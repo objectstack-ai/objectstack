@@ -2,8 +2,8 @@
   "number": 34041,
   "kind": "issue",
   "title": "metadata-protocol: a disabled doc holder registered last turns the bare doc read, /layers and /published into 404 although an enabled package ships the name",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,21 +13,23 @@
   "labels": [
     "bug",
     "domain:server",
-    "lease:E1",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:07:10Z",
-  "updated_at": "2026-11-16T05:46:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T10:51:56Z",
+  "closed_at": "2026-11-16T10:49:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34041",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a product defect with a named location, measured. Found by area S5's dev on #33264 (report 6898101382, out_of_scope_findings, class a), filed by area S5 (E1b), lease E1.\n\n## 维护者速读\n\n- 问题：两个包发布同名文档，其中被停用的包最后注册时，按名字裸读、`/layers`、`/published` 都返回 404，尽管启用中的包发布了这个名字。\n- 影响：启用包的文档读不到，违反 ADR-0150 D3（停用的包不持有名字）。\n- 修法方向：把 `servedHolderAddressOf` 的\"被服务持有者\"判断扩展到文档这类不按包读取的类型。\n- 优先级 p2，本区（S5）处理。\n\n## Measured\n\nOn the same composed artifact server, with one of two holders disabled and registered last: bare `GET /meta/doc/NAME`, `/layers` and `/published` answer 404. That is the answer on origin/main 1e65a389 and on PR #34036's head.\n\nSeam (read): `packages/metadata-protocol/src/protocol-meta-item-face.ts` `servedHolderAddressOf` covers readsByPackage types only.\n\n## Acceptance\n\n1. The bare doc read and its `/layers` / `/published` faces serve the enabled holder when the only other holder is disabled, in both orders. Pin and ablate. CONTROL: both disabled stays 404, and two enabled stays 409 (PR #34036).\n2. Check the other non-readsByPackage types for the same shape, and fix them in one PR.\n3. Declare the FROM→TO with its Clause-② arm.\n\nPrior rulings read: ADR-0150 D3 (a disabled package holds no name) and D4; ruling 6893582352 on #33264 (\"a disabled holder: no refusal\"); fold PR #33995 (#33385/#33401) edits `protocol-meta-item-face.ts` for `_env`. That is the same file, so merge-tree it before the claim. No test was found that pins the 404.\n\n## Dedupe\n\nI searched \"disabled holder doc 404\" and \"served holder doc\", and found only #33264. #32605 (PR #33889) is the bare save, not the doc read."

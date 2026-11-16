@@ -13,22 +13,22 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "lease:A2",
+    "lease:o1-A",
     "pm:blocking",
     "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T22:36:58Z",
-  "updated_at": "2026-11-16T03:34:45Z",
+  "updated_at": "2026-11-16T12:56:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34164",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: ② a framework seam that a cloud card is blocked on (objectstack-ai/cloud#4128, Enterprise audit tamper-evidence stage 2). The cloud lane files this card and leaves first touch (domain, queue) to triage. Drafted by the cloud#4128 card thread; every file:line was read at objectstack `b914e72` (cloud's pin, 18.5.0).\nDedupe: `org:objectstack-ai is:issue` with this card's dedupe words → 0 hits.\n\n**Business reason.** cloud#4128 item 4 opts Enterprise's AI audit trail (`sys_ai_audit_log`) into tamper evidence, as ADR-0154 D10 says it will (\"Enterprise's `sys_ai_audit_log` opts in from cloud\", ADR line 144). A financial customer's reviewer asks the same proof of the AI tool-call trail as of the main audit log. Today that object cannot be sealed at all.\n\n**What happens at the pin.**\n- `packages/plugins/plugin-audit/src/audit-seal/sealer.ts:332-334`: `plans()` refuses any object declaring `lifecycle.seal` that has no `tenant_id` field (\"it declares no 'tenant_id' field, so its rows cannot be chained per organization\") and reports it at error. The object is then never sealed.\n- The chain is read from `tenant_id` only: `sealer.ts:220` (`tenantOf`), `verifier.ts:253` (`tenantOf`), and the signed body's member `tenant_id` (`signed-body.ts:65`, `:290`, `:331`).\n- `sys_ai_audit_log` has no `tenant_id`. Its organization is the `organization_id` column the registry injects (ADR-0131), which cloud's interceptor relies on (cloud `packages/security-enterprise/src/ai-governance/tool-interceptor.ts:149`). The cloud design that ADR-0154 was drafted from names exactly that column as the chain key: \"per organization (`sys_audit_log.tenant_id`, `sys_ai_audit_log.organization_id`)\" (cloud `docs/design/audit-tamper-evidence.md:118-119`).\n\n**What cloud needs.** A sealed object can name the column its rows are chained by (for example `lifecycle.seal.chainField`, default `tenant_id`), read by the sealer, the verifier and the proof bundle, with the signed body keeping its `tenant_id` member as the chain's organization id. A spec key is a metadata-protocol change, so the shape is the framework's to decide. Cloud will not add a duplicate `tenant_id` column to `sys_ai_audit_log` as a workaround.\n\n**Also needed before cloud can use it (cloud side, not this card):** cloud#4129 (retention for `sys_ai_audit_log`, ruled A). `lifecycle.class: 'audit'` requires a bounding policy (`packages/spec/src/data/object.zod.ts`, the superRefine after `seal`), and `seal` is for class `audit` only.\n\n**Done when.** On a real kernel, an object whose organization is in `organization_id` and which declares `lifecycle.seal` with that column seals one chain per organization, and `os audit verify --org X` reports its rows.\n\n**Cloud consumer.** objectstack-ai/cloud#4128 (item 4).\nDedupe words: `audit sealer chain column`, `lifecycle.seal tenant_id`, `sealed object organization_id`."

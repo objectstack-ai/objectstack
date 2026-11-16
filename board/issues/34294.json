@@ -2,8 +2,8 @@
   "number": 34294,
   "kind": "issue",
   "title": "Scenario runner: restore the seeded rows an operation reads before it runs, so one failed write does not cascade into the next",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:devx",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T04:25:56Z",
-  "updated_at": "2026-11-16T07:54:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T09:04:16Z",
+  "closed_at": "2026-11-16T09:02:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34294",
   "body": "epic:#33595#1 · os-tesla · session_01L9qiby1cctpVpRbJzjccvY\n\nFiling-gate category: ③ maintainer-directed child of #33595 (M3 row of its milestone table, Blocked-by M2, which closed 2026-11-16 with #33818). Maintainer, 2026-11-15 02:10Z: 「你建议的任务全部立卡，你负责开 devx 车道派发处理」; 08:36Z, on the epic seat's decision card \"M2/M3 的行现在立卡吗?立了交给谁派发?\": \"立卡,留给本专题席位派发\".\n\n## Mechanism\n\n`runHalf` (`packages/qa/scenarios/src/runner/orchestrate.ts`, the operations loop) runs every operation in card order on one booted, once-seeded app. Each reads `before` rows and grades the change the turn made. A turn that wrote the wrong row, or a probe that changed state, leaves the next operation starting from rows the card never declared, so its grade depends on the operation before it.\n\n## Why it matters\n\nOne bad write can fail two or three operations, and the 问数/operations comparison between models then measures the cascade as much as each turn. Operations are graded one by one, so each must start from the card's own state.\n\n## Done when\n\n- Before each operation, the rows of the objects the operation and its outcome read are restored to the seeded state the card declares (by the runner as admin, through the same seed path), or the PR shows a cheaper reset with the same effect.\n- A restore that cannot be done (a refused row, a platform refusal) makes the operation not measured with the reason, never a degraded pass or fail.\n- Questions are unchanged: they all run before any operation already.\n- The record says each operation started from restored rows; with nothing to restore (no earlier write) the record and scorecard are byte-identical to today.\n- Tests pin: an operation after a failed write passes on its own merits; an operation after a clean run is unchanged; a refused restore is not measured.\n\n## Reader\n\nThe epic seat `epic:#33595#1` dispatches it to `os-dev` (`domain:devx`, `packages/qa/scenarios`), serial with the other M3 runner cards where files overlap.\n\nDedup: `repo:objectstack-ai/objectstack is:issue restore seed before each operation` → 288 hits; the top ones (#33595 parent, #33353, #31112, #33564) are unrelated, none restores rows between scenario operations."

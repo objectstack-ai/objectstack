@@ -1,0 +1,31 @@
+{
+  "number": 34373,
+  "kind": "issue",
+  "title": "Engine: a predicate delete on an object with delete-family lookups re-deletes by id, so its predicate never reaches the DELETE (a conditional delete is not atomic)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T10:18:13Z",
+  "updated_at": "2026-11-16T14:26:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34373",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① read in the code (a contract-tier review of PR #34162, card #33228). Not exercised against Postgres.\n\n## Defect\n\n`packages/objectql/src/engine-delete-and-aggregate.ts` (around 746–771). When the target object is referenced by delete-family lookups (cascade / set_null / restrict plan not `'none'`), a predicate delete `delete(obj, { where: { id, <guard> }, multi: true })` runs:\n\n1. `find(where)`\n2. `cascadeDeleteRelations`\n3. `deleteMany({ id: { $in: ids } })`, which carries no `<guard>`.\n\nNo driver takes a row lock on the read (no `FOR UPDATE` in the drivers). So a caller that uses the predicate as a guard, \"delete only if still in state X\", gets no atomicity. A concurrent commit that leaves state X between step 1 and step 3 is still deleted, and the count says 1.\n\nThe first consumer is plugin-auth's new remove door (PR #34162). It deletes `sys_user` with `{ id, source: 'idp_pending' }` so that a person whose first sign-in commits during the removal is kept. On the real engine the window between the find and the by-id delete stays open: narrower, but not closed.\n\n## What done looks like\n\n- The final DELETE of a predicate delete carries the caller's predicate (`id IN (…) AND <guard>`), and the returned count is what that statement removed. Alternatively, the engine reads the target rows under a lock inside the unit of work. When the guarded DELETE removes fewer rows than the cascade walked, the unit of work rolls back.\n- A driver-sql test (SQLite, and Postgres where CI has it) commits a change to the guard column between the find and the delete, and asserts the row is kept and the count is 0.\n\nDedupe words: predicate delete cascade by id, conditional delete not atomic, deleteMany $in drops where."
+}

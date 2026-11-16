@@ -14,7 +14,7 @@
     "documentation",
     "domain:devx",
     "pm:on-hold",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [
     "os-project-manager"
@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T17:17:24Z",
-  "updated_at": "2026-11-14T23:54:15Z",
+  "updated_at": "2026-11-16T14:11:54Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33353",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: v18.4.0 sweep close-out, #32908 comment 6881136418 (devx#4 ledger, read at `87330e89`), routed by triage.\n\nRows that the v18.4.0 sweep left partial or didn't drive. The next `checklist-test` run picks them up.\n\n## Partial: blocked on a dependency or ledger marker (8)\n- 1: `access-security.rls-both-sides` acceptance[5]: D11 spot-check, blocked(dependency, #7463).\n- 2: `access-security.crud-permission-matrix` acceptance[5]: guest_portal, blocked(dependency, #23267).\n- 3: `integration-system.datasource-credential-refusal-matrix` acceptance[0]: the build door and the connector inline-auth door were not driven.\n- 4: `records-forms.crud-roundtrip` acceptance[6]: the clone-readonly half is blocked(fixture): no lead_score plant.\n- 6: 11 items blocked by their ledger markers: multi-replica ×6, Oracle ×2, SQL Server, AI chat Cloud/EE, locale-scoped seed.\n- 8: `identity-auth.auth-method-matrix`: the SSO and device variants are blocked(environment). Splitting the drivable rows from the blocked ones would let a run score.\n- 9: `studio-authoring.expression-editors` [0][1][3][5][6]: only the retest rows were re-driven.\n- 10: `ux-conventions.disabled-control-reason`: only the three #32102 rows were re-driven.\n\n## Needs a live drive (3)\n- 7: `integration-system.email-template-render` acceptance[7]: the no-provider 501 arm was read from `email-routes.ts` only.\n- 106: `automation.package-flow-override`: removing a node through the Studio canvas was not driven.\n- 114: `platform-core.bare-name-one-holder-refusal` acceptance[2]: resolution of qa_a's `auth.password_reset` through the email service was not driven.\n\n## Coverage gaps: a new clause or item (2), the seat decides\n- 196: `api-backend.package-rest-lifecycle`: no clause says 'the manifest served after a restart equals the last one written' (card-B-api-4).\n- 232: no item asserts #33075's SCIM-deactivation key revocation live: a revoked key answers 403 `API_KEY_REVOKED`.\n\n## Do\nDrive the partial and live rows in the next sweep, and split row 8 when the item's text is next touched. For 196 and 232, author the clause or item with `checklist-author`. That's the seat's call, not the maintainer's.\n\n## Grade\n**p2**.\n\n## Reader\n`domain:devx`."

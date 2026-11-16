@@ -1,0 +1,31 @@
+{
+  "number": 34392,
+  "kind": "issue",
+  "title": "Console: the organization's Localization language never decides a no-locale user's language — the Console always states a language, so the server's deployment-default rung never answers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T12:07:03Z",
+  "updated_at": "2026-11-16T14:27:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34392",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5mV676uKv5vXZ12fc8\n\nFiling class: ① product defect — reach: named real producer (the first-run checklist's \"Default language and country\" row and the Settings page's Localization section write the organization's `localization.locale` through `PUT /api/settings/localization`; that value never reaches the Console's language for a user with no personal language). Read from the code on `main`, not measured in a browser. **Reader:** triage first touch, then the lane that owns the fix (the Console read is `domain:ui`; whether the server's rung 3 needs to change is part of the card).\n\nFollow-up named by ruling 6915665005 on #33985 (finding 3 of the decision thread's record, 「B 浏览器语言受支持就优先」), which kept it out of that card's PR and asked the lane seat to confirm the reading and file it.\n\n## Symptom (code reading)\n\nAn administrator sets the organization's language (first-run checklist row \"Default language and country\", or Settings → Localization) to `zh-CN`. A user with no `sys_user.locale` signs in on a fresh device with an `fr` browser on an app with `i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] }`. Expected per the ladder below: `zh-CN` (the deployment default). Read from code: `en` (the app's declared default). On 18.3.0 the same user got the browser's raw `Accept-Language` answered instead, so the organization setting never decided this either.\n\n## Why (reading, on main after #33985's fix)\n\n- `GET /api/v1/auth/me/localization` resolves `locale` by three rungs (#14788 option D, docblock of `resolveCurrentUserLocalization` in `packages/plugins/plugin-hono-server/src/current-user-endpoints.ts`): `sys_user.locale`, else the request's `Accept-Language` (top tag, `preferredLocaleFromHeader`), else the deployment default (`resolveLocalizationContext`: `localization.locale` settings, then tenant `sys_setting` rows, then `en-US`).\n- The Console's two reads of that endpoint (`seedTenantLanguage` in `ui/apps/console/src/languageSeed.ts`, `LocalizationFetchProvider` in `ui/apps/console/src/LocalizationFetchProvider.tsx`) always state an `Accept-Language` when the device holds no choice: after #33985, the browser's language when discovery `locale.supported` lists it, else discovery `locale.default`. Discovery's `locale.default` is the i18n service's `getDefaultLocale()` (`packages/runtime/src/http-dispatcher.ts`), which is the app's declared `i18n.defaultLocale` (`AppPlugin.loadTranslations` → `setDefaultLocale`), not the organization's `localization.locale`.\n- So rung 2 always answers, and rung 3, the only one that reads the organization's setting, never does. When discovery fails, the browser's raw header goes and rung 2 answers again.\n\n## Expected\n\nThe ladder the maintainer ruled on 2026-09-02 for request-triggered auth mail, quoted verbatim in `packages/plugins/plugin-auth/src/auth-manager.ts`: 「语言优先取请求的 `Accept-Language`（命中 `AUTH_EMAIL_TEMPLATE_LOCALES` 才生效），其次才是部署默认（`localization.locale` → `i18n.defaultLocale`）」. For the Console under ruling 6915665005: `sys_user.locale` → the browser's language when the app lists it in `locale.supported` → the organization's `localization.locale` → the app's `i18n.defaultLocale` → `en`. The decision thread told the maintainer it would propose this card and reads it as executing an existing ruling.\n\n## Business reason\n\nThe first-run checklist offers \"Default language and country\" as the administrator's way to set the organization's language, and HotCRM's report on #33985 (comment 6911498660) names it as the only visible way out for a first-time admin. Today the setting changes formatting defaults but not the Console's language for anyone who has not picked one, so an administrator who sets 中文 for the organization still sees users whose browser language the app does not ship booted in the app's default. Not fixing it leaves a setting that looks like it chooses the organization's language and does not.\n\n## Open for the reader\n\nHow rung 3 is reached: the Console could state no language when the browser's is not supported (but `fetch` still sends the browser's header, which then answers rung 2 with a language the app may not ship), or state `*` (`preferredLocaleFromHeader` reads it as no preference), or the server could resolve the whole ladder itself. Rung 3's floor is `en-US`, not `i18n.defaultLocale`, so the server half may need a change too. If the reader finds this needs a product or contract choice, it goes to the decision inbox, not a guess.\n\n## Dedupe\n\nobjectstack issues, all states: `Default language and country console` (21 hits), `localization.locale console language` (14), `organization language console Accept-Language` (56), `org Localization setting console` (89). Read the locale ones: #33985 is the browser rung (its PR leaves this half out by ruling), #34062 is flow-written stored text (other path), #30286 / #27625 / #14788 / #29349 are closed and other surfaces. No card for this path.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

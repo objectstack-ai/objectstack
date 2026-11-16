@@ -2,8 +2,8 @@
   "number": 34027,
   "kind": "issue",
   "title": "Decision: after the mailbox lock proved deaf (HTTP 403 on the relay's own comment), is the knock-author fence enough, or isolate mailboxes another way?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "needs-user-decision",
     "security",
     "tooling"
   ],
@@ -20,12 +19,16 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T16:35:02Z",
-  "updated_at": "2026-11-15T16:35:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T12:01:15Z",
+  "closed_at": "2026-11-16T12:01:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34027",
-  "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nFiling gate ③: seat-directed (domain:skills#1, after the canary measurement 6897369511 and review record 6897706365 ③ on PR #34022). Follow-up of #33789.\n\n## 维护者速读\n\n- **现状:** #33789 要求两件事：信箱 PR 锁会话（外人写不进来）+ 读敲门只认车队机器人与维护者。第 2 件已落地（PR #33972）。第 1 件落地后实测：锁住后 GitHub 连车队中继自己的评论也拒（HTTP 403），锁了信箱就听不见敲门，所以 PR #34022 把锁撤掉了。\n- **剩下的风险:** 外人仍能在信箱 PR 下留言。读敲门的工具会忽略它、不转述正文。但如果某个会话不走工具、直接读 PR 评论，就会读到外人的文字。\n- **要您选:** 是否接受第 2 件单独兜底（推荐 A），还是另做隔离（B 或 C）。\n\n## Today\n\n- `record-recognisers.mjs` `readMailboxComment` counts a knock only when the author is `objectstack-fleet[bot]` or in `GOVERNED_APPROVERS`; any other author is listed as ignored, body unread (#33972, `bc6b7ffd`). `untrusted-text.md` and `seat-post-protocol.md` tell seats to read mailboxes through that reader, never raw.\n- Locking was measured on mailbox #33915: lock read back `locked: true`, the relay App's comment answered `HTTP 403 — Unable to create comment because issue is locked`, and the take-back unlocked it (runs 43733466622 / 43733514690 / 43733552114). An App with write access cannot comment on a locked conversation, so a lock and a working mailbox cannot coexist on GitHub. PR #34022 removes the lock and pins that no lock op returns without a new measurement.\n- The card's item 3 (a knock's session must match the named seat) is split to #34013.\n\n## Decision needed (maintainer)\n\n- **A. Accept the author fence as the mailbox defence (recommended).** No further change. An outsider's comment on a mailbox is noise the reader drops; the residual is a session that bypasses the reader, which the skill text already forbids. #33789 closes when #34022 lands; #34013 hardens the fence further.\n- **B. Repository interaction limit.** Set the repo's interaction limit to collaborators only (GitHub caps it at 6 months, renewable). Outsiders could no longer comment anywhere in the repo, including on public issues and PRs, so it also closes the product's public intake that #33789 item 4 kept open. A maintainer-only setting; no code.\n- **C. Move mailboxes to a private repository.** Mailbox PRs live in a private org repo the relay can write to; outsiders cannot read or write them. Cost: `mailbox-open`, the doorbell reader, seat posts and the relay allowlist all learn a second repo; a skills-lane card of size M–L.\n\nWhy A: the threat #33789 named was an outsider's knock being acted on, and item 2 closes exactly that at the one reader every seat uses; B costs the public intake, and C buys isolation of text that is already dropped unread. Pick C if you want mailbox text unreachable even by a session that ignores the skill.\n\nPrior rulings read: #33789 body item 4 (\"issues opened by outsiders … is the product's public intake and is not locked\"), which B would reverse. No ⛔ line requires mailboxes to be private.\n\n## Reader\n\ndomain:skills (seat 1) for any follow-up; B is a maintainer setting with no card.\n"
+  "body": "domain:skills#1 · os-steve · session_01ADHkmPd7uRqHauEehGPr19\n\nRuled: 6915686754 · letter A · 2026-11-16T11:56Z\n\nFiling gate ③: seat-directed (domain:skills#1, after the canary measurement 6897369511 and review record 6897706365 ③ on PR #34022). Follow-up of #33789.\n\n## 维护者速读\n\n- **现状:** #33789 要求两件事：信箱 PR 锁会话（外人写不进来）+ 读敲门只认车队机器人与维护者。第 2 件已落地（PR #33972）。第 1 件落地后实测：锁住后 GitHub 连车队中继自己的评论也拒（HTTP 403），锁了信箱就听不见敲门，所以 PR #34022 把锁撤掉了。\n- **剩下的风险:** 外人仍能在信箱 PR 下留言。读敲门的工具会忽略它、不转述正文。但如果某个会话不走工具、直接读 PR 评论，就会读到外人的文字。\n- **要您选:** 是否接受第 2 件单独兜底（推荐 A），还是另做隔离（B 或 C）。\n\n## Today\n\n- `record-recognisers.mjs` `readMailboxComment` counts a knock only when the author is `objectstack-fleet[bot]` or in `GOVERNED_APPROVERS`; any other author is listed as ignored, body unread (#33972, `bc6b7ffd`). `untrusted-text.md` and `seat-post-protocol.md` tell seats to read mailboxes through that reader, never raw.\n- Locking was measured on mailbox #33915: lock read back `locked: true`, the relay App's comment answered `HTTP 403 — Unable to create comment because issue is locked`, and the take-back unlocked it (runs 43733466622 / 43733514690 / 43733552114). An App with write access cannot comment on a locked conversation, so a lock and a working mailbox cannot coexist on GitHub. PR #34022 removes the lock and pins that no lock op returns without a new measurement.\n- The card's item 3 (a knock's session must match the named seat) is split to #34013.\n\n## Decision needed (maintainer)\n\n- **A. Accept the author fence as the mailbox defence (recommended).** No further change. An outsider's comment on a mailbox is noise the reader drops; the residual is a session that bypasses the reader, which the skill text already forbids. #33789 closes when #34022 lands; #34013 hardens the fence further.\n- **B. Repository interaction limit.** Set the repo's interaction limit to collaborators only (GitHub caps it at 6 months, renewable). Outsiders could no longer comment anywhere in the repo, including on public issues and PRs, so it also closes the product's public intake that #33789 item 4 kept open. A maintainer-only setting; no code.\n- **C. Move mailboxes to a private repository.** Mailbox PRs live in a private org repo the relay can write to; outsiders cannot read or write them. Cost: `mailbox-open`, the doorbell reader, seat posts and the relay allowlist all learn a second repo; a skills-lane card of size M–L.\n\nWhy A: the threat #33789 named was an outsider's knock being acted on, and item 2 closes exactly that at the one reader every seat uses; B costs the public intake, and C buys isolation of text that is already dropped unread. Pick C if you want mailbox text unreachable even by a session that ignores the skill.\n\nPrior rulings read: #33789 body item 4 (\"issues opened by outsiders … is the product's public intake and is not locked\"), which B would reverse. No ⛔ line requires mailboxes to be private.\n\n## Reader\n\ndomain:skills (seat 1) for any follow-up; B is a maintainer setting with no card.\n"
 }

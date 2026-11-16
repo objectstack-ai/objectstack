@@ -1,0 +1,34 @@
+{
+  "number": 34368,
+  "kind": "issue",
+  "title": "List the new service-ai-studio tool list_flow_runs in PLATFORM_TOOLS_BY_PACKAGE and give it a chatbot.tool label in every locale",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T09:44:37Z",
+  "updated_at": "2026-11-16T11:50:35Z",
+  "closed_at": "2026-11-16T11:49:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34368",
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: open question of a cloud lane card's report, settled by the seat (land the cloud side now, with a named debt that removes itself on the next pin bump).\n\n## What happens\n\nThe cloud package `service-ai-studio` adds a build-agent tool, `list_flow_runs`: it reads a flow's recent runs, as the caller, so the in-app agent can answer \"did my automation work?\" from the run's own error. The framework does not know the name yet:\n\n- `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` (the spec's platform tool-name registry, pinned by `packages/spec/src/system/constants/platform-tool-names.test.ts`) does not list it.\n- `ui/packages/i18n/src/locales/*.ts` has `chatbot.tool.test_flow` and `chatbot.tool.toggle_flow`, but no `chatbot.tool.list_flow_runs`. So `humanizeToolName` in `ui/packages/plugin-chatbot` falls back to the English \"List flow runs\" as the chat step's title, even in a Chinese chat.\n\n## Expected\n\n1. `list_flow_runs` is in `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']`, beside `test_flow` and `toggle_flow`.\n2. Every locale pack has `chatbot.tool.list_flow_runs`, worded like its neighbours (for example zh-Hans 「查看自动化运行记录」, en \"Check automation runs\").\n3. The registry's own test and the locale-completeness check stay green. The cloud side's AHEAD entry for this name is deleted on the pin bump that carries this."
+}

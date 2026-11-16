@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T03:40:02Z",
-  "updated_at": "2026-11-16T03:40:02Z",
+  "updated_at": "2026-11-16T14:25:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34280",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ① found by the seat's review of the cloud#4128 audit-seal cards (#34165 / #34166), read at origin/main. Hardening; nothing is broken for a host that registers no signer. ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** 宿主注册了外部签名服务（如 KMS）但它启动失败时，审计封存会悄悄改用本机密钥签名，没有任何提示。\n- **影响：** 客户以为检查点由 KMS 签名，实际是本机密钥；之后用 KMS 公钥验证会失败，或者信任级别被悄悄降低。\n- **建议：** p2，小改：只有\"未注册\"才回退本机，\"注册了但取不到\"就停止封存并报错。\n\n## What happens\n\n`packages/plugins/plugin-audit/src/audit-plugin.ts` `startSealer` resolves the checkpoint signer through a helper that catches every error from `ctx.getService(AUDIT_CHECKPOINT_SIGNER_SERVICE)` and answers `undefined`, and the signer falls back to the local signer on `undefined`. A host signer that is registered but whose resolution throws (a factory that fails, a missing credential, a KMS client that cannot start) therefore signs with the local key, and nothing is logged.\n\nThe same helper resolves `audit.checkpointSink` and `cluster`. A sink that fails to resolve then drops the off-host export silently. A cluster service that fails to resolve then lets the sealer run without the cluster lock.\n\n## Rule\n\nOnly an absent service falls back. A service that is registered but fails to resolve stops the sealer: no checkpoint is signed and the error is logged once, at error, naming the service. The same holds for the sink and the cluster service. The local signer stays the answer when no host signer is registered.\n\n## Done when\n\n- Pins on a real kernel:\n  - an absent signer seals with the local key, unchanged;\n  - a registered signer whose resolution throws seals nothing and logs the error;\n  - a registered signer that resolves is used;\n  - the sink and cluster cases follow the same rule.\n- Each pin is ablated.\n- Declaration: whether a host that today silently seals with the local key now stops counts as a narrowing is for the dev to measure and declare.\n\nPrior rulings read: ADR-0154 D6 (local signer) and D11 (the host seams); the seat's note on the S1 thread. No line says a failed host seam should fall back.\nDedupe words: checkpointSigner resolve fallback local; audit sealer getService catch."

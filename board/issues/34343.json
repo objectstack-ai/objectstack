@@ -2,8 +2,8 @@
   "number": 34343,
   "kind": "issue",
   "title": "pm-dispatch review rules: a one-off codegen or migration script is never committed, and a refactor accounts for growth beyond a pure move",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,23 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T08:30:52Z",
-  "updated_at": "2026-11-16T08:33:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T13:48:17Z",
+  "closed_at": "2026-11-16T13:47:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34343",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nMaintainer order, project chat 2026-11-16 (「这种代码就是垃圾啊，我为什么要合并，以及如何避免类似的问题」, then 「yes」 to the proposal). It is an explicit exception to the current no-new-claims wind-down.\n\n**Why.** PR #34285 (registry.ts split 1 of 8, #33949) committed a 3,073-line one-off script, `scripts/codemod-split-registry.mjs`, about 1,900 lines of it copied from `codemod-split-engine.mjs`. Nothing runs it after merge. The PR showed +5.7k net lines for \"a move\". Neither the L1 nor the hand-off questioned the growth.\n\n**Change** (`.claude/skills/pm-dispatch/references/review-checklist.md`, plus the line in SKILL.md or contract-review.md that points at it, if one is needed):\n1. **Never committed.** A one-off code generator, codemod or migration script whose output is the PR's own diff stays off the repo. It goes on the PR branch history or as a PR attachment, and the reviewer runs it to verify. Its proof (for example byte-identity and exports-equality readings) goes in the PR body. A reviewer FAILs a PR that commits such a script.\n   - Out of scope: tools that run again after merge, such as a gate, a regen step, or a codemod that customers run from a migration guide.\n2. **Growth accounted for.** When a refactor presented as a move or split has net growth far beyond what a pure move produces, the reviewer accounts for the extra lines before PASS: per file, and what each block is for. If they can't, it's a FAIL. The account goes in the review record.\n3. The rule is recorded on #33949 for splits 2 to 8.\n\n**Done when** both rules are in the review checklist, the checklist gates are green, and the PR has landed through the seat (PM-skill text is governed, so Tier H if the governed check says so).\n\nRelated: #34285 (rework drops the script), and the clean-up card that deletes the existing `codemod-split-*.mjs`."

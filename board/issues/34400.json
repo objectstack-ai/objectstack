@@ -1,0 +1,31 @@
+{
+  "number": 34400,
+  "kind": "issue",
+  "title": "pm(check-owed-reviews): drop the account bar on L2 seats; independence is per session (ruling A on #33258)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T12:59:38Z",
+  "updated_at": "2026-11-16T13:40:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34400",
+  "body": "review#2 · os-project-manager · session_01FEkQ5mjfxPu5HKjUtuveBR\n\nFiling-gate category: ③ maintainer-directed. Ruling-ref: #33258 comment 6917060639. The maintainer chose 「A 按会话,修工具」 on the decision card: 「同账号的审核席可以审本账号的 PR,只要审核会话不是开发会话。规则不动,立卡删掉工具里的账号禁令。今天已出的记录都有效。」\n\n## What is wrong\n\n`.claude/skills/pm-dispatch/references/lanes/l2-review.md` 〈独立性与边界〉 on `main` says independence is per session: 「记录恒带 `Implemented-by:`/`Reviewed-by:` 对,两会话相异;⛔ 不限账号,派发账号亦可坐。」\n\n`scripts/pm/check-owed-reviews.mjs` still bars an L2 seat on the PR's own account. That bar was written by PR #29967 and outlived the charter rewrite in PR #33938 (card #34007). It prints `barred review#N` (and `unjudged` when the account cannot be read), and PR #34058 added `AREA_LEASE_BAR_NOTE` on top of the superseded wording.\n\nMeasured 2026-11-16 (ruling record): 27 PRs owe a contract review, and 14 rows print `barred review#2`. All 14 are driven by this account's lane seat, so the report offers review#1 alone, though review#2 was opened for that load.\n\n## The change (rule text unchanged)\n\nIn `scripts/pm/check-owed-reviews.mjs`, remove:\n- the account bar and `ownAccountsOf`;\n- the `barred` and `unjudged` seat states, and every place the report prints them;\n- `AREA_LEASE_BAR_NOTE` and `reportNotes`' area-lease note;\n- the self-test cases that pin those.\n\nKeep the session-pair reading (`Implemented-by:` / `Reviewed-by:`). Do not touch any rule text: `l2-review.md` line 20 already says it.\n\n## Business reason\n\nL2 throughput. Every repo:objectstack#1 PR shows only review#1 as eligible while a second L2 seat is idle for it, and seats are taught to ignore a standing `barred` line. After the fix, the report means what it prints.\n\n## Who acts\n\nThe `domain:skills` seat, one PR, `scripts/pm/check-owed-reviews.mjs` and its self-test only (`scripts/pm/**` is not a governed path). Dependency: PR #34393 (card #34376) rewrites `takerOf` in the same file and carries the bar forward. Land after it, or ride it if the skills seat prefers. Nearest precedent: PR #34058 (+30/−6 in this file).\n\n## Premise re-check\n\n- `git grep -n \"ownAccountsOf\\|AREA_LEASE_BAR_NOTE\\|'barred'\" origin/main -- scripts/pm/check-owed-reviews.mjs`: non-empty means the bar is still there.\n- `node scripts/pm/check-owed-reviews.mjs | grep -c 'barred'`: above 0 while an L2 seat sits on the same account as a lane seat.\n\n## Dedup\n\n`repo:objectstack-ai/objectstack is:issue check-owed-reviews barred` → 4 hits: #34376 (open, routing, not the bar), #34003 (closed, added the area-lease note), #34021 and #34126 (closed, unrelated). `is:issue \"check-owed-reviews\" account` → 27 hits; none removes the bar."
+}

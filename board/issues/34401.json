@@ -1,0 +1,31 @@
+{
+  "number": 34401,
+  "kind": "issue",
+  "title": "metadata-protocol: rolling back or reverting a package's own permission set is refused as sealed while a package of another namespace ships a set of that name",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T13:05:08Z",
+  "updated_at": "2026-11-16T13:52:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34401",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5obaLbqgzRUR9xXfft\n\nFiling gate: ① reproducible defect (class a), read from code, with the mechanism measured on a sibling site. Follow-up owed by #34226 (hand-off 6912108122 on #34359).\n\nBlocked-by: #34359 (until it lands, a package cannot store its own permission set N beside another namespace's shipped N, so these sites have no input).\n\n## Locations (head `b054ae27` of #34359)\n\n- `packages/metadata-protocol/src/protocol-package-commits.ts#revertCommit`, restore limb, lines 1657-1660: `host.restoreWriteFor(type, name, commitPackageId, host.isArtifactBacked(it.type, it.name), 'protocol.revertCommit')`.\n- `packages/metadata-protocol/src/protocol-package-commits.ts#rollbackMetaItemUnaudited`, line 2139 (`const artifactBacked = host.isArtifactBacked(singularType, request.name)`), passed to `restoreWriteFor` at line 2234 with `rollbackPackageId`.\n- Shared derivation: `packages/metadata-protocol/src/protocol-class-head.ts#restoreWriteFor`, line 216. Both sites hand it a name-wide `artifactBacked`, so it answers `override-artifact` for a package's own set.\n- Not refused today, same shape: `revertCommit`'s removal limb, lines 1484-1485, also derives its intent from `isArtifactBacked` alone. The store admits that removal anyway, because `SysMetadataRepository#assertDeleteAllowed` lets an `override-artifact` delete through for a `supportsOverlay` type, and `permission` is one. The hand-off counted three refused sites; two of them refuse.\n\n## Symptom\n\nAn admin of package `hr` rolls back `hr`'s own permission set `N` to an earlier version, or reverts or rolls back an `hr` commit that edited it, while package `crm` of another namespace ships a set `N`. The item rollback answers 403 `NOT_OVERRIDABLE` (\"provided by a managed package and is sealed\"), and a commit revert lists `N` in `failed[]`. In both cases `N` keeps its current version. The earlier version should be restored.\n\n## How it was found\n\nRead from code. The mechanism was measured on the sibling site that #34359 fixed. There, `undoLandedPromotions` called `restoreVersion` for `hr`'s own `N` with a name-wide `override-artifact` intent. That ablation leg (U1 on #34359) went red: the store's `assertAllowed` refuses an `override-artifact` put for `permission`, which is not `allowEnvironmentOverlay`. Both sites above reach the same `restoreVersion` with the same intent. The two sites themselves: read, not measured.\n\nreach: `POST /api/v1/meta/:type/:name/rollback` (`rollbackMetaItem`), `POST /packages/:id/commits/:commitId/revert` (`revertCommit`) and `POST /packages/:id/rollback` (`rollbackToPackageCommit`, which calls `revertCommit`). Read, not measured through these doors.\n\n## Acceptance\n\nPackage `crm` (namespace `crm`) ships `N`. `hr` (namespace `hr`) saved its own `N` at v1 and edited it to v2. Each case runs in both registration orders: `crm`'s set registered before the other packages install, and after.\n\n1. Rolling back `permission/N` bound to `hr` to v1 restores v1, and `hr`'s grant confers v1. FROM: 403 `NOT_OVERRIDABLE`.\n2. Reverting the `hr` commit that edited `N` restores v1, and `rollbackToPackageCommit` to the earlier commit does too. FROM: `N` in `failed[]` with `NOT_OVERRIDABLE`.\n3. With `crm` AND `fin` shipping `N`, cases 1 and 2 still restore. Every shipper is judged, not the first found.\n4. CONTROLs stay refused exactly as before, with `code` and `status` asserted: a rollback or revert of a row bound to no package, to `crm`, to `crm`'s customization pair (another namespace, judged by the override write gate) and to a co-owner of `crm`'s namespace; and, with `fin` also shipping, a row bound to a co-owner of `fin`'s namespace.\n5. One verdict decides it: the same `isOwnPermissionSetWrite` the save, publish and undo paths use (`protocol-packaged-base-refusal.ts`, line 206). Narrowing the `artifactBacked` that `restoreWriteFor` receives is likely the one place to do it. Each narrowed site gets an ablation leg that goes red.\n6. Declaration: `Clause-②: yes (widening)`: a rollback, a commit revert or a package rollback of a package's own permission set N, refused 403 `NOT_OVERRIDABLE` while a package of another namespace ships N, now restores; nothing the doors accepted is refused. `Metadata-protocol: none`, patch.\n\n## Related\n\n#34226 (the card), #34359 (the save, publish and undo half; its PR body lists this as out of scope).\n\nDedupe: `gh api -X GET search/issues -f q='repo:objectstack-ai/objectstack is:issue revertCommit permission NOT_OVERRIDABLE'` 13 hits, none open on this shape (#6563 is the closed `object` intent fix this site descends from). `q='repo:objectstack-ai/objectstack is:issue restoreWriteFor isArtifactBacked'` 0 hits. `q='repo:objectstack-ai/objectstack is:issue rollback permission set sealed package name'` 46 hits; the only open match is #34226 itself, plus the #31527 epic."
+}

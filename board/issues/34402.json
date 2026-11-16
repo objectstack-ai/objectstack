@@ -1,0 +1,31 @@
+{
+  "number": 34402,
+  "kind": "issue",
+  "title": "metadata-protocol: the managed seal judges every sealed package-scoped type by name alone, so a package's save of its own flow, page, app, agent and others is refused while a package of another namespace ships that name",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T13:06:01Z",
+  "updated_at": "2026-11-16T13:53:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34402",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5obaLbqgzRUR9xXfft\n\nFiling gate: ① contract violation (class b). ADR-0150 D1, ruled: \"Behavioural and presentation metadata are identified by (package, name)\". Bucket 2 and bucket 3 list the types below. D2: identity is `(package id, type, name)`, and only co-owners of one namespace keep a name unique. Follow-up owed by #34226 (H3 on #34359). Suggested parent: #31527 (the ADR-0150 epic), as a sub-issue.\n\nSeam: spec:`DEFAULT_METADATA_TYPE_REGISTRY` (`allowEnvironmentOverlay: false` on a bucket 2/3 type) → runtime:`protocol-packaged-base-refusal.ts#refusePackagedBaseOverride`\n\n## Locations (head `b054ae27` of #34359)\n\n- `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#refusePackagedBaseOverride`, line 89: `isSealedManagedItem(request.type, request.name)` seals by name. Line 164 exempts `permission` alone (`isOwnPermissionSetWrite`, line 206).\n- The store's write intent, narrowed for `permission` only: `protocol-save.ts` line 1912 (save), `protocol-history-and-publish.ts` line 1260 (`promoteDraftForPublish`) and line 148 (`undoLandedPromotions`), and `protocol-class-head.ts#restoreWriteFor` line 216 (rollback and revert; see the sibling card for `permission`).\n- Types this affects (sealed, package-scoped): `flow`, `hook`, `job`, `webhook`, `mapping`, `connector`, `sharing_rule`, `queue`, `assignment_rule`, `app`, `page`, `dataset`, `analytics_cube`, `picklist`, `book`, `api`, `tool`, `skill`, `agent`, and `action`, which shares the predicate. `dashboard`, `report` and `email_template` are not sealed (environment-overlay types), so they are out of scope.\n\n## Symptom\n\nAn admin of package `hr` saves `hr`'s own flow (or page, app, agent, …) named `X` while package `crm` of another namespace ships a flow `X`. The save is refused 403 `NOT_OVERRIDABLE` (\"provided by a managed package and is sealed\"), as if it edited `crm`'s flow. Install already lets both namespaces ship `X`: every type the bare-name rule covers has narrowed to the namespace (`packages/objectql/src/bare-name-one-holder.ts`, \"The narrowing\"). The save should land as `hr`'s own `X`, and `crm`'s `X` should be unchanged.\n\n## How it was found\n\nMeasured at the seal function. In #34359's H3 probe (a scratch test, not committed), `refusePackagedBaseOverride` was called for `hr`'s own item of each type while `crm` ships one. Every type listed refused `hr`'s save as sealed. `action`'s registration contract refused the bare probe body, but its seal uses the same predicate. #34226's H1 showed that `permission` also had a second judge behind the seal: the store's name-wide write intent. These types share that code path, so they will too (read, not measured per type).\n\nreach: `PUT /api/v1/meta/:type/:name` with a `packageId` (`saveMetaItem` → `refusePackagedBaseOverride`, `protocol-save.ts` line 738), the draft save and the publish of that draft. Measured at the function, not through the HTTP door.\n\n## Acceptance\n\n1. Measure first. For each type above, save `hr`'s own `X` through the save door while `crm` ships `X`, and record the answer and which judge refused it: the seal, the store's intent, or a type-specific gate. The card's scope is what that table shows.\n2. For every sealed package-scoped type, `hr`'s own save, draft save and draft publish of `X` land. The item is served at `hr`'s address, and `crm`'s `X` is unchanged. FROM: 403 `NOT_OVERRIDABLE`.\n3. CONTROLs per type stay sealed as before, with `code` and `status` asserted: no package, `crm`, `crm`'s customization pair (another namespace), and a co-owner of `crm`'s namespace. With two shippers, every shipper is judged.\n4. Every case runs in both registration orders: `crm`'s item registered before the other packages install, and after.\n5. One verdict per write, at every judge that `permission`'s fix touched: the save-door seal and the store intent at save, promote, undo and restore. It generalises `isOwnPermissionSetWrite` to use the type's own holders-meet predicate (`permissionSetHoldersMeet` for `permission`, `bareNameHoldersMeet` for a bare-name type) plus `isPairOf`. `action` keeps its `objectName:name` identity under the package.\n6. An enumeration pin derives the type list from `DEFAULT_METADATA_TYPE_REGISTRY` (sealed and package-scoped), so a type sealed later is judged without a code edit. An ablation leg goes red per judge.\n7. Declaration: `Clause-②: yes (widening)`: a save, a draft save or a draft's publish that a package addresses to its own item of a sealed package-scoped type, refused 403 `NOT_OVERRIDABLE` while a package of another namespace ships that name, now lands; nothing the doors accepted is refused. `Metadata-protocol: none`, patch.\n\n## Related\n\n#34226 and #34359 (the `permission` half). #31527 (ADR-0150 epic). #30803 (bare-name phase 1; the narrowing this card's premise rests on).\n\nDedupe: `gh api -X GET search/issues -f q='repo:objectstack-ai/objectstack is:issue sealed package-scoped name-wide seal flow hook (package, name)'` 17 hits; the only open matches are #34226 and #31527. `q='repo:objectstack-ai/objectstack is:issue refusePackagedBaseOverride namespace'` 15 hits, none open on this shape (#32780 is the closed registry half for permission). `q='repo:objectstack-ai/objectstack is:issue managed seal same name another namespace'` 44 hits, none open on this shape (#32568 is the closed D4 read half)."
+}

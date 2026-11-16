@@ -1,0 +1,33 @@
+{
+  "number": 34391,
+  "kind": "issue",
+  "title": "spec(ui): the action answer's field formats gain a table, so a per-row answer (add-person, CSV import) is drawn as rows, not raw JSON",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T12:05:03Z",
+  "updated_at": "2026-11-16T12:10:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34391",
+  "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ① the maintainer's ruling A on #33187 (record 6915677641, chosen 2026-11-16T11:49Z on the decision card), which says: \"a `domain:spec` card is filed for the `table` format and its column list (parse refusal and the renderer contract included), and this card carries `Blocked-by:` it.\"\nReader: `domain:spec` (`packages/spec/src/ui/action.zod.ts`). Grade suggestion: p1, because it blocks the p1 card #33187, whose first consumer is objectstack-ai/cloud#4465 (managed-environment add-person, sub-card 1c).\nDedupe: `ACTION_ANSWER_FIELD_FORMATS table` and `resultDialog table columns`: none open.\n\n## 维护者速读\n\n您在 #33187 选了 A：动作结果弹窗加「表格」这种显示格式。这张卡做协议那一半：结果字段的格式枚举加 `table`，并加一个列清单键；列清单只能配 `table`，配其他格式时在解析阶段报错。这是一次协议新增（`Metadata-protocol: added`），走契约复审，合入前需要您批一次。界面半边（控制台表格块、用户对象的加人 / 导入结果）在 #33187 上做，等这张卡落地。\n\n## Facts (origin/main, 2026-11-16)\n\n- `ACTION_ANSWER_FIELD_FORMATS = ['qrcode', 'code-list', 'secret', 'text', 'json']` (`packages/spec/src/ui/action.zod.ts:839`). It is a closed set shared by `resultDialog` (its dialog-level default and each field's override) and `preflight.fields`, through the one row builder `actionAnswerFieldRow` (#31840). The renderer contract for each member is on `resultDialog`.\n- None of the five draws an array of objects as rows. The add-person and CSV-import answers on `sys_user` (`plugin-auth` `pending-sso-users.ts`: per row `alreadyPending`, `notApplied`, the host's refusal and reason) are drawn today as `json`. The #33187 dev measured this on `895783a1` (os-dev-report 6895877442). AGENTS.md Prime Directive 12 forbids the console from guessing a table out of a `json` array.\n\n## Ask\n\n1. Add `table` to `ACTION_ANSWER_FIELD_FORMATS`. It draws an array of objects at `path` as rows.\n2. Add a column list to the field row (`actionAnswerFieldRow`), so both `resultDialog.fields` and `preflight.fields` get it. Each column reuses the row's own shape: a dot `path` into one element, an optional `label`, and an optional per-cell `format` from the same set, minus `table` (no nesting). The spec lane settles the key name against the existing row and the alias map.\n3. Parse refusals, worded the way the row's other refusals are: a column list beside any `format` other than `table` is refused; `table` without a column list is refused, unless you rule that it defaults to the element's own keys (decide, and state why in the describe); a nested `table` in a column is refused.\n4. State the renderer contract for `table` on `resultDialog`, as the other five are stated: what a missing or non-array value draws, an empty array, a cell whose value is not a scalar, the column order, and that the header is the column `label`. Keep it short enough for one console renderer to honour it exactly.\n5. Pins, with ablation red for each refusal, and a CONTROL showing that every existing format and row parses unchanged. Regenerate the outputs the change requires (JSON schema, the authorable surface and its baseline, the reference page) with the repo's own generators.\n6. `Metadata-protocol: added`. Changeset `minor` on `@objectstack/spec`. CONTRACT_REVIEW_TIER review by review#2. No console or `plugin-auth` change in this PR; #33187 does the renderer and the two `sys_user` answers.\n\n⛔ Not a claim."
+}

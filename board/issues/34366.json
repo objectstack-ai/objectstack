@@ -1,0 +1,30 @@
+{
+  "number": 34366,
+  "kind": "issue",
+  "title": "[PM seat] repo:objectstack — 🟢 os-project-manager · 由 os-project-manager 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T09:36:37Z",
+  "updated_at": "2026-11-16T10:18:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34366",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 1** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n- New seat: no `repo:objectstack` seat post existed at seating, so this is seat 1. The `domain:*` seat posts are different seats; `domain:*` still decides file ownership and serial order.\n\n## Current PM — 🟢 os-project-manager\n\n- **Holder:** `os-project-manager` · `session_01FEkQ5pmEYLVFDcQ1Z1CS8H`, seated on the maintainer's summons in this account's fleet project (Claude Code project thread 「运行 objectstack 仓库车道席位」). The project's account is responsible for this seat.\n- **Mailbox:** PR #34367. **Patrol:** `trig_01EzTmMR8LtqgVxfhuFet47P` · `38 * * * *`.\n- **Posture ledger lives in the project:** the labels, the assignee, the `Claim:` comments carrying `Seat: repo:objectstack#1`, and the `head:claude/` PRs. Round reports live in the project thread.\n- **Intake:** the maintainer's 「除了前任的任务继续处理，后续只认领 p1 或者阻塞 p1 的任务」: domain:server#5's tails (brief #28677 comment 6912561028), then `priority:p1` cards or cards a p1 waits on. Excluded: cloud cards (`repo:cloud` seats), security advisories (`security` seat), other repositories.\n\n## Leases\n\n| Area | Thread session | Inherited PRs (card) and new claims |\n|---|---|---|\n| `o1-A` | `session_01FEkQ5nNrLRm8ssuwWcBVcw` | #34304 (#33790, first: root of #34342), #34333 (#34257), #34252 (#33918), #34351 (#34164) |\n| `o1-B` | `session_01FEkQ5pHNFS9mn8hS13iGyL` | #34198 (#34005), #34335 (#33792), #34353 (#34345); new p1: #34336, #33724 |\n| `o1-C` | `session_01FEkQ5kgF3mo9f7LXuv5hac` | #34358 (#34209), #34316 (#33922), #34357 (#34163), #34331 (#34046), #34300 (#34218), #34315 (#34145), #34330 (#34199); #33712 close record |\n| `o1-D` | `session_01FEkQ5obaLbqgzRUR9xXfft` | #34285 (#33949), #34238 (#34059), #34354 (#34041), #34324 (#34144/#33955/#34262), #34347 (#34247/#34248), #34359 (#34226), #34355 (#33210), #34356 (#34343) |\n| `L1-a` | `session_01FEkQ5kcNtBBExhz4DZqYbi` | L1 for o1-A, o1-B |\n| `L1-b` | `session_01FEkQ5mww9UksbwbjvM4aYn` | L1 for o1-C, o1-D |\n\nEach area claims its cards fresh (cross-account `Release:` + `Claim:` + `lease:<area>`) as it starts them. Not taken: PR #34082 (waits on the maintainer), PR #34162 (repo:cloud#5), PR #34223 (parked on cloud#4569). #34062 (p1) is with the maintainer through a decision evaluation.\n\n## Hot-file serial queue\n\n- None held by this seat at seating. Inherited readings from domain:server#5's brief (objectstack-ai/objectstack#28677 comment 6912561028): PR #34358 merges main only after #34318 lands (`mcp-http-tools.ts`); #34324 and #34238 both touch `protocol-save.ts` (run `git merge-tree` before arming either).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Contract (L2) reviews for this account's PRs go to the online `review` seats by mailbox (`Request: contract-review`).\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+}

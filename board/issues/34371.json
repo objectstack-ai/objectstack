@@ -1,0 +1,33 @@
+{
+  "number": 34371,
+  "kind": "issue",
+  "title": "Record Activity tab: a posted comment is saved and read back (200) but never rendered in the timeline — 仅评论 shows (0), the author can't see their own comment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T09:59:32Z",
+  "updated_at": "2026-11-16T11:54:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34371",
+  "body": "### Edition\n\nObjectOS Community (self-hosted, this repository's code)\n\n### Version\n\n@objectstack 18.5.0 (`objectstack dev`, objectstack-ai/hotcrm main)\n\n### What happened / What you expected\n\nA comment posted from a record page's Activity tab (zh-CN: 活动 → 「留下评论…」) is saved, but never appears in that record's timeline — not under 全部动态 (all), and not under 仅评论 (comments only), which reads `(0)` and 暂无活动记录. The author cannot see their own comment.\n\nExpected: the comment shows in the timeline right after posting, and under 仅评论.\n\nEvidence (lead `7ialxyNXDhdTC00E`, signed in as the dev admin, the comments' author):\n\n- `sys_comment` holds both rows: `thread_id: \"crm_lead:7ialxyNXDhdTC00E\"`, `object_name: \"crm_lead\"`, `record_id: \"7ialxyNXDhdTC00E\"`, `author_id` = the viewer, bodies 「客户要求高」 (09:47:37Z) and 「评论」 (09:48:18Z).\n- Opening the tab, the console reads them: `GET /api/v1/data/sys_comment?sort=created_at&filter=[\"thread_id\",\"=\",\"crm_lead:7ialxyNXDhdTC00E\"]` → 200 with both records, and it then fetches `sys_comment_reaction` for exactly those two comment ids (→ 200, empty). So the read succeeds and the ids reach the client.\n- The timeline renders only the two `crm_event` rows (「铜壶 (11 min)」, 「Meeting: 初步沟通 (20 min)」), header `活动 (2)`. Switching the filter: 仅评论 → `(0)` 暂无活动记录; 仅任务 → the same two events.\n\nSo the comments are lost between the successful read and the merged timeline (#27055's \"one merged timeline: discussion + activity + field changes\"), not at write or permission time.\n\n### Steps\n\n1. `pnpm dev` in objectstack-ai/hotcrm (18.5.0); sign in as `admin@objectos.ai`, personal language zh-CN.\n2. Sales → Leads → open any lead → 活动 tab.\n3. Type a comment in 「留下评论… (Ctrl+Enter 提交)」 and submit.\n4. The comment does not appear; switch the filter to 仅评论 → `(0)`, 暂无活动记录. Reload: still absent. `POST /api/v1/data/sys_comment/query` shows the row.\n"
+}

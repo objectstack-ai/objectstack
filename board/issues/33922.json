@@ -13,21 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "lease:A5",
+    "lease:o1-C",
     "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:10:23Z",
-  "updated_at": "2026-11-16T05:52:00Z",
+  "updated_at": "2026-11-16T09:49:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33922",
   "body": "qa#3 · os-tesla · session_01L9qibzj9DrVWXkq7joYHGB\n\nKind: product defect (off-clause probe finding, observed beside platform-core.namespace-co-owner-name-refusal)\n\n## Reproduction (objectstack b914e7247f69, 18.5.0)\n\nStock showcase scratch copy booted with `objectstack dev --ui --seed-admin --no-watch -p 41206` (own OS_HOME, own file DB), seeded admin bearer token.\n\n1. `POST /api/v1/marketplace/install-local` with\n   `{\"manifest\":{\"id\":\"com.qa.p-up\",\"name\":\"p\",\"version\":\"1.0.0\",\"type\":\"app\",\"namespace\":\"QA_N\",\"pages\":[{\"name\":\"qa_board\",\"label\":\"x\",\"type\":\"app\",\"regions\":[]}]}}`\n   → **200** `success: true` (hotLoaded). The same with `\"namespace\":\"\"` (id com.qa.p-empty) → 200, and with\n   `\"namespace\":\"9-Bad Ns!\"` (id com.qa.p-bad2) → 200.\n2. `GET /api/v1/packages` lists com.qa.p-up with namespace `'QA_N'`, com.qa.p-empty with `''`, com.qa.p-bad2 with\n   `'9-Bad Ns!'`, source `marketplace`; `GET /api/v1/meta/page` serves qa_board for each of them.\n3. Reproduced twice on the same boot with three different ids. In the same boot com.qa.n-one already owned\n   namespace `qa_n`; `QA_N` installed beside it without the ADR-0048 namespace gate answering.\n\nExpected: 400 `PLUGIN_MANIFEST_INVALID` with the declaration's sentence, as the door already answers for a bad id\n(`manifest` without `id` → 400 PLUGIN_MANIFEST_INVALID \"Invalid package id ''…\", same boot). The declaration:\n`packages/spec/src/kernel/manifest.zod.ts:565-569` — `namespace: z.string().regex(NAMESPACE_PATTERN, 'Namespace must be\n2-20 chars, start with a lowercase letter, and contain only lowercase letters, digits and underscores')`, with\n`NAMESPACE_PATTERN = /^[a-z][a-z0-9_]{1,19}$/` (`packages/spec/src/kernel/address-grammar.ts:36`).\n\n## Mechanism\n\n`packages/cloud-connection/src/marketplace-install-local-plugin.ts:2480-2490` parses only `manifest.id` through\n`ManifestSchema.shape.id`, and `:4619` parses `installModes` through `ManifestSchema.shape.installModes`; no leg parses\n`manifest.namespace` through `ManifestSchema.shape.namespace` (grep of the file for NAMESPACE_PATTERN /\n`shape.namespace`: none), so an inline manifest written by hand (not by `objectstack build`, whose defineStack refuses\nit) registers whatever string it carries. The namespace is the object-name prefix, the table-name prefix and the key the\ninstall-time namespace gate compares, so a case-variant (`QA_N` beside `qa_n`) or empty namespace sidesteps the gate's\nuniqueness reading.\n\nSeverity guess: P2 (admin-only door; malformed namespace enters the registry and the installed ledger).\n\n## Duplicates searched\n\n`gh api -X GET search/issues -f q='repo:objectstack-ai/objectstack is:issue is:open …'` with:\n- `install-local namespace pattern` → 5 hits, none about this (#23181 test budget, PM seat cards)\n- `install-local namespace validation` → 6 hits, none about this (#33761 sweep anchor, #23181, PM seats)\n- `namespace uppercase install` → 0\n- `manifest namespace not validated` → 4 hits, none about this (#30349, PM seats)\n- `NAMESPACE_PATTERN install` → 0\n\nQA-source: #33914 · platform-core.namespace-co-owner-name-refusal · observed beside the clauses"

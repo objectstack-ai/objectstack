@@ -2,8 +2,8 @@
   "number": 33812,
   "kind": "issue",
   "title": "SeedLoader: dataset insert order follows lookup edges only, so a seed whose hook reads another seeded object cannot be ordered after it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,21 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "lease:A4",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T11:16:15Z",
-  "updated_at": "2026-11-16T03:33:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T09:08:27Z",
+  "closed_at": "2026-11-16T09:02:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33812",
   "body": "## Summary\n\n`SeedLoaderService` orders datasets by `buildDependencyGraph` + `topologicalSort` (`@objectstack/metadata-protocol` 18.4.0, `dist/chunk-SEQUEZLL.js` ~L771 and ~L2124). An edge exists only when an object has a `lookup` / `master_detail` / `user` field pointing at another seeded object. Authored dataset order only breaks ties between datasets that are ready at the same moment (Kahn queue). A dataset whose **lifecycle hook reads another seeded object at insert time** has no way to say so: there is no `dependsOn` (or similar) on `Seed`, and the loader does not honour the authored order once lookup edges have reordered things.\n\nHooks *do* run over seed writes (`isSystem`, `skipTriggers` and `seedReplay` suppress automation and guards, not lifecycle hooks). So a hook-derived value on the seeded row is computed against whatever the dependency happens to hold at that moment. The result depends on unrelated datasets in the same load.\n\n## Concrete case (steedos-labs/os-project-blackcat-crm)\n\n- `crm_rating_rule` ← `crm_rating_item` (master_detail) ← `crm_rating_band` (master_detail). Bands land in the third wave.\n- `crm_customer_rating` has lookups to `crm_rating_rule` and `crm_account` only. It lands in the second wave.\n- Its `beforeInsert` hook (`customer_rating_compute`) scores the rating from `crm_rating_band` rows. With no bands present, every band-scored item scores 0. Every demo customer then falls to `grade_d` instead of its workbook grade (e.g. 72.4 → 27.4, 95 → 45).\n- This only worked before because unrelated sample datasets made `crm_account` depend on objects that were themselves late, which pushed ratings behind bands. Removing those unrelated sample datasets (steedos-labs/os-project-blackcat-crm#141) silently flips the order and breaks the demo book on every fresh install. The authored order (`ratingBands` listed before the demo ratings in the stack's `data`) is ignored.\n\n## Expected\n\nAn app can make a seeded row land after the rows its hook reads, without inventing a lookup field that exists only to order seeds. Either of:\n\n1. a declared dependency on the dataset, e.g. `defineSeed(CustomerRating, { dependsOn: ['crm_rating_band'], … })`, merged into the graph as edges; or\n2. the authored order of `data[]` is treated as an edge (each dataset after the ones listed before it) whenever no lookup edge contradicts it, rather than only as a tie-breaker inside one Kahn wave.\n\nOption 1 is explicit and keeps the topological sort as the source of truth. Option 2 matches what authors read in their own `data[]`.\n\n## Not wanted (workarounds an app should not need)\n\n- Adding a meaningless `lookup` from `crm_customer_rating` to `crm_rating_band` purely to create an edge.\n- Teaching the business hook to skip its computation on system writes, or seeding derived `total_score` / `grade` values.\n\n## Repro sketch\n\nTwo seeded objects A and B with no lookup between them, plus an object C with a lookup to A. B's `beforeInsert` hook reads C. Author `data: [A, C, B]`. Since B has no edge to C, B lands in the first wave with A, before C; reordering `data[]` cannot fix it."

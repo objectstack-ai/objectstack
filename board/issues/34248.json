@@ -13,21 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "lease:E1",
+    "lease:o1-D",
     "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T02:14:55Z",
-  "updated_at": "2026-11-16T04:18:55Z",
+  "updated_at": "2026-11-16T09:54:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34248",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a product defect with a named location, measured. Found by area S5's dev on #34040 (report on #34040, out_of_scope_findings, class a; PR #34241 pins it as measured), filed by area S5 (E1b), lease E1.\n\n## 维护者速读\n\n- 问题：两个启用中的包发布了同名文档，同时存在一条不属于任何包的条目（无包戳的注册表条目，或启动时水化的不带包的存储行）。这时不带包名读取不再拒绝，而是返回\"最后注册的那个包\"的文档。\n- 影响：答案取决于注册顺序，违反 ADR-0150 红线 2（有歧义就报告，不猜）。`/layers` 把环境行显示为覆盖层，有效层却是那个随机的持有者。\n- 修法方向：环境自己的条目先回答时，要用环境自己的内容，不能落到某个包的 MetadataService 副本上；否则就按 PR #34036 的规则拒绝。\n- 优先级 p2，本区（S5）处理。\n\n## Measured\n\nThis was measured on the composed artifact rig (MetadataPlugin artifact door + AppPlugin), on both transports, in both registration orders, at origin/main 86350e12. Two enabled packages ship doc `shared_doc`, and there is a stamp-less bare registry entry or a hydrated package-less row. PR #34036's bare refusal is exempted (\"the environment's own item answers first\"), but `GET /meta/doc/shared_doc` and `/published` serve the MetadataService copy of the holder registered last. `/layers` reports overlay 'environment doc' over an effective layer that is that holder. Pinned as measured and unresolved in `packages/runtime/src/domains/meta-disabled-holder-artifact-door.test.ts` (PR #34241).\n\nSeam (read): `packages/metadata-protocol/src/protocol-meta-item-reads.ts` `readMetaItem` step 2, after `refuseAmbiguousBareDocRead` / the registry's `readBareDoc` exemption.\n\n## Acceptance\n\n1. With two enabled holders and a package-less entry or row, the bare read, `/layers` and `/published` answer from the environment's own item, or refuse as PR #34036 does. Never a registration-order pick. Pin it in both orders and ablate it; flip PR #34241's measured pins.\n2. Declare the FROM→TO with its Clause-② arm. Moving a served answer to a refusal is a narrowing.\n\nPrior rulings read: ADR-0150 D3 and red line 2; ruling 6893582352 on #33264 (the environment's own item answers first); PR #34036 (#33264) and PR #34241 (#34040), which touch the same file. Merge-tree against #34241 before the claim.\n\n## Dedupe\n\nI searched \"bare doc read registration order\", \"readBareDoc exemption\" and \"hydrated doc row two holders\". The hits were #34040 (exact address) and #33127 (two stored rows after a restart, a different door)."

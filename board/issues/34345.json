@@ -2,8 +2,8 @@
   "number": 34345,
   "kind": "issue",
   "title": "scripts: delete the committed one-off codemod-split-*.mjs scripts and the comments that point at them",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "zhuangjianguo"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T08:31:26Z",
-  "updated_at": "2026-11-16T08:33:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T13:42:04Z",
+  "closed_at": "2026-11-16T13:39:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34345",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nMaintainer order, project chat 2026-11-16 (「yes」 to the clean-up step after 「这种代码就是垃圾啊…」). It is an explicit exception to the current no-new-claims wind-down.\n\n**What.** Four one-off split scripts sit on main, about 15,900 lines. No code, gate, CI workflow or package script runs or imports any of them; only comments and headers name them.\n\n| script | lines | files naming it |\n|---|--:|--:|\n| `scripts/codemod-split-engine.mjs` | 7,452 | 43 |\n| `scripts/codemod-split-protocol.mjs` | 4,164 | 13 |\n| `scripts/codemod-split-sql-driver.mjs` | 2,950 | 29 |\n| `scripts/codemod-split-conversions-registry.mjs` | 1,367 | 118 |\n\n**Change.**\n- Delete the four scripts.\n- Reword every comment that names one (module headers, gate banners such as `regen-artifacts.mjs`, `check-adr-0087-registration.mjs`, `sql-driver-split-source.mjs`, `cross-package-test-inputs.mjs`) so it names the PR that made the split instead.\n- Comments only: no code change. Re-measure the \"nothing runs them\" claim on the branch with `git grep`.\n- Do not touch `scripts/codemod/` (customer migration codemods, a different kind of tool).\n\n**Done when** the scripts are gone, `git grep codemod-split-` finds nothing outside the changeset, every gate is green, and the PR has landed. Over 3,000 changed lines makes it Tier H, so the seat hands it to the maintainer.\n\nRelated: the review-rule card filed beside this one; #33949; #34285."

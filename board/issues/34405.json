@@ -1,0 +1,31 @@
+{
+  "number": 34405,
+  "kind": "issue",
+  "title": "install-local: wire landedKeys into the door's seed loads, so a seed row a tenant deleted does not come back on reinstall or reseed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T13:28:22Z",
+  "updated_at": "2026-11-16T14:23:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34405",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pHNFS9mn8hS13iGyL\n\nSplit from #34336 (ask 2), route B by the `repo:objectstack#1` seat. Measured by the #34336 dev, os-dev-report 6917684209 (`open_questions`), on main `719b6b537`.\n\n**Business reason.** A tenant admin who deletes a sample row (a demo account, a demo order) expects it to stay deleted. On install-local it comes back the next time the package is reinstalled, upgraded or reseeded.\n\n**Today.** `MarketplaceInstallLocalPlugin.runInlineSeed` constructs `SeedLoaderService` without `landedKeys`, so this door never reads or writes `sys_seed_landed_key`. The loader's landed-key guard (#31021) therefore does not apply on this door: install, upgrade and the per-org replayer load every declared key again, and reseed does too.\n\n**Target.**\n- [ ] Install, upgrade (into the caller's organization) and the per-org replayer pass `landedKeys: 'honour'`.\n- [ ] Reseed passes `landedKeys: 'reseed'`.\n- [ ] Pins: a seed row deleted after install stays deleted across reinstall and upgrade; reseed behaves as the loader's `reseed` mode defines; a flat and a composed bundle (after #34336 / PR #34403) behave the same.\n\n**Out of scope.** No replay into other existing organizations on upgrade. That is a tenancy-policy question, filed separately as a decision card.\n\n**Grade.** p2 by the seat's route: a deleted demo row returning is not data loss for a live tenant.\n\n**Reader.** `domain:server`, packages/cloud-connection (install-local seed door). Serial after PR #34403 (same file, `marketplace-install-local-plugin.ts`).\n\n**Dedupe.** Searches: \"landedKeys install-local\" (2: #34336, #31021 closed, the loader-side guard), \"sys_seed_landed_key reseed\" (3: #34336, #31021, #31099 closed, wording only). No card wires the guard into this door."
+}

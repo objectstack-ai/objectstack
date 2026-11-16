@@ -13,22 +13,22 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "lease:A1",
+    "lease:o1-A",
     "pm:blocking",
     "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T02:46:15Z",
-  "updated_at": "2026-11-16T08:29:03Z",
+  "updated_at": "2026-11-16T10:25:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34257",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① the framework half of objectstack-ai/cloud#4470 (#4465 child 3; the maintainer: 「都是p1，车道自己认领就可以」), measured at cloud's pin `b914e724` by the card thread. Dedupe: `invitation accept one step verify email proof` finds no card.\nConsumer: objectstack-ai/cloud#4470 (hosted invitation acceptance).\n## 维护者速读\n\n同事点邀请邮件里的链接：设好密码，或用 Google、微软账号登录，一步完成——没有账号就新建，邮箱同时完成真正的验证，接受邀请。邮箱的证明只放在发出的邮件里；管理员复制的链接和后台能看到的邮件记录里都没有它，所以只拿到链接不算验证邮箱。\n\n## The rule\n\nAccepting an organization invitation requires a verified email address, and holding the link is not mailbox proof. An administrator can copy the same link (`copy_invitation_link`) and can list the invitation row, so the link proves nothing about the mailbox. One step is still possible, because the invitation mail itself reaches the mailbox: what proves the mailbox is a secret that only the mail carries.\n\n## Facts at the cloud pin (b914e724, better-auth 1.7.12)\n\n- better-auth's `/organization/accept-invitation` checks `emailVerified` only when asked and never sets it (`plugins/organization/routes/crud-invites.mjs:246-345`, check at `:270-274`). plugin-auth leaves the check off (`auth-manager-organization-plugin.ts:199`).\n- The mail's link and the copy action's link are the same path from the same composer (`auth-manager-organization-plugin.ts:571`, `invitation-link-action.ts:84-86`).\n- The mail is stored in `sys_email` (`body_text` / `body_html`). A proof placed in the mail must not be stored in any column a generic read returns.\n- The console's accept page (`ui/packages/app-shell/src/console/organizations/manage/AcceptInvitationPage.tsx`) sends a signed-out person to sign-in or register (`auth/invitationArrival.tsx`); `auth/invitationSignUpJoin.ts` accepts only after a sign-up that creates a session. Where sign-up requires email verification, that is a second mail and three more screens.\n\n## Work\n\n1. **The mail carries a mailbox-only proof (plugin-auth).** `sendInvitationEmail` mints a single-use, short-lived proof bound to the invitation id, the invited address and the invitation's expiry, and puts it in the mail's link only. `copy_invitation_link` never answers it. The stored `sys_email` row carries the link with the proof redacted (or the proof lives in an `internal` column the generic read omits). Resending mints a new proof and retires the old one. Optionally a host seam, so a host can mint it.\n2. **An accept-with-proof door (plugin-auth).** One request: the invitation is pending and unexpired, the proof matches the invitation and its address, the address has no account or has an unverified one; it creates the account if there is none (password), marks the address verified, accepts the invitation, and signs the person in. An address that already has a verified account signs in as today and accepts. The proof is spent on success. The door refuses an expired, used or mismatched proof without saying which.\n3. **A social return accepts only a provider-verified address.** Google or Microsoft from the accept page carries the invitation through the sign-in and accepts on return only when the provider asserts the invited address as verified; otherwise the person is asked to verify by mail.\n4. **One form on the accept page (app-shell).** A signed-out person whose link carries the proof sees one form: name and password, or Google / Microsoft. On success the page enters the organization the way \"Continue\" does today (a full-page load of the console root). Without the proof (a copied link), the page keeps today's path: sign in, or register and verify by mail.\n5. **Tests.** A copied link (no proof) cannot verify an address or accept for an unverified account; the mail's proof creates, verifies and accepts in one request; a used, expired or other-invitation proof is refused; the stored mail row does not carry the proof; the copy action's answer does not carry it; a provider-verified address accepts, an unverified provider address does not.\n\n## Out of scope\n\n- Where a hosted person lands after acceptance (the cloud's console-root landing already sends a plain member to the environment).\n- The environment's first sign-in binding to the pending row (objectstack#33181, unchanged).\n\n## Cloud follow-up once this lands\n\ncloud#4470 turns the one-step door on for hosted and pins the whole flow end to end: invitation mail, one form, verified address, accepted invitation, environment with positions and permission sets in place."

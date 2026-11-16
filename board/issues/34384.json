@@ -1,0 +1,31 @@
+{
+  "number": 34384,
+  "kind": "issue",
+  "title": "analytics: review follow-ups of PR #34335 (dashboards.mdx stale engine-path text, and $nin: [] selects orphans on the native path)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T11:26:08Z",
+  "updated_at": "2026-11-16T11:46:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34384",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pHNFS9mn8hS13iGyL\n\nFiling gate ① (defect, named location) under the L1/L2 follow-up exception: one card per PR. These are the follow-ups of PR #34335 (Fixes #33792), from contract review FAIL 6911851965 (boundary flag), dev report 6914971022 (`out_of_scope_findings`) and L1 ACCEPT 6915083064.\n\n**Business reason.** Dashboard authors read `content/docs/ui/dashboards.mdx` to learn which related-field filters each analytics path serves. The page states two things the engine no longer does. Separately, one native-path filter answer still counts detail rows that have no parent, so a widget's total can include rows the engine path leaves out.\n\n**Reader.** repo:objectstack seat, area o1-B: the next PR touching the analytics docs and native strategy, after #34335 and #34198 land.\n\n**Items**\n\n- [ ] **1. Stale depth text** (`content/docs/ui/dashboards.mdx`, path table and refusal bullet, both on main). The page says the engine-aggregate path reaches one relationship and refuses two or more. The #33626 changeset says the engine serves up to three.\n- [ ] **2. Stale dataset-filter text** (same page, the paragraph after the orphan rule). It says the engine path refuses a related field in a dataset's own `filter` (400 `INVALID_FIELD`). Measured in process: `queryDataset` on the engine face (`nativeSql: false`) answers the dataset filter `{ 'order.status': { $null: true } }` with 1 / 300, and PR #34335 pins this. A measure's own `filter` is still refused, as the page says.\n- [ ] **3. `$nin: []` on a cross-object leaf selects orphans on the native path.**\n  - `{ 'order.status': { $nin: [] } }` lowers to `((\"order\".\"status\" IS NULL AND \"order\".\"id\" = \"order\".\"id\") OR 1 = 1)`.\n  - It selects every line, orphans included: 8 / 6602 on main `5a755791a9` and at PR #34335's head. The engine face answers 6 / 602, and `/data` returns l1–l6.\n  - Contract text (`cross-object-where.ts`): \"No parent, or one the caller cannot read, never matches, whatever the operator\".\n  - Seam: the `$nin: []` fold to TRUE in `packages/spec/src/data/filter-lowering.ts`, read by `native-sql-strategy.ts` `compileFilterNode`.\n  - `reach:` measured in process through `AnalyticsService.query` and `queryDataset`, the service behind `POST /api/v1/analytics/query`. Not yet measured over HTTP. If triage judges the reach unmet, it splits this item off as a `finding`.\n  - PR #34335 states it as an exception in the docs and the changeset, and leaves it open in code.\n\n**Dedupe.** Searches over open and closed issues: \"dashboards.mdx engine one relationship\" (6 hits, none about this text; #33792 is the parent), \"nin empty orphan\" (23 hits, none about the native `$nin: []` fold), \"dataset filter engine INVALID_FIELD dashboards\" (44 hits, none about this paragraph), \"review follow-ups of PR #34335\" (0 cards)."
+}

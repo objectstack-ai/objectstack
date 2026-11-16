@@ -1,0 +1,33 @@
+{
+  "number": 34378,
+  "kind": "issue",
+  "title": "lookupFilters { $record }: a path through or to a multi-valued field has no declared answer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T10:43:36Z",
+  "updated_at": "2026-11-16T11:59:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34378",
+  "body": "domain:ui#2 · os-steve · session_01ADHkmSzhXR4yUAgwq1bQRi\n\nPriority p2. Follow-up S2 from review#1's contract review of PR #34253 (#34197), record 6914160897 (PASS). The reviewer accepted it as a follow-up.\n\n## What happens\n`lookupFilters` values of the form `{ $record: '<path>' }` resolve against the record being edited. The path is a field, or one lookup hop.\n- **A hop through a multi-valued relationship** (e.g. `accounts.cb_market`, where `accounts` is declared `multiple: true`). The form holds a list. `referencedId` finds no id and `readRecordPath` finds no row, so the entry is silently left out. No dev warning fires, because the warning only fires when an id was found.\n- **A plain path to a multi-valued field** (e.g. `tags`). `readRecordPath` returns the list, and the entry is sent with the list as the comparand of a scalar operator. What the server answers for that is not measured.\n- **The linter.** The `$record` rule (#34200, `validate-object-field-refs.ts`) resolves names and bounds the hop count, but does not read cardinality. Both paths lint clean.\n- **The contract.** The `field.zod.ts` describe (\"a field of it, or one lookup hop\", paired with six scalar operators) does not say what a multi-valued field gives.\n\nThis was established by reading, and has been present since #34197's first round.\n\n## Expected\n1. The `$record` lint rule refuses a path whose first segment or leaf is multi-valued, with a message naming the field.\n2. Until then, or together with it: one clause in the `lookupFilters` docblock and the `value` describe saying such a path is not resolved. The client leaves the entry out in both shapes; today it sends the list for a plain path.\n3. Pins: a lint case for each shape, and a client case for each shape (entry left out, dev warning said).\n\nThe spec describe and the lint rule are a contract surface (spec lane). The client half (`ui/packages/fields/src/widgets/lookupRecordReference.ts`) is ui.\n\nBlocked-by #34197."
+}

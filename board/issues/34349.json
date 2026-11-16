@@ -1,0 +1,35 @@
+{
+  "number": 34349,
+  "kind": "issue",
+  "title": "OAuth consent page stays on screen after \"Authorize\" when the client redirects to a custom-scheme callback (WorkBuddy, desktop MCP clients)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T08:39:24Z",
+  "updated_at": "2026-11-16T10:34:13Z",
+  "closed_at": "2026-11-16T10:33:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34349",
+  "body": "domain:ui#6 · os-lizheng · session_012MmDsR2MvJuPqJW5jG2YQV\n\nFiling gate: ① product defect — named location `ui/apps/console/src/pages/auth/OAuthConsentPage.tsx` (`handleDecision`), reproduced in a hosted environment.\n\nreach: public entry — the Console OAuth consent page (`/_console/oauth/consent`), measured once by the maintainer on a hosted `*.objectos.ai` environment with Tencent WorkBuddy as the MCP client: after **Authorize** the tab stays on the consent card with the buttons re-enabled.\n\n**Business reason.** Connecting an AI assistant is a front-door flow (\"Connect an AI assistant\" lists Claude, Codex, Cursor, WorkBuddy, 豆包工作, 千问办公). For every client whose callback is an app scheme, the last screen of that flow currently looks as if nothing happened, so a person who just connected successfully clicks Authorize again and gets a failure toast. Left as is, the desktop / domestic assistants we advertise look broken at the moment of first contact.\n\n**Reader.** The `domain:ui` lane seat dispatches one `os-dev` on this card; the fix and its test stay inside `ui/apps/console/src/pages/auth/`.\n\n**Duplicate search.** `repo:objectstack-ai/objectstack is:issue consent redirect custom scheme` → 2 hits (#29714, #25118, both closed, unrelated); `repo:objectstack-ai/objectstack is:issue OAuth consent page stays open` → 13 hits (incl. closed #30894, #30898, #31048), none about the post-consent state for a custom-scheme redirect.\n\n## What happened\n\nConnecting **Tencent WorkBuddy** as an MCP client (Console → Connect an AI assistant → WorkBuddy, server URL `https://<env>/api/v1/mcp`):\n\n1. WorkBuddy opens the browser at `/_console/oauth/consent?…&redirect_uri=workbuddy://workbuddy/mcp/custom-mcp%3Aobjectstack/oauth/callback&scope=data:read+…`.\n2. The consent card renders correctly (\"WorkBuddy Connector 请求访问您的账户\", unverified-app notice, destination `workbuddy://…/oauth/callback`, scope list).\n3. Click **授权 / Authorize**. The browser hands the `workbuddy://…?code=…` URL to the desktop app and the authorization completes on the WorkBuddy side.\n4. **The browser tab stays on the very same consent card**, with the Authorize / Deny buttons enabled again. Nothing tells the person the grant succeeded or that they can go back to WorkBuddy and close the tab.\n\n## What I expected\n\nAfter a successful consent the page should leave the consent state: show an \"Access granted — return to <app>, you can close this tab\" confirmation (and try `window.close()` where the browser allows it), the way other OAuth providers do for desktop / native clients. Same for Deny (\"Access denied — you can close this tab\").\n\n## Why it happens (reading of the code)\n\n`ui/apps/console/src/pages/auth/OAuthConsentPage.tsx`, `handleDecision`:\n\n```ts\nif (redirect) {\n  window.location.href = redirect;\n  return;\n}\n```\n\nfollowed by `finally { setSubmitting(false); }`.\n\n- For an `http(s)` redirect (loopback callbacks used by Claude Code / Codex / Cursor) the assignment navigates the tab away to the client's callback page, so the consent card disappears.\n- For a **custom-scheme** redirect (`workbuddy://…`, any native/desktop client registered with a non-`http(s)` `redirect_uri`) the browser dispatches the URL to the OS protocol handler and **does not unload the page**. The component returns, `finally` re-enables the buttons, and the card is shown exactly as before the click.\n\nThe page already knows the redirect is non-`http(s)`: `redirectDestination()` in the same file branches on it to show the raw `workbuddy://…` destination.\n\n## Impact\n\n- The person cannot tell whether authorization worked; the natural reaction is to click **Authorize** again.\n- A second click re-POSTs `/oauth2/consent` with the same, already-consumed `oauth_query` and most likely ends in a \"Consent failed\" toast — making a successful connection look broken.\n- Affects every connector the Console lists that uses a custom-scheme callback (WorkBuddy confirmed; likely other desktop clients such as 豆包 / 千问 if they register app-scheme redirects).\n\n## Suggested fix\n\nIn `handleDecision`, after a successful consent response:\n\n1. If the redirect is not `http:` / `https:`, set a terminal \"granted\" / \"denied\" state (do not reset to the decision buttons), trigger the hand-off (`window.location.href = redirect`), and render a confirmation card: outcome, the app name, \"you can return to <app> and close this tab\", plus a fallback \"Open <app>\" link pointing at the same redirect in case the protocol prompt was dismissed.\n2. Optionally attempt `window.close()` after a short delay (works only when the tab was script-opened; harmless otherwise).\n3. Keep the buttons disabled once a decision has been posted so the consumed `oauth_query` cannot be re-submitted.\n4. Test: a consent whose `redirect_uri` is `workbuddy://…` ends on the confirmation state with no enabled Authorize button; an `https://` / loopback redirect keeps today's navigation.\n\n## Environment\n\n- Edition: ObjectOS Cloud (hosted environment `*.objectos.ai`)\n- Client: Tencent WorkBuddy, custom MCP connector (`~/.workbuddy/mcp.json`, `type: streamableHttp`)\n- Browser: Chrome (macOS)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012MmDsR2MvJuPqJW5jG2YQV)_"
+}

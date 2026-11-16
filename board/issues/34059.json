@@ -12,21 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "lease:E1",
+    "lease:o1-D",
     "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "zhuangjianguo"
+    "os-project-manager"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:31:41Z",
-  "updated_at": "2026-11-16T06:13:16Z",
+  "updated_at": "2026-11-16T09:49:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 11,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34059",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jTkZnXtRhuEiiyidvJ\n\nFiling gate ③, a decision the maintainer must make: two governing texts conflict for exactly this case. Area S4 (E1) files it so the ruling has a home. The seat has put the decision in front of the maintainer and recommends 「算环境自己的新动作」, with an independent review in `/mnt/project-files/server-seat-5/fable-review-batch-1115b.md`. No dev is dispatched before the ruling.\n\n## 维护者速读\n\n- 问题：只有一个可写包 P 在 A 对象上持有动作 `approve`。环境在 B 对象上不带包名保存同名动作时，保存会写进 P，把 P 的动作从 A 挪到 B。回执会写明 P。\n- 冲突：ADR-0150 L181 和 R15 说\"包持有的名字，不带包名的行就是该包的定制\"，按此应写进 P。D4 表给动作的键是 `(package, objectName, name)`，按此 B 上的动作是环境自己的。读取（#33898）、列表（#33904）和执行路由已经按 D4 处理。\n- 需要你做的：在决策卡上选一个方案。推荐「算环境自己的新动作」，需要给 ADR-0150 补一条注记（Tier H）。\n\n## Measured (reach: HTTP)\n\nReal showcase dev boot (`objectstack dev --seed-admin`, SQLite file DB), main `63e47feeca`; os-dev-report on #33456 (comment 6896608715), cell 4:\n\n1. `POST /api/v1/packages` `com.probe.beta` → 201; `PUT /api/v1/meta/action/probe_approve_p?package=com.probe.beta` bound to `showcase_invoice` → 200.\n2. Package-less `PUT /api/v1/meta/action/probe_approve_p` bound to `showcase_task` → 200 `Saved action probe_approve_p (env-wide, package=com.probe.beta, state=active) [seq=4]`; history shows create seq 3, update seq 4 on BETA's row.\n3. BETA's item now sits on `showcase_task` with the environment's target. `POST /api/v1/actions/showcase_invoice/probe_approve_p` → 404 \"has no declaration\"; `/actions/_env/showcase_task/probe_approve_p` → 404. No package-less row exists.\n\nManaged (code) packages are not affected: a package-less save of their name answers 403 `NOT_OVERRIDABLE` (cell 1 of the same report).\n\n## Options (as put to the maintainer)\n\n- A — keep today's behaviour: the save is P's customization whatever object it binds. Nothing to build. One unqualified save moves P's action to another object, unasked (the receipt names P), while read, listing and execution already treat an environment action on another object as the environment's own item.\n- B — key the save door by D4's action key: a package-less save on an object P does not bind writes a package-less row, the environment's own item on B, and P's item on A is untouched. Needs an ADR-0150 amendment note for object-bound actions (Tier H, maintainer's merge) and a declared Clause-② arm with the dogfood battery. Follow-on: `(action, approve)` then has two items, so a bare `/meta/action/approve` serves the environment's item first (D3), and moving P's own action to another object needs `?package=P`.\n- C — refuse 409 naming P, asking for `?package=P` or another name. Nothing guessed, but it blocks an environment action the read side serves.\n\n## Landing point (for B)\n\n`packages/metadata-protocol/src/protocol-save.ts` (the package-less save address, `packagelessAddress`, for type `action` keyed with `objectName`), its draft twin, and the pin `protocol.packageless-save-address.test.ts` L234 (re-address pinned for a type-agnostic item; no cross-object action case). ADR-0150 amendment note: `domain:skills`, Tier H.\n\nPrior rulings read: ADR-0150 L181 and R15 (L311), which read as A; ADR-0150 D4 table L158/L163, which reads as B; PR #33898 (merged), which reads actions by owner key; the listing card #33904. No ⛔ line covers actions on different objects.\n\n## Dedupe search\n\n`is:issue \"package-less\" action \"another object\" save` (30 hits), `action save re-addressed package objectName` (5), `packageless save action object holder` (22): the only on-surface hits are #33904 (listing, read side), #33456 (closed: route and envelope, where this was measured) and #33385 (the `_env` qualifier for disabled holders). None covers the save door."
