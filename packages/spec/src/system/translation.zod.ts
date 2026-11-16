@@ -2681,15 +2681,19 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
    * `defaultLocale`'s. Their `--default-locale` flag overrides it.
    * Like `defaultLocale`, it need not appear in `supportedLocales`.
    *
-   * ⚠️ Not yet read by the serving layer: the runtime label resolvers still
-   * treat `defaultLocale` as the authored label's language when they decide
-   * whether a request walks the fallback chain.
+   * Read by the serving layer too (#33634): `AppPlugin` threads it into the
+   * i18n service (`II18nService.setSourceLocale`), and every runtime label
+   * resolver passes it — else `defaultLocale` — as the authored label's
+   * language (`ResolveOptions.defaultLocale`), so a request in this locale
+   * answers from the inline text and never walks the fallback chain ahead of
+   * it. A request in `defaultLocale` (when the two differ) walks the chain
+   * like any other translated locale.
    */
   sourceLocale: LocaleSchema.optional().describe(
     'Language the inline metadata text (a plain-string label) is written in, when it differs from defaultLocale '
     + '(e.g. "en" for an English-authored app whose users default to "zh-CN"). Absent, it is defaultLocale. '
     + 'Read by os lint, os i18n check and os i18n extract as the source language; their --default-locale flag overrides it. '
-    + 'Not yet read by the serving layer: the runtime label resolvers still treat defaultLocale as the authored label\'s language.',
+    + 'The serving layer reads it as the authored label\'s language too: a request in this locale is answered from the inline text.',
   ),
 }).describe('Internationalization configuration'));
 

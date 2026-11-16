@@ -254,7 +254,8 @@ const NEW_RECORD_UPLOAD_LINK_LINES = `  For a record you have not created yet (a
  * (after normalization) is the only hit, one hit wins, several hits are a
  * question for the user, no hit falls back to the object tools with the
  * answer labelled as not a governed metric, and a dimension alone is not an
- * answer.
+ * answer. The last entry covers a question no tool can answer: name what the
+ * data lacks, never answer from an assumed value.
  */
 const DATASET_TOOL_LINES = `- **list_datasets({ terms? })** — the governed datasets (business metrics)
   you may query: each dataset's measures and dimensions with their business
@@ -277,6 +278,12 @@ const DATASET_TOOL_LINES = `- **list_datasets({ terms? })** — the governed dat
   \`aggregate_records\` and say the answer is not from a governed metric. A
   dimension match alone (a grouping such as "by stage") is not an answer: you
   still need a measure match, or ask.
+- **When the data cannot answer.** No metric, object or field records what the
+  question needs: say the data you can read does not record it and name what
+  is missing (such as a shipment's weight), and offer the computation if the
+  user supplies it. Never fill the gap with an assumed value,
+  nor draw a conclusion from one ("under a typical term, none would…").
+  Any figure you add comes from a tool answer; cite it.
 `;
 
 /** The dataset pair's entries for a host whose bridge carries them, under the grant that registers them. */

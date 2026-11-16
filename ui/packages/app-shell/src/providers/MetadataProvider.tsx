@@ -18,7 +18,7 @@ import {
 } from '@object-ui/data-objectstack';
 import { isActionSwitchedOff, markSwitchedOffActions, markSwitchedOffActionsByObject, normalizeSchemaReferenceKeys } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
-import { resolveInlineMode } from '@object-ui/plugin-form';
+import { resolveInlineMode } from '@object-ui/plugin-form/core';
 import {
   MetadataCtx,
   answeredLoadFailure,

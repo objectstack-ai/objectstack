@@ -69,11 +69,11 @@ Built-in (plugins register more):
 | `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config |
 | `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
 | `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end |
-| `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first; in a `record-after-*` flow it (or `errorHandling.strategy: 'retry'`) may not reach an inline `http` / `connector_action`: the save would wait out every attempt. **No `finally`** — the container's ordinary out-edges are the continuation |
+| `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first; in a `record-after-*` flow it (or `errorHandling.strategy: 'retry'`) may not reach an inline `http` / `connector_action`: the save would wait out every attempt. Inside a `subflow` / `map` child, retried by either flow, that is **silent**: the flow saves but never arms (`GET /api/v1/automation/_status`: `bound: false`, `unboundCause: retried_callout_in_subflow`) until the child's `http` is `durable: true` or nothing retries the call. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
 | `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` passes and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller) |
-| `parallel_gateway` / `join_gateway` / `boundary_event` | **Not author-facing** — BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
+| `parallel_gateway` / `join_gateway` / `boundary_event` | BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
 
 #### Data Operations
 
@@ -138,8 +138,7 @@ fan-out.
 
 ### Flow Variables
 
-`variables` is an **array** —
-not a name-keyed map; a variable has no `label`: `variables: [{ name: 'case_id',
+`variables` is an **array**; a variable has no `label`: `variables: [{ name: 'case_id',
 type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOutput: true }]`.
 
 → [references/examples-flows.md](./references/examples-flows.md) § Flow Example — Auto-Escalate Overdue Cases.
@@ -150,8 +149,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > routes a failed node to a handler instead of ending the run. **A
 > `label: 'error'` alone does nothing:** an ordinary edge
 > traverses on SUCCESS (`objectstack validate` reports `flow-error-label-not-fault`).
-> A handled failure does not consume a flow-level `errorHandling.retry`, which
-> replays from the start — prefer a fault edge for a local failure. The handler
+> A handled failure does not consume the flow-level retry
+> (`errorHandling.strategy: 'retry'`), which replays from the start — prefer a fault edge for a local failure. The handler
 > reads `{{ <nodeId>.error }}` (run-wide `{{ $error.message }}`; in CEL,
 > `vars["$error"]`); the run then reports success and the failed step stays in the trace.
 
@@ -200,8 +199,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > hook's `ctx.api` data operations only, on the in-process `handler` and the
 > sandboxed `body` alike. A `'user'` hook whose trigger resolved no user has
 > nothing to scope to: its `ctx.api` data operations are refused
-> (`HOOK_UNSCOPED_DATA_ACCESS`, 403) rather than run unscoped — declare
-> `runAs: 'system'` when the elevation is intended.
+> (`HOOK_UNSCOPED_DATA_ACCESS`, 403) rather than run unscoped.
 
 ### Filter operands (`config.filter`)
 
@@ -396,15 +394,15 @@ the **start node `config`**:
 
 ### Trigger Types (start-node `config.triggerType`)
 
-| `triggerType` | Fires | ObjectQL hook |
-|:------|:------|:------|
-| `record-before-create` | before insert (can modify/reject) | `beforeInsert` |
-| `record-after-create` | after insert | `afterInsert` |
-| `record-before-update` | before update | `beforeUpdate` |
-| `record-after-update` | after update | `afterUpdate` |
-| `record-before-delete` | before delete | `beforeDelete` |
-| `record-after-delete` | after delete | `afterDelete` |
-| `record-before-write` / `record-after-write` | create OR update — one flow, both events | both insert + update hooks |
+| `triggerType` | ObjectQL hook |
+|:------|:------|
+| `record-before-create` (can modify/reject) | `beforeInsert` |
+| `record-after-create` | `afterInsert` |
+| `record-before-update` | `beforeUpdate` |
+| `record-after-update` | `afterUpdate` |
+| `record-before-delete` | `beforeDelete` |
+| `record-after-delete` | `afterDelete` |
+| `record-before-write` / `record-after-write` — one flow, both events | insert + update hooks |
 
 ### Trigger Configuration — on the `start` node
 
@@ -437,8 +435,7 @@ A flow around it also owns `label`, `type`, `nodes` and the `edges`
 A vendor system reachable over HTTP is a
 `connectors:` entry inside the app — `provider: 'openapi' | 'mcp' | 'rest'`, a
 packaged spec, `auth.credentialRef` (the customer's administrator supplies the
-value) — dispatched by `connector_action`; an inbound vendor callback is an
-`api` flow. Never a plugin. Recipes,
+value) — dispatched by `connector_action`. Never a plugin. Recipes,
 credential hand-off, loader limits: [references/integration-recipes.md](./references/integration-recipes.md).
 Platform code only when one holds — and then it is the platform's, filed as a
 card, the app still writing none: the protocol is not HTTP; the work writes

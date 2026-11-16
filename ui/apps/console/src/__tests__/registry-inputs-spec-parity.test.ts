@@ -264,6 +264,11 @@ import {
 // test/hook timeout (AGENTS.md §测试纪律, objectui#3010).
 import '@object-ui/components';
 import '../register-plugins';
+// `@object-ui/plugin-form` too: the console registers its tags as lazy stubs
+// since its first load stopped carrying the package (objectstack#33581), and
+// a stub carries no `inputs`, so without this import the three form blocks
+// leave `covered`.
+import '@object-ui/plugin-form';
 
 // ── objectui#8176: the blocks `register-plugins` alone cannot show this gate ──
 //

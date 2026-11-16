@@ -967,7 +967,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       refusals: {
         label: "Ablehnungen",
-        helpText: "Katalog der Ablehnungen, nach dem SCREAMING_SNAKE-Code, den der Rumpf wirft (z. B. CLEAN_VERSION_REQUIRED). Der Aufrufer liest die deklarierte Meldung, übersetzt in seine Sprache, mit dem deklarierten Status. Nur JavaScript-Rümpfe (L2)"
+        helpText: "Katalog der Ablehnungen, nach dem SCREAMING_SNAKE-Code, den der Hook wirft (z. B. CLEAN_VERSION_REQUIRED). Der Aufrufer liest die deklarierte Meldung, übersetzt in seine Sprache, mit dem deklarierten Status. Für einen JavaScript-Rumpf (L2) oder einen Handler; bei einem Ausdrucksrumpf abgelehnt"
       },
       "refusals.message": {
         label: "Meldung",

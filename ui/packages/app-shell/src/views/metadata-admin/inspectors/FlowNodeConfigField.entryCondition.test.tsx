@@ -44,6 +44,9 @@ import * as React from 'react';
 import { describe, it, expect, afterEach, beforeAll, vi } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+// The source under test reaches a dynamic `import('@objectstack/lint')`; pay
+// that load during collection, never inside a case's clocked window.
+import '@objectstack/lint';
 
 /**
  * The trigger object's field catalog. Stubbed at the hook rather than at the
@@ -76,6 +79,7 @@ const FIELD_NAMES_IN_SCOPE = FIELDS.filter((f) => !f.hidden).map((f) => f.name);
 import { FlowNodeConfigField } from './FlowNodeConfigField';
 import { fieldsForNodeType, type FlowConfigField } from './flow-node-config';
 import { resolveFlowScope, type TriggerScope } from './flow-scope';
+import { tFormat } from '../i18n';
 
 afterEach(cleanup);
 
@@ -277,12 +281,29 @@ describe('#6226 probe instrument — positive controls', () => {
 
 /* ── the subject vocabulary AT THIS SITE ─────────────────────────────────── */
 
-/** Open the row's SUBJECT dropdown and read back every subject offered. */
+/**
+ * An option's CEL spelling. A field subject reads by its label with the
+ * spelling beside it (objectstack#33864), so the spelling is that hint; an
+ * unlabelled subject (`previous`) reads as its spelling alone.
+ */
+function spellingOf(option: HTMLElement): string {
+  const hint = option.querySelector('.font-mono');
+  return (hint ?? option).textContent ?? '';
+}
+
+/** Open the row's SUBJECT dropdown and read back the spelling of every subject offered. */
 async function subjectOptions(container: HTMLElement): Promise<string[]> {
   const trigger = container.querySelectorAll('[role="combobox"]')[0] as HTMLElement;
   await userEvent.click(trigger);
   const opts = await screen.findAllByRole('option');
-  return opts.map((o) => o.textContent ?? '');
+  return opts.map(spellingOf);
+}
+
+/** The open dropdown's option that offers `spelling`. */
+function optionBySpelling(spelling: string): HTMLElement {
+  const option = screen.getAllByRole('option').find((o) => spellingOf(o) === spelling);
+  if (!option) throw new Error(`no option offers ${spelling}`);
+  return option;
 }
 
 /** The field holding exactly one row, ready to have its subject read. The
@@ -348,14 +369,14 @@ describe('#6226 the flow entry field offers the FLATTENED trigger vocabulary', (
     const { container, onCommit } = mountOneRow();
     const opts = await subjectOptions(container);
     expect(opts).toContain('amount');
-    await userEvent.click(screen.getByRole('option', { name: 'amount' }));
+    await userEvent.click(optionBySpelling('amount'));
     expect(onCommit).toHaveBeenCalledWith("amount == 'x'");
   });
 
   it('authors the create-path idiom `previous == null` end to end', async () => {
     const { container, onCommit } = mountOneRow();
     await userEvent.click(container.querySelectorAll('[role="combobox"]')[0] as HTMLElement);
-    await userEvent.click(screen.getByRole('option', { name: 'previous' }));
+    await userEvent.click(optionBySpelling('previous'));
     const valueBox = container.querySelector('input') as HTMLInputElement;
     fireEvent.change(valueBox, { target: { value: 'null' } });
     expect(onCommit).toHaveBeenLastCalledWith('previous == null');
@@ -371,6 +392,42 @@ describe('#6226 the flow entry field offers the FLATTENED trigger vocabulary', (
 });
 
 /* ── the escape hatch ────────────────────────────────────────────────────── */
+
+/**
+ * objectstack#33864 — the subject list names a field by its label, its CEL
+ * spelling beside it as secondary text (`ux-conventions.labels-over-machine-names`).
+ */
+describe('objectstack#33864 the flow entry field names each subject by its field label', () => {
+  /** Open the dropdown; each option as [its main text, its secondary spelling or null]. */
+  async function labelledOptions(container: HTMLElement): Promise<Array<[string, string | null]>> {
+    await userEvent.click(container.querySelectorAll('[role="combobox"]')[0] as HTMLElement);
+    const opts = await screen.findAllByRole('option');
+    return opts.map((o) => {
+      const hint = o.querySelector('.font-mono')?.textContent ?? null;
+      const text = o.textContent ?? '';
+      return [hint === null ? text : text.slice(0, text.length - hint.length), hint];
+    });
+  }
+
+  it('a field reads by its label, with its spelling as the hint', async () => {
+    const opts = await labelledOptions(mountOneRow().container);
+    expect(opts).toContainEqual(['Status', 'status']);
+    expect(opts).toContainEqual(['Contract term (months)', 'contract_term_months']);
+  });
+
+  it("a `previous.FIELD` reads by the field's label, before the change", async () => {
+    const opts = await labelledOptions(mountOneRow().container);
+    expect(opts).toContainEqual([
+      tFormat('engine.inspector.condition.previousField', 'en', { field: 'Status' }),
+      'previous.status',
+    ]);
+  });
+
+  it('CONTROL: the whole-record `previous` has no label, so it reads as its spelling', async () => {
+    const opts = await labelledOptions(mountOneRow().container);
+    expect(opts).toContainEqual(['previous', null]);
+  });
+});
 
 describe('#6226 raw CEL remains reachable — the ruling\'s escape hatch', () => {
   it('a row-mode field can be switched to the raw expression editor', async () => {
