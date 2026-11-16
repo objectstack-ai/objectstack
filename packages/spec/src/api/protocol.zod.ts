@@ -2756,6 +2756,33 @@ export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Diff Metadata Item Request
+ *
+ * Request shape for `GET /api/v1/meta/:type/:name/diff` (the `diffMetaItem`
+ * protocol method): the two bounds from the query (`from` / `to`, or their
+ * `fromVersion` / `toVersion` spellings), both read through this declaration,
+ * and `package` from the query. Mirrors the implementation's parameter type
+ * in `@objectstack/metadata-protocol` member for member — a declared-surface
+ * catch-up (#33308), as `RollbackMetaItemRequestSchema` is for the rollback
+ * door.
+ */
+export const DiffMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  fromVersion: z.number().int().optional().describe(
+    'The older side\'s history version, a whole number as the history lists it. Absent, the nearest '
+    + 'earlier version whose body differs from the `to` side\'s. A version with no history row of the '
+    + 'item (or, with `packageId`, of that holder) is refused 404 `VERSION_NOT_FOUND`.',
+  ),
+  toVersion: z.number().int().optional().describe(
+    'The newer side\'s history version, a whole number as the history lists it. Absent, the active '
+    + 'row (with `packageId`, that holder\'s own active row). Refused 404 `VERSION_NOT_FOUND` as '
+    + '`fromVersion` is.',
+  ),
+  packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),
+}));
+
+/**
  * `GET /meta/:type/:name/diff` — structural diff between two history
  * versions (`from`/`to`). An omitted `to` is the active version; an omitted
  * `from` is the nearest earlier version whose body differs from the `to`
@@ -4589,6 +4616,9 @@ export type RollbackMetaItemRequestParsed = z.infer<typeof RollbackMetaItemReque
 export type RollbackMetaItemResponse = z.input<typeof RollbackMetaItemResponseSchema>;
 /** Post-parse shape of {@link RollbackMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type RollbackMetaItemResponseParsed = z.infer<typeof RollbackMetaItemResponseSchema>;
+export type DiffMetaItemRequest = z.input<typeof DiffMetaItemRequestSchema>;
+/** Post-parse shape of {@link DiffMetaItemRequest} — defaults applied, transforms run (ADR-0122). */
+export type DiffMetaItemRequestParsed = z.infer<typeof DiffMetaItemRequestSchema>;
 export type DiffMetaItemResponse = z.input<typeof DiffMetaItemResponseSchema>;
 /** Post-parse shape of {@link DiffMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type DiffMetaItemResponseParsed = z.infer<typeof DiffMetaItemResponseSchema>;

@@ -172,7 +172,7 @@ returned in full by `GET /api/v1/data/sys_webhook`.
 | `object_name`     | text      | Short object name whose record events fire this webhook.                           |
 | `triggers`        | select    | Multi-select of `create` / `update` / `delete` plus the opt-in bulk pair `bulk_update` / `bulk_delete` ([see below](#bulk-writes-bulk_update-and-bulk_delete)), stored as an array (the enqueuer also accepts a legacy comma-separated string). |
 | `url`             | text      | External endpoint that receives the POST.                                          |
-| `method`          | select    | HTTP method — one of `GET` / `POST` / `PUT` / `PATCH` / `DELETE`. Default `POST`.   |
+| `method`          | select    | HTTP method — one of `POST` / `PUT` / `PATCH` / `DELETE`. Default `POST`. No `GET`: every delivery carries the event as its body ([see below](#stored-get-webhooks-are-parked)). |
 | `description`     | textarea  | Free-text description.                                                              |
 | `active`          | boolean   | Inactive webhooks are skipped by the dispatcher. Default `true`.                    |
 | `definition_json` | textarea  | Serialised `Webhook` JSON (`WebhookSchema` from `@objectstack/spec/automation`) — the per-attempt `timeoutMs` and the rest of the authored envelope. **Not** the signing secret and **not** the custom headers: each has its own encrypted column below. |
@@ -236,6 +236,24 @@ row, or move the values into their encrypted columns yourself. Never type a toke
 `definition_json`: it is returned in full by the generic data API, and nothing
 ages it out.
 </Callout>
+
+### Stored GET webhooks are parked
+
+`GET` was removed from the `method` select and from `WebhookSchema.method`:
+every delivery sends the event envelope as its request body and a GET request
+carries none, so no GET webhook ever delivered an event. Saving a webhook with
+`method: 'get'` — an insert or an update — is now refused
+(`VALIDATION_FAILED` / `400`), and a declared webhook with `method: 'GET'`
+fails `WebhookSchema` parse with the fix in the message.
+
+A `sys_webhook` row already stored with `get` keeps loading, but it is
+**parked**: nothing is sent, and each record change it matches is written to
+`sys_http_delivery` as a `dead` row with 0 attempts whose `error` names the
+method and the fix. Such a row cannot be redelivered. The stored method is
+never rewritten to another one — sending a POST to an endpoint configured for
+GET would be a different request. To bring the webhook back, edit it and set
+the method to `POST`, `PUT`, `PATCH` or `DELETE`, whichever the endpoint
+accepts a body on; it re-arms at the next periodic cache refresh.
 
 ### 3.2 `sys_http_delivery`
 
