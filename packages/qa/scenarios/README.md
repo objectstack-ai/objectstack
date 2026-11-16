@@ -371,7 +371,7 @@ npx @objectstack/scenarios help                                      # the comma
   card that lacks one of the texts the run's modes render in that language (scratch: the build prompt `--prompt` names,
   the iterate change, every question and operation; template: all but the build prompt; ask: the questions and
   operations) is skipped before the first card runs, before any scaffold or boot, with a line naming each missing text
-  (``skipped crm_account_with_contacts: … no zh text for `prompt.detailed`, `iterate.change`, …``), and the other cards
+  (``skipped some_card: … no zh text for `prompt.detailed`, `iterate.change`, …``; the open library's three controls carry every text in both), and the other cards
   run; with none left the run exits 2. `--prompt short|detailed` picks the card prompt the build turn is given; the
   iterate turn is given `iterate.change` either way. With neither flag nothing changes, byte for byte: each text in
   English when the card has it, else in Chinese, the build turn given `prompt.detailed`, and the record, the scorecard
