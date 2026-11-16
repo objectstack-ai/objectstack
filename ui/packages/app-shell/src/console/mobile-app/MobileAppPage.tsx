@@ -6,9 +6,10 @@
  *
  * The server URL is the one the server publishes (`features.publicBaseUrl` on
  * the public auth config), never `window.location`, which can be an internal
- * or proxied host. A loopback or private address, or no published address,
- * gets a refusal naming `OS_AUTH_URL` instead of a code a phone cannot use.
- * The code carries the server's address only, never a credential.
+ * or proxied host. A loopback or private address, or a public host on plain
+ * `http:`, gets a refusal naming `OS_AUTH_URL` instead of a code a phone
+ * cannot use; a server that does not serve the key gets a refusal saying so.
+ * The code carries the normalised server address only, never a credential.
  */
 
 import { useEffect, useState } from 'react';
@@ -69,23 +70,28 @@ export function MobileAppPage() {
           <ConnectCard key={load.target.connectLink} connectLink={load.target.connectLink} />
         ) : (
           <Alert variant="destructive" data-testid="mobile-app-refusal">
-            <AlertTitle>
-              {load.target.kind === 'unreachable' ? t('mobileApp.unreachableTitle') : t('mobileApp.unpublishedTitle')}
-            </AlertTitle>
+            <AlertTitle>{t(refusalKeys(load.target).title)}</AlertTitle>
             <AlertDescription>
               {load.target.kind === 'unreachable'
-                ? t('mobileApp.unreachableBody', {
+                ? t(refusalKeys(load.target).body, {
                     address: load.target.serverUrl,
                     setting: PUBLIC_ADDRESS_SETTING,
                     example: PUBLIC_ADDRESS_EXAMPLE,
                   })
-                : t('mobileApp.unpublishedBody', { setting: PUBLIC_ADDRESS_SETTING, example: PUBLIC_ADDRESS_EXAMPLE })}
+                : t(refusalKeys(load.target).body)}
             </AlertDescription>
           </Alert>
         )}
       </div>
     </div>
   );
+}
+
+/** The title and body keys for a target that shows no code. */
+function refusalKeys(target: Exclude<MobileConnectTarget, { kind: 'ready' }>): { title: string; body: string } {
+  if (target.kind === 'unpublished') return { title: 'mobileApp.unpublishedTitle', body: 'mobileApp.unpublishedBody' };
+  if (target.reason === 'not-https') return { title: 'mobileApp.insecureTitle', body: 'mobileApp.insecureBody' };
+  return { title: 'mobileApp.unreachableTitle', body: 'mobileApp.unreachableBody' };
 }
 
 function ConnectCard({ connectLink }: { connectLink: string }) {

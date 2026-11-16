@@ -34,6 +34,8 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { MobileAppPage } from './MobileAppPage';
 import { builtInLocales } from '@object-ui/i18n/locales';
+import { getAppComponent } from '../../services/componentRegistry';
+import '../../services/builtinComponents';
 
 function serving(features: Record<string, unknown> | undefined) {
   getAuthConfig = vi.fn(async () => ({ features }));
@@ -66,6 +68,16 @@ describe('MobileAppPage: a public base URL renders the code and the copyable lin
     expect(screen.queryByTestId('mobile-app-refusal')).not.toBeInTheDocument();
   });
 
+  it('a credential, query or fragment in the configured URL never reaches the code or the link', async () => {
+    serving({ publicBaseUrl: 'https://ops:s3cret@acme.example/os/?token=abc#x' });
+    render(<MobileAppPage />);
+    const link = 'objectos://connect?server=https%3A%2F%2Facme.example%2Fos';
+
+    expect(await screen.findByTestId('mobile-app-link')).toHaveTextContent(link);
+    expect(await screen.findByTestId('mobile-app-qr')).toHaveAttribute('src', await expectedQrSrc(link));
+    expect(document.body.textContent).not.toMatch(/s3cret|token/);
+  });
+
   it('Copy link writes exactly the connect link to the clipboard', async () => {
     serving({ publicBaseUrl: 'https://os.acme.example' });
     const writeText = vi.fn(async () => undefined);
@@ -90,13 +102,35 @@ describe('MobileAppPage: no code for an address a phone cannot reach', () => {
     expect(screen.queryByTestId('mobile-app-link')).not.toBeInTheDocument();
   });
 
+  it('a public host on plain http: the HTTPS remedy names the address and OS_AUTH_URL, and no code renders', async () => {
+    serving({ publicBaseUrl: 'http://os.acme.example/os' });
+    render(<MobileAppPage />);
+
+    const refusal = await screen.findByTestId('mobile-app-refusal');
+    expect(refusal).toHaveTextContent('«mobileApp.insecureTitle»');
+    expect(refusal).toHaveTextContent('«mobileApp.insecureBody|http://os.acme.example/os|OS_AUTH_URL»');
+    expect(screen.queryByTestId('mobile-app-qr')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('mobile-app-link')).not.toBeInTheDocument();
+  });
+
+  it('a credential in the configured address is shown nowhere on a refusal', async () => {
+    serving({ publicBaseUrl: 'http://ops:s3cret@192.168.1.20/os' });
+    render(<MobileAppPage />);
+
+    const refusal = await screen.findByTestId('mobile-app-refusal');
+    expect(refusal).toHaveTextContent('«mobileApp.unreachableBody|http://192.168.1.20/os|OS_AUTH_URL»');
+    expect(document.body.textContent).not.toContain('s3cret');
+  });
+
   it('no published address: the unpublished remedy, and the browser address is never encoded', async () => {
     serving({});
     render(<MobileAppPage />);
 
     const refusal = await screen.findByTestId('mobile-app-refusal');
     expect(refusal).toHaveTextContent('«mobileApp.unpublishedTitle»');
-    expect(refusal).toHaveTextContent('«mobileApp.unpublishedBody|OS_AUTH_URL»');
+    // The server does not serve the key: no setting can fix that, so none is named.
+    expect(refusal).toHaveTextContent('«mobileApp.unpublishedBody»');
+    expect(refusal).not.toHaveTextContent('OS_AUTH_URL');
     expect(screen.queryByTestId('mobile-app-qr')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain(window.location.host);
   });
@@ -120,5 +154,19 @@ describe('the mobileApp pack keys', () => {
         expect(placeholders(pack.mobileApp![key]), `${locale}.mobileApp.${key}`).toEqual(placeholders(en[key]));
       }
     }
+  });
+});
+
+describe('the account:mobile_app registration', () => {
+  // The platform-objects half of this pairing pins that the account app's
+  // `nav_account_mobile_app` entry, right after Profile, names this ref.
+  it('the ref the account app navigates to resolves to this page', async () => {
+    serving({ publicBaseUrl: 'https://os.acme.example' });
+    const entry = getAppComponent('account:mobile_app');
+    expect(entry).toMatchObject({ ref: 'account:mobile_app', source: '@object-ui/app-shell' });
+    const Registered = entry!.component;
+    render(<Registered />);
+    expect(await screen.findByTestId('mobile-app-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('mobile-app-link')).toHaveTextContent('objectos://connect?server=https%3A%2F%2Fos.acme.example');
   });
 });

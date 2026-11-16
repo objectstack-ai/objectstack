@@ -5239,8 +5239,10 @@ const pt = {
     loadFailed: "Não foi possível ler o endereço público deste servidor. Recarregue a página para tentar novamente.",
     unreachableTitle: "Um celular não consegue acessar o endereço deste servidor",
     unreachableBody: "O endereço deste servidor é {{address}}, um endereço local ou privado que um celular não consegue abrir, então nenhum código é exibido. Defina {{setting}} no servidor com o endereço público dele, por exemplo {{example}}, e reinicie-o.",
+    insecureTitle: "O endereço deste servidor não usa HTTPS",
+    insecureBody: "O endereço deste servidor é {{address}}. O aplicativo móvel faz login por ele, então ele precisa usar HTTPS, e nenhum código é exibido. Sirva este servidor por HTTPS, defina {{setting}} com o endereço https:// dele, por exemplo {{example}}, e reinicie-o.",
     unpublishedTitle: "Este servidor não publica seu endereço público",
-    unpublishedBody: "Nenhum código é exibido: o endereço no seu navegador pode ser um host interno que um celular não consegue acessar. Defina {{setting}} no servidor com o endereço público dele, por exemplo {{example}}, e reinicie-o.",
+    unpublishedBody: "Nenhum código é exibido: este servidor ainda não oferece seu endereço público ao aplicativo móvel. Atualize o servidor para uma versão compatível.",
   },
 };
 

@@ -6006,8 +6006,10 @@ const en = {
     loadFailed: "Could not read this server's public address. Reload the page to try again.",
     unreachableTitle: "A phone cannot reach this server's address",
     unreachableBody: "This server's address is {{address}}, a local or private address a phone cannot open, so no code is shown. Set {{setting}} on the server to its public address, for example {{example}}, and restart it.",
+    insecureTitle: "This server's address does not use HTTPS",
+    insecureBody: "This server's address is {{address}}. The mobile app signs in through it, so it must use HTTPS, and no code is shown. Serve this server over HTTPS, set {{setting}} to its https:// address, for example {{example}}, and restart it.",
     unpublishedTitle: "This server does not publish its public address",
-    unpublishedBody: "No code is shown: the address in your browser can be an internal host a phone cannot reach. Set {{setting}} on the server to its public address, for example {{example}}, and restart it.",
+    unpublishedBody: "No code is shown: this server does not offer its public address to the mobile app yet. Update the server to a version that does.",
   },
 } as const;
 

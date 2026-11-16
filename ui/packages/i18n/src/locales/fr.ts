@@ -5240,8 +5240,10 @@ const fr = {
     loadFailed: "Impossible de lire l'adresse publique de ce serveur. Rechargez la page pour réessayer.",
     unreachableTitle: "Un téléphone ne peut pas joindre l'adresse de ce serveur",
     unreachableBody: "L'adresse de ce serveur est {{address}}, une adresse locale ou privée qu'un téléphone ne peut pas ouvrir : aucun code n'est donc affiché. Définissez {{setting}} sur le serveur avec son adresse publique, par exemple {{example}}, puis redémarrez-le.",
+    insecureTitle: "L'adresse de ce serveur n'utilise pas HTTPS",
+    insecureBody: "L'adresse de ce serveur est {{address}}. L'application mobile s'y connecte pour l'authentification : elle doit donc utiliser HTTPS, et aucun code n'est affiché. Servez ce serveur en HTTPS, définissez {{setting}} avec son adresse https://, par exemple {{example}}, puis redémarrez-le.",
     unpublishedTitle: "Ce serveur ne publie pas son adresse publique",
-    unpublishedBody: "Aucun code n'est affiché : l'adresse de votre navigateur peut être un hôte interne qu'un téléphone ne peut pas joindre. Définissez {{setting}} sur le serveur avec son adresse publique, par exemple {{example}}, puis redémarrez-le.",
+    unpublishedBody: "Aucun code n'est affiché : ce serveur ne fournit pas encore son adresse publique à l'application mobile. Mettez le serveur à jour vers une version qui le prend en charge.",
   },
 };
 

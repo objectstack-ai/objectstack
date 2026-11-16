@@ -5244,8 +5244,10 @@ const es = {
     loadFailed: "No se pudo leer la dirección pública de este servidor. Recarga la página para volver a intentarlo.",
     unreachableTitle: "Un teléfono no puede acceder a la dirección de este servidor",
     unreachableBody: "La dirección de este servidor es {{address}}, una dirección local o privada que un teléfono no puede abrir, así que no se muestra ningún código. Establece {{setting}} en el servidor con su dirección pública, por ejemplo {{example}}, y reinícialo.",
+    insecureTitle: "La dirección de este servidor no usa HTTPS",
+    insecureBody: "La dirección de este servidor es {{address}}. La aplicación móvil inicia sesión a través de ella, por lo que debe usar HTTPS, y no se muestra ningún código. Sirve este servidor por HTTPS, establece {{setting}} con su dirección https://, por ejemplo {{example}}, y reinícialo.",
     unpublishedTitle: "Este servidor no publica su dirección pública",
-    unpublishedBody: "No se muestra ningún código: la dirección de tu navegador puede ser un host interno al que un teléfono no puede acceder. Establece {{setting}} en el servidor con su dirección pública, por ejemplo {{example}}, y reinícialo.",
+    unpublishedBody: "No se muestra ningún código: este servidor todavía no ofrece su dirección pública a la aplicación móvil. Actualiza el servidor a una versión que lo admita.",
   },
 };
 

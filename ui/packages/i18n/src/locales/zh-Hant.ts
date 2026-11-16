@@ -5161,8 +5161,10 @@ const zhHant = {
     loadFailed: "無法讀取此伺服器的公開地址。請重新整理頁面重試。",
     unreachableTitle: "手機無法訪問此伺服器的地址",
     unreachableBody: "此伺服器的地址是 {{address}}，這是手機無法開啟的本機或內網地址，因此不顯示二維碼。請在伺服器上將 {{setting}} 設為它的公開地址（例如 {{example}}），然後重啟伺服器。",
+    insecureTitle: "此伺服器的地址未使用 HTTPS",
+    insecureBody: "此伺服器的地址是 {{address}}。移動應用會通過它登入，因此它必須使用 HTTPS，此處不顯示二維碼。請讓此伺服器通過 HTTPS 提供服務，將 {{setting}} 設為它的 https:// 地址（例如 {{example}}），然後重啟伺服器。",
     unpublishedTitle: "此伺服器未公佈其公開地址",
-    unpublishedBody: "不顯示二維碼：瀏覽器中的地址可能是手機無法訪問的內部主機。請在伺服器上將 {{setting}} 設為它的公開地址（例如 {{example}}），然後重啟伺服器。",
+    unpublishedBody: "不顯示二維碼：此伺服器尚未向移動應用提供其公開地址。請將伺服器升級到支援此功能的版本。",
   },
 } as const;
 

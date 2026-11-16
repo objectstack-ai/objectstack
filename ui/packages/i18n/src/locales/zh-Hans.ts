@@ -5161,8 +5161,10 @@ const zh = {
     loadFailed: "无法读取此服务器的公开地址。请刷新页面重试。",
     unreachableTitle: "手机无法访问此服务器的地址",
     unreachableBody: "此服务器的地址是 {{address}}，这是手机无法打开的本机或内网地址，因此不显示二维码。请在服务器上将 {{setting}} 设为它的公开地址（例如 {{example}}），然后重启服务器。",
+    insecureTitle: "此服务器的地址未使用 HTTPS",
+    insecureBody: "此服务器的地址是 {{address}}。移动应用会通过它登录，因此它必须使用 HTTPS，此处不显示二维码。请让此服务器通过 HTTPS 提供服务，将 {{setting}} 设为它的 https:// 地址（例如 {{example}}），然后重启服务器。",
     unpublishedTitle: "此服务器未公布其公开地址",
-    unpublishedBody: "不显示二维码：浏览器中的地址可能是手机无法访问的内部主机。请在服务器上将 {{setting}} 设为它的公开地址（例如 {{example}}），然后重启服务器。",
+    unpublishedBody: "不显示二维码：此服务器尚未向移动应用提供其公开地址。请将服务器升级到支持此功能的版本。",
   },
 } as const;
 
