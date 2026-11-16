@@ -361,10 +361,14 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    *
    * Surfaced to hooks as `HookContext.provenance.performedByClientId`,
    * `performedByAgentId`, `performedByConversationId` and
-   * `performedByConfirmationId`. The audit writer records {@link clientId} in
-   * `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`; the
-   * in-product AI keys are carried for the audit writer, which records them
-   * under #33694 (at this revision it reads `performedByClientId` only). ⛔ It
+   * `performedByConfirmationId`. The record-write audit writer records the
+   * performer in `sys_audit_log.metadata` as `performed_by` beside
+   * `on_behalf_of` — {@link clientId}, or {@link agentId} for the in-product AI
+   * (owner ruling on objectstack-ai/cloud#3826: the existing pair, no new actor
+   * vocabulary) — with {@link conversationId} as `conversation_id` and
+   * {@link confirmationId} as `confirmation_id` beside them when set. The
+   * action-invocation, data-export and dataset-query rows record
+   * {@link clientId} only. ⛔ It
    * does NOT move `actor`: ADR-0118 D1/D5 keeps that column two-valued (a user
    * id, or `null` for the system) and answers "which non-user acted" with an
    * ADDED attribution field — this one — never with a second actor
@@ -409,7 +413,7 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
     confirmationId: z.string().optional().describe('The confirmation the person gave before the operation ran: the id of the pending item their approval decided (the in-app pending action id, or the pending-confirmation service item id). Stamped only after the server resolved it as a pending item the person in userId decided for this operation; absent when the operation needed no confirmation.'),
   }).refine(requiredOneOf(['clientId', 'agentId']), {
     message: 'performedBy names its performer: clientId (the /mcp OAuth door) or agentId (the in-product AI path)',
-  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names its performer, at least one of clientId and agentId, each set only by its own producer. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied: an id a request named (an agent name, a conversation, a pending item) is stamped only after the server resolved it in its own store for the person in userId, and an unresolved id is not stamped. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId. The audit writer records clientId as sys_audit_log.metadata.performed_by beside on_behalf_of; the in-product AI keys are carried for the audit writer, which does not record them yet. It does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
+  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names its performer, at least one of clientId and agentId, each set only by its own producer. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied: an id a request named (an agent name, a conversation, a pending item) is stamped only after the server resolved it in its own store for the person in userId, and an unresolved id is not stamped. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId. The record-write audit writer records the performer (clientId, or agentId for the in-product AI) as sys_audit_log.metadata.performed_by beside on_behalf_of, with conversationId as metadata.conversation_id and confirmationId as metadata.confirmation_id when set; the action-invocation, data-export and dataset-query rows record clientId only. It does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
 
   /**
    * [#27908 — ruling 6513869839 on #27681, parameter 3] WHICH DOOR an action
