@@ -24,7 +24,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
 import type { ScriptContext, ScriptOrigin } from './script-runner.js';
@@ -199,10 +199,22 @@ describe('a sandboxed data call reaches the engine with every filter key it was 
 });
 
 describe('what the host receives for a data call’s arguments', () => {
-  /** A `ctx.api` that records each call's arguments and answers nothing. */
+  /**
+   * A `ctx.api` that records each call's arguments and answers nothing: the
+   * two verbs these cases call, `update` opening with the engine's own
+   * dispatch check so the double accepts no call the engine would not.
+   */
   function recordingApi(seen: unknown[][]) {
-    const answer = async (...args: unknown[]) => { seen.push(args); return []; };
-    return { object: () => ({ find: answer, findOne: answer, count: answer, aggregate: answer, update: answer, delete: answer, insert: answer }) } as any;
+    return {
+      object: () => ({
+        find: async (...args: unknown[]) => { seen.push(args); return []; },
+        update: async (data: Record<string, unknown>, options?: Record<string, unknown>) => {
+          assertEngineUpdateDispatch(data, options);
+          seen.push([data, options]);
+          return 0;
+        },
+      }),
+    } as any;
   }
 
   async function received(source: string): Promise<unknown[][]> {
@@ -238,15 +250,17 @@ describe('what the host receives for a data call’s arguments', () => {
   });
 
   it('every value outside a filter crosses as before', async () => {
-    const [[query], [inserted]] = await received(
+    const [[query], [data, options]] = await received(
       `await ctx.api.object('x').find({ where: { a: 1 }, orderBy: [{ field: 'a', extra: undefined }], fields: ['a', undefined], limit: undefined });
-       await ctx.api.object('x').insert({ a: 1, b: undefined, list: [undefined] });`,
+       await ctx.api.object('x').update({ a: 1, b: undefined, list: [undefined] }, { where: { a: 1 }, multi: true, returning: undefined });`,
     ) as any;
     expect(query).toEqual({ where: { a: 1 }, orderBy: [{ field: 'a' }], fields: ['a', null] });
     expect(own(query.orderBy[0], 'extra')).toBe(false);
     expect(own(query, 'limit')).toBe(false);
-    expect(inserted).toEqual({ a: 1, list: [null] });
-    expect(own(inserted, 'b')).toBe(false);
+    expect(data).toEqual({ a: 1, list: [null] });
+    expect(own(data, 'b')).toBe(false);
+    expect(options).toEqual({ where: { a: 1 }, multi: true });
+    expect(own(options, 'returning')).toBe(false);
   });
 
   it('a query argument with no undefined value arrives exactly as written', async () => {
