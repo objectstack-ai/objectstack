@@ -556,8 +556,14 @@ describe('a skill its owner declares in-product only is never an MCP prompt (#34
     });
 
     it('declared in-product only, the same skill is neither listed nor got', async () => {
-      const stdio = await stdioPrompts([inProductOnly(OPEN_RECORD), inProductOnly(RECORD_WRITING)]);
-      expect(stdio.names).toEqual([]);
+      // An undeclared sibling keeps the prompt surface up: the SDK declares no
+      // prompts capability on a server that registers no prompt at all.
+      const stdio = await stdioPrompts([
+        inProductOnly(OPEN_RECORD),
+        inProductOnly(RECORD_WRITING),
+        { ...OPEN_RECORD, name: 'mcp_opening' },
+      ]);
+      expect(stdio.names).toEqual(['mcp_opening']);
       await expect(stdio.client.getPrompt({ name: 'record_opening' })).rejects.toMatchObject({ code: -32602 });
       await stdio.close();
     });

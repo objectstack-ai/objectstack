@@ -499,6 +499,28 @@ offered as before. When a prompt you expect is missing, connect with a grant
 that registers the skill's tools, or bind the skill only to tools its intended
 connections serve.
 
+**A skill written for the in-product agents opts out.** The binding answers
+whether a connection *can* run a playbook, not whether the playbook is written
+for MCP: a skill can bind tools MCP serves under the same names
+(`create_record`, `action_*` through `run_action`) and still tell the model to
+call in-product tools or wait for the in-product approval card. Set
+`mcpPrompt: false` on such a skill and it is never offered as a prompt:
+`prompts/list` leaves it out and `prompts/get` answers it as an unknown prompt
+name, on every connection (HTTP and stdio) and whatever its `tools`. Leave the
+key out, or set `true`, and the skill is offered as above. The key changes
+nothing on the in-product runtime: the `ask` / `build` agents resolve, bind
+and activate the skill exactly as before.
+
+```typescript
+export const RecordWritingSkill = defineSkill({
+  name: 'record_writing',
+  label: 'Record Writing',
+  instructions: 'Open the record, propose the change, and wait for the user to confirm on the card.',
+  tools: ['create_record', 'update_record'],
+  mcpPrompt: false, // written for the in-product agents only
+});
+```
+
 **Only the instructions half projects.** A skill's `tools` / `surface` /
 `triggerConditions` are bound by the **in-product agent runtime** (the `ask` /
 `build` agents, cloud / Enterprise), which is the thing that composes a tool set
