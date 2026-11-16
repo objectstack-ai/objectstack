@@ -98,6 +98,8 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
     const r = rows.get(k);
     return r ? { key: k, row: r } : null;
   };
+  const meetsScalars = (r: Row, where?: Record<string, unknown>) => Object.entries(where ?? {})
+    .every(([k, v]) => (v !== null && typeof v === 'object') || (r[k] ?? null) === v);
   const declaredItems = [
     { name: PACKAGED_SET, label: 'Support Agent', _packageId: PKG, objects: {} },
     { name: SHADOW_SET, label: 'Drafted', _packageId: 'sys_metadata', objects: {} },
@@ -123,13 +125,12 @@ function makeFakeEngine(opts?: { listItemsThrows?: boolean }) {
       if (table === 'sys_metadata_history') return historyRows;
       // The table's own rows, narrowed by the where's scalar equalities (a batch
       // publish lists a package's drafts with one); operator clauses are not read.
-      const scalar = Object.entries(opts2?.where ?? {}).filter(([, v]) => v === null || typeof v !== 'object');
-      return Array.from(rows.values()).filter((r) => (r.__table ?? 'sys_metadata') === table
-        && scalar.every(([k, v]) => (r[k] ?? null) === v));
+      return Array.from(rows.values()).filter((r) => (r.__table ?? 'sys_metadata') === table && meetsScalars(r, opts2?.where));
     },
     async findOne(table: string, opts2: { where: Record<string, unknown> }) {
       assertEngineFindOnePredicate(table, opts2);
-      if (table === 'sys_metadata_history') return null;
+      // A version's history row, as a restore reads it back.
+      if (table === 'sys_metadata_history') return historyRows.find((h) => meetsScalars(h, opts2.where)) ?? null;
       return findRow(opts2.where)?.row ?? null;
     },
     async insert(table: string, data: Record<string, unknown>) {
@@ -461,13 +462,21 @@ describe('[#34226] a permission set is (package, name): the seal and the lock ju
     // [#32396] On a runtime that cannot roll back, a refused package publish undoes
     // each promotion it made by hand. The undo addresses the same package the
     // promotion did, so it judges hr's own set N as the promotion did.
-    it(`${order}: a refused batch publish on a runtime that cannot roll back undoes hr's own set N and puts its draft back (FROM left live)`, async () => {
+    // Created: the undo removes the active row. Edited (hr's N live at v1): the undo
+    // restores v1, a write the store judges by its intent.
+    it.each(['created', 'edited'] as const)(`${order}: a refused batch publish on a runtime that cannot roll back undoes hr's own set N (%s) and puts its draft back (FROM left live)`, async (shape) => {
       const { engine, protocol } = await composition(order);
       Object.assign(engine, {
         getDefaultDriverName: () => 'remote',
         getDriverByName: () => ({ supports: { transactionsUnsupported: true } }),
       });
       const LATER = 'qa_zz_refused_later';
+      const publishOne = (protocol as unknown as { publishMetaItem(req: Record<string, unknown>): Promise<unknown> }).publishMetaItem;
+      if (shape === 'edited') {
+        expect(await save(protocol, { type: 'permission', name: N, item: setOf('cap_hr_v1'), packageId: HR, mode: 'draft' })).toBeNull();
+        expect(await publishOne.call(protocol, { type: 'permission', name: N, packageId: HR }).then(() => null, (e: unknown) => e)).toBeNull();
+      }
+      const activeBefore = metaRowsOf(engine).filter((r) => r.state === 'active').map((r) => r.metadata);
       expect(await save(protocol, { type: 'permission', name: N, item: setOf('cap_hr'), packageId: HR, mode: 'draft' })).toBeNull();
       expect(await save(protocol, { type: 'permission', name: LATER, item: { ...setOf('cap_later'), name: LATER }, packageId: HR, mode: 'draft' })).toBeNull();
       const draftOf = (name: string) => metaRowsOf(engine).find((r) => r.name === name && r.state === 'draft');
@@ -494,7 +503,8 @@ describe('[#34226] a permission set is (package, name): the seal and the lock ju
       expect(promoted, 'hr\'s N is promoted before the refused write').toEqual([N]);
       expect(res.outcome).toBe('refused');
       expect(res.failed.find((f) => f.name === N)?.code, 'undone, not reported live').toBe('BATCH_ABORTED');
-      expect(metaRowsOf(engine).map((r) => `${String(r.name)}:${String(r.state)}`).sort()).toEqual([`${N}:draft`, `${LATER}:draft`]);
+      expect(metaRowsOf(engine).filter((r) => r.state === 'active').map((r) => r.metadata), 'the active row is as before the publish').toEqual(activeBefore);
+      expect(metaRowsOf(engine).filter((r) => r.state === 'draft').map((r) => String(r.name)).sort()).toEqual([N, LATER]);
       expect({ metadata: draftOf(N)?.metadata, checksum: draftOf(N)?.checksum }).toEqual(draftBefore);
     }, 30_000);
 
