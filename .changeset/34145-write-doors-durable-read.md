@@ -1,6 +1,6 @@
 ---
-'@objectstack/runtime': minor
-'@objectstack/service-automation': minor
+'@objectstack/runtime': patch
+'@objectstack/service-automation': patch
 ---
 
 fix(runtime)!: the automation write doors judge a flow name over every holder, whatever the holder's package's enable state
