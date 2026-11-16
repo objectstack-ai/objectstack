@@ -302,26 +302,27 @@ invitation-link sign-up still owes the verification mail.
 
 **Amended 2026-11-16 — the one-step invitation acceptance and the OAuth client-name read, class-2-shaped doors.** Card
 [#34257](https://github.com/objectstack-ai/objectstack/issues/34257) admits one more door of class 2's shape, not a
-seventh class: `POST /api/v1/auth/organization/accept-invitation-one-step`. What admits the request: the mailbox
-proof the invitation mail carries, a capability token minted per send. The invitation id alone, which the copied link
-and the invitation row carry, admits nothing. What it runs as: after validation, the creation of the invited
-address's account (or the replacement of the password of an unverified account whose mailbox is its one claim,
-revoking its sessions), the address marked verified, the invitation accepted through the vendor's own accept route,
-and a session for that account. The proof is never at rest in clear, the stored mail row never holds it, and it is
-bound to the invitation, its address and its expiry; a resend retires the old one. It is spent only by a request that
-passed every gate, and one server process serializes concurrent redemptions of it; across processes, single use is
-as strong as the store's consume. Every proof that does not admit gets one refusal that does not say which check
-failed. The door sets a password on an existing account only when it reads that the mailbox is the account's one
-claim: the address is not verified, the account's only sign-in account is its email and password one or it has none,
-it has no second factor, enabled or enrolled, no verified phone number and no standing grant (an API key, an OAuth
-client consent, an OAuth access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM
-credential or a link to an identity provider's directory, revoked or expired ones included), its identity source is
-local, and the server allows a local password here (not SSO-only, email and password on). Every other account,
-including one in a state no rule names, answers `sign_in`, and the proof stays unspent. Every store the plugin mounts
-that is keyed by a user is classified as a claim the judge reads or as no claim, and a test holds that classification
-to the mounted list. A cloud-managed environment
-sets no local password, so there the door refuses every request that carries a proof. It carries a rate limit per
-client network address and per invitation, as ADR-0121 D6 requires. Enforced by
+seventh class: `POST /api/v1/auth/organization/accept-invitation-one-step`. What admits the request: the mailbox proof
+the invitation mail carries, a capability token minted per send. The invitation id alone, which the copied link and
+the invitation row carry, admits nothing. What it runs as: after validation, the creation of the invited address's
+account (or the replacement of the password of an unverified account the rule below admits, revoking its sessions),
+the address marked verified, the invitation accepted through the vendor's own accept route, and a session for that
+account. The proof is never at rest in clear, the stored mail row never holds it, and it is bound to the invitation,
+its address and its expiry; a resend retires the old one. It is spent only by a request that passed every gate, and
+one server process serializes concurrent redemptions of it; across processes, single use is as strong as the store's
+consume. Every proof that does not admit gets one refusal that does not say which check failed. The door sets a
+password on an existing account only when it reads all of these: the address is not verified; the account's only
+sign-in account is its email and password one, or it has none; it has no second factor, enabled or enrolled; its user
+row holds no phone number, verified or not; it holds no standing grant (an API key, an OAuth client consent, an OAuth
+access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM credential or a link to an
+identity provider's directory, revoked or expired ones included); its identity source is local; and the server allows
+a local password here (not SSO-only, email and password on). Every other account answers `sign_in`, including one in a
+state no rule names and one whose reading fails, and the proof stays unspent. Every store this plugin mounts that is
+keyed by a user, and every column of the vendor's user model with every plugin this plugin can mount, is classified as
+a claim the judge reads or as no claim, and a test holds each classification to what is mounted. The classification
+covers what this plugin mounts and nothing another package mounts. A cloud-managed environment sets no local password,
+so there the door refuses every request that carries a proof. It carries a rate limit per client network address and
+per invitation, as ADR-0121 D6 requires. Enforced by
 `packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts#buildInvitationProofDoorPlugin`, ledgered in
 `packages/plugins/plugin-auth/src/auth-route-ledger.ts`. It is a better-auth endpoint, so it rides the `/auth`
 catch-all, which no route table lists door by door: the anonymous sweep's classification names it under class 2 as a

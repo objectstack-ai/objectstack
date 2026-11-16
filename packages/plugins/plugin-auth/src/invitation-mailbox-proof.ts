@@ -57,23 +57,26 @@
  *
  * ## Which existing account the door sets a password on
  *
- * The door sets a password on an existing account only when it reads that the
- * mailbox is the account's one claim: the address is not verified, the
- * account's only sign-in account is its email and password one or it has
- * none, it has no second factor, enabled or enrolled, no verified phone
- * number and no standing grant (an API key, an OAuth client consent, an OAuth
+ * The door sets a password on an existing account only when it reads all of
+ * these: the address is not verified; the account's only sign-in account is
+ * its email and password one, or it has none; it has no second factor,
+ * enabled or enrolled; its user row holds no phone number, verified or not;
+ * it holds no standing grant (an API key, an OAuth client consent, an OAuth
  * access or refresh token, an OAuth client, a device authorization, an SSO
  * provider, a SCIM credential or a link to an identity provider's directory,
- * revoked or expired ones included), its identity source is local, and the
+ * revoked or expired ones included); its identity source is local; and the
  * server allows a local password here (not SSO-only, email and password on).
- * Every other account, including one in a state no rule names, answers
- * `sign_in`, and the proof stays unspent. Every store the plugin mounts that
- * is keyed by a user is classified as a claim the judge reads or as no claim,
- * and a test holds that classification to the mounted list.
+ * Every other account answers `sign_in`, including one in a state no rule
+ * names and one whose reading fails, and the proof stays unspent. Every store
+ * this plugin mounts that is keyed by a user, and every column of the
+ * vendor's user model with every plugin this plugin can mount, is classified
+ * as a claim the judge reads or as no claim, and a test holds each
+ * classification to what is mounted. The classification covers what this
+ * plugin mounts and nothing another package mounts.
  *
  * The judge, {@link oneStepSignInState}, is an allow-list: it lets the
  * password be set only when every value it reads is positively the one that
- * carries no other claim, and a value no rule names answers `sign_in` as
+ * carries no claim it reads, and a value no rule names answers `sign_in` as
  * `unrecognised`. Its reasons are {@link ONE_STEP_SIGN_IN_STATES}; the card's
  * test pins one case per reason.
  *
@@ -83,6 +86,12 @@
  * rows; a read that fails answers `sign_in` as `grant_unreadable`. The
  * plugin's `passkeys` flag is not wired today; if it is ever wired, a passkey
  * is a claim the judge must read.
+ *
+ * A sign-in identity on the user row counts as a claim whether or not it is
+ * verified ({@link USER_ROW_COLUMNS}, {@link readUserRowSignIn}): its presence
+ * answers `sign_in`. It is read from the stored row, so a value written while
+ * its sign-in plugin is not mounted counts too; a read that fails answers
+ * `sign_in` as `identity_unreadable`.
  *
  * An account that passes gets the typed password in place of its own, and
  * every one of its sessions is revoked with the reason a password reset
@@ -237,9 +246,9 @@ export interface InvitationProofDoorHost {
  * Why an existing account answers `sign_in`. The judge
  * ({@link oneStepSignInState}) is an allow-list: these name the reasons it
  * reports, and `unrecognised` is every value it does not positively read as
- * carrying no other claim. Each named state is either a claim on the account
- * the mailbox proof does not outrank, or a server that sets no local password
- * here.
+ * carrying no claim. Each named state is either a claim on the account the
+ * mailbox proof does not outrank, a reading that failed, or a server that sets
+ * no local password here.
  */
 export const ONE_STEP_SIGN_IN_STATES = [
   /** The address is already verified: its holder signs in. */
@@ -250,6 +259,10 @@ export const ONE_STEP_SIGN_IN_STATES = [
   'second_factor',
   /** The account has a verified phone number. */
   'verified_phone',
+  /** The account's user row holds a sign-in phone number, verified or not. */
+  'phone_number',
+  /** The account's user row cannot be read for its sign-in identities. */
+  'identity_unreadable',
   /** The account holds an API key, revoked or not. */
   'api_key',
   /** The account holds an OAuth client consent, revoked or not. */
@@ -278,7 +291,7 @@ export const ONE_STEP_SIGN_IN_STATES = [
   'sso_only',
   /** Email and password sign-in is off. */
   'email_password_off',
-  /** A stored value the judge does not read as carrying no other claim, such as an identity source no rule names. */
+  /** A stored value the judge does not read as carrying no claim, such as an identity source no rule names. */
   'unrecognised',
 ] as const;
 
@@ -295,9 +308,12 @@ function isOff(value: unknown): boolean {
 /**
  * Every store the plugin mounts that is keyed by a user: each column of an
  * object in `authIdentityManifest` (`manifest.ts`) that references `sys_user`
- * or is named `user_id`, classified. A test derives that set from the
- * manifest and holds it equal to this table's keys, so a store mounted later
- * fails it until it is classified here.
+ * or whose name ends in `user_id`, classified. A test derives that set from
+ * the manifest and holds it equal to this table's keys, so a store mounted
+ * later fails it until it is classified here. The test finds a user column by
+ * that reference or that name only: a store that held a user's id in a plain
+ * column under another name would pass it unclassified. It covers the
+ * manifest this plugin registers, and no store another package mounts.
  *
  * - `{ grant }`: a standing grant, a claim. The door reads it by
  *   {@link readStandingGrant}, and any row answers `sign_in` as `grant`.
@@ -333,6 +349,15 @@ export const USER_KEYED_STORES = {
   'sys_user.accountable_user_id': { notAClaim: 'Names the account as accountable for another user and signs no one in as this account.' },
   'sys_user_preference.user_id': { notAClaim: 'The account\'s own settings, which grant no access.' },
   'sys_personal_view.user_id': { notAClaim: 'The account\'s own saved list views, which grant no access.' },
+  'sys_scim_group_member.scim_user_id': {
+    notAClaim: 'Names a SCIM directory user, not an account; the account\'s own link is `sys_scim_user.user_id`, a claim.',
+  },
+  'sys_scim_projection_grant.scim_user_id': {
+    notAClaim: 'Names a SCIM directory user, not an account; the same row\'s `user_id` is the claim.',
+  },
+  'sys_scim_connection_binding.decommission_cursor_user_id': {
+    notAClaim: 'A resumable cursor of a directory connection\'s decommission pass, which grants the account nothing.',
+  },
 } as const satisfies Record<
   string,
   { grant: OneStepSignInState } | { accounts: OneStepSignInState } | { notAClaim: string }
@@ -382,6 +407,73 @@ export async function readStandingGrant(
   }
 }
 
+/**
+ * Every column of the vendor's user model (`sys_user`), its core model and
+ * every column the plugins this plugin can mount add to it, classified. A
+ * test composes the auth manager with every plugin flag on, derives the user
+ * model's columns from it, and holds that set equal to this table's keys, so
+ * a column a plugin adds later fails it until it is classified here.
+ *
+ * - `{ signIn }`: a sign-in identity, a claim whether or not it is verified.
+ *   The door reads it from the stored row ({@link readUserRowSignIn}), and its
+ *   presence answers `sign_in` as `signIn`.
+ * - `{ judged }`: a value the judge reads off the user the vendor loads, and
+ *   the reason it answers.
+ * - `{ proven }`: the invited address, which the proof proves.
+ * - `{ notASignIn }`: why the column signs no one in as the account.
+ */
+export const USER_ROW_COLUMNS = {
+  email: { proven: 'The invited address: the proof is what proves the mailbox.' },
+  email_verified: { judged: 'verified' },
+  phone_number: { signIn: 'phone_number' },
+  phone_number_verified: { judged: 'verified_phone' },
+  two_factor_enabled: { judged: 'second_factor' },
+  name: { notASignIn: 'A display name, which signs no one in.' },
+  image: { notASignIn: 'A picture, which signs no one in.' },
+  created_at: { notASignIn: 'A timestamp.' },
+  updated_at: { notASignIn: 'A timestamp.' },
+  role: { notASignIn: 'A platform role authorizes a signed-in session and signs no one in.' },
+  banned: { notASignIn: 'A ban refuses sign-in and signs no one in.' },
+  ban_reason: { notASignIn: 'The reason of a ban, which signs no one in.' },
+  ban_expires: { notASignIn: 'The end of a ban, which signs no one in.' },
+} as const satisfies Record<
+  string,
+  { signIn: OneStepSignInState } | { judged: OneStepSignInState } | { proven: string } | { notASignIn: string }
+>;
+
+type UserRowColumn = keyof typeof USER_ROW_COLUMNS;
+/** A sign-in identity column of the user row. */
+export type UserRowSignInColumn = {
+  [K in UserRowColumn]: (typeof USER_ROW_COLUMNS)[K] extends { signIn: OneStepSignInState } ? K : never;
+}[UserRowColumn];
+
+/** The sign-in identities of the user row, in the order the judge reports them: each column and its reason. */
+export const USER_ROW_SIGN_IN: ReadonlyArray<{ column: UserRowSignInColumn; reason: OneStepSignInState }> = Object.entries(
+  USER_ROW_COLUMNS,
+).flatMap(([column, cls]) => ('signIn' in cls ? [{ column: column as UserRowSignInColumn, reason: cls.signIn }] : []));
+
+/** The user row's sign-in identity columns, as stored; `ok: false` when the row cannot be read. */
+export type UserRowSignInReading =
+  | { ok: true; values: Readonly<Partial<Record<UserRowSignInColumn, unknown>>> }
+  | { ok: false };
+
+/**
+ * The sign-in identity columns of `userId`'s stored row. One read by `id` as
+ * the system. No read surface, a failed read, or no row is `ok: false`.
+ */
+export async function readUserRowSignIn(engine: UserSourceReader | undefined, userId: string): Promise<UserRowSignInReading> {
+  if (!engine?.find) return { ok: false };
+  try {
+    const columns = USER_ROW_SIGN_IN.map(({ column }) => column);
+    const rows = await engine.find('sys_user', { where: { id: userId }, fields: ['id', ...columns], limit: 1 }, SYSTEM_READ);
+    if (!Array.isArray(rows) || rows.length !== 1) return { ok: false };
+    const row = rows[0] as Record<string, unknown>;
+    return { ok: true, values: Object.fromEntries(columns.map((column) => [column, row[column]])) };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** What the judge reads of an existing account and the server. */
 export interface OneStepAccountReading {
   /** `user.emailVerified`, as stored. */
@@ -392,6 +484,8 @@ export interface OneStepAccountReading {
   twoFactorEnabled: unknown;
   /** `user.phoneNumberVerified`, as stored (absent without the plugin). */
   phoneNumberVerified: unknown;
+  /** The sign-in identity columns of the stored user row ({@link readUserRowSignIn}). */
+  userRowSignIn: UserRowSignInReading;
   /** Any row of the user in each standing-grant object ({@link readStandingGrant}). */
   standingGrants: Readonly<Record<StandingGrantObject, StandingGrantReading>>;
   /** `sys_user.source`, or `ok: false` when it cannot be read. */
@@ -413,6 +507,12 @@ export function oneStepSignInState(account: OneStepAccountReading): OneStepSignI
   if (!account.accountProviders.every((providerId) => providerId === 'credential')) return 'linked_provider';
   if (!isOff(account.twoFactorEnabled)) return account.twoFactorEnabled === true ? 'second_factor' : 'unrecognised';
   if (!isOff(account.phoneNumberVerified)) return account.phoneNumberVerified === true ? 'verified_phone' : 'unrecognised';
+  if (account.userRowSignIn?.ok !== true) return 'identity_unreadable';
+  for (const { column, reason } of USER_ROW_SIGN_IN) {
+    const value = account.userRowSignIn.values[column];
+    if (value === null || value === undefined) continue;
+    return typeof value === 'string' && value.trim().length > 0 ? reason : 'unrecognised';
+  }
   const grants = STANDING_GRANTS.map((grant) => ({ ...grant, reading: account.standingGrants[grant.object] }));
   if (grants.some(({ reading }) => reading?.ok !== true)) return 'grant_unreadable';
   const held = grants.find(({ reading }) => reading.ok && reading.held !== false);
@@ -536,8 +636,9 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
       if (existing) {
         const engine = host.getDataEngine() as UserSourceReader | undefined;
         const userId = String(existing.id);
-        const [source, grantReadings] = await Promise.all([
+        const [source, userRowSignIn, grantReadings] = await Promise.all([
           readUserSource(engine, userId),
+          readUserRowSignIn(engine, userId),
           Promise.all(STANDING_GRANT_OBJECTS.map((object) => readStandingGrant(engine, object, userId))),
         ]);
         const standingGrants = Object.fromEntries(
@@ -548,6 +649,7 @@ export async function buildInvitationProofDoorPlugin(host: InvitationProofDoorHo
           accountProviders: (found.accounts ?? []).map((a: any) => a?.providerId),
           twoFactorEnabled: existing.twoFactorEnabled,
           phoneNumberVerified: existing.phoneNumberVerified,
+          userRowSignIn,
           standingGrants,
           source,
           ssoOnly: host.isSsoOnlyMode(),

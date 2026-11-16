@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { getAuthTables } from 'better-auth/db';
 import { resetCloudManagedForTesting } from '@objectstack/core';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
@@ -21,6 +22,8 @@ import {
   STANDING_GRANTS,
   STANDING_GRANT_OBJECTS,
   USER_KEYED_STORES,
+  USER_ROW_COLUMNS,
+  USER_ROW_SIGN_IN,
   invitationProofIdentifier,
   oneStepSignInState,
   type OneStepAccountReading,
@@ -667,7 +670,7 @@ describe('#34257 — every gate refuses before anything is written, and the proo
   });
 });
 
-describe('#34257 — the door sets a password only where the mailbox is the account\'s one claim', () => {
+describe('#34257 — the door sets a password on an existing account only where it reads no claim', () => {
   quietConsole();
 
   type Booted = Awaited<ReturnType<typeof boot>>;
@@ -692,6 +695,16 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     await engine.insert(object, { id, user_id: userRow(engine, email)!.id, ...extra });
     return () => {
       engine.tables.set(object, (engine.tables.get(object) ?? []).filter((row) => row.id !== id));
+    };
+  };
+  const findThrowsForUserRowSignIn = (engine: MemoryEngine) => {
+    const find = engine.find.bind(engine);
+    engine.find = async (name: string, q: any = {}) => {
+      if (name === 'sys_user' && Array.isArray(q.fields) && q.fields.includes('phone_number')) throw new Error('store unavailable');
+      return find(name, q);
+    };
+    return () => {
+      engine.find = find;
     };
   };
   const findThrowsForSource = (engine: MemoryEngine) => {
@@ -739,9 +752,24 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
         userRow(engine, email)!.phone_number = '+15550134257';
         userRow(engine, email)!.phone_number_verified = true;
         return () => {
+          userRow(engine, email)!.phone_number = null;
           userRow(engine, email)!.phone_number_verified = false;
         };
       },
+    },
+    // A sign-in phone number on the user row, not verified, with phone
+    // sign-in not mounted: read from the stored row all the same.
+    phone_number: {
+      enter: async ({ engine }, email) => {
+        userRow(engine, email)!.phone_number = '+15550134258';
+        userRow(engine, email)!.phone_number_verified = false;
+        return () => {
+          userRow(engine, email)!.phone_number = null;
+        };
+      },
+    },
+    identity_unreadable: {
+      enter: async ({ engine }) => findThrowsForUserRowSignIn(engine),
     },
     // A standing grant counts as a claim, a revoked or expired one included.
     api_key: { enter: async ({ engine }, email) => holdGrant(engine, 'sys_api_key', email, { revoked: true }) },
@@ -812,6 +840,7 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     accountProviders: ['credential'],
     twoFactorEnabled: false,
     phoneNumberVerified: undefined,
+    userRowSignIn: { ok: true, values: { phone_number: null } },
     standingGrants: Object.fromEntries(STANDING_GRANT_OBJECTS.map((object) => [object, { ok: true, held: false }])) as Record<
       StandingGrantObject,
       StandingGrantReading
@@ -821,9 +850,17 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     emailPasswordEnabled: true,
   };
 
-  it('the judge lets the password be set only on the reading that carries no other claim', () => {
+  it('the judge lets the password be set only on the reading that carries no claim', () => {
     expect(oneStepSignInState(ALLOWED)).toBeUndefined();
-    expect(oneStepSignInState({ ...ALLOWED, accountProviders: [], source: { ok: true, value: null }, twoFactorEnabled: null })).toBeUndefined();
+    expect(
+      oneStepSignInState({
+        ...ALLOWED,
+        accountProviders: [],
+        source: { ok: true, value: null },
+        twoFactorEnabled: null,
+        userRowSignIn: { ok: true, values: {} },
+      }),
+    ).toBeUndefined();
   });
 
   it.each<[string, Partial<OneStepAccountReading>, OneStepSignInState]>([
@@ -835,6 +872,12 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
     ['a second-factor flag stored in no form the judge reads', { twoFactorEnabled: 'true' }, 'unrecognised'],
     ['a verified phone number', { phoneNumberVerified: true }, 'verified_phone'],
     ['a phone flag stored in no form the judge reads', { phoneNumberVerified: 1 }, 'unrecognised'],
+    ['a phone number on the user row, not verified', { userRowSignIn: { ok: true, values: { phone_number: '+15550134257' } } }, 'phone_number'],
+    ['a phone number on the user row, verified flag unread', { phoneNumberVerified: undefined, userRowSignIn: { ok: true, values: { phone_number: '+1 555 013' } } }, 'phone_number'],
+    ['a phone number stored in no form the judge reads', { userRowSignIn: { ok: true, values: { phone_number: 15550134257 } } }, 'unrecognised'],
+    ['an empty phone number', { userRowSignIn: { ok: true, values: { phone_number: ' ' } } }, 'unrecognised'],
+    ['a user row that cannot be read', { userRowSignIn: { ok: false } }, 'identity_unreadable'],
+    ['a user row reading that is missing', { userRowSignIn: undefined as never }, 'identity_unreadable'],
     ['an identity-provider source', { source: { ok: true, value: 'idp_provisioned' } }, 'idp_provisioned'],
     ['a pending single sign-on', { source: { ok: true, value: 'idp_pending' } }, 'pending_sso'],
     ['an unreadable source', { source: { ok: false } }, 'source_unreadable'],
@@ -885,12 +928,15 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
 
   it('every user-keyed store the plugin mounts is classified, as a claim the judge reads or as no claim', () => {
     // Derived from the manifest the plugin registers: every column that
-    // references sys_user or is named user_id, on its objects and on the
-    // fields it adds to them.
+    // references sys_user or whose name ends in user_id, on its objects and on
+    // the fields it adds to them. It finds a user column by that reference or
+    // that name only, so a store holding a user's id in a plain column under
+    // another name would pass it unclassified; and it reads this plugin's
+    // manifest only, so a store another package mounts is outside it.
     const manifest = authIdentityManifest();
     const userKeyed = (fields: Record<string, any>) =>
       Object.entries(fields ?? {})
-        .filter(([name, field]) => field?.reference === 'sys_user' || name === 'user_id')
+        .filter(([name, field]) => field?.reference === 'sys_user' || name.endsWith('user_id'))
         .map(([name]) => name);
     const mounted = [
       ...manifest.objects.flatMap((object: any) => userKeyed(object.fields).map((column) => `${object.name}.${column}`)),
@@ -903,6 +949,80 @@ describe('#34257 — the door sets a password only where the mailbox is the acco
       expect(declared?.fields?.user_id, object).toBeDefined();
       expect((declared?.indexes ?? []).some((index: any) => index.fields?.[0] === 'user_id'), `${object} has no index led by user_id`).toBe(true);
     }
+  });
+
+  // Every plugin flag the plugin list reads, on, plus the two mounts gated by
+  // configuration rather than a flag: generic OAuth providers and the
+  // one-time token's app scheme.
+  const EVERY_PLUGIN_ON = {
+    plugins: {
+      organization: true,
+      twoFactor: true,
+      passwordRejectBreached: true,
+      passkeys: true,
+      magicLink: true,
+      oidcProvider: true,
+      deviceAuthorization: true,
+      admin: true,
+      phoneNumber: true,
+      sso: true,
+      ssoDomainVerification: true,
+      scim: true,
+    },
+    oidcProviders: [{ providerId: 'idp34257', clientId: 'client34257', clientSecret: 'secret34257', discoveryUrl: 'https://idp.example.com/.well-known/openid-configuration' }],
+    trustedAppSchemes: ['com.example.app34257'],
+  };
+
+  it('every column of the vendor user model with every plugin mounted is classified, and the judge reads each sign-in identity', async () => {
+    // The flags the plugin list reads: each one is on in EVERY_PLUGIN_ON, so
+    // a flag added later reds here until it is.
+    const listSource = readFileSync(new URL('./auth-manager-plugin-list.ts', import.meta.url), 'utf8');
+    const enabledBlock = /const enabled = \{([\s\S]*?)\n  \};/.exec(listSource)?.[1] ?? '';
+    const flags = [...enabledBlock.matchAll(/^\s{4}([A-Za-z]+):/gm)].map(([, flag]) => flag);
+    expect(flags.length, 'the scan of the plugin list found no flag').toBeGreaterThan(5);
+    expect(flags.filter((flag) => (EVERY_PLUGIN_ON.plugins as Record<string, boolean>)[flag] !== true)).toEqual([]);
+
+    // The composed instance: what the plugin list mounts with all of them on.
+    const engine = createMemoryEngine();
+    const manager = new AuthManager({ secret: SECRET, baseUrl: BASE, dataEngine: engine as any, ...EVERY_PLUGIN_ON } as any);
+    const auth: any = await manager.getAuthInstance();
+    const ids = (auth.options.plugins ?? []).map((plugin: any) => plugin.id);
+    for (const id of ['two-factor', 'admin', 'phone-number', 'magic-link', 'generic-oauth', 'oauth-provider', 'sso', 'scim', 'device-authorization', 'one-time-token']) {
+      expect(ids, id).toContain(id);
+    }
+    const userFields = (getAuthTables(auth.options) as any).user.fields as Record<string, { fieldName?: string }>;
+    const columns = Object.entries(userFields).map(([key, field]) => field.fieldName ?? key);
+    expect([...new Set(columns)].sort()).toEqual(Object.keys(USER_ROW_COLUMNS).sort());
+
+    // The classification, written out: the sign-in identities the door reads
+    // off the stored row, and the values the judge reads off the vendor's user.
+    expect(USER_ROW_SIGN_IN.map(({ column, reason }) => [column, reason])).toEqual([['phone_number', 'phone_number']]);
+    expect(
+      Object.entries(USER_ROW_COLUMNS)
+        .filter(([, cls]) => 'judged' in cls)
+        .map(([column, cls]) => [column, (cls as { judged: string }).judged])
+        .sort(),
+    ).toEqual([
+      ['email_verified', 'verified'],
+      ['phone_number_verified', 'verified_phone'],
+      ['two_factor_enabled', 'second_factor'],
+    ]);
+  });
+
+  it('a phone number on the user row answers sign_in with phone sign-in mounted, and is accepted once it is cleared', async () => {
+    const { engine, manager, invite } = await boot({ plugins: { phoneNumber: true } });
+    const email = 'phone-mounted@example.com';
+    const { invitation, proof } = await invite(email);
+    await signUp(manager, engine, email);
+    userRow(engine, email)!.phone_number = '+15550134259';
+    userRow(engine, email)!.phone_number_verified = false;
+    const before = writtenState(engine);
+
+    await expectSignIn(await door(manager, { invitationId: invitation.id, proof, name: 'P', password: NEW_PASSWORD }));
+    expect(writtenState(engine)).toBe(before);
+
+    userRow(engine, email)!.phone_number = null;
+    await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'P', password: NEW_PASSWORD }));
   });
 
   // One boot for every store: each store has its own invitation, account and
