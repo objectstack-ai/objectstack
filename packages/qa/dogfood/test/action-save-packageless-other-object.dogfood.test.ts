@@ -90,8 +90,15 @@ describe('[ADR-0150 D4] a package-less action save on an object the package does
     // FROM: a package-less DELETE of the name removes P's row on
     // `showcase_invoice`, and leaves the environment's row.
     const deleted = await stack.apiAs(admin, 'DELETE', `/meta/action/${name}`);
-    expect(deleted.status, await deleted.clone().text()).toBe(200);
-    expect((await stack.apiAs(admin, 'GET', `/meta/action/${name}?package=${PKG}`)).status).toBe(404);
+    const deletedText = await deleted.text();
+    expect(deleted.status, deletedText).toBe(200);
+    expect(deletedText).toContain(`package=${PKG}`);
+    // …so P no longer holds the name: the read naming P is refused 409, the
+    // name held by the environment only.
+    const afterDelete = await stack.apiAs(admin, 'GET', `/meta/action/${name}?package=${PKG}`);
+    const afterText = await afterDelete.text();
+    expect(afterDelete.status, afterText).toBe(409);
+    expect(afterText).toContain('RESOURCE_CONFLICT');
     expect(await routeTarget(`/actions/_env/showcase_task/${name}`)).toEqual([400, 'env']);
   }, 120_000);
 

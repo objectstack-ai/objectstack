@@ -853,7 +853,7 @@ export class ProtocolSaveFacet {
         // read here for the two gates below that judge the row it lands in.
         // Read once, for the same authoring saves the publish-mode address
         // above is resolved for.
-        const draftAddress = mode === 'draft'
+        const packagelessDraft = mode === 'draft'
             && request.packageId == null
             && request.source === undefined
             && request.writeFace !== 'package-duplicate'
@@ -861,6 +861,17 @@ export class ProtocolSaveFacet {
                 singularType, request.name, itemDiscriminator(singularType, request.item),
             )
             : undefined;
+        // [ADR-0150 D4, ruling 6902014292] …and an action draft whose body
+        // binds an object no package's active row binds the name to is the
+        // environment's own draft, as the repository writes it
+        // (`resolveWriteHead`, the one rule {@link actionHeldOnlyOnOtherObjects}):
+        // the gates below judge the package-unbound draft it lands in.
+        const draftAddress = packagelessDraft !== undefined
+            && packagelessDraft.kind !== 'ambiguous'
+            && packagelessDraft.into !== null
+            && await packagelessActionKeyedAddress(host, singularType, request.name, request.item, { candidates: [packagelessDraft.into] }) === 'environment'
+            ? { ...packagelessDraft, key: null, into: null }
+            : packagelessDraft;
 
         // [#26921] THE NAMED-BASE RULE for the binding a save naming no
         // package INHERITS: the package its address gives (the resolved
@@ -2039,6 +2050,9 @@ export class ProtocolSaveFacet {
                 // [#22877] The write's bundle member, from the body it writes —
                 // the member the repository's `put` keys this save by.
                 member: itemDiscriminator(singularTypeForRepo, request.item),
+                // [ADR-0150 D4] …and its body, so an action draft's head is
+                // keyed by its object, as the put's is.
+                body: request.item,
             });
             const currentStored = writeHead.head?.hash ?? null;
             if (mode === 'draft' && request.packageId == null) inheritedDraftPackageId = writeHead.packageId;

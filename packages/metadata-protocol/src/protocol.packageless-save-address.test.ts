@@ -447,10 +447,24 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
         const { protocol, rows } = makeProtocol();
         await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
 
-        await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+        const drafted = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
 
+        // FROM: `(env-wide, package=com.qa.lanebapp, state=draft)`.
+        expect(drafted.message).toBe(`Saved action '${NAME}' (env-wide, state=draft) [seq=${drafted.seq}]`);
         expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
         expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
+    });
+
+    it('the DRAFT save on `task` beside a sole binding on `invoice` to a package that is NOT INSTALLED: the environment\'s draft (FROM: 422 naming the package)', async () => {
+        const { protocol, rows, seedRow } = makeProtocol();
+        const GONE = 'com.qa.uninstalled';
+        seedRow({ type: 'action', name: NAME, package_id: GONE, metadata: JSON.stringify(action(NAME, 'gone', 'invoice')), checksum: 'sha-gone' });
+
+        const drafted = await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+
+        expect(drafted.success).toBe(true);
+        expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
+        expect(stored(rows('action', NAME))).toEqual([[GONE, 'invoice', 'gone']]);
     });
 
     it('the per-item publish naming no package promotes that draft into the environment\'s row (FROM: over P\'s item on `invoice`)', async () => {

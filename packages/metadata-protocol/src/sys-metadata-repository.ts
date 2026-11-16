@@ -929,11 +929,22 @@ export class SysMetadataRepository implements MetadataRepository {
      * it from the body it writes, so a caller asking for that save's head
      * passes the body's member (see {@link get} for the rest).
      */
-    opts: { state?: OverlayState; packageId?: string | null; member?: string | null },
+    opts: {
+      state?: OverlayState;
+      packageId?: string | null;
+      member?: string | null;
+      /**
+       * [ADR-0150 D4] The body the write carries, as {@link put} is handed it:
+       * an action draft's inherited binding is keyed by its object
+       * ({@link actionHeldOnlyOnOtherObjects}), so the head is the row that
+       * put writes. Omitted, the binding is inherited by name.
+       */
+      body?: unknown;
+    },
   ): Promise<{ head: MetadataItem | null; packageId: string | null }> {
     this.assertOpen();
     const { row, targetPackageId } = await this.resolveWriteHead(
-      ref, opts.state ?? 'active', opts.packageId, undefined, overlayMemberValue(ref.type, opts.member),
+      ref, opts.state ?? 'active', opts.packageId, undefined, overlayMemberValue(ref.type, opts.member), opts.body,
     );
     return { head: row ? this.rowToItem(ref, row) : null, packageId: targetPackageId };
   }
