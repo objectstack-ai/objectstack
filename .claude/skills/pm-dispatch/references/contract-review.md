@@ -17,7 +17,7 @@
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
 - 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,档经子代理或卡线程取。
 - 送审路由只住此处:车道能取 `CONTRACT_REVIEW_TIER` 才自审;取不到(账号够不到、配额拒 429、
-  维护者限配)⇒ ⛔ 不降档 ⛔ 非分诊,落交接行并同笔敲在座 L2 席 `Request: contract-review`;
+  维护者限配)⇒ ⛔ 不降档 ⛔ 非分诊,落交接行并同笔请 L2 席(请谁照 `lanes/l2-review.md`);
   无 L2 席在座改点能取该档的兄弟席,皆无则挂等 L2 标记留欠审表待 (a)(b)(c)。交接行:
 - `Contract-review-handoff: <l2-review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
 - 「立 skills 卡，把契约复审的路由直接改成 review 座位」「没有 fable 时，找 review 座位」(卡33157)
