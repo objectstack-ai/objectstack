@@ -227,7 +227,7 @@ describe('app-todo business actions over MCP (CE runtime, no service-ai)', () =>
   // bridge never sees the runtime gate. Here the member travels from a real
   // JSON-RPC `tools/call`, through both of those layers, into the real gate —
   // and the record afterwards says whether anything ran.
-  it('step 7: ai.requiresConfirmation is ENFORCED, and satisfiable', async () => {
+  it('step 7: ai.requiresConfirmation is ENFORCED, and the caller\'s confirm: true never satisfies it', async () => {
     // Same app, but todo_complete_task now declares the author's gate.
     const gatedConfirmObjects = withTaskAction(mergedObjects, 'todo_complete_task', (a) => ({
       ...a,
@@ -241,23 +241,21 @@ describe('app-todo business actions over MCP (CE runtime, no service-ai)', () =>
 
     const gatedId = await seedTask('Needs a human');
 
-    // 7a — WITHOUT the member: refused, with the declared code, and NOTHING ran.
-    const refused = await callMcp(confirmBridge, toolsCall(12, 'run_action', { actionName: 'todo_complete_task', recordId: gatedId }));
-    expect(refused.result?.isError).toBe(true);
-    const refusedEnvelope = JSON.parse(refused.result?.content?.[0]?.text ?? '{}');
-    expect(refusedEnvelope?.error?.code).toBe('ACTION_CONFIRMATION_REQUIRED');
-    expect(refusedEnvelope?.error?.status).toBe(428);
-    expect(refusedEnvelope?.error?.details?.actionName).toBe('todo_complete_task');
-    expect(refusedEnvelope?.error?.details?.confirmationMember).toBe('confirm');
-    expect(await statusOf(gatedId)).toBe('not_started');
-
-    // 7b — WITH the member: the identical call succeeds and the handler runs.
-    // This is the leg that proves the member is not stripped: before the door
-    // grew it, this call was refused exactly like 7a and the action was
-    // permanently un-invokable.
-    const confirmed = await callMcp(confirmBridge, toolsCall(13, 'run_action', { actionName: 'todo_complete_task', recordId: gatedId, confirm: true }));
-    expect(confirmed.result?.isError, confirmed.result?.content?.[0]?.text).not.toBe(true);
-    expect(await statusOf(gatedId)).toBe('completed');
+    // 7a/7b — [#33690] WITH the member and WITHOUT it alike: this app registers
+    // no pending-confirmation service, so the call is refused with the
+    // declared code and `details.reason: 'no_confirmation_service'`, and
+    // NOTHING ran. Before the amended contract 7b (with `confirm: true`) ran
+    // the handler; the member now travels the whole path and confers nothing.
+    for (const [id, extra] of [[12, {}], [13, { confirm: true }]] as const) {
+      const refused = await callMcp(confirmBridge, toolsCall(id, 'run_action', { actionName: 'todo_complete_task', recordId: gatedId, ...extra }));
+      expect(refused.result?.isError).toBe(true);
+      const refusedEnvelope = JSON.parse(refused.result?.content?.[0]?.text ?? '{}');
+      expect(refusedEnvelope?.error?.code).toBe('ACTION_CONFIRMATION_REQUIRED');
+      expect(refusedEnvelope?.error?.status).toBe(428);
+      expect(refusedEnvelope?.error?.details?.actionName).toBe('todo_complete_task');
+      expect(refusedEnvelope?.error?.details?.reason).toBe('no_confirmation_service');
+      expect(await statusOf(gatedId)).toBe('not_started');
+    }
 
     // 7c — the heuristic must NOT gate: todo_delete_completed is `variant:'danger'`
     // and the listing calls it requiresConfirmation, but its author declared

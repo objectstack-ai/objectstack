@@ -47,6 +47,7 @@ import { BUILT_IN_SECURITY_CATALOG_NAMES, ENVIRONMENT_HELD_SECURITY_CATALOG_TYPE
 import type { SecurityCatalogHolder } from './security-catalog-namespace.js';
 import { declaredDefaultRecordPages, defaultRecordPageHolderKey, holdsRecordPageSlot, misplacedDefaultPages, recordPageSlotKey } from './default-record-page.js';
 import type { DefaultRecordPageHolder, RecordPageSlot } from './default-record-page.js';
+import { overlaySlotEntriesOf, parseOverlaySlotKey, storedRowPackageOf } from './registry-top-level.js';
 import type { DefaultRecordPageConflict, SecurityCatalogNameConflict } from './registry-top-level.js';
 import {
   DefaultRecordPageConflictError, MisplacedDefaultPageError, SecurityCatalogNameConflictError,
@@ -268,7 +269,9 @@ export class NamespacesAndClaimsFacet {
    * {@link BUILT_IN_SECURITY_CATALOG_NAMES} for why the item seam does not ask);
    * the bare slot (an override a package bound to itself, else an
    * environment-authored item — the latter only when `environment`); every
-   * composite `<packageId>:<name>` slot; the package claims. A package that
+   * composite `<packageId>:<name>` slot; every package overlay slot (a stored
+   * item bound to a package is that package's holding, #32780); the package
+   * claims. A package that
    * holds the name more than one way is one holder. A disabled package is still
    * installed, and still holds its names.
    *
@@ -298,6 +301,11 @@ export class NamespacesAndClaimsFacet {
           kind: 'package',
           packageId: typeof stamped === 'string' && stamped !== '' ? stamped : key.slice(0, -suffix.length),
         });
+      } else {
+        // [#32780] A package's overlay slot counts as a holder of its name:
+        // the stored set bound to that package is its holding.
+        const slot = parseOverlaySlotKey(key);
+        if (slot !== undefined && slot.bareKey === name) add({ kind: 'package', packageId: slot.packageId });
       }
     }
     for (const claimant of this.securityCatalogClaims.get(type)?.get(name) ?? []) add({ kind: 'package', packageId: claimant });
@@ -400,6 +408,13 @@ export class NamespacesAndClaimsFacet {
    *   boot hydration grafts the package's envelope onto the stored row (the
    *   protocol's artifact-protection merge), so the stamp names the very
    *   package the row collides with.
+   *   A stored row in a package overlay slot ({@link overlaySlotKey}; a stored
+   *   permission set bound to a package takes one, #32780) is the environment's
+   *   too where it is held against the declaring package: the declarer's own
+   *   slot, a slot whose item is served as the declarer's, or, for a permission
+   *   set, the slot of a package that meets the declarer under the one
+   *   predicate ({@link permissionSetHoldersMeet}). A slot of a package of
+   *   another namespace is that package's own set and holds nothing against it.
    * - **A package holds a name** through an item registered under it (its
    *   composite slot) or its install claim — never through the bare slot.
    * - **Built-in names are skipped**, as the item seam skips the environment
@@ -421,14 +436,29 @@ export class NamespacesAndClaimsFacet {
    * module-level {@link findEnvironmentHeldSecurityCatalogNames}, which the
    * package entries do not re-export.
    */
-  static environmentHeldSecurityCatalogConflicts(this: Pick<NamespacesAndClaimsHost, 'metadata' | 'packageHeldSecurityCatalogNames'>): SecurityCatalogNameConflict[] {
+  static environmentHeldSecurityCatalogConflicts(this: Pick<NamespacesAndClaimsHost, 'bareNameHolderNamespace' | 'metadata' | 'packageHeldSecurityCatalogNames'>): SecurityCatalogNameConflict[] {
     const conflicts: SecurityCatalogNameConflict[] = [];
     for (const { catalogType, name, packageIds } of this.packageHeldSecurityCatalogNames()) {
+      const collection = this.metadata.get(catalogType);
       // The environment's item: the bare slot, whatever `_packageId` it wears.
       // A held name never contains `:` and is never a built-in, so this is the
       // bare-slot reading the method header states.
-      if (!this.metadata.get(catalogType)?.has(name)) continue;
+      const bare = collection?.has(name) === true;
+      const stored = collection === undefined ? [] : overlaySlotEntriesOf(collection, name).map((entry) => ({
+        packageId: storedRowPackageOf(entry)!,
+        stamped: (entry.item as { _packageId?: unknown } | null | undefined)?._packageId,
+      }));
       for (const packageId of packageIds) {
+        // [ADR-0048 N.3, #32780] A stored row in a package overlay slot is the
+        // environment's too when it is held against the declaring package: the
+        // declarer's own slot, a slot whose item is served as the declarer's,
+        // or (a permission set) the slot of a package that meets the declarer
+        // under the one predicate; any slot for a type of one holder per name.
+        const heldAgainst = (slot: { packageId: string; stamped: unknown }) => slot.packageId === packageId
+          || slot.stamped === packageId
+          || catalogType !== 'permission'
+          || permissionSetHoldersMeet(this.bareNameHolderNamespace(packageId), this.bareNameHolderNamespace(slot.packageId), name);
+        if (!bare && !stored.some(heldAgainst)) continue;
         conflicts.push({ catalogType, name, incomingPackageId: packageId, existingHolder: { kind: 'environment' } });
       }
     }

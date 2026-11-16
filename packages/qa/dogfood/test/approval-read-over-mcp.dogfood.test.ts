@@ -37,8 +37,10 @@
 //   ⭐ the object is listed and described; no write tool opens it, and
 //      `sys_approval_action` stays refused;
 //   ⭐ the query tool's text names the "pending for me" filter shape;
-//   ⭐ end to end: the submitter files over MCP, the approver lists, approves
-//      with confirmation, and the record's flow resumes and stamps it.
+//   ⭐ end to end: the submitter files over MCP, the approver lists; [#33690]
+//      the approver's approve carrying `confirm: true` decides nothing (the
+//      caller's own confirm never counts on a declared-gated action, and this
+//      stack has no pending-confirmation service), so the request stays pending.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
@@ -444,7 +446,7 @@ describe('an approver\'s agent lists the approvals waiting on them over MCP (#32
     expect(query?.description).toContain('pending_approvers');
   });
 
-  it('⭐ end to end: the approver lists what waits on them, approves one with confirmation, and the flow resumes', async () => {
+  it('⭐ end to end: the approver lists what waits on them; [#33690] a confirmed approve over MCP decides nothing, and the request stays waiting', async () => {
     const before = rowsOf((await pendingForMe({ bearer: approver })).payload);
     const target = before.find((r) => String(r.record_id) === first.recordId);
     expect(target, 'the approver sees the request in their pending list').toBeTruthy();
@@ -456,14 +458,15 @@ describe('an approver\'s agent lists the approvals waiting on them over MCP (#32
       params: { comment: 'approved over MCP' },
       [AI_ACTION_CONFIRMATION_MEMBER]: true,
     });
-    expect(decided.isError, decided.text).toBe(false);
+    // [#33690] `approval_approve` declares `ai.requiresConfirmation: true`, so
+    // the caller's own `confirm: true` never runs it; this stack registers no
+    // pending-confirmation service, so the call is refused at confirmation.
+    // Before the amended contract it approved and the flow resumed.
+    expect(decided.isError, decided.text).toBe(true);
+    expect(decided.payload?.error?.code, decided.text).toBe('ACTION_CONFIRMATION_REQUIRED');
+    expect(decided.payload?.error?.details?.reason, decided.text).toBe('no_confirmation_service');
+    expect((await requestRow(first.requestId)).status).toBe('pending');
 
-    expect((await requestRow(first.requestId)).status).toBe('approved');
-    // The run resumed past the approval node down its approve edge, whose
-    // next node stamps the record.
-    const record = rowsOf(await ql.find(OVERTIME, { where: { id: first.recordId }, context: SYS.context }))[0];
-    expect(record?.outcome, JSON.stringify(record)).toBe('approved');
-
-    expect(await pendingIds({ bearer: approver })).toEqual([second.requestId]);
+    expect((await pendingIds({ bearer: approver })).sort()).toEqual([first.requestId, second.requestId].sort());
   });
 });

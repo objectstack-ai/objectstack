@@ -161,5 +161,28 @@
       "card": "#33949",
       "reason": "first-pass stay (scripts/codemod-split-registry.mjs, the first pass of the engine codemod): bare-this: its body uses `this` other than as `this.member`, which needs the identity port (#30020 R1); a later pass on #33949 moves it, as the engine's fourth pass (#30055, #30020) moved the engine's"
     }
+  ],
+  "ceilings": [
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "baseLines": 11605,
+      "baseCommit": "63db7240aa",
+      "maxLines": 11705,
+      "ruling": "6897467376"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "baseLines": 6754,
+      "baseCommit": "63db7240aa",
+      "maxLines": 6854,
+      "ruling": "6897467376"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "baseLines": 9971,
+      "baseCommit": "63db7240aa",
+      "maxLines": 10071,
+      "ruling": "6897467376"
+    }
   ]
 }

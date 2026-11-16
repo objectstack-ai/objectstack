@@ -543,6 +543,7 @@ const ja = {
       succeeded: "成功 {{count}} / {{total}}",
       resultFailed: " · 失敗 {{count}}",
       succeededRecords: "成功したレコード",
+      aggregateNotCompleted: "選択したレコードに対する操作は完了しませんでした。一部のレコードはすでに変更されている可能性があります。閉じると、一覧に現在の値が表示されます。",
       retry: "再試行",
       downloadErrorCsv: "エラー CSV をダウンロード",
       cancel: "キャンセル",
@@ -5091,6 +5092,25 @@ const ja = {
     sourceRequired: "{{kind}} ページには空でない {{source}} が必要です。",
     loading: "React ランタイムを読み込んでいます…",
     error: "React ページのエラー",
+  },
+  // The account app's Mobile App page (app-shell `MobileAppPage`): the QR code
+  // and link that connect the ObjectOS mobile app to this server.
+  mobileApp: {
+    title: "モバイルアプリ",
+    subtitle: "ObjectOS モバイルアプリをこのサーバーに接続します",
+    scanHint: "ObjectOS モバイルアプリを開き、このコードをスキャンしてこのサーバーに接続します。",
+    qrAlt: "ObjectOS モバイルアプリをこのサーバーに接続する QR コード",
+    linkLabel: "接続リンク",
+    copy: "リンクをコピー",
+    copied: "リンクをコピーしました",
+    privacy: "このコードに含まれるのはこのサーバーのアドレスだけで、アカウント情報は含まれません。",
+    loadFailed: "このサーバーの公開アドレスを読み取れませんでした。ページを再読み込みしてもう一度お試しください。",
+    unreachableTitle: "スマートフォンからこのサーバーのアドレスに接続できません",
+    unreachableBody: "このサーバーのアドレスは {{address}} で、スマートフォンから開けないローカルまたはプライベートアドレスのため、コードは表示されません。サーバーの {{setting}} を公開アドレス（例: {{example}}）に設定し、サーバーを再起動してください。",
+    insecureTitle: "このサーバーのアドレスは HTTPS を使用していません",
+    insecureBody: "このサーバーのアドレスは {{address}} です。モバイルアプリはこのアドレスを通じてサインインするため HTTPS が必要で、コードは表示されません。サーバーを HTTPS で提供し、{{setting}} を https:// のアドレス（例: {{example}}）に設定して、サーバーを再起動してください。",
+    unpublishedTitle: "このサーバーは公開アドレスを公開していません",
+    unpublishedBody: "コードは表示されません。このサーバーはまだ公開アドレスをモバイルアプリに提供していません。対応するバージョンにサーバーを更新してください。",
   },
 };
 

@@ -172,7 +172,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `@objectstack/service-settings` (`setup-nav-hub-parity.test.ts`).
       { id: 'nav_settings_mail', type: 'url', label: 'Mail Delivery', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_sms', type: 'url', label: 'SMS Delivery', url: '/apps/setup/system/settings/sms', icon: 'message-square', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
+      // [#33891] A cloud-managed environment's file storage is the hosting
+      // platform's: the settings doors refuse the page there
+      // (`@objectstack/service-settings` `cloud-managed-settings.ts`), so the
+      // entry is not drawn. `features` is a root every nav entry binds.
+      { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'], visible: 'features.cloudManaged != true' },
       { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_knowledge', type: 'url', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open', requiredPermissions: ['manage_platform_settings'] },
       // `lifecycle` is `@objectstack/objectql`'s manifest (ADR-0057), offered

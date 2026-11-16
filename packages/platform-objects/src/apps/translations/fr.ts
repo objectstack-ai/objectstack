@@ -18,6 +18,7 @@ export const fr: TranslationData = {
         grp_account_developer: { label: 'Développeur' },
         grp_account_ai_assistant: { label: 'Assistant IA' },
         nav_account_profile: { label: 'Profil' },
+        nav_account_mobile_app: { label: 'Application mobile' },
         nav_account_notifications: { label: 'Notifications' },
         nav_account_approvals: { label: 'Mes approbations en attente' },
         nav_account_memberships: { label: 'Mes organisations' },
