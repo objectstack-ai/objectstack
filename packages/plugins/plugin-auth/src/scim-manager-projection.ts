@@ -64,8 +64,8 @@
  * {@link screenUserManagerLink} (self-assignment, cycle, depth cap,
  * cross-organization), imported: one derivation, never a copy. Each is a SCIM
  * error in RFC 7644 §3.12 shape: status 400, `scimType: invalidValue` — the
- * vendor's own answer to a value it refuses — and the refusal's sentence as
- * `detail`. The refusal ledger (`scim-refusal-audit.ts`) records it like any
+ * vendor's own answer to a value it refuses — the refusal's sentence as
+ * `detail`, and the admin endpoint's ADR-0112 `code` for the same refusal. The refusal ledger (`scim-refusal-audit.ts`) records it like any
  * other SCIM refusal. A cleared or absent attribute clears the column.
  */
 
@@ -117,13 +117,20 @@ export function readScimManagerReference(serializedAttributes: unknown): ScimMan
   return { kind: 'none' };
 }
 
-/** A SCIM 400 `invalidValue` error, built the way the vendor builds its own. */
-async function scimInvalidValue(detail: string): Promise<Error> {
+/**
+ * A SCIM 400 `invalidValue` error, in the body the vendor builds its own in
+ * (RFC 7644 §3.12), plus the ADR-0112 `code` of the refusal it carries — the
+ * admin endpoint's code for the same refusal — which the refusal ledger
+ * records beside the `scimType`. A body already in SCIM shape passes the
+ * vendor's after-hook unchanged.
+ */
+async function scimInvalidValue(code: string, detail: string): Promise<Error> {
   const { APIError } = await import('better-auth/api');
   const error = new APIError('BAD_REQUEST', {
     schemas: [SCIM_ERROR_SCHEMA],
     status: '400',
     scimType: 'invalidValue',
+    code,
     detail,
   } as never);
   error.message = detail;
@@ -159,6 +166,7 @@ export async function projectScimManager(
   const reference = readScimManagerReference(source.serializedAttributes);
   if (reference.kind === 'unreadable') {
     throw await scimInvalidValue(
+      'INVALID_REFERENCE',
       `${SCIM_ENTERPRISE_USER_SCHEMA}:manager names no User: its $ref '${reference.ref}' does not end in `
         + `/Users/{id}, and it carries no value. Send the manager's SCIM resource id as manager.value.`,
     );
@@ -175,6 +183,7 @@ export async function projectScimManager(
     });
     if (!managerSource || !text(managerSource.userId)) {
       throw await scimInvalidValue(
+        'INVALID_REFERENCE',
         `${SCIM_ENTERPRISE_USER_SCHEMA}:manager.value '${reference.id}' names no User this connection `
           + `provisioned. manager.value is the manager's SCIM resource id (the id this service returned when `
           + `the manager was created), not an externalId, userName or email. Provision the manager first, or `
@@ -201,7 +210,7 @@ export async function projectScimManager(
 
   if (managerId !== null) {
     const refusal = await screenUserManagerLink(deps, engine, state.userId, managerId);
-    if (refusal) throw await scimInvalidValue(refusal.message);
+    if (refusal) throw await scimInvalidValue(refusal.code, refusal.message);
   }
 
   // Attributed to the connection (`svc:scim:CONNECTION_ID`) inside a SCIM

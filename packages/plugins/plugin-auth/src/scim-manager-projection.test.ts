@@ -194,13 +194,14 @@ function patch(operations: unknown[]) {
 }
 
 /** RFC 7644 §3.12: the error the identity provider reads, 400 `invalidValue`. */
-async function expectInvalidValue(res: Response, detail: RegExp): Promise<void> {
+async function expectInvalidValue(res: Response, code: string, detail: RegExp): Promise<void> {
   const text = await res.text();
   expect(res.status, `expected 400 invalidValue, got ${res.status} ${text}`).toBe(400);
-  const body = JSON.parse(text) as { schemas?: string[]; status?: string; scimType?: string; detail?: string };
+  const body = JSON.parse(text) as { schemas?: string[]; status?: string; scimType?: string; code?: string; detail?: string };
   expect(body.schemas).toEqual([ERROR_SCHEMA]);
   expect(body.status).toBe('400');
   expect(body.scimType).toBe('invalidValue');
+  expect(body.code).toBe(code);
   expect(body.detail).toMatch(detail);
 }
 
@@ -289,7 +290,7 @@ describe('SCIM manager projection: a reference that names no known User is refus
   it('an unknown manager.value refuses the create, and nothing of it is written', async () => {
     const h = await boot();
     const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp', { value: 'no-such-scim-id' })));
-    await expectInvalidValue(res, /names no User this connection provisioned/);
+    await expectInvalidValue(res, 'INVALID_REFERENCE', /names no User this connection provisioned/);
     expect(await h.engine.find('sys_user', { where: { email: 'emp@acme.com' }, fields: ['id'] }, SYSTEM)).toEqual([]);
     expect(await h.engine.find('sys_scim_user', { where: { user_name: 'emp@acme.com' }, fields: ['id'] }, SYSTEM)).toEqual([]);
   });
@@ -298,14 +299,14 @@ describe('SCIM manager projection: a reference that names no known User is refus
     const h = await boot();
     await provision(h, 'boss');
     const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp', { value: 'ext-boss' })));
-    await expectInvalidValue(res, /names no User this connection provisioned/);
+    await expectInvalidValue(res, 'INVALID_REFERENCE', /names no User this connection provisioned/);
   });
 
   it('another connection\'s resource id is refused: an id means something only to the connection that issued it', async () => {
     const h = await boot();
     const boss = await provision(h, 'boss', undefined, h.otherToken);
     const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp', { value: boss.scimId })));
-    await expectInvalidValue(res, /names no User this connection provisioned/);
+    await expectInvalidValue(res, 'INVALID_REFERENCE', /names no User this connection provisioned/);
   });
 
   it('a PATCH to an unknown manager keeps the manager the user had', async () => {
@@ -315,7 +316,7 @@ describe('SCIM manager projection: a reference that names no known User is refus
     const res = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
       { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: 'no-such-scim-id' } },
     ])));
-    await expectInvalidValue(res, /names no User this connection provisioned/);
+    await expectInvalidValue(res, 'INVALID_REFERENCE', /names no User this connection provisioned/);
     expect(await managerOf(h, emp.userId)).toBe(boss.userId);
   });
 });
@@ -327,7 +328,7 @@ describe('SCIM manager projection: the admin endpoint\'s four refusals, answered
     const res = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
       { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: emp.scimId } },
     ])));
-    await expectInvalidValue(res, /cannot be their own manager/);
+    await expectInvalidValue(res, 'INVALID_FIELD', /cannot be their own manager/);
     expect(await managerOf(h, emp.userId)).toBeNull();
   });
 
@@ -338,7 +339,7 @@ describe('SCIM manager projection: the admin endpoint\'s four refusals, answered
     const res = await h.send(scimRequest(h.token, 'PATCH', `/Users/${a.scimId}`, patch([
       { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: b.scimId } },
     ])));
-    await expectInvalidValue(res, /close a loop/);
+    await expectInvalidValue(res, 'RESOURCE_CONFLICT', /close a loop/);
     expect(await managerOf(h, a.userId)).toBeNull();
     expect(await managerOf(h, b.userId)).toBe(a.userId);
   });
@@ -355,7 +356,7 @@ describe('SCIM manager projection: the admin endpoint\'s four refusals, answered
       below = id;
     }
     const res = await h.send(scimRequest(h.token, 'POST', '/Users', userBody('emp', { value: boss.scimId })));
-    await expectInvalidValue(res, new RegExp(`maximum of ${MAX_MANAGER_CHAIN_DEPTH} links`));
+    await expectInvalidValue(res, 'VALUE_OUT_OF_RANGE', new RegExp(`maximum of ${MAX_MANAGER_CHAIN_DEPTH} links`));
     expect(await h.engine.find('sys_user', { where: { email: 'emp@acme.com' }, fields: ['id'] }, SYSTEM)).toEqual([]);
   });
 
@@ -368,7 +369,7 @@ describe('SCIM manager projection: the admin endpoint\'s four refusals, answered
     const res = await h.send(scimRequest(h.token, 'PATCH', `/Users/${emp.scimId}`, patch([
       { op: 'replace', path: `${SCIM_ENTERPRISE_USER_SCHEMA}:manager`, value: { value: boss.scimId } },
     ])));
-    await expectInvalidValue(res, /none of them an organization this user belongs to/);
+    await expectInvalidValue(res, 'INVALID_REFERENCE', /none of them an organization this user belongs to/);
     expect(await managerOf(h, emp.userId)).toBeNull();
   });
 });
