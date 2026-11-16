@@ -351,6 +351,24 @@ describe('exportGallery — ⛔ only a run on published packages is exported or 
   });
 });
 
+describe('exportGallery — a record naming its supplied template (`template`, written by `run --template`)', () => {
+  it('exports as the same record without the key: every file and the index the same, the key carried in the run record as read', async () => {
+    const fx = await runCrm();
+    const plain = await setup(fx);
+    const named = await setup({ ...fx, record: { ...fx.record, template: { file: 'crm-template.json', sha256: 'a'.repeat(64) } } });
+    const a = await exportGallery(plain.opts());
+    const b = await exportGallery(named.opts());
+    expect(b.refused).toEqual(a.refused);
+    expect(b.exported.map((e) => e.id)).toEqual([CARD_ID]);
+    const withoutRecord = (t: Record<string, string>) => Object.fromEntries(Object.entries(t).filter(([k]) => k !== `apps/${CARD_ID}/run-record.json`));
+    expect(withoutRecord(tree(named.out))).toEqual(withoutRecord(tree(plain.out)));
+    const record = JSON.parse(readFileSync(join(named.out, 'apps', CARD_ID, 'run-record.json'), 'utf8'));
+    expect(record.template).toEqual({ file: 'crm-template.json', sha256: 'a'.repeat(64) });
+    const { template: _template, ...rest } = record;
+    expect(rest).toEqual(JSON.parse(readFileSync(join(plain.out, 'apps', CARD_ID, 'run-record.json'), 'utf8')));
+  });
+});
+
 describe('⛔ no local path: every work directory that names the run is redacted', () => {
   /** Every file under `dir`, relative path → its text. */
   function texts(dir: string): Record<string, string> {
