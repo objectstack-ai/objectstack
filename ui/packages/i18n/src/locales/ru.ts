@@ -566,6 +566,7 @@ const ru = {
       succeeded: "Успешно {{count}} / {{total}}",
       resultFailed: " · Ошибок {{count}}",
       succeededRecords: "Успешные записи",
+      aggregateNotCompleted: "Действие не было выполнено для выбранных записей. Некоторые записи могли уже измениться; после закрытия список покажет их текущие значения.",
       retry: "Повторить",
       downloadErrorCsv: "Скачать CSV с ошибками",
       cancel: "Отмена",

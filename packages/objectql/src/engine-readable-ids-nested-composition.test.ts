@@ -532,6 +532,29 @@ describe('[#33696 ruling 6893666857] the required master\'s leaf over an unrestr
     }
   });
 
+  it('a condition the caller writes on the required master, in the same read, is never dropped with the master\'s own leaf', async () => {
+    // A driver the nested-relation lowering plans a subquery for: the
+    // caller's `{ opp: { name: 'x' } }` becomes a leaf over the same master.
+    const rec = makeRecordingDriver('com.objectstack.driver.sql');
+    const planned = new ObjectQL();
+    planned.registerDriver(rec.driver, true);
+    await planned.init();
+    for (const def of [ACCOUNT, OPP, LINE]) planned.registry.registerObject(def as any, 'test');
+    const { svc } = chain(undefined);
+    wire(planned, () => svc);
+    rec.calls.length = 0;
+    await planned.find('rid_r4_line', { where: { $and: [leafOn('opp', 'rid_r4_opp'), { opp: { name: 'x' } }] }, context: { userId: 'u1' } as any });
+    // One driver call: the related read was planned, not run.
+    expect(rec.calls.map((c) => c.verb)).toEqual(['find']);
+    const where = rec.calls[0].ast.where;
+    // The master's own leaf is dropped for this View All reader; the caller's condition stays, as its subquery.
+    expect(where.$and).toHaveLength(1);
+    const leaf = where.$and[0].opp.$in;
+    expect(isComposedReadableIds(leaf)).toBe(true);
+    expect(leaf.object).toBe('rid_r4_opp');
+    expect(leaf.scope).toEqual({ name: 'x' });
+  });
+
   it('a master the caller may not read keeps the leaf, answered `$in: []`', async () => {
     const { svc } = makeSecurity({ canRead: (object) => object !== 'rid_r4_opp' });
     wire(engine, () => svc);

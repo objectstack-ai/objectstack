@@ -53,7 +53,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "HTTP メソッド",
         help: "コールバックリクエストで使用する HTTP メソッド",
         options: {
-          get: "GET",
           post: "POST",
           put: "PUT",
           patch: "PATCH",

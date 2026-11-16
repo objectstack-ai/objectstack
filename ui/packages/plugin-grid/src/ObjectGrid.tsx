@@ -2217,7 +2217,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       toast: { showOnSuccess: false, showOnError: false },
     } as any);
     if (!res?.success) {
-      throw new Error(res?.error || `Action ${def.name} failed`);
+      // The refusal's producer-marked `userMessage` rides on the rejection,
+      // so the result reports the ONE outcome for the selection in the words
+      // the handler wrote for the user (objectstack#34173). `message` stays
+      // the whole text.
+      const error = new Error(res?.error || `Action ${def.name} failed`);
+      throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
   };
   const handleBulkDialogClose = (result?: BulkResult | null) => {
@@ -2231,6 +2236,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     if (result && result.succeeded > 0) {
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
+      setRefreshKey(k => k + 1);
+    } else if (result?.aggregateRejection) {
+      // A rejected aggregate run (objectstack#34173) is ONE call that may have
+      // written some rows before it stopped, so the grid re-reads them by the
+      // same path. The selection stays: re-running the whole action is the
+      // retry, as for a total failure.
       setRefreshKey(k => k + 1);
     }
   };
