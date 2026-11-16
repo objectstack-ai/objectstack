@@ -28,6 +28,7 @@ import { join } from 'node:path';
 import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { createMemoryI18n } from '@objectstack/core';
+import type { EngineInsertOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 import { hookBodyRunnerFactory, withInProcessHookTitle } from './body-runner.js';
 import { hookRefusalI18nReader } from './hook-refusal-catalogue.js';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
@@ -59,6 +60,8 @@ async function inProcessHandler(ctx: any): Promise<void> {
 }
 
 const TEXTS = { follow_up_subject: { message: EN, params: ['lead'] } };
+
+const SYSTEM_READ: EngineQueryOptions = { context: { isSystem: true } };
 
 /** What the `settings` service answers for `localization.locale`. */
 type SettingsAnswer = { value?: unknown; source?: string } | (() => never);
@@ -149,11 +152,13 @@ describe('#34374 — a hook writes its declared text in the organization\'s lang
 
   /** Qualify a lead as a caller whose own language is en-US, in organization `org_a`; answer the stored task subjects. */
   async function qualify(ql: ObjectQL, name: string): Promise<string[]> {
-    const CALLER = { context: { userId: 'u_probe', isSystem: true, tenantId: 'org_a', locale: 'en-US' } };
-    const lead: any = await ql.insert(LEAD.name, { name, status: 'new' }, CALLER as any);
+    const context = { userId: 'u_probe', isSystem: true, tenantId: 'org_a', locale: 'en-US' };
+    const asCaller: EngineInsertOptions = { context };
+    const lead: any = await ql.insert(LEAD.name, { name, status: 'new' }, asCaller);
     // The update carries the name, so the hook reads it from its own input.
-    await ql.update(LEAD.name, { name, status: 'qualified' }, { ...CALLER, where: { id: lead.id } } as any);
-    const tasks: any[] = await ql.find(TASK.name, { context: { isSystem: true } } as any);
+    const qualifyIt: EngineUpdateOptions = { context, where: { id: lead.id } };
+    await ql.update(LEAD.name, { name, status: 'qualified' }, qualifyIt);
+    const tasks: any[] = await ql.find(TASK.name, SYSTEM_READ);
     return tasks.map((t) => t.subject);
   }
 
@@ -199,7 +204,7 @@ describe('#34374 — a hook writes its declared text in the organization\'s lang
           settings: () => { throw Object.assign(new Error('settings store unavailable'), { code: 'SETTINGS_STORE_UNAVAILABLE' }); },
         });
         await expect(qualify(broken.engine, 'Acme')).rejects.toThrow(/settings store unavailable/);
-        const tasks: any[] = await broken.engine.find(TASK.name, { context: { isSystem: true } } as any);
+        const tasks: any[] = await broken.engine.find(TASK.name, SYSTEM_READ);
         expect(tasks).toEqual([]);
       }, 30000);
     });
