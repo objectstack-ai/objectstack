@@ -1146,6 +1146,29 @@ describe('#34257 — the door sets a password on an existing account only where 
       await expectAccepted(await door(manager, { invitationId: invitation.id, proof, name: 'R', password: NEW_PASSWORD }));
     },
   );
+
+  it('a proof spent by another redemption after this one was admitted revokes no session and writes no password', async () => {
+    const { engine, manager, invite } = await boot();
+    const email = 'raced-spent@example.com';
+    const { invitation, proof } = await invite(email);
+    const { userId, cookie } = await signUp(manager, engine, email);
+    const credential = () => (engine.tables.get('sys_account') ?? []).find((a) => a.user_id === userId && a.provider_id === 'credential');
+    const password = credential()!.password;
+    const find = engine.find.bind(engine);
+    engine.find = async (name: string, q: any = {}) => {
+      const rows = await find(name, q);
+      if (name === 'sys_api_key') {
+        const identifier = invitationProofIdentifier(invitation.id);
+        engine.tables.set('sys_verification', (engine.tables.get('sys_verification') ?? []).filter((v) => v.identifier !== identifier));
+      }
+      return rows;
+    };
+
+    await expectRefused(await door(manager, { invitationId: invitation.id, proof, name: 'R', password: NEW_PASSWORD }));
+    engine.find = find;
+    expect(credential()!.password).toBe(password);
+    expect(await sessionUser(manager, cookie)).not.toBeNull();
+  });
 });
 
 describe('#34257 — a password the door sets starts the password-age clock and clears a forced change', () => {
