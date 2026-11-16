@@ -18,6 +18,9 @@
  * dialog stamps nothing. Driven through the real `BulkActionDialog`, because
  * the hand-off of the sibling values IS the hazard.
  *
+ * A param that writes `recordBeingEdited` itself is not let opt in:
+ * `bulkParamToField` never carries the key from a param.
+ *
  * CONTROL: the literal entry beside it reaches the candidate query, so the
  * dialog does forward `lookupFilters` — the missing entry is left out, not
  * lost with the rest.
@@ -55,7 +58,40 @@ const PRICE_BOOK = {
   ],
 };
 
+async function pickerQueries(priceBook: Record<string, unknown>) {
+  const ds = makeDataSource();
+  render(
+    <BulkActionDialog
+      def={{ name: 'bulk_reprice', label: 'Reprice', operation: 'update', params: [QUOTE_DATE, priceBook] } as any}
+      rows={[{ id: 'r1' }, { id: 'r2' }]}
+      resource="quote"
+      dataSource={ds}
+      open
+      onClose={() => {}}
+    />,
+  );
+  const dateInput = await waitFor(() => {
+    const el = document.getElementById('bulk-param-quote_date');
+    if (!el) throw new Error('dialog not ready');
+    return el;
+  });
+  fireEvent.change(dateInput, { target: { value: '2026-11-01' } });
+  const trigger = await screen.findByTestId('lookup-trigger-price_book');
+  await act(async () => {
+    fireEvent.click(trigger);
+  });
+  const queries = () => ds.find.mock.calls.filter((c: any[]) => c[0] === 'price_book').map((c: any[]) => c[1]?.$filter);
+  await waitFor(() => expect(queries().length).toBeGreaterThan(0));
+  return { queries: queries(), ds };
+}
+
 describe('BulkActionDialog — a { $record } lookup filter is left out (objectstack#34197)', () => {
+  it('a param that writes the record-form stamp itself gains nothing: the entry is still left out', async () => {
+    const { queries, ds } = await pickerQueries({ ...PRICE_BOOK, recordBeingEdited: { hopObjects: {} } });
+    for (const filter of queries) expect(filter).toEqual({ is_active: true });
+    expect(ds.findOne).not.toHaveBeenCalled();
+  });
+
   it('leaves the entry out although a sibling param holds a value of that name', async () => {
     const ds = makeDataSource();
     render(
