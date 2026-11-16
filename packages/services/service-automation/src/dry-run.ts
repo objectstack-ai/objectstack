@@ -722,7 +722,7 @@ export async function dryRun(this: DryRunHost, definition: unknown, options: Flo
         ...(options.params !== undefined ? { params: options.params } : {}),
         ...(options.locale !== undefined ? { locale: options.locale } : {}),
     };
-    const variables = this.seedRunVariables(flow, flow.name, start, '');
+    const variables: Map<string, unknown> = this.seedRunVariables(flow, flow.name, start, '');
     variables.delete('$runId');
     const runContext = await this.resolveRunContext({ ...flow, runAs: 'user' }, start);
 
