@@ -2242,6 +2242,50 @@ export function hasDatasetTools(bridge: Partial<McpDataBridge>): bridge is McpDa
 }
 
 /**
+ * [ADR-0149 D2] The dataset tools {@link registerDatasetTools} registers for
+ * this bridge and grant, by name, each with the description it registers
+ * under; empty when neither registers. A bridge missing a dataset member, a
+ * grant without `data:read`, and a tool the bridge defines no description for
+ * are all absent here.
+ *
+ * [#34686] It is the one gate for the pair: `registerDatasetTools` registers
+ * from it, and `handleHttpRequest` reads it to decide whether the `initialize`
+ * instructions carry the selection rule ({@link datasetToolsServed}), so the
+ * rule is sent exactly where `tools/list` lists both tools.
+ */
+export function datasetToolDescriptions(
+  bridge: Partial<McpDataBridge>,
+  options: RegisterObjectToolsOptions = {},
+): Map<string, string> {
+  const descriptions = new Map<string, string>();
+  if (!hasDatasetTools(bridge)) return descriptions;
+  // Read family, exactly as `aggregate_records`: undefined grant (API key,
+  // session) keeps the pair, a scope list without `data:read` registers neither.
+  const scopes = options.grantedScopes;
+  if (scopes && !scopes.includes(MCP_OAUTH_SCOPE_DATA_READ)) return descriptions;
+  const definitions = bridge.datasetToolDefinitions();
+  for (const name of [LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME]) {
+    const description = definitions.find((d) => d.name === name)?.description;
+    if (description) descriptions.set(name, description);
+  }
+  return descriptions;
+}
+
+/**
+ * [#34686] Whether this bridge and grant register BOTH dataset tools — the
+ * condition under which the selection rule ("look for a governed metric
+ * first", ADR-0149 D3) can be followed, since it names both.
+ */
+export function datasetToolsServed(
+  bridge: Partial<McpDataBridge> | undefined,
+  options: RegisterObjectToolsOptions = {},
+): boolean {
+  if (!bridge) return false;
+  const descriptions = datasetToolDescriptions(bridge, options);
+  return descriptions.has(LIST_DATASETS_TOOL_NAME) && descriptions.has(QUERY_DATASET_TOOL_NAME);
+}
+
+/**
  * [ADR-0149 D2] Register the dataset pair, `list_datasets` and
  * `query_dataset`, over the bridge's dataset members.
  *
@@ -2275,14 +2319,10 @@ export function registerDatasetTools(
 ): string[] {
   const registered: string[] = [];
   if (!hasDatasetTools(bridge)) return registered;
-  const scopes = options.grantedScopes;
-  if (scopes && !scopes.includes(MCP_OAUTH_SCOPE_DATA_READ)) return registered;
+  const descriptions = datasetToolDescriptions(bridge, options);
   const maxRows = options.maxQueryLimit ?? DEFAULT_MAX_LIMIT;
-  const definitions = bridge.datasetToolDefinitions();
-  const descriptionOf = (name: string): string | undefined =>
-    definitions.find((d) => d.name === name)?.description;
 
-  const listDescription = descriptionOf(LIST_DATASETS_TOOL_NAME);
+  const listDescription = descriptions.get(LIST_DATASETS_TOOL_NAME);
   if (listDescription) {
     registered.push(LIST_DATASETS_TOOL_NAME);
     server.registerTool(
@@ -2302,7 +2342,7 @@ export function registerDatasetTools(
     );
   }
 
-  const queryDescription = descriptionOf(QUERY_DATASET_TOOL_NAME);
+  const queryDescription = descriptions.get(QUERY_DATASET_TOOL_NAME);
   if (queryDescription) {
     registered.push(QUERY_DATASET_TOOL_NAME);
     server.registerTool(
