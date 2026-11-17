@@ -19,9 +19,8 @@
  *
  *   1. Studio writable list — Studio's builder landing (objectui
  *      `packages/app-shell/src/views/studio-design/BuilderLanding.tsx`, heading
- *      `engine.studio.landing.mineHeading` = "My packages (writable)", empty
- *      state "No writable packages yet") lists `fetchPackages()` filtered to
- *      `writable`. `fetchPackages()` (`studio-design/packages-io.ts`) is ONE
+ *      `engine.studio.landing.ownHeading` = "Your own apps") lists
+ *      `fetchPackages()` filtered to `writable`. `fetchPackages()` (`studio-design/packages-io.ts`) is ONE
  *      read: `GET /api/v1/packages`, no query parameters; `parsePackages` drops
  *      `scope: system | cloud` rows and takes the row's top-level `writable`
  *      boolean — the server's verdict (`withWritableVerdict` in
