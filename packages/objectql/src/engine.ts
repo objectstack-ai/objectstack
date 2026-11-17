@@ -5860,6 +5860,7 @@ export class ObjectQL implements IObjectQLEngine {
       recomputeSummaries: (...a) => engine.recomputeSummaries(...a),
       rejectCredentialAggregation: (...a) => engine.rejectCredentialAggregation(...a),
       get relatedSchemaOf() { return engine.relatedSchemaOf; },
+      relationSemiJoinServes: (...a) => engine.relationSemiJoinServes(...a),
       releaseSecretHandles: (...a) => engine.releaseSecretHandles(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
       resolveWhereTokens: (...a) => engine.resolveWhereTokens(...a),

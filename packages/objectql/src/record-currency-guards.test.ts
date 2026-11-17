@@ -143,7 +143,7 @@ async function bootEngine() {
   const d = makeDriver();
   engine.registerDriver(d.driver, true);
   await engine.init();
-  return { engine, storeFor: d.storeFor };
+  return { engine, storeFor: d.storeFor, driver: d.driver };
 }
 
 describe('a record-mode amount is stored with its currency code (ERR_CURRENCY_CODE_REQUIRED)', () => {
@@ -552,6 +552,46 @@ describe('a summary rolled up through the master_detail its children follow regi
       expect(storeFor('pp_invoice').get('inv_usd').subtotal, String(parentFirst)).toBe(150);
       expect(storeFor('pp_invoice').get('inv_eur').subtotal, String(parentFirst)).toBe(100);
     }
+  });
+
+  it('[#33795] a batch of lines across two parents totals each in one grouped aggregate, as one line at a time does', async () => {
+    const LINES = [
+      { title: 'u1', invoice: 'inv_usd', amount: 100 },
+      { title: 'e1', invoice: 'inv_eur', amount: 70 },
+      { title: 'u2', invoice: 'inv_usd', amount: 50 },
+      { title: 'e2', invoice: 'inv_eur', amount: 30 },
+    ];
+    // One line at a time: each recompute asks the one-parent aggregate.
+    const single = await bootFollowing();
+    for (const line of LINES) await single.engine.insert('pp_line', line);
+    // One batch: the recompute asks ONE aggregate grouped by the master_detail
+    // over both parents. The door admits it on the roll-up's own channel only:
+    // had it refused, the insert would answer ERR_SUMMARY_RECOMPUTE and both
+    // subtotals would stay stale.
+    const batch = await bootFollowing();
+    const lineReads: unknown[] = [];
+    const find = batch.driver.find;
+    batch.driver.find = async (object: string, ast: any) => {
+      if (object === 'pp_line') lineReads.push(ast?.where);
+      return find.call(batch.driver, object, ast);
+    };
+    await batch.engine.insert('pp_line', LINES);
+    const grouped = lineReads.filter((where) => JSON.stringify(where).includes('$in'));
+    expect(grouped).toHaveLength(1);
+    expect(JSON.stringify(grouped[0])).toContain('"invoice":{"$in":["inv_usd","inv_eur"]}');
+    for (const id of ['inv_usd', 'inv_eur']) {
+      expect(batch.storeFor('pp_invoice').get(id).subtotal, id).toBe(single.storeFor('pp_invoice').get(id).subtotal);
+    }
+    expect(batch.storeFor('pp_invoice').get('inv_usd').subtotal).toBe(150);
+    expect(batch.storeFor('pp_invoice').get('inv_eur').subtotal).toBe(100);
+    // The same grouped statement asked by a caller, without the channel, is
+    // still refused: the grouping does not make it one currency, the channel does.
+    const err = await refusalOf(batch.engine.aggregate('pp_line', aggregateQuery({
+      where: { invoice: { $in: ['inv_usd', 'inv_eur'] } },
+      groupBy: ['invoice'],
+      aggregations: [{ function: 'sum', field: 'amount', alias: 'value' }],
+    })));
+    expect(envelopeOf(err)).toEqual(INVALID_FIELD);
   });
 
   const PROJECT = { name: 'pp_project', fields: { title: { type: 'text' } } };

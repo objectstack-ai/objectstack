@@ -21,7 +21,9 @@ import {
 } from '@objectstack/spec/automation';
 import {
   isEditableValueEnvelope,
+  isRecordFieldValueSlot,
   isValueEnvelopeSlot,
+  recordFieldValueRefusal,
   valueEnvelopeRefusal,
   writeValueEnvelope,
 } from './flow-value-envelope';
@@ -120,9 +122,8 @@ describe('isValueEnvelopeSlot — read off the spec expression ledger (objectui#
     // schema refuses a malformed envelope in its map with exactly the messages
     // the editor shows (`valueEnvelopeRefusal`), and accepts the well-formed
     // envelope and a plain literal string it accepts.
+    // A record write's `fields` is judged by its own rule, the next case.
     const slots = {
-      'create_record:fields': (v: unknown) => CreateRecordConfigSchema.safeParse({ objectName: 'account', fields: { name: v } }),
-      'update_record:fields': (v: unknown) => UpdateRecordConfigSchema.safeParse({ objectName: 'account', fields: { name: v } }),
       'screen:defaults': (v: unknown) => ScreenConfigSchema.safeParse({ defaults: { name: v } }),
       'script:inputs': (v: unknown) => ScriptConfigSchema.safeParse({ function: 'my_fn', inputs: { name: v } }),
       'subflow:input': (v: unknown) => SubflowConfigSchema.safeParse({ flowName: 'child_flow', input: { name: v } }),
@@ -144,6 +145,41 @@ describe('isValueEnvelopeSlot — read off the spec expression ledger (objectui#
         expect(valueEnvelopeRefusal(good)).toBeNull();
       }
     }
+  });
+});
+
+describe('recordFieldValueRefusal — a record write\'s `fields` takes a text envelope too (objectstack#34445)', () => {
+  const slots = {
+    'create_record:fields': (v: unknown) => CreateRecordConfigSchema.safeParse({ objectName: 'account', fields: { name: v } }),
+    'update_record:fields': (v: unknown) => UpdateRecordConfigSchema.safeParse({ objectName: 'account', fields: { name: v } }),
+  } as const;
+  const TEXT = { dialect: 'template', source: 'Escalated: {{ record.priority }} priority' };
+
+  it('answers true only for the two record writes\' `config.fields` map', () => {
+    expect(isRecordFieldValueSlot('create_record', ['config', 'fields'])).toBe(true);
+    expect(isRecordFieldValueSlot('update_record', ['config', 'fields'])).toBe(true);
+    expect(isRecordFieldValueSlot('assignment', ['config', 'fields'])).toBe(false);
+    expect(isRecordFieldValueSlot('create_record', ['config', 'filter'])).toBe(false);
+    expect(isRecordFieldValueSlot(undefined, ['config', 'fields'])).toBe(false);
+  });
+
+  it('refuses a malformed envelope with exactly the sentences each node\'s own schema gives', () => {
+    for (const [slot, parse] of Object.entries(slots)) {
+      for (const bad of [{ dialect: 'cel' }, { dialect: 'js', source: 'a' }, { dialect: 'template', source: '{record.id}' }]) {
+        const parsed = parse(bad);
+        expect(parsed.success, `${slot}: ${JSON.stringify(bad)} is refused`).toBe(false);
+        const messages = parsed.success ? [] : parsed.error.issues.map((i) => i.message);
+        expect(messages, `${slot}: with the same sentences the editor shows`).toEqual(recordFieldValueRefusal(bad));
+      }
+      for (const good of [{ dialect: 'cel', source: 'a + 1' }, 'plain text', 30, TEXT]) {
+        expect(parse(good).success, `${slot}: ${JSON.stringify(good)} is accepted`).toBe(true);
+        expect(recordFieldValueRefusal(good)).toBeNull();
+      }
+    }
+  });
+
+  it('CONTROL — the value-map rule other maps use still refuses the text envelope', () => {
+    expect(valueEnvelopeRefusal(TEXT)).not.toBeNull();
   });
 });
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { resetPlatformAdminEmailMemo } from '@objectstack/core';
 import { OrganizationsPlugin } from './organizations-plugin.js';
 
 // ⛔ Nothing is granted here, and nothing needs to be. In the closed runtime
@@ -407,6 +408,14 @@ describe('per-org seed replay names the founder (#30281)', () => {
     result: { id },
     context,
   });
+  /** better-auth's member write, as the adapter hands it to the engine. */
+  const memberInsert = (organizationId: string, userId: string) => ({
+    object: 'sys_member',
+    operation: 'insert' as const,
+    data: { organization_id: organizationId, user_id: userId, role: 'owner' },
+    result: { id: `mem_${organizationId}_${userId}`, organization_id: organizationId, user_id: userId, role: 'owner' },
+    context: { isSystem: true, attributedUserId: userId },
+  });
 
   async function startWithReplayer() {
     const plugin = new OrganizationsPlugin();
@@ -424,9 +433,34 @@ describe('per-org seed replay names the founder (#30281)', () => {
     const { seedReplayer, middlewares } = await startWithReplayer();
 
     await middlewares[1](insertBy('org_zh', { isSystem: true, attributedUserId: 'usr_founder' }), async () => {});
+    // [#34038] better-auth writes the founder's member row next; the replay runs on it.
+    await middlewares[1](memberInsert('org_zh', 'usr_founder'), async () => {});
 
     expect(seedReplayer).toHaveBeenCalledTimes(1);
     expect(seedReplayer.mock.calls[0]).toEqual(['org_zh', { userId: 'usr_founder' }]);
+  });
+
+  it('[#34038] an organization a person created waits for its first member row, and replays once', async () => {
+    const { seedReplayer, middlewares } = await startWithReplayer();
+
+    await middlewares[1](insertBy('org_wait', { isSystem: true, attributedUserId: 'usr_founder' }), async () => {});
+    expect(seedReplayer).not.toHaveBeenCalled();
+
+    // A member of ANOTHER organization does not release it.
+    await middlewares[1](memberInsert('org_other', 'usr_founder'), async () => {});
+    expect(seedReplayer).not.toHaveBeenCalled();
+
+    await middlewares[1](memberInsert('org_wait', 'usr_founder'), async () => {});
+    await middlewares[1](memberInsert('org_wait', 'usr_colleague'), async () => {});
+    expect(seedReplayer.mock.calls).toEqual([['org_wait', { userId: 'usr_founder' }]]);
+  });
+
+  it('[#34038] a member row of an organization nobody is waiting on replays nothing', async () => {
+    const { seedReplayer, middlewares } = await startWithReplayer();
+
+    await middlewares[1](memberInsert('org_existing', 'usr_someone'), async () => {});
+
+    expect(seedReplayer).not.toHaveBeenCalled();
   });
 
   it('keeps the one-argument call when no person founded the organization', async () => {
@@ -436,5 +470,125 @@ describe('per-org seed replay names the founder (#30281)', () => {
 
     expect(seedReplayer).toHaveBeenCalledTimes(1);
     expect(seedReplayer.mock.calls[0]).toEqual(['org_sys']);
+  });
+});
+
+// [#34425] The walled default-organization bootstrap writes the `default`
+// organization as SYSTEM, with no person behind it, and then the platform
+// owner's member row. Its replay waits for that member row, the same way an
+// organization a person created does (#34038), and names the owner it binds.
+// When the bootstrap binds nobody, the replay still runs, with no person, once
+// the bootstrap call is over. The real walled boot is pinned in
+// `default-organization-seed-owner.wall.test.ts`; these pin the two branches
+// on an engine double whose inserts run the plugin's middlewares.
+describe('the walled default-organization bootstrap replays after the owner it binds (#34425)', () => {
+  const OWNER_EMAIL = 'owner@bootstrap.test';
+  type Row = Record<string, unknown>;
+
+  function makeEngine(store: Record<string, Row[]>, options: { refuseMembers?: boolean } = {}) {
+    const middlewares: any[] = [];
+    const matches = (row: Row, where: Row | undefined): boolean =>
+      !where ||
+      Object.entries(where).every(([key, value]) => {
+        // ⛔ Refuse a combinator rather than reading it as a field name
+        // (`pnpm check:where-matcher`): exact-match keys only.
+        if (key.startsWith('$')) throw new Error(`fake engine: WHERE combinator \`${key}\` is not implemented`);
+        return value === null ? row[key] == null : row[key] === value;
+      });
+    const ql: any = {
+      registerMiddleware: (mw: any) => middlewares.push(mw),
+      getSchema: () => null,
+      find: vi.fn(async (object: string, query: any) => {
+        const rows = (store[object] ?? []).filter((r) => matches(r, query?.where));
+        return rows.slice(0, query?.limit ?? rows.length);
+      }),
+      insert: vi.fn(async (object: string, data: Row, opts?: { context?: Row }) => {
+        if (object === 'sys_member' && options.refuseMembers) throw new Error('member write refused');
+        (store[object] ??= []).push({ ...data });
+        // Each middleware awaits `next()` first, so running them after the
+        // store is the order the engine gives them.
+        const opCtx = { object, operation: 'insert', data, result: { ...data }, context: opts?.context };
+        for (const mw of middlewares) await mw(opCtx, async () => {});
+        return { ...data };
+      }),
+    };
+    return { ql, middlewares };
+  }
+
+  async function bootWalled(options: { refuseMembers?: boolean } = {}) {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    process.env.OS_PLATFORM_OWNER_EMAIL = OWNER_EMAIL;
+    resetPlatformAdminEmailMemo();
+    const store: Record<string, Row[]> = {};
+    const { ql } = makeEngine(store, options);
+    const replays: Array<{ args: unknown[]; membersAtReplay: Row[] }> = [];
+    const seedReplayer = vi.fn(async (...args: unknown[]) => {
+      replays.push({ args, membersAtReplay: [...(store.sys_member ?? [])] });
+      return { inserted: 1, updated: 0, skipped: 0, errors: [] };
+    });
+    const services: Record<string, unknown> = {
+      manifest: { register: vi.fn() },
+      objectql: ql,
+      settings: {
+        getNamespace: vi.fn(async () => ({ values: { membership_policy: { value: 'invite-only', source: 'env' } } })),
+      },
+      auth: { getMembershipPolicy: () => 'invite-only' },
+      'seed-datasets': [{ object: 'crm_account', records: [{ id: 'a1' }] }],
+      'seed-replayer': seedReplayer,
+    };
+    const ctx: any = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      registerService: (name: string, svc: unknown) => {
+        services[name] = svc;
+      },
+      getService: (name: string) => {
+        if (!(name in services)) throw new Error(`service not registered: ${name}`);
+        return services[name];
+      },
+      // No `kernel:ready` is fired: the owner's verified `sys_user` insert is
+      // the trigger, as on a walled boot.
+      hook: vi.fn(),
+    };
+    const plugin = new OrganizationsPlugin();
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    // The declared owner's verified account lands: a bootstrap trigger.
+    await ql.insert(
+      'sys_user',
+      { id: 'usr_owner', email: OWNER_EMAIL, email_verified: true, name: 'Owner', created_at: '2026-01-01' },
+      { context: { isSystem: true } },
+    );
+    return { store, replays };
+  }
+
+  const savedPosture = process.env.OS_TENANCY_POSTURE;
+  const savedOwner = process.env.OS_PLATFORM_OWNER_EMAIL;
+  afterEach(() => {
+    if (savedPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+    else process.env.OS_TENANCY_POSTURE = savedPosture;
+    if (savedOwner === undefined) delete process.env.OS_PLATFORM_OWNER_EMAIL;
+    else process.env.OS_PLATFORM_OWNER_EMAIL = savedOwner;
+    resetPlatformAdminEmailMemo();
+  });
+
+  it('replays the default organization once, inside the owner\'s member write, naming the owner', async () => {
+    const { store, replays } = await bootWalled();
+
+    const orgId = store.sys_organization?.[0]?.id;
+    expect(store.sys_organization?.map((o) => o.slug)).toEqual(['default']);
+    expect(replays.map((r) => r.args)).toEqual([[orgId, { userId: 'usr_owner' }]]);
+    // The owner's member row was stored before the replay read membership.
+    expect(replays[0]!.membersAtReplay.map((m) => [m.organization_id, m.user_id, m.role])).toEqual([
+      [orgId, 'usr_owner', 'owner'],
+    ]);
+  });
+
+  it('control: when the bootstrap binds nobody, the default organization still replays once, with no person', async () => {
+    const { store, replays } = await bootWalled({ refuseMembers: true });
+
+    const orgId = store.sys_organization?.[0]?.id;
+    expect(orgId).toBeTruthy();
+    expect(store.sys_member ?? []).toEqual([]);
+    expect(replays.map((r) => r.args)).toEqual([[orgId]]);
   });
 });

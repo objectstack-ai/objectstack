@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { SystemObjectName } from '@objectstack/spec/system';
+import { readOrganizationLocaleSetting } from '@objectstack/core';
 
 /**
  * The locale a seed load filters `Seed.locale` on, for ONE organization — the
@@ -132,12 +133,12 @@ export async function resolveSeedLocaleForLoad(
     const h = host as SeedLocaleHost | null | undefined;
     const organizationId = localeText(question.organizationId);
 
+    // Rung 1 is the organization-language reader's own rung 1
+    // (`@objectstack/core`'s `readOrganizationLocaleSetting`): one reading of
+    // "somebody set it", shared with the text a flow writes for the organization.
     const settings = serviceOf<SeedLocaleSettingsDoor>(h, 'settings');
-    if (settings && typeof settings.get === 'function') {
-        const resolved = await settings.get('localization', 'locale', organizationId ? { tenantId: organizationId } : {});
-        const value = localeText(resolved?.value);
-        if (value && resolved?.source !== 'default') return { locale: value, source: 'organization-setting' };
-    }
+    const setting = await readOrganizationLocaleSetting(settings, organizationId);
+    if (setting) return { locale: setting, source: 'organization-setting' };
 
     const userId = localeText(question.userId);
     const ql = serviceOf<SeedLocaleUserReader>(h, 'objectql');

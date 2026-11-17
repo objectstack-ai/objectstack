@@ -170,14 +170,18 @@ jobs:
           # warning by removing the input. ⛔ A refused mint fails this step with zero writes; no step here
           # ever mints an un-narrowed token instead.
           permission-repository-advisories: ${{ steps.validate.outputs.permission_repository_advisories }}
-          # ONE consumer: the `pr_enqueue_front` row — `enqueuePullRequest(jump: true)`, the front of a base's merge
-          # queue, which reorders every queued pull behind it ("Jump to the front of the queue" is a repository
-          # permission above write). Minted ONLY for a stroke carrying that op, which travels alone, the same way as
-          # `permission-actions`: the validator writes `permission_merge_queues=write` for it and an EMPTY value for
-          # every other stroke, so every other run's token is exactly what it was. The App installation must hold
-          # `Merge queues: write` (a maintainer's setting); without it this mint fails with zero writes. Whether
-          # GitHub honours the jump for an App token is NOT MEASURED until the first live stroke, whose read-back
-          # judges it (`scripts/pm/fleet-write/execute.mjs`, "The front-of-queue enqueue").
+          # TWO consumers, one at a time: the `pr_enqueue_front` row — `enqueuePullRequest(jump: true)`, the front
+          # of a base's merge queue, which reorders every queued pull behind it ("Jump to the front of the queue" is
+          # a repository permission above write) — and the `pr_dequeue` row — `dequeuePullRequest`, which takes one
+          # pull out of its base's queue. Each travels alone; the grant is minted ONLY for a stroke carrying one, the
+          # same way as `permission-actions`: the validator writes `permission_merge_queues=write` for it and an
+          # EMPTY value for every other stroke, so every other run's token is exactly what it was. The App
+          # installation must hold `Merge queues: write` (a maintainer's setting); without it this mint fails with
+          # zero writes. Whether GitHub honours the jump for an App token is NOT MEASURED until the first live
+          # stroke, whose read-back judges it (`scripts/pm/fleet-write/execute.mjs`, "The front-of-queue enqueue").
+          # Whether `dequeuePullRequest` needs this grant at all, or what a token without it answers, is
+          # NOT MEASURED either: the one live stroke carried the grant (`scripts/pm/fleet-write/ops.mjs`, "The one
+          # row that takes a pull OUT of the merge queue").
           permission-merge-queues: ${{ steps.validate.outputs.permission_merge_queues }}
 
       # The sender gate, then the actions in order, then the step summary —

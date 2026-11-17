@@ -653,3 +653,140 @@ describe('[#26950] a predicate update or delete hands recomputeSummaries its mat
     expect(storeFor('node').get(root.id).kids).toBe(0);
   });
 });
+
+// [#33795] A write recomputes each touched parent with ONE write carrying all
+// of its summary fields, and a batch computes each summary field for all of
+// its parents in ONE grouped aggregate. The SQL statement counts and the
+// per-dialect value parity are pinned on real drivers
+// (`packages/qa/dogfood/test/rollup-grouped-recompute-33795.test.ts`); these
+// pin what only the engine decides: how many parent writes and hook runs a
+// recompute makes, the fallback that keeps a self-referencing roll-up in
+// per-parent order, and how a failed write is reported.
+describe('[#33795] grouped roll-up recompute', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let log: ReturnType<typeof makeDriver>['log'];
+  let driver: any;
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    log = d.log;
+    driver = d.driver;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'region',
+      fields: {
+        name: { type: 'text' },
+        // A summary over a summary: the regions total their invoices' totals.
+        grand_total: { type: 'summary', summaryOperations: { object: 'inv', field: 'line_total', function: 'sum' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+      },
+    } as any);
+    // A roll-up over its own object: a task counts its direct subtasks.
+    engine.registry.registerObject({
+      name: 'task',
+      fields: {
+        name: { type: 'text' },
+        parent_task: { type: 'lookup', reference: 'task' },
+        subtask_count: { type: 'summary', summaryOperations: { object: 'task', function: 'count' } },
+      },
+    } as any);
+  });
+
+  /** The reads of `object`'s rows the recompute's aggregates made: the in-memory aggregate reads through `find`. */
+  const aggregateReads = (object: string, from: number) =>
+    log.slice(from).filter((e) => e.op === 'find' && e.object === object).length;
+
+  it('writes each parent once with all its summary fields, and aggregates each field once per batch', async () => {
+    const [a, b, c] = await engine.insert('inv', [{ name: 'A' }, { name: 'B' }, { name: 'C' }]) as any[];
+    const parentWrites: Array<Record<string, unknown>> = [];
+    engine.registerHook('beforeUpdate', async (ctx: any) => { parentWrites.push({ ...ctx.input.data }); }, { object: 'inv' });
+    const before = log.length;
+    await engine.insert('inv_line', [
+      { inv: a.id, amount: 1 }, { inv: b.id, amount: 2 }, { inv: c.id, amount: 3 },
+      { inv: a.id, amount: 4 }, { inv: b.id, amount: 5 }, { inv: c.id, amount: 6 },
+    ]);
+    // One hook run per parent (it was one per parent per field), each
+    // carrying both fields.
+    expect(parentWrites).toHaveLength(3);
+    for (const write of parentWrites) expect(Object.keys(write).sort()).toEqual(['id', 'line_count', 'line_total']);
+    // One aggregate per summary field over all three parents (it was one per
+    // parent per field: six).
+    expect(aggregateReads('inv_line', before)).toBe(2);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 5, line_count: 2 });
+    expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 7, line_count: 2 });
+    expect(storeFor('inv').get(c.id)).toMatchObject({ line_total: 9, line_count: 2 });
+  });
+
+  it('a single-row write asks the one-parent aggregate and writes the parent once', async () => {
+    const [a] = await engine.insert('inv', [{ name: 'A' }]) as any[];
+    let hookRuns = 0;
+    engine.registerHook('beforeUpdate', async () => { hookRuns += 1; }, { object: 'inv' });
+    const before = log.length;
+    await engine.insert('inv_line', { inv: a.id, amount: 10 });
+    expect(hookRuns).toBe(1);
+    const reads = log.slice(before).filter((e) => e.op === 'find' && e.object === 'inv_line');
+    expect(reads).toHaveLength(2);
+    // The one-parent aggregate's equality on the id, not a grouped `$in`.
+    for (const read of reads) expect(JSON.stringify(read.ast?.where)).toContain(`"inv":"${a.id}"`);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 10, line_count: 1 });
+  });
+
+  it('a summary over a summary still recomputes up the chain', async () => {
+    const [r] = await engine.insert('region', [{ name: 'R' }]) as any[];
+    const [a, b] = await engine.insert('inv', [{ name: 'A', region: r.id }, { name: 'B', region: r.id }]) as any[];
+    await engine.insert('inv_line', [{ inv: a.id, amount: 10 }, { inv: b.id, amount: 32 }, { inv: a.id, amount: 1 }]);
+    expect(storeFor('region').get(r.id).grand_total).toBe(43);
+    await engine.update('inv_line', { amount: 0 }, { where: { inv: a.id }, multi: true } as any);
+    expect(storeFor('region').get(r.id).grand_total).toBe(32);
+  });
+
+  it('a roll-up over its own object keeps the per-parent order, and lands the same values', async () => {
+    const [root] = await engine.insert('task', [{ name: 'root' }]) as any[];
+    const [mid] = await engine.insert('task', [{ name: 'mid', parent_task: root.id }]) as any[];
+    const before = log.length;
+    // One batch naming two parents, one of them (mid) a child of the other.
+    await engine.insert('task', [
+      { name: 'leaf 1', parent_task: mid.id }, { name: 'leaf 2', parent_task: mid.id }, { name: 'sibling', parent_task: root.id },
+    ]);
+    expect(storeFor('task').get(mid.id).subtask_count).toBe(2);
+    expect(storeFor('task').get(root.id).subtask_count).toBe(2);
+    // Per parent, never grouped: no aggregate in this batch read a `$in`.
+    const grouped = log.slice(before).filter((e) => e.op === 'find' && e.object === 'task' && JSON.stringify(e.ast?.where).includes('$in'));
+    expect(grouped).toHaveLength(0);
+  });
+
+  it('a failed parent write reports every field it carried; the other parents are still written', async () => {
+    const [a, b] = await engine.insert('inv', [{ name: 'A' }, { name: 'B' }]) as any[];
+    const update = driver.update;
+    driver.update = async (object: string, id: string, data: Record<string, unknown>) => {
+      if (object === 'inv' && id === a.id) throw new Error('parent write refused');
+      return update.call(driver, object, id, data);
+    };
+    let caught: any;
+    try {
+      await engine.insert('inv_line', [{ inv: a.id, amount: 1 }, { inv: b.id, amount: 2 }]);
+    } catch (e) { caught = e; }
+    expect(caught?.code).toBe('ERR_SUMMARY_RECOMPUTE');
+    expect(caught.failures.map((f: any) => [f.parentId, f.field]).sort()).toEqual([[a.id, 'line_count'], [a.id, 'line_total']]);
+    expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 2, line_count: 1 });
+  });
+});
