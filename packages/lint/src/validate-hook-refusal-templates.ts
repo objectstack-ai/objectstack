@@ -54,48 +54,66 @@ function paramsOf(entry: AnyRec): string[] {
   return Array.isArray(entry.params) ? entry.params.filter((p): p is string => typeof p === 'string') : [];
 }
 
+/** The subject a judged sentence belongs to, as a refusal names it. */
+type SentenceSubject = 'hook' | 'action';
+
 /** The refusal of an argument-less `currency` formatter in one hole, or `undefined`. */
-function currencyWithoutCode(holeText: string, inner: string, noun: 'hook' | 'action'): string | undefined {
+function currencyWithoutCode(holeText: string, inner: string, noun: SentenceSubject): string | undefined {
   const bar = inner.indexOf('|');
   if (bar === -1) return undefined;
   const formatter = inner.slice(bar + 1).trim();
   if (formatter !== 'currency') return undefined;
   const path = inner.slice(0, bar).trim() || 'amount';
   return (
-<<<<<<< HEAD
-    `\`${holeText}\` formats in the organization's default currency, which a hook sentence does not carry, so the `
-=======
-    `\`${holeText}\` formats in the organization's default currency, which a ${noun} refusal does not carry, so the `
->>>>>>> f0e42de65 (wip(runtime,lint): answer an action body's throw against its refusal catalogue)
+    `\`${holeText}\` formats in the organization's default currency, which a ${noun} sentence does not carry, so the `
     + 'sentence would be served with its braces. Name the code in the hole: '
     + `\`{{ ${path} | currency:EUR }}\`.`
   );
 }
 
-/** Every finding one refusal catalogue draws, each located at `owner` + the sentence's path. */
-function judgeCatalogue(issues: ExprIssue[], refusals: AnyRec, owner: string, noun: 'hook' | 'action'): void {
+/** One sentence to judge: its path under the declaration, and its text as written. */
+type Sentence = { path: string; text: unknown };
+
+/** The sentences of a refusal catalogue whose entry declares `params` — `message` and each `reasons[*].message`. */
+function refusalSentences(refusals: unknown): Sentence[] {
+  const sentences: Sentence[] = [];
+  if (!isRec(refusals)) return sentences;
   for (const [code, entry] of Object.entries(refusals)) {
-    if (!isRec(entry)) continue;
-    const params = paramsOf(entry);
-    if (params.length === 0) continue;
-    const sentences: Array<{ path: string; text: unknown }> = [{ path: `refusals.${code}.message`, text: entry.message }];
+    if (!isRec(entry) || paramsOf(entry).length === 0) continue;
+    sentences.push({ path: `refusals.${code}.message`, text: entry.message });
     if (isRec(entry.reasons)) {
       for (const [reason, sentence] of Object.entries(entry.reasons)) {
         sentences.push({ path: `refusals.${code}.reasons.${reason}.message`, text: isRec(sentence) ? sentence.message : undefined });
       }
     }
-    for (const { path, text } of sentences) {
-      if (typeof text !== 'string') continue;
-      const where = `${owner} ${path}`;
-      const refuse = (message: string, source: string): void => {
-        issues.push({ where, message, source, severity: 'error' });
-      };
-      for (const m of text.matchAll(HOLE)) {
-        const refusal = currencyWithoutCode(m[0], m[1]!, noun);
-        if (refusal !== undefined) refuse(refusal, m[0]);
-      }
-      for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
+  }
+  return sentences;
+}
+
+/** The sentences of a declared-text catalogue (#34374) whose entry declares `params`. */
+function textSentences(texts: unknown): Sentence[] {
+  const sentences: Sentence[] = [];
+  if (!isRec(texts)) return sentences;
+  for (const [key, entry] of Object.entries(texts)) {
+    if (!isRec(entry) || paramsOf(entry).length === 0) continue;
+    sentences.push({ path: `texts.${key}.message`, text: entry.message });
+  }
+  return sentences;
+}
+
+/** Every finding `sentences` draw, each located at `owner` + the sentence's path. */
+function judgeSentences(issues: ExprIssue[], owner: string, sentences: readonly Sentence[], noun: SentenceSubject): void {
+  for (const { path, text } of sentences) {
+    if (typeof text !== 'string') continue;
+    const where = `${owner} ${path}`;
+    const refuse = (message: string, source: string): void => {
+      issues.push({ where, message, source, severity: 'error' });
+    };
+    for (const m of text.matchAll(HOLE)) {
+      const refusal = currencyWithoutCode(m[0], m[1]!, noun);
+      if (refusal !== undefined) refuse(refusal, m[0]);
     }
+    for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
   }
 }
 
@@ -108,27 +126,7 @@ export function hookRefusalTemplateIssues(stack: AnyRec): ExprIssue[] {
   const issues: ExprIssue[] = [];
   for (const hook of recordsOf(stack.hooks)) {
     const hookName = typeof hook.name === 'string' ? hook.name : '?';
-<<<<<<< HEAD
-    const sentences: Array<{ path: string; text: unknown }> = [];
-    if (isRec(hook.refusals)) {
-      for (const [code, entry] of Object.entries(hook.refusals)) {
-        if (!isRec(entry) || paramsOf(entry).length === 0) continue;
-        sentences.push({ path: `refusals.${code}.message`, text: entry.message });
-        if (isRec(entry.reasons)) {
-          for (const [reason, sentence] of Object.entries(entry.reasons)) {
-            sentences.push({ path: `refusals.${code}.reasons.${reason}.message`, text: isRec(sentence) ? sentence.message : undefined });
-          }
-        }
-      }
-    }
-    if (isRec(hook.texts)) {
-      for (const [key, entry] of Object.entries(hook.texts)) {
-        if (!isRec(entry) || paramsOf(entry).length === 0) continue;
-        sentences.push({ path: `texts.${key}.message`, text: entry.message });
-      }
-=======
-    if (!isRec(hook.refusals)) continue;
-    judgeCatalogue(issues, hook.refusals, `hook '${hookName}'`, 'hook');
+    judgeSentences(issues, `hook '${hookName}'`, [...refusalSentences(hook.refusals), ...textSentences(hook.texts)], 'hook');
   }
   return issues;
 }
@@ -157,7 +155,7 @@ export function actionRefusalTemplateIssues(stack: AnyRec, scope: ActionRefusalT
     const key = `${bound}:${name}`;
     if (seen.has(key)) return;
     seen.add(key);
-    if (isRec(action.refusals)) judgeCatalogue(issues, action.refusals, `${owner} · action '${name}'`, 'action');
+    judgeSentences(issues, `${owner} · action '${name}'`, refusalSentences(action.refusals), 'action');
   };
   if (scope.actions) {
     for (const action of recordsOf(stack.actions)) judge('stack', action);
@@ -166,19 +164,6 @@ export function actionRefusalTemplateIssues(stack: AnyRec, scope: ActionRefusalT
     for (const object of recordsOf(stack.objects)) {
       const objectName = typeof object.name === 'string' ? object.name : undefined;
       for (const action of recordsOf(object.actions)) judge(`object '${objectName ?? '?'}'`, action, objectName);
->>>>>>> f0e42de65 (wip(runtime,lint): answer an action body's throw against its refusal catalogue)
-    }
-    for (const { path, text } of sentences) {
-      if (typeof text !== 'string') continue;
-      const where = `hook '${hookName}' ${path}`;
-      const refuse = (message: string, source: string): void => {
-        issues.push({ where, message, source, severity: 'error' });
-      };
-      for (const m of text.matchAll(HOLE)) {
-        const refusal = currencyWithoutCode(m[0], m[1]!);
-        if (refusal !== undefined) refuse(refusal, m[0]);
-      }
-      for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
     }
   }
   return issues;

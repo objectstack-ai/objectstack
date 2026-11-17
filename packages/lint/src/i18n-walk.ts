@@ -140,12 +140,9 @@
  *       (see `authorWarnedTranslationGroups`)
  *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message      (#33214)
-<<<<<<< HEAD
  *   hooks.<hook>.texts.<key>.message                           (#34374)
-=======
  *   objects.<object>._actions.<action>.refusals.<CODE>.message  (#34273; and
  *   globalActions.<action>.refusals.<CODE>.message, with `.reasons.<REASON>.message` under each)
->>>>>>> f0e42de65 (wip(runtime,lint): answer an action body's throw against its refusal catalogue)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
