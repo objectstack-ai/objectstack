@@ -67,15 +67,11 @@
  *   lane seat  the lane of the PR's card (`domain:*`) against the open seat
  *              posts: `seated`, `stood-down`, `absent`, `unknown`.
  *   L2 seat the L2 seats (`l2-review#N`, or `review#N`) against the same posts: `seated`
- *              (and which), `barred` (every seated one sits on this PR's own
- *              implementing or dispatching account — `lanes/l2-review.md` 独立性;
- *              a barred seat is never named; `area-lease.md` lets the maintainer's
- *              own word in that seat's L1 thread seat it anyway, a word this
- *              GitHub-only reader cannot see, so the bar stands here and the
- *              report says so once whenever any row bars a seat), `unjudged` (seated ones, but the
- *              card's comments could not be read, so the dispatching account
- *              is unknown and none is printed as free), `stood-down`,
- *              `absent`, `unknown` (roster unread).
+ *              (and which), `stood-down`, `absent`, `unknown` (roster unread).
+ *              ⛔ No account is read: independence is per session, never per
+ *              account (`lanes/l2-review.md` 独立性 — 「不限账号,派发账号亦可坐」),
+ *              so a seat on the PR's own implementing or dispatching account is
+ *              as seated as any other.
  *   status     `TAKE` (owed, nobody on it, a trigger holds), `WAIT` (owed,
  *              nobody on it, no trigger yet — the lane's own, a lane's live hold
  *              included), `HELD` (a live claim on this head), `DONE` (a record on
@@ -90,12 +86,12 @@
  *   taker      on a TAKE row, who takes it: the seat the hand-off names; else
  *              a seated L2 seat on the delta of a record it signed; else the
  *              lane seat (its next seat on duty when (c) holds), which reviews
- *              at the tier or writes the hand-off — a barred L2 seat is named
- *              beside it as barred, never as the taker. A row owed on the
+ *              at the tier or writes the hand-off. A row owed on the
  *              declaration face alone (`TIER_DEFAULT`) never names an L2 seat,
- *              a hand-off to one included. A bar this reader cannot see (every
- *              other seat able to review the head barred) reaches the L2 seat
- *              the one way it can read: a hand-off line naming it. ⛔ Never triage.
+ *              a hand-off to one included. A bar is a per-session fact this
+ *              reader never sees (every other seat able to review the head
+ *              barred): it reaches the L2 seat the one way this reader can read,
+ *              a hand-off line naming it. ⛔ Never triage.
  *
  * ## Report-only — the exit is 0 on every completed or incomplete read
  *
@@ -110,7 +106,7 @@
 import process from 'node:process';
 
 import { isEntrypoint } from '../invoked-as.mjs';
-import { CLAIM_COMMENT_MARKER, CONTRACT_REVIEW_HEADING_MARKER, contractReviewVerdictLines, latestMarkedComment, markerMatches, readSignatureLine } from './check-half-states.mjs';
+import { CONTRACT_REVIEW_HEADING_MARKER, contractReviewVerdictLines, latestMarkedComment, readSignatureLine } from './check-half-states.mjs';
 import { repoIdForSlug } from './check-governed-merges.mjs';
 import { GOVERNED_APPROVERS, recordAuthorTrusted, recordTrustedAuthors } from './check-governed-queue-guard.mjs';
 import { FLEET_BOT_LOGIN } from './check-handover.mjs';
@@ -306,50 +302,15 @@ export function laneSeatOf(cardLabels, seats) {
  * the same — `isL2ReviewLane`, the opener's two words) on the open seat posts. Each is named by the word its own post spells. Pure.
  * `seats` null means the roster could not be read. `seated` names every seated one, canonically.
  */
-export function reviewSeatsOf(seats, ownAccounts = new Set()) {
-  if (!Array.isArray(seats)) return { state: 'unknown', seated: [], barred: [] };
+export function reviewSeatsOf(seats) {
+  if (!Array.isArray(seats)) return { state: 'unknown', seated: [] };
   const rows = seats.filter((s) => isL2ReviewLane(s?.lane));
   const name = (s) => `${String(s.lane).trim().toLowerCase()}#${Number(s.seat) > 0 ? Number(s.seat) : 1}`;
-  const seatedRows = rows.filter((s) => s.status === 'seated');
-  // The card's comments could not be read: the dispatching account is unknown, so no seated seat is printed as free.
-  if (ownAccounts === null && seatedRows.length > 0) return { state: 'unjudged', seated: seatedRows.map(name).sort(), barred: [] };
-  // `lanes/l2-review.md` 独立性: an L2 seat never reviews a PR its own account dispatched or implemented —
-  // except one seated by the maintainer's own word in its L1 thread (`area-lease.md`). That word lives in
-  // a project thread, not on GitHub, so this reader cannot see it: it bars every same-account seat (erring toward
-  // over-barring, never waving a review through) and the report names the exception (AREA_LEASE_BAR_NOTE).
-  const isBarred = (s) => typeof s.account === 'string' && ownAccounts !== null && ownAccounts.has(s.account.toLowerCase());
-  const seated = seatedRows.filter((s) => !isBarred(s)).map(name).sort();
-  const barred = seatedRows.filter(isBarred).map(name).sort();
-  if (seated.length > 0) return { state: 'seated', seated, barred };
-  if (barred.length > 0) return { state: 'barred', seated: [], barred };
-  return { state: rows.length > 0 ? 'stood-down' : 'absent', seated: [], barred: [] };
-}
-
-/**
- * The accounts no L2 seat of which may take this PR (`lanes/l2-review.md` 独立性): the IMPLEMENTING
- * account — the login in the body's `claude-projects-attribution` line — and the DISPATCHING account —
- * the login signing each `Claim:` comment on the delivered card. Lowercased logins; an unreadable or
- * absent line names no account. `null` when the card's comments could not be read (`cardComments`
- * null beside a delivered card): the dispatching account is then UNJUDGED, not absent. Pure.
- */
-export function ownAccountsOf(pull) {
-  if (pull?.card !== null && pull?.card !== undefined && pull?.cardComments === null) return null;
-  const out = new Set();
-  const m = /claude-projects-attribution:\s*(\{[^\n]*?\})/.exec(String(pull?.body ?? ''));
-  if (m) {
-    try {
-      const login = JSON.parse(m[1])?.github_login;
-      if (typeof login === 'string' && login !== '') out.add(login.toLowerCase());
-    } catch {
-      // an unreadable attribution object names no account
-    }
-  }
-  for (const c of Array.isArray(pull?.cardComments) ? pull.cardComments : []) {
-    if (!markerMatches(CLAIM_COMMENT_MARKER, c?.body)) continue;
-    const account = readSignatureLine(c?.body)?.account;
-    if (typeof account === 'string' && account !== '') out.add(account.toLowerCase());
-  }
-  return out;
+  // `lanes/l2-review.md` 独立性: the pair is two SESSIONS, ⛔ never two accounts (ruling A on #33258) —
+  // a seat's account is not read, so one on the PR's own implementing or dispatching account is seated like any other.
+  const seated = rows.filter((s) => s.status === 'seated').map(name).sort();
+  if (seated.length > 0) return { state: 'seated', seated };
+  return { state: rows.length > 0 ? 'stood-down' : 'absent', seated: [] };
 }
 
 /**
@@ -373,7 +334,7 @@ export function owedReviewRow(pull, { now, seats, repo = DEFAULT_REPO }) {
   const claim = contractReviewClaims(pull.comments, head, { now });
   const hold = contractReviewHold(pull.comments, head, { now });
   const lane = laneSeatOf(pull.cardLabels, seats);
-  const review = reviewSeatsOf(seats, ownAccountsOf(pull));
+  const review = reviewSeatsOf(seats);
   const triggers = [];
   if (handoff.state === 'handed') triggers.push('(a) hand-off');
   if (owed.limbs.includes('label')) triggers.push('(a) label');
@@ -415,7 +376,6 @@ export function owedReviewRow(pull, { now, seats, repo = DEFAULT_REPO }) {
     laneSeat: lane.seat,
     reviewSeat: review.state,
     reviewSeats: review.seated,
-    reviewBarred: review.barred,
     status,
     trigger: status === 'TAKE' || status === 'WAIT' ? (triggers[0] ?? 'none yet') : null,
     taker: takerOf(status, handoff, lane, review, { limbs: owed.limbs, record }),
@@ -427,13 +387,13 @@ export function owedReviewRow(pull, { now, seats, repo = DEFAULT_REPO }) {
  * Who takes a TAKE row (null on every other status). Pure. The rule text (`contract-review.md`
  * 〈L2 归属与资格〉, `lanes/l2-review.md` 路由): the L2 seat is the FALLBACK, never the default taker.
  * It is named where a hand-off line on this head names it, and where the row is the delta of a
- * record it signed while it is seated and not barred (`lanes/l2-review.md`: the delta stays with the original L2
+ * record it signed while it is seated (`lanes/l2-review.md`: the delta stays with the original L2
  * reviewer). Every other TAKE row — the waiting label, (b) a full round, (c) the lane seat gone —
- * is the lane's, which reviews at the tier itself or writes the hand-off; a barred L2 seat is named
- * beside it as barred. A row owed on the declaration face alone (`TIER_DEFAULT`, SKILL.md
+ * is the lane's, which reviews at the tier itself or writes the hand-off. A row owed on the
+ * declaration face alone (`TIER_DEFAULT`, SKILL.md
  * 〈审核两级〉) never names an L2 seat, a hand-off to one included. ⛔ Never triage.
  */
-export function takerOf(status, handoff, lane, review = { state: 'unknown', seated: [], barred: [] }, { limbs = [], record = null } = {}) {
+export function takerOf(status, handoff, lane, review = { state: 'unknown', seated: [] }, { limbs = [], record = null } = {}) {
   if (status !== 'TAKE') return null;
   const seat = lane?.lane ? `the ${lane.lane} seat` : 'the lane seat';
   const laneGone = lane?.seat === 'stood-down' || lane?.seat === 'absent';
@@ -446,12 +406,9 @@ export function takerOf(status, handoff, lane, review = { state: 'unknown', seat
   }
   if (handedTo !== null) return handedTo;
   const signer = record?.state === 'stale' ? record.seat : null;
-  // Seated and judged free: an unread card thread (`unjudged`) leaves the record itself unjudged, so it never gets here.
+  // An unread card thread leaves the record itself `unjudged`, so no earlier-head signer is read and it never gets here.
   if (isL2(signer) && review?.state === 'seated' && review.seated.includes(signer)) return `${signer} (the delta of its own record ${record.id})`;
-  const barred = review?.barred ?? [];
-  return barred.length > 0
-    ? `${laneTaker} (${LANE_OWN_NOTE}; L2 seat ${barred.join(', ')} is on this PR's own account)`
-    : `${laneTaker} (${LANE_OWN_NOTE})`;
+  return `${laneTaker} (${LANE_OWN_NOTE})`;
 }
 
 /** What the lane seat does with a row it takes — the rule's 「车道达档自审或交接」. */
@@ -491,7 +448,7 @@ export function renderRow(row) {
     `claim ${claim}`,
     `hold ${holdText(row.hold)}`,
     `lane ${row.lane ?? '?'} ${row.laneSeat}`,
-    `L2 seat ${row.reviewSeat}${row.reviewSeats.length > 0 ? ` ${row.reviewSeats.join(',')}` : ''}${row.reviewBarred.length > 0 ? ` (barred ${row.reviewBarred.join(',')})` : ''}`,
+    `L2 seat ${row.reviewSeat}${row.reviewSeats.length > 0 ? ` ${row.reviewSeats.join(',')}` : ''}`,
   ];
   const tail = row.trigger === null ? '' : ` → ${row.trigger}${row.taker ? ` · take: ${row.taker}` : ''}`;
   const listed = row.hold.listed ? `  ⏳ HOLD ${holdAge(row.hold)} — list it in the triage round record` : '';
@@ -522,20 +479,6 @@ function holdText(hold) {
   return hold.state;
 }
 
-/**
- * The note every report carries beside a barred L2 seat. `area-lease.md` lets the maintainer's own word
- * in a L1 thread seat an L2 seat on the PR's own account; that word is not on GitHub, so this reader
- * keeps the seat barred and says what it cannot see. ⛔ Never a reading that frees the seat. Pure constant.
- */
-export const AREA_LEASE_BAR_NOTE = 'barred = an L2 seat on this PR\'s own account (`lanes/l2-review.md` 独立性). '
-  + 'Under area-lease mode (`area-lease.md`) the maintainer may seat one anyway by their own word in that seat\'s L1 thread; '
-  + 'this tool reads GitHub only and cannot see that word, so the seat stays barred here — read the L1 thread before taking it.';
-
-/** The report's notes, by what its rows show: the area-lease note once when any row bars an L2 seat. Pure. */
-export function reportNotes(rows) {
-  return (Array.isArray(rows) ? rows : []).some((r) => (r?.reviewBarred?.length ?? 0) > 0) ? [AREA_LEASE_BAR_NOTE] : [];
-}
-
 /** The printed report. Pure. */
 export function renderReport(rows, { repo, now, read, gaps }) {
   const count = (s) => rows.filter((r) => r.status === s).length;
@@ -553,8 +496,6 @@ export function renderReport(rows, { repo, now, read, gaps }) {
       ...listed.map((r) => `  - #${r.pr} held by ${r.hold.session} since ${r.hold.at ?? '?'} (${holdAge(r.hold)}) until ${r.hold.until}`),
     );
   }
-  const notes = reportNotes(rows);
-  if (notes.length > 0) lines.push('', ...notes.map((n) => `⚖️ ${n}`));
   if (gaps.length > 0) {
     lines.push('', `⚠️ sweep INCOMPLETE — ${gaps.length} read(s) failed; the rows above are not the whole answer:`, ...gaps.map((g) => `  - ${g}`));
   }
@@ -625,7 +566,7 @@ const USAGE = [
   '  names; else the L2 seat (`l2-review#N`) on the delta of its own record; else the lane seat, at',
   '  the tier or by a hand-off line — the L2 seat is the fallback, never the default; never triage.',
   `  --repo   the repository whose pulls are read (default ${DEFAULT_REPO}); --board, where the seat posts live`,
-  '  --now    the clock (default: now); --json prints the rows and the report\'s notes (the area-lease note when a seat is barred) as JSON',
+  '  --now    the clock (default: now); --json prints the rows as JSON',
   '  Report-only: reads through `gh api`, writes nothing, exits 0 on every read; 2 on a usage error.',
 ].join('\n');
 
@@ -644,7 +585,7 @@ export function main(argv, { get = ghApi, log = console.log, error = console.err
   const snapshot = readSnapshot({ repo: opts.repo, board: opts.board, get });
   const rows = owedReviewRows(snapshot, { now });
   const read = { pulls: snapshot.pulls.length, drafts: snapshot.pulls.filter((p) => p.draft === true).length };
-  if (opts.json) log(JSON.stringify({ repo: opts.repo, now: new Date(now).toISOString(), read, gaps: snapshot.gaps, notes: reportNotes(rows), rows }, null, 2));
+  if (opts.json) log(JSON.stringify({ repo: opts.repo, now: new Date(now).toISOString(), read, gaps: snapshot.gaps, rows }, null, 2));
   else for (const line of renderReport(rows, { repo: opts.repo, now, read, gaps: snapshot.gaps })) log(line);
   return EXIT_OK;
 }
@@ -667,7 +608,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 17 → 18: the L2 lane word `l2-review` beside its old spelling `review`, each seat named by the word its own post spells.
   // 18 → 24 (#34376): the L2 seat is the fallback — (b), (c) and the label are the lane's; the TIER_DEFAULT face never
   // names an L2 seat; an L2 seat takes the delta of its own record. The lane-joins-after-a-further-round case retired with the rule.
-  'the L2 seat is the fallback: named by a hand-off or on its own delta, never on (b), (c), the label or the TIER_DEFAULT face': 24,
+  // 24 → 18 (#34400, ruling A on #33258): the account bar is gone — its eight cases (S2, S4, the area-lease note, the
+  // own delta of a now-barred signer) retire with it; one case pins same account, different session ⇒ seated and named,
+  // and one keeps the unread-card-thread reading (the record unjudged, no own delta), which never needed the bar.
+  'the L2 seat is the fallback: named by a hand-off or on its own delta, never on (b), (c), the label or the TIER_DEFAULT face': 18,
   'a live claim holds the head and a record settles it; a lapsed claim holds nothing': 6,
   'the live instance: two Tier H drafts with a hand-off on the current head list as TAKE under (a)': 4,
   'the live read: every read through one reader; a failed read is INCOMPLETE, never clean': 6,
@@ -801,16 +745,11 @@ export function selfTest() {
   t('a record on THIS head is DONE — no taker at all, the signer\'s or anyone\'s', (() => { const r = rv({ comments: [signed(HEAD, MICKEY)] }); return r.status === 'DONE' && r.taker === null && r.record.seat === 'review#1'; })());
   const ATTR = '<!-- claude-projects-attribution: {"github_login":"OS-Support-AI"} -->\n_Requested by **Y**_\n\nPart of #25922\n\nClause-②: no\nMetadata-protocol: none';
   const CLAIMED = [{ id: 7, created_at: '2026-10-28T09:00:00Z', body: 'domain:skills#3 · os-zhuang · session_01Abcdefgh\n\nClaim: PM loop round 1 · 2026-10-28T09:00Z\nBranch: `claude/x`' }];
-  const OWN = [...SEATED, { lane: 'review', seat: 1, status: 'seated', account: 'os-support-ai' }];
-  const BARRED_TAKES = `the domain:ui seat (${LANE_OWN_NOTE}; L2 seat review#1 is on this PR's own account)`;
-  t('⭐ own accounts: the body\'s attribution login (lowercased) and the signer of each Claim: comment on the card; an unsigned or non-claim card comment, an unreadable attribution and no body name none', [...ownAccountsOf({ body: ATTR, card: 25922, cardComments: [...CLAIMED, { body: 'os-dev-report\n{}' }, { body: 'domain:ui#1 · os-ui · session_01Abcdefgh\n\nnote' }] })].sort().join() === 'os-support-ai,os-zhuang' && ownAccountsOf({ body: '<!-- claude-projects-attribution: {"github_login":} -->' }).size === 0 && ownAccountsOf({}).size === 0);
-  t('⭐ S2: the only seated L2 seat sits on the IMPLEMENTING account ⇒ barred, named beside the lane seat that takes — no triage', (() => { const r = rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN); return r.status === 'TAKE' && r.reviewSeat === 'barred' && r.reviewSeats.length === 0 && r.reviewBarred.join() === 'review#1' && r.taker === BARRED_TAKES && !/triage/.test(renderRow(r)) && renderRow(r).includes('L2 seat barred (barred review#1)'); })());
-  t('⭐ S2: an L2 seat on the DISPATCHING account (the card claim\'s signer) is barred too; an L2 seat on a third account is seated yet NOT the taker on a label row — the lane takes, the barred one named', (() => { const r = rv({ card: 25922, cardComments: CLAIMED, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, [...SEATED, { lane: 'review', seat: 1, status: 'seated', account: 'OS-Zhuang' }, { lane: 'review', seat: 2, status: 'seated', account: 'os-other' }]); const alone = rv({ card: 25922, cardComments: CLAIMED, headCommittedAt: twoRounds }, [...SEATED, { lane: 'review', seat: 1, status: 'seated', account: 'os-zhuang' }]); return r.reviewSeat === 'seated' && r.reviewSeats.join() === 'review#2' && r.reviewBarred.join() === 'review#1' && r.taker === BARRED_TAKES && alone.taker === BARRED_TAKES; })());
-  t('S2: the lane seat gone and the only L2 seat barred ⇒ the lane\'s next seat; an L2 seat with no account on its post is never barred — and is still not the taker without a hand-off', rv({ body: ATTR, headCommittedAt: fresh }, [{ lane: 'review', seat: 1, status: 'seated', account: 'os-support-ai' }]).taker === `the domain:ui seat next on duty (${LANE_OWN_NOTE}; L2 seat review#1 is on this PR's own account)` && (() => { const r = rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, [...SEATED, { lane: 'review', seat: 1, status: 'seated', account: null }]); return r.reviewSeat === 'seated' && r.taker === LANE_TAKES; })());
-  t('⛔ S2: the delta of its own record, the signer now barred ⇒ the lane, the bar named — never a barred seat as taker', rv({ body: ATTR, comments: [signed(HEAD2, MICKEY)] }, OWN).taker === BARRED_TAKES);
-  t('⭐ S4: the card\'s comments unreadable ⇒ own accounts null, the bar UNJUDGED: a label row is the lane\'s; and an earlier-head record cannot be read either (the card thread is part of the read), so no own delta names an L2 seat', (() => { const unread = { card: 25922, cardComments: null, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }; const r = rv(unread, OWN); const delta = rv({ card: 25922, cardComments: null, comments: [signed(HEAD2, MICKEY)] }, OWN); return ownAccountsOf({ card: 25922, cardComments: null }) === null && ownAccountsOf({ card: null, cardComments: [] }).size === 0 && r.reviewSeat === 'unjudged' && r.reviewSeats.join() === 'review#1' && r.reviewBarred.length === 0 && r.taker === LANE_TAKES && delta.record.state === 'unjudged' && delta.taker === LANE_TAKES && rv(unread, SEATED).reviewSeat === 'absent' && rv(unread, [...SEATED, { lane: 'review', seat: 1, status: 'paused' }]).reviewSeat === 'stood-down' && renderRow(r).includes('L2 seat unjudged review#1'); })());
-  t('S4: a readable but empty comment thread on the card, or no card at all, judges the bar — the attribution login alone bars', rv({ card: 25922, cardComments: [], body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN).reviewSeat === 'barred' && rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN).reviewSeat === 'barred');
-  t('⛔ area-lease: a same-account seat the maintainer may have seated in its L1 thread STAYS barred — that word is off GitHub — and the report names the exception once; no barred seat, no note', (() => { const barred = [rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN), { ...rv({ body: ATTR, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN), pr: 27137 }]; const free = [rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] })]; const report = (rows) => renderReport(rows, { repo: DEFAULT_REPO, now: NOW, read: { pulls: rows.length, drafts: rows.length }, gaps: [] }); const notes = report(barred).filter((l) => l.includes('area-lease.md')); return barred.every((r) => r.reviewSeat === 'barred' && r.reviewSeats.length === 0 && r.taker === BARRED_TAKES) && notes.length === 1 && notes[0] === `⚖️ ${AREA_LEASE_BAR_NOTE}` && reportNotes(barred).length === 1 && reportNotes(free).length === 0 && !report(free).some((l) => l.includes('area-lease.md')); })());
+  // Ruling A on #33258 (6917060639): independence is per SESSION — an L2 seat on the PR's own implementing account (the
+  // attribution login) and one on its dispatching account (the card claim's signer) are seated like any other.
+  const OWN = [...SEATED, { lane: 'review', seat: 1, status: 'seated', account: 'os-support-ai' }, { lane: 'review', seat: 2, status: 'seated', account: 'OS-Zhuang' }];
+  t('⭐ same account, different session ⇒ eligible: L2 seats on the PR\'s implementing and dispatching accounts are seated and named, nothing printed as barred, no note under the report; the label row stays the lane\'s, and the seat on the implementing account takes the delta of its own record', (() => { const r = rv({ body: ATTR, card: 25922, cardComments: CLAIMED, headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, OWN); const delta = rv({ body: ATTR, card: 25922, cardComments: CLAIMED, comments: [signed(HEAD2, MICKEY)] }, OWN); const report = renderReport([r, delta], { repo: DEFAULT_REPO, now: NOW, read: { pulls: 2, drafts: 0 }, gaps: [] }); return r.status === 'TAKE' && r.reviewSeat === 'seated' && r.reviewSeats.join() === 'review#1,review#2' && !('reviewBarred' in r) && r.taker === LANE_TAKES && delta.taker === 'review#1 (the delta of its own record 6911000001)' && !report.some((l) => /barred|area-lease|⚖️/.test(l)) && rv({ body: ATTR, headCommittedAt: fresh }, [{ lane: 'review', seat: 1, status: 'seated', account: 'os-support-ai' }]).taker === `the domain:ui seat next on duty (${LANE_OWN_NOTE})`; })());
+  t('⛔ an unreadable card thread leaves the record unjudged, so no own delta names an L2 seat — the lane takes; the seats still read seated, never a state of their own', (() => { const delta = rv({ card: 25922, cardComments: null, comments: [signed(HEAD2, MICKEY)] }, OWN); return delta.record.state === 'unjudged' && delta.taker === LANE_TAKES && delta.reviewSeat === 'seated' && delta.reviewSeats.join() === 'review#1,review#2'; })());
   t('the printed row carries the L2-seat reading and the taker', renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] })).includes(`L2 seat seated review#1,review#2 → (a) label · take: ${LANE_TAKES}`) && renderRow(rv({ headCommittedAt: fresh, labels: [{ name: WAITING_LABEL }] }, SEATED)).includes(`L2 seat absent → (a) label · take: ${LANE_TAKES}`));
 
   battery('a live claim holds the head and a record settles it; a lapsed claim holds nothing');
@@ -872,7 +811,7 @@ export function selfTest() {
   t('the header counts what was read and what is owed', printed[0].includes('2 open PR(s) read (1 draft)') && printed[0].includes('1 owe a contract review — 1 to take'));
   t('rows sort TAKE, WAIT, HELD, DONE, then by number', owedReviewRows({ pulls: [pull({ number: 3, comments: [recordRow(HEAD)] }), pull({ number: 2, headCommittedAt: '2026-10-28T12:59:00Z' }), pull({ number: 1, labels: [{ name: WAITING_LABEL }] })], seats: SEATED }, { now: NOW }).map((r) => `${r.status}${r.pr}`).join() === 'TAKE1,WAIT2,DONE3');
   const jsonOut = [];
-  t('--json prints the rows and the report\'s notes as one JSON document, still exit 0', main(['--repo', DEFAULT_REPO, '--json', '--now', '2026-10-28T13:00:00Z'], { get: fake(routes), log: (l) => jsonOut.push(l) }) === EXIT_OK && (() => { const doc = JSON.parse(jsonOut.join('\n')); return doc.rows[0].pr === 27136 && Array.isArray(doc.notes) && JSON.stringify(doc.notes) === JSON.stringify(reportNotes(doc.rows)); })());
+  t('--json prints the rows as one JSON document, still exit 0', main(['--repo', DEFAULT_REPO, '--json', '--now', '2026-10-28T13:00:00Z'], { get: fake(routes), log: (l) => jsonOut.push(l) }) === EXIT_OK && (() => { const doc = JSON.parse(jsonOut.join('\n')); return doc.rows[0].pr === 27136 && !('notes' in doc) && !('reviewBarred' in doc.rows[0]); })());
   t('a usage error exits 2 and prints the usage', main(['--bogus'], { get: fake({}), log: () => {}, error: () => {} }) === EXIT_USAGE);
 
   battery('the hold: a live hold on this head holds (b) alone, (a) and (c) still fire; a new head clears it; at 24 hours it is listed, still WAIT');

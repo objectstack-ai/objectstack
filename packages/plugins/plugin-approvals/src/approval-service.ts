@@ -130,6 +130,7 @@ import {
 } from './submitter-exclusion-note.js';
 import {
   localizeRequestLabels,
+  negotiatedReaderLocale,
   readerLabelsFor,
   type ReaderLabelI18n,
   type ReaderLabels,
@@ -2631,7 +2632,20 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       // the caller's locale without it.
       translate = undefined;
     }
-    return renderOperationMessage({ messageKey }, { locale: context?.locale, translate });
+    // [#34454] The override is asked with the NEGOTIATED tag, the way
+    // objectql's catalog callers ask (`negotiatedMessageLocale`): the i18n
+    // service matches tags exactly, so a bare `zh` caller asked as written
+    // skips a deployment's zh-CN `errors.approval_recall_not_submitter`.
+    // Negotiated against the same service the translator reads; without one
+    // (or one that cannot list its locales) the tag passes through.
+    let service: ReaderLabelI18n | undefined;
+    try {
+      service = this.i18nServiceSource?.();
+    } catch {
+      service = undefined;
+    }
+    const locale = negotiatedReaderLocale(service, context?.locale);
+    return renderOperationMessage({ messageKey }, { locale, translate });
   }
 
   /**

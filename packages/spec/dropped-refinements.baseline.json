@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 267,
-    "droppedRefinementSites": 1096,
+    "droppedRefinementSites": 1120,
     "refinementSitesThatDidProject": 728,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -105,6 +105,8 @@
         "manifest.actions.element.in.ai.outputSchema",
         "manifest.actions.element.in.onSuccess",
         "manifest.actions.element.in.params.element.in",
+        "manifest.actions.element.in.preflight.fields.element",
+        "manifest.actions.element.in.resultDialog.fields.element",
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.analyticsCubes.element.measures.valueType",
@@ -288,6 +290,8 @@
         "data.options[1].manifest.actions.element.in.ai.outputSchema",
         "data.options[1].manifest.actions.element.in.onSuccess",
         "data.options[1].manifest.actions.element.in.params.element.in",
+        "data.options[1].manifest.actions.element.in.preflight.fields.element",
+        "data.options[1].manifest.actions.element.in.resultDialog.fields.element",
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -439,6 +443,8 @@
         "options[1].manifest.actions.element.in.ai.outputSchema",
         "options[1].manifest.actions.element.in.onSuccess",
         "options[1].manifest.actions.element.in.params.element.in",
+        "options[1].manifest.actions.element.in.preflight.fields.element",
+        "options[1].manifest.actions.element.in.resultDialog.fields.element",
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -529,6 +535,8 @@
         "data.packages.element.options[1].manifest.actions.element.in.ai.outputSchema",
         "data.packages.element.options[1].manifest.actions.element.in.onSuccess",
         "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
+        "data.packages.element.options[1].manifest.actions.element.in.preflight.fields.element",
+        "data.packages.element.options[1].manifest.actions.element.in.resultDialog.fields.element",
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -616,7 +624,9 @@
         "data.actions.element.in",
         "data.actions.element.in.ai.outputSchema",
         "data.actions.element.in.onSuccess",
-        "data.actions.element.in.params.element.in"
+        "data.actions.element.in.params.element.in",
+        "data.actions.element.in.preflight.fields.element",
+        "data.actions.element.in.resultDialog.fields.element"
       ]
     },
     "api/ObjectDefinitionResponse": {
@@ -626,6 +636,8 @@
         "data.actions.element.in.ai.outputSchema",
         "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
+        "data.actions.element.in.preflight.fields.element",
+        "data.actions.element.in.resultDialog.fields.element",
         "data.defaultRowScope",
         "data.fieldGroups",
         "data.fields.out.valueType",
@@ -1135,6 +1147,8 @@
         "actions.element.in.ai.outputSchema",
         "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
+        "actions.element.in.preflight.fields.element",
+        "actions.element.in.resultDialog.fields.element",
         "defaultRowScope",
         "fieldGroups",
         "fields.out.valueType",
@@ -1374,7 +1388,9 @@
         "actions.element.in",
         "actions.element.in.ai.outputSchema",
         "actions.element.in.onSuccess",
-        "actions.element.in.params.element.in"
+        "actions.element.in.params.element.in",
+        "actions.element.in.preflight.fields.element",
+        "actions.element.in.resultDialog.fields.element"
       ]
     },
     "kernel/OpsDomainModule": {
@@ -1498,6 +1514,8 @@
         "operations.element.options[3].object.actions.element.in.ai.outputSchema",
         "operations.element.options[3].object.actions.element.in.onSuccess",
         "operations.element.options[3].object.actions.element.in.params.element.in",
+        "operations.element.options[3].object.actions.element.in.preflight.fields.element",
+        "operations.element.options[3].object.actions.element.in.resultDialog.fields.element",
         "operations.element.options[3].object.defaultRowScope",
         "operations.element.options[3].object.fieldGroups",
         "operations.element.options[3].object.fields.out.valueType",
@@ -1522,6 +1540,8 @@
         "object.actions.element.in.ai.outputSchema",
         "object.actions.element.in.onSuccess",
         "object.actions.element.in.params.element.in",
+        "object.actions.element.in.preflight.fields.element",
+        "object.actions.element.in.resultDialog.fields.element",
         "object.defaultRowScope",
         "object.fieldGroups",
         "object.fields.out.valueType",
@@ -1578,6 +1598,8 @@
         "options[3].object.actions.element.in.ai.outputSchema",
         "options[3].object.actions.element.in.onSuccess",
         "options[3].object.actions.element.in.params.element.in",
+        "options[3].object.actions.element.in.preflight.fields.element",
+        "options[3].object.actions.element.in.resultDialog.fields.element",
         "options[3].object.defaultRowScope",
         "options[3].object.fieldGroups",
         "options[3].object.fields.out.valueType",
@@ -1713,7 +1735,9 @@
         "in",
         "in.ai.outputSchema",
         "in.onSuccess",
-        "in.params.element.in"
+        "in.params.element.in",
+        "in.preflight.fields.element",
+        "in.resultDialog.fields.element"
       ]
     },
     "ui/ActionAi": {

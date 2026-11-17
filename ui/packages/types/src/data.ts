@@ -147,7 +147,12 @@ export interface QueryParams {
   $searchFields?: string[];
 
   /**
-   * Total count of records (for pagination)
+   * Total count of records (for pagination).
+   *
+   * The total is reported by default; `false` declines it. A surface that
+   * never draws a record count sends `false`, the server then skips the
+   * `count(*)` it runs beside every paged read, and `QueryResult.total` is
+   * absent.
    */
   $count?: boolean;
 }

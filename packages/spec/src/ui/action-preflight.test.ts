@@ -163,7 +163,7 @@ describe('refusal 3 — a credential-shaped or unknown key', () => {
     const alias = issuesAt(withPreflight({ fields: [{ key: 'findings' }] }), 'preflight.fields.0');
     expect(alias.map((i) => i.code)).toEqual(['unrecognized_keys']);
     expect(alias[0].message).toContain('path');
-    const format = issuesAt(withPreflight({ fields: [{ path: 'findings', format: 'table' }] }), 'preflight.fields.0.format');
+    const format = issuesAt(withPreflight({ fields: [{ path: 'findings', format: 'chart' }] }), 'preflight.fields.0.format');
     expect(format.map((i) => i.code)).toEqual(['invalid_value']);
   });
 
