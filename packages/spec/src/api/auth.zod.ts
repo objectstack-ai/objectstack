@@ -211,7 +211,9 @@ export const MePermissionsAuthenticatedResponseSchema = lazySchema(() => z.objec
     + 'organization or of an installed package routes the object\'s new records into a queue. Resolved server-side '
     + 'through the ownership-queue service and listed only for objects the caller may read, except on the degraded '
     + 'body, where no object permissions resolved and the list is not narrowed; no queue names and no counts are '
-    + 'disclosed. Empty when `hasAnyQueue` is false, for a person outside every organization, when the '
+    + 'disclosed. Empty when `hasAnyQueue` is false, for a person outside every organization, for a caller with '
+    + 'no active organization on a deployment that walls organizations apart (`isolated` or `group`; under '
+    + '`single` that caller is answered environment-wide), when the '
     + 'ownership-queue service is not registered '
     + 'or cannot answer, and on the closed body. Read once per session, so a record that starts sitting in a queue '
     + 'later shows here from the next read on.',

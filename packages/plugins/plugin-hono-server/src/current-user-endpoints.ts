@@ -50,6 +50,8 @@ import {
     resolveRequestExecutionContext,
     rethrowAuthzStoreUnavailable,
     isOutsideEveryOrganization,
+    effectiveTenancyPosture,
+    type TenancyPostureSource,
     type ApiExposureSchemaLike,
     type ManagedSchemaLike,
     type RequestAuthService,
@@ -57,6 +59,7 @@ import {
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { MePermissionsAuthenticatedResponse } from '@objectstack/spec/api';
 import { preferredLocaleFromHeader, resolveLocaleAmong } from '@objectstack/spec/system';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import {
     OWNERSHIP_QUEUE_SERVICE,
     type IMetadataService,
@@ -419,6 +422,13 @@ async function organizationHasAnyQueue(
  * posture (ADR-0093 D8.1, as amended), so naming an object would disclose
  * other organizations' queues. A context that carries no membership set at all
  * is not judged by that rule and reads as before.
+ *
+ * Under a walled posture (`isolated`, `group`) any caller with no active
+ * organization is answered `[]` too, and the service is never asked with
+ * `null`: the environment-wide read would cross the wall the posture states
+ * (seat ruling on #34602). Under `single`, or with no `tenancy` service (the
+ * same deployment shape), the no-organization read stays environment-wide.
+ * See {@link tenancyWallStands}.
  */
 async function organizationObjectsUsingQueues(
     ctx: CurrentUserEndpointsContext,
@@ -428,6 +438,7 @@ async function organizationObjectsUsingQueues(
 ): Promise<string[]> {
     if (!hasAnyQueue) return [];
     if (isOutsideEveryOrganization(execCtx)) return [];
+    if (organizationId === null && tenancyWallStands(ctx)) return [];
     try {
         const service = (() => {
             try { return ctx.getService<Partial<AnyQueueReader>>(OWNERSHIP_QUEUE_SERVICE) ?? null; }
@@ -443,6 +454,27 @@ async function organizationObjectsUsingQueues(
             err: err?.message,
         });
         return [];
+    }
+}
+
+/**
+ * [#34602] Does the deployment's effective tenancy posture wall organizations
+ * apart (`isolated` or `group`)? Read from the kernel's `tenancy` service the
+ * way every walled door reads it (`effectiveTenancyPosture`). No service is the
+ * `single` shape: `false`. A service that cannot answer is no posture decided,
+ * and for a disclosure that is the walled answer: `true`, logged.
+ */
+function tenancyWallStands(ctx: CurrentUserEndpointsContext): boolean {
+    let tenancy: TenancyPostureSource | undefined;
+    try { tenancy = ctx.getService<TenancyPostureSource>('tenancy') ?? undefined; } catch { return false; }
+    try {
+        const posture = effectiveTenancyPosture(tenancy);
+        return posture !== undefined && postureEnforcesWall(posture);
+    } catch (err: any) {
+        ctx.logger?.warn?.('[hono] /auth/me/permissions: the tenancy posture could not be read — objectsUsingQueues answers [] with no active organization', {
+            err: err?.message,
+        });
+        return true;
     }
 }
 

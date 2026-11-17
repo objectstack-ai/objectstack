@@ -80,13 +80,15 @@ function mount(
     {
         security = true, signedIn = true, mergeThrows = false,
         objects = {}, objectsUsingQueues: objectsSlot = { kind: 'answers', value: [] },
-        member = true, activeOrganization = ACTIVE_ORG,
+        member = true, activeOrganization = ACTIVE_ORG, tenancy,
     }: {
         security?: boolean; signedIn?: boolean; mergeThrows?: boolean;
         /** [#34602] false: the person holds no membership row, so the resolver's set is empty. */
         member?: boolean;
         /** [#34602] The session's claimed organization; null = none active. */
         activeOrganization?: string | null;
+        /** [#34602] The kernel's `tenancy` service; absent = the `single` shape. */
+        tenancy?: Record<string, unknown>;
         /** The member set's object grants, merged by the real `buildEffectiveObjectPermissions`. */
         objects?: Record<string, Row>;
         objectsUsingQueues?: ObjectsSlot;
@@ -113,6 +115,7 @@ function mount(
             : { ...ql, find: async (object: string, opts: any) => (object === 'sys_member' ? [] : ql.find(object, opts)) },
         metadata: { list: async () => [] as unknown[] },
     };
+    if (tenancy) services.tenancy = tenancy;
     if (security) {
         services.security = {
             resolvePermissionSetsForContext: async () => (mergeThrows
@@ -300,15 +303,53 @@ describe('[#34602] /auth/me/permissions carries objectsUsingQueues, narrowed to 
         expect(body.hasAnyQueue).toBe(true);
     });
 
-    it('a member with no active organization is not outside every organization, and reads as before', async () => {
+    it.each(['isolated', 'group'])('under %s, a member with no active organization is answered [] and the service is never asked with null', async (posture) => {
         const { app, objectsUsingQueues } = mount(
             { kind: 'answers', value: true },
-            { activeOrganization: null, objects: READABLE, objectsUsingQueues: { kind: 'answers', value: ['crm_case', 'crm_secret'] } },
+            { activeOrganization: null, tenancy: { posture }, objects: READABLE, objectsUsingQueues: { kind: 'answers', value: ['crm_case'] } },
+        );
+        const body = await read(app);
+        expect(body.tenantId).toBeNull();
+        expect(body.objectsUsingQueues).toEqual([]);
+        expect(objectsUsingQueues).not.toHaveBeenCalled();
+        // `hasAnyQueue` keeps its #28508 behaviour in this change.
+        expect(body.hasAnyQueue).toBe(true);
+    });
+
+    it.each([
+        ['under single', { posture: 'single' }],
+        ['with no tenancy service (the single shape)', undefined],
+    ])('%s, a member with no active organization keeps the environment-wide read', async (_label, tenancy) => {
+        const { app, objectsUsingQueues } = mount(
+            { kind: 'answers', value: true },
+            { activeOrganization: null, tenancy, objects: READABLE, objectsUsingQueues: { kind: 'answers', value: ['crm_case', 'crm_secret'] } },
         );
         const body = await read(app);
         expect(body.tenantId).toBeNull();
         expect(objectsUsingQueues).toHaveBeenCalledWith(null);
         expect(body.objectsUsingQueues).toEqual(['crm_case']);
+    });
+
+    it('under a walled posture, a member WITH an active organization is asked for it as before', async () => {
+        const { app, objectsUsingQueues } = mount(
+            { kind: 'answers', value: true },
+            { tenancy: { posture: 'isolated' }, objects: READABLE, objectsUsingQueues: { kind: 'answers', value: ['crm_case'] } },
+        );
+        expect((await read(app)).objectsUsingQueues).toEqual(['crm_case']);
+        expect(objectsUsingQueues).toHaveBeenCalledWith(ACTIVE_ORG);
+    });
+
+    it('a tenancy service that cannot answer its posture is no posture decided: [] with no active organization, logged', async () => {
+        const tenancy = { get posture(): string { throw new Error('tenancy store down'); } };
+        const { app, objectsUsingQueues, warn } = mount(
+            { kind: 'answers', value: true },
+            { activeOrganization: null, tenancy, objects: READABLE, objectsUsingQueues: { kind: 'answers', value: ['crm_case'] } },
+        );
+        expect((await read(app)).objectsUsingQueues).toEqual([]);
+        expect(objectsUsingQueues).not.toHaveBeenCalled();
+        expect(warn.mock.calls.map(([line]) => line)).toContain(
+            '[hono] /auth/me/permissions: the tenancy posture could not be read — objectsUsingQueues answers [] with no active organization',
+        );
     });
 
     it('the closed body of the outer catch carries []', async () => {
