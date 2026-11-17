@@ -36,7 +36,7 @@
 - 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;exit 1 排所列 PR 后,3 补前提重跑。
 - 认领照 `execution-duties.md` 派发原子对,同笔加 `lease:<区>`;`Branch:` 照 AGENTS.md 命名。
 - 认领后回读标签(SKILL.md 标签写四步):缺 `lease:` 或 `pm:dispatched` 即重挂;首推即开 draft PR。
-- 写码前照 `dispatch-runbook.md` 派发前置核前提;开线程请求交席位攒批(`coordinator.md` 三)。
+- 认领前照 `dispatch-runbook.md` 派发前置核前提;开线程请求交席位攒批(`coordinator.md` 三)。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
 - 同系列卡可从前卡分支起步(AGENTS.md §2 主干形,⛔ 不叠 PR);新测试建按卡命名的新文件,
   AGENTS.md 共享 harness 规则适用时除外,由重叠检查定排队。
