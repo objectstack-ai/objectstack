@@ -1754,6 +1754,7 @@ export type Iso_ui_view__ListMapConfigSchema = Assert<Eq< z.input< typeof M167.L
 export type Iso_ui_view__NavigationModeSchema = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
 export type Iso_ui_view__RowColorConfigSchema = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.infer< typeof M167.RowColorConfigSchema > >>;
 export type Iso_ui_view__RowHeightSchema = Assert<Eq< z.input< typeof M167.RowHeightSchema >, z.infer< typeof M167.RowHeightSchema > >>;
+export type Iso_ui_view__TimesheetConfigSchema = Assert<Eq< z.input< typeof M167.TimesheetConfigSchema >, z.infer< typeof M167.TimesheetConfigSchema > >>;
 export type Iso_ui_view__TreeConfigSchema = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
 export type Iso_ui_view__UserFilterFieldSchema = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
 export type Iso_ui_view__ViewItemNameSchema = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;

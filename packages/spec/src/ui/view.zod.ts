@@ -2783,6 +2783,35 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * Timesheet (weekly entry grid) Settings
+ *
+ * Pivots the view's records into an editable row × weekday grid: one row per
+ * distinct `rowFields` value tuple, one column per day of the displayed week,
+ * and in each cell the `valueField` of the one record that row and day hold.
+ * Typing a value creates or updates that record, clearing the cell deletes it,
+ * and every write goes through the ordinary record door, so hooks, validation
+ * and permissions judge each cell on its own. Row, day and week totals are
+ * always shown. A cell that holds two or more records shows their sum and is
+ * read-only, because one typed value could not say which record it changes.
+ *
+ * The week follows the viewer's locale for its first day; there is no period
+ * key, because a week is the only window the renderer draws. Every key is
+ * required: an unbound timesheet has nothing to pivot, and the renderer
+ * refuses it with a "Timesheet configuration required" screen.
+ */
+export const TimesheetConfigSchema = lazySchema(() => strictObject({
+  surface: 'this timesheet configuration',
+  history: VIEW_HISTORY,
+}, {
+  rowFields: z.array(z.string()).min(1).max(3)
+    .describe('One to three fields whose values key a row (e.g. ["project", "task"]); a record\'s values for these fields place it on its row, and a new row\'s values are written onto each record it creates'),
+  dateField: z.string()
+    .describe('Date field placing a record on a day column; the renderer fetches only the records whose value falls in the displayed week'),
+  valueField: z.string()
+    .describe('Numeric field (number, currency or percent) a cell shows and edits; row, day and week totals sum it'),
+}));
+
+/**
  * Map View Settings
  *
  * Configures the geospatial (`type: 'map'`) list view: which fields provide
@@ -3344,7 +3373,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     'gantt',      // Project Timeline
     'map',        // Geospatial
     'chart',      // Aggregate visualisation
-    'tree'        // Self-referencing hierarchy (tree-grid)
+    'tree',       // Self-referencing hierarchy (tree-grid)
+    'timesheet'   // Editable row × weekday entry grid
   ], {
     error: (issue) => (issue.input === 'page' ? LIST_VIEW_TYPE_PAGE_RETIRED : undefined),
   }).default('grid'),
@@ -3487,6 +3517,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     .describe('Chart binding — applies when the view renders as a chart. A `type: \'chart\'` view must bind one: it names the ADR-0021 `dataset` and the measures (`values`) the chart plots, and there is no default binding'),
   map: ListMapConfigSchema.optional().describe('Map configuration — applies when the view renders as a map layout'),
   tree: TreeConfigSchema.optional().describe('Tree/hierarchy configuration — applies when the view renders as a tree layout'),
+  timesheet: TimesheetConfigSchema.optional().describe('Timesheet binding — applies when the view renders as a timesheet. A `type: \'timesheet\'` view must bind one: the row fields, the date field and the numeric value field the weekly grid pivots and edits'),
 
   /**
    * [#17063] REMOVED — the `type: 'page'` mount this key named was never
@@ -8227,4 +8258,5 @@ export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;
+export type TimesheetConfig = z.input<typeof TimesheetConfigSchema>;
 export type ViewItemName = z.input<typeof ViewItemNameSchema>;
