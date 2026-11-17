@@ -25,7 +25,9 @@
  * draft definition, never fillable (`@object-ui/plugin-form` maps the marker
  * onto the field's `disabled`, in `ObjectForm` and in `fromObjectSchema`). As
  * the safety net, the proxy's `create` / `update` leave its name out of the
- * record they send, so its declared default is never written either.
+ * record they send, so its declared default is never written either. Its
+ * `required` / `requiredWhen` are dropped from the marked copy: a disabled
+ * control the form still requires would make every save refuse.
  * ⛔ Not `readonly: true`: `filterSystemFields` in `@object-ui/plugin-form`
  * drops such a field before render, on create and edit alike, and a create
  * form does not evaluate `readonlyWhen` — either would hide the very field
@@ -74,7 +76,9 @@ export function draftOnlyFieldNames(schema: unknown): string[] {
 /**
  * The object definition a draft-preview reader draws: a copy of the published
  * document, plus each field only the draft overlay declares, with its draft
- * definition, marked {@link DRAFT_ONLY_FIELD_KEY}. Fields the
+ * definition, marked {@link DRAFT_ONLY_FIELD_KEY} and without `required` /
+ * `requiredWhen`: the form draws it disabled, so a requirement would refuse
+ * the save over a field the viewer cannot fill. Fields the
  * published document declares keep their published definition, so what the
  * form validates and writes is what the data door accepts. The published
  * copy keeps the adapter's per-column sortability projection, which a spread
@@ -89,7 +93,8 @@ export function withDraftOnlyFields(published: unknown, overlay: unknown): unkno
   const fields: Record<string, Record<string, unknown>> = { ...publishedFields };
   for (const [name, def] of Object.entries(overlay.fields)) {
     if (Object.prototype.hasOwnProperty.call(publishedFields, name)) continue;
-    fields[name] = { ...def, [DRAFT_ONLY_FIELD_KEY]: true };
+    const { required: _required, requiredWhen: _requiredWhen, ...drawn } = def;
+    fields[name] = { ...drawn, [DRAFT_ONLY_FIELD_KEY]: true };
   }
   return attachObjectSortability({ ...base, fields }, readObjectSortability(published));
 }
