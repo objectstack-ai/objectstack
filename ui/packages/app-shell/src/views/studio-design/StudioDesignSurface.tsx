@@ -60,6 +60,8 @@ import {
   STUDIO_HEADER,
   STUDIO_HEADER_ICON_BUTTON,
   STUDIO_HEADER_PACKAGE_COLUMN,
+  STUDIO_HEADER_PILLAR_NAME,
+  STUDIO_HEADER_WIDE_WORD,
   STUDIO_HEADER_PILLAR,
   STUDIO_HEADER_PILLAR_NAV,
   STUDIO_KIND_CHIP,
@@ -1672,8 +1674,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                       pillars read as icons, the name kept in the accessible
                       name and the tooltip. objectstack#28561 — the "All
                       metadata" area is named from 1280 px: the top bar's
-                      1024 px row was sized for the four pillar names. */}
-                  <span className={p.key === STUDIO_METADATA_AREA ? 'sr-only xl:not-sr-only' : 'sr-only lg:not-sr-only'}>
+                      1024 px row was sized for the four pillar names.
+                      objectstack#34725 — both now answer the bar's own width
+                      (see STUDIO_HEADER_PILLAR_NAME). */}
+                  <span className={p.key === STUDIO_METADATA_AREA ? STUDIO_HEADER_WIDE_WORD : STUDIO_HEADER_PILLAR_NAME}>
                     {t(`engine.studio.pillar.${p.key}`, locale)}
                   </span>
                 </Link>
@@ -1705,7 +1709,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  <span className="sr-only xl:not-sr-only">{t('engine.studio.app.create', locale)}</span>
+                  <span className={STUDIO_HEADER_WIDE_WORD}>{t('engine.studio.app.create', locale)}</span>
                 </button>
               )}
               {/* objectui#12459 — the pending count is a pill, not "· N" text. */}

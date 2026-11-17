@@ -88,6 +88,7 @@ vi.mock('./StudioAiCopilot', () => ({
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { STUDIO_HEADER_PILLAR_NAME, STUDIO_HEADER_WIDE_WORD } from './studio-tokens';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -343,20 +344,27 @@ describe('Studio right slot: properties OR the copilot (objectui#12725)', () => 
     expect(within(sheet).getByTestId('if-definition-json')).toHaveTextContent('"name": "sales_overview"');
   });
 
-  it('the pillar names are visible from 1024 px (lg), icons below', async () => {
+  // objectstack#34725 — the names answer the top bar's own width, not the
+  // viewport's: the slot beside it is resizable, and a viewport breakpoint
+  // kept the names on while pushing the robot under the slot (en, 1163 px
+  // window, slot dragged to 520 px). The thresholds are the bar widths the old
+  // breakpoints gave beside the old fixed slot.
+  it('the pillar names show from a 724 px top bar, icons below; the area from 920 px', async () => {
     await openDashboard();
+    expect(screen.getByTestId('studio-shell-header')).toHaveClass('@container/studio-header');
     const links = within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link');
     // The four pillars, then (objectstack#28561) the "All metadata" area.
     expect(links).toHaveLength(5);
+    expect(STUDIO_HEADER_PILLAR_NAME).toBe('sr-only @min-[724px]/studio-header:not-sr-only');
+    expect(STUDIO_HEADER_WIDE_WORD).toBe('sr-only @min-[920px]/studio-header:not-sr-only');
     for (const link of links.slice(0, 4)) {
       const name = link.querySelector('span') as HTMLElement;
-      expect(name).toHaveClass('sr-only', 'lg:not-sr-only');
-      expect(name).not.toHaveClass('xl:not-sr-only');
+      expect(name).toHaveClass(...STUDIO_HEADER_PILLAR_NAME.split(' '));
+      expect(name).not.toHaveClass('lg:not-sr-only', 'xl:not-sr-only');
     }
-    // The area is named from 1280 px: the 1024 px row holds the four names.
     const area = links[4].querySelector('span') as HTMLElement;
-    expect(area).toHaveClass('sr-only', 'xl:not-sr-only');
-    expect(area).not.toHaveClass('lg:not-sr-only');
+    expect(area).toHaveClass(...STUDIO_HEADER_WIDE_WORD.split(' '));
+    expect(area).not.toHaveClass('lg:not-sr-only', 'xl:not-sr-only');
   });
 });
 
