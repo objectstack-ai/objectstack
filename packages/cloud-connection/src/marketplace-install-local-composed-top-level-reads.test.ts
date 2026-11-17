@@ -22,6 +22,13 @@
  * the artifact's package order. The controls pin that a flat bundle reads its
  * own top-level list unchanged, and that a composed artifact which still
  * carries its flattened union reads it once, never once more per package.
+ *
+ * [#34431] The same holds for the datasources and objects the install, the
+ * upgrade and the rehydrate hand `connectPackageDatasources`, for the
+ * datasource names step 2a judges against held names, and for the connectors
+ * whose credentials the install answer names: a composed bundle and the flat
+ * control carrying the same declarations hand the runtime the same lists and
+ * answer the same `datasources` and `credentialRefs`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
