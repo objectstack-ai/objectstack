@@ -4164,6 +4164,7 @@ const ko = {
         seeds_one: "샘플 데이터 세트 {{count}}개",
         seeds_other: "샘플 데이터 세트 {{count}}개",
         verified: "{{checks}} 확인 완료",
+        seedFailed: "샘플 데이터를 불러오지 못했습니다.",
       },
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",

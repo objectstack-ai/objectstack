@@ -4362,6 +4362,7 @@ const ru = {
         seeds_many: "{{count}} наборов примеров",
         seeds_other: "{{count}} набора примеров",
         verified: "Проверено: {{checks}}",
+        seedFailed: "Не удалось загрузить примеры данных.",
       },
       unknownPhase: "Неизвестный этап сборки",
       nextStepsLead: "Дальше можно сказать: {{steps}}",

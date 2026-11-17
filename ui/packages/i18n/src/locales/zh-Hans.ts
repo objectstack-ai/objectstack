@@ -4413,6 +4413,7 @@ const zh = {
         seeds_one: '{{count}} 组示例数据',
         seeds_other: '{{count}} 组示例数据',
         verified: '已核对 {{checks}}',
+        seedFailed: '示例数据未能加载。',
       },
       unknownPhase: '未知的构建阶段',
       nextStepsLead: '接下来可以说：{{steps}}',

@@ -4538,6 +4538,7 @@ const ar = {
         seeds_many: "مجموعات بيانات نموذجية: {{count}}",
         seeds_other: "مجموعات بيانات نموذجية: {{count}}",
         verified: "تم التحقق: {{checks}}",
+        seedFailed: "تعذّر تحميل البيانات النموذجية.",
       },
       unknownPhase: "مرحلة إنشاء غير معروفة",
       nextStepsLead: "بعد ذلك يمكنك أن تقول: {{steps}}",
