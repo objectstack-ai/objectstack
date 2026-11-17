@@ -1205,7 +1205,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  chrome that real-app conventions (Gmail / Notion / Linear)
                  reclaim for content. The create / import / overflow
                  actions move to a floating action button (see below), and
-                 the title's view switcher 「<view> ▾ · N」 leads the list's
+                 the title's view switcher 「VIEW ▾」 leads the list's
                  toolbar row, beside its filter / sort / display tools
                  (objectstack#27058). */}
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
