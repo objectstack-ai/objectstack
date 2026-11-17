@@ -110,11 +110,19 @@ export function PendingDraftsBar({ packageId, idle }: PendingDraftsBarProps) {
       }
       const health = publishHealthFromResponse(body);
       const problems = (health?.issues ?? []).filter((i) => i.severity === 'error');
-      if (health?.seedError || problems.length > 0) {
+      // objectstack#32984 — `seedFailed` is the failure; `seedError` is only
+      // the producer's own text and is absent when it sent none. The rule the
+      // chat's publish-health line reads; with no producer text the detail is
+      // that line's own sentence, from the pack.
+      const seedFailed = health?.seedFailed === true || !!health?.seedError;
+      const seedDetail = seedFailed
+        ? health?.seedError || t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' })
+        : undefined;
+      if (seedFailed || problems.length > 0) {
         toast.warning(
           t('console.ai.pendingDrafts.publishedWithFindings', {
             defaultValue: 'Published, but the runtime probes reported problems: {{detail}}',
-            detail: [health?.seedError, ...problems.map((p) => p.message)].filter(Boolean).join('; '),
+            detail: [seedDetail, ...problems.map((p) => p.message)].filter(Boolean).join('; '),
           }),
         );
       } else {

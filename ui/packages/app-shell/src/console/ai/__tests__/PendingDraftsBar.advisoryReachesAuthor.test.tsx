@@ -175,3 +175,26 @@ describe('PendingDraftsBar — the server’s advisory reaches the author (objec
     expect(toast.warning).not.toHaveBeenCalled();
   });
 });
+
+// objectstack#32984 — `seedError` holds only the producer's own text and is
+// absent when it sent none; `seedFailed` is the failure. A failed seed with no
+// text still reads as a failed seed, in the publish-health line's own words,
+// never as "All pending changes are live."
+describe('PendingDraftsBar — a failed seed the producer sent no text for (objectstack#32984)', () => {
+  it('warns that the publish found problems, naming the failed sample data', async () => {
+    batchBody = {
+      success: true,
+      data: {
+        ...CLEAN_BATCH.data,
+        seedApplied: { success: false, inserted: 0, updated: 0, errors: [] },
+      },
+    };
+    await publishFromTheBar();
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
+    const [title] = vi.mocked(toast.warning).mock.calls[0] as [string];
+    expect(title).toMatch(/^Published\b/);
+    expect(title).toContain('Sample data failed to load.');
+  });
+});
