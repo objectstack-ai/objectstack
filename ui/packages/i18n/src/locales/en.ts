@@ -2883,7 +2883,7 @@ const en = {
       changesApplied: 'Applied',
       changesDrafted: 'Saved as draft',
       changesFailed: 'Not applied',
-      discussing: 'Discussing: {{target}}',
+      discussing: 'Viewing: {{target}}',
       // Wording is load-bearing: this is SENT to the agent and must satisfy the
       // cloud confirm gate's English clause `apply (this|the) change`
       // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
@@ -4202,7 +4202,7 @@ const en = {
       detailNone: 'No differences detected — the draft matches the published version.',
       fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Includes changes drafted by the AI copilot',
+      draftedByCopilot: 'Includes changes drafted by the AI assistant',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
       draftedByMcp: 'Includes changes drafted by an MCP client',
       detailChangedKeys: 'Also changed:',
@@ -4316,6 +4316,7 @@ const en = {
       securityBlockTitle_one: 'Publishing will be refused — {{count}} item needs a decision first',
       securityBlockTitle_other: 'Publishing will be refused — {{count}} items need a decision first',
       securityBlockWhere: 'Fix it on the object under Settings → Record sharing, then publish again.',
+      flowChecksTitle: 'Before you publish — the publish check will report these',
       // The pre-publish security rows, by the rule id of the finding (DraftChangesPanel `SECURITY_RULE_TEXT`).
       securityRule: {
         owdUnset: 'No record-sharing baseline (sharingModel) is declared. The runtime falls back to private, but the baseline must be an authored decision.',

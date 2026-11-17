@@ -2176,7 +2176,7 @@ const ja = {
       changesApplied: "適用済み",
       changesDrafted: "下書きとして保存",
       changesFailed: "未適用",
-      discussing: "話題: {{target}}",
+      discussing: "表示中: {{target}}",
       changeVerb: {
         createObject: "オブジェクトを作成",
         addField: "項目を追加",
@@ -4613,7 +4613,7 @@ const ja = {
       detailNone: '差分は検出されませんでした — ドラフトは公開版と一致しています。',
       fieldOrderChanged: 'フィールドの順序が変更されました',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI コパイロットが下書きした変更を含みます',
+      draftedByCopilot: 'AI アシスタントが下書きした変更を含みます',
       draftedByMcpClient: 'MCP クライアント「{{client}}」が下書きした変更を含みます',
       draftedByMcp: 'MCP クライアントが下書きした変更を含みます',
       detailChangedKeys: 'その他の変更：',
@@ -4722,6 +4722,7 @@ const ja = {
       securityBlockTitle_one: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_other: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockWhere: 'オブジェクトの「設定 → レコード共有」で修正してから、もう一度公開してください。',
+      flowChecksTitle: '公開する前に確認してください — 公開チェックが次の点を指摘します',
       securityRule: {
         owdUnset: 'レコード共有のベースライン（sharingModel）が宣言されていません。ランタイムは private として扱いますが、ベースラインは明示的に決める必要があります。',
         owdAlias: 'レコード共有のベースライン（sharingModel）が正規の値ではないため、ランタイムはこのオブジェクトを private として扱います。',

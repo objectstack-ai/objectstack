@@ -7,7 +7,7 @@
  * objectui#7254's ruling: what is READ is the label; the internal identity
  * stays REACHABLE on a tooltip. Before this, ChatPane built the chip from the
  * `context.surface` artifact alone, so the chip printed
- * `Discussing: dashboard · customer_dashboard` at the reader.
+ * `Viewing: dashboard · customer_dashboard` at the reader.
  *
  * The display label reaches ChatPane as its OWN optional prop
  * (`surfaceArtifactLabel`), never inside `surfaceContext` — that object is the
@@ -85,7 +85,7 @@ const SURFACE = {
   artifact: { type: 'dashboard', name: 'customer_dashboard' },
 };
 
-function renderPane(extra: { surfaceArtifactLabel?: string; surfaceContext?: typeof SURFACE }) {
+function renderPane(extra: { surfaceArtifactLabel?: string; surfaceContext?: typeof SURFACE; hideHeader?: boolean }) {
   cleanup();
   captured = {};
   chatOptions = {};
@@ -110,6 +110,7 @@ function renderPane(extra: { surfaceArtifactLabel?: string; surfaceContext?: typ
           pendingFirstMessageRef={{ current: null }}
           onSent={vi.fn()}
           onShare={vi.fn()}
+          hideHeader={extra.hideHeader}
           {...labelProp}
         />
       </MemoryRouter>
@@ -124,13 +125,13 @@ afterEach(() => cleanup());
 describe('AI chat "discussing" chip — label read, internal id on the tooltip (objectui#8219)', () => {
   it('with a display label: the chip reads the label and its title is the type · name pair', () => {
     const { props } = renderPane({ surfaceContext: SURFACE, surfaceArtifactLabel: 'Customer dashboard' });
-    expect(props.surfaceContextLabel).toBe('Discussing: Customer dashboard');
+    expect(props.surfaceContextLabel).toBe('Viewing: Customer dashboard');
     expect(props.surfaceContextTitle).toBe('dashboard · customer_dashboard');
   });
 
   it('with no display label: the chip falls back to the type · name pair, still reachable as its title', () => {
     const { props } = renderPane({ surfaceContext: SURFACE });
-    expect(props.surfaceContextLabel).toBe('Discussing: dashboard · customer_dashboard');
+    expect(props.surfaceContextLabel).toBe('Viewing: dashboard · customer_dashboard');
     expect(props.surfaceContextTitle).toBe('dashboard · customer_dashboard');
   });
 
@@ -155,5 +156,14 @@ describe('AI chat "discussing" chip — label read, internal id on the tooltip (
     expect(JSON.stringify(bodyOf(withLabel))).toBe(JSON.stringify(bodyOf(without)));
     // The label never travels to the agent under any key.
     expect(JSON.stringify(bodyOf(withLabel))).not.toContain('Customer dashboard');
+  });
+});
+
+// objectstack#34725 — a host that draws its own title bar (the Studio slot's
+// one header row) asks the pane for none; every other host keeps the header.
+describe('ChatPane hideHeader (objectstack#34725)', () => {
+  it('draws its header by default, and none when the host asks', () => {
+    expect(renderPane({ surfaceContext: SURFACE }).props.headerSlot).toBeTruthy();
+    expect(renderPane({ surfaceContext: SURFACE, hideHeader: true }).props.headerSlot).toBeUndefined();
   });
 });

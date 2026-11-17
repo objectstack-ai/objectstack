@@ -38,7 +38,9 @@ const SCROLL_SPY_OFFSET = 24;
 
 /**
  * After a click, the jump's own scroll events must not move the highlight
- * through the sections it passes on the way.
+ * through the sections it passes on the way. When the hold ends the highlight
+ * is measured once more, so a scroll that landed inside the hold — a refused
+ * submit taking the form back to its first error — is followed too.
  */
 const CLICK_HOLD_MS = 800;
 
@@ -74,6 +76,11 @@ export function FormSectionNav({ items, className }: FormSectionNavProps) {
   const [current, setCurrent] = React.useState<string | undefined>(undefined);
   // While set, the jump a click started is under way: see CLICK_HOLD_MS.
   const holding = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The section the last click jumped to, while the form stays at its bottom:
+  // a short tail shows several headings at once and the click picks one.
+  const jumpedTo = React.useRef<string | null>(null);
+  // Re-reads the scroll position; bound by the scroll spy below.
+  const remeasure = React.useRef<(() => void) | null>(null);
   React.useEffect(() => () => {
     if (holding.current) clearTimeout(holding.current);
   }, []);
@@ -81,8 +88,9 @@ export function FormSectionNav({ items, className }: FormSectionNavProps) {
   const anchorIds = shown ? shown.map((i) => i.anchorId).join('\n') : '';
 
   // Scroll spy: the current section is the last heading at or above the
-  // scroller's top edge; at the very bottom it is the last section, whose
-  // heading may never reach the top on a short tail.
+  // scroller's top edge; at the very bottom it is the section a click jumped
+  // to when its heading is in view, else the last section, whose heading may
+  // never reach the top on a short tail.
   React.useEffect(() => {
     if (!anchorIds) return;
     const ids = anchorIds.split('\n');
@@ -101,8 +109,12 @@ export function FormSectionNav({ items, className }: FormSectionNavProps) {
         : window.scrollY > 0 && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
       let found = ids[0];
       if (atBottom) {
-        found = ids[ids.length - 1];
+        const clicked = jumpedTo.current ? document.getElementById(jumpedTo.current) : null;
+        const viewBottom = scroller ? scroller.getBoundingClientRect().bottom : window.innerHeight;
+        const clickedTop = clicked ? clicked.getBoundingClientRect().top : NaN;
+        found = clickedTop >= top && clickedTop < viewBottom ? jumpedTo.current! : ids[ids.length - 1];
       } else {
+        jumpedTo.current = null;
         for (const id of ids) {
           const el = document.getElementById(id);
           if (el && el.getBoundingClientRect().top - top <= SCROLL_SPY_OFFSET) found = id;
@@ -113,8 +125,10 @@ export function FormSectionNav({ items, className }: FormSectionNavProps) {
     const onScroll = () => {
       if (!frame) frame = requestAnimationFrame(measure);
     };
+    remeasure.current = onScroll;
     target.addEventListener('scroll', onScroll, { passive: true });
     return () => {
+      remeasure.current = null;
       target.removeEventListener('scroll', onScroll);
       if (frame) cancelAnimationFrame(frame);
     };
@@ -145,7 +159,9 @@ export function FormSectionNav({ items, className }: FormSectionNavProps) {
     if (holding.current) clearTimeout(holding.current);
     holding.current = setTimeout(() => {
       holding.current = null;
+      remeasure.current?.();
     }, CLICK_HOLD_MS);
+    jumpedTo.current = item.anchorId;
     setCurrent(item.key);
     const reveal = () =>
       document.getElementById(item.anchorId)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });

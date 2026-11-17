@@ -172,6 +172,7 @@ import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { useNavigationWrites } from '../../hooks/useNavigationSync.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
 import { authoredBuffer, authoredPublished, editsAuthoredLayers, type AuthoredLayers } from './authoredObjectBuffer.js';
+import { clearPublishChecksShown, markPublishChecksShown } from '../../preview/publishChecksShown.js';
 
 /** What an environment section is handed: the item's name and its definition on screen. */
 interface EnvironmentSectionProps {
@@ -2318,10 +2319,20 @@ function MetadataResourceEditPageImpl({
       // objectstack#28680 — whether this publish is the item's first: before
       // it, the item held no layer at all (its body lived only in the draft).
       const firstPublish = holdsNoLayer(layered);
-      await client.publish<any>(type, name, {
-        ...(activePackage ? { packageId: activePackage } : {}),
-        ...memberScope,
-      });
+      // objectstack#34818 — a flow whose Problems tab is listing the draft's
+      // publish checks: the author has read them, so the post-publish toast
+      // keeps its one title line (`publishChecksShown.ts`). Marked for this
+      // publish's flight only.
+      const reviewedChecks = type === 'flow' && (draftDiagnostics?.warnings?.length ?? 0) > 0;
+      if (reviewedChecks) markPublishChecksShown(type, name);
+      try {
+        await client.publish<any>(type, name, {
+          ...(activePackage ? { packageId: activePackage } : {}),
+          ...memberScope,
+        });
+      } finally {
+        if (reviewedChecks) clearPublishChecksShown(type, name);
+      }
       // objectui#11773 — the draft is re-read at the address the next save
       // writes, so its answer pins that save (see the load effect).
       const [lay, draftRead] = await Promise.all([
