@@ -1330,16 +1330,32 @@ function planUnitWithdrawal(
 }
 
 /**
- * [#28039] The datasources a package body declares, as `AppPlugin` reads a
- * stack's: a list, or a map keyed by name.
+ * [#28039] The datasources a package artifact declares, as `AppPlugin` reads a
+ * stack's: a list, or a map keyed by name. The ONE reading for every door of
+ * this plugin that judges or connects them — the held-name check (2a), the
+ * connect of an install or an upgrade (4b′) and the `kernel:ready` rehydrate.
+ *
+ * [#34431, ADR-0130 D4] The list is read through `resolveStackCollection`, as
+ * the seed datasets are ({@link seedDatasetsOf}): the top-level list when the
+ * artifact carries one (a flat bundle, or a composed artifact that still
+ * carries its flattened union — read once, never again per package),
+ * otherwise every package body's, in the artifact's package order. A composed
+ * bundle carries no top-level `datasources`, and a top-level-only read
+ * connected none of its package bodies' datasources and judged none of their
+ * names. Entries are kept as declared, a name declared twice included, as a
+ * flat bundle's pair is: the runtime's path judges the pair.
+ *
+ * The map form is read at the top level only, where a flat bundle may carry
+ * it: a package body's `datasources` is a list by the package entry schema,
+ * and the resolver refuses a body that carries a map.
+ *
+ * @throws The resolver's ADR-0112 refusal for a malformed `packages`
+ *   (`INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`, …).
  */
-function declaredDatasources(body: unknown): any[] {
-    const defs = isPlainObject(body) ? body.datasources : undefined;
-    return Array.isArray(defs)
-        ? defs
-        : isPlainObject(defs)
-            ? Object.entries(defs).map(([name, def]) => ({ name, ...(def as any) }))
-            : [];
+function declaredDatasources(artifact: unknown): any[] {
+    const top = isPlainObject(artifact) ? artifact.datasources : undefined;
+    if (isPlainObject(top)) return Object.entries(top).map(([name, def]) => ({ name, ...(def as any) }));
+    return resolveStackCollection(artifact, 'datasources');
 }
 
 /**
@@ -3094,7 +3110,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     engine as well (a driver the legacy `onEnable` bridge registered
         //     has no metadata item), and a holder that cannot be read refuses
         //     `503`: a check that did not run is never taken for "no holder".
-        const heldDatasource = await this.findHeldDatasourceName(ctx, manifest, manifestId);
+        //     [#34431] The names are every package body's on a composed
+        //     bundle, so a `packages` the resolver refuses is answered here
+        //     with that refusal, before any write
+        //     ({@link declaredRefusalAnswer}), as 2b and 2c″ answer it. An
+        //     undeclared throw stays a throw.
+        let heldDatasource: Awaited<ReturnType<MarketplaceInstallLocalPlugin['findHeldDatasourceName']>>;
+        try {
+            heldDatasource = await this.findHeldDatasourceName(ctx, manifest, manifestId);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
+        }
         if (heldDatasource && 'reading' in heldDatasource) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] install of ${manifestId} refused: whether another holder owns its datasource `
@@ -6886,6 +6914,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * `failed-credentials` verdict, which the datasource answers and a read of
      * a bound object names (`ERR_DATASOURCE_UNAVAILABLE`).
      *
+     * [#34431, ADR-0130 D4] The datasources and the objects are read through
+     * the one reader of a package-owned collection ({@link declaredDatasources},
+     * `resolveStackCollection`), so a composed bundle hands the path every
+     * package body's, in package order, as a flat bundle hands its own. Every
+     * one is stamped with `manifestId`, the id the ledger entry, the uninstall
+     * cleanup and the held-name judge key on.
+     *
      * Answers each declared datasource's verdict, or `undefined` when the
      * package declares none (or the runtime predates the path). Never throws:
      * the package is installed either way.
@@ -6896,7 +6931,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         version: string | undefined,
     ): Promise<Array<{ name: string; status: string }> | undefined> => {
-        const declared = declaredDatasources(manifest);
+        let declared: any[];
+        let objects: any[];
+        try {
+            declared = declaredDatasources(manifest);
+            objects = resolveStackCollection(manifest, 'objects');
+        } catch (err: any) {
+            // The register before this step resolved the same bytes, so this
+            // is not expected; nothing is connected, and the log says so.
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] the datasources of ${manifestId} could not be read, so none is registered or connected: `
+                + `${err?.message ?? err}. The objects bound to them have no driver until a fixed version is installed.`,
+            );
+            return undefined;
+        }
         let connect: typeof import('@objectstack/runtime')['connectPackageDatasources'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
@@ -6911,7 +6959,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             return undefined;
         }
-        const objects = isPlainObject(manifest) && Array.isArray(manifest.objects) ? manifest.objects : [];
         try {
             // Called with an empty list too: a reinstall whose new version
             // declares none withdraws what the previous version registered.
@@ -7186,14 +7233,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * automation service, or one that cannot list, the status is `unknown`.
      * `writable` is the references the credential door can store, as the
      * listing says; `undefined` when there is no listing to say it.
+     *
+     * [#34431, ADR-0130 D4] `connectors` through `resolveStackCollection`: the
+     * top-level list when the body carries one, otherwise every package
+     * body's, in package order. A composed bundle carries no top-level
+     * `connectors`, and the top-level read named none of its credentials.
      */
     private describeInstalledCredentialRefs = async (
         ctx: PluginContext,
         converted: unknown,
     ): Promise<{ entries: InstalledCredentialRef[]; writable?: ReadonlySet<string> } | undefined> => {
-        const connectors = (converted as { connectors?: unknown } | null)?.connectors;
         const declared = new Map<string, string[]>();
-        for (const raw of Array.isArray(connectors) ? connectors : []) {
+        for (const raw of resolveStackCollection(converted, 'connectors')) {
             const entry = raw as { name?: unknown; provider?: unknown; auth?: { credentialRef?: unknown } } | null;
             if (typeof entry?.name !== 'string' || typeof entry.provider !== 'string') continue;
             const ref = entry.auth?.credentialRef;
@@ -7327,7 +7378,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             const bundles: Array<Record<string, unknown>> = [];
             bundles.push(...(resolveStackCollection(manifest, 'translations') as Array<Record<string, unknown>>));
-            if (Array.isArray(manifest?.i18n)) bundles.push(...manifest.i18n);
 
             if (bundles.length > 0) {
                 let i18nService: any;

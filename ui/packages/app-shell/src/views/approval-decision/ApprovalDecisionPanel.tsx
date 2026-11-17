@@ -436,11 +436,14 @@ export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPa
       <div className="space-y-3" data-testid="approval-decision-head">
         <FlowOrigin request={request} />
         <DecisionComment request={request} thread={thread.rows} />
+        {/* The approver's band, the same one the business record page draws
+            (objectstack#34361). */}
         <DeclaredActionsBar
           objectName={SYS_APPROVAL_REQUEST_OBJECT}
           record={request}
           location={RECORD_APPROVAL_ACTION_LOCATION}
           onDone={handleDecided}
+          foldDecisions
         />
       </div>
       <div className="grid grid-cols-1 gap-4 @4xl:grid-cols-[minmax(0,1fr)_20rem]">

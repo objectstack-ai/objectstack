@@ -122,6 +122,13 @@ export interface DoorClass {
   readonly match?: (r: SweptRoute) => boolean;
   /** For a class with no route of its own: the routes it rides, all in the population. */
   readonly ridesOn?: readonly string[];
+  /**
+   * Doors of this class a catch-all route serves (`ALL /api/v1/auth/*`, the
+   * better-auth endpoints): no route table lists them on their own, so the
+   * sweep's one request per route never reaches them, and the control-plane
+   * allowlist claims the catch-all itself. Each is probed by its own path.
+   */
+  readonly servedByCatchAll?: readonly { readonly method: string; readonly path: string; readonly catchAll: string }[];
   /** The class-level answer to the sweep's request on one of its routes. */
   readonly expect?: ClassExpectation;
 }
@@ -149,8 +156,10 @@ export const DOOR_CLASSES: readonly DoorClass[] = [
     id: 2,
     name: 'share links',
     enforcedBy:
-      'registerShareLinkRoutes (plugin-sharing), the capability token; and the signed-out invitation preview ' +
-      '(plugin-auth runInvitationPreview), the invitation id as the capability token',
+      'registerShareLinkRoutes (plugin-sharing), the capability token; the signed-out invitation preview ' +
+      '(plugin-auth runInvitationPreview), the invitation id as the capability token; the OAuth client-name read ' +
+      '(plugin-auth answerOAuthClientName), the server-signed authorization request; and the one-step invitation ' +
+      'acceptance (plugin-auth buildInvitationProofDoorPlugin), the mailbox proof the invitation mail carries',
     // The two token-addressed reads. The create / list / revoke routes beside
     // them manage links and need a signed-in caller: they are everything-else.
     //
@@ -160,11 +169,22 @@ export const DOOR_CLASSES: readonly DoorClass[] = [
     // row the control-plane allowlist below would claim it and the sweep would
     // judge nothing. Matched here first, the sweep's probe (which carries no
     // invitation id) is held to the class's answer: a 4xx, nothing served.
+    //
+    // The OAuth client-name read, by the same note's amendment: a public read
+    // admitted by a request the server signed, mounted ahead of the catch-all
+    // like the preview, so the same reasoning holds.
     match: routeIs(
       'GET /api/v1/share-links/:token/resolve',
       'GET /api/v1/share-links/:token/messages',
       'GET /api/v1/auth/organization/invitation-preview',
+      'GET /api/v1/auth/oauth2/client-name',
     ),
+    // The one-step invitation acceptance, by the same amendment: a better-auth
+    // endpoint, so it rides the auth catch-all and is probed by its own path.
+    // An anonymous request that carries no proof is held to the class's answer.
+    servedByCatchAll: [
+      { method: 'POST', path: '/api/v1/auth/organization/accept-invitation-one-step', catchAll: 'ALL /api/v1/auth/*' },
+    ],
     expect: REFUSED_WITHOUT_A_SUBJECT,
   },
   {
