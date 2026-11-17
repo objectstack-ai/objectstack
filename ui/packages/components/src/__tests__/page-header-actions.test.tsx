@@ -7,8 +7,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { useEffect } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { useEffect, useMemo, useState } from 'react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import type {
   ActionContext,
@@ -23,6 +23,7 @@ import {
   useInlineEdit,
   PredicateScopeProvider,
 } from '@object-ui/react';
+import { PageHeaderPhoneContext, type PageHeaderPhoneFace } from '../index';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
@@ -881,5 +882,136 @@ describe('PageHeaderRenderer — #2358 action visibility traps', () => {
         warn.mockRestore();
       }
     });
+  });
+});
+
+describe('PageHeaderRenderer — in-flight header action (objectstack#34933)', () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  }
+  const convert = { name: 'convert', locations: ['record_header'], label: 'Convert Lead', type: 'flow', icon: 'ArrowRightCircle' };
+  const record = { id: 'lead-1', name: 'Mira Costa' };
+
+  function renderWithFlow(flow: (action: ActionDef, ctx: ActionContext) => Promise<ActionResult>) {
+    render(
+      <ActionProvider handlers={{ flow }}>
+        <RecordContextProvider objectName="lead" recordId="lead-1" data={record} objectSchema={{ name: 'lead', label: 'Lead' }}>
+          <PageHeader schema={{ type: 'page:header', title: 'Lead', actions: [convert] }} />
+        </RecordContextProvider>
+      </ActionProvider>,
+    );
+  }
+
+  const expectBusy = (button: HTMLElement) => {
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(button.querySelector('[data-header-action-pending]')).not.toBeNull();
+  };
+  const expectIdle = (button: HTMLElement) => {
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.hasAttribute('aria-busy')).toBe(false);
+    expect(button.querySelector('[data-header-action-pending]')).toBeNull();
+  };
+
+  it('is busy from the click until the launch resolves, and a second click does not dispatch again', async () => {
+    const launch = deferred<ActionResult>();
+    const flow = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => launch.promise);
+    renderWithFlow(flow);
+    const button = screen.getByRole('button', { name: /Convert Lead/i });
+    expectIdle(button);
+
+    fireEvent.click(button);
+    await waitFor(() => expect(flow).toHaveBeenCalledTimes(1));
+    expectBusy(button);
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await act(async () => { await Promise.resolve(); });
+    expect(flow).toHaveBeenCalledTimes(1);
+
+    await act(async () => { launch.resolve({ success: true }); await launch.promise; });
+    await waitFor(() => expectIdle(button));
+
+    fireEvent.click(button);
+    await waitFor(() => expect(flow).toHaveBeenCalledTimes(2));
+  });
+
+  it('returns to normal when the launch fails', async () => {
+    const launch = deferred<ActionResult>();
+    const flow = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => launch.promise);
+    renderWithFlow(flow);
+    const button = screen.getByRole('button', { name: /Convert Lead/i });
+    fireEvent.click(button);
+    await waitFor(() => expectBusy(button));
+    await act(async () => { launch.reject(new Error('flow launch failed')); await launch.promise.catch(() => undefined); });
+    await waitFor(() => expectIdle(button));
+  });
+
+  it('a host action whose click rejects returns to normal and the failure is reported', async () => {
+    const run = deferred<void>();
+    const onClick = vi.fn(() => run.promise);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      renderHeader(
+        { type: 'page:header', title: 'Lead' },
+        { record, headerSystemActions: [{ name: 'sys_delete_34933', label: 'Remove', onClick }] },
+      );
+      const button = await screen.findByRole('button', { name: /Remove/i });
+      fireEvent.click(button);
+      expectBusy(button);
+      fireEvent.click(button);
+      expect(onClick).toHaveBeenCalledTimes(1);
+      const failure = new Error('delete refused');
+      await act(async () => { run.reject(failure); await run.promise.catch(() => undefined); });
+      await waitFor(() => expectIdle(button));
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('sys_delete_34933'), failure);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('a host action whose click returns nothing is never busy', async () => {
+    const onClick = vi.fn(() => undefined);
+    renderHeader(
+      { type: 'page:header', title: 'Lead' },
+      { record, headerSystemActions: [{ name: 'sys_edit_34933', label: 'Edit', onClick }] },
+    );
+    const button = await screen.findByRole('button', { name: /^Edit$/i });
+    fireEvent.click(button);
+    expectIdle(button);
+    fireEvent.click(button);
+    expect(onClick).toHaveBeenCalledTimes(2);
+  });
+
+  it('the phone bar face is busy the same way and returns to normal on settle', async () => {
+    const launch = deferred<ActionResult>();
+    const flow = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => launch.promise);
+    function PhoneHost() {
+      const [bar, setBar] = useState<HTMLDivElement | null>(null);
+      const face = useMemo<PageHeaderPhoneFace>(() => ({ actionBar: bar }), [bar]);
+      return (
+        <ActionProvider handlers={{ flow }}>
+          <RecordContextProvider objectName="lead" recordId="lead-1" data={record} objectSchema={{ name: 'lead', label: 'Lead' }}>
+            <PageHeaderPhoneContext.Provider value={face}>
+              <PageHeader schema={{ type: 'page:header', title: 'Lead', actions: [convert] }} />
+            </PageHeaderPhoneContext.Provider>
+          </RecordContextProvider>
+          <div ref={setBar} data-testid="bar" />
+        </ActionProvider>
+      );
+    }
+    render(<PhoneHost />);
+    await waitFor(() => expect(screen.getByTestId('bar').querySelector('[data-page-header-actions-face="bar"]')).not.toBeNull());
+    const button = within(screen.getByTestId('bar')).getByRole('button', { name: /Convert Lead/i });
+    fireEvent.click(button);
+    await waitFor(() => expectBusy(button));
+    fireEvent.click(button);
+    await act(async () => { await Promise.resolve(); });
+    expect(flow).toHaveBeenCalledTimes(1);
+    await act(async () => { launch.resolve({ success: true }); await launch.promise; });
+    await waitFor(() => expectIdle(button));
   });
 });
