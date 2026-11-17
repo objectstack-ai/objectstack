@@ -59,9 +59,10 @@
  * ## Fail closed on vendor drift
  *
  * {@link acceptEachTotpCodeOnce} throws when the two-factor plugin it is handed
- * serves no `/two-factor/verify-totp` endpoint: a build that went ahead would
- * accept TOTP codes at a door this hook does not match. The failure is the
- * build's, at boot.
+ * serves routes but none at `/two-factor/verify-totp`: a build that went ahead
+ * would accept TOTP codes at a door this hook does not match. The failure is
+ * the build's, at boot. A plugin object that serves no route at all takes no
+ * code, and is handed back as it is.
  */
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
@@ -239,17 +240,23 @@ const extended = new WeakSet<object>();
  * the plugin object in `plugins`, and hand the same list back. A list with no
  * two-factor plugin is handed back untouched.
  *
- * @throws Error when the two-factor plugin serves no `/two-factor/verify-totp`
- *   endpoint: fail closed rather than build a TOTP door this hook does not match.
+ * @throws Error when the two-factor plugin serves routes but none at
+ *   `/two-factor/verify-totp`: fail closed rather than build a TOTP door this
+ *   hook does not match.
  */
 export async function acceptEachTotpCodeOnce<T extends unknown[]>(plugins: T): Promise<T> {
   const target = plugins.find(
     (plugin) => (plugin as TwoFactorPluginShape | null | undefined)?.id === TWO_FACTOR_PLUGIN_ID,
   ) as TwoFactorPluginShape | undefined;
   if (!target || extended.has(target)) return plugins;
-  if (!Object.values(target.endpoints ?? {}).some(servesTotpDoor)) {
+  // better-auth mounts a plugin's routes from `endpoints`: a plugin that serves
+  // none takes no code anywhere, so there is no door to guard. One that serves
+  // routes, none of them this door, has moved the door.
+  const endpoints = Object.values(target.endpoints ?? {});
+  if (endpoints.length === 0) return plugins;
+  if (!endpoints.some(servesTotpDoor)) {
     throw new Error(
-      `[AuthManager] The two-factor plugin serves no ${TOTP_VERIFY_PATH} endpoint, so its TOTP codes ` +
+      `[AuthManager] The two-factor plugin serves routes but none at ${TOTP_VERIFY_PATH}, so its TOTP codes ` +
         'cannot be made single-use where they are accepted. Refusing to build the auth instance: a TOTP ' +
         'code must be refused on any use after the first. Update totp-code-single-use.ts for the ' +
         'installed better-auth two-factor plugin.',

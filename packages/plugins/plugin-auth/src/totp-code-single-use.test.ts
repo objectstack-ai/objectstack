@@ -353,9 +353,9 @@ describe('a TOTP code is accepted once — the seams', () => {
     expect(a).not.toContain('secret-one');
   });
 
-  it('the build refuses a two-factor plugin that serves no /two-factor/verify-totp', async () => {
+  it('the build refuses a two-factor plugin whose routes do not include /two-factor/verify-totp', async () => {
     const drifted = { id: TWO_FACTOR_PLUGIN_ID, endpoints: { verifyTOTP: { path: '/two-factor/verify-code' } } };
-    await expect(acceptEachTotpCodeOnce([drifted])).rejects.toThrow(/serves no \/two-factor\/verify-totp endpoint/);
+    await expect(acceptEachTotpCodeOnce([drifted])).rejects.toThrow(/none at \/two-factor\/verify-totp/);
   });
 
   it('one before-hook is appended to the two-factor plugin, matched on the door, once', async () => {
@@ -371,6 +371,12 @@ describe('a TOTP code is accepted once — the seams', () => {
     expect(entry.matcher({ path: TOTP_VERIFY_PATH })).toBe(true);
     expect(entry.matcher({ path: '/two-factor/verify-otp' })).toBe(false);
     expect(entry.matcher({ path: '/two-factor/verify-backup-code' })).toBe(false);
+  });
+
+  it('a two-factor plugin that serves no route takes no code and gets no hook', async () => {
+    const plugin: any = { id: TWO_FACTOR_PLUGIN_ID, hooks: { after: [] } };
+    expect(await acceptEachTotpCodeOnce([plugin])).toEqual([plugin]);
+    expect(plugin.hooks.before).toBeUndefined();
   });
 
   it('a list with no two-factor plugin is handed back untouched', async () => {
