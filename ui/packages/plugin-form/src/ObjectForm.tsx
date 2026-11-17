@@ -18,6 +18,7 @@ import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@objec
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
+import { useReportedDirtyChange } from './formDirtyReport';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast } from '@object-ui/components';
@@ -814,8 +815,11 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // (objectui#10715). Dirtiness is read from the form renderer's existing
   // `onDirtyChange` channel; nothing new is declared on any schema.
   const readsRecord = !!schema.recordId && schema.mode !== 'create' && !hasInlineFields;
-  const { refetch: recordRefetch, onDirtyChange: handleDirtyChange, saved: recordSaved } =
+  const { refetch: recordRefetch, onDirtyChange: onBusDirtyChange, saved: recordSaved } =
     useRecordInvalidation(schema.objectName, schema.recordId, readsRecord);
+  // The same verdict reaches a hosting master-detail form, when one provides a
+  // reporter (`formDirtyReport.ts`): its close guard counts the header's input.
+  const handleDirtyChange = useReportedDirtyChange(onBusDirtyChange);
   // The `recordRefetch` value the fetch effect last ran for — a run that moved
   // it is a re-read IN PLACE and must not enter the loading branch.
   const appliedRecordRefetchRef = React.useRef(0);

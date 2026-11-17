@@ -770,7 +770,28 @@ export const CEILINGS = new Map([
   // absorbed and the ceiling moves 5997 -> 6014 (+17), the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24055 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6011],
+  // 6011 -> 6145 (card #34210, the Skills-docs follow-up the MCP action
+  // confirmation hand-off owed this file): a sixth `requires:` rule says the
+  // confirmation of an AI-door action is a service the host registers — an
+  // `IActionConfirmationService` under `'ai.actionConfirmation'` takes the
+  // hand-off (`pending_confirmation`, a `pendingId`), a host with none refuses
+  // 428 `no_confirmation_service`, `run_action` / `resume_run` refuse a call
+  // that sends `confirm`, and the `service_account` and elicited `declined` /
+  // `cancelled` / `timed_out` reasons point at objectstack-ai. Raise path the
+  // standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST — two restatements cut, each keeping its other
+  // home in the file: "Never rebuild what the platform owns." in the App /
+  // Platform Boundary intro (the first bullet under it, "capability belongs in
+  // the platform", and the third, "no hand-written predicate re-implementing a
+  // platform rule") and the `HonoServerPlugin` row's "(this is what `os dev` /
+  // `os serve` register)" (step 4 of the boot sequence lists the plugin under
+  // those two commands). Arithmetic in priced bytes (stamp line excluded): on
+  // `origin/main` the text was 24021 bytes (6006 tokens, headroom 5); the cuts
+  // remove 84 and the rule adds 640, so the LANDED priced text is 24577 bytes
+  // -> 6145 tokens: the 5 tokens of headroom are absorbed and the ceiling moves
+  // 6011 -> 6145 (+134), the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24577 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6145],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -861,7 +882,25 @@ export const CEILINGS = new Map([
   // bytes (15233 priced, 3809 tokens, headroom 5) -> 15349 (15329 priced) -> 3833 tokens,
   // the 5 absorbed, ceiling +19, pinned AT the measurement, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15329 / 4)
-  ['skills/objectstack-ui/SKILL.md', 3833],
+  // 3833 -> 3888: Form Views stops steering a long form to `tabbed` — `simple` is the
+  // default at any field count, `tabbed` names its cost, and one paragraph says how a long
+  // form stays `simple` (collapsed groups, `columns`, `modalSize`). PAID DOWN FIRST by two
+  // restatements cut from this file, each keeping a home: the derived-FK / roll-up paragraph
+  // under Master-Detail Forms (-223 bytes; the line-item paragraph's "every behaviour is
+  // derived from the DATA MODEL" and objectstack-data `rules/relationships.md` § Roll-up
+  // Summaries) and the "row-by-row" sentence under Field Conditional Rules (-97; the
+  // objectstack-data SKILL.md § Conditional Field Rules the line above links). Remainder
+  // raised under the standing ruling 「A:先削重复,余额按实测提高」 (record 6513306068):
+  // 15349 bytes (15329 priced) -> 15569 (15549 priced) -> 3888 tokens, pinned AT the
+  // measurement, zero headroom.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15549 / 4)
+  // 3888 -> 3921: Master-Detail Forms item 1 names the save's precondition — a parent or
+  // child declaring `enable.apiMethods` must list `'bulk'`, or the one `/api/v1/batch` is
+  // refused 405. Nothing else in this file restates it or was left to cut after the row
+  // above; same standing ruling (record 6513306068). 15569 bytes (15549 priced) -> 15704
+  // (15684 priced) -> 3921 tokens, pinned AT the measurement, zero headroom.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15684 / 4)
+  ['skills/objectstack-ui/SKILL.md', 3921],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -1029,7 +1068,12 @@ export const CEILINGS = new Map([
   // ceil(16925 / 4) = 4232; the ceiling moves +105, pinned AT the measurement.
   // Raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (ruling record
   // 6513306068), quoted verbatim and untranslated in the PR body.
-  ['skills/objectstack-data/rules/relationships.md', 4232],
+  // 4232 -> 4229: Inline Editing names the save's `bulk` precondition (+129 bytes), paid by
+  // restatement cut from the same file: the `subforms` sentence (the objectstack-ui pointer
+  // now carries it), the related-list example's "write side" comment (the paragraph above
+  // says it) and "(no UI config)" (the sentence says "purely from how you model"). 16925 ->
+  // 16916 bytes -> ceil(16916 / 4) = 4229; the row follows the measurement down.
+  ['skills/objectstack-data/rules/relationships.md', 4229],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -1511,7 +1555,10 @@ export const CEILINGS = new Map([
   // review's module pointer paid by the custom-Page aside (the ui skill's
   // rule); the row follows the measurement down, zero headroom.
   ['skills/objectstack-data/references/examples-objects.md', 1728],
-  ['skills/objectstack-data/references/lint-rules.md', 970],
+  // 970 -> 934: one row for `relationship/inline-edit-needs-bulk`, and the closing "target a
+  // lint-clean model" paragraph cut — it restated the table's rows one by one. 3829 -> 3735
+  // bytes -> ceil(3735 / 4) = 934; the row follows the measurement down, zero headroom.
+  ['skills/objectstack-data/references/lint-rules.md', 934],
   // 1299 -> 1566 (#26297): the `columns` dataset key and `applyOn: 'create'`
   // — a column a job or an admin owns after the first load is written on
   // create and left alone on every `upsert` replay; which modes it touches,
