@@ -28,6 +28,13 @@ export interface RecordChatterPanelProps {
   loading?: boolean;
   /** Called when a comment is submitted */
   onAddComment?: (text: string) => void | Promise<void>;
+  /**
+   * Whether the feed can show a comment at all; forwarded to the timeline,
+   * which withholds the composer and the Comments-only filter when `false`.
+   * The caller that filters the items by `feed.types` decides it, through
+   * `feedTypesAdmitComments` (objectstack#34525). Absent means `true`.
+   */
+  commentsShown?: boolean;
   /** Called when a reply is submitted */
   onAddReply?: (parentId: string | number, text: string) => void | Promise<void>;
   /** Called when user toggles a reaction */
@@ -93,6 +100,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
   onLoadMore,
   loading,
   onAddComment,
+  commentsShown,
   onAddReply,
   onToggleReaction,
   onEditComment,
@@ -208,6 +216,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               onLoadMore={onLoadMore}
               loading={loading}
               onAddComment={onAddComment}
+              commentsShown={commentsShown}
               onAddReply={onAddReply}
               onToggleReaction={onToggleReaction}
               onEditComment={onEditComment}
@@ -275,6 +284,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               onLoadMore={onLoadMore}
               loading={loading}
               onAddComment={onAddComment}
+              commentsShown={commentsShown}
               onAddReply={onAddReply}
               onToggleReaction={onToggleReaction}
               onEditComment={onEditComment}

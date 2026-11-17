@@ -42,7 +42,7 @@
 - 车道→分诊问卡去留路由定级 `Request: triage`;发版板生产者→车道 `Notify: release-blocker`。
 - 车道→cloud 席:缺 cloud 事实读数 `Request: cloud-confirm`;反向随记录 `Notify: cloud-confirm`。
 - 移卡入队者→车道:p0/p1 `Blocked-by` 关闭 `Notify: unblocked`;记裁决席→被改席 `Notify: ruling`。
-- 席→兄弟席或他车道:认领文件面相交或须先落 `Notify: serial`,先落者落地 `Notify: landed`。
+- 席→兄弟席或他车道:重叠检查令排后或须先落 `Notify: serial`,先落者落地 `Notify: landed`。
 - p0/p1 卡阻于他车道未认领或闲置 ≥3h 的卡:认领席(未认领则分诊)→其车道 `Request: assist`。
 - 收方随记录(认领/ETA/不接理由)回 `Notify: assist`;ETA 或 2h 无记录交分诊,彼道无席呈决策卡。
 - 上下线→兄弟席与分诊 `Notify: seat-online`、`Notify: seat-offline`;清单变→兄弟席 `Notify: split`。

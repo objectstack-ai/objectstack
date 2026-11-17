@@ -78,6 +78,11 @@ describe('os migrate audit-* amend a sealed row first (ADR-0154 D7)', () => {
       }
     });
 
+    it(`${file}: awaits the seal before the lock hold, so a host signer that cannot be resolved fails the run first (#34519)`, () => {
+      expect(source.match(/const seal = await redaction\.seal\(stack\.kernel, engine\);/g)).toHaveLength(1);
+      expect(source.indexOf('await redaction.seal(')).toBeLessThan(source.indexOf('underAuditSealLock('));
+    });
+
     it(`${file}: exits non-zero when a sealed row was refused, or the seal lock was lost, as for a failure`, () => {
       expect(source.match(/failures > 0 \|\| (report\.)?refused > 0 \|\| lostLock\) this\.exit\(1\)/g)).toHaveLength(2);
     });

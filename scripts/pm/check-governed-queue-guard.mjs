@@ -695,7 +695,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #18701: the record lives on the PR or its card, and BOTH are read': 14,
   '⛔ #19036: the SIZE line at the queue — imported, per queued PR, fail-closed': 54,
   '⭐ #19344: the remedy names a path the ruleset actually offers': 5,
-  '⛔ the queued pull-back: the remedy names no dequeue act a seat has': 4,
+  '⛔ the queued pull-back: the landing seat sends the relay dequeue, never a DRAFT conversion': 4,
   '⭐ the 2026-09-20 ruling: a certified PURE REGENERATION carries the record to the queued head': 13,
   'the per-row repository scope (ruling B2, 2026-10-13)': 14,
   '⭐ B′ with C: the record stands at the tier its FACE maps to, read off the committed paths': 8,
@@ -1987,12 +1987,14 @@ export function renderGuardVerdict(verdict) {
   lines.push(
     '',
     '      What satisfies this check:',
-    '        1. ⭐ FIRST, whatever comes after it — the pull request is IN the queue, and no seat act is measured',
-    '           to take it out of the queue, disabling auto-merge and converting it to DRAFT included',
+    '        1. ⭐ FIRST, whatever comes after it — the pull request is IN the queue, and disabling auto-merge',
+    '           and converting it to DRAFT do not take it out of the queue',
     '           (`.claude/skills/pm-dispatch/references/platform-readings.md`, queue membership).',
-    '           So ask the maintainer AT ONCE to remove it from the queue by hand; disable auto-merge AND convert',
-    '           it back to DRAFT, which disarms it so it does not re-enter once removed; then confirm from the',
-    '           remote that it is in neither the queue nor `origin/main` (AGENTS.md Prime Directive #14). Out of',
+    '           So its landing seat sends the relay\'s `pr_dequeue` AT ONCE (measured live, comment 6902190812);',
+    '           any other seat, or a stroke that does not land, asks the maintainer AT ONCE to remove it by hand.',
+    '           Disable auto-merge AND convert it back to DRAFT, which disarms it so it does not re-enter once',
+    '           removed; then confirm from the remote that it is in neither the queue nor `origin/main`',
+    '           (AGENTS.md Prime Directive #14). Out of',
     '           the queue and in draft is where a governed PR waits — 「四件套留 draft 等人批,⛔ 不翻正式不入队」',
     '           — the SAFE state, not a stalled one.',
     `        2. Then: obtain an APPROVED review by an authorized approver (GOVERNED_APPROVERS: ${GOVERNED_APPROVERS.join(', ')})`,
@@ -2954,12 +2956,14 @@ export function renderSizeVerdict(verdict) {
   lines.push(
     '',
     '      What satisfies this check:',
-    '        1. ⭐ The pull request is IN the queue, and no seat act is measured to take it out of the queue,',
-    '           disabling auto-merge and converting it to DRAFT included',
+    '        1. ⭐ The pull request is IN the queue, and disabling auto-merge and converting it to DRAFT do not',
+    '           take it out of the queue',
     '           (`.claude/skills/pm-dispatch/references/platform-readings.md`, queue membership).',
-    '           So ask the maintainer AT ONCE to remove it from the queue by hand; disable auto-merge AND convert',
-    '           it back to DRAFT, which disarms it so it does not re-enter once removed; then confirm from the',
-    '           remote that it is in neither the queue nor `origin/main` — the pull-back of AGENTS.md Prime',
+    '           So its landing seat sends the relay\'s `pr_dequeue` AT ONCE (measured live, comment 6902190812);',
+    '           any other seat, or a stroke that does not land, asks the maintainer AT ONCE to remove it by hand.',
+    '           Disable auto-merge AND convert it back to DRAFT, which disarms it so it does not re-enter once',
+    '           removed; then confirm from the remote that it is in neither the queue nor `origin/main` — the',
+    '           pull-back of AGENTS.md Prime',
     '           Directive #14. Out of the queue and in draft is the SAFE state.',
     '        2. Then ONE of the landings — the same terminal a Tier H governed diff has: ACCEPT on the card,',
     '           `pm:awaiting-merge` on the PR, a final 维护者速读, review requested from GOVERNED_APPROVERS',
@@ -4276,16 +4280,17 @@ export async function selfTest() {
   assert('a-refusal-names-the-pull-request', refusalText.includes('#9527'), refusalText);
   assert('a-refusal-states-what-would-satisfy-it', /What satisfies this check/.test(refusalText) && /DRAFT/.test(refusalText) && /APPROVED review/.test(refusalText), refusalText);
   // ⭐ The remedy is an ORDER, not a menu, and the order is the landed rule's:
-  // the queued pull request goes back to the maintainer's manual removal first
-  // (AGENTS.md Prime Directive #14 — no seat act is measured to dequeue it),
+  // the queued pull request comes out of the queue first (AGENTS.md Prime
+  // Directive #14 — its landing seat sends the relay's `pr_dequeue`, any other
+  // seat asks the maintainer),
   // then the authorized approval, then the claiming seat lands it (ruling C,
   // #17971). The pin reads all three positions rather than the first two,
   // because a remedy that stopped at the approval would leave a seat waiting
   // for a merge nobody is going to perform; and each position must EXIST, since
   // a phrase that is gone answers -1, which sorts before everything.
-  const remedyOrder = ['ask the maintainer AT ONCE', 'obtain an APPROVED review', 'CLAIMING SEAT lands it from there'].map((p) => refusalText.indexOf(p));
+  const remedyOrder = ['its landing seat sends the relay\'s `pr_dequeue` AT ONCE', 'obtain an APPROVED review', 'CLAIMING SEAT lands it from there'].map((p) => refusalText.indexOf(p));
   assert(
-    'a-refusal-orders-the-remedy-the-MAINTAINER-PULL-BACK-then-the-authorized-APPROVAL-then-the-CLAIMING-SEAT-lands-it',
+    'a-refusal-orders-the-remedy-the-PULL-BACK-then-the-authorized-APPROVAL-then-the-CLAIMING-SEAT-lands-it',
     remedyOrder.every((i) => i !== -1) && remedyOrder[0] < remedyOrder[1] && remedyOrder[1] < remedyOrder[2],
     `${JSON.stringify(remedyOrder)} :: ${refusalText}`,
   );
@@ -5154,26 +5159,29 @@ export async function selfTest() {
   assert('⭐ one-configured-bypass-actor-makes-the-named-path-REACHABLE-and-the-pin-clears', judgeRemedy(sizeRemedy, { bypass_actors: [{ actor_type: 'RepositoryRole', bypass_mode: 'pull_request' }] }).ok === true);
   assert('⛔ and-a-remedy-drifting-back-to-a-bare-maintainer-click-REDS-even-where-the-path-IS-offered', judgeRemedy("the maintainer's own click lands it (人工直合).", { bypass_actors: [{ actor_id: 5 }] }).ok === false);
 
-  // ── the queued pull-back: the remedy names no dequeue act a seat has ─────
+  // ── the queued pull-back: the landing seat sends the relay dequeue, never a DRAFT conversion ─────
   //
   // Both refusals print on the merge_group leg, so the pull request they name
-  // IS in the queue. No seat act is measured to take a queued pull request out
-  // of it — a DRAFT conversion and an auto-merge disable included
+  // IS in the queue. A DRAFT conversion and an auto-merge disable do not take
+  // a queued pull request out of it
   // (`.claude/skills/pm-dispatch/references/platform-readings.md`, queue
-  // membership) — so the remedy is AGENTS.md Prime Directive #14's pull-back:
-  // the maintainer's manual removal at once, the disarm so it does not
-  // re-enter, and a confirmation from the remote. A remedy that tells a seat
+  // membership), so the remedy is AGENTS.md Prime Directive #14's pull-back:
+  // the landing seat's relay `pr_dequeue` at once (measured live, comment
+  // 6902190812) or, from any other seat or on a stroke that does not land, the
+  // maintainer's manual removal at once; the disarm so it does not re-enter;
+  // and a confirmation from the remote. A remedy that tells a seat
   // the draft conversion dequeues sends it away believing the PR is parked
   // while the queue can still merge it.
   //
   // The texts are read FLATTENED: a phrase wrapped across two array entries
   // is still one phrase to the reader, so it is one phrase to the pin.
-  battery('⛔ the queued pull-back: the remedy names no dequeue act a seat has');
+  battery('⛔ the queued pull-back: the landing seat sends the relay dequeue, never a DRAFT conversion');
   const flatText = (t) => t.replace(/\s+/g, ' ');
   const QUEUED_PULL_BACK = Object.freeze([
-    /no seat act is measured to take it out of the queue, disabling auto-merge and converting it to DRAFT included/,
-    /ask the maintainer AT ONCE to remove it from the queue by hand/,
-    /disable auto-merge AND convert it back to DRAFT, which disarms it/,
+    /disabling auto-merge and converting it to DRAFT do not take it out of the queue/,
+    /its landing seat sends the relay's `pr_dequeue` AT ONCE \(measured live, comment 6902190812\)/,
+    /any other seat, or a stroke that does not land, asks the maintainer AT ONCE to remove it by hand/,
+    /Disable auto-merge AND convert it back to DRAFT, which disarms it/,
     /confirm from the remote that it is in neither the queue nor `origin\/main`/,
     /AGENTS\.md Prime Directive #14/,
     /platform-readings\.md`, queue membership/,
@@ -5192,7 +5200,7 @@ export async function selfTest() {
   const governedRefusals = [refusedV, unreadableV, unattrV].map((v) => renderGuardVerdict(v));
   const sizeRefusals = [overOne, unreadOne, sizeNoPull].map((v) => renderSizeVerdict(v));
   assert(
-    '⭐ every-governed-refusal-kind-sends-the-queued-PR-to-the-MAINTAINERS-manual-removal-disarms-it-and-confirms-from-the-remote',
+    '⭐ every-governed-refusal-kind-sends-the-queued-PR-to-the-LANDING-SEATS-relay-dequeue-or-the-MAINTAINERS-manual-removal-disarms-it-and-confirms-from-the-remote',
     governedRefusals.every((t) => /REFUSED/.test(t) && missingPullBack(t).length === 0),
     JSON.stringify(governedRefusals.map(missingPullBack)),
   );
@@ -6903,8 +6911,8 @@ export async function selfTest() {
       'every combination — and the #19344 remedy pin: every limb names the Merge button\'s bypass-rules option, ' +
       'judged against the recorded ruleset reading, red on a present-and-empty `bypass_actors` and on a remedy ' +
       'drifting back to a bare click, and passing with the reading PRINTED when the field is unreadable — and the ' +
-      'queued pull-back: every refusal kind on both legs sends the queued pull request to the maintainer\'s manual ' +
-      'removal, disarms it and confirms from the remote, and no rendering claims a DRAFT conversion dequeues it, ' +
+      'queued pull-back: every refusal kind on both legs sends the queued pull request to its landing seat\'s relay ' +
+      '`pr_dequeue` or, from any other seat, the maintainer\'s manual removal, disarms it and confirms from the remote, and no rendering claims a DRAFT conversion dequeues it, ' +
       'with a detector control that fires on every listed spelling — and the 2026-10-26 ENQUEUE leg: an entry an ' +
       'account in GOVERNED_APPROVERS put in the queue clears with no APPROVED review and lifts the size limb through ' +
       'the sibling, a seat enqueue still refuses, an UNDETERMINED enqueuer (no add, a removal newest, an unreadable or ' +

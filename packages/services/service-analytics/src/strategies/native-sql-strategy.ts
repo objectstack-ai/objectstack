@@ -2214,6 +2214,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (!node) return null;
 
     if (node.kind === 'const') {
+      // [#34384] The empty `$nin`'s TRUE names the member it was written on. On
+      // a joined member it is a leaf a NULL satisfies like the others the leaf
+      // arm below guards, so it is evaluated on an existing parent the same
+      // way: the last hop's `key = key`, TRUE for an existing parent and
+      // UNKNOWN for none. As the bare `1 = 1` it selected the orphans the
+      // engine path and `/data` leave out (`cross-object-where.ts`: no parent
+      // never matches, whatever the operator). On a base column, or an
+      // expression, the constant is the answer. It binds nothing.
+      if (node.value && node.member !== undefined) {
+        this.resolveFieldSql(cube, node.member, parentTable, joins);
+        const parentKey = this.joinedParentKey(cube, node.member, parentTable, joins);
+        if (parentKey) return `${parentKey} = ${parentKey}`;
+      }
       return node.value ? SQL_CONST_TRUE : SQL_CONST_FALSE;
     }
 
