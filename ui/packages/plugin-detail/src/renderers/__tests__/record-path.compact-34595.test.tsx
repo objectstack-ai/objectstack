@@ -108,7 +108,9 @@ describe('record:path below `sm` is the compact path (objectstack#34595)', () =>
     const r = mount('negotiation');
     const summary = summaryOf(r);
     const list = listOf(r);
-    expect(summary).toHaveAttribute('aria-controls', list.id);
+    // The list follows its button; no generated id, so a render is stable.
+    expect(summary.nextElementSibling).toBe(list);
+    expect(list).not.toHaveAttribute('id');
     expect(tokens(list)).toContain('hidden');
 
     fireEvent.click(summary);

@@ -307,8 +307,10 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
   const stageChange = useStageChange(schema.allowStageChange === true, statusField);
   // The compact phone path's disclosure (objectstack#34595): whether its full
   // stage list is open. Ephemeral by ADR-0054 C3 — nobody expects it back.
+  // No generated id ties the summary to the list: the list follows the
+  // button directly, `aria-expanded` says it is open, and a render must stay
+  // byte-identical for the same record (`record-block-record-reach.test.tsx`).
   const [phoneListOpen, setPhoneListOpen] = React.useState(false);
-  const phoneListId = React.useId();
   /**
    * WHERE the stages come from: the author, else the status field's picklist
    * (objectui#11106).
@@ -781,7 +783,6 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
         <button
           type="button"
           aria-expanded={phoneListOpen}
-          aria-controls={phoneListId}
           onClick={() => setPhoneListOpen((open) => !open)}
           className={PHONE_SUMMARY_CLASS}
           data-record-path-summary=""
@@ -809,7 +810,6 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
         {/* Collapsed by CSS, not unmounted: closed, the list is out of the
             layout and the accessibility tree alike. */}
         <div
-          id={phoneListId}
           className={cn('mt-1 flex-col gap-1', phoneListOpen ? 'flex' : 'hidden')}
           data-record-path-stage-list=""
           {...railAria}
