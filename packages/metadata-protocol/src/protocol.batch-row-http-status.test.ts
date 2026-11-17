@@ -291,6 +291,7 @@ describe('[#8570] section 2 — the rows that already carried a status are untou
         const del: any = await protocol.deleteManyData({ object: 'leave_request', ids: ['ghost'] });
         expect(del.results[0].errors[0]).toEqual({
             code: 'RECORD_NOT_FOUND', message: 'Record ghost not found in leave_request', httpStatus: 404,
+            userMessage: 'This record does not exist, or you do not have access to it.',
         });
     });
 });

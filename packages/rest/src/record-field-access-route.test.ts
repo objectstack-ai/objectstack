@@ -25,6 +25,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server.js';
 import { RECORD_FIELD_ACCESS_PARAMS } from './data-action-routes.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
+import { recordNotFoundError } from '@objectstack/core';
 
 const TASK = {
     name: 'task',
@@ -85,9 +86,9 @@ function boot(opts: { getData?: () => Promise<unknown>; security?: unknown } = {
     return { getData, call };
 }
 
-const recordNotFound = () => Object.assign(new Error('Record r1 not found in task'), {
-    code: 'RECORD_NOT_FOUND', status: 404, object: 'task',
-});
+// The read path's own not-found, as the GET record read throws it (it carries
+// the end user's sentence as `userMessage`, in the caller's language).
+const recordNotFound = () => recordNotFoundError('task', 'r1', CTX);
 
 describe('[#26594] GET /data/:object/:id/field-access', () => {
     it("relays the service's projection of this record, asked with the caller's object, record and context", async () => {

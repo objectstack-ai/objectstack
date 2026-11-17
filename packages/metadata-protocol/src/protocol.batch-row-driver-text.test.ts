@@ -290,6 +290,7 @@ describe('[#8502] section 2 — the authored population survives, in all THREE d
         const res: any = await protocol.deleteManyData({ object: 'leave_request', ids: ['ghost'] });
         expect(res.results[0].errors[0]).toEqual({
             code: 'RECORD_NOT_FOUND', message: 'Record ghost not found in leave_request', httpStatus: 404,
+            userMessage: 'This record does not exist, or you do not have access to it.',
         });
     });
 
