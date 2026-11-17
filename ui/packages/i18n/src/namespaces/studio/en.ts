@@ -3448,6 +3448,22 @@ const STUDIO_EN: Record<string, string> = {
   // environment catalog, entered from the landing.
   'engine.studio.landing.envCatalog.name': 'Environment catalog',
   'engine.studio.landing.envCatalog.description': 'Positions, capabilities, permission sets and sharing rules, across every package.',
+  // objectstack#34715 — the landing ordered by what the author came to do, in
+  // words that name no package mechanism.
+  'engine.studio.landing.lead': 'Change an installed app, or build an app of your own. Changes save as drafts and take effect when you publish.',
+  'engine.studio.landing.appsHeading': 'Installed apps',
+  'engine.studio.landing.appsHint': 'Each app is upgraded by its vendor. Your changes are kept separately, so an upgrade does not overwrite them.',
+  'engine.studio.landing.marketplaceInstall': 'Install from the marketplace',
+  'engine.studio.landing.customizeTitle': 'Customize {name}',
+  'engine.studio.landing.customizations.none': 'No changes yet',
+  'engine.studio.landing.ownHeading': 'Your own apps',
+  'engine.studio.landing.newApp': 'New app of your own',
+  'engine.studio.landing.newAppDescription': 'Start from a blank app.',
+  'engine.studio.landing.outsideHeading': 'Outside any app',
+  'engine.studio.landing.rolesPermissions.name': 'Positions and permissions',
+  'engine.studio.landing.rolesPermissions.description': 'Positions, permission sets and sharing rules, shared by every app.',
+  'engine.studio.landing.unassignedFlows.name': 'Flows in no app',
+  'engine.studio.landing.unassignedFlows.description': 'Flows that belong to no app, such as a copy of an app’s flow. They open editable.',
   // objectstack#28561 — assignments are Setup's (ADR-0146 D7): the area links
   // the Setup page in place of the section.
   'engine.studio.area.assignments.position': 'The people who hold this position are assigned in Setup.',
