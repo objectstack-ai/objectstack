@@ -503,8 +503,8 @@ export interface InstallAnswer {
  * install's manifest ({@link installableManifest}). `installMode` is absent on
  * a record from before it was written (those installed unmanaged).
  * `unmanagedRefusal` is present only when ask mode fell back: the unmanaged
- * door refused the build {@link MANAGED_FALLBACK_CODE}, and the build was then
- * installed managed.
+ * door refused the build `UNMANAGED_INSTALL_UNCOPYABLE` ({@link fallsBackToManaged}),
+ * and the build was then installed managed.
  */
 export interface InstalledBuild {
   source: string;
@@ -515,13 +515,17 @@ export interface InstalledBuild {
 }
 
 /**
- * The one unmanaged-install refusal ask mode falls back to a managed install
- * on: the build carries an item an unmanaged copy cannot write as an
- * environment row (`capability` is runtime-uncreatable), so the door refuses
- * the copy whole and names the managed install. Every other refusal is a
- * finding, as before.
+ * Whether an unmanaged install's refusal is the one ask mode falls back to a
+ * managed install on: `UNMANAGED_INSTALL_UNCOPYABLE`, the build carries an
+ * item an unmanaged copy cannot write as an environment row (`capability` is
+ * runtime-uncreatable), so the door refuses the copy whole and names the
+ * managed install. Every other refusal is a finding, as before. The code is
+ * the platform's (`@objectstack/metadata-protocol` stamps it); the runner only
+ * compares against it.
  */
-export const MANAGED_FALLBACK_CODE = 'UNMANAGED_INSTALL_UNCOPYABLE';
+export function fallsBackToManaged(refusal: Pick<HttpAnswer, 'ok' | 'code'>): boolean {
+  return !refusal.ok && refusal.code === 'UNMANAGED_INSTALL_UNCOPYABLE';
+}
 
 export interface CardRun {
   card: string;
@@ -1800,7 +1804,7 @@ interface VerifiedBuild {
  * verified build or it declares another namespace than the card's; a refused
  * install is a finding, recorded and never worked around, and `use` is not
  * called. The one exception is `managedFallback` (ask mode, which edits
- * nothing): an unmanaged refusal coded {@link MANAGED_FALLBACK_CODE} installs
+ * nothing): the unmanaged refusal {@link fallsBackToManaged} names installs
  * the same build, unchanged, through the managed door instead, and the record
  * names both (`installMode: 'managed'`, `unmanagedRefusal`). Template mode
  * never falls back: its agent edits the installed copy, which only an
@@ -1851,8 +1855,9 @@ async function withInstalledBuild(
     if (!install.ok) {
       const refusal = `unmanaged install refused: ${install.status} ${install.code ?? ''} ${install.message ?? ''}`.trim();
       const installManaged = app.installManaged?.bind(app);
-      if (!options.managedFallback || install.code !== MANAGED_FALLBACK_CODE || installManaged === undefined) {
-        mode.findings.push(installManaged === undefined && options.managedFallback && install.code === MANAGED_FALLBACK_CODE ? `${refusal} (this app harness has no managed install door to fall back to)` : refusal);
+      const fallsBack = options.managedFallback === true && fallsBackToManaged(install);
+      if (!fallsBack || installManaged === undefined) {
+        mode.findings.push(fallsBack ? `${refusal} (this app harness has no managed install door to fall back to)` : refusal);
         return;
       }
       // Ask mode edits nothing: the same build, unchanged, installed managed (the door's own prescription).
@@ -1863,13 +1868,13 @@ async function withInstalledBuild(
         install: installAnswerOf(again),
         installModesSupplied: managed.installModesSupplied,
         installMode: 'managed',
-        unmanagedRefusal: { ...installAnswerOf(install), code: MANAGED_FALLBACK_CODE },
+        unmanagedRefusal: { ...installAnswerOf(install), code: install.code! },
       };
       if (!again.ok) {
         mode.findings.push(`${refusal}; the managed install of the same build was refused too: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
         return;
       }
-      mode.findings.push(`unmanaged install refused ${MANAGED_FALLBACK_CODE} (${install.status}): installed the same build managed instead`);
+      mode.findings.push(`unmanaged install refused ${install.code} (${install.status}): installed the same build managed instead`);
       landed = { manifest: managed.manifest, install: (a, m) => a.installManaged!(m), mode: 'managed' };
     }
     const fresh: FreshCopy = async () => {
@@ -1916,7 +1921,8 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
 /**
  * Ask mode: the verified build template mode installs, installed the same way
  * ({@link withInstalledBuild}) — or managed, when the unmanaged door refuses it
- * {@link MANAGED_FALLBACK_CODE} (`ModeRun.template.installMode` says which) —
+ * `UNMANAGED_INSTALL_UNCOPYABLE` ({@link fallsBackToManaged};
+ * `ModeRun.template.installMode` says which) —
  * then the Run half on it — seed, personas, every
  * question (`askRepeats` times) and every operation — and nothing else. The
  * driver is never asked to author: there is no build half, no score and no
