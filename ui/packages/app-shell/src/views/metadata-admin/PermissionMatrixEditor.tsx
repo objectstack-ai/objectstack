@@ -3263,7 +3263,7 @@ function StudioObjectRow({
         <td className="px-3 py-1 align-middle">
           <span
             className={cn(
-              'inline-flex h-[22px] items-center rounded px-1.5 text-[11px] font-medium',
+              'inline-flex h-[22px] items-center whitespace-nowrap rounded px-1.5 text-[11px] font-medium',
               owdChipTone(o.owd),
               onOpenOwd && 'cursor-pointer hover:ring-1 hover:ring-border focus:outline-none focus-visible:ring-1 focus-visible:ring-primary',
             )}

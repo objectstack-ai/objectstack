@@ -575,7 +575,15 @@ export function PackageOwdOverviewPanel({
                     <td className="px-2 py-2">
                       <span className="flex flex-col gap-0.5">
                         <span className="flex items-center gap-1.5">
-                          <span className="font-medium text-foreground">{row.label}</span>
+                          {/* The object's label alone; its machine name is the
+                              tooltip (objectstack#34795). */}
+                          <span
+                            className="font-medium text-foreground"
+                            title={row.label !== row.name ? row.name : undefined}
+                            data-testid={`owd-object-name-${row.name}`}
+                          >
+                            {row.label}
+                          </span>
                           {dirty && (
                             <span
                               data-testid={`owd-dirty-${row.name}`}
@@ -590,7 +598,6 @@ export function PackageOwdOverviewPanel({
                             </span>
                           )}
                         </span>
-                        <span className="font-mono text-[10px] text-muted-foreground">{row.name}</span>
                       </span>
                     </td>
 
