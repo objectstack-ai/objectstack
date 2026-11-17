@@ -6,7 +6,7 @@
 
 feat(console): on a phone, Home keeps its first screen for the apps, and the top bar's badge and title fit
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 **Home's setup checklist.** Below 768 px, Home draws the administrator's first-run checklist after the apps instead of above the greeting, folded to one line: its title, its progress ("2 of 5 done") and **Continue**. Continue opens the whole card in place; a fold control beside the progress closes it to one line again. A fresh visit starts folded. The rows, the progress count, the done rule and the close button are unchanged, and from 768 px up the card is drawn above the page as before. With no app yet the card stays above the empty state at every width.
