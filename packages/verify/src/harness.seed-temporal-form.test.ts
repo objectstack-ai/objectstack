@@ -89,9 +89,9 @@ const app = defineStack({
     },
   ],
   data: [
-    { object: 'stf_handler', mode: 'insert', records: rows('handler') },
-    { object: 'stf_body', mode: 'insert', records: rows('body') },
-    { object: 'stf_guarded', mode: 'insert', records: rows('guarded') },
+    { object: 'stf_handler', mode: 'ignore', records: rows('handler') },
+    { object: 'stf_body', mode: 'ignore', records: rows('body') },
+    { object: 'stf_guarded', mode: 'ignore', records: rows('guarded') },
   ],
 } as never);
 

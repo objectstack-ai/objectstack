@@ -120,7 +120,7 @@ const SINGLE_PASS = {
   dryRun: false,
   haltOnError: false,
   multiPass: false,
-  defaultMode: 'insert',
+  defaultMode: 'ignore',
   batchSize: 1000,
   transaction: false,
 } as any;
@@ -130,7 +130,7 @@ const ORDERS = [
   {
     object: 'drop_order',
     externalId: 'name',
-    mode: 'insert',
+    mode: 'ignore',
     env: ['prod', 'dev', 'test'],
     records: [
       { name: 'ORD-1' },
@@ -223,7 +223,7 @@ describe('a record dropped for an unresolvable reference is logged, not only cou
         {
           object: 'drop_customer',
           externalId: 'name',
-          mode: 'insert',
+          mode: 'ignore',
           env: ['prod', 'dev', 'test'],
           records: [{ name: 'Ghost Inc' }],
         },
@@ -322,7 +322,7 @@ describe('a deferred reference still unresolved after pass 2 is logged too (fram
         {
           object: 'drop_team',
           externalId: 'name',
-          mode: 'insert',
+          mode: 'ignore',
           env: ['prod', 'dev', 'test'],
           // 'Nobody' is never seeded and is not in the database — pass 2 cannot
           // rescue it, so the deferred reference is permanently NULL.

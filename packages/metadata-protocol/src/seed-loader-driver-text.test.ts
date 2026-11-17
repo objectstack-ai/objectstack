@@ -247,8 +247,8 @@ describe('[#8442] raw driver text is withheld from the seed `errors[].message`',
         const logger = createLogger();
         const result = await new SeedLoaderService(engine, metadata, logger as never).load({
             seeds: [
-                { object: 'dept', externalId: 'name', mode: 'insert', env: ['prod', 'dev', 'test'], records: [{ name: 'Engineering', head_id: 'Alice' }] },
-                { object: 'worker', externalId: 'name', mode: 'insert', env: ['prod', 'dev', 'test'], records: [{ name: 'Alice', dept_id: 'Engineering' }] },
+                { object: 'dept', externalId: 'name', mode: 'ignore', env: ['prod', 'dev', 'test'], records: [{ name: 'Engineering', head_id: 'Alice' }] },
+                { object: 'worker', externalId: 'name', mode: 'ignore', env: ['prod', 'dev', 'test'], records: [{ name: 'Alice', dept_id: 'Engineering' }] },
             ],
             config: CONFIG,
         } as never);

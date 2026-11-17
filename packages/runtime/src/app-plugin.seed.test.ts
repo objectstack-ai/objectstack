@@ -288,7 +288,7 @@ describe('AppPlugin flat-bundle seed collection (#15262)', () => {
         data: [
             {
                 object: 'sys_user',
-                mode: 'insert',
+                mode: 'ignore',
                 records: [{ id: 'flat_u1', name: 'Flat One' }],
             },
         ],
@@ -332,9 +332,9 @@ describe('AppPlugin flat-bundle seed collection (#15262)', () => {
         const bundle = {
             manifest: {
                 id: 'com.test.nested-seed',
-                data: [{ object: 'sys_user', mode: 'insert', records: [{ id: 'legacy_u1' }] }],
+                data: [{ object: 'sys_user', mode: 'ignore', records: [{ id: 'legacy_u1' }] }],
             },
-            data: [{ object: 'sys_user', mode: 'insert', records: [{ id: 'top_u1' }] }],
+            data: [{ object: 'sys_user', mode: 'ignore', records: [{ id: 'top_u1' }] }],
         };
 
         await new AppPlugin(bundle).start(ctx);

@@ -107,7 +107,7 @@ const CONFIG = {
   dryRun: false,
   haltOnError: false,
   multiPass: true,
-  defaultMode: 'insert',
+  defaultMode: 'ignore',
   batchSize: 1000,
   transaction: false,
 } as any;
@@ -116,14 +116,14 @@ const SEEDS = [
   {
     object: 'audit_department',
     externalId: 'name',
-    mode: 'insert',
+    mode: 'ignore',
     env: ['prod', 'dev', 'test'],
     records: [{ name: 'Engineering', head_id: 'Alice' }],
   },
   {
     object: 'audit_worker',
     externalId: 'name',
-    mode: 'insert',
+    mode: 'ignore',
     env: ['prod', 'dev', 'test'],
     records: [{ name: 'Alice', department_id: 'Engineering' }],
   },

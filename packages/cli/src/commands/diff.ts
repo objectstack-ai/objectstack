@@ -78,8 +78,12 @@ function diffNamedArrays(
 
 function seedModeNote(mode: string): string {
   if (seedModeOverwritesMatchedRows(mode)) return '; a replay writes its columns over the rows it matches';
-  if (mode === 'replace') return '; a replay deletes nothing and inserts these again, so rows already in the table stay';
-  if (mode === 'insert') return "; a replay inserts these again, and a row the database refuses is that row's error";
+  // [#34613] `insert` and `replace` are retired: a replay refuses such a
+  // dataset whole and writes none of it, so the note says what to declare.
+  if (mode === 'insert' || mode === 'replace') {
+    return `; \`${mode}\` is a retired seed mode: a replay refuses this dataset and writes none of it. `
+      + "Declare `mode: 'ignore'` (or 'upsert') with an `externalId` that names a row";
+  }
   return '';
 }
 

@@ -84,7 +84,7 @@ const TREENODE = {
   fields: { name: { type: 'text' }, parent: { type: 'lookup', reference: 'treenode' } },
 };
 
-const SEED_CONFIG = { dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'insert', batchSize: 1000, transaction: false } as any;
+const SEED_CONFIG = { dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'ignore', batchSize: 1000, transaction: false } as any;
 const logger = { info() {}, warn() {}, error() {}, debug() {} };
 
 function metadataFor(objects: any[]) {
@@ -183,7 +183,7 @@ describe('bulk-write hardening on a REAL SqlDriver (framework#3147–#3152, #317
     });
     const seeder = new SeedLoaderService(e as any, metadataFor([WIDGET]), logger as any);
     const result = await seeder.load({
-      seeds: [{ object: 'widget', externalId: 'sku', mode: 'insert', env: ['prod', 'dev', 'test'],
+      seeds: [{ object: 'widget', externalId: 'sku', mode: 'ignore', env: ['prod', 'dev', 'test'],
         records: [{ name: 'A', sku: 'W-A' }, { name: 'B', sku: 'W-B' }] }] as any,
       config: SEED_CONFIG,
     });
@@ -202,7 +202,7 @@ describe('bulk-write hardening on a REAL SqlDriver (framework#3147–#3152, #317
     });
     const seeder = new SeedLoaderService(e as any, metadataFor([TREENODE]), logger as any);
     const result = await seeder.load({
-      seeds: [{ object: 'treenode', externalId: 'name', mode: 'insert', env: ['prod', 'dev', 'test'],
+      seeds: [{ object: 'treenode', externalId: 'name', mode: 'ignore', env: ['prod', 'dev', 'test'],
         records: [{ name: 'Alice' }, { name: 'Bob' }] }] as any,
       config: SEED_CONFIG,
     });
