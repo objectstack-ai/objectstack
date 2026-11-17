@@ -971,6 +971,14 @@ export class SeedLoaderService implements ISeedLoaderService {
    * several parameters away from where the load opens it. Reset per `load`.
    */
   private landedKeyLedger?: LandedKeyLedger;
+  /**
+   * [#34458] The person references the last {@link load} left NULL because no
+   * `sys_user` row answered yet, each on a row it landed on. Reset per `load`;
+   * read and shrunk by {@link resolveHeldPersonReferences}.
+   */
+  private heldPersonReferences: HeldPersonReference[] = [];
+  /** [#34458] The retry in flight: a second one waits for it, so two never interleave. */
+  private heldPersonRetry: Promise<unknown> = Promise.resolve();
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger, options: SeedLoaderServiceOptions = {}) {
     this.engine = engine;
@@ -1006,6 +1014,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   async load(request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed> {
     this.loadProgress = undefined;
+    this.heldPersonReferences = [];
     try {
       return await runWithAdvisoryAggregation(
         () => this.loadDatasets(request),
@@ -1014,6 +1023,94 @@ export class SeedLoaderService implements ISeedLoaderService {
     } catch (err) {
       throw this.notePartialWrites(err);
     }
+  }
+
+  /** [#34458] How many person references {@link resolveHeldPersonReferences} still holds. */
+  heldPersonReferenceCount(): number {
+    return this.heldPersonReferences.length;
+  }
+
+  /**
+   * [#34458] Retry the person references the last {@link load} left NULL
+   * because no `sys_user` row answered yet — the seed that runs before the
+   * first admin exists names that admin, and pass 2 is otherwise its last word.
+   *
+   * Each reference is resolved by the rule pass 2 used ({@link
+   * resolveReferenceItem}, the same organization), and a reference that now
+   * resolves is written onto the row the load landed on, and only while that
+   * column is still NULL: the write is a compare-and-set by the row's id, so a
+   * row the seed did not write is never reached (ADR-0138 D1), and a value
+   * someone set since is kept. A reference that resolves is released whatever
+   * the write matched; one that still misses stays held for the next call.
+   * Calls run one after another, never interleaved.
+   */
+  resolveHeldPersonReferences(): Promise<{ resolved: number; held: number }> {
+    const run = this.heldPersonRetry.then(() => this.retryHeldPersonReferences());
+    this.heldPersonRetry = run.catch(() => undefined);
+    return run;
+  }
+
+  /** The body of {@link resolveHeldPersonReferences}, one call at a time. */
+  private async retryHeldPersonReferences(): Promise<{ resolved: number; held: number }> {
+    const pending = this.heldPersonReferences;
+    if (pending.length === 0) return { resolved: 0, held: 0 };
+    const stillHeld: HeldPersonReference[] = [];
+    let resolved = 0;
+    for (const held of pending) {
+      const items = Array.isArray(held.attemptedValue) ? held.attemptedValue : [held.attemptedValue];
+      const values: unknown[] = [];
+      let missed = false;
+      for (const item of items) {
+        if (isMissing(item)) continue;
+        const outcome = await this.resolveReferenceItem(held, item, new Map(), { organizationId: held.organizationId });
+        if (outcome.status === 'resolved' || outcome.status === 'kept') {
+          values.push(outcome.value);
+          continue;
+        }
+        // [#31021] Gone on purpose: no link to write for this element.
+        if (outcome.status === 'withdrawn') continue;
+        missed = true;
+        break;
+      }
+      if (missed) {
+        stillHeld.push(held);
+        continue;
+      }
+      if (values.length === 0) continue;
+      try {
+        const written = await this.engine.update(
+          held.objectName,
+          { [held.field]: held.multiple ? values : values[0] },
+          {
+            ...this.writeOptionsFor(held.rowOrganization),
+            where: { id: held.recordId, [held.field]: null },
+            multi: true,
+          } as any,
+        );
+        if (typeof written === 'number' && written > 0) resolved += 1;
+      } catch (err) {
+        stillHeld.push(held);
+        const causeSentence = seedFailureCause(err);
+        this.logger.error(
+          `[SeedLoader] Held person reference back-fill FAILED — ${held.objectName}.${held.field} stays NULL on ` +
+            `row '${held.recordId}' although ${held.targetObject}.${held.targetField} = ` +
+            `'${this.formatAttempted(held.attemptedValue)}' now resolves. The row itself looks healthy while the ` +
+            'person the seed named is missing from it. The write is tried again at the next person insert of ' +
+            `this process; fix the error below, or set ${held.field} on that row by hand. ` +
+            `${seedCauseLabel(err, causeSentence)}: ${causeSentence}.`,
+          err instanceof Error ? err : undefined,
+          { object: held.objectName, field: held.field, recordId: held.recordId },
+        );
+      }
+    }
+    this.heldPersonReferences = stillHeld;
+    if (resolved > 0) {
+      this.logger.info(
+        `[SeedLoader] ${resolved} seed person reference(s) left NULL before their person existed now resolve, ` +
+          `on rows the seed landed on; ${stillHeld.length} still wait for their person`,
+      );
+    }
+    return { resolved, held: stillHeld.length };
   }
 
   /**
@@ -3455,6 +3552,24 @@ export class SeedLoaderService implements ISeedLoaderService {
               : missingProbe?.nonMemberOf
                 ? `; the ${deferred.targetObject} row that answers to it is not a member of organization ${missingProbe.nonMemberOf}`
                 : ''));
+        // [#34458] A person can appear after the seed — the first admin signs
+        // up after the boot seed ran — so a missed person is held for
+        // `resolveHeldPersonReferences`, on the row this load landed on.
+        const heldRowId = deferred.internalId
+          ?? insertedRecords.get(deferred.objectName)?.get(deferred.recordExternalId);
+        if (stillUnresolved && deferred.targetObject === SystemObjectName.USER && heldRowId) {
+          this.heldPersonReferences.push({
+            objectName: deferred.objectName,
+            recordId: heldRowId,
+            field: deferred.field,
+            targetObject: deferred.targetObject,
+            targetField: deferred.targetField,
+            attemptedValue: deferred.attemptedValue,
+            multiple: deferred.multiple === true,
+            rowOrganization: deferred.rowOrganization,
+            organizationId,
+          });
+        }
       }
     }
   }
@@ -4851,7 +4966,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         (ledger.withdrawnReferences > 0
           ? ` ${ledger.withdrawnReferences} reference(s) to such rows were left as they are rather than reported unresolved.`
           : '') +
-        ` A deliberate re-seed brings them back: the seed-replayer service called with { reseed: true }.`,
+        ` A deliberate re-seed brings them back: the seed-replayer service called with { reseed: true }, or an installed package's sample-data reseed.`,
       {
         organizationId: ledger.organizationId,
         rows,
@@ -5117,4 +5232,23 @@ interface DeferredUpdate {
    * organization is found by its by-id update under a walled posture.
    */
   rowOrganization?: unknown;
+}
+
+/**
+ * [#34458] A person reference pass 2 left NULL because no `sys_user` row
+ * answered to it yet, on a row this load landed on: the deferral it came
+ * from, plus the id of that row and the organization the load probed in.
+ * {@link SeedLoaderService.resolveHeldPersonReferences} retries it once a
+ * person exists.
+ */
+interface HeldPersonReference {
+  readonly objectName: string;
+  readonly recordId: string;
+  readonly field: string;
+  readonly targetObject: string;
+  readonly targetField: string;
+  readonly attemptedValue: unknown;
+  readonly multiple: boolean;
+  readonly rowOrganization?: unknown;
+  readonly organizationId?: string;
 }

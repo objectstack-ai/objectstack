@@ -750,11 +750,26 @@ export class DeleteAndAggregateFacet {
                  // as the by-id branch deletes its id after reading its
                  // pre-image under that scope. The unit of work is the by-id
                  // branch's, for the same reasons (#7413).
+                 //
+                 // [#34373] Deleting by id keeps the caller's predicate off the
+                 // final statement, so the read is where the predicate has to
+                 // keep holding: a concurrent commit that moved a matched row
+                 // out of it ("delete only if still pending") between this read
+                 // and the delete would otherwise be deleted anyway, and counted.
+                 // Inside the unit of work, a driver that declares
+                 // `supports.lockRows` takes the read with `lockRows`, so no
+                 // other writer commits a change to a matched row until the
+                 // unit ends. A driver without the bit, or no open transaction
+                 // (the `'split'` plan, a driver with no transactions), reads
+                 // unlocked and keeps that window (`DriverCapabilities.lockRows`).
                  const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
                    const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
+                   const readOptions = writeOptions?.transaction != null && driver.supports?.lockRows === true
+                     ? { ...writeOptions, lockRows: true }
+                     : writeOptions;
                    // [#27581] The same read carries the secret columns, so the
                    // handles released are those of the rows deleted.
-                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns, ...secretColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
+                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns, ...secretColumns] }, readOptions)) ?? []) as Array<Record<string, unknown>>;
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
                    deletedSecrets = deletedSecretSlots(deleteSchema, matched);

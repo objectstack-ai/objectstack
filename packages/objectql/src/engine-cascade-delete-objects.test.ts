@@ -333,4 +333,67 @@ describe('[#34206] getCascadeDeleteObjects is memoized on the registry object re
     engine.registry.registerObject({ name: 'cd_later', label: 'Later', fields: { id, name } } as any, '__test__');
     expect(engine.getCascadeDeleteObjects('cd_later')).toEqual([]);
   });
+
+  /**
+   * [#34206 L1 N1] The two paths that move the object revision without a
+   * register or unregister of their own: a package enable or disable
+   * (through `invalidateAll`), and the restore of a refused registration run.
+   */
+  describe('the memo follows a package enable and disable', () => {
+    const OWNER = 'com.cd.owner';
+    const EXTENDER = 'com.cd.extender';
+    const manifest = (pkgId: string, type: string) =>
+      ({ id: pkgId, name: pkgId, version: '1.0.0', type, namespace: 'cd', ...(type === 'module' ? { dependencies: { [OWNER]: '^1.0.0' } } : {}) }) as any;
+
+    /** `cd_ext_line` is owned by one package; a second package's extension makes it a cascading child of `cd_loner`. */
+    async function makeExtendedEngine() {
+      const { engine } = await makeEngine();
+      engine.registry.installPackage(manifest(OWNER, 'app'), 'code');
+      engine.registry.installPackage(manifest(EXTENDER, 'module'), 'code');
+      engine.registry.registerObject({ name: 'cd_ext_line', label: 'Ext line', fields: { id, name } } as any, OWNER, 'cd', 'own');
+      engine.registry.registerObject({
+        name: 'cd_ext_line',
+        fields: { cd_loner: { name: 'cd_loner', type: 'master_detail', reference: 'cd_loner', required: true } },
+      } as any, EXTENDER, 'cd', 'extend');
+      return engine;
+    }
+
+    it('a disable moves the revision, and the next answer leaves out the child only the disabled extension made', async () => {
+      const engine = await makeExtendedEngine();
+      expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual(['cd_ext_line']);
+      const before = engine.registry.objectRevision;
+      engine.registry.disablePackage(EXTENDER);
+      expect(engine.registry.objectRevision).not.toBe(before);
+      const walk = countWalk(engine);
+      expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual([]);
+      expect(walk).toHaveBeenCalled();
+    });
+
+    it('an enable moves the revision again, and the next answer names the child once more', async () => {
+      const engine = await makeExtendedEngine();
+      engine.registry.disablePackage(EXTENDER);
+      expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual([]);
+      const before = engine.registry.objectRevision;
+      engine.registry.enablePackage(EXTENDER);
+      expect(engine.registry.objectRevision).not.toBe(before);
+      expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual(['cd_ext_line']);
+    });
+  });
+
+  it('a refused registration run: an answer memoized inside the run is retired by the restore', async () => {
+    const { engine } = await makeEngine();
+    expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual([]);
+    const refusal = new Error('refused for the test');
+    expect(() => engine.registry.restoringOnRefusal(() => {
+      engine.registry.registerObject({
+        name: 'cd_refused_line', label: 'Refused line',
+        fields: { id, name, loner: { name: 'loner', type: 'master_detail', reference: 'cd_loner', required: true } },
+      } as any, '__test__');
+      // Non-vacuity: inside the run the child is registered and memoized.
+      expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual(['cd_refused_line']);
+      throw refusal;
+    })).toThrow(refusal);
+    expect(engine.registry.getObject('cd_refused_line')).toBeUndefined();
+    expect(engine.getCascadeDeleteObjects('cd_loner')).toEqual([]);
+  });
 });
