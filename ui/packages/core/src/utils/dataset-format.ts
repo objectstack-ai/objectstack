@@ -879,6 +879,9 @@ function isDrillDataSource(source: unknown): source is DatasetDrillDataSource {
  * may cross a relationship — {@link buildDatasetDrillFilter}, with every
  * `relationship.field` dimension resolved into a filter the data API accepts.
  *
+ * Dotted relationship-path drill filters are resolved here because the client
+ * filter grammar has no nested-relation node yet; objectstack#34990 adds it.
+ *
  * ## How a path is resolved
  *
  * The analytics compiler joins each hop on `<parent>.<relationship> =
