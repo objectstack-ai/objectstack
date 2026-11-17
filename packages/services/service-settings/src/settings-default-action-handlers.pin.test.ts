@@ -18,6 +18,11 @@
  * package are plugin-email (`mail`), service-sms (`sms`) and service-storage
  * (`storage`).
  *
+ * Since #33933 neither of those two buttons is in the bundled slate: the
+ * knowledge service contributes both, with their handlers, when it is mounted
+ * (`@objectstack/service-knowledge`, `knowledge-settings-contribution.test.ts`),
+ * so this default composition declares neither and registers neither.
+ *
  * ## What is pinned
  *
  * The CLASS, not the two instances: each bundled manifest's `http`-kind
@@ -34,11 +39,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
-import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { SettingsServicePlugin } from './settings-service-plugin.js';
 import { SettingsService } from './settings-service.js';
 import type { SettingsActionHandler } from './settings-service.types.js';
-import { registerSettingsRoutes } from './settings-routes.js';
 import { builtinSettingsManifests } from './manifests/index.js';
 
 /** The settings action route under the plugin's default base path. */
@@ -104,19 +107,16 @@ afterEach(() => {
 });
 
 describe('[#24769] the default composition answers every declared settings action button', () => {
-  it('enumerates the declared population — the two buttons this card is about among it', () => {
+  it('enumerates the declared population — and the two buttons this card was about are not in it', () => {
     const declared = declaredRouteActions().map((a) => `${a.namespace}/${a.actionId}`);
     expect(declared).toEqual(
-      expect.arrayContaining([
-        'ai/test',
-        'ai/reset',
-        'ai/test_embedder',
-        'knowledge/test',
-        'mail/test',
-        'sms/test',
-        'storage/test',
-      ]),
+      expect.arrayContaining(['ai/test', 'ai/reset', 'mail/test', 'sms/test', 'storage/test']),
     );
+    // #33933: `ai/test_embedder` and `knowledge/test` arrive with the knowledge
+    // service, which registers their handlers; its suite drives both at the
+    // HTTP door (`knowledge-settings-contribution.test.ts`).
+    expect(declared).not.toContain('ai/test_embedder');
+    expect(declared).not.toContain('knowledge/test');
   });
 
   it('each button targets its own namespace and its own id on the route', () => {
@@ -134,64 +134,5 @@ describe('[#24769] the default composition answers every declared settings actio
       if (!invoked.has(`${namespace}/${actionId}`) && !result.ok) unanswered.push(`${namespace}/${actionId}`);
     }
     expect(unanswered).toEqual([]);
-  });
-});
-
-class MockHttp implements IHttpServer {
-  routes = new Map<string, RouteHandler>();
-  private add(method: string, path: string, handler: RouteHandler) {
-    this.routes.set(`${method} ${path}`, handler);
-  }
-  get(path: string, h: RouteHandler) { this.add('GET', path, h); return this as any; }
-  post(path: string, h: RouteHandler) { this.add('POST', path, h); return this as any; }
-  put(path: string, h: RouteHandler) { this.add('PUT', path, h); return this as any; }
-  delete(path: string, h: RouteHandler) { this.add('DELETE', path, h); return this as any; }
-  patch(path: string, h: RouteHandler) { this.add('PATCH', path, h); return this as any; }
-  use() { return this as any; }
-  listen() { return Promise.resolve(); }
-  close() { return Promise.resolve(); }
-  getInstance() { return null; }
-}
-
-async function post(http: MockHttp, namespace: string, actionId: string, body: unknown) {
-  const req = { params: { namespace, actionId }, query: {}, body, headers: {}, method: 'POST', path: '/' } as IHttpRequest;
-  const state: { status: number; body?: any } = { status: 200 };
-  const res = {
-    json: (data: unknown) => { state.body = data; },
-    send: () => {},
-    status: (code: number) => { state.status = code; return res; },
-    header: () => res,
-  } as unknown as IHttpResponse;
-  await http.routes.get('POST /api/settings/:namespace/:actionId')!(req, res);
-  return state;
-}
-
-describe('[#24769] the two buttons the card measured, at the HTTP door', () => {
-  // A platform admin: both namespaces gate reads and writes (and so actions) on
-  // `manage_platform_settings`.
-  const admin = () => ({ enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' });
-
-  it('POST /api/settings/ai/test_embedder is answered by the embedder check (200, not 400)', async () => {
-    const { service } = await bootDefaultPlugin();
-    const http = new MockHttp();
-    registerSettingsRoutes(http, service, { contextFromRequest: admin });
-    const answer = await post(http, 'ai', 'test_embedder', {
-      values: { embedder_provider: 'openai', embedder_api_key: 'sk-test', embedder_model: 'text-embedding-3-small' },
-    });
-    expect(answer.status).toBe(200);
-    expect(answer.body?.data?.ok).toBe(true);
-    expect(answer.body?.data?.message).toContain('text-embedding-3-small');
-  });
-
-  it('POST /api/settings/knowledge/test is answered by the adapter check (200, not 400)', async () => {
-    const { service } = await bootDefaultPlugin();
-    const http = new MockHttp();
-    registerSettingsRoutes(http, service, { contextFromRequest: admin });
-    const answer = await post(http, 'knowledge', 'test', {
-      values: { adapter: 'ragflow', ragflow_base_url: 'http://localhost:9380', ragflow_api_key: 'k' },
-    });
-    expect(answer.status).toBe(200);
-    expect(answer.body?.data?.ok).toBe(true);
-    expect(answer.body?.data?.message).toContain('localhost:9380');
   });
 });

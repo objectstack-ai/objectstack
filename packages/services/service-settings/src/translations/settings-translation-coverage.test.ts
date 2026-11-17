@@ -30,13 +30,18 @@ import { en, zhCN, jaJP, esES, zhHant, ar, fr, ptBR, ru, de, ko } from './index.
 
 // The manifests barrel also exports action handlers and the aggregate array;
 // keep only the manifest objects.
-const bundledManifests = Object.values(manifestsModule).filter(
-  (v): v is SettingsManifest =>
-    !!v &&
-    typeof v === 'object' &&
-    'namespace' in v &&
-    Array.isArray((v as SettingsManifest).specifiers),
-);
+// The `ai` manifest is held here WITH its embedder section: since #33933
+// `@objectstack/service-knowledge` adds that section when it is mounted, and
+// its copy lives in this bundle beside the rest of the page.
+const bundledManifests = Object.values(manifestsModule)
+  .filter(
+    (v): v is SettingsManifest =>
+      !!v &&
+      typeof v === 'object' &&
+      'namespace' in v &&
+      Array.isArray((v as SettingsManifest).specifiers),
+  )
+  .map((m) => (m.namespace === 'ai' ? manifestsModule.withAiEmbedderSection(m) : m));
 
 /**
  * Platform manifests another package registers into the same settings hub,

@@ -10,6 +10,7 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
+import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
 
 /**
  * Configuration options for the `KnowledgeServicePlugin`.
@@ -69,8 +70,14 @@ export class KnowledgeServicePlugin implements Plugin {
    * order-if-present so the resolution is deterministic (ADR-0116, #4471).
    * Soft, not hard: without an engine the service degrades on purpose
    * (pure-search mode with conservative RLS).
+   *
+   * The settings plugin is ordered ahead the same way: init() contributes the
+   * knowledge settings to its `settings` service (`contributeKnowledgeSettings`),
+   * so its absence there is a fact about the composition, never a guess.
    */
-  optionalDependencies = ['com.objectstack.engine.objectql'];
+  // Literal ids: the boot-order gates read this array statically. The second
+  // is `SETTINGS_PLUGIN_ID` from `@objectstack/service-settings`.
+  optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.service.settings'];
 
   private service: KnowledgeService | null = null;
   private subscriptionId: string | undefined;
@@ -124,6 +131,11 @@ export class KnowledgeServicePlugin implements Plugin {
     }
 
     ctx.registerService(KNOWLEDGE_SERVICE, this.service);
+
+    // The knowledge settings page, the `ai` embedder section, both test
+    // actions and the Setup entry are offered only where this service is
+    // mounted — never by default (`@objectstack/service-settings`).
+    contributeKnowledgeSettings(ctx, this.version);
     ctx.logger.info?.(
       `KnowledgeServicePlugin: registered '${KNOWLEDGE_SERVICE}' service (eventSync=${
         this.options.enableEventSync !== false

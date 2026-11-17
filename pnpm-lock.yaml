@@ -3096,6 +3096,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../service-settings
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -3103,6 +3106,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

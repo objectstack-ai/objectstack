@@ -416,8 +416,7 @@ export const esES: PlatformTranslationData = {
     ai: {
       title: 'IA y Embedder',
       description:
-        'Proveedor de LLM, modelo, credenciales y configuración del embedder usados por ' +
-        'los servicios de IA y de conocimiento de la plataforma.',
+        'Proveedor de LLM, modelo y credenciales usados por el servicio de IA de la plataforma.',
       groups: {
         provider: { title: 'Proveedor',
           description: 'Elige el backend de LLM.' },

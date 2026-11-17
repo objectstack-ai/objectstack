@@ -374,7 +374,7 @@ export const ko: PlatformTranslationData = {
     },
     ai: {
       title: 'AI 및 Embedder',
-      description: '플랫폼 AI 및 지식 서비스가 쓰는 LLM 공급자, 모델, 자격 증명, Embedder 설정입니다.',
+      description: '플랫폼 AI 서비스가 쓰는 LLM 공급자, 모델, 자격 증명입니다.',
       groups: {
         provider: {
           title: '공급자',

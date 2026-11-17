@@ -181,6 +181,14 @@ export {
   smsTestActionHandler,
   storageSettingsManifest,
   storageTestActionHandler,
+  // What `@objectstack/service-knowledge` contributes when it is mounted —
+  // never registered by default (`builtinSettingsManifests`).
+  knowledgeSettingsManifest,
+  knowledgeTestActionHandler,
+  aiSettingsManifest,
+  aiEmbedderSettingsSpecifiers,
+  withAiEmbedderSection,
+  aiTestEmbedderActionHandler,
 } from './manifests/index.js';
 
 // Re-export the spec types for convenience so plugin authors only need

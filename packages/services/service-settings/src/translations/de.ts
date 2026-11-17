@@ -477,7 +477,7 @@ export const de: PlatformTranslationData = {
     },
     ai: {
       title: 'KI und Embedder',
-      description: 'LLM-Anbieter, Modell, Anmeldedaten und Embedder-Konfiguration für die KI- und Wissensdienste der Plattform.',
+      description: 'LLM-Anbieter, Modell und Anmeldedaten für den KI-Dienst der Plattform.',
       groups: {
         provider: {
           title: 'Anbieter',

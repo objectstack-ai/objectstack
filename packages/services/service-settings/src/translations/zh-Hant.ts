@@ -334,7 +334,7 @@ export const zhHant: PlatformTranslationData = {
     },
     ai: {
       title: 'AI 與 Embedder',
-      description: '平台 AI 與知識庫服務使用的 LLM 提供者、模型、憑證與 Embedder 設定。',
+      description: '平台 AI 服務使用的 LLM 提供者、模型與憑證。',
       groups: {
         provider: { title: '提供者', description: '選擇 LLM 後端。' },
         gateway: { title: 'Vercel AI Gateway', description: '多提供者路由器。模型寫成 provider/model，例如 openai/gpt-4o。' },

@@ -486,7 +486,7 @@ export const fr: PlatformTranslationData = {
     },
     ai: {
       title: 'IA et Embedder',
-      description: 'Fournisseur LLM, modèle, identifiants et configuration de l’Embedder utilisés par les services d’IA et de connaissances de la plateforme.',
+      description: 'Fournisseur LLM, modèle et identifiants utilisés par le service d’IA de la plateforme.',
       groups: {
         provider: {
           title: 'Fournisseur',
