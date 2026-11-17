@@ -320,8 +320,9 @@ export interface ExprSchemaHint {
    * `date-text-call*` and `date-text-arithmetic*` — and only over the
    * `record.<field>` / `previous.<field>` reads, which under that premise hold
    * what the entrance bound: the row under `record`, and under `previous` the
-   * row before the write (on a record-change trigger) or null (a sweep has
-   * none, and a read of it faults whatever the field's type). Every other pass stands down: field existence, the
+   * row before the write (on a record-change trigger's update leg) or null
+   * (its create leg, and a sweep, have none; a read of it faults whatever the
+   * field's type). Every other pass stands down: field existence, the
    * near-miss, the role catalog, the bare-reference refusal, `type-mismatch*`,
    * `date-arithmetic*` and `date-duration-value` say nothing here. A bare name
    * stands down too: in a value envelope it holds whatever the run's variable

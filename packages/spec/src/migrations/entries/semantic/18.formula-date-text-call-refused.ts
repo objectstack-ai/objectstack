@@ -47,6 +47,9 @@ export const entry: SemanticMigration = {
     + 'one), and each rewritten validation rule admits a write it refused as unevaluable before; no '
     + 'stored sys_metadata object row reports the finding in its _diagnostics.'
     + ' For a stored flow: the boot log carries no "[Automation] failed to register flow" (or '
-    + '"cold-boot flow bind: failed to register flow") warning naming it, and os migrate meta --stored '
-    + '(POST /api/v1/meta/_migrate-stored) lists no registerFlow TODO at its assignments or fields slots.',
+    + '"cold-boot flow bind: failed to register flow") warning naming it, and POST '
+    + '/api/v1/meta/_migrate-stored on the running server lists no registerFlow TODO at its assignments '
+    + 'or fields slots. The CLI\'s os migrate meta --stored cannot show this: it boots the automation '
+    + 'plugin inert (armRuntime: false), which returns before the object-schema resolver is wired, so '
+    + 'its stored pass types no value envelope and lists no such TODO whether or not the flow carries one.',
 };
