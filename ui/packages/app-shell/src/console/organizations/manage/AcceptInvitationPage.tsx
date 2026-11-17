@@ -18,7 +18,11 @@ import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { Loader2, Building2, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { resolveOrgRoleLabel } from '../orgRoleLabel.js';
-import { resolveInvitationLookupMessage, resolveOrgErrorMessage } from '../orgErrorMessage.js';
+import {
+  isAcceptNeedsVerifiedEmail,
+  resolveInvitationLookupMessage,
+  resolveOrgErrorMessage,
+} from '../orgErrorMessage.js';
 import { resolveRootUrl } from '../resolveHomeUrl.js';
 
 type InvitationWithOrg = AuthInvitation & {
@@ -81,19 +85,6 @@ const readCode = (err: unknown): string | undefined => {
   return typeof code === 'string' ? code : undefined;
 };
 
-/**
- * The server's refusals for a session whose email address is not verified:
- * accepting, declining, reading or listing an invitation needs a verified
- * address (better-auth's own codes). The page answers them with its
- * verify-email state.
- */
-const UNVERIFIED_ADDRESS_CODES: ReadonlySet<string> = new Set([
-  'EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION',
-  'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
-]);
-
-const isUnverifiedAddressRefusal = (err: unknown): boolean => UNVERIFIED_ADDRESS_CODES.has(readCode(err) ?? '');
-
 export function AcceptInvitationPage() {
   const { t } = useObjectTranslation();
   // Dates and numbers on this surface read the display locale; a bare
@@ -103,6 +94,7 @@ export function AcceptInvitationPage() {
   const location = useLocation();
   const { invitationId } = useParams<{ invitationId: string }>();
   const {
+    user,
     isAuthenticated,
     isLoading: isAuthLoading,
     getInvitation,
@@ -138,8 +130,7 @@ export function AcceptInvitationPage() {
   // Joined through the one-step door: the organization's name to welcome the
   // visitor to (the door answers no role).
   const [oneStepJoined, setOneStepJoined] = useState<{ orgName: string } | null>(null);
-  // The session's address is not the invited one, or not verified: the
-  // one-step door's `verify_email`, or a refusal in UNVERIFIED_ADDRESS_CODES.
+  // The provider session's address is not the invited one, or not verified.
   const [needsVerifiedEmail, setNeedsVerifiedEmail] = useState(false);
 
   // The proof leaves the address bar as soon as it has been read.
@@ -213,14 +204,10 @@ export function AcceptInvitationPage() {
         if (!cancelled) setInvitation(inv);
       })
       .catch((err) => {
-        if (cancelled) return;
-        if (isUnverifiedAddressRefusal(err)) {
-          setNeedsVerifiedEmail(true);
-          return;
-        }
-        // objectstack#33650 — the lookup's own not-found answer carries no
-        // code; read by route, status and the missing code, never the text.
-        setError(resolveInvitationLookupMessage(err, t));
+        if (!cancelled)
+          // objectstack#33650 — the lookup's own not-found answer carries no
+          // code; read by route, status and the missing code, never the text.
+          setError(resolveInvitationLookupMessage(err, t));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -238,9 +225,15 @@ export function AcceptInvitationPage() {
       await switchOrganization(invitation.organizationId).catch(() => null);
       setJoined(true);
     } catch (err) {
-      setIsAccepting(false);
-      if (isUnverifiedAddressRefusal(err)) {
-        setNeedsVerifiedEmail(true);
+      // objectstack#34272 — while the deployment delivers mail, an address that
+      // was never verified may not accept. The next step is to verify it, so
+      // the page hands over to the verification-mail screen for this account's
+      // address, whose link brings the person back here to accept.
+      if (isAcceptNeedsVerifiedEmail(err)) {
+        const sp = new URLSearchParams();
+        if (user?.email) sp.set('email', user.email);
+        sp.set('redirect', location.pathname + location.search);
+        navigate(`/verify-email-prompt?${sp.toString()}`);
         return;
       }
       // objectui#4474 — the card's site 5: a wrong recipient produced better-auth's
@@ -251,6 +244,7 @@ export function AcceptInvitationPage() {
           defaultValue: 'Failed to accept invitation',
         }),
       );
+      setIsAccepting(false);
     }
   };
 
@@ -299,17 +293,13 @@ export function AcceptInvitationPage() {
       toast.success(t('organization.accept.declined', { defaultValue: 'Invitation declined' }));
       navigate('/organizations');
     } catch (err) {
-      setIsDeclining(false);
-      if (isUnverifiedAddressRefusal(err)) {
-        setNeedsVerifiedEmail(true);
-        return;
-      }
       toast.error(
         resolveOrgErrorMessage(err, t, {
           key: 'organization.accept.declineFailed',
           defaultValue: 'Failed to decline invitation',
         }),
       );
+      setIsDeclining(false);
     }
   };
 
