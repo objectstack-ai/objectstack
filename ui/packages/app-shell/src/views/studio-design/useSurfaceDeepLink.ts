@@ -76,7 +76,8 @@ export const DESIGNER_SURFACE_VIEW_PARAM = 'view';
  * with that action selected. Studio's landing links a switched-off action
  * that lives in its object's `actions[]` here, since such an action has no
  * item page of its own and its switch is on the object's Actions view. A key
- * of its own, for the reason `nav` is one.
+ * of its own, for the reason `nav` is one. Never written by the mirror, and
+ * dropped by it once another surface opens.
  */
 export const DESIGNER_SURFACE_ACTION_PARAM = 'action';
 
@@ -134,7 +135,13 @@ export function useSurfaceDeepLinkMirror(current: SurfaceTarget | null | undefin
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.set(DESIGNER_SURFACE_PARAM, formatSurfaceParam({ type, name }));
+        const surface = formatSurfaceParam({ type, name });
+        // objectstack#34724 — `?action=` was written for the surface it came
+        // with: once another surface opens, it is dropped, so a reload or a
+        // shared copy never opens the new surface on an action view. The
+        // first write after a deep link names that same surface and keeps it.
+        if (prev.get(DESIGNER_SURFACE_PARAM) !== surface) next.delete(DESIGNER_SURFACE_ACTION_PARAM);
+        next.set(DESIGNER_SURFACE_PARAM, surface);
         // objectui#11774 — the entry travels with its target, and a surface
         // with no entry id clears it, so a `nav` left by an earlier selection
         // never qualifies a target it was not written for.

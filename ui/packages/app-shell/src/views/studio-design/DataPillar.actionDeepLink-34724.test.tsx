@@ -12,7 +12,10 @@
  *    (its inspector shows its label, not the first action's);
  *  - CONTROL: the same link without `action=` opens the object on Records, as
  *    before, with no action inspector;
- *  - the param is read once: picking another view afterwards stays there.
+ *  - the param is read once: picking another view afterwards stays there;
+ *  - the param leaves the URL once another object opens, so a reload or a
+ *    shared copy never opens that object on an action (seat L2 S4); the first
+ *    write, naming the deep-linked object, keeps it.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -20,8 +23,8 @@ import '@testing-library/jest-dom/vitest';
 import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
+import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 import { ActionSchema } from '@objectstack/spec/ui';
 
@@ -80,7 +83,10 @@ const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
 
 const client = new MetadataClient({ baseUrl: 'http://test.local', fetch: fetchImpl as unknown as typeof fetch });
 Object.assign(client, {
-  list: vi.fn(async () => [{ name: 'showcase_task', label: 'Task' }]),
+  list: vi.fn(async () => [
+    { name: 'showcase_task', label: 'Task' },
+    { name: 'showcase_note', label: 'Note' },
+  ]),
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async () => ({ effective: objectDef, code: objectDef })),
   getDraft: vi.fn(async () => null),
@@ -144,10 +150,17 @@ const TASK = {
   actions: [ARCHIVE, SEND],
 };
 
+/** The URL the pillar mirrored back: what a reload or a shared copy opens. */
+function UrlProbe(): React.ReactElement {
+  const [params] = useSearchParams();
+  return <span data-testid="url">{params.toString()}</span>;
+}
+
 function mountAt(search: string): void {
   objectDef = TASK;
   render(
     <MemoryRouter initialEntries={[`/studio/com.example.showcase/data${search}`]}>
+      <UrlProbe />
       <DataPillar packageId="com.example.showcase" />
     </MemoryRouter>,
   );
@@ -181,5 +194,18 @@ describe('Studio data page — `?action=` opens the object\'s Actions view on th
       await new Promise((r) => setTimeout(r, 200));
     });
     expect(screen.queryByText(L('engine.inspector.action.label'), { selector: 'label' })).not.toBeInTheDocument();
+  });
+
+  it('drops `action=` from the URL once another object opens, and keeps it until then', async () => {
+    mountAt('?surface=object%3Ashowcase_task&action=showcase_task_send');
+    expect(await labelInput()).toHaveValue('Send');
+    const url = () => new URLSearchParams(screen.getByTestId('url').textContent ?? '');
+    // The mirror's first write names the deep-linked object: the key stays.
+    expect(url().get('surface')).toBe('object:showcase_task');
+    expect(url().get('action')).toBe('showcase_task_send');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Note' }));
+    await waitFor(() => expect(url().get('surface')).toBe('object:showcase_note'));
+    expect(url().has('action')).toBe(false);
   });
 });
