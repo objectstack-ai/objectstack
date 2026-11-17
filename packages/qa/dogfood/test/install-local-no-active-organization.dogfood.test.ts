@@ -29,8 +29,11 @@
 //      organization; the reseed and the purge answer `403 PERMISSION_DENIED`
 //      naming it; no seed row lands in either organization (nothing guessed).
 //   3. The SAME session once it selects organization B: reseed, purge and a
-//      reinstall all act in B, as they always have. One fact differs between
-//      2 and 3: the active organization.
+//      reinstall all act in B, never in A. The reinstall after the purge
+//      honours B's landed-key record (the purge deletes the rows, not the
+//      record) and withholds every purged row; the reseed is the way back, in
+//      B (#34405, ruling 6929076086). One fact differs between 2 and 3: the
+//      active organization.
 //
 // Boots a walled fixture stack of its own, so it stays out of `SHARED_SHOWCASE`.
 
@@ -96,11 +99,12 @@ describe('dogfood: install-local under an organization wall, with a session that
   let memberships: number;
   type Answer = { status: number; body: any };
   const orgless: Record<'install' | 'reseed' | 'purge', Answer> = {} as never;
-  const inOrgB: Record<'reseed' | 'purge' | 'reinstall', Answer> = {} as never;
+  const inOrgB: Record<'reseed' | 'purge' | 'reinstall' | 'reseedBack', Answer> = {} as never;
   let rowsAfterOrgless: number;
   let orgBAfterReseed: number;
   let orgBAfterPurge: number;
   let orgBAfterReinstall: number;
+  let orgBAfterReseedBack: number;
   let orgAAtEnd: number;
 
   async function activeOrganization(): Promise<unknown> {
@@ -147,6 +151,8 @@ describe('dogfood: install-local under an organization wall, with a session that
     orgBAfterPurge = await countRows(ql, ORG_B);
     inOrgB.reinstall = await json(await stack.apiAs(token, 'POST', BASE, installBody()));
     orgBAfterReinstall = await countRows(ql, ORG_B);
+    inOrgB.reseedBack = await json(await stack.apiAs(token, 'POST', `${BASE}/${CRM}/reseed-sample-data`, {}));
+    orgBAfterReseedBack = await countRows(ql, ORG_B);
     orgAAtEnd = await countRows(ql, ORG_A);
   }, 300_000);
 
@@ -191,7 +197,7 @@ describe('dogfood: install-local under an organization wall, with a session that
     expect(rowsAfterOrgless).toBe(0);
   });
 
-  it('CONTROL: the same session with organization B active — reseed, purge and reinstall act in B, as before', () => {
+  it('CONTROL: the same session with organization B active — reseed, purge and reinstall act in B; the reinstall withholds the purged rows and the reseed brings them back', () => {
     expect(sessionOrgAfter).toBe(ORG_B);
     expect(inOrgB.reseed.status, JSON.stringify(inOrgB.reseed.body)).toBe(200);
     expect(inOrgB.reseed.body?.data).toMatchObject({ inserted: SEED_TOTAL, errors: 0, withSampleData: true });
@@ -200,8 +206,13 @@ describe('dogfood: install-local under an organization wall, with a session that
     expect(inOrgB.purge.body?.data).toMatchObject({ deleted: SEED_TOTAL, skipped: 0, errors: 0, withSampleData: false });
     expect(orgBAfterPurge).toBe(0);
     expect(inOrgB.reinstall.status, JSON.stringify(inOrgB.reinstall.body)).toBe(200);
-    expect(inOrgB.reinstall.body?.data?.seeded).toMatchObject({ mode: 'inline', inserted: SEED_TOTAL });
-    expect(orgBAfterReinstall).toBe(SEED_TOTAL);
+    // #34405, ruling 6929076086: the reinstall honours B's landed-key record, which the purge leaves in place,
+    // so it withholds every purged row (`skipped`); the reseed is the way back.
+    expect(inOrgB.reinstall.body?.data?.seeded).toMatchObject({ mode: 'inline', inserted: 0, skipped: SEED_TOTAL, errors: 0 });
+    expect(orgBAfterReinstall).toBe(0);
+    expect(inOrgB.reseedBack.status, JSON.stringify(inOrgB.reseedBack.body)).toBe(200);
+    expect(inOrgB.reseedBack.body?.data).toMatchObject({ inserted: SEED_TOTAL, errors: 0, withSampleData: true });
+    expect(orgBAfterReseedBack).toBe(SEED_TOTAL);
     expect(orgAAtEnd).toBe(0);
   });
 });

@@ -271,7 +271,8 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *
  * The English sentences are byte-identical to the fixed text the HTTP doors
  * answered before they were localized, so an English deployment reads no
- * change for a single field or none. *
+ * change for a single field or none.
+ *
  * The four `record_locked*` keys are the end user's sentence of plugin-approvals'
  * per-row record lock (`409 RECORD_LOCKED`, the refusal a user reads in a toast
  * when they save a record a live approval holds). One wire code, four
@@ -530,7 +531,12 @@ export function renderOperationMessage(
     const key = operationMessageTranslationKey(input.messageKey);
     let override: string | undefined;
     try {
-      override = opts.translate(key, locale, params);
+      // [#34454] The override TEMPLATE is asked for, without `params`, and
+      // interpolated once below. An `II18nService.t` handed `params`
+      // interpolates them itself, and a second pass here would then expand a
+      // placeholder that arrived inside a VALUE (a record title such as
+      // `Q{{object}}`) instead of printing it as written.
+      override = opts.translate(key, locale);
     } catch {
       // A misbehaving i18n service must never turn a 409 into a 500.
       override = undefined;

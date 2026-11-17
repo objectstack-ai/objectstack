@@ -4068,10 +4068,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // We use a raw request because the client SDK's data.find() QueryOptions
       // interface does not include populate/expand fields.
       if ((params?.$expand && params.$expand.length > 0)
-          || (params?.$search != null && String(params.$search).trim() !== '')) {
+          || (params?.$search != null && String(params.$search).trim() !== '')
+          || params?.$count === false) {
         // The client SDK's data.find() QueryOptions drops `$search`; route through
         // the raw GET so the term reaches protocol.findData → the metadata-driven
         // search executor (ADR-0061).
+        //
+        // It drops `$count` as well, so a caller that declines the total
+        // (`$count: false`) takes this route too: the GET sends `count=false`,
+        // and the server skips the `count(*)` it otherwise runs beside every
+        // paged read. Only an explicit `false` routes here — an absent
+        // `$count` already gets the total, and `true` asks for nothing more.
         const result = await this.rawFindWithPopulate(resource, params);
         return this.normalizeQueryResult(result, params);
       }
@@ -5632,7 +5639,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
 
     const resultObj = result as { records?: T[]; total?: number; value?: T[]; count?: number; hasMore?: boolean };
     const records = resultObj.records || resultObj.value || [];
-    const total = resultObj.total ?? resultObj.count ?? records.length;
+    // A caller that sent `$count: false` declined the total, and the server
+    // answers that request with no `total` at all. The page length is not a
+    // stand-in for it: filling it in would hand back a plausible number for a
+    // question nobody asked, which is how a page size ends up rendered as a
+    // record count. So the declined total stays absent (`QueryResult.total` is
+    // optional — "if requested").
+    const declined = params?.$count === false;
+    const total = declined ? resultObj.total : (resultObj.total ?? resultObj.count ?? records.length);
     // Prefer the server's `hasMore` (real server-side pagination, framework
     // issue objectstack-ai/objectstack#2212). Fall back to the page-local estimate (a full page implies
     // there may be more) only when the server doesn't report it.
@@ -5641,7 +5655,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       : (params?.$top ? records.length === params.$top : false);
     return {
       data: records,
-      total,
+      ...(total === undefined ? {} : { total }),
       // Calculate page number safely
       page: params?.$skip && params.$top ? Math.floor(params.$skip / params.$top) + 1 : 1,
       pageSize: params?.$top,
@@ -5669,6 +5683,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
     if (params.$skip !== undefined) {
       queryParams.set('skip', String(params.$skip));
+    }
+
+    // The declined total (`$count: false`, see `find`). Only the explicit
+    // opt-out is sent: an absent `count` already gets the total.
+    if (params.$count === false) {
+      queryParams.set('count', 'false');
     }
 
     // Full-text search (ADR-0061). The server resolves which fields to match

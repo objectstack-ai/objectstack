@@ -24,6 +24,7 @@
     "ui/BulkActionExecution",
     "ui/BulkActionOperation",
     "ui/BulkActionParam",
+    "ui/BulkActionResult",
     "ui/CalendarConfig",
     "ui/ChartAggregate",
     "ui/ChartAggregateFunction",
