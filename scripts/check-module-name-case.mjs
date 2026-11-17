@@ -34,6 +34,11 @@
  * Whole paths that differ only in case (`Docs/a.md` and `docs/a.md`) are the
  * same rule one level up: the two folder names collide in their parent.
  *
+ * Full names are compared too, in a key space of their own (a module name is
+ * never matched against a full name), so two entries whose whole names differ
+ * only in case collide whatever their keys: `Foo.ts` beside `foo.TS`, or a
+ * folder `Foo.ts/` beside a file `foo.ts`.
+ *
  * ⛔ Not a collision: the same key in the same case (`foo.ts` beside
  * `foo.tsx`, or `foo.ts` beside `foo.test.ts`, whose key is `foo.test`). Those
  * are one name on every file system, and which one an import reaches is the
@@ -70,18 +75,25 @@ export function moduleKey(name, isFolder) {
  * `[{ folder, key, entries }]`, `entries` sorted, one row per colliding key.
  */
 export function findCaseCollisions(paths) {
-  /** folder → lower-cased key → Map(exact key → Set(entry names)) */
-  const folders = new Map();
-  const add = (folder, name, isFolder) => {
-    const key = moduleKey(name, isFolder);
-    let byLower = folders.get(folder);
-    if (!byLower) folders.set(folder, (byLower = new Map()));
+  /** `${space}\0${folder}` → lower-cased key → Map(exact key → Set(entry names)) */
+  const groups = new Map();
+  const put = (space, folder, key, entry) => {
+    const at = `${space}\0${folder}`;
+    let byLower = groups.get(at);
+    if (!byLower) groups.set(at, (byLower = new Map()));
     const lower = key.toLowerCase();
     let byExact = byLower.get(lower);
     if (!byExact) byLower.set(lower, (byExact = new Map()));
     let names = byExact.get(key);
     if (!names) byExact.set(key, (names = new Set()));
-    names.add(isFolder ? `${name}/` : name);
+    names.add(entry);
+  };
+  const add = (folder, name, isFolder) => {
+    const entry = isFolder ? `${name}/` : name;
+    // Two key spaces, never matched against each other: the module name an
+    // import spells, and the full name the file system stores.
+    put('module', folder, moduleKey(name, isFolder), entry);
+    put('full', folder, name, entry);
   };
   for (const path of paths) {
     const parts = path.split('/');
@@ -89,15 +101,22 @@ export function findCaseCollisions(paths) {
       add(parts.slice(0, i).join('/'), parts[i], i < parts.length - 1);
     }
   }
-  const out = [];
-  for (const [folder, byLower] of folders) {
+  /** One row per folder and set of colliding entries, whichever key space found it. */
+  const rows = new Map();
+  for (const [at, byLower] of groups) {
+    const folder = at.slice(at.indexOf('\0') + 1);
     for (const byExact of byLower.values()) {
       if (byExact.size < 2) continue;
-      const entries = [...byExact.values()].flatMap((s) => [...s]).sort();
-      out.push({ folder, key: [...byExact.keys()].sort().join(' / '), entries });
+      const entries = [...new Set([...byExact.values()].flatMap((s) => [...s]))].sort();
+      const id = `${folder}\0${entries.join('\0')}`;
+      if (!rows.has(id)) rows.set(id, { folder, key: [...byExact.keys()].sort().join(' / '), entries });
     }
   }
-  return out.sort((a, b) => (a.folder + a.key).localeCompare(b.folder + b.key));
+  // A row whose entries another row of its folder already names says nothing new.
+  const all = [...rows.values()];
+  const kept = all.filter((r) => !all.some((o) => o !== r && o.folder === r.folder
+    && o.entries.length > r.entries.length && r.entries.every((e) => o.entries.includes(e))));
+  return kept.sort((a, b) => (a.folder + a.key).localeCompare(b.folder + b.key));
 }
 
 function trackedPaths() {
@@ -171,6 +190,10 @@ function selfTest() {
   t('a folder beside a module (an import of the folder)', keys(['src/Foo.ts', 'src/foo/index.ts']).length === 1);
   t('a collision deep in the tree names its folder', JSON.stringify(keys(['a/b/c/X.ts', 'a/b/c/x.tsx'])) === JSON.stringify(['a/b/c|X.ts,x.tsx']));
   t('three spellings are one row', keys(['f/Ab.ts', 'f/aB.ts', 'f/ab.tsx']).length === 1);
+  t('an extension that differs in case', JSON.stringify(keys(['src/Foo.ts', 'src/foo.TS'])) === JSON.stringify(['src|Foo.ts,foo.TS']));
+  t('…a declaration extension too', keys(['src/Foo.d.ts', 'src/foo.D.ts']).length === 1);
+  t('a folder against a file of the same full name', JSON.stringify(keys(['src/Foo.ts/a.md', 'src/foo.ts'])) === JSON.stringify(['src|Foo.ts/,foo.ts']));
+  t('a pair both key spaces find is one row', keys(['src/Foo.ts', 'src/foo.ts']).length === 1);
 
   // Shapes that do not.
   t('same key, same case, two extensions', keys(['src/foo.ts', 'src/foo.tsx']).length === 0);
