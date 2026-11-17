@@ -34,7 +34,7 @@
 - 正文首行 `Mailbox-of: <席位> · <login>`;坐席即开(`mailbox-open.mjs`)并订阅,存根记 `Mailbox:`。
 - 永不合并,不欠 CI,落地与台账查询排除它;移交或换账号关旧开新;评论首行 `To: <席位>`。
 - 次行恒为一键,下列事件必敲;一事一行 ≤200 字节,只写键与编号;表外即半态。
-- 车道→L2 席或兄弟席同交接行 `Request: contract-review`;反向随记录 `Notify: contract-review`。
+- 跨账号或跨项目:车道→L2 或兄弟席 `Request: contract-review`;反向随记录 `Notify: contract-review`。
 - 任一席→分诊:p0 嫌疑、main 红、确定性队列红 `Request: urgent-triage`。
 - 立锚卡者→分诊(缺则总监)`Request: main-red`,→破坏 PR 的席与锚卡车道 `Notify: main-red`。
 - 锚卡关闭:分诊(缺则总监)→正文带 `Waits-on: main-red #n` 的每张 open PR 之席 `Notify: main-green`。
