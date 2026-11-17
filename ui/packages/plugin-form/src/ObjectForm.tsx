@@ -21,7 +21,7 @@ import { useRecordInvalidation } from './recordInvalidation';
 import { useReportedDirtyChange } from './formDirtyReport';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
-import { useIsMobile, toast } from '@object-ui/components';
+import { useIsMobile, toast, FormSectionNavContext } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
 import { resolveSubmitRedirect, submitRedirectScope } from './submitRedirect';
 import {
@@ -49,6 +49,7 @@ import {
   sectionedGridLayout,
 } from './autoLayout';
 import { deriveFieldGroupSections, projectSectionDivider, resolveSectionCollapse, type FormFieldWithGroup } from './fieldGroups';
+import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
 import { mergeCustomFields } from './customFieldsMerge';
 import { hasSectionGroupReference, resolveSectionGroupReferences } from './sectionGroups';
 import {
@@ -598,6 +599,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // file/image widget below me still uploading" answer, the Save label while it
   // is true, and the sentence that says why. See `uploadGate.tsx`.
   const uploadGate = useUploadGate();
+  // The section navigation above a sectioned form (objectstack#34605): the
+  // form reports its visible sections, this host draws them.
+  const sectionNav = useFormSectionNav();
   // Field-level permission gate. When the consumer hasn't mounted a
   // PermissionProvider / MePermissionsProvider, `usePermissions` returns
   // a permissive default (isLoaded:false, checkField always true) so we
@@ -1796,8 +1800,11 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
 
     return (
       <UploadGateProvider gate={uploadGate}>
+        <FormSectionNavContext.Provider value={sectionNav.sink}>
         <div className="w-full @container">
           {closedAffordanceNotice}
+          {/* Sticky, so the sections stay one click away down a long page. */}
+          <FormSectionNav items={sectionNav.items} className="sticky top-0 z-10 mb-4 bg-background" />
           <SchemaRenderer
             schema={{
               type: 'form',
@@ -1828,6 +1835,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           <UploadInFlightNotice gate={uploadGate} />
           {conflictDialog}
         </div>
+        </FormSectionNavContext.Provider>
       </UploadGateProvider>
     );
   }
