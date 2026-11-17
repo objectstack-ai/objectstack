@@ -7,11 +7,8 @@
  *
  * ## The rule
  *
- * The accept door writes a membership for the session's user on the strength
- * of one fact: the session's address equals the invited one. An address that
- * was never verified proves nothing about the mailbox, so on a deployment that
- * can mail, anyone who registered the invited address first (an account the
- * real owner never confirmed) could take the seat.
+ * While mail is live, accepting an invitation needs a verified address,
+ * because an unverified address is not proof of the invited mailbox.
  *
  *  - **While email delivery is live** (`AuthManager.isEmailDeliveryLive`, the
  *    one reader of `IEmailService.isConfigured()`, read at call time): an

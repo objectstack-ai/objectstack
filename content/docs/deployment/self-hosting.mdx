@@ -767,9 +767,11 @@ EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION` and
 writes nothing: an unverified address does not prove the person holds the
 invited mailbox. The Console's accept page sends the person to the
 verification-mail screen for their address, and the link in that mail brings
-them back to accept. Opening the invitation's link from the invitation mail
-itself needs no separate step, because that link verifies the address as it
-accepts. Reading, listing and declining an invitation are not affected. On a
+them back to accept. A visitor who is not signed in and opens the invitation's
+link from the invitation mail itself needs no separate step: the accept page
+offers the one-step form, which verifies the address as it accepts. A visitor
+already signed in to an unverified account who opens that link is sent to
+verify first, like any other unverified session. Reading, listing and declining an invitation are not affected. On a
 deployment with no live transport (none configured, or the log transport)
 nothing can verify an address, so acceptance stays open to an unverified
 address, as before.
