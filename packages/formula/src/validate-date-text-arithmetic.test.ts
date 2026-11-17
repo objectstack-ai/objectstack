@@ -561,6 +561,26 @@ describe('a flow condition\'s record.<field> / previous.<field> read takes the d
     expect(run("record.due_date - record.borrow_date > duration('24h')")).toMatchObject({ ok: false });
   });
 
+  it('stands down only on date arithmetic against a number: another Timestamp-typing fault leaves the root read judged, as the bare name is', () => {
+    // A Duration ordered against a number faults the Timestamp typing, but it is no date-arith shape.
+    expect(codes('due_date - borrow_date > 3')).toEqual(['date-text-arithmetic-run-fails']);
+    const span = errorsOf('record.due_date - record.borrow_date > 3');
+    expect(span.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
+      code: 'date-text-arithmetic-run-fails',
+      params: { operands: 'DateText - DateText', reference: 'record.borrow_date' },
+    }]);
+    // An ordering of the date text against a text literal (which the runtime answers) does not mask a later call, in either order.
+    for (const [bare, root] of [
+      ['due_date >= "2026-01-01" && timestamp(borrow_date) < now()', 'record.due_date >= "2026-01-01" && timestamp(record.borrow_date) < now()'],
+      ['timestamp(borrow_date) < now() && due_date >= "2026-01-01"', 'timestamp(record.borrow_date) < now() && record.due_date >= "2026-01-01"'],
+    ]) {
+      expect(codes(bare), bare).toEqual(['date-text-call-run-fails']);
+      const errors = errorsOf(root);
+      expect(errors.map((e) => e.code), root).toEqual(['date-text-call-run-fails']);
+      expect(errors[0].params, root).toMatchObject({ call: 'timestamp(record.borrow_date)', reference: 'record.borrow_date' });
+    }
+  });
+
   it('CONTROL: what the Timestamp typing of the roots faults on, and an input read, are not this family\'s', () => {
     // `record.due_date + 1` is the date-arithmetic family's shape, not the date-text check's.
     expect(codes('record.due_date + 1 > 5').filter((c) => c.startsWith('date-text-'))).toEqual([]);

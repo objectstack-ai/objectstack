@@ -24,7 +24,8 @@ import {
   firstDateTextVerdict,
   firstTypeMismatch,
   inferCelType,
-  recordRootReadsFaultTimestampTyping,
+  recordRootReadsFaultDateArith,
+  RECORD_ROOT_READ_RE,
   parseCelToAst,
   parseCelToAstWithReason,
   type CelAstNode,
@@ -839,9 +840,6 @@ function dateTextCallIssue(
 /** [#34451] The date-text verdict family: `date-text-call` / `date-text-arithmetic` and their outcome arms. */
 const DATE_TEXT_FAMILY_RE = /^date-text-(?:call|arithmetic)(?:-|$)/;
 
-/** A `record.` / `previous.` read spelled member-wise — what the record-root pass can type. */
-const RECORD_ROOT_READ_RE = /(?<![\w$.])(?:record|previous)\s*\./;
-
 /**
  * [#34662] The record-root pass of the date-text family in a flattened (flow)
  * condition: what {@link typeSoundnessIssue}'s bare-name pass leaves, judged
@@ -854,10 +852,16 @@ const RECORD_ROOT_READ_RE = /(?<![\w$.])(?:record|previous)\s*\./;
  * root read, left `dyn`, checked clean. Typed here with every field's type
  * (a flow variable shadows a bare name, never a root member), every bare name
  * `dyn`, the same verdict, code and words come back, naming the read as
- * written. The order is {@link flowValueEnvelopeDateTextIssue}'s: a shape the
- * Timestamp typing of the roots already faults on (`record.due_date + 1`) is
- * the Timestamp typing's family, not this one, so the pass stands down on it;
- * only `date-text-call*` / `date-text-arithmetic*` are kept. The outcome arm is
+ * written. The order is the bare name's own: there {@link firstTypeMismatch}
+ * answers `date-arith` when the Timestamp typing's first fault is date/duration
+ * arithmetic against a number, and the date-text check is asked only once it
+ * answers null. So the pass stands down exactly where the roots' first
+ * Timestamp-typing fault is that shape (`record.due_date + 1`, the
+ * `date-arithmetic` family's, {@link recordRootReadsFaultDateArith}), and on no
+ * other fault: `record.due_date - record.borrow_date > 3` (a Duration ordered
+ * against a number) and an expression that orders a date field against a text
+ * literal before it calls `timestamp()` are judged, as their bare spellings
+ * are. Only `date-text-call*` / `date-text-arithmetic*` are kept. The outcome arm is
  * the row's: a root read keeps the declared outcome whatever binds the bare
  * names (#30025), so `bareNamesUnproven` is not asked.
  */
@@ -869,7 +873,7 @@ function recordRootDateTextIssue(
   faultOutcome: ExprSchemaHint['faultOutcome'],
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   if (!RECORD_ROOT_READ_RE.test(source) || !Object.values(celFieldTypes).includes('timestamp')) return null;
-  if (recordRootReadsFaultTimestampTyping(source, celFieldTypes)) return null;
+  if (recordRootReadsFaultDateArith(source, celFieldTypes)) return null;
   const dateOnly = new Set(Object.keys(celFieldTypes).filter((name) => fieldTypes[name] === 'date'));
   const found = dateTextIssue(source, {}, 'flattened', role, dateArm('flattened', faultOutcome, false), dateOnly, celFieldTypes);
   return found && DATE_TEXT_FAMILY_RE.test(found.issue.code) ? found : null;

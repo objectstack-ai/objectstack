@@ -6880,6 +6880,21 @@ describe('validateStackExpressions — a flow condition\'s record. / previous. r
     }
   });
 
+  it('takes the run-may-fail sentence where the run is not proven to hold the row, as the bare name does', () => {
+    // No trigger: the start names the object but no entrance binds its row, so no outcome is declared.
+    const untriggered = (condition: string) => {
+      const stack = stackWith('start', condition);
+      const start = stack.flows[0].nodes[0] as { config: Record<string, unknown> };
+      delete start.config.triggerType;
+      return stack;
+    };
+    for (const read of ['borrow_date', 'record.borrow_date', 'previous.borrow_date']) {
+      const issues = dateTextOf(validateStackExpressions(untriggered(`timestamp(${read}) < now()`)));
+      expect(issues.map((i) => i.severity), read).toEqual(['error']);
+      expect(issues[0].message, read).toContain(`this faults wherever \`${read}\` holds that text when the condition runs`);
+    }
+  });
+
   it('CONTROL: a datetime field under timestamp() stays clean through either root', () => {
     for (const site of ['start', 'edge', 'decision'] as const) {
       for (const root of ['record', 'previous']) {
