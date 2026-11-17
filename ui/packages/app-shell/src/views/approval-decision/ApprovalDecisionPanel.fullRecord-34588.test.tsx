@@ -261,3 +261,133 @@ describe('the request page shows the business record whole (objectstack#34588)',
     expect(within(record).queryByTestId('submitted-record-open')).toBeNull();
   });
 });
+
+/**
+ * The submitted record's field groups read as real sections (objectstack#34707;
+ * maintainer 2026-11-17: 「还有审批单显示记录所有字段的时候是不是没有带分组」): each
+ * titled section is a heading a level below the card's "As submitted", in the
+ * record page's section face; every section stays open, a group declared
+ * collapsed included; and two or more titled sections get a strip of links
+ * that jump to each heading. Which fields show, their order and the "Changed"
+ * marks are unchanged.
+ */
+describe('the submitted record heads its sections and links to them (objectstack#34707)', () => {
+  /** A one-group object: a single titled section. */
+  const SINGLE = {
+    name: 'expense_claim',
+    label: 'Expense Claim',
+    fieldGroups: [{ key: 'claim', label: 'Claim', icon: 'receipt' }],
+    fields: {
+      title: { type: 'text', label: 'Title', group: 'claim' },
+      total: { type: 'currency', label: 'Total', group: 'claim' },
+    },
+  };
+  /** The purchase request with its delivery group declared collapsed. */
+  const COLLAPSED = {
+    ...PURCHASE_REQUEST,
+    fieldGroups: [
+      { key: 'request', label: 'Request' },
+      { key: 'delivery', label: 'Delivery', collapse: 'collapsed' },
+    ],
+  };
+
+  function mountObject(def: { name: string } & Record<string, unknown>, payload: Record<string, unknown>) {
+    const objects = [def, PURCHASE_LINE];
+    const adapter = {
+      getObjectSchema: vi.fn(async (name: string) => objects.find((o) => o.name === name) ?? null),
+      findOne: vi.fn(async (object: string) => {
+        if (object === def.name) return payload;
+        throw Object.assign(new Error('not found'), { status: 404 });
+      }),
+      find: vi.fn(async () => ({ data: [] })),
+    };
+    const metadata = {
+      objects,
+      getItem: async (type: string, name: string) => (type === 'object' ? (objects.find((o) => o.name === name) ?? null) : null),
+    };
+    const request = { ...REQUEST, object_name: def.name, record_id: String(payload.id), payload };
+    render(
+      <MetadataCtx.Provider value={metadata as never}>
+        <AdapterCtx.Provider value={adapter as never}>
+          <RecordContextProvider objectName="sys_approval_request" recordId={request.id} data={request}>
+            <ApprovalDecisionRenderer />
+          </RecordContextProvider>
+        </AdapterCtx.Provider>
+      </MetadataCtx.Provider>,
+    );
+    return screen.getByTestId('approval-decision-panel');
+  }
+
+  const scrollIntoView = vi.fn();
+  beforeEach(() => {
+    scrollIntoView.mockClear();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: scrollIntoView });
+  });
+  afterEach(() => {
+    delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  it('each titled section is a level-4 heading under the level-3 "As submitted", in the record page\'s foreground face; a field label is not a heading', async () => {
+    const { panel } = mount();
+    const record = await within(panel).findByTestId('submitted-record');
+    await waitFor(() => expect(record.getAttribute('data-current')).toBe('readable'));
+    expect(within(record).getByRole('heading', { level: 3 }).textContent).toBe('As submitted');
+    const headings = within(record).getAllByRole('heading', { level: 4 });
+    expect(headings.map((h) => h.textContent)).toEqual(['Request', 'Delivery']);
+    // The record page's section title: semibold, foreground, over a hairline; not the muted field-label grey.
+    for (const h of headings) {
+      expect(h.className).toContain('font-semibold');
+      expect(h.className).toContain('text-foreground');
+      expect(h.className).not.toContain('text-muted-foreground');
+      expect(h.className).not.toContain('truncate');
+      expect(h.parentElement?.className).toContain('border-b');
+    }
+    expect(within(record).queryByRole('heading', { name: 'Vendor' })).toBeNull();
+  });
+
+  it('a group declared collapsed is drawn open, with no disclosure to fold it', async () => {
+    const panel = mountObject(COLLAPSED, SUBMITTED);
+    const record = await within(panel).findByTestId('submitted-record');
+    await waitFor(() => expect(record.getAttribute('data-current')).toBe('readable'));
+    const delivery = record.querySelector('[data-submitted-section="group:delivery"]') as HTMLElement;
+    expect(within(delivery).getByRole('heading', { level: 4 }).textContent).toBe('Delivery');
+    expect(fieldKeys(delivery)).toEqual(['ship_to', 'needed_by', 'carrier', 'contact_phone', 'justification']);
+    expect(record.querySelector('[aria-expanded]')).toBeNull();
+  });
+
+  it('two or more titled sections get section links, in page order and named by the card heading; a click scrolls to that section\'s heading', async () => {
+    const { panel } = mount();
+    const record = await within(panel).findByTestId('submitted-record');
+    const nav = within(record).getByRole('navigation', { name: 'As submitted' });
+    const links = within(nav).getAllByRole('button');
+    expect(links.map((b) => b.textContent)).toEqual(['Request', 'Delivery']);
+    links[1].click();
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    const delivery = within(record.querySelector('[data-submitted-section="group:delivery"]') as HTMLElement)
+      .getByRole('heading', { level: 4 });
+    expect(scrollIntoView.mock.contexts[0]).toBe(delivery);
+  });
+
+  it('CONTROL: a record with one titled section draws its heading and no section links', async () => {
+    const panel = mountObject(SINGLE, { id: 'ec_1', title: 'Team dinner', total: 120 });
+    const record = await within(panel).findByTestId('submitted-record');
+    await waitFor(() => expect(record.getAttribute('data-current')).toBe('readable'));
+    expect(within(record).getAllByRole('heading', { level: 4 }).map((h) => h.textContent)).toEqual(['Claim']);
+    expect(within(record).queryByRole('navigation')).toBeNull();
+    expect(within(record).queryByTestId('submitted-record-section-nav')).toBeNull();
+  });
+
+  it('the fields, their order and the "Changed" mark are those the page drew before the headings', async () => {
+    const { panel } = mount();
+    const record = await within(panel).findByTestId('submitted-record');
+    await waitFor(() => expect(record.querySelector('[data-submitted-field="vendor"]')?.getAttribute('data-changed')).toBe('true'));
+    expect(fieldKeys(record.querySelector('[data-submitted-section="group:request"]') as HTMLElement)).toEqual([
+      'name', 'amount', 'vendor', 'category', 'cost_center', 'budget_code', 'requested_on',
+    ]);
+    expect(fieldKeys(record.querySelector('[data-submitted-section="group:delivery"]') as HTMLElement)).toEqual([
+      'ship_to', 'needed_by', 'carrier', 'contact_phone', 'justification',
+    ]);
+    expect(record.querySelectorAll('[data-changed="true"]')).toHaveLength(1);
+    expect(within(record).getByTestId('submitted-field-changed').textContent).toBe('Changed');
+  });
+});

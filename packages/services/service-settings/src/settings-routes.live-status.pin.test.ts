@@ -163,6 +163,20 @@ describe('GET /api/settings/:namespace — the live values the runtime states', 
     expect(SettingsNamespacePayloadSchema.safeParse(body.data).success).toBe(true);
   });
 
+  it('serves "environment" with no value: in use, supplied by the host, named by no option', async () => {
+    const { svc, read, logger } = rig();
+    svc.registerLiveStatus('mail', () => ({
+      label: 'Mail is delivered through a transport supplied by the host application',
+      bannerText: 'In use.', bannerSeverity: 'info',
+      values: { provider: { value: null, source: 'environment' } },
+    }));
+    const { status, body } = await read();
+    expect(status).toBe(200);
+    expect(body.data.live).toEqual({ provider: { value: null, source: 'environment' } });
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(SettingsNamespacePayloadSchema.safeParse(body.data).success).toBe(true);
+  });
+
   it('⛔ serves only the value and its source: a credential the runtime attaches never leaves', async () => {
     const { svc, read } = rig(aiSettingsManifest);
     svc.registerLiveStatus('ai', () => ({
@@ -204,7 +218,8 @@ describe('GET /api/settings/:namespace — the live values the runtime states', 
     ['a key the namespace does not declare', { api_key: { value: 'openai', source: 'environment' } }],
     ['a source outside the closed set', { provider: { value: 'openai', source: 'env' } }],
     ['a value under source "none"', { provider: { value: 'openai', source: 'none' } }],
-    ['no value under a source other than "none"', { provider: { value: null, source: 'settings' } }],
+    ['no value under source "settings"', { provider: { value: null, source: 'settings' } }],
+    ['a key with no option table, even as "environment" with no value', { openai_model: { value: null, source: 'environment' } }],
     ['an entry that is not { value, source }', { provider: 'openai' }],
   ])('leaves out an entry naming %s, keeping the stated banner', async (_what, values) => {
     const { svc, read, logger } = rig(aiSettingsManifest);

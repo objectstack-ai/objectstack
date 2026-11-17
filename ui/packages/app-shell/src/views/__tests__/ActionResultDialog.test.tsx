@@ -2,8 +2,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
-import type { ResultDialogSpec } from '@object-ui/core';
-import { ActionResultDialog } from '../ActionResultDialog';
+import type { ResultDialogSpec, ResultDialogFieldSpec } from '@object-ui/core';
+import { ActionResultDialog, ResultField } from '../ActionResultDialog';
 
 /**
  * The display language the dialog resolves an `I18nLabel` against, mutable per
@@ -237,5 +237,166 @@ describe('ActionResultDialog — every copy button has an accessible name', () =
     // The same node, so assistive technology already watching it reads the change.
     expect(screen.getByRole('status')).toBe(region);
     expect(region).toHaveTextContent('actions.resultDialog.copied');
+  });
+});
+
+/**
+ * objectstack#33187 — `format: 'table'` (the contract's `table` bullet on
+ * `resultDialog`, objectstack#34391): an array drawn as rows, one cell per
+ * entry of the field's `columns`, in order. The five formats above are the
+ * CONTROL: they draw as they did.
+ */
+describe('ActionResultDialog — a `table` field draws its array as rows', () => {
+  const columns = [
+    { path: 'row', label: 'Row', format: 'json' as const },
+    { path: 'email', label: 'Email' },
+    { path: 'host.reason' },
+    { path: 'notApplied', label: 'Not applied', format: 'code-list' as const },
+  ];
+  const tableSpec = (cols: NonNullable<ResultDialogFieldSpec['columns']> = columns): ResultDialogSpec => ({
+    title: 'Import Finished',
+    fields: [{ path: 'rows', label: 'Result per row', format: 'table', columns: cols }],
+  });
+  const bodyRows = () => within(screen.getByTestId('result-table')).getAllByRole('row').slice(1);
+  const cellsOf = (row: HTMLElement) => within(row).getAllByRole('cell').map((cell) => cell.textContent);
+
+  it('draws a header per column, its label or else its path, in `columns` order', () => {
+    i18nState.language = 'en';
+    open(tableSpec(), { rows: [{ row: 1, email: 'a@example.com' }] });
+
+    const headers = within(screen.getByTestId('result-table')).getAllByRole('columnheader');
+    expect(headers.map((h) => h.textContent)).toEqual(['Row', 'Email', 'host.reason', 'Not applied']);
+    // The field's own label still heads the block.
+    expect(screen.getByText('Result per row')).toBeInTheDocument();
+  });
+
+  it('draws one row per element, a cell per column read at its path in that element', () => {
+    i18nState.language = 'en';
+    open(tableSpec(), {
+      rows: [
+        { row: 1, email: 'a@example.com', host: { notified: false, reason: 'no_host' } },
+        { row: 2, email: 'b@example.com', notApplied: ['positions', 'manager'] },
+      ],
+    });
+
+    const rows = bodyRows();
+    expect(rows).toHaveLength(2);
+    expect(cellsOf(rows[0]!)).toEqual(['1', 'a@example.com', 'no_host', '']);
+    // A `code-list` cell draws each string of the array.
+    expect(cellsOf(rows[1]!)).toEqual(['2', 'b@example.com', '', 'positionsmanager']);
+    expect(within(rows[1]!).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['positions', 'manager']);
+  });
+
+  it('draws an empty cell for a key the element does not carry, and for `null` — never the text `null`', () => {
+    i18nState.language = 'en';
+    open(tableSpec(), { rows: [{ row: 1, email: null, host: null }] });
+
+    expect(cellsOf(bodyRows()[0]!)).toEqual(['1', '', '', '']);
+    expect(screen.queryByText('null')).not.toBeInTheDocument();
+  });
+
+  it('draws a value that does not fit its cell format as compact JSON text', () => {
+    i18nState.language = 'en';
+    open(
+      tableSpec([
+        { path: 'flag' },
+        { path: 'meta' },
+        { path: 'codes', format: 'code-list' },
+        { path: 'pin', format: 'secret' },
+      ]),
+      { rows: [{ flag: true, meta: { a: 1 }, codes: [1, 2], pin: 42 }] },
+    );
+
+    expect(cellsOf(bodyRows()[0]!)).toEqual(['true', '{"a":1}', '[1,2]', '42']);
+  });
+
+  it('keeps a `secret` cell masked until revealed', () => {
+    i18nState.language = 'en';
+    open(tableSpec([{ path: 'pin', label: 'PIN', format: 'secret' }]), { rows: [{ pin: 'abcd' }] });
+
+    expect(screen.getByText('••••')).toBeInTheDocument();
+    expect(screen.queryByText('abcd')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'actions.resultDialog.copyFieldItem(label=Result per row, PIN, index=1)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('draws an element that is not a plain object as compact JSON in the first cell, the others empty', () => {
+    i18nState.language = 'en';
+    open(tableSpec(), { rows: [['x', 1], null, 'plain', 7] });
+
+    expect(bodyRows().map(cellsOf)).toEqual([
+      ['["x",1]', '', '', ''],
+      ['null', '', '', ''],
+      ['"plain"', '', '', ''],
+      ['7', '', '', ''],
+    ]);
+  });
+
+  it('draws `[]` as the header row over an empty-state line', () => {
+    i18nState.language = 'en';
+    open(tableSpec(), { rows: [] });
+
+    const table = screen.getByTestId('result-table');
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(4);
+    expect(within(table).getByText('table.noRows')).toBeInTheDocument();
+  });
+
+  it('draws a value that is not an array as `json`, and skips a missing one', () => {
+    i18nState.language = 'en';
+    open(tableSpec(), { rows: { not: 'an array' } });
+
+    expect(screen.queryByTestId('result-table')).not.toBeInTheDocument();
+    expect(screen.getByText(/"not": "an array"/)).toBeInTheDocument();
+  });
+
+  it('skips a `table` field whose path the answer does not carry, like any other field', () => {
+    i18nState.language = 'en';
+    open(tableSpec(), { summary: { added: 1 } });
+
+    expect(screen.queryByText('Result per row')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('result-table')).not.toBeInTheDocument();
+  });
+
+  it('resolves an inline per-locale column label against the display language', () => {
+    i18nState.language = 'zh-CN';
+    open(tableSpec([{ path: 'email', label: { en: 'Email', 'zh-CN': '邮箱' } }]), { rows: [{ email: 'a@example.com' }] });
+
+    expect(within(screen.getByTestId('result-table')).getByRole('columnheader').textContent).toBe('邮箱');
+    i18nState.language = 'en';
+  });
+
+  it('draws in the preflight panel too: `ResultField` takes the same row', () => {
+    i18nState.language = 'en';
+    render(
+      <ResultField
+        field={{ path: 'findings', label: 'Findings', format: 'table', columns: [{ path: 'object' }, { path: 'kind' }] }}
+        value={[{ object: 'crm_lead', kind: 'drop' }]}
+      />,
+    );
+
+    const rows = within(screen.getByTestId('result-table')).getAllByRole('row');
+    expect(cellsOf(rows[1]!)).toEqual(['crm_lead', 'drop']);
+  });
+});
+
+/**
+ * objectstack#33187 (renderer note on the `code-list` fit test): the contract
+ * fits `code-list` to an array of STRINGS. Any other array draws as JSON.
+ */
+describe('ActionResultDialog — a `code-list` field fits an array of strings only', () => {
+  it('draws an array that holds a non-string as JSON, not as a code list', () => {
+    i18nState.language = 'en';
+    open({ title: 'Codes', fields: [{ path: 'codes', label: 'Codes', format: 'code-list' }] }, { codes: ['a', { b: 1 }] });
+
+    expect(screen.queryByRole('button', { name: 'actions.resultDialog.copyAll' })).not.toBeInTheDocument();
+    expect(screen.getByText(/"b": 1/)).toBeInTheDocument();
+  });
+
+  it('CONTROL: an array of strings still draws as a code list', () => {
+    i18nState.language = 'en';
+    open({ title: 'Codes', fields: [{ path: 'codes', label: 'Codes', format: 'code-list' }] }, { codes: ['a', 'b'] });
+
+    expect(screen.getByRole('button', { name: 'actions.resultDialog.copyAll' })).toBeInTheDocument();
   });
 });

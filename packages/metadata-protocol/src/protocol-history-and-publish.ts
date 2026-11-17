@@ -45,6 +45,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
+import { environmentActionPublishSlotRefusal } from './protocol-save.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
@@ -670,7 +671,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'seedExternalIdSaveRefusal' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -890,6 +891,17 @@ export class ProtocolHistoryAndPublishFacet {
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft', packageId: draftKey, ...memberOption(request.member) },
         );
+        // [ADR-0150 D4, ruling 6902014292] The environment's own action
+        // draft is promoted into the one package-unbound active row of the
+        // name: when that row is a holder's customization, the publish would
+        // move it off the holder's object, so it is refused, never moved, as
+        // the saves are ({@link environmentActionPublishSlotRefusal}). Asked
+        // whether the caller named no package or stated `packageId: null`:
+        // both promote the package-unbound draft into that row.
+        if (draftKey === null && promoteInto === null && draftForGate) {
+            const slotRefusal = await environmentActionPublishSlotRefusal(host, singularType, request.name, draftForGate.body);
+            if (slotRefusal) throw slotRefusal;
+        }
         // [ADR-0029 D9.9, #23630] …and the save door's representability
         // refusal, asked of the row this promotion writes: an `object` row
         // bound to a package that does not own the object. A draft save is
