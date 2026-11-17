@@ -188,6 +188,31 @@ export interface DagTraversalHost {
     readonly cancelRun: AutomationEngine['cancelRun'];
 }
 
+/**
+ * Route a failed node down its declared `fault` edge: run the edge's target and
+ * answer `true`, or answer `false` when the node declares no `fault` edge (or the
+ * edge names no node), leaving the caller to fail the run. The ONE copy of the
+ * routing every failure arm of {@link executeNode} uses — the missing executor,
+ * the thrown failure and the returned failure. Whether a failure MAY route (a
+ * guard refusal never does, #3863) is the caller's decision, made before this
+ * is called; `$error` is published by the caller before it, too (#14955).
+ */
+async function followFaultEdge(
+    host: Pick<DagTraversalHost, 'executeNode'>,
+    node: FlowNodeParsed,
+    flow: FlowParsed,
+    variables: Map<string, unknown>,
+    context: AutomationContext,
+    steps: StepLogEntry[],
+): Promise<boolean> {
+    const faultEdge = flow.edges.find(e => e.source === node.id && e.type === 'fault');
+    if (!faultEdge) return false;
+    const faultTarget = flow.nodes.find(n => n.id === faultEdge.target);
+    if (!faultTarget) return false;
+    await host.executeNode(faultTarget, flow, variables, context, steps);
+    return true;
+}
+
 /** The body of {@link AutomationEngine.executeNode}, moved unedited; that method's docblock is its contract. */
 export async function executeNode(
     this: Pick<DagTraversalHost, 'renderRefusalMessage' | 'nodeExecutors' | 'executeWithTimeout' | 'setNodeError' | 'executeNode' | 'refuseUndeclaredSuspension' | 'traverseNext'>,
@@ -266,6 +291,25 @@ export async function executeNode(
     if (!executor) {
         // start node without executor is fine — just skip
         if (node.type !== 'start') {
+            // A node whose type no installed plugin provides (an `approval`
+            // node on a deployment without the approvals plugin) is a node
+            // failure like any other, graded by the same three moves as the
+            // two failure arms below: record the step, publish `$error`, then
+            // follow a declared `fault` edge. Before this the throw came first
+            // and the routing was never reached, so an author's graceful path
+            // could not run and the record that started the run waited forever.
+            //
+            // It is a `runtime` failure, never a guard refusal: the metadata is
+            // valid and a deployment that installs the plugin runs it, which is
+            // also why the boot audit only warns about it (ADR-0018 §M1).
+            //
+            // `code` rides on `$error` as the returned-failure arm's classified
+            // code does, so a handler can branch on `{$error.code}`.
+            //
+            // With no `fault` edge the run fails exactly as it always has: the
+            // same step, the same thrown text. The node never ran, so nothing
+            // it wrote can be carried and no node-level retry applies here.
+            const message = `No executor registered for node type '${node.type}'`;
             steps.push({
                 nodeId: node.id,
                 nodeType: node.type,
@@ -273,9 +317,12 @@ export async function executeNode(
                 startedAt: stepStartedAt,
                 completedAt: new Date().toISOString(),
                 durationMs: Date.now() - stepStart,
-                error: { code: 'NO_EXECUTOR', message: `No executor registered for node type '${node.type}'` },
+                error: { code: 'NO_EXECUTOR', message },
             });
-            throw new Error(`No executor registered for node type '${node.type}'`);
+            variables.set('$error', { nodeId: node.id, message, code: 'NO_EXECUTOR' });
+            this.setNodeError(variables, node.id, message);
+            if (await followFaultEdge(this, node, flow, variables, context, steps)) return;
+            throw new Error(message);
         }
         // Log start node step
         steps.push({
@@ -409,16 +456,7 @@ export async function executeNode(
             // returns: `UnscopedRunDataAccessError` (ADR-0049/#1888) reports
             // that the metadata would run unscoped, and rerouting it would
             // let a `fault` edge disable the elevation check.
-            const faultEdge = isGuardRefusal(execErr)
-                ? undefined
-                : flow.edges.find(e => e.source === node.id && e.type === 'fault');
-            if (faultEdge) {
-                const faultTarget = flow.nodes.find(n => n.id === faultEdge.target);
-                if (faultTarget) {
-                    await this.executeNode(faultTarget, flow, variables, context, steps);
-                    return;
-                }
-            }
+            if (!isGuardRefusal(execErr) && await followFaultEdge(this, node, flow, variables, context, steps)) return;
             throw execErr;
         }
 
@@ -504,16 +542,7 @@ export async function executeNode(
             // condition, a data node names no object); rerouting it would
             // make a single `fault` edge a switch that turns the guard off
             // while the run still reports success.
-            const faultEdge = result.errorClass === 'guard'
-                ? undefined
-                : flow.edges.find(e => e.source === node.id && e.type === 'fault');
-            if (faultEdge) {
-                const faultTarget = flow.nodes.find(n => n.id === faultEdge.target);
-                if (faultTarget) {
-                    await this.executeNode(faultTarget, flow, variables, context, steps);
-                    return;
-                }
-            }
+            if (result.errorClass !== 'guard' && await followFaultEdge(this, node, flow, variables, context, steps)) return;
             // [#24914, ruling B′] The text is unchanged — it is the run's
             // diagnostic, read by the run log, `failAncestors`, approvals
             // and every door's `message`. What the node's data call met is
