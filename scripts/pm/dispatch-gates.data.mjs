@@ -339,8 +339,8 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
  *
  * ## The census, re-derived on this tree
  *
- * 324 code-position matches over the tracked JS/TS corpus, 24 of them under
- * `ui/` since the objectui import (objectstack#25803). 290 are the bare
+ * 330 code-position matches over the tracked JS/TS corpus, 21 of them under
+ * `ui/` since the objectui import (objectstack#25803). 294 are the bare
  * `selfTest`; the remaining 36 carry compound names over 29 distinct spellings,
  * and they are the rows below. 25 are genuine self-test batteries — the
  * anchor firing on them is the anchor working. ELEVEN are production code:
