@@ -358,7 +358,14 @@ npx @objectstack/scenarios help                                      # the comma
   `.claude/skills/NAME/` in its working directory, with `Skill` beside `mcp__app` in `--allowedTools`; authoring turns
   never see them. The record's driver states which skills the turns had (`askSkills`: the directory, and per skill its
   name, the sha256 of its files and the front-matter `version` when it has one), and the console's driver line names
-  them. Off, the turn's arguments and the record are as before, byte for byte.
+  them. Off, the turn's arguments and the record are as before, byte for byte. A skill cannot widen the turn: a
+  `SKILL.md` (nested ones too) whose front matter carries a key outside `name`, `description`, `version`, `license`,
+  `compatibility`, `metadata`, `when_to_use`, `argument-hint`, `user-invocable` and `disable-model-invocation` is
+  refused when the directory is read. `allowed-tools` would grant tools, `model` or `effort` would swap what answers,
+  `hooks` would run commands and `context` / `agent` would hand the turn to a subagent, and the argument list cannot pin
+  all of those (`--tools` limits the built-in tools only), so the set is closed where the bytes are read. A front matter
+  the runner cannot read for certain (not opening on the first line, never closed, a top-level line that is no plain
+  `key:`) is refused the same way.
 - **Cost** (`scorecard.ts`): every turn records the cost its driver reported (`reportedCostUsd`: the `claude` CLI's
   `total_cost_usd`, notional under a subscription login, or an external command's report) and, from an external
   command, its `inputTokens` and `outputTokens`; a turn that reported none records none, never a zero. The scorecard's
@@ -395,7 +402,9 @@ npx @objectstack/scenarios help                                      # the comma
   `scenario-dataset-grade.ts`. The record keeps each on the half (`datasetQuestions`: the grade, the turn), and the
   scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back 1/2 ·
   fallback-labelled 1/1)`) only on a card that declares them. A run on a build whose app serves no datasets answers
-  them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet.
+  them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
+  replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
+  records that ask as not measured, never as failed.
 - **Ask, then confirm** (`orchestrate.ts`, `prompts.ts`, `driver.ts`, `scorecard.ts`): a `pending_confirmation`
   operation whose first turn asked first and wrote nothing gets a second turn as the same persona over the same MCP
   door. No driver resumes a session, so it is a fresh turn whose prompt (`confirmPrompt`) quotes the operation's ask
