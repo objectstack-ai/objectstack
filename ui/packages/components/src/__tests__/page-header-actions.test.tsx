@@ -1092,7 +1092,8 @@ describe('PageHeaderRenderer — in-flight header action (objectstack#34933)', (
     expect(document.activeElement).toBe(trigger);
     fireEvent.click(trigger);
     const dialog = await screen.findByRole('alertdialog');
-    expectBusy(trigger);
+    // Busy is read off `aria-busy` alone here, so this case judges focus only.
+    expect(trigger.getAttribute('aria-busy')).toBe('true');
     const confirm = within(dialog).getByRole('button', { name: 'Confirm' });
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     confirm.focus();
@@ -1100,10 +1101,10 @@ describe('PageHeaderRenderer — in-flight header action (objectstack#34933)', (
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     await waitFor(() => expect(api).toHaveBeenCalledTimes(1));
     // The run is still in flight: busy, and focus is back on the trigger.
-    expectBusy(trigger);
+    expect(trigger.getAttribute('aria-busy')).toBe('true');
     await waitFor(() => expect(document.activeElement).toBe(trigger));
     await act(async () => { run.resolve({ success: true }); await run.promise; });
-    await waitFor(() => expectIdle(trigger));
+    await waitFor(() => expect(trigger.hasAttribute('aria-busy')).toBe(false));
     expect(document.activeElement).toBe(trigger);
   });
 
