@@ -398,6 +398,11 @@ export interface PendingSchemaWork {
  * section tells the operator the work is never data-losing, and that claim must
  * not silently come to cover a row rewrite.
  *
+ * [#34973] `normalize_boolean_storage` rewrites rows in place too: the SQLite
+ * boolean backfill, which turns legacy text `'true'` / `'false'` cells into
+ * `1` / `0`. It is in place by the rule below, and `os migrate plan` renders
+ * it as a row-update count beside the temporal ones.
+ *
  * [#30636] Two more describe the one existing-table shape the additive path
  * cannot adopt — keyed by `_id`, with no `id` column (`existing-table-refusal.ts`):
  * `rebuild_table` drops and recreates it while it is EMPTY (in place: it is
@@ -418,6 +423,7 @@ export type PendingSchemaWorkKind =
   | 'add_columns'
   | 'normalize_datetime_storage'
   | 'normalize_time_storage'
+  | 'normalize_boolean_storage'
   | 'widen_datetime_columns'
   | 'widen_time_columns'
   | 'rebuild_table'
