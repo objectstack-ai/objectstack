@@ -79,6 +79,11 @@ const NOT_AN_AUTHOR = ['manage_users'];
 function fakeProtocol() {
   const calls: unknown[] = [];
   const protocol: OpenAuthoringProtocol = {
+    // The live type set the unknown-type refusal reads: without it the refusal
+    // cannot disprove a type and lets it through.
+    async getMetaTypes() {
+      return { types: ['object', 'flow', 'view'] } as any;
+    },
     async getMetaItems(request: any) {
       calls.push(['getMetaItems', request]);
       return {
