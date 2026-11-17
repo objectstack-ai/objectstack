@@ -1059,7 +1059,8 @@ const FLOW_PATTERN_CASES: readonly AdvisoryCase[] = [
 ];
 
 pinCatalog('flow patterns', FLOW_PATTERNS_USER_TEXT, [FLOW_DECISION_UNCONDITIONAL_BRANCH]);
-pinCases('flow patterns', lintFlowPatterns, FLOW_PATTERN_CASES);
+// The rule leaves `severity` unset for a warning, as the registry row reads it.
+pinCases('flow patterns', (stack) => lintFlowPatterns(stack).map((f) => ({ ...f, severity: f.severity ?? 'warning' })), FLOW_PATTERN_CASES);
 
 describe('flow patterns user text · what the builder reads (#34818)', () => {
   it('places the finding on the decision node by its document path, so the draft verdict resolves onto it', () => {
