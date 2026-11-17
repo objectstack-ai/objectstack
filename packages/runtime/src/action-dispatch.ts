@@ -1288,8 +1288,14 @@ export async function dispatchAction(kernel: ObjectKernel, request: ActionDispat
  * {@link dispatchAction}'s does (`428 ACTION_CONFIRMATION_REQUIRED` without
  * it on a declared-gated action, and an AI service account refused whatever
  * it carries); the subject record is read again as the person; the run must
- * be paused on a screen (else `409`). Then it resumes, once. Nothing is
+ * be paused on a screen (else `409`). Then it resumes, and nothing is
  * handed off again.
+ *
+ * A run that is no longer paused is the only replay refused here. A wizard
+ * that this call moved on to its next screen is still paused under the same
+ * run id, so a second call with the same hand-off passes every step again and
+ * resumes that next screen with the values given. Deciding a pending item
+ * once, and voiding an item whose run has moved on, are the host's.
  *
  * `kernel`, the placement and the gates that stay the host's job are
  * {@link dispatchAction}'s, and so is the answer's shape: `200` with

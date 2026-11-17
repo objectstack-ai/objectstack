@@ -2184,7 +2184,12 @@ export async function resumeActionRun(
  *    without it. Nothing is handed off again, and an AI service account is
  *    refused whatever it carries (ADR-0151 D3 rule 3).
  *  - Steps 4 and 5 read the subject record again as the person and require
- *    the run to be paused on a screen; step 6 resumes it once.
+ *    the run to be paused on a screen; step 6 resumes it.
+ *
+ * Step 2 refuses only a run that is no longer paused: a wizard moved on to
+ * its next screen is still paused under the same run id, and a second call
+ * with the same hand-off resumes that screen with the values given. Deciding
+ * a pending item once is the host's.
  *
  * Placement is the host action door's ({@link PlaceRequestInEnvironment}).
  * What stays the host's before it calls, as for `dispatchAction`: resolving

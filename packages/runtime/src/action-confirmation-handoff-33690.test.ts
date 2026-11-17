@@ -650,7 +650,7 @@ describe('[#34386] dispatchActionResume: approving a handed-off resume_run resum
         expect(h.runs.get(run.runId)?.status).toBe('paused');
     });
 
-    it('a run that is no longer parked is refused: an approval resumes it once, never twice', async () => {
+    it('a run that is no longer parked is refused: a run the first approval completed is not resumed again', async () => {
         const service = makeConfirmationService();
         const h = makeHarness({ service });
         const run = await handedOffResume(h, service);

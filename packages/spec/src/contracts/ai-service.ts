@@ -777,7 +777,11 @@ export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
  * true })` resumes the run a handed-off `resume_run` carries
  * ({@link ActionConfirmationHandOff.run}) as that person, asking every
  * `resume_run` gate again: a run no longer paused, or one another person
- * started, is refused, and the run resumes once.
+ * started, is refused. That is the only replay it refuses: a wizard the first
+ * approval moved on to its next screen is still paused under the same run id,
+ * and a second call with the same hand-off resumes it again with the values
+ * given. Deciding a pending item once, and voiding an item whose run has
+ * moved on, are the host's.
  *
  * A host may build it over its own pending-action store; the
  * `held` outcome of {@link IAIService.approvePendingAction} is the existing
