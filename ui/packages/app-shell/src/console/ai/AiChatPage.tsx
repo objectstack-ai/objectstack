@@ -2050,6 +2050,10 @@ export function ChatPane({
         // transport reads the body per send, so this stays fresh per turn).
         // The console dock sends the page in view too (objectstack#30043).
         ...(surfaceContext ? { surface: surfaceContext } : {}),
+        // The language this console renders in, so a reply that names a card
+        // control names it as the card draws it. Only `Accept-Language` reaches
+        // the server otherwise; the server validates the value itself.
+        uiLocale: language,
       },
     },
     initialMessages: hydrated,

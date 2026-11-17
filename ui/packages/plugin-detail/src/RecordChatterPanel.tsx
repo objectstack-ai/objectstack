@@ -14,6 +14,19 @@ import { RecordActivityTimeline } from './RecordActivityTimeline';
 import type { FeedFilterMode } from './RecordActivityTimeline';
 import { useDetailTranslation } from './useDetailTranslation';
 import { useRecordAriaProps } from './renderers/recordComponentAria';
+import { RecordTimelinePanelContext } from './recordTimelineStream';
+
+/**
+ * The inline timeline's face inside the record page's 动态 card
+ * (`RecordTimelinePanel`). That card draws its body edge to edge, because the
+ * peek face it expects pads its own rows; the timeline's panel face pads only
+ * its top. Inside the card it takes the related panels' inset instead —
+ * `px-3`, a `py-3` band, the card's own divider colour — merged over the
+ * timeline's root classes, so the divider under the card head stays the one
+ * border between the two. Outside the card (the 动态 tab, a page body) the
+ * de-boxed face is unchanged.
+ */
+const IN_TIMELINE_CARD_FACE = 'border-border px-3 py-3';
 
 export interface RecordChatterPanelProps {
   /** Chatter panel configuration from RecordChatterComponentProps */
@@ -143,6 +156,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
    * resolves differently. With nothing authored it carries no attribute.
    */
   const feedAria = useRecordAriaProps(config?.feed?.aria);
+  const inTimelineCard = React.useContext(RecordTimelinePanelContext) !== null;
 
   // A refused or failed read leaves the count unknown, not zero (see the
   // timeline's header), so the collapsed toggle names the panel without one.
@@ -304,6 +318,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               activityFailed={activityFailed}
               commentsFailed={commentsFailed}
               onRetryFeed={onRetryFeed}
+              className={inTimelineCard ? IN_TIMELINE_CARD_FACE : undefined}
             />
           </div>
         </div>
