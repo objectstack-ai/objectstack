@@ -350,3 +350,38 @@ describe('#34604 — the master-detail (subforms) arm', () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 });
+
+describe('#34604 — beside the section nav strip of a sectioned flat form', () => {
+  const SECTIONED = {
+    name: 'deal',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      amount: { type: 'number', label: 'Amount' },
+    },
+  };
+  const sections = [
+    { name: 'basics', label: 'Basics', fields: ['name'] },
+    { name: 'money', label: 'Money', fields: ['amount'] },
+  ];
+
+  it('keeps the nav strip, the same node, across two toggles; the header hands its rule to the strip', async () => {
+    render(
+      <ModalForm
+        schema={{ type: 'object-form', formType: 'modal', objectName: 'deal', mode: 'create', title: 'New', open: true, sections } as any}
+        dataSource={flatDs({ deal: SECTIONED })}
+      />,
+    );
+    await nameInput();
+    const nav = await waitFor(() => screen.getByTestId('form-section-nav'));
+    const header = screen.getByText('New').parentElement as HTMLElement;
+    expect(header.className).toContain('sm:pr-20');
+    expect(header.className.split(/\s+/)).not.toContain('border-b');
+
+    fireEvent.click(maximizeButton());
+    expectMaximized(dialog());
+    expect(screen.getByTestId('form-section-nav')).toBe(nav);
+    fireEvent.click(maximizeButton());
+    expectRestored(dialog());
+    expect(screen.getByTestId('form-section-nav')).toBe(nav);
+  });
+});
