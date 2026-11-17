@@ -277,7 +277,11 @@ async function mount(page: Page, c: Case): Promise<void> {
   }, c);
   await page.addScriptTag({ content: bundle, type: 'module' });
   const compiled = new Set<string>();
-  const expand = page.getByRole('button', { name: new RegExp(`^Project\\W*${OBJECT}\\W*$`) });
+  // The Studio row names the object by its label alone, the machine name being
+  // the button's tooltip (objectstack#34795); the environment table still
+  // prints the name beside the label.
+  const name = c.host === 'studio' ? /^Project$/ : new RegExp(`^Project\\W*${OBJECT}\\W*$`);
+  const expand = page.getByRole('button', { name });
   await expand.waitFor({ state: 'attached', timeout: 30_000 });
   await styleUntilStable(page, compiled);
   await expand.click();

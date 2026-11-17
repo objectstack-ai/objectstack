@@ -5286,7 +5286,7 @@ const ar = {
       securityBlockTitle_few: 'سيتم رفض النشر — {{count}} عناصر بحاجة إلى قرار أولاً',
       securityBlockTitle_many: 'سيتم رفض النشر — {{count}} عنصرًا بحاجة إلى قرار أولاً',
       securityBlockTitle_other: 'سيتم رفض النشر — {{count}} عنصر بحاجة إلى قرار أولاً',
-      securityBlockWhere: 'أصلحه في الكائن ضمن الإعدادات ← مشاركة السجلات، ثم انشر مرة أخرى.',
+      securityBlockWhere: 'أصلحه في الكائن ضمن الإعدادات ← من يمكنه رؤية أي السجلات، ثم انشر مرة أخرى.',
       flowChecksTitle: 'قبل النشر: سيُبلغ فحص النشر عمّا يلي',
       securityRule: {
         owdUnset: 'لم يُعرَّف أساس مشاركة السجلات (sharingModel). يعود وقت التشغيل إلى private، لكن يجب أن يكون الأساس قرارًا صريحًا.',
