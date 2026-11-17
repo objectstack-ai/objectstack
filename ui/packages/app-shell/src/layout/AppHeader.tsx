@@ -1015,10 +1015,12 @@ export function AppHeader({
           With the search centered, the search group here holds only the icon
           button and leaves at 960 px; the three `min-[960px]:` rules keyed on
           `data-topbar-search` keep the group after it from drawing a divider
-          next to nothing. */}
+          next to nothing. Below `sm` the groups draw no divider and no gap
+          beyond the cluster's own: the phone bar's 44 px controls sit side by
+          side and the room goes to the page title (objectstack#34596). */}
       <div
         className={cn(
-          'flex items-center gap-0.5 sm:gap-1 shrink-0 [&>*+*[data-topbar-group]]:ml-1 [&>[data-topbar-group]+[data-topbar-group]]:border-l [&>[data-topbar-group]+[data-topbar-group]]:border-border/60 [&>[data-topbar-group]+[data-topbar-group]]:pl-1 sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2 sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
+          'flex items-center gap-0.5 sm:gap-1 shrink-0 sm:[&>*+*[data-topbar-group]]:ml-1 sm:[&>[data-topbar-group]+[data-topbar-group]]:border-l sm:[&>[data-topbar-group]+[data-topbar-group]]:border-border/60 sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2 sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
           centersSearch &&
             'min-[960px]:flex-1 min-[960px]:min-w-max min-[960px]:justify-end min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:ml-1 min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:border-l-0 min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:pl-0',
         )}

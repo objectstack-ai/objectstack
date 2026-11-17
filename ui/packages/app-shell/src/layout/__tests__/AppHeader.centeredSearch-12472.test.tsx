@@ -348,3 +348,24 @@ describe('CONTROLS (objectui#12472)', () => {
     expect(document.querySelector('[data-topbar-zone]')).toBeNull();
   });
 });
+
+describe('the phone bar spends no room on group dividers (objectstack#34596)', () => {
+  it('below sm the cluster draws no divider and no gap between its groups; from sm each group after the first draws one', () => {
+    mount();
+    const classes = classesOf(clusterOf());
+    // Every divider rule is `sm:`-scoped, so the phone bar's 44 px controls sit
+    // side by side and the page title keeps the width.
+    const dividerRules = classes.filter((c) => /topbar-group\]\]?:(border-l|border-border|pl-|ml-)/.test(c));
+    expect(dividerRules.length).toBeGreaterThan(0);
+    for (const c of dividerRules) {
+      expect(c.startsWith('sm:') || c.startsWith('min-[960px]:'), `${c} is phone-scoped`).toBe(true);
+    }
+    expect(classes).toEqual(
+      expect.arrayContaining([
+        'sm:[&>[data-topbar-group]+[data-topbar-group]]:border-l',
+        'sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2',
+        'sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
+      ]),
+    );
+  });
+});
