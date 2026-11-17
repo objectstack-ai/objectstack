@@ -9,7 +9,15 @@ export const entry: SemanticMigration = {
     + 'validation conditions, flow conditions) — a date or datetime field subtracted from another '
     + '(record.end_date - record.start_date), or arithmetic on one with a duration '
     + '(record.start_date - duration("24h")); and, as a formula value, an expression that computes a '
-    + 'duration (today() - record.start_date, now() - record.start_at)',
+    + 'duration (today() - record.start_date, now() - record.start_at)'
+    + '. The first two shapes (a field subtracted from another, a field in arithmetic with a duration; '
+    + 'not the formula-only duration value) are refused in a flow VALUE envelope too (#34451): an assignment node\'s '
+    + 'assignments value, a create_record / update_record node\'s fields.* value, reading the field '
+    + 'through record (or previous), in a record-triggered flow or a time-relative sweep of the typed '
+    + 'object that binds no variable named record itself; os validate and the engine\'s registerFlow '
+    + 'refuse the same set. A stored flow carrying one fails to register at boot on an engine with the '
+    + 'object-schema resolver wired (the automation service bridged to ObjectQL) until it is rewritten '
+    + 'with the same rewrite',
   replacement:
     'daysBetween(a, b) for the span in whole days: daysBetween(record.start_date, record.end_date) for end '
     + 'minus start, daysBetween(record.start_date, today()) for the days since a date. addDays(d, n) / '

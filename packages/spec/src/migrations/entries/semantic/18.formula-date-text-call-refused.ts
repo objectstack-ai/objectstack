@@ -8,7 +8,14 @@ export const entry: SemanticMigration = {
     'data.Field.expression of a formula field (and any CEL predicate judged with the object\'s field types: '
     + 'validation conditions, flow conditions) — a date or datetime field handed straight to a call that '
     + 'takes a timestamp: isoDate(record.start_at), isoDatetime(record.start_at), '
-    + 'startsWith(isoDate(record.start_at), "2026"), record.start_date.getFullYear()',
+    + 'startsWith(isoDate(record.start_at), "2026"), record.start_date.getFullYear()'
+    + '. The same shapes in a flow VALUE envelope are refused too (#34451): an assignment node\'s '
+    + 'assignments value, a create_record / update_record node\'s fields.* value, reading the field '
+    + 'through record (or previous), in a record-triggered flow or a time-relative sweep of the typed '
+    + 'object that binds no variable named record itself; os validate and the engine\'s registerFlow '
+    + 'refuse the same set. A stored flow carrying one fails to register at boot on an engine with the '
+    + 'object-schema resolver wired (the automation service bridged to ObjectQL) until it is rewritten '
+    + 'with the same rewrite',
   replacement:
     'Parse the field\'s text into a timestamp first with date(…): isoDate(date(record.start_at)), '
     + 'isoDatetime(date(record.start_at)), date(record.start_date).getFullYear(). date(…) keeps a '
