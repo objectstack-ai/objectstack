@@ -58,6 +58,7 @@ import {
 import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
+import { bundleMemberDiscriminator } from './protocol-bundle-members.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ServedOverrideRow } from './served-override.js';
 
@@ -491,7 +492,15 @@ export function exactQualifierItem(
             address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
     }
     const [holder] = address.registryHolders;
-    return holder === undefined ? undefined : registry.getPackageScopedItem(request.type, request.name, holder, member);
+    // [#34682] The admitted holder's item AT the addressed member: the named
+    // one, else the canonical one (the selector's contract: naming no member
+    // is naming the canonical value). Asked with the raw selector, a read
+    // naming no member got the holder's FIRST member when it ships no
+    // canonical one, while `?member=<canonical>` answered nothing. `undefined`
+    // for a type with no members, which reads as before.
+    return holder === undefined
+        ? undefined
+        : registry.getPackageScopedItem(request.type, request.name, holder, bundleMemberDiscriminator(request.type, member));
 }
 
 /**

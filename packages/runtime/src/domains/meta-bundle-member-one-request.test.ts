@@ -147,6 +147,10 @@ describe('[#34682] naming no member and naming the canonical member are one requ
                     expect({ leg, name, read: bare.read, effective: (bare.layers[1] as unknown[] | undefined)?.[0], executed: bare.executed })
                         .toEqual({ leg, name, read: [200, served], effective: served, executed: served });
                 }
+                // The preserved half: the `fr-FR` member, named, is served as before.
+                const fr = await doors(b, 'email_template', name, 'fr-FR');
+                const frSubject = name.startsWith('ship_') ? 'ship fr' : 'row fr';
+                expect([leg, name, fr.read]).toEqual([leg, name, [200, { name, locale: 'fr-FR', subject: frSubject, label: frSubject }]]);
                 // …and at the shipping package's own address (`?package=`), for a shipped bundle.
                 if (name.startsWith('ship_')) {
                     const atBase = await doors(b, 'email_template', name, undefined, A);

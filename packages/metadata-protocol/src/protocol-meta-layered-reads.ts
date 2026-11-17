@@ -449,13 +449,8 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // now refused naming the holders (ruling 6917064203 on #34398).
         if (exactAddress === undefined) regItem = namedMemberOnly(runtimeOnly(registryAnswerAtAddress(host, request, regItem, member, isWantedMember, { refuse: true })));
         if (regItem !== undefined) code = regItem;
-        // [#34682] No member-less artifact lookup follows: naming no member,
-        // the code layer is the canonical member's artifact, asked above, or
-        // none. FROM (`main` d947a93cf8): a bundle whose base ships no
-        // canonical member took the member it ships as its code layer here
-        // (#34441 cell 1), so `/layers` served A's `fr-FR` where
-        // `/layers?member=en-US` answered 404. For a type with no members that
-        // lookup repeated the artifact lookup above with the same arguments.
+        // [#34682] Naming no member, the code layer is the canonical member's
+        // artifact (asked above) or none: no lookup by name alone follows.
     }
 
     // [#5840] The code half of the rule #5707 wrote for the overlay half,
