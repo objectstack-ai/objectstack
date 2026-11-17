@@ -203,6 +203,7 @@ export type {
     MetaBookTreeSources,
     MetaItemAnswer,
     MetaItemAnswerSources,
+    MetaHolderCandidate,
     MetaHolderItemReader,
     MetaItemReadGateSources,
     MetaItemReadRefusal,

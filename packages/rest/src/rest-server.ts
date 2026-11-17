@@ -4464,7 +4464,8 @@ export class RestServer {
                 RestServer.metaTypeSingular(req.params.type), req.params.name,
                 metaReadGate.STORED_VERSION_DOOR_POLICY, readError,
                 async (holder) => (await p.getMetaItem({
-                    type: req.params.type, name: req.params.name, packageId: holder,
+                    type: req.params.type, name: req.params.name,
+                    ...(holder.kind === 'package' ? { packageId: holder.packageId } : {}),
                     ...metaReadGate.metaMemberSelector(req.query),
                     ...(environmentId ? { environmentId } : {}),
                 } as any) as { item?: unknown } | undefined)?.item,

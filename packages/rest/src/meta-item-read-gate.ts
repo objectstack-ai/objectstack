@@ -4755,19 +4755,24 @@ export function createMetaItemAnswer(
     };
 }
 
+/** [#34247] A holder a `not-held-by-qualifier` refusal names, as {@link MetaHolderItemReader} reads it. */
+export type MetaHolderCandidate = { kind: 'package'; packageId: string } | { kind: 'environment' };
+
 /**
  * [#34247] How {@link gateHolderNamingRefusal} reads one holder's item: the
- * transport's own by-name read of `name` at `?package=<packageId>`, answering
- * the served `item` (or `null`/`undefined` when that package serves none). A
- * rejection is a gate input that cannot be read: it propagates, and the
- * transport answers that fault, never the refusal.
+ * transport's own by-name read of the name at that holder's address — a
+ * package holder at `?package=<packageId>`, the environment's own item at the
+ * address that names no package — answering the served `item` (or
+ * `null`/`undefined` when that address serves none). A rejection is a gate
+ * input that cannot be read: the gate fails closed (see
+ * {@link gateHolderNamingRefusal}).
  */
-export type MetaHolderItemReader = (packageId: string) => Promise<unknown>;
+export type MetaHolderItemReader = (holder: MetaHolderCandidate) => Promise<unknown>;
 
 /**
  * [ruling 6917064203 on #34398 · #34247] The read gate answers before the
  * `not-held-by-qualifier` refusal names any holder. An exact `?package=X` read
- * of a name X holds no item of, while another package holds it, is refused by
+ * of a name X holds no item of, while another holder holds it, is refused by
  * the protocol `409 RESOURCE_CONFLICT` `not-held-by-qualifier` with the
  * holders as its candidates; that refusal is answered only to a caller the
  * type's own read gate admits. A caller the gate refuses is answered the
@@ -4778,14 +4783,17 @@ export type MetaHolderItemReader = (packageId: string) => Promise<unknown>;
  *    judges a doc by its NAME (its effective audience over the books that
  *    claim the name), so the judgment needs no holder's item.
  *  - `view`: the list view audience ({@link filterViewForUser}), `403
- *    PERMISSION_DENIED`. A view is judged by its body, so each package holder's
- *    item is read through `readHolderItem` and judged by the view arm; the
- *    gate's refusal of any one of them is the answer.
+ *    PERMISSION_DENIED`. A view is judged by its body, so EVERY holder the
+ *    refusal names — each package and the environment — is read through
+ *    `readHolderItem` and judged by the view arm; the gate's refusal of any
+ *    one of them is the answer. A candidate of any other kind cannot be read
+ *    at an address of its own, so it fails closed, as a read that rejects.
  *
  * Any other thrown value, and any other type, is `undefined`: the transport
  * answers the thrown value as it did. A gate input that cannot be read
- * REJECTS, as the gate always does: the transport answers that fault, never
- * the refusal.
+ * REJECTS, as the gate always does, and a holder read that rejects is
+ * rethrown as a fault that names no holder: the transport answers that fault,
+ * never the refusal.
  *
  * One function, called by both transports' plain read and `/layers` read.
  */
@@ -4805,16 +4813,32 @@ export async function gateHolderNamingRefusal(
         const verdict = await createMetaItemReadGate(sources, metaType, name, [named], policy)(named);
         return verdict.kind === 'refuse' && verdict.refusal.reason === 'docs-audience' ? verdict.refusal : undefined;
     }
-    const holders = (Array.isArray(refusal.candidates) ? refusal.candidates : [])
-        .filter((c: any): c is { kind: 'package'; packageId: string } => c?.kind === 'package' && typeof c.packageId === 'string')
-        .map((c) => c.packageId);
+    const candidates = Array.isArray(refusal.candidates) ? refusal.candidates as unknown[] : [];
     const items: unknown[] = [];
-    for (const holder of holders) items.push(await readHolderItem(holder));
+    for (const candidate of candidates) {
+        const holder = holderCandidateOf(candidate);
+        if (holder === undefined) {
+            throw new Error(`A holder of the ${metaType} "${name}" cannot be read at an address of its own, so its read gate cannot be judged.`);
+        }
+        try {
+            items.push(await readHolderItem(holder));
+        } catch {
+            throw new Error(`A holder of the ${metaType} "${name}" could not be read, so its read gate cannot be judged.`);
+        }
+    }
     const judge = createMetaItemReadGate(sources, metaType, name, items, policy);
     for (const item of items) {
         const verdict = await judge(item);
         if (verdict.kind === 'refuse' && verdict.refusal.reason === 'audience-permission') return verdict.refusal;
     }
+    return undefined;
+}
+
+/** A refusal candidate as {@link MetaHolderItemReader} reads it, or `undefined` for a kind with no address of its own. */
+function holderCandidateOf(candidate: unknown): MetaHolderCandidate | undefined {
+    const c = candidate as { kind?: unknown; packageId?: unknown } | null | undefined;
+    if (c?.kind === 'package' && typeof c.packageId === 'string' && c.packageId !== '') return { kind: 'package', packageId: c.packageId };
+    if (c?.kind === 'environment') return { kind: 'environment' };
     return undefined;
 }
 

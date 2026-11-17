@@ -950,7 +950,8 @@ type LayeredReadWithDraft = (
 ) => ReturnType<MetaLayeredProtocol['getMetaItemLayered']>;
 
 /**
- * [#34247] A holder's item, read at its own address (`?package=<holder>`), for
+ * [#34247] A holder's item, read at its own address (`?package=<holder>` for a
+ * package, the address naming no package for the environment's own item), for
  * {@link gateHolderNamingRefusal}. A protocol with no by-name read cannot
  * answer it, so the read REJECTS: the gate fails closed and the transport
  * answers that fault, never the refusal naming holders.
@@ -963,9 +964,11 @@ function holderItemReader(
 ): MetaHolderItemReader {
     return async (holder) => {
         if (typeof protocol.getMetaItem !== 'function') {
-            throw new Error(`The protocol serves no by-name read, so the item "${name}" of type "${type}" cannot be read at package "${holder}" to judge its read gate.`);
+            throw new Error(`The protocol serves no by-name read, so a holder of the ${type} "${name}" cannot be read to judge its read gate.`);
         }
-        const envelope = await protocol.getMetaItem({ type, name, packageId: holder, ...memberSelector });
+        const envelope = await protocol.getMetaItem({
+            type, name, ...(holder.kind === 'package' ? { packageId: holder.packageId } : {}), ...memberSelector,
+        });
         return (envelope as { item?: unknown } | undefined)?.item;
     };
 }

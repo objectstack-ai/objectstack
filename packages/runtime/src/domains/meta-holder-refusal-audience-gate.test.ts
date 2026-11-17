@@ -26,7 +26,8 @@ import '@objectstack/metadata';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
-const THROW: { type?: string; name?: string } = {};
+type Candidate = { kind: 'package'; packageId: string } | { kind: 'environment' };
+const THROW: { type?: string; name?: string; candidates?: Candidate[] } = {};
 
 // ── Fixtures (the #20193 parity rig's docs) ───────────────────────────────────
 
@@ -56,6 +57,15 @@ const VIEWS = [
     { name: 'crm_pipeline_review', label: 'Pipeline review', type: 'grid', data: { provider: 'object', object: 'crm_deal' }, requiredPermissions: ['crm_pipeline_audit'], _packageId: 'crm' },
 ];
 const STORE: Record<string, any[]> = { book: [ADMIN_GUIDE, HELP_CENTER], doc: DOCS, view: VIEWS };
+/**
+ * The environment's own items (no `_packageId`), served at the address that
+ * names no package: a view only the environment holds, and the environment's
+ * item of a name `crm` also holds, each behind its own audience.
+ */
+const ENVIRONMENT_VIEWS = [
+    { name: 'env_pipeline_review', label: 'Pipeline review (environment)', type: 'grid', data: { provider: 'object', object: 'crm_deal' }, requiredPermissions: ['crm_pipeline_audit'] },
+    { name: 'crm_pipeline_review', label: 'Pipeline review (environment)', type: 'grid', data: { provider: 'object', object: 'crm_deal' }, requiredPermissions: ['env_pipeline_audit'] },
+];
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const singular = (type: unknown): string => String(type ?? '').replace(/s$/, '');
@@ -69,7 +79,7 @@ interface Caller {
     holdings: string[];
     readableFields: string[];
 }
-const CALLERS: Record<'holder' | 'non-holder' | 'anonymous' | 'view-holder', Caller> = {
+const CALLERS: Record<'holder' | 'non-holder' | 'anonymous' | 'view-holder' | 'both-view-holder', Caller> = {
     holder: {
         ctx: { userId: 'u_holder', isSystem: false, systemPermissions: [] },
         holdings: ['crm_admin'],
@@ -86,6 +96,11 @@ const CALLERS: Record<'holder' | 'non-holder' | 'anonymous' | 'view-holder', Cal
         holdings: [],
         readableFields: [],
     },
+    'both-view-holder': {
+        ctx: { userId: 'u_both_view_holder', isSystem: false, systemPermissions: ['crm_pipeline_audit', 'env_pipeline_audit'] },
+        holdings: [],
+        readableFields: [],
+    },
 };
 type CallerName = keyof typeof CALLERS;
 
@@ -93,16 +108,17 @@ type CallerName = keyof typeof CALLERS;
  * The protocol's refusal of `?package=sales` for a doc or view `sales` ships
  * none of while `crm` ships it (`notHeldByQualifierRefusal` in
  * `@objectstack/metadata-protocol`): `PackageScopedNameRefusedError`, reason
- * `not-held-by-qualifier`, naming the holder. The holder's own address
- * (`?package=crm`) serves its item.
+ * `not-held-by-qualifier`, naming the holder (or the holders `THROW.candidates`
+ * names). Every other address serves: the holder's own (`?package=crm`) its
+ * item, the one naming no package the environment's item where it has one.
  */
 function refuseIfAsked(type: unknown, name: unknown, packageId: unknown): void {
     const t = singular(type);
-    if (packageId === 'crm') return;
+    if (packageId !== 'sales') return;
     if (t !== (THROW.type ?? 'doc') || name !== THROW.name) return;
     const base = {
         status: 'refused' as const, reason: 'not-held-by-qualifier' as const, type: t, name: String(name),
-        callerPackageId: 'sales', candidates: [{ kind: 'package' as const, packageId: 'crm' }],
+        callerPackageId: 'sales', candidates: THROW.candidates ?? [{ kind: 'package' as const, packageId: 'crm' }],
     };
     throw new PackageScopedNameRefusedError({ ...base, message: `${t} "${String(name)}" is not held by package "sales"` } as never);
 }
@@ -114,7 +130,10 @@ function protocolDouble() {
         getMetaItems: vi.fn(async ({ type }: any) => clone(STORE[singular(type)] ?? [])),
         getMetaItem: vi.fn(async ({ type, name, packageId }: any) => {
             refuseIfAsked(type, name, packageId);
-            const found = find(type, name);
+            const environmentItem = packageId === undefined && singular(type) === 'view'
+                ? ENVIRONMENT_VIEWS.find((i) => i.name === name)
+                : undefined;
+            const found = environmentItem ?? find(type, name);
             return { type: singular(type), name, item: found ? clone(found) : undefined, lock: 'none', editable: true, deletable: true, resettable: false };
         }),
         getMetaItemLayered: vi.fn(async ({ type, name, packageId }: any) => {
@@ -216,12 +235,13 @@ const PATH = (type: string, name: string, suffix: string) => `/meta/${type}/${na
  * (the holder) it serves the holder's item.
  */
 async function answersFor(
-    callerName: CallerName, name: string, type = 'doc', packageId = 'sales',
+    callerName: CallerName, name: string, type = 'doc', packageId = 'sales', candidates?: Candidate[],
 ): Promise<Array<Answer & { door: string }>> {
     const answers: Array<Answer & { door: string }> = [];
     if (packageId === 'sales') {
         THROW.type = type;
         THROW.name = name;
+        THROW.candidates = candidates;
     }
     try {
         for (const suffix of DOORS) {
@@ -232,6 +252,7 @@ async function answersFor(
     } finally {
         THROW.type = undefined;
         THROW.name = undefined;
+        THROW.candidates = undefined;
     }
     return answers;
 }
@@ -293,6 +314,40 @@ describe('[#34247] the view gate answers before the not-held-by-qualifier refusa
         }
         for (const answer of await answersFor('view-holder', 'crm_pipeline_review', 'view', 'crm')) {
             expect([answer.status, answer.door], JSON.stringify(answer.body)).toEqual([200, answer.door]);
+        }
+    });
+});
+
+describe('[#34247] the view gate judges every holder the refusal names, the environment included, both transports', () => {
+    const ENVIRONMENT_ONLY: Candidate[] = [{ kind: 'environment' }];
+    const PACKAGE_AND_ENVIRONMENT: Candidate[] = [{ kind: 'package', packageId: 'crm' }, { kind: 'environment' }];
+
+    it('a view only the environment holds: a member its audience refuses is answered the gate\'s 403, never the refusal naming holders', async () => {
+        for (const answer of await answersFor('non-holder', 'env_pipeline_review', 'view', 'sales', ENVIRONMENT_ONLY)) {
+            expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
+                .toEqual([403, 'PERMISSION_DENIED', false, answer.door]);
+        }
+    });
+
+    it('CONTROL: a view only the environment holds, a member its audience admits is answered the 409', async () => {
+        for (const answer of await answersFor('view-holder', 'env_pipeline_review', 'view', 'sales', ENVIRONMENT_ONLY)) {
+            expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
+                .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
+        }
+    });
+
+    it('a view a package and the environment both hold: a member the package\'s view admits and the environment\'s refuses is answered the gate\'s 403, never the refusal naming holders', async () => {
+        for (const answer of await answersFor('view-holder', 'crm_pipeline_review', 'view', 'sales', PACKAGE_AND_ENVIRONMENT)) {
+            expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
+                .toEqual([403, 'PERMISSION_DENIED', false, answer.door]);
+        }
+    });
+
+    it('CONTROL: the same co-held view, a member both audiences admit is answered the 409 naming the holders', async () => {
+        for (const answer of await answersFor('both-view-holder', 'crm_pipeline_review', 'view', 'sales', PACKAGE_AND_ENVIRONMENT)) {
+            expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
+                .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
+            expect(JSON.stringify(answer.body), answer.door).toContain('crm');
         }
     });
 });

@@ -1102,7 +1102,9 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                                 metaType, req.params.name, readPolicyFor, readError,
                                 // A holder's item, read at its own address.
                                 async (holder) => (await p.getMetaItem({
-                                    type: req.params.type, name: req.params.name, packageId: holder, ...memberSelector,
+                                    type: req.params.type, name: req.params.name,
+                                    ...(holder.kind === 'package' ? { packageId: holder.packageId } : {}),
+                                    ...memberSelector,
                                 }) as { item?: unknown } | undefined)?.item,
                             );
                             if (gated) {
