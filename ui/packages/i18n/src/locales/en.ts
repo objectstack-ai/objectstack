@@ -274,6 +274,11 @@ const en = {
     // only displace it by authoring a `description`, which makes a VISIBLE
     // subtitle appear on every form — so the fallback has to come from here.
     dialogDescriptionFallback: 'Complete the form fields, then submit or cancel.',
+    // The form section navigation (objectstack#34605): its accessible name,
+    // and the screen-reader text of a section's error count, which is drawn
+    // as a bare number beside the section name.
+    sectionNav: 'Form sections',
+    sectionNavErrors: 'Fields to fix: {{number}}',
     // The hint under a field the caller may read but not write, shown when the
     // field declares no description of its own (objectui#11071).
     deniedDescription: 'You do not have edit access to this field.',

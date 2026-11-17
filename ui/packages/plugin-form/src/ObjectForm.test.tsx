@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+
+// Section names are read inside the <form>: the section navigation above it
+// repeats each name once two or more sections are drawn (objectstack#34605).
+const inForm = () => within(document.querySelector('form') as HTMLElement);
 import { ObjectForm } from './ObjectForm';
 import { registerAllFields } from '@object-ui/fields';
 import React from 'react';
@@ -145,9 +149,9 @@ describe('ObjectForm Integration', () => {
         );
 
         await waitFor(() => {
-            expect(screen.getByText('Contact Info')).toBeTruthy();
+            expect(inForm().getByText('Contact Info')).toBeTruthy();
         });
-        expect(screen.getByText('Billing')).toBeTruthy();
+        expect(inForm().getByText('Billing')).toBeTruthy();
         // All fields still render, including the ungrouped one.
         expect(container.querySelector('input[name="email"]')).toBeTruthy();
         expect(container.querySelector('input[name="amount"]')).toBeTruthy();
@@ -186,7 +190,7 @@ describe('ObjectForm Integration', () => {
 
         // Collapse the Contact Info group → its email field leaves the DOM,
         // while the other group's field and the ungrouped field stay.
-        fireEvent.click(screen.getByText('Contact Info'));
+        fireEvent.click(inForm().getByText('Contact Info'));
         await waitFor(() => {
             expect(container.querySelector('input[name="email"]')).toBeNull();
         });
@@ -194,7 +198,7 @@ describe('ObjectForm Integration', () => {
         expect(container.querySelector('[name="notes"]')).toBeTruthy();
 
         // Expand again → the field returns.
-        fireEvent.click(screen.getByText('Contact Info'));
+        fireEvent.click(inForm().getByText('Contact Info'));
         await waitFor(() => {
             expect(container.querySelector('input[name="email"]')).toBeTruthy();
         });

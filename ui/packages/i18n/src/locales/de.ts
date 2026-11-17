@@ -189,6 +189,8 @@ const de = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Füllen Sie die Formularfelder aus und senden Sie ab oder brechen Sie ab.",
+    sectionNav: "Formularabschnitte",
+    sectionNavErrors: "Zu korrigierende Felder: {{number}}",
     deniedDescription: "Sie haben keinen Bearbeitungszugriff auf dieses Feld.",
     serverDefaultHint: "Wird beim Speichern automatisch gesetzt.",
     requiredForAction: "Erforderlich, um „{{action}}“ auszuführen.",

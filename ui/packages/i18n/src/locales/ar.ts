@@ -203,6 +203,8 @@ const ar = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "املأ حقول النموذج ثم أرسل أو ألغِ.",
+    sectionNav: "أقسام النموذج",
+    sectionNavErrors: "حقول تحتاج إلى تصحيح: {{number}}",
     deniedDescription: "ليس لديك إذن لتعديل هذا الحقل.",
     serverDefaultHint: "يُعيَّن تلقائيًا عند الحفظ.",
     requiredForAction: "مطلوب لتنفيذ «{{action}}».",
