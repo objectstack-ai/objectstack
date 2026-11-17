@@ -6,7 +6,7 @@
 
 feat(console): on a phone, an app's menu is a bar along the bottom edge, and 「More」 opens the full menu with a star on every entry
 
-Clause-②: yes (widening) — one new public export of `@object-ui/layout` (`drawnNavigationEntries`) and three new `console.nav` keys in every `@object-ui/i18n` pack; nothing that worked before is refused
+Clause-②: yes (widening — one @object-ui/layout export + new @object-ui/i18n locale keys; no metadata key)
 Metadata-protocol: none
 
 Below 768 px, inside an app, the Console draws a menu bar at the bottom of every list, dashboard, report and page. Before, the app's menu was only in the sidebar drawer, behind an unlabeled icon at the top left.
