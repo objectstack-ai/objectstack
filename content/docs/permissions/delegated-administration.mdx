@@ -81,12 +81,81 @@ set, and the gate resolves the name in the security catalog. The gate's rules:
 | Tenant-level assets stay tenant-level | The `everyone`/`guest` audience anchors and security-domain publishes are untouchable from any delegated scope |
 | Membership is not delegable | `sys_member` writes are tenant-admin-only: no `adminScope` axis expresses org membership, and an admin-grade membership row is auto-elevated to `organization_admin` — writing one would mint a tenant admin. Adding people *is* delegable, through an [invitation](#letting-a-delegate-invite-delegated_admin) |
 | No scope, no admin | Holders of plain CRUD on the RBAC tables with **no** scope are refused: administration is a scoped capability now, not a side effect of table access |
+| Organization administrators assign inside the boundary | A holder of `organization_admin` or `organization_admin_no_bypass` for the organization creates and removes its own members' assignment rows — never edits one in place — when every set the row distributes is inside the [organization boundary](#separation-of-duties-the-three-officer-split); outside it, a scope it also holds judges the write as for any delegate |
 
 The showcase permission zoo exercises the gate end-to-end
 (`packages/qa/dogfood/test/showcase-permission-zoo.dogfood.test.ts`): the
 in-subtree allowlisted assignment passes with a `granted_by` stamp; the
 out-of-subtree anchor and the off-allowlist grant (to self) are each
 refused.
+
+## Separation of duties: the three-officer split
+
+Some deployments split administration between three officers whose powers do
+not overlap: a system administrator who runs the deployment, a security
+administrator who decides who holds what, and an auditor who reads the
+compliance ledger (`view_all_audit_log`) and is appointed and removed by
+neither of the other two. The platform ships no officer sets — you author all
+three as ordinary permission sets, and the security administrator's set is a
+delegated scope like the one above, whose allowlist leaves out the auditor's
+set.
+
+That allowlist bounds the delegated path only. An **organization
+administrator** — a holder of `organization_admin` or
+`organization_admin_no_bypass` for the organization, which an owner- or
+admin-grade membership confers — has a right of its own (ADR-0090 D12, as
+amended): it creates and removes its organization's assignment rows for any
+set inside the **organization boundary**. A set is inside when all four hold:
+
+1. its `objects['*']` entry carries neither `viewAllRecords` nor `modifyAllRecords`;
+2. it carries no `adminScope`;
+3. every capability in its `systemPermissions` is declared `scope: 'org'`;
+4. it is not one of the sets kept outside by name (`admin_full_access`, the
+   two organization-administrator sets, the agent ceilings).
+
+`view_all_audit_log` is declared `scope: 'org'`, so an auditor set built from
+it alone is inside the boundary, and every organization administrator can
+change who holds it.
+
+**Rule: in a three-officer split, the auditor's set carries a platform-scoped
+capability.** One capability that is not declared `scope: 'org'` puts the set
+outside the organization boundary. From then on only a delegated scope whose
+allowlist names the set, or the platform administrator, adds or removes its
+holders — by a direct grant, by a position that distributes it, by a removal
+by id or through the bulk delete door alike. A capability your app declares is
+platform-scoped unless it says otherwise:
+
+```typescript
+export const AuditOfficer = defineCapability({
+  name: 'audit_officer',
+  label: 'Audit Officer',
+  description: 'Marks the auditor officer set: keeps it outside the organization boundary.',
+  // scope defaults to 'platform'
+});
+
+export const Auditor = definePermissionSet({
+  name: 'auditor',
+  label: 'Auditor',
+  systemPermissions: ['view_all_audit_log', 'audit_officer'],
+  objects: { sys_audit_log: { allowRead: true } },
+});
+```
+
+A built-in platform-scoped capability the auditor needs anyway, such as
+`setup.access` to reach Setup, serves the same way. What does not change:
+
+- **The delegated path judges the set as before.** A scope whose allowlist
+  names the auditor's set — the auditor's own administrator — still assigns
+  and removes it, whether or not its holder is also an organization
+  administrator; a scope whose allowlist leaves it out is still refused
+  `403 DELEGATION_SCOPE_VIOLATION`.
+- **An organization administrator is refused** unless a scope it holds
+  allowlists the set: `403 PERMISSION_DENIED`, naming the set and the boundary
+  condition it fails — or, when it also holds a delegated scope that leaves the
+  set out, that scope's `403 DELEGATION_SCOPE_VIOLATION`.
+- **The ceiling.** The platform administrator (`admin_full_access`) can still
+  assign any set, the auditor's included. The split separates the officers
+  below that ceiling; it does not bind the platform administrator.
 
 ## The assignment anchor
 
