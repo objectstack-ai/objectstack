@@ -134,3 +134,43 @@ describe('[#17273] and the door answers it as one', () => {
         expect(response.body.error.message).toBe('Contact has no phone');
     });
 });
+
+describe('an action body that does not compile answers naming the action and the compile error', () => {
+    /** The body from the scenario run the fix answers, byte for byte. */
+    const CARD_BODY = 'const input = ctx.input || {}; return 1;';
+
+    async function compileFailure(source: string): Promise<SandboxError> {
+        const e = await runner
+            .runScript({ language: 'js', source, capabilities: [] }, { input: {} }, actionOpts)
+            .then(() => null, (err) => err as SandboxError);
+        expect(e, 'expected the body to fail, but the script resolved').toBeInstanceOf(SandboxError);
+        return e!;
+    }
+
+    it('the runner names the action and the compiler, declares 500, and is no crash', async () => {
+        const err = await compileFailure(CARD_BODY);
+        expect(err.message).toBe("action 'submit_signoff' does not compile: SyntaxError: invalid redefinition of parameter name");
+        expect(err.status).toBe(500);
+        expect(err.code).toBeUndefined();
+        expect(err.innerMessage).toContain("Action 'submit_signoff' cannot run: its body does not compile");
+        expect(err.innerMessage).toContain('SyntaxError: invalid redefinition of parameter name');
+    });
+
+    it('the /actions door answers 500 INTERNAL_ERROR with that sentence, never the bare "Internal server error"', async () => {
+        const err = await compileFailure(CARD_BODY);
+        const response = await throughActionsDoor(err);
+        expect(response.status).toBe(500);
+        expect(response.body.error.code).toBe('INTERNAL_ERROR');
+        expect(response.body.error.message).not.toBe('Internal server error');
+        expect(response.body.error.message).toContain("Action 'submit_signoff' cannot run");
+        expect(response.body.error.message).toContain('invalid redefinition of parameter name');
+    });
+
+    it('control: a body that throws a SyntaxError while RUNNING is still a crash, answered with the sanitised 500', async () => {
+        const err = await compileFailure("JSON.parse('{'); return 1;");
+        expect(err.message).toContain("action 'submit_signoff' threw:");
+        const response = await throughActionsDoor(err);
+        expect(response.status).toBe(500);
+        expect(response.body.error.message).toBe('Internal server error');
+    });
+});

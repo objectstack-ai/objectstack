@@ -52,8 +52,9 @@ describe('action-body-does-not-compile · the wrapper is the runtime\'s', () => 
     expect(f.hint).toContain('`input` is already a parameter of the wrapper');
   });
 
-  it('…while the same source compiles on its own, which is why no parse check saw it', () => {
-    expect(hostCompileFailure(CARD_BODY)).toBeUndefined();
+  it('…while the same source compiles in the parse check\'s own wrapper, which is why that check never saw it', () => {
+    // `action-body-source-unparseable` parses inside `async function __body(ctx)`, which binds no `input`.
+    expect(hostCompileFailure(`async function __body(ctx) {\n${CARD_BODY}\n}`)).toBeUndefined();
   });
 
   it('refuses `let ctx` the same way, and names the line of body.source', () => {
