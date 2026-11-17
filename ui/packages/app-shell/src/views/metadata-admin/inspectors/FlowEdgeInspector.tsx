@@ -507,7 +507,9 @@ function EdgeConditionEditor({
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[440px] max-w-[90vw] p-3">
+            {/* `end`: the panel sits at the window's right edge, so the
+                builder opens leftward over the canvas. */}
+            <PopoverContent align="end" className="w-[440px] max-w-[90vw] p-3">
               <FilterBuilder fields={fields as never} value={group as never} onChange={(g) => commitRows(g as EdgeConditionGroup)} />
             </PopoverContent>
           </Popover>
