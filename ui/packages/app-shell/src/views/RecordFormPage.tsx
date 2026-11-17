@@ -364,14 +364,14 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
   if (!objectDef) {
     return (
-      <div className="flex h-full items-center justify-center p-4">
+      <div className="flex h-full items-center justify-center p-4" data-testid="object-not-found">
         <Empty>
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <Database className="h-6 w-6 text-muted-foreground" />
           </div>
           <EmptyTitle>{t('empty.objectNotFound')}</EmptyTitle>
           <EmptyDescription>
-            {t('empty.objectNotFoundDescription', { name: objectName })}
+            {t('console.objectView.objectNotFoundDescription', { objectName })}
           </EmptyDescription>
           <div className="mt-4">
             <Button variant="outline" onClick={() => navigate(baseUrl)}>

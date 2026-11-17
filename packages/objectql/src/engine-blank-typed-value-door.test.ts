@@ -178,14 +178,22 @@ describe('engine write doors: a blank on a non-string-typed column reaches the d
   });
 
   it('update by id and update by predicate', async () => {
+    // [#34672] A `summary` column is read-only on update: a caller's value
+    // for it, a blank included, is dropped before the driver, so the update
+    // sends no `f_summary` at all. Every other typed column still lands null.
+    const updateTyped = TYPED.filter((t) => t !== 'summary');
+    const expectUpdateTypedNull = (data: Record<string, unknown>) => {
+      for (const t of updateTyped) expect(data[f(t)], t).toBeNull();
+      expect(data).not.toHaveProperty(f('summary'));
+    };
     await engine.insert('blank_door', { id: 'u1', ...VALID });
     await engine.update('blank_door', { id: 'u1', ...blankTyped(''), ...STR_BLANK });
     const byId = last('update');
-    expectTypedNull(byId);
+    expectUpdateTypedNull(byId);
     expect([byId.c_text, byId.c_lookup, byId.c_select]).toEqual(['', null, null]);
 
     await engine.update('blank_door', blankTyped(''), { where: { id: { $in: ['u1'] } }, multi: true } as any);
-    expectTypedNull(last('updateMany'));
+    expectUpdateTypedNull(last('updateMany'));
   });
 
   it('a valid value on every typed column — falsy ones included — is unchanged', async () => {

@@ -72,6 +72,12 @@
  * verified the address, is matched by address. `open` and `email_domain`
  * match every creation by address.
  *
+ * Admission by an invitation alone grants the account and nothing more
+ * ({@link isAdmittedByInvitationAlone}): under `invite_only`, and under
+ * `email_domain` for an address off the list, the sign-up is not bound into
+ * the deployment's organization while its address is unverified, and joins by
+ * accepting the invitation.
+ *
  * ## Pinned domain-matching rules (`email_domain`)
  *
  * An unpinned matcher is where this class of gate leaks, so the rules are
@@ -523,6 +529,38 @@ export function invitationProofFor(input: {
   if (method === 'email-password') return 'presented';
   if (method === 'oauth') return emailVerified === true ? 'address' : 'none';
   return 'address';
+}
+
+/**
+ * Whether an admitted self-serve sign-up was admitted by its invitation alone,
+ * so the membership settle does not bind it into the deployment's
+ * organization while its address is unverified (`settleMembership`,
+ * `auth-manager-membership-admission.ts`). It joins by accepting the
+ * invitation, which needs a verified address and writes the role the issuer
+ * chose. An invitation proves no mailbox: under `invite_only` its id is
+ * carried by the accept link and by a copied link, and under `email_domain`
+ * the address match reads only the address the sign-up typed.
+ *
+ * - `invite_only`: the sign-up presented the invitation, which is pending,
+ *   unexpired and addressed to it ({@link invitationProofFor} `presented`).
+ * - `email_domain`: the sign-up's address is off the allowlist, and a pending
+ *   invitation addressed to it admitted it. An address on the list is admitted
+ *   by the domain rule, invitation or not, and binds as before.
+ * - `open`, an off-vocabulary posture, and every creation that is not
+ *   self-serve: never.
+ */
+export function isAdmittedByInvitationAlone(input: {
+  audience: ResolvedAudience;
+  creationClass: AudienceCreationClass;
+  email: string | undefined;
+  proof: InvitationProof;
+  hasPendingInvitation: boolean;
+}): boolean {
+  const { audience, creationClass, email, proof, hasPendingInvitation } = input;
+  if (!hasPendingInvitation || audience.invalid || creationClass !== 'self-serve') return false;
+  if (audience.posture === 'invite_only') return proof === 'presented';
+  if (audience.posture === 'email_domain') return !emailDomainAllowed(email, audience.allowedEmailDomains);
+  return false;
 }
 
 /** The refusal message for an unknown user arriving through an SSO provider under `invite_only`. */

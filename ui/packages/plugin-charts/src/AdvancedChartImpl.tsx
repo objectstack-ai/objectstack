@@ -59,6 +59,23 @@ import { createSafeTranslation, useDisplayLocale, useSafeTranslate } from '@obje
 // Default color fallback for chart series
 const DEFAULT_CHART_COLOR = 'hsl(var(--primary))';
 
+// Theme categorical palette: ten distinct `--chart-N` tokens (light and dark
+// values live in the theme stylesheets, ADR-0065 §3), so a category chart of up
+// to ten slices never repeats a colour. Kept in step with the dashboard's
+// `CHART_COLORS` in plugin-dashboard.
+const THEME_CHART_PALETTE: string[] = [
+  'hsl(var(--chart-1))',
+  'hsl(var(--chart-2))',
+  'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))',
+  'hsl(var(--chart-5))',
+  'hsl(var(--chart-6))',
+  'hsl(var(--chart-7))',
+  'hsl(var(--chart-8))',
+  'hsl(var(--chart-9))',
+  'hsl(var(--chart-10))',
+];
+
 // Simple color map for Tailwind names (Mock - ideal would be computed styles)
 const TW_COLORS: Record<string, string> = {
   slate: '#64748b',
@@ -2447,14 +2464,9 @@ function AdvancedChartImplInner({
   const labelEveryBucket = data.length > 0 && data.length <= X_AXIS_ALL_LABELS_MAX_BUCKETS;
 
   // Helper function to get color palette. An explicit `colors` prop (set by the
-  // page/dashboard) wins; otherwise fall back to the theme's --chart-1..5 vars.
-  const getPalette = () => (Array.isArray(colors) && colors.length > 0 ? colors : [
-    'hsl(var(--chart-1))',
-    'hsl(var(--chart-2))',
-    'hsl(var(--chart-3))',
-    'hsl(var(--chart-4))',
-    'hsl(var(--chart-5))'
-  ]);
+  // page/dashboard) wins; otherwise fall back to the theme's --chart-1..10 vars.
+  const getPalette = (): string[] =>
+    Array.isArray(colors) && colors.length > 0 ? colors : THEME_CHART_PALETTE;
 
   // Compact numeric formatter for Y-axis ticks (1,200,000 → 1.2M).
   // Keeps the axis readable when bar/area series have large values.

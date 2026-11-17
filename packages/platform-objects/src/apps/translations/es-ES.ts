@@ -38,7 +38,6 @@ export const esES: TranslationData = {
       navigation: {
         group_overview: { label: 'Resumen' },
         group_apps: { label: 'Aplicaciones' },
-        nav_packaged_actions: { label: 'Acciones empaquetadas' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
         nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
         nav_cloud_connection: { label: 'Conexión a la nube' },

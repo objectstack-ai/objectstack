@@ -357,6 +357,38 @@ const ActionPreflightTranslationSchema = lazySchema(() => strictObject({
 }).describe('Translations for an action preflight panel'));
 
 /**
+ * The translations of a declared refusal catalogue, keyed by code — one shape
+ * for `hooks.<hook>.refusals` (#26170, #33214) and an action's
+ * `….refusals` (#34273, under `objects.<object>._actions.<action>` or
+ * `globalActions.<action>`), built by one factory so the two cannot drift.
+ */
+const refusalTranslationsSchema = (noun: 'hook' | 'action') => z.record(z.string(), strictObject({
+  surface: `this ${noun} refusal translation`,
+  history: TRANSLATION_HISTORY,
+  // The spellings the refusal entry schema renames onto its own `message` and `reasons`.
+  aliases: { text: 'message', reason: 'message', description: 'message', variants: 'reasons', messages: 'reasons' },
+}, {
+  // The declared message's own form — plain text, or a template over the
+  // entry's declared `params`; an empty string is the untranslated
+  // skeleton slot `os i18n extract` writes (the declared message is served).
+  message: z.string().optional().describe(
+    `Translated refusal message of ${noun === 'action' ? 'an action' : 'a hook'}'s declared refusal code — served whole in the caller's locale in `
+    + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
+  ),
+  // [#33214] A declared reason's sentence under the same code.
+  reasons: z.record(z.string(), strictObject({
+    surface: `this ${noun} refusal reason translation`,
+    history: TRANSLATION_HISTORY,
+    aliases: { text: 'message', description: 'message' },
+  }, {
+    message: z.string().optional().describe(
+      `Translated sentence of a declared reason under ${noun === 'action' ? 'an action' : 'a hook'}'s refusal code — served in place of the declared `
+      + 'reason message, its {{ }} holes filled after',
+    ),
+  })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),
+})).optional().describe(`Refusal translations keyed by the code the ${noun}'s \`refusals\` declares`);
+
+/**
  * Action translations — one shape, used at two addresses: an object's
  * `_actions.<name>` and the top-level `globalActions.<name>` (the same split
  * `resolveActionLabel` walks). Built by a factory rather than transcribed
@@ -379,6 +411,7 @@ const actionTranslationSchema = (surface: string) => strictObject({
     cancelLabel: 'cancelText',
     parameters: 'params', args: 'params', inputs: 'params',
     result: 'resultDialog', dialog: 'resultDialog',
+    refusal: 'refusals',
   },
 }, {
   label: z.string().optional().describe('Translated action label'),
@@ -432,6 +465,13 @@ const actionTranslationSchema = (surface: string) => strictObject({
   // the action declares.
   preflight: ActionPreflightTranslationSchema.optional()
     .describe('Translations for the action preflight panel'),
+  // [#34273] `ActionSchema.refusals` — one translated sentence per declared
+  // refusal code (and per declared reason under it), picked by the action
+  // body runner in the caller's locale through `actionRefusalMessageKey`
+  // (`system/i18n-resolver.ts`) before the refusal leaves the server, the
+  // declared sentence on a miss. Server-rendered like a hook refusal, so no
+  // client overlay reads it.
+  refusals: refusalTranslationsSchema('action'),
 });
 
 /**
@@ -709,6 +749,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.resultDialog.*
    *   objects.<object>._actions.<action_name>.preflight.fields.<path>
    *   objects.<object>._actions.<action_name>.preflight.columns.<path>.<column_path>
+   *   objects.<object>._actions.<action_name>.refusals.<CODE>.message                  (#34273, `ActionSchema.refusals`)
+   *   objects.<object>._actions.<action_name>.refusals.<CODE>.reasons.<REASON>.message
    */
   _actions: z.record(z.string(), actionTranslationSchema('this object action translation'))
     .optional().describe('Action translations keyed by action name'),
@@ -1239,6 +1281,8 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.resultDialog.*
    *   globalActions.<action_name>.preflight.fields.<path>
    *   globalActions.<action_name>.preflight.columns.<path>.<column_path>
+   *   globalActions.<action_name>.refusals.<CODE>.message                  (#34273, `ActionSchema.refusals`)
+   *   globalActions.<action_name>.refusals.<CODE>.reasons.<REASON>.message
    */
   globalActions: z.record(z.string(), actionTranslationSchema('this global action translation'))
     .optional().describe('Global action translations keyed by action name'),
@@ -2180,31 +2224,7 @@ const appTranslationDataShape = () => ({
         + 'writes into records. Translate `refusals.<CODE>.message` or `texts.<key>.message`.',
     },
   }, {
-    refusals: z.record(z.string(), strictObject({
-      surface: 'this hook refusal translation',
-      history: TRANSLATION_HISTORY,
-      // The spellings `HookRefusalSchema` renames onto its own `message` and `reasons`.
-      aliases: { text: 'message', reason: 'message', description: 'message', variants: 'reasons', messages: 'reasons' },
-    }, {
-      // The declared message's own form — plain text, or a template over the
-      // entry's declared `params`; an empty string is the untranslated
-      // skeleton slot `os i18n extract` writes (the declared message is served).
-      message: z.string().optional().describe(
-        "Translated refusal message of a hook's declared refusal code — served whole in the caller's locale in "
-        + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
-      ),
-      // [#33214] A declared reason's sentence under the same code.
-      reasons: z.record(z.string(), strictObject({
-        surface: 'this hook refusal reason translation',
-        history: TRANSLATION_HISTORY,
-        aliases: { text: 'message', description: 'message' },
-      }, {
-        message: z.string().optional().describe(
-          "Translated sentence of a declared reason under a hook's refusal code — served in place of the declared "
-          + 'reason message, its {{ }} holes filled after',
-        ),
-      })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),
-    })).optional().describe("Refusal translations keyed by the code the hook's `refusals` declares"),
+    refusals: refusalTranslationsSchema('hook'),
     // [#34374] A declared text's sentence, picked in the organization's language.
     texts: z.record(z.string(), strictObject({
       surface: 'this hook text translation',
