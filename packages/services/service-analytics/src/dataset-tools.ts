@@ -28,7 +28,7 @@ import {
   undeclaredSelectionMembers,
   usableDeclaredMembers,
 } from './dataset-declared-members.js';
-import { matchDatasetTerms } from './dataset-term-matcher.js';
+import { findDatasetTermCandidates, matchDatasetTerms, type CandidateDataset } from './dataset-term-matcher.js';
 
 /**
  * The dataset AI tools — `list_datasets` and `query_dataset` — defined once,
@@ -86,14 +86,17 @@ const LIST_DATASETS_DESCRIPTION =
   'List the governed business datasets this caller may query: each dataset\'s dimensions (what an answer can be '
   + 'grouped by) and measures (the numbers it can answer), with their business definitions and synonyms. Pass '
   + '`terms` — the business words lifted from the question — and each dataset reports which of them equal a '
-  + 'member\'s name, label or synonym (`matches`). Selection rule: one match on a measure wins, so answer through '
-  + '`query_dataset` with that dataset and measure, and cite the answer\'s `provenance` as its source. Several '
-  + 'matches (two datasets or two members answer to the word): ask the user which one is meant, listing each '
-  + 'candidate\'s label, dataset label and description; never pick one. No match: fall back to the object query '
-  + 'tools and say in the answer that no governed metric was used (非指标口径); when the object you fall back to '
-  + 'is a listed dataset\'s `object`, add one line naming that dataset and its measures. A dimension match alone '
-  + 'picks a grouping, not a number: a measure must still match. `membersWithheld` means some members exist that '
-  + 'this caller may not see.';
+  + 'member\'s name, label or synonym (`matches`). Selection rule: a word for a thing measured that matches exactly '
+  + 'one measure wins, so answer through `query_dataset` with that dataset and measure, and cite the answer\'s '
+  + '`provenance` as its source; two such words are two metrics, so compute both. One word matching several '
+  + 'measures (in one dataset or two): ask the user which one is meant, listing each candidate\'s label, dataset '
+  + 'label and description; never pick one. A word that matched nothing may have `candidates`, members offered as '
+  + 'possible readings: ask the same way, listing each one\'s label, dataset label and description; never pick one, '
+  + 'and never treat a candidate as a match. No match and no candidates: fall back to the object query tools and '
+  + 'say in the answer that no governed metric was used (非指标口径); when the object you fall back to is a listed '
+  + 'dataset\'s `object`, add one line naming that dataset and its measures. A dimension match alone picks a '
+  + 'grouping, not a number: a measure must still match. `membersWithheld` means some members exist that this '
+  + 'caller may not see.';
 
 const QUERY_DATASET_DESCRIPTION =
   'Run a selection (measures, optional dimensions, filter, time window, order, limit) against one saved business '
@@ -406,6 +409,9 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
 
     const locale = context?.locale;
     const entries: DatasetToolCatalogEntry[] = [];
+    // The admitted members of each listed dataset, in its entry's order: the
+    // only members a candidate may name (ADR-0149 D3 amendment note).
+    const listed: CandidateDataset[] = [];
     let unresolved = false;
     for (const dataset of loaded.datasets) {
       const admission = await service.admitDatasetCatalogEntry(dataset, context);
@@ -438,7 +444,11 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       };
       if (terms !== undefined) entry.matches = matchDatasetTerms(terms, { dimensions, measures });
       entries.push(entry);
+      listed.push({ name: dataset.name, dimensions, measures });
     }
+    // Terms with no hit in any listed entry get the near members, or nothing:
+    // the key is absent rather than an empty list.
+    const candidates = terms !== undefined ? findDatasetTermCandidates(terms, listed) : [];
 
     const warnings: string[] = [];
     if (loaded.partial && loaded.warning) warnings.push(loaded.warning);
@@ -448,6 +458,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     return {
       datasets: entries,
       ...(warnings.length > 0 ? { partial: true as const, warning: warnings.join(' ') } : {}),
+      ...(candidates.length > 0 ? { candidates } : {}),
     };
   }
 
