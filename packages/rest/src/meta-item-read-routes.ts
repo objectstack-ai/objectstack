@@ -1086,9 +1086,10 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             // [#22877] The member, read once above.
                             ...memberSelector,
                         };
-                        // [ruling 6917064203 on #34398] For a doc, the audience
-                        // gate answers before the `not-held-by-qualifier` refusal
-                        // (`gateHolderNamingRefusal`, the one both transports ask).
+                        // [ruling 6917064203 on #34398] The read gate answers
+                        // before the `not-held-by-qualifier` refusal names any
+                        // holder (`gateHolderNamingRefusal`, the one both
+                        // transports ask).
                         const readPolicyFor: MetaReadGatePolicy = isDraftRead
                             ? this.STORED_VERSION_DOOR_POLICY
                             : { arms: 'all', app: 'gate' };
@@ -1099,6 +1100,10 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             const gated = await metaReadGate.gateHolderNamingRefusal(
                                 this.metaItemAnswerSources(environmentId, req, p, readPolicyFor),
                                 metaType, req.params.name, readPolicyFor, readError,
+                                // A holder's item, read at its own address.
+                                async (holder) => (await p.getMetaItem({
+                                    type: req.params.type, name: req.params.name, packageId: holder, ...memberSelector,
+                                }) as { item?: unknown } | undefined)?.item,
                             );
                             if (gated) {
                                 this.sendMetaReadRefusal(res, gated);

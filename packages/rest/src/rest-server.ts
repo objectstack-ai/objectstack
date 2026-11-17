@@ -4456,13 +4456,18 @@ export class RestServer {
         try {
             layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
         } catch (readError) {
-            // [ruling 6917064203 on #34398] For a doc, the audience gate answers
-            // before the `not-held-by-qualifier` refusal — the plain read's own
-            // question.
+            // [ruling 6917064203 on #34398] The read gate answers before the
+            // `not-held-by-qualifier` refusal names any holder — the plain
+            // read's own question; a holder's item is read at its own address.
             const gated = await metaReadGate.gateHolderNamingRefusal(
                 this.metaItemReadGateSources(environmentId, req, p, true),
                 RestServer.metaTypeSingular(req.params.type), req.params.name,
                 metaReadGate.STORED_VERSION_DOOR_POLICY, readError,
+                async (holder) => (await p.getMetaItem({
+                    type: req.params.type, name: req.params.name, packageId: holder,
+                    ...metaReadGate.metaMemberSelector(req.query),
+                    ...(environmentId ? { environmentId } : {}),
+                } as any) as { item?: unknown } | undefined)?.item,
             );
             if (gated) {
                 RestServer.sendMetaReadRefusal(res, gated);

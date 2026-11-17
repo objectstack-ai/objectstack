@@ -4756,24 +4756,36 @@ export function createMetaItemAnswer(
 }
 
 /**
- * [ruling 6917064203 on #34398 · #34247] For a `doc`, the audience gate
- * answers before the `not-held-by-qualifier` refusal. An exact `?package=X`
- * read of a `doc` X holds no item of, while another package holds the name, is
- * refused by the protocol `409 RESOURCE_CONFLICT` `not-held-by-qualifier` with
- * the holders as its candidates; that refusal is answered only to a caller
- * the ADR-0046 §6.7 docs audience admits to the name. A caller the gate
- * refuses is answered the gate's own `401 UNAUTHENTICATED` /
- * `403 PERMISSION_DENIED` instead.
+ * [#34247] How {@link gateHolderNamingRefusal} reads one holder's item: the
+ * transport's own by-name read of `name` at `?package=<packageId>`, answering
+ * the served `item` (or `null`/`undefined` when that package serves none). A
+ * rejection is a gate input that cannot be read: it propagates, and the
+ * transport answers that fault, never the refusal.
+ */
+export type MetaHolderItemReader = (packageId: string) => Promise<unknown>;
+
+/**
+ * [ruling 6917064203 on #34398 · #34247] The read gate answers before the
+ * `not-held-by-qualifier` refusal names any holder. An exact `?package=X` read
+ * of a name X holds no item of, while another package holds it, is refused by
+ * the protocol `409 RESOURCE_CONFLICT` `not-held-by-qualifier` with the
+ * holders as its candidates; that refusal is answered only to a caller the
+ * type's own read gate admits. A caller the gate refuses is answered the
+ * gate's own refusal instead, which names no holder:
  *
- * The doc arm of {@link createMetaItemReadGate} judges a doc by its NAME (its
- * effective audience over the books that claim the name), so the judgment
- * needs no holder's item. Any other thrown value, and any other type, is
- * `undefined`: the transport answers the thrown value as it did. A gate input
- * that cannot be read REJECTS, as the gate always does: the transport answers
- * that fault, never the refusal.
+ *  - `doc`: the ADR-0046 §6.7 docs audience, `401 UNAUTHENTICATED` /
+ *    `403 PERMISSION_DENIED`. The doc arm of {@link createMetaItemReadGate}
+ *    judges a doc by its NAME (its effective audience over the books that
+ *    claim the name), so the judgment needs no holder's item.
+ *  - `view`: the list view audience ({@link filterViewForUser}), `403
+ *    PERMISSION_DENIED`. A view is judged by its body, so each package holder's
+ *    item is read through `readHolderItem` and judged by the view arm; the
+ *    gate's refusal of any one of them is the answer.
  *
- * S7: the view row's order is declared and pinned; the ordering is carried by
- * the security channel (GHSA-ggc2-jqph-f74f, acknowledgement 6932974351).
+ * Any other thrown value, and any other type, is `undefined`: the transport
+ * answers the thrown value as it did. A gate input that cannot be read
+ * REJECTS, as the gate always does: the transport answers that fault, never
+ * the refusal.
  *
  * One function, called by both transports' plain read and `/layers` read.
  */
@@ -4783,13 +4795,27 @@ export async function gateHolderNamingRefusal(
     name: string,
     policy: MetaReadGatePolicy,
     thrown: unknown,
-): Promise<Extract<MetaItemReadRefusal, { reason: 'docs-audience' }> | undefined> {
-    if (metaType !== 'doc') return undefined;
-    const reason = (thrown as { refusal?: { reason?: unknown } } | null | undefined)?.refusal?.reason;
-    if (reason !== 'not-held-by-qualifier') return undefined;
-    const named = { name };
-    const verdict = await createMetaItemReadGate(sources, metaType, name, [named], policy)(named);
-    return verdict.kind === 'refuse' && verdict.refusal.reason === 'docs-audience' ? verdict.refusal : undefined;
+    readHolderItem: MetaHolderItemReader,
+): Promise<Extract<MetaItemReadRefusal, { reason: 'docs-audience' | 'audience-permission' }> | undefined> {
+    if (metaType !== 'doc' && metaType !== 'view') return undefined;
+    const refusal = (thrown as { refusal?: { reason?: unknown; candidates?: unknown } } | null | undefined)?.refusal;
+    if (refusal?.reason !== 'not-held-by-qualifier') return undefined;
+    if (metaType === 'doc') {
+        const named = { name };
+        const verdict = await createMetaItemReadGate(sources, metaType, name, [named], policy)(named);
+        return verdict.kind === 'refuse' && verdict.refusal.reason === 'docs-audience' ? verdict.refusal : undefined;
+    }
+    const holders = (Array.isArray(refusal.candidates) ? refusal.candidates : [])
+        .filter((c: any): c is { kind: 'package'; packageId: string } => c?.kind === 'package' && typeof c.packageId === 'string')
+        .map((c) => c.packageId);
+    const items: unknown[] = [];
+    for (const holder of holders) items.push(await readHolderItem(holder));
+    const judge = createMetaItemReadGate(sources, metaType, name, items, policy);
+    for (const item of items) {
+        const verdict = await judge(item);
+        if (verdict.kind === 'refuse' && verdict.refusal.reason === 'audience-permission') return verdict.refusal;
+    }
+    return undefined;
 }
 
 // ── THE layered answer ────────────────────────────────────────────────────────

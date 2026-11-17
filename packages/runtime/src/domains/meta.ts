@@ -1019,14 +1019,18 @@ async function answerMetaLayered(
             { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), ...memberSelector, maskPosture },
         )(layered);
     } catch (e: any) {
-        // [ruling 6917064203 on #34398] For a doc, the audience gate answers
-        // before the `not-held-by-qualifier` refusal, as `RestServer`'s layered
-        // read asks it.
+        // [ruling 6917064203 on #34398] The read gate answers before the
+        // `not-held-by-qualifier` refusal names any holder, as `RestServer`'s
+        // layered read asks it.
         let gated: Awaited<ReturnType<typeof gateHolderNamingRefusal>>;
         try {
             gated = await gateHolderNamingRefusal(
                 metaItemReadGateSources(deps, context, protocol, mayWriteItem),
                 pluralToSingular(type), name, STORED_VERSION_DOOR_POLICY, e,
+                // A holder's item, read at its own address.
+                async (holder) => (await protocol.getMetaItem({
+                    type, name, packageId: holder, ...memberSelector,
+                }) as { item?: unknown } | undefined)?.item,
             );
         } catch (fault: any) {
             return withHeaders(deps.errorFromThrown(fault, 500), headers);
@@ -2430,12 +2434,16 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // whichever item it finds first.
                     if (isPackageScopedRefusal(e)) {
                         // [ruling 6917064203 on #34398] …answered only after
-                        // the audience gate admits the caller: for a doc, the
-                        // audience gate answers before the `not-held-by-qualifier`
-                        // refusal (`gateHolderNamingRefusal`, `RestServer`'s
-                        // question).
+                        // the read gate admits the caller: the read gate
+                        // answers before the `not-held-by-qualifier` refusal
+                        // names any holder (`gateHolderNamingRefusal`,
+                        // `RestServer`'s question).
                         const gated = await gateHolderNamingRefusal(
                             metaItemReadGateSources(deps, _context, protocol), singularType, name, RENDERED_DOCUMENT_POLICY, e,
+                            // A holder's item, read at its own address.
+                            async (holder) => (await protocol.getMetaItem({
+                                type: singularType, name, packageId: holder, ...memberSelector,
+                            }) as { item?: unknown } | undefined)?.item,
                         );
                         if (gated) return { handled: true, response: deps.error(gated.message, gated.status, { code: gated.code }) };
                         throw e;

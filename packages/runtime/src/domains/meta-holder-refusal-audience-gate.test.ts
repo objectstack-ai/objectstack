@@ -1,21 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ruling 6917064203 on #34398 · #34247] For a doc, the audience gate answers
- * before the `not-held-by-qualifier` refusal.
+ * [ruling 6917064203 on #34398 · #34247] The read gate answers before the
+ * `not-held-by-qualifier` refusal names any holder.
  *
- * An exact `?package=X` read of a doc X holds no item of, while another
- * package holds the name, is refused by the protocol `409 RESOURCE_CONFLICT`
- * `not-held-by-qualifier`, its candidates naming the holders. That refusal is
- * the answer only for a caller the ADR-0046 §6.7 docs audience admits to the
- * name: a member the gate refuses is answered the gate's `403
- * PERMISSION_DENIED`, an anonymous caller the gate's `401 UNAUTHENTICATED`,
- * and neither answer names a holder. Both transports (the dispatcher and
- * `RestServer`) ask the one question, `gateHolderNamingRefusal` in
- * `@objectstack/rest`, on the plain read and on `/layers`.
- *
- * S7: the view row's order is declared and pinned; the ordering is carried by
- * the security channel (GHSA-ggc2-jqph-f74f, acknowledgement 6932974351).
+ * An exact `?package=X` read of a doc or a view X holds no item of, while
+ * another package holds the name, is refused by the protocol `409
+ * RESOURCE_CONFLICT` `not-held-by-qualifier`, its candidates naming the
+ * holders. That refusal is the answer only for a caller the type's read gate
+ * admits: for a doc the ADR-0046 §6.7 docs audience (a refused member is
+ * answered the gate's `403 PERMISSION_DENIED`, an anonymous caller its `401
+ * UNAUTHENTICATED`), for a view the list view audience (`403
+ * PERMISSION_DENIED`). No gate answer names a holder. Both transports (the
+ * dispatcher and `RestServer`) ask the one question, `gateHolderNamingRefusal`
+ * in `@objectstack/rest`, on the plain read and on `/layers`.
  *
  * The protocol is a double that throws the protocol's own refusal shape; the
  * gate, its audience resolution and both transports are the real ones.
@@ -95,10 +93,12 @@ type CallerName = keyof typeof CALLERS;
  * The protocol's refusal of `?package=sales` for a doc or view `sales` ships
  * none of while `crm` ships it (`notHeldByQualifierRefusal` in
  * `@objectstack/metadata-protocol`): `PackageScopedNameRefusedError`, reason
- * `not-held-by-qualifier`, naming the holder.
+ * `not-held-by-qualifier`, naming the holder. The holder's own address
+ * (`?package=crm`) serves its item.
  */
-function refuseIfAsked(type: unknown, name: unknown): void {
+function refuseIfAsked(type: unknown, name: unknown, packageId: unknown): void {
     const t = singular(type);
+    if (packageId === 'crm') return;
     if (t !== (THROW.type ?? 'doc') || name !== THROW.name) return;
     const base = {
         status: 'refused' as const, reason: 'not-held-by-qualifier' as const, type: t, name: String(name),
@@ -112,13 +112,13 @@ function protocolDouble() {
     return {
         getMetaTypes: vi.fn(async () => ({ types: Object.keys(STORE) })),
         getMetaItems: vi.fn(async ({ type }: any) => clone(STORE[singular(type)] ?? [])),
-        getMetaItem: vi.fn(async ({ type, name }: any) => {
-            refuseIfAsked(type, name);
+        getMetaItem: vi.fn(async ({ type, name, packageId }: any) => {
+            refuseIfAsked(type, name, packageId);
             const found = find(type, name);
             return { type: singular(type), name, item: found ? clone(found) : undefined, lock: 'none', editable: true, deletable: true, resettable: false };
         }),
-        getMetaItemLayered: vi.fn(async ({ type, name }: any) => {
-            refuseIfAsked(type, name);
+        getMetaItemLayered: vi.fn(async ({ type, name, packageId }: any) => {
+            refuseIfAsked(type, name, packageId);
             const found = find(type, name);
             const layer = () => (found ? clone(found) : null);
             return { type: singular(type), name, code: layer(), overlay: layer(), effective: layer() };
@@ -270,20 +270,19 @@ describe('[#34247] the audience gate answers before the not-held-by-qualifier re
     });
 });
 
-describe('[#34247] S7: the view row, both transports', () => {
-    // S7: the view row's order is declared and pinned; the ordering is carried
-    // by the security channel (GHSA-ggc2-jqph-f74f, acknowledgement 6932974351).
-    it('the view row at `?package=` of a package holding none, the first member (non-holder), plain read and /layers', async () => {
+describe('[#34247] the view gate answers before the not-held-by-qualifier refusal, both transports', () => {
+    it('a member the view audience refuses is answered the gate\'s 403 at `?package=` of a package holding none, on the plain read and /layers, never the refusal naming holders', async () => {
         for (const answer of await answersFor('non-holder', 'crm_pipeline_review', 'view')) {
             expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
-                .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
+                .toEqual([403, 'PERMISSION_DENIED', false, answer.door]);
         }
     });
 
-    it('the view row at the same address, the second member (view-holder), plain read and /layers', async () => {
+    it('CONTROL: a member the view audience admits is answered the 409 naming the holders', async () => {
         for (const answer of await answersFor('view-holder', 'crm_pipeline_review', 'view')) {
             expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
                 .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
+            expect(JSON.stringify(answer.body), answer.door).toContain('crm');
         }
     });
 
