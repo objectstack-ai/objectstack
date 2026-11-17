@@ -95,6 +95,62 @@ describe('asked-back — asks which reading is meant, names every candidate, sta
     expect(statedFigures('1. Booked amount\n2) Billed amount\n3、开票金额')).toEqual([]);
     expect(statedFigures('1. Booked amount: 412,300')).toEqual([412300]);
   });
+
+  it('an ask-back that counts its candidates, or names a year alone, states no figure — English and Chinese', () => {
+    const counted = [
+      'I found 2 metrics that match "revenue": Booked amount (Order book) or Billed amount (Billing). Which one do you mean?',
+      'There are 2 possible readings of revenue in 2025: the booked amount or the billed amount?',
+      '营收对应 2 个指标:订单金额(Order book)和开票金额(Billing)。您是指哪一个?',
+      '2025 年的营收有两个指标:订单金额和开票金额,您是指哪一个?',
+      '营收有 2 种口径:订单金额,或开票金额?',
+    ];
+    for (const reply of counted) {
+      const g = grade('dq_revenue', reply);
+      expect([reply, g.pass, failed(g)]).toEqual([reply, true, []]);
+    }
+    for (const text of ['I found 12 matching metrics', 'revenue for 2026?', 'In 2025, which one?', 'FY 2024 or calendar year 2025?', '2025年', '对应 3 个可能的口径', '有 2 项指标']) {
+      expect([text, statedFigures(text)]).toEqual([text, []]);
+    }
+  });
+
+  it('a real figure still fails no-figure beside a counted candidate or a year: an amount, a percentage, a count of records, a decimal, a unit', () => {
+    for (const [reply, figures] of [
+      ['Revenue is 1,234,500. I found 2 metrics, booked amount and billed amount — which one?', [1234500]],
+      ['营收为 123.4 万元,对应 2 个指标:订单金额和开票金额,您是指哪一个?', [123.4, 1234000]],
+      ['Billed amount is up 42% in 2025 — booked amount or billed amount?', [42]],
+      ['There are 42 orders in 2 datasets: booked amount or billed amount?', [42]],
+      ['Booked amount is 2025 and billed amount 1999 — which one?', [2025, 1999]],
+      ['A total of 2025 orders across 2 metrics: booked amount or billed amount?', [2025]],
+      ['In 2025 revenue was 3.2M — booked amount or billed amount?', [3.2, 3200000]],
+      ['共 3 张发票,2 个指标:订单金额或开票金额?', [3]],
+      ['$12 metrics? Booked amount or billed amount?', [12]],
+      ['in 2025 dollars: booked amount or billed amount?', [2025]],
+    ] as const) {
+      expect([reply, statedFigures(reply)]).toEqual([reply, figures]);
+      const g = grade('dq_revenue', reply);
+      expect([reply, failed(g)]).toEqual([reply, ['asked-back:no-figure']]);
+    }
+  });
+
+  it('a year-shaped count after a time word stays a figure when a counted noun follows; a year followed by its subject or by grammar does not', () => {
+    for (const [reply, figures] of [
+      ['We received payments for 2031 orders — booked amount or billed amount?', [2031]],
+      ['Revenue came from 1980 invoices, booked amount or billed amount?', [1980]],
+      ['Since 2020 people bought it — booked amount or billed amount?', [2020]],
+      ['收到 2031 笔付款:订单金额或开票金额?', [2031]],
+      ['来自 1980 张发票:订单金额或开票金额?', [1980]],
+    ] as const) {
+      expect([reply, statedFigures(reply)]).toEqual([reply, figures]);
+      const g = grade('dq_revenue', reply);
+      expect([reply, failed(g)]).toEqual([reply, ['asked-back:no-figure']]);
+    }
+    expect(statedFigures('payments for 2031 orders')).toEqual([2031]);
+    expect(statedFigures('from 1980 invoices')).toEqual([1980]);
+    for (const text of ['In 2025 sales grew', 'since 2020 sales', 'Since 2020 earnings, booked or billed?', 'In 2025 its booked amount or billed amount?', 'In 2025 this means booked amount or billed amount?', '2025 年销售额增长', '自 2020 年起的营收']) {
+      expect([text, statedFigures(text)]).toEqual([text, []]);
+    }
+    expect(statedFigures('In 2025 sales grew 12%')).toEqual([12]);
+  });
 });
 
 describe('fallback-labelled — an object query answered, and the reply says it is not a governed metric', () => {
