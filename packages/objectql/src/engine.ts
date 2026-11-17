@@ -1957,6 +1957,7 @@ export class ObjectQL implements IObjectQLEngine {
     const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof buildDriverOptions> = {
       isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
+      getDriver: (...a) => this.getDriver(...a),
       get txStore() { return readTxStore(); },
       transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
       get _registry() { return readRegistry(); },
