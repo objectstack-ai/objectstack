@@ -4922,6 +4922,47 @@ describe('validateTranslationReferences — hook refusals (#26170)', () => {
   });
 });
 
+describe('validateTranslationReferences — hook texts (#34374)', () => {
+  const textStack = {
+    hooks: [
+      {
+        name: 'lead_follow_up',
+        object: 'lead',
+        events: ['afterUpdate'],
+        body: { language: 'js', source: "await ctx.text('follow_up_subject', { lead: ctx.input.name });" },
+        texts: { follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] } },
+      },
+      { name: 'stamp', object: 'lead', events: ['beforeInsert'], handler: 'stamp' },
+    ],
+  };
+  const bundle = (hooks: unknown) => ({ ...textStack, translations: [{ 'zh-CN': { hooks } }] });
+
+  it('reports nothing for a translation of a declared text', () => {
+    expect(validateTranslationReferences(
+      bundle({ lead_follow_up: { texts: { follow_up_subject: { message: '跟进已认定线索：{{ lead }}' } } } }),
+    )).toEqual([]);
+  });
+
+  it('refuses a text key the hook does not declare, with the nearest declared key offered', () => {
+    const findings = validateTranslationReferences(
+      bundle({ lead_follow_up: { texts: { follow_up_subjct: { message: 'x' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.lead_follow_up.texts.follow_up_subjct');
+    expect(findings[0].message).toContain('a key hook "lead_follow_up" does not declare under `texts`');
+    expect(findings[0].message).toContain('Did you mean "follow_up_subject"?');
+  });
+
+  it('refuses a text key on a hook that declares no texts', () => {
+    const findings = validateTranslationReferences(bundle({ stamp: { texts: { anything: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.stamp.texts.anything');
+    expect(findings[0].message).toContain('hook "stamp" declares no `texts`');
+  });
+});
+
 describe('validateTranslationReferences — hook refusal reasons (#33214)', () => {
   const planStack = {
     hooks: [

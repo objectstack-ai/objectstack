@@ -159,11 +159,12 @@ export const CONFIG_CHANGE_ACTION = 'config_change';
  * nothing.
  *
  * ⛔ The pre-existing spelling below — the insert itself — is deliberately left
- * INLINE rather than folded onto this constant. It is a counted site in
- * `content/docs/permissions/tenant-audit-census.mdx` ("object name spelled
- * inline" vs "named through a const"), so folding it moves a corpus-scale
- * ratchet and a hand-written prose count in a docs tree this change has no
- * business in. The consolidation is worth doing; it is not worth doing here.
+ * INLINE rather than folded onto this constant. It is a counted site in the
+ * tenant-audit census ("object name spelled inline" vs "spelled through a
+ * `const`", in this package's shard
+ * `docs/audits/2026-08-tenant-audit-write-call-sites.counts/services/service-settings.md`),
+ * so folding it moves a corpus-scale ratchet and a generated ledger this change
+ * has no business in. The consolidation is worth doing; it is not worth doing here.
  */
 const AUDIT_LEDGER_OBJECT_NAME = 'sys_audit_log';
 

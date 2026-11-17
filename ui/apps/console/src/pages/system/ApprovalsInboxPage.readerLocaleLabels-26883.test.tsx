@@ -130,6 +130,7 @@ function permissions(): MePermissionsAuthenticatedResponse {
     tenantId: 't_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: {},
     fields: {},

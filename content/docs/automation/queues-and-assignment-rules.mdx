@@ -117,7 +117,9 @@ A record **sits in** queue Q when its `owner_id` is empty and its `queue` column
 
 The moment someone claims it, the queue path stops applying: the other members lose access unless another basis grants it. Ask the explain endpoint (`POST /api/v1/security/explain`) why a user sees a record and it reports the queue basis as its own reason (`queue_membership`) — see [Explaining a decision](/docs/permissions/explain).
 
-In the Console, a list of an object that carries the `queue` column has an **In a queue** toggle in its toolbar. It narrows the list to parked records (`owner_id` empty and `queue` set); which of them you see is still the server's read filter, so a member sees what sits in their own queues.
+In the Console, a list of an object that carries the `queue` column has an **In a queue** toggle in its toolbar when your organization has at least one queue and the view's own filter does not require `owner_id` to hold a value (a top-level `equals`, `in` or `is_not_empty` condition on it, such as a "my records" view; one inside an OR group does not count), since a parked record has no owner. It narrows the list to parked records (`owner_id` empty and `queue` set); which of them you see is still the server's read filter, so a member sees what sits in their own queues.
+
+The toggle appears only where it can find something: on an object where a record of your organization sits in a queue now, or where an active assignment rule (the organization's own or a package's) routes new records into a queue. Nothing is declared for this; the server works it out and the Console reads it once per session from `GET /api/v1/auth/me/permissions` (`objectsUsingQueues`, which names only objects you may read). So the toggle on an object whose first record was just parked by hand appears from the next time the Console loads your permissions, for example after signing in again or reloading the page.
 
 ## How a claim is spelled
 

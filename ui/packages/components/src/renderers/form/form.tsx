@@ -48,6 +48,7 @@ import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 import { usePatchingUpdateActions } from './actionRequirements';
 import { SuggestedFieldChangesContext, SuggestedFieldsContext } from './suggested-fields-context';
+import { FormSectionNavContext, type FormSectionNavItem, type FormSectionNavSink } from './section-nav-context';
 
 /**
  * A submit refusal as the banner and the toast draw it: one string as itself,
@@ -126,7 +127,9 @@ function sectionGateVisible(
 
 /** Inline section header rendered as a virtual field inside a flat SchemaRenderer field list.
  *  Collapsibility is controlled externally (collapsed state lives in DrawerForm). */
-function SectionDivider({ label, description, collapsible, collapsed, onToggle, className }: {
+function SectionDivider({ sectionKey, anchorId, label, description, collapsible, collapsed, onToggle, className }: {
+  sectionKey?: string;
+  anchorId?: string;
   label?: string;
   description?: string;
   collapsible?: boolean;
@@ -153,7 +156,7 @@ function SectionDivider({ label, description, collapsible, collapsed, onToggle, 
   return (
     <div
       className={cn(
-        'col-span-full pt-4 pb-1 border-b border-border',
+        'col-span-full pt-4 pb-1 border-b border-border scroll-mt-2',
         collapsible &&
           'cursor-pointer select-none ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         className
@@ -163,6 +166,11 @@ function SectionDivider({ label, description, collapsible, collapsed, onToggle, 
       role={collapsible ? 'button' : undefined}
       tabIndex={collapsible ? 0 : undefined}
       aria-expanded={collapsible ? !collapsed : undefined}
+      // objectstack#34605 — the row's stable DOM identity: `id` is the scroll
+      // target the section navigation jumps to, `data-form-section` names the
+      // section. `scroll-mt-2` keeps a jumped-to heading off the scroller's edge.
+      id={anchorId}
+      data-form-section={sectionKey}
     >
       {label && (
         <div className="flex items-center gap-1.5">
@@ -261,6 +269,67 @@ function splitAtUntitledRuns(fields: FormFieldConfig[]): FormFieldConfig[][] {
     blocks[blocks.length - 1].push(f);
   }
   return blocks;
+}
+
+/**
+ * The section each field of a stacked sectioned form sits under, for the
+ * section navigation's error counts (objectstack#34605): field name → the name
+ * of the divider row whose heading it is drawn under.
+ *
+ * The same reading as {@link splitAtUntitledRuns}: a field belongs to the
+ * heading above it when that heading's membership claim names it, or when the
+ * heading carries no claim; a field the claim does not name, and a row that
+ * draws no heading, end the heading's run.
+ */
+function sectionKeyByFieldName(fields: FormFieldConfig[]): Map<string, string> {
+  const out = new Map<string, string>();
+  let heading: { key: string; claim: ReadonlySet<string> | 'all' } | null = null;
+  for (const f of fields) {
+    if (f?.type === 'section-divider') {
+      if (!dividerDrawsRow(f.label, f.description) || typeof f.name !== 'string') {
+        heading = null;
+        continue;
+      }
+      const claim = f.fields;
+      heading = { key: f.name, claim: Array.isArray(claim) && claim.length > 0 ? new Set(claim) : 'all' };
+      continue;
+    }
+    if (!heading || typeof f?.name !== 'string') continue;
+    if (heading.claim === 'all' || heading.claim.has(f.name)) out.set(f.name, heading.key);
+    else heading = null;
+  }
+  return out;
+}
+
+/**
+ * The DOM `id` of a section heading row: unique per form instance (two forms
+ * can be open at once, a drawer under a dialog), and a valid `id` whatever the
+ * section name holds — a section keyed by its label can carry spaces.
+ */
+function sectionAnchorId(formInstanceId: string, sectionKey: string): string {
+  return `form-section-${formInstanceId.replace(/[^A-Za-z0-9_-]/g, '')}-${encodeURIComponent(sectionKey).replace(/%/g, '_')}`;
+}
+
+/**
+ * Hands the drawn section list to the host's sink (objectstack#34605) when it
+ * changes, and `null` when the form stops drawing sections or unmounts. A
+ * component of its own so the report is an effect after commit, not a write
+ * during render, and so the form's hook order never depends on its layout.
+ * The list is compared by what a host draws; `expand` reads the latest row
+ * state through the form's ref, so an older list never acts on a stale one.
+ */
+function SectionNavReporter({ sink, items }: { sink: FormSectionNavSink; items: FormSectionNavItem[] | null }) {
+  const signature = items
+    ? JSON.stringify(items.map((i) => [i.key, i.label, i.anchorId, i.errorCount, i.collapsed]))
+    : '';
+  React.useEffect(() => {
+    sink(items);
+    // `signature` stands for `items`: a new array of the same sections must
+    // not re-report.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sink, signature]);
+  React.useEffect(() => () => sink(null), [sink]);
+  return null;
 }
 
 /**
@@ -1975,6 +2044,14 @@ ComponentRegistry.register('form',
      */
     const formInstanceId = React.useId();
     const outcomeToastId = `form-outcome:${formInstanceId}`;
+    // The host's section-list sink (objectstack#34605), and per drawn section
+    // row its latest collapse state and toggle — republished by
+    // `renderFormField` on every render, like `requiredMessages` below, so a
+    // navigation click always acts on the row as it now stands. A ref: nothing
+    // renders off it.
+    const sectionNavSink = React.useContext(FormSectionNavContext);
+    const sectionRowsRef = React.useRef<Map<string, { collapsed: boolean; toggle?: () => void }> | undefined>(undefined);
+    const sectionRows = (sectionRowsRef.current ??= new Map<string, { collapsed: boolean; toggle?: () => void }>());
     /**
      * A refused submit is said ONCE, by the banner above the fields
      * (objectstack-ai/objectstack#27520). The toast that used to repeat it word
@@ -2288,6 +2365,13 @@ ComponentRegistry.register('form',
       }
       return hiddenNames;
     }, [fields, ruleRecord, previousRecord, isCreateForm, predicateScope]);
+
+    // Field name → the section heading it is drawn under, for the section
+    // navigation's per-section error count (objectstack#34605).
+    const sectionKeyByField = React.useMemo(
+      () => sectionKeyByFieldName(fields as FormFieldConfig[]),
+      [fields],
+    );
 
     // --- Tabbed field layout (#2959) ---------------------------------------
     // `fieldTabs` spreads THIS form's fields across tab panels. Crucially there
@@ -2647,6 +2731,25 @@ ComponentRegistry.register('form',
       }
       return out;
     }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames]);
+
+    // objectstack#34615 — below `sm` a horizontal tab strip that does not fit
+    // scrolls sideways inside its own box (see the strip's classes) instead of
+    // widening the page. The ACTIVE tab must stay in that box's visible window:
+    // a pick, `defaultFieldTab`, or a failed submit jumping to the first
+    // offending tab can each select a trigger scrolled out of view. Only the
+    // strip's own `scrollLeft` moves, never an outer scroller, and a strip
+    // that fits (every desktop strip) is left untouched.
+    const fieldTabListRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+      const list = fieldTabListRef.current;
+      if (!list || activeFieldTab === undefined || list.scrollWidth <= list.clientWidth) return;
+      const trigger = list.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+      if (!trigger) return;
+      const box = list.getBoundingClientRect();
+      const tab = trigger.getBoundingClientRect();
+      if (tab.left < box.left) list.scrollLeft -= box.left - tab.left;
+      else if (tab.right > box.right) list.scrollLeft += tab.right - box.right;
+    }, [activeFieldTab]);
 
     // Cascade clear (#2284): when a select/radio's option list narrows — because a
     // controlling field changed or a role/context predicate flipped — a previously
@@ -3670,9 +3773,12 @@ ComponentRegistry.register('form',
       // so all fields share the same form instance (enables cross-section conditions).
       if (type === 'section-divider') {
         const fp = fieldProps as any;
+        sectionRows.set(name, { collapsed: !!fp.collapsible && !!fp.collapsed, toggle: fp.onToggle });
         return (
           <SectionDivider
             key={name}
+            sectionKey={name}
+            anchorId={sectionAnchorId(formInstanceId, name)}
             label={label}
             description={description}
             collapsible={fp.collapsible}
@@ -4315,10 +4421,21 @@ ComponentRegistry.register('form',
     // single block is the pre-#11777 DOM, unchanged. Keyed by position in the
     // split, which only the field list's structure moves — a predicate flipping
     // never re-keys a block, so it never remounts the fields in it.
-    const renderFieldBlocks = (list: FormFieldConfig[]): React.ReactNode => {
+    const renderFieldBlocks = (
+      list: FormFieldConfig[],
+      drawnHeadings?: Array<{ key: string; label: string }>,
+    ): React.ReactNode => {
       let drawnAbove = false;
       return splitAtUntitledRuns(list).map((block, index) => {
         const nodes = block.map(renderFormField);
+        // The headings this render actually drew, in order (objectstack#34605):
+        // the section navigation lists exactly these, so a section a predicate
+        // hides is absent from it by the same verdict that hid its row.
+        block.forEach((f, j) => {
+          if (f?.type === 'section-divider' && nodes[j] != null && f.label && typeof f.name === 'string') {
+            drawnHeadings?.push({ key: f.name, label: String(f.label) });
+          }
+        });
         const draws = block.some(
           (f, j) =>
             nodes[j] != null &&
@@ -4333,6 +4450,39 @@ ComponentRegistry.register('form',
         );
       });
     };
+
+    // The stacked (untabbed, unpaned) field list, drawn here rather than inline
+    // below so the headings it draws are known before the tree is returned —
+    // the section navigation is built from them (objectstack#34605). A tabbed
+    // or paned form has its own group switcher, and reports no sections.
+    const drawsStackedFields = !schema.children && !fieldTabGroups && !fieldPaneGroups;
+    const drawnHeadings: Array<{ key: string; label: string }> = [];
+    const stackedFieldBlocks = drawsStackedFields
+      ? renderFieldBlocks(fields as FormFieldConfig[], drawnHeadings)
+      : null;
+    let sectionNavItems: FormSectionNavItem[] | null = null;
+    if (sectionNavSink && drawnHeadings.length > 0) {
+      // Read only when a host listens: reading `formState.errors` subscribes
+      // this component to every error change, which keeps the counts live —
+      // a fixed field drops out of its section's count as it revalidates.
+      const errors = (form.formState.errors ?? {}) as Record<string, unknown>;
+      const counts = new Map<string, number>();
+      for (const fieldName of Object.keys(errors)) {
+        const key = sectionKeyByField.get(fieldName);
+        if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      sectionNavItems = drawnHeadings.map(({ key, label: headingLabel }) => ({
+        key,
+        label: headingLabel,
+        anchorId: sectionAnchorId(formInstanceId, key),
+        errorCount: counts.get(key) ?? 0,
+        collapsed: sectionRows.get(key)?.collapsed ?? false,
+        expand: () => {
+          const row = sectionRows.get(key);
+          if (row?.collapsed) row.toggle?.();
+        },
+      }));
+    }
 
     // Extract designer-related props and conflicting handlers
     const { 
@@ -4403,6 +4553,10 @@ ComponentRegistry.register('form',
 	    } = props;
 
     return (
+      // A form nested inside this one (a sub-form widget) reports into no
+      // sink: the host's navigation belongs to the outermost form.
+      <FormSectionNavContext.Provider value={null}>
+      {sectionNavSink && <SectionNavReporter sink={sectionNavSink} items={sectionNavItems} />}
       <Form {...form}>
         <form
             ref={formRef}
@@ -4471,13 +4625,26 @@ ComponentRegistry.register('form',
                 className={cn('flex w-full', isVerticalFieldTabs ? 'gap-4' : 'flex-col')}
               >
                 <TabsList
+                  ref={fieldTabListRef}
+                  data-testid="form-tab-strip"
                   className={cn(
                     // `self-start` keeps the strip its content's size instead of
                     // being stretched by the flex container above.
                     'self-start',
                     isVerticalFieldTabs
                       ? cn('h-auto flex-col', fieldTabsPosition === 'right' && 'order-last')
-                      : fieldTabsPosition === 'bottom' ? 'order-last mt-4' : 'mb-4',
+                      : cn(
+                          fieldTabsPosition === 'bottom' ? 'order-last mt-4' : 'mb-4',
+                          // objectstack#34615 — below `sm` the strip never
+                          // outgrows its container: it is capped at the
+                          // container's width and the tabs that do not fit
+                          // scroll sideways, with no scrollbar drawn (the
+                          // active tab is kept in view by the effect on
+                          // `fieldTabListRef`). Left-packed, because a centred
+                          // overflowing row cannot scroll to its first tab.
+                          'max-sm:max-w-full max-sm:justify-start max-sm:overflow-x-auto max-sm:overflow-y-hidden',
+                          'max-sm:[scrollbar-width:none] max-sm:[&::-webkit-scrollbar]:hidden',
+                        ),
                   )}
                 >
                   {visibleFieldTabGroups.map((group) => (
@@ -4564,7 +4731,7 @@ ComponentRegistry.register('form',
           ) : (
             // Otherwise render fields from schema — one grid per block, split
             // where an untitled run leaves a heading (objectui#11777).
-            renderFieldBlocks(fields as FormFieldConfig[])
+            stackedFieldBlocks
           )}
 
           {/* Form Actions */}
@@ -4615,6 +4782,7 @@ ComponentRegistry.register('form',
           )}
         </form>
       </Form>
+      </FormSectionNavContext.Provider>
     );
   },
   {

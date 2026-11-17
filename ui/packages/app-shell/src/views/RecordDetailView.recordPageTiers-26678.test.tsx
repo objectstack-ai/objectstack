@@ -265,17 +265,18 @@ const expectTabRowOnly = async (active = 'overview') => {
   expect(lists).toHaveLength(1);
   expect(lists[0].closest('[data-record-tab-row]')).not.toBeNull();
   const tabs = Array.from(lists[0].querySelectorAll('[role="tab"]'));
+  // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
   expect(tabs.map((tab) => tab.getAttribute('data-record-tab'))).toEqual([
     'overview',
-    'timeline',
     'showcase_task.project',
     'showcase_note.project',
+    'timeline',
   ]);
   expect(lists[0].querySelector('[aria-selected="true"]')?.getAttribute('data-record-tab')).toBe(active);
 };
 
 describe('RecordDetailView — one record page, laid out by its width (objectstack#26678, objectstack#27524)', () => {
-  it('1440 px: details beside the right column at 380 px, the details grid at three columns; 动态 leads; History is read at open', async () => {
+  it('1440 px: details beside the right column at 380 px, the details grid at three columns; 动态 last (objectstack#34590); History is read at open', async () => {
     const { container } = renderPage({ width: 1440 });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('wide');
@@ -283,7 +284,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(columnsGrid(container)).toContain('23.75rem');
     expect(detailsGrid(container)).toContain('@lg:grid-cols-3');
     await expectTabRowOnly();
-    expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
+    // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
+    expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
     // No resident timeline column and no rail: the two columns are all.
     expect(column(container, 'timeline')).toBeNull();
     expect(column(container, 'related')).toBeNull();
@@ -307,7 +309,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(detailsGrid(container)).toContain('@sm:grid-cols-2');
     expect(detailsGrid(container)).not.toContain('@lg:grid-cols-3');
     // The same panels as the wide tier — no rail to open first.
-    expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
+    // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
+    expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
     expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
     await expectTabRowOnly();
   });
@@ -326,7 +329,8 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     const details = column(container, 'details')!;
     const right = column(container, 'right')!;
     expect(details.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
+    // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
+    expect(rightPanels(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'timeline']);
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
     // objectstack#27058 — on a phone the stack ends where the bottom action
     // bar starts: the header's actions are drawn there, after the body, and

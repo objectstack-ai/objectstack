@@ -109,7 +109,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ObjectStackClient } from '@objectstack/client';
-import { ConsolePageHeader, useMetadata, useAdapter } from '@object-ui/app-shell';
+import { ConsolePageHeader, useMetadata, useAdapter, useOpenAssistant } from '@object-ui/app-shell';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveKeyedI18nLabel } from '../../utils';
 
@@ -237,6 +237,7 @@ function SetDefaultStar({
 export function AppManagementPage() {
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
+  const openAssistant = useOpenAssistant();
   const { appName } = useParams();
   const basePath = appName ? `/apps/${appName}` : '';
   const { apps, refresh } = useMetadata();
@@ -657,8 +658,9 @@ export function AppManagementPage() {
                         // pre-scoped to this app's package (passed as the chat
                         // context.packageId the cloud seeds as the active package),
                         // so the AI iterates within THIS app, not the whole env.
+                        // objectstack#34608 — in the console's chat drawer, in place.
                         onClick={() =>
-                          navigate(`/ai/build?package=${encodeURIComponent(app._packageId!)}&new=1`)
+                          openAssistant({ agent: 'build', packageId: app._packageId, fresh: true })
                         }
                       >
                         <Sparkles className="h-4 w-4" />
