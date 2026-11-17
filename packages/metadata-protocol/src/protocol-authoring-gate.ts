@@ -329,6 +329,50 @@ export async function assertRuntimeAuthoringRules(
 }
 
 /**
+ * [#34901] The objects a `view` write is judged against: each object a
+ * disabled package extends, folded with that package's `extend` contribution
+ * IN (`includeDisabledExtensions`, the fold the storage layer keeps), and
+ * every other object exactly as served.
+ *
+ * A disable withholds the fields its extensions add from the served object,
+ * while the owner's views keep naming them on purpose: re-enabling the package
+ * serves the column again with no write. Judged against the served objects,
+ * every save of such a view (a rename, a pin, a Studio edit) was refused as
+ * `list-view-field-unknown` / `sort-field-unknown` for as long as the package
+ * stayed off. Judged against this fold, a withheld name is the real, stored
+ * field it is, and a name no contributor declares is still unknown.
+ *
+ * Applied to the merged universe (registered and stored halves alike), so a
+ * stored overlay of an extended object is folded the same way. ⛔ View writes
+ * ONLY: a flow, a formula or a validation rule written while the package is
+ * off would read a field the served object does not carry.
+ */
+export function withDisabledExtensionsFolded(registry: unknown, objects: unknown[]): unknown[] {
+    const r = registry as {
+        getWithheldExtensionFields?: (name: string) => Record<string, unknown>;
+        foldObjectExtendersOnto?: (name: string, base: unknown, options?: { includeDisabledExtensions?: true }) => unknown;
+    } | null | undefined;
+    if (typeof r?.getWithheldExtensionFields !== 'function' || typeof r.foldObjectExtendersOnto !== 'function') return objects;
+    let changed = false;
+    const folded = objects.map((object) => {
+        const name = (object as { name?: unknown } | null)?.name;
+        if (typeof name !== 'string' || Object.keys(r.getWithheldExtensionFields!(name)).length === 0) return object;
+        try {
+            const storage = r.foldObjectExtendersOnto!(name, object, { includeDisabledExtensions: true });
+            if (storage === object || storage === null || typeof storage !== 'object') return object;
+            changed = true;
+            const packageId = (object as { _packageId?: unknown })._packageId;
+            return packageId === undefined ? storage : { ...(storage as Record<string, unknown>), _packageId: packageId };
+        } catch {
+            // The fold is a read over in-memory contributors; a failure leaves
+            // the served object, the judgement this write had before.
+            return object;
+        }
+    });
+    return changed ? folded : objects;
+}
+
+/**
  * [#26707] The judgement {@link assertRuntimeAuthoringRules} enforces, handed
  * back instead of thrown: the gate's {@link RuntimeAuthoringVerdict}, its
  * refusal (`error`) beside its advisories. The assert above is this function
@@ -627,7 +671,10 @@ export async function judgeRuntimeAuthoringRules(
         name: evt.name,
         state: evt.state,
         body: evt.body,
-        objects,
+        // [#34901] A `view` write judges its field names against the STORAGE
+        // fold ({@link withDisabledExtensionsFolded}); every other type keeps
+        // the served objects.
+        objects: singular === 'view' ? withDisabledExtensionsFolded(this.engine?.registry, objects) : objects,
         permissions,
         books,
         datasets,

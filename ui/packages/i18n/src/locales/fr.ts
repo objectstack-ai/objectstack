@@ -961,6 +961,7 @@ const fr = {
     groupingUnstoredNotice: "Cette liste ne peut pas être regroupée par {{fields}} : sa valeur est calculée à l’affichage et n’est pas stockée. La liste est affichée sans ce regroupement.",
     groupingUnstoredRemove: "Retirer du regroupement",
     draftOnlyQueryDropped: "Non filtré ni trié par {{fields}} : ce champ n’existe que dans le brouillon jusqu’à la publication.",
+    withheldFieldsLeftOut: "Non affiché, filtré, trié ni groupé par {{fields}} : le paquet qui ajoute ce champ est désactivé. Il revient lorsque le paquet est réactivé.",
     inlineEditShort: "Édition en ligne",
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
   },

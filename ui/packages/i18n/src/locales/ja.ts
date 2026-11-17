@@ -936,6 +936,7 @@ const ja = {
     groupingUnstoredNotice: "{{fields}} ではこの一覧をグループ化できません。値は表示時に計算され、保存されていません。このグループ化を除いて一覧を表示しています。",
     groupingUnstoredRemove: "グループ化から削除",
     draftOnlyQueryDropped: "{{fields}} での絞り込みと並べ替えは行われていません。下書きにのみ存在し、公開後に有効になります。",
+    withheldFieldsLeftOut: "{{fields}} は表示、絞り込み、並べ替え、グループ化されていません。この項目を追加するパッケージが無効になっています。パッケージを有効にすると戻ります。",
     inlineEditShort: "インライン編集",
     inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
   },

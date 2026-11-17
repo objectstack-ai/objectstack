@@ -719,11 +719,21 @@ type ServedObjectLayer = 'served' | 'code';
  * Every other disabled package's stay withheld. The enable door's pre-check
  * reads it, as the disable door's reads `withoutExtensionsOf`; for a package
  * that is not disabled it changes nothing.
+ *
+ * [#34901] `includeDisabledExtensions` is `asEnabled` for EVERY disabled
+ * package at once: no `extend` contribution is withheld, so the fold is the
+ * one the storage layer keeps ({@link SchemaRegistry.getStorageObject}). The
+ * runtime authoring gate reads it on a `view` write ONLY, so a column or sort
+ * naming a field a disabled package adds is judged a real, stored field rather
+ * than an unknown one: the view the owner ships keeps naming it, and
+ * re-enabling the package serves it again with no write. A name no
+ * contributor declares is unknown either way.
  */
 export interface ObjectExtensionFoldOptions {
   withoutExtensionsOf?: string;
   onlyExtensionsOf?: string;
   asEnabled?: string;
+  includeDisabledExtensions?: true;
 }
 
 /** Whether `options` leaves any contribution out (otherwise the fold is the ordinary one). */

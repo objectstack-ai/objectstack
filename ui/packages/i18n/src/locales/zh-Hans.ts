@@ -963,6 +963,7 @@ const zh = {
     groupingUnstoredNotice: '无法按 {{fields}} 分组：它的值在显示时计算，并未存储。列表已暂不按它分组显示。',
     groupingUnstoredRemove: '从分组中移除',
     draftOnlyQueryDropped: '未按 {{fields}} 筛选或排序：它仅存在于草稿中，发布后才生效。',
+    withheldFieldsLeftOut: '未显示 {{fields}}，也未按其筛选、排序或分组：添加该字段的软件包已停用，启用后即恢复。',
     inlineEditShort: '行内编辑',
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
   },

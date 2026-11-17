@@ -51,7 +51,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -1480,6 +1480,8 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
   // The draft preview's note on a sort or filter it left out (objectstack#34807).
   'list.draftOnlyQueryDropped': 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
+  // The note on view fields a disabled package withholds (objectstack#34901).
+  'list.withheldFieldsLeftOut': 'Not shown, filtered, sorted or grouped by {{fields}}: the package that adds it is disabled. It comes back when the package is enabled.',
   // Heading of the record-detail overlay this view opens when a child view's
   // row is clicked (objectui#3426). Borrowed from the `detail.*` namespace
   // rather than minted as `list.recordDetail`: `NavigationOverlay` already
@@ -2245,6 +2247,24 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const draftOnlyFields = React.useMemo(() => readDraftOnlyFieldNames(objectDef), [objectDef]);
 
   /**
+   * objectstack#34901 — the names a disabled package withholds from this
+   * object (`_withheldFields` on the served read, see `readWithheldFieldNames`
+   * in `@object-ui/core`). The data door refuses each of them on every axis,
+   * exactly as it refuses a draft-only name, so `queryDropFields` is the one
+   * set every request leg below leaves out. Unlike a draft-only field the
+   * definition does not declare a withheld one, so its column is hidden by
+   * derivation (`effectiveFields`), never written to the view or to the
+   * user's list preferences: re-enabling the package brings it back with no
+   * write. The persist boundary keeps it (`emitSortChange`).
+   */
+  const withheldFields = React.useMemo(() => readWithheldFieldNames(objectDef), [objectDef]);
+  const queryDropFields = React.useMemo<ReadonlySet<string>>(() => {
+    if (withheldFields.size === 0) return draftOnlyFields;
+    if (draftOnlyFields.size === 0) return withheldFields;
+    return new Set([...draftOnlyFields, ...withheldFields]);
+  }, [draftOnlyFields, withheldFields]);
+
+  /**
    * objectstack#34807 — the view's `searchableFields` as every query this list
    * makes or hands down sends them: without a draft-only field, which the data
    * door refuses as `$searchFields` (`400 INVALID_FIELD`, an unknown field)
@@ -2254,10 +2274,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    */
   const searchFieldsSent = React.useMemo(() => {
     const declared = schema.searchableFields;
-    if (!declared || draftOnlyFields.size === 0) return declared;
-    const kept = declared.filter((f) => !refersToDraftOnlyField(f, draftOnlyFields));
+    if (!declared || queryDropFields.size === 0) return declared;
+    const kept = declared.filter((f) => !refersToDraftOnlyField(f, queryDropFields));
     return kept.length === declared.length ? declared : kept;
-  }, [schema.searchableFields, draftOnlyFields]);
+  }, [schema.searchableFields, queryDropFields]);
 
   /**
    * objectui#12966 — the object's `search` resolves to no field, so the server
@@ -2387,10 +2407,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // objectstack#34807 — a draft-only field is not sortable by the data door
     // whatever the projection served (the published one does not name it, and
     // an older deployment or a never-published object serves none at all).
-    return draftOnlyFields.size > 0
-      ? sortable.filter((item) => !refersToDraftOnlyField(item.field, draftOnlyFields))
+    // objectstack#34901 — nor is a field a disabled package withholds.
+    return queryDropFields.size > 0
+      ? sortable.filter((item) => !refersToDraftOnlyField(item.field, queryDropFields))
       : sortable;
-  }, [currentSort, platformSortability, draftOnlyFields]);
+  }, [currentSort, platformSortability, queryDropFields]);
 
   /**
    * The view's DECLARED sort, for the "reset to default" affordance
@@ -2641,19 +2662,29 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     .map((level) => level.field)
     .filter((field) => !declaredGroupingFieldNames.has(field)
       && isVirtualSearchField(objectDef?.fields?.[field] as SearchFieldMeta | undefined));
+  // objectstack#34901 — a level on a field a disabled package withholds is
+  // left out of the query as well, whoever added it, and kept in the chosen
+  // grouping: no button writes it away, and it groups again once the package
+  // is enabled. Named by `list.withheldFieldsLeftOut`.
+  const withheldGroupingFields = (chosenGroupingConfig?.fields ?? [])
+    .map((level) => level.field)
+    .filter((field) => refersToWithheldField(field, withheldFields));
+  const groupingLeftOut = withheldGroupingFields.length > 0
+    ? [...unstoredGroupingFields, ...withheldGroupingFields]
+    : unstoredGroupingFields;
   const reducedGroupingRef = React.useRef<{
     chosen: typeof chosenGroupingConfig;
     key: string;
     value: typeof chosenGroupingConfig;
   } | null>(null);
   let groupingConfig = chosenGroupingConfig;
-  if (chosenGroupingConfig && unstoredGroupingFields.length > 0) {
-    const key = JSON.stringify(unstoredGroupingFields);
+  if (chosenGroupingConfig && groupingLeftOut.length > 0) {
+    const key = JSON.stringify(groupingLeftOut);
     const cached = reducedGroupingRef.current;
     if (cached && cached.chosen === chosenGroupingConfig && cached.key === key) {
       groupingConfig = cached.value;
     } else {
-      const kept = chosenGroupingConfig.fields.filter((level) => !unstoredGroupingFields.includes(level.field));
+      const kept = chosenGroupingConfig.fields.filter((level) => !groupingLeftOut.includes(level.field));
       groupingConfig = kept.length > 0 ? { ...chosenGroupingConfig, fields: kept } : undefined;
       reducedGroupingRef.current = { chosen: chosenGroupingConfig, key, value: groupingConfig };
     }
@@ -2816,6 +2847,36 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
     return dropped.size > 0 ? Array.from(dropped) : NO_DRAFT_ONLY_QUERY_DROPS;
   }, [draftOnlyFields, currentSort, authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions]);
+
+  /**
+   * objectstack#34901 — the withheld fields (see `withheldFields`) this list
+   * names anywhere a request would carry them: a column, the sort, a grouping
+   * level, `searchableFields` or the filter. Each is left out of every request
+   * and its column is not drawn; this list is what the one line above the
+   * rows names (`list.withheldFieldsLeftOut`). Empty while nothing is withheld.
+   */
+  const withheldViewRefs = React.useMemo<readonly string[]>(() => {
+    if (withheldFields.size === 0) return NO_DRAFT_ONLY_QUERY_DROPS;
+    const named = new Set<string>();
+    const note = (ref: unknown) => {
+      if (refersToWithheldField(ref, withheldFields)) named.add(ref.split('.')[0]);
+    };
+    if (Array.isArray(schema.columns)) for (const column of schema.columns as unknown[]) note(columnIdentity(column as any));
+    for (const item of currentSort) note(item.field);
+    for (const level of chosenGroupingConfig?.fields ?? []) note(level.field);
+    for (const field of schema.searchableFields ?? []) note(field);
+    try {
+      omitDraftOnlyFilterFields(
+        mergeEffectiveFilterSources(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions),
+        withheldFields,
+        named,
+      );
+    } catch (error) {
+      // A malformed filter is the fetch's own load error to raise, not this line's.
+      if (!(error instanceof FilterOperatorError)) throw error;
+    }
+    return named.size > 0 ? Array.from(named) : NO_DRAFT_ONLY_QUERY_DROPS;
+  }, [withheldFields, schema.columns, currentSort, chosenGroupingConfig, schema.searchableFields, authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions]);
 
   // User filters render ONLY when explicitly configured (ADR-0047 §data
   // mode): saved list views already act as the preset switcher, so an
@@ -3795,7 +3856,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       try {
         // Construct filter — shared with the export path so the file a user
         // downloads is built from the same three sources as the rows on screen.
-        const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, draftOnlyFields);
+        const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, queryDropFields);
 
         // Convert sort to query format
         // Use array format to ensure order is preserved (Object keys are not guaranteed ordered)
@@ -3838,8 +3899,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // objectstack#34807 — a column on a draft-only field is drawn (empty,
           // under its draft label) but never asked for: the data door knows
           // only the published object and refuses the whole query for it.
-          const servedCols = draftOnlyFields.size > 0
-            ? rawCols.filter(c => !refersToDraftOnlyField(c, draftOnlyFields))
+          // objectstack#34901 — nor is one a disabled package withholds.
+          const servedCols = queryDropFields.size > 0
+            ? rawCols.filter(c => !refersToDraftOnlyField(c, queryDropFields))
             : rawCols;
           const cols = (perms?.isLoaded && schema.objectName)
             ? servedCols.filter(c => perms.checkField(schema.objectName!, c, 'read'))
@@ -4464,7 +4526,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, draftOnlyFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, queryDropFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -4757,6 +4819,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       });
     }
 
+    // objectstack#34901 — a column on a field a disabled package withholds is
+    // not drawn. Derived here on every render, never written to `hiddenFields`
+    // or the view, so it is drawn again once the package is enabled.
+    if (withheldFields.size > 0) {
+      fields = fields.filter((f: any) => !refersToWithheldField(columnIdentity(f), withheldFields));
+    }
+
     // Remove hidden fields
     if (hiddenFields.size > 0) {
       fields = fields.filter((f: any) => {
@@ -4776,7 +4845,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
     
     return fields;
-  }, [schema.columns, schema.objectName, hiddenFields, schema.fieldOrder, perms]);
+  }, [schema.columns, schema.objectName, hiddenFields, schema.fieldOrder, perms, withheldFields]);
 
   /**
    * Did the AUTHOR declare a column projection at all? (objectui#6598)
@@ -4890,7 +4959,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   let selfQueryFilter: unknown = authoredFilter;
   if (currentView === 'gantt' || currentView === 'tree' || currentView === 'chart' || gridOwnsGroupedFetch || kanbanLanesPaged) {
     try {
-      const value = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, draftOnlyFields);
+      const value = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, queryDropFields);
       const key = JSON.stringify(value ?? null);
       const cached = selfQueryFilterRef.current;
       if (cached && cached.key === key) {
@@ -5886,8 +5955,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * emitted unchanged.
    *
    * Nor does any REQUEST carry it (objectstack#30024): the fetch, the export
-   * and the child views read `serverSort`, which drops it through the same
-   * `filterPlatformSortableSort` call. This boundary used to leave it in "the
+   * and the child views read `serverSort`, which drops it through the same platform verdict,
+   * `filterPlatformSortableSort`. This boundary used to leave it in "the
    * order this list asks the server for", and the server answers such a sort
    * `400 INVALID_SORT`, so a stored view naming one failed its first fetch.
    *
@@ -5898,15 +5967,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    *
    * Only under a served projection: with no signal there is no verdict to
    * filter by, and the pre-objectstack#10235 behaviour stands unchanged.
+   *
+   * objectstack#34901 — an entry on a field a disabled package withholds is
+   * KEPT. The projection has no entry for it only while the package is off,
+   * which is no verdict on the sort: dropping it here would lose it from the
+   * user's stored sort for good. No request carries it (`serverSort`), and it
+   * orders the rows again once the package is enabled.
    */
   const emitSortChange = React.useCallback((next: SortItem[]) => {
     if (!onSortChange) return;
     onSortChange(
       platformSortability
-        ? filterPlatformSortableSort(next, platformSortability)
+        ? next.filter((item) => refersToWithheldField(item?.field, withheldFields)
+            || isPlatformSortableField(platformSortability, item?.field))
         : next,
     );
-  }, [onSortChange, platformSortability]);
+  }, [onSortChange, platformSortability, withheldFields]);
 
   /**
    * A column-header sort from the child grid (#3106).
@@ -6038,7 +6114,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       const fields = (effectiveFields
         .map((f: any) => columnIdentity(f))
         .filter(Boolean) as string[])
-        .filter((f) => !refersToDraftOnlyField(f, draftOnlyFields));
+        .filter((f) => !refersToDraftOnlyField(f, queryDropFields));
 
       // The rows on screen were asked for with `serverSort`, so the file is too:
       // a refused entry would fail the export the way it failed the list.
@@ -6059,7 +6135,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // file, no message. Here it lands in the catch below, which names it
           // in the toolbar the way the data fetch's own `try` names it in the
           // load-error panel — and nothing is exported unfiltered.
-          const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, draftOnlyFields);
+          const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, queryDropFields);
           const blob = await dataSource!.exportDownload!(schema.objectName!, {
             format: format as 'csv' | 'xlsx' | 'json',
             fields: fields.length ? fields : undefined,
@@ -6153,7 +6229,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setShowExport(false);
     // `searchTerm` / `searchableFields` belong here: the export now narrows by
     // the active search, so a stale closure would export the wrong row set.
-  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, searchFieldsSent, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel, t, draftOnlyFields]);
+  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, searchFieldsSent, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel, t, queryDropFields]);
 
   // All available fields for hide/show (with i18n)
   //
@@ -7604,6 +7680,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   || tFieldLabel(field, objectDef?.fields?.[field]?.label || field))
                 .join(', '),
             })}
+          </span>
+        </div>
+      )}
+
+      {/* objectstack#34901 — the fields a disabled package withholds that this
+          view names (`withheldViewRefs`): each is left out of every request
+          and its column is not drawn; this line says why. */}
+      {withheldViewRefs.length > 0 && (
+        <div
+          role="status"
+          data-testid="list-withheld-fields-notice"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            {t('list.withheldFieldsLeftOut', { fields: withheldViewRefs.join(', ') })}
           </span>
         </div>
       )}

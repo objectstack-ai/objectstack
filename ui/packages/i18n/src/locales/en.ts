@@ -1225,6 +1225,7 @@ const en = {
     groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
     groupingUnstoredRemove: 'Remove from grouping',
     draftOnlyQueryDropped: 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
+    withheldFieldsLeftOut: 'Not shown, filtered, sorted or grouped by {{fields}}: the package that adds it is disabled. It comes back when the package is enabled.',
     inlineEditShort: 'Edit inline',
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
   },
