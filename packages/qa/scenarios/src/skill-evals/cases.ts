@@ -109,11 +109,18 @@ export const hashCase = (c: Pick<SkillEvalCase, 'prompt' | 'mustContain' | 'must
 /** The directory under a bundle that holds the files cases place in a turn's project. */
 export const CASE_FILES_DIR = 'evals/files';
 
-/** Why a `files` entry is refused; `undefined` ⇒ it names a path under `evals/files/`. Pure. */
+/** Why a `files` entry is refused; `undefined` ⇒ it names a path under `evals/files/` that lands outside any `.claude/`. Pure. */
 export function caseFileProblem(entry: string): string | undefined {
   const parts = entry.split('/');
   if (entry.includes('\\') || parts.length < 3 || `${parts[0]}/${parts[1]}` !== CASE_FILES_DIR || parts.slice(2).some((p) => p === '' || p === '.' || p === '..')) {
     return `\`files\` entry \`${entry}\` is not a path under \`${CASE_FILES_DIR}/\` (forward slashes, no \`.\` or \`..\` segment)`;
+  }
+  // Both arms receive every case file, and `.claude/` is where Claude Code finds
+  // skills: a case file there would hand the no-skill arm a skill without
+  // `verdictOf` ever calling the turn invalid. Any depth, any letter case (a
+  // case-insensitive disk resolves `.Claude` to the same directory).
+  if (parts.slice(2).some((p) => p.toLowerCase() === '.claude')) {
+    return `\`files\` entry \`${entry}\` would land under a \`.claude/\` directory in the turn's project, which only the runner fills: a case file there reaches the no-skill arm too`;
   }
   return undefined;
 }

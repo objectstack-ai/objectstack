@@ -48,6 +48,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   'regrade: a case changed since the round → SET APART, never graded against the new text': 1,
   'reader: a trigger case reads with no assertions; one carrying assertions → REFUSED': 1,
   'reader: a `files` entry outside evals/files/ → REFUSED': 1,
+  'reader: a `files` entry that would land under the project\'s .claude/ → REFUSED': 1,
   'reader: a bundle whose trigger cases are all positive → REFUSED': 1,
   'judge: a trigger case the turn loaded, by a Skill launch or a read → PASS; not loaded → FAIL': 1,
   'judge: a should-not-trigger case the turn loaded → FAIL; left alone → PASS': 1,
@@ -57,7 +58,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
 });
 
 /** The roster's own size, pinned: a deleted row takes its floor with it otherwise. */
-export const SELF_TEST_BATTERY_FLOOR = 29;
+export const SELF_TEST_BATTERY_FLOOR = 30;
 
 let selfTestReachedVerdict = false;
 /** Whether the last {@link runSelfTest} reached its verdict line. */
@@ -302,6 +303,15 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
         const bad = ['rules/x.md', 'evals/files/../SKILL.md', 'evals/files/', '/etc/passwd'].map((f) => parseEvalFile('demo-skill', 'f.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', files: [f], assertions: { must_contain: ['x'] } }] })));
         const good = parseEvalFile('demo-skill', 'f.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', files: ['evals/files/src/a.ts'], assertions: { must_contain: ['x'] } }] }));
         return bad.every((r) => r.cases.length === 0 && r.refusals.length === 1) && good.cases[0]?.files?.join() === 'evals/files/src/a.ts' ? true : `refused ${bad.filter((r) => r.refusals.length === 1).length} of 4 bad entries; the good one read as [${good.cases[0]?.files?.join() ?? 'refused'}]`;
+      },
+    },
+    {
+      label: 'reader: a `files` entry that would land under the project\'s .claude/ → REFUSED',
+      run: () => {
+        const read = (f: string) => parseEvalFile('demo-skill', 'f.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', files: [f], assertions: { must_contain: ['x'] } }] }));
+        const bad = ['evals/files/.claude/skills/demo-skill/SKILL.md', 'evals/files/.claude', 'evals/files/.Claude/skills/x/SKILL.md', 'evals/files/app/.claude/skills/x/SKILL.md'].map(read);
+        const good = read('evals/files/.claude-notes.md');
+        return bad.every((r) => r.cases.length === 0 && r.refusals.length === 1) && good.cases.length === 1 ? true : `refused ${bad.filter((r) => r.refusals.length === 1).length} of 4 .claude entries; .claude-notes.md read as ${good.cases.length === 1 ? 'a case' : 'refused'}`;
       },
     },
     {

@@ -780,7 +780,7 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   the behaviour cases, never inside their pass rates: per bundle, loaded when it should, left alone when it should
   not, the missed loads and the false loads.
 - **Case files**: a case's `files` entries are paths under the bundle's `evals/files/` (anything else is refused, and
-  so is a path the bundle lacks). Each is copied, a directory whole, into both arms' directories at its path below
+  so is a path the bundle lacks or one with a `.claude` segment, since `.claude/` is where the runner places the skill). Each is copied, a directory whole, into both arms' directories at its path below
   `evals/files/`, so the arms still differ only in the bundle. A case whose prompt states its context needs none.
   `--regrade DIR` applies the current rules to a recorded round's answers and arm facts. A changed record keeps the
   verdict its turn was first given as `regradedFrom`. Each record carries `caseHash`, a hash of its case's prompt and

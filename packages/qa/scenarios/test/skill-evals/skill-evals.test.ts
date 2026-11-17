@@ -540,6 +540,18 @@ describe('`files`: what a case needs on disk, placed in the turn\'s project on b
     }
   });
 
+  it('the reader refuses a path that would land under the project\'s .claude/, where only the runner puts a skill', () => {
+    const read = (files: string[]) => parseEvalFile('alpha-skill', 'f.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', files, assertions: { must_contain: ['x'] } }] }));
+    for (const bad of ['evals/files/.claude/skills/alpha-skill/SKILL.md', 'evals/files/.claude', 'evals/files/.claude/settings.json', 'evals/files/.CLAUDE/skills/x/SKILL.md', 'evals/files/app/.claude/skills/x/SKILL.md']) {
+      const r = read([bad]);
+      expect(r.cases, bad).toEqual([]);
+      expect(r.refusals, bad).toEqual([{ path: 'alpha-skill/evals/f.json: evals[0]', message: expect.stringContaining('`.claude/`') }]);
+    }
+    for (const good of ['evals/files/.claude-notes.md', 'evals/files/claude/a.md', 'evals/files/.mcp.json']) {
+      expect(read([good]).cases[0]?.files, good).toEqual([good]);
+    }
+  });
+
   it('the catalog refuses a case naming a file the bundle lacks; a round places each file below evals/files/ in both arms\' projects', async () => {
     const root = writeCatalog();
     const evalsFile = join(root, 'alpha-skill', 'evals', 'cases.json');
