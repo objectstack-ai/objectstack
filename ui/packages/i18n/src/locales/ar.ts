@@ -2576,6 +2576,7 @@ const ar = {
       view: "عرض",
       confirm: "تأكيد",
       cancel: "إلغاء",
+      continue: "متابعة",
       prefilled: "القيم التي لم تُعيَّن بعد مقترحة من متصفحك. لن يُحفظ شيء حتى تؤكد.",
       organizationName: {
         title: "سمِّ مؤسستك",
