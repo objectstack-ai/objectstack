@@ -20,7 +20,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ApprovalService } from './approval-service.js';
+import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
+import { ApprovalService, type ApprovalNodeAutoOutcome } from './approval-service.js';
 
 interface FakeRow { [k: string]: any }
 
@@ -250,12 +251,16 @@ describe('the override never approves its actor\'s own request', () => {
     }
   });
 
+  const opened = (result: ApprovalRequestRow | ApprovalNodeAutoOutcome): ApprovalRequestRow => {
+    if ('autoApproved' in result) throw new Error('expected an OPENED approval request, got an auto-approval outcome');
+    return result;
+  };
   /** A request whose slate names one designated user, `u9`, opened by `submitter`. */
-  const open = async (submitter: any, extra: Record<string, any> = {}) => svc.openNodeRequest({
+  const open = async (submitter: any, extra: Record<string, any> = {}) => opened(await svc.openNodeRequest({
     object: 'opportunity', recordId: `opp_${n}`, runId: `run_${n}`, nodeId: 'gate', flowName: 'own_request',
     config: { approvers: [{ type: 'user' as const, value: 'u9' }], behavior: 'first_response' as const, ...extra },
     record: { id: `opp_${n}` },
-  }, submitter);
+  }, submitter));
 
   const actions = async (id: string) => (await svc.listActions(id, SYS)).map((a: any) => a.action);
   const statusOf = async (id: string) => (await svc.getRequest(id, SYS))!.status;
