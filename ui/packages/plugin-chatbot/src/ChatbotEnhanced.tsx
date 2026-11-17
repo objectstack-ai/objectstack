@@ -1194,6 +1194,16 @@ function writtenRecordOf(
   return { objectName, recordId, ...(typeof r.label === 'string' && r.label ? { label: r.label } : {}) };
 }
 
+/**
+ * The plain surface's left/right gutter, keyed to the chat's own width (the
+ * root is an `@container`), never to the viewport: a 16px gutter on both
+ * sides, shared by the message list and the composer so messages, cards and
+ * the input align. The gutter drops only once the container is wide enough
+ * (`@3xl`, 48rem) that the centred `max-w-2xl` (42rem) column already keeps
+ * more than 16px of margin on each side — the full-page chat at full width.
+ */
+const PLAIN_SURFACE_GUTTER = 'px-4 @3xl:px-0';
+
 /** The item a selected model none of the offered models carries is shown by. */
 const OUTSIDE_MODELS = 'outside';
 
@@ -5190,8 +5200,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       <div
         ref={ref}
         className={cn(
+          // The plain surface is a size container: its gutters follow the
+          // width the chat is GIVEN (a ~420px dock or a full page), never the
+          // viewport — see PLAIN_SURFACE_GUTTER.
           isPlainSurface
-            ? 'flex min-h-0 flex-col overflow-hidden bg-background'
+            ? '@container flex min-h-0 flex-col overflow-hidden bg-background'
             : 'flex min-h-0 flex-col overflow-hidden rounded-lg border bg-background',
           className
         )}
@@ -5226,7 +5239,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             className={cn(
               'space-y-4',
               isPlainSurface
-                ? 'mx-auto w-full max-w-2xl px-4 py-8 sm:px-0'
+                ? cn('mx-auto w-full max-w-2xl py-8', PLAIN_SURFACE_GUTTER)
                 : 'px-4 py-3',
             )}
           >
@@ -5651,7 +5664,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
           ref={promptInputWrapRef}
           className={cn(
             'relative',
-            isPlainSurface && 'mx-auto w-full max-w-2xl px-4 pb-4 sm:px-0',
+            isPlainSurface && cn('mx-auto w-full max-w-2xl pb-4', PLAIN_SURFACE_GUTTER),
           )}
         >
           {/* objectui#12978 — in flow, so it pushes the conversation up instead
