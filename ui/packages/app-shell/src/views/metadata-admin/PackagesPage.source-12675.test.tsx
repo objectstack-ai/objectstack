@@ -164,11 +164,23 @@ describe('Packages — marketplace capability present (objectui#12675)', () => {
     }
   });
 
-  it('`?source=marketplace` shows only the marketplace rows, and Show all clears it', async () => {
+  it('`?source=marketplace` shows only the marketplace rows, with no Show all that clears it', async () => {
     await serve(true, { packages: [CODE, MARKET, AUTHORED], ledger: [LEDGER_TODO] });
     renderPackages('?source=marketplace');
 
     expect(await drawnSources()).toEqual({ 'com.example.todo': 'marketplace' });
+    // objectstack#34722 — that view is Setup's Installed Apps door, and its
+    // one click into the unfiltered developer list is gone (ruling 甲 on
+    // objectstack#25098); `PackagesPage.installedAppsUpdates-34722.test.tsx`
+    // pins the door.
+    expect(screen.queryByTestId('pkg-source-filter')).toBeNull();
+  });
+
+  it('another `?source=` shows only its rows, and Show all clears it', async () => {
+    await serve(true, { packages: [CODE, MARKET, AUTHORED], ledger: [LEDGER_TODO] });
+    renderPackages('?source=code');
+
+    expect(await drawnSources()).toEqual({ 'com.acme.code': 'code' });
     fireEvent.click(within(screen.getByTestId('pkg-source-filter')).getByRole('button'));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(new RegExp(`^${PACKAGES_PATH}$`)));
     expect(Object.keys(await drawnSources())).toHaveLength(3);
