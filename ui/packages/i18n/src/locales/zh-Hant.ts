@@ -2559,6 +2559,7 @@ const zhHant = {
       },
       passwordsNote: '臨時密碼——僅顯示一次，不會被儲存。請立即儲存；使用者首次登入時必須修改。',
       passwordsMore: '更多條目已省略——請使用下載。',
+      positionsHint: '崗位：可對映一列崗位機器名，多個用“;”分隔。每個崗位按 Setup 中指派崗位的同樣規則分配；不存在或你無權指派的崗位會在該行報錯，使用者照常建立。',
       passwordsDownload: '下載 CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
