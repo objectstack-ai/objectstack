@@ -1,5 +1,7 @@
 ---
 '@objectstack/plugin-auth': patch
+'@object-ui/app-shell': patch
+'@object-ui/console': patch
 ---
 
 fix(plugin-auth)!: accepting an organization invitation requires a verified email address
@@ -13,5 +15,7 @@ Skills-docs: none — no skill under `skills/**` teaches accepting an organizati
 **BREAKING** for a deployment whose invitees sign in with an address that is not verified: email verification off (the default under the `invite_only` posture, or declared off under `open`), or a social or SSO provider that does not verify the address. Accepting an organization invitation requires a verified email address. A password account verifies by the verification mail; an account a social or SSO provider made counts only when the provider verified the address. The invitation's id, which its accept link and a copied link carry, is no proof of the mailbox. No setting relaxes the rule.
 
 Unchanged: the invitation mail's own link, which carries a proof of the mailbox and accepts in one step (`POST /api/v1/auth/organization/accept-invitation-one-step`), and that door's signed-in mode, which already asks for a verified address; a verified account, which accepts, declines, reads and lists its invitations as before; sending, resending and cancelling invitations.
+
+The Console's accept-invitation page answers either refusal with its verify-email state, which asks the invitee to verify the address and open the invitation link from the mailbox again.
 
 What to do: an invitee completes the verification mail (`POST /api/v1/auth/send-verification-email`, then the link it carries) before accepting, or opens the invitation mail's own link. On a deployment with no mail transport, a platform administrator adds the person to the organization with the member list's **Add Member** action instead of an invitation.
