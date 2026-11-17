@@ -130,3 +130,27 @@ describe('[#25579] createBatchSummaryAccumulator — what it leaves as it was', 
     expect(acc.overlay(undefined)).toBeUndefined();
   });
 });
+
+describe('[#34466] overlayRow — the master-detail header a field-level parent. predicate reads', () => {
+  it('moves the summary on a header row of the roll-up\'s parent object, on a copy', () => {
+    const acc = createBatchSummaryAccumulator([desc({ summaryField: 'lines', fn: 'count', sourceField: undefined })], CHILD_FIELDS)!;
+    const header = { id: 'o1', lines: 1, status: 'draft' };
+    acc.accept({ order: 'o1' });
+    acc.accept({ order: 'o1' });
+    expect(acc.overlayRow('xt_order', header)).toEqual({ id: 'o1', lines: 3, status: 'draft' });
+    expect(header.lines).toBe(1);
+  });
+
+  it('leaves as it was: an unbound header, another parent, another object, a header not handed the summary', () => {
+    const acc = createBatchSummaryAccumulator([desc({ summaryField: 'lines', fn: 'count', sourceField: undefined })], CHILD_FIELDS)!;
+    acc.accept({ order: 'o1' });
+    expect(acc.overlayRow('xt_order', null)).toBeNull();
+    expect(acc.overlayRow('xt_order', undefined)).toBeUndefined();
+    const other = { id: 'o2', lines: 0 };
+    expect(acc.overlayRow('xt_order', other)).toBe(other);
+    const elsewhere = { id: 'o1', lines: 0 };
+    expect(acc.overlayRow('xt_quote', elsewhere)).toBe(elsewhere);
+    const narrow = { id: 'o1', status: 'draft' };
+    expect(acc.overlayRow('xt_order', narrow)).toBe(narrow);
+  });
+});

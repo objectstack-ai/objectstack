@@ -31,7 +31,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ConsolePageHeader, objectHostAppSegment, useMetadata } from '@object-ui/app-shell';
+import { ConsolePageHeader, approvalQueueState, objectHostAppSegment, useMetadata } from '@object-ui/app-shell';
 import {
   Button,
   buttonVariants,
@@ -682,31 +682,43 @@ function InlineActions({
     'needsDecisionInputs',
     'This approval collects decision outputs — open it to decide.',
   );
+  const approveLabel = tr('approve', 'Approve');
+  const rejectLabel = tr('reject', 'Reject');
+  // objectstack#34587: the buttons are always shown, each with its word next
+  // to its icon — they used to appear only on row hover or keyboard focus, so
+  // a reviewer scanning the inbox saw no way to decide from the list. The
+  // accessible name is the visible word; a disabled button carries the reason
+  // as its title (read as its description), and the wrapper repeats it so the
+  // hover tooltip shows even where a disabled button swallows pointer events.
   return (
     <div
-      className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+      className="flex items-center justify-end gap-1 whitespace-nowrap"
       onClick={(e) => e.stopPropagation()}
       title={needsInputs ? needsInputsHint : undefined}
     >
       <Button
         size="sm"
         variant="ghost"
-        className="h-7 px-2 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:text-emerald-400"
+        className="h-7 gap-1 px-2 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:text-emerald-400"
         disabled={busy || needsInputs}
         onClick={() => onApprove(r)}
-        aria-label={needsInputs ? needsInputsHint : tr('approve', 'Approve')}
+        aria-label={approveLabel}
+        title={needsInputs ? needsInputsHint : undefined}
       >
-        <CheckCircle2 className="h-4 w-4" />
+        <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+        {approveLabel}
       </Button>
       <Button
         size="sm"
         variant="ghost"
-        className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400"
+        className="h-7 gap-1 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400"
         disabled={busy || needsInputs}
         onClick={() => onReject(r)}
-        aria-label={needsInputs ? needsInputsHint : tr('reject', 'Reject')}
+        aria-label={rejectLabel}
+        title={needsInputs ? needsInputsHint : undefined}
       >
-        <XCircle className="h-4 w-4" />
+        <XCircle className="h-4 w-4" aria-hidden="true" />
+        {rejectLabel}
       </Button>
     </div>
   );
@@ -957,25 +969,6 @@ function ApprovalsQueue() {
    * the read failed or answered no total; the line is then not drawn.
    */
   const [environmentPendingCount, setEnvironmentPendingCount] = useState<number | null>(null);
-
-  /**
-   * Open a request on its page (objectui#12484): the page objectstack serves
-   * for it, on the standard record route. A navigation, so Back returns to the
-   * queue with its tab, filters and scroll as they were. It opens under the
-   * app that owns the row's record (`requestPagePath`).
-   */
-  const openRequest = useCallback(
-    (r: ApprovalRequestRow) =>
-      navigate(
-        requestPagePath(
-          Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
-          r.object_name,
-          appName,
-          r.id,
-        ),
-      ),
-    [navigate, appName, metadataApps],
-  );
 
   /**
    * objectui#5211 — an approver can be routed a request about a record they
@@ -1253,6 +1246,39 @@ function ApprovalsQueue() {
     return sorted;
   }, [rows, deferredQuery, processFilter, objectFilter, statusFilter, tab, sortKey, hiddenFields, displayLocale]);
 
+  /**
+   * Open a request on its page (objectui#12484): the page objectstack serves
+   * for it, on the standard record route. A navigation, so Back returns to the
+   * queue with its tab, filters and scroll as they were. It opens under the
+   * app that owns the row's record (`requestPagePath`).
+   *
+   * objectstack#34586 — from 「待我审批」 the page is handed the queue as this
+   * list shows it, filtered and sorted (`approvalQueueState`): its top bar
+   * draws 「第 N 条，共 M 条」 with ↓ ↑ and `j` / `k` over it, and a decision
+   * that takes the request out of the queue opens the next one. The other
+   * tabs list requests the reader is not deciding, so they hand no queue.
+   */
+  const openRequest = useCallback(
+    (r: ApprovalRequestRow) =>
+      navigate(
+        requestPagePath(
+          Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
+          r.object_name,
+          appName,
+          r.id,
+        ),
+        tab === 'pending'
+          ? {
+              state: approvalQueueState(
+                { pathname: `${location.pathname}${location.search}`, label: inboxTitle },
+                filteredRows.map((row) => row.id),
+              ),
+            }
+          : undefined,
+      ),
+    [navigate, appName, metadataApps, tab, location.pathname, location.search, inboxTitle, filteredRows],
+  );
+
   // Reset selection when underlying filtered list changes (avoid acting on hidden rows).
   useEffect(() => {
     if (selectedRowIds.size === 0) return;
@@ -1486,7 +1512,7 @@ function ApprovalsQueue() {
                 <TableHead className="w-[16%]">{tr('colRequester', 'Requester')}</TableHead>
                 <TableHead className="w-[110px] min-w-[96px] whitespace-nowrap">{tr('colStatus', 'Status')}</TableHead>
                 <TableHead className="w-[132px]">{tr('colWaiting', 'Submitted')}</TableHead>
-                <TableHead className={cn('w-20', PINNED_ACTIONS_CLASSES, 'after:bg-muted/50')} aria-label={tr('colActions', 'Actions')} />
+                <TableHead className={cn('w-px whitespace-nowrap', PINNED_ACTIONS_CLASSES, 'after:bg-muted/50')} aria-label={tr('colActions', 'Actions')} />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1567,7 +1593,7 @@ function ApprovalsQueue() {
                   </TableCell>
                   <TableCell
                     className={cn(
-                      'w-20',
+                      'w-px whitespace-nowrap',
                       PINNED_ACTIONS_CLASSES,
                       // The focused row's inset ring is drawn by the row,
                       // under this opaque cell: the cell redraws the ring's

@@ -63,16 +63,25 @@ export interface DateBucketHost {
 }
 
 /** The body of `SqlDriver#buildDateBucketExpr`; the method's docblock there is its contract. */
-export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'dateGranularityCapabilities' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'sqliteTemporalArg' | 'temporalFieldKind'>, field: string, granularity: 'day' | 'week' | 'month' | 'quarter' | 'year', table?: string | null, column: string = field): { sql: string; bindings: any[] } | null {
+export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateFields' | 'dateFieldsOnInstantColumn' | 'dateGranularityCapabilities' | 'isMysql' | 'isOracle' | 'isPostgres' | 'isSqlite' | 'sqliteTemporalArg' | 'temporalFieldKind'>, field: string, granularity: 'day' | 'week' | 'month' | 'quarter' | 'year', table?: string | null, column: string = field, timezone?: string): { sql: string; bindings: any[] } | null {
   if (!this.dateGranularityCapabilities[granularity]) return null;
 
   // `field` is the FIELD — the registries (`temporalFieldKind`, the SQLite
   // repair) are keyed by it; `column` is the identifier the statement names,
-  // the remote column an `external.columnMap` maps the field to.
+  // the remote column an `external.columnMap` maps the field to. A zone
+  // binding is never mistaken for the field: a field is a snake_case machine
+  // name and the zone an area/location name, which contains `/`.
   if (column !== field) {
-    const bucket = buildDateBucketExpr.call(this, field, granularity, table);
+    const bucket = buildDateBucketExpr.call(this, field, granularity, table, field, timezone);
     return bucket && { sql: bucket.sql, bindings: bucket.bindings.map((b) => (b === field ? column : b)) };
   }
+
+  // [#33697] A reference zone (ADR-0053 Phase 2 D2 as amended) is bucketed by
+  // the PostgreSQL arm only, the one dialect that declares
+  // `supports.zonedDateBucketing`; every other arm answers `null` for it
+  // rather than a UTC bucket under a zone's name. `aggregate` refuses before
+  // it asks, so this is the second wall, not the first.
+  if (timezone !== undefined && !this.isPostgres) return null;
 
   const calendarDay = this.temporalFieldKind(table, field) === 'date';
 
@@ -96,13 +105,22 @@ export function buildDateBucketExpr(this: Pick<DateBucketHost, 'dateFields' | 'd
     // `date` publish) is bucketed as its UTC day, the day the read presents;
     // a bare `::date` would read it in the session's zone.
     const dayArg = isDateOnInstantColumn(this, table, field) ? `${utcCalendarDaySql('??')}::timestamp` : `(??)::date::timestamp`;
-    const arg = calendarDay ? dayArg : `(??)::timestamptz AT TIME ZONE 'UTC'`;
+    // [#33697] An instant is read in the reference zone before it is
+    // labelled: `(col)::timestamptz AT TIME ZONE tz` is the zone's wall
+    // clock, so every unit starts at the zone's local midnight on either side
+    // of a DST change. The `::timestamptz` cast is part of the rule — on a
+    // zone-less `timestamp`, `AT TIME ZONE` converts the other way. The zone
+    // is a bound value, never SQL text. A `Field.date` keeps its calendar day
+    // under every zone (`dayArg`, no zone read), as the in-memory path does.
+    const zoned = timezone !== undefined && !calendarDay;
+    const arg = calendarDay ? dayArg : zoned ? `(??)::timestamptz AT TIME ZONE ?` : `(??)::timestamptz AT TIME ZONE 'UTC'`;
+    const bindings = zoned ? [field, timezone] : [field];
     switch (granularity) {
-      case 'year':    return { sql: `to_char(${arg}, 'YYYY')`, bindings: [field] };
-      case 'month':   return { sql: `to_char(${arg}, 'YYYY-MM')`, bindings: [field] };
-      case 'day':     return { sql: `to_char(${arg}, 'YYYY-MM-DD')`, bindings: [field] };
-      case 'quarter': return { sql: `to_char(${arg}, 'YYYY"-Q"Q')`, bindings: [field] };
-      case 'week':    return { sql: `to_char(${arg}, 'IYYY"-W"IW')`, bindings: [field] };
+      case 'year':    return { sql: `to_char(${arg}, 'YYYY')`, bindings };
+      case 'month':   return { sql: `to_char(${arg}, 'YYYY-MM')`, bindings };
+      case 'day':     return { sql: `to_char(${arg}, 'YYYY-MM-DD')`, bindings };
+      case 'quarter': return { sql: `to_char(${arg}, 'YYYY"-Q"Q')`, bindings };
+      case 'week':    return { sql: `to_char(${arg}, 'IYYY"-W"IW')`, bindings };
     }
   }
 
