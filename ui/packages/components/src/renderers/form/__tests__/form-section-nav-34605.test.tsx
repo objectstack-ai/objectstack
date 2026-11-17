@@ -23,6 +23,8 @@ import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 // Module-scope import (not `beforeAll`) — objectui#3010/#3021.
 import '../../../renderers';
+// The renderers reach `react-runtime` through a dynamic import: pay its load at collection.
+import '@object-ui/react-runtime';
 import { FormSectionNavContext, type FormSectionNavItem } from '../section-nav-context';
 
 afterEach(cleanup);
