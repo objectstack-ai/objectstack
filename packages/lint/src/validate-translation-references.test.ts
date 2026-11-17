@@ -3865,7 +3865,15 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         objectName: 'crm_env',
         type: 'api',
         target: '/api/v1/rotate',
-        resultDialog: { title: 'Secret', fields: [{ path: 'client.secret', label: 'Secret' }, { path: 'token' }] },
+        resultDialog: {
+          title: 'Secret',
+          fields: [
+            { path: 'client.secret', label: 'Secret' },
+            { path: 'token' },
+            // [#34652] A table field: its columns' headers are keyed under `resultDialog.columns`.
+            { path: 'rows', format: 'table', columns: [{ path: 'id', label: 'ID' }, { path: 'error.message', label: 'Why' }] },
+          ],
+        },
       },
       { name: 'plain_env', label: 'Plain', objectName: 'crm_env', type: 'script', target: 'plainEnv' },
       {
@@ -3880,7 +3888,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         label: 'Mint',
         type: 'api',
         target: '/api/v1/mint',
-        resultDialog: { fields: [{ path: 'token' }] },
+        resultDialog: { fields: [{ path: 'token' }, { path: 'rows', format: 'table', columns: [{ path: 'id' }] }] },
       },
       // [#31885] A preflight panel with declared fields, bound and object-less,
       // and a bound one that declares none (its panel shows the answer as JSON).
@@ -3893,7 +3901,11 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         params: [{ name: 'version', label: 'Version', type: 'text' }],
         preflight: {
           read: { url: '/api/v1/upgrade-plan?version=${param.version}' },
-          fields: [{ path: 'verdict.summary', label: 'Verdict' }, { path: 'findings' }],
+          fields: [
+            { path: 'verdict.summary', label: 'Verdict' },
+            { path: 'findings' },
+            { path: 'steps', format: 'table', columns: [{ path: 'step.name', label: 'Step' }] },
+          ],
         },
       },
       {
@@ -3913,7 +3925,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         params: [{ name: 'version', label: 'Version', type: 'text' }],
         preflight: {
           read: { url: '/api/v1/upgrade-plan?version=${param.version}' },
-          fields: [{ path: 'findings', label: 'Findings' }],
+          fields: [{ path: 'findings', label: 'Findings' }, { path: 'steps', format: 'table', columns: [{ path: 'step.name' }] }],
         },
       },
     ],
@@ -4207,6 +4219,65 @@ describe('validateTranslationReferences — keyed children of an action entry (#
   });
 
   /**
+   * [#34652] `resultDialog.columns.<path>.<column_path>` and
+   * `preflight.columns.<path>.<column_path>` — a table field's column headers,
+   * read by the resolvers for the declared table fields and their declared
+   * columns only.
+   */
+  describe('resultDialog.columns / preflight.columns', () => {
+    it('refuses a column the table field does not list, quoting a dotted path as ONE key', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            rotate_secret: { resultDialog: { columns: { rows: { id: '编号', 'error.message': '原因', 'error.code': '代码' } } } },
+            upgrade_env: { preflight: { columns: { steps: { 'step.name': '步骤', 'step.ghost': '幽灵' } } } },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.rotate_secret.resultDialog.columns.rows["error.code"]`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.upgrade_env.preflight.columns.steps["step.ghost"]`],
+      ]);
+      expect(findings[0].message).toContain('does not list');
+    });
+
+    it('refuses headers keyed to a field that is not a table, a field no row declares, or a block the action lacks', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            rotate_secret: { resultDialog: { columns: { 'client.secret': { id: '编号' }, ghost_rows: { id: '编号' } } } },
+            plain_env: { preflight: { columns: { steps: { 'step.name': '步骤' } } } },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.rotate_secret.resultDialog.columns["client.secret"]`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.rotate_secret.resultDialog.columns.ghost_rows`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.preflight.columns.steps`],
+      ]);
+      expect(findings[0].message).toContain("no `format: 'table'` field at that path");
+      expect(findings[2].message).toContain('declares no `preflight`');
+    });
+
+    it('accepts every declared column at both addresses (the control)', () => {
+      expect(
+        validateTranslationReferences(
+          actionStack({
+            ...onEnv({
+              rotate_secret: { resultDialog: { columns: { rows: { id: '编号', 'error.message': '原因' } } } },
+              upgrade_env: { preflight: { columns: { steps: { 'step.name': '步骤' } } } },
+            }),
+            globalActions: {
+              mint_token: { resultDialog: { columns: { rows: { id: '编号' } } } },
+              upgrade_pkg: { preflight: { columns: { steps: { 'step.name': '步骤' } } } },
+            },
+          }),
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  /**
    * The action-entry twin of the #13835 object-branch pin above: every key the
    * action translation shape declares — down into `params.<name>.*` and
    * `resultDialog.*` — classified, and every `reference-checked` claim backed
@@ -4311,7 +4382,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       },
       resultDialog: {
         kind: 'container',
-        why: 'a fixed-key node; its leaves and its keyed child `resultDialog.fields` are each judged below',
+        why: 'a fixed-key node; its leaves and its keyed children `resultDialog.fields` and `resultDialog.columns` are each judged below',
       },
       'resultDialog.title': {
         kind: 'reference-checked',
@@ -4341,15 +4412,29 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         suffix: '.resultDialog.fields.ghost_path',
         rule: TRANSLATION_TARGET_UNKNOWN,
       },
+      'resultDialog.columns': {
+        kind: 'reference-checked',
+        host: 'dialog',
+        ghost: { resultDialog: { columns: { rows: { ghost_column: 'x' } } } },
+        suffix: '.resultDialog.columns.rows.ghost_column',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
       preflight: {
         kind: 'container',
-        why: 'a fixed-key node; its one keyed child `preflight.fields` is judged below',
+        why: 'a fixed-key node; its keyed children `preflight.fields` and `preflight.columns` are judged below',
       },
       'preflight.fields': {
         kind: 'reference-checked',
         host: 'preflight',
         ghost: { preflight: { fields: { ghost_path: 'x' } } },
         suffix: '.preflight.fields.ghost_path',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      'preflight.columns': {
+        kind: 'reference-checked',
+        host: 'preflight',
+        ghost: { preflight: { columns: { ghost_path: { 'step.name': 'x' } } } },
+        suffix: '.preflight.columns.ghost_path',
         rule: TRANSLATION_TARGET_UNKNOWN,
       },
     };
@@ -4403,8 +4488,10 @@ describe('validateTranslationReferences — keyed children of an action entry (#
             outcomeMessages: address === 'bound' ? { archived: 'x' } : { up_to_date: 'x' },
             params: { mode: { label: 'x', helpText: 'x', placeholder: 'x', options: { soft: 'x' } } },
           },
-          [dialog]: { resultDialog: { title: 'x', description: 'x', acknowledge: 'x', fields: { token: 'x' } } },
-          [HOST.preflight[address]]: { preflight: { fields: { findings: 'x' } } },
+          [dialog]: {
+            resultDialog: { title: 'x', description: 'x', acknowledge: 'x', fields: { token: 'x' }, columns: { rows: { id: 'x' } } },
+          },
+          [HOST.preflight[address]]: { preflight: { fields: { findings: 'x' }, columns: { steps: { 'step.name': 'x' } } } },
         };
       };
       expect(

@@ -199,7 +199,10 @@ describe('collectExpectedEntries — answer table column labels', () => {
 
   it('lists a key per labelled column beside the field key, an unlabelled column none', () => {
     expect(blockKeys('resultDialog')).toEqual([
+      // The optional prose slots are listed whether authored or not.
       ['resultDialog', 'title'],
+      ['resultDialog', 'description'],
+      ['resultDialog', 'acknowledge'],
       ['resultDialog', 'fields', 'summary.added'],
       ['resultDialog', 'fields', 'rows'],
       ['resultDialog', 'columns', 'rows', 'email'],

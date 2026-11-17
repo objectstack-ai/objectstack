@@ -14,6 +14,7 @@
     "system/AccessControlConfig:maxAgeSeconds",
     "system/AccessControlConfig:publicAccess",
     "system/ActionResultDialogTranslation:acknowledge",
+    "system/ActionResultDialogTranslation:columns",
     "system/ActionResultDialogTranslation:description",
     "system/ActionResultDialogTranslation:fields",
     "system/ActionResultDialogTranslation:title",

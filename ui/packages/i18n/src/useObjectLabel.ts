@@ -222,20 +222,23 @@ export function useObjectLabel() {
       : [`globalActions.${actionName}.${tail}`];
 
   /**
-   * Fetch the `fields` node of an action's answer-showing block
-   * (`resultDialog` or `preflight`) WHOLE, with `returnObjects`. The node is
-   * keyed by the LITERAL field path from the action metadata, which may contain
-   * dots (`"user.email"`), so it is indexed directly and never resolved through
-   * a dotted i18next key. Undefined when no namespace carries an object node.
+   * Fetch the `fields` (or `columns`) node of an action's answer-showing block
+   * (`resultDialog` or `preflight`) WHOLE, with `returnObjects`. The `fields`
+   * node is keyed by the LITERAL field path from the action metadata, which
+   * may contain dots (`"user.email"`); the `columns` node by that path and then
+   * a table column's literal path (#34652). Both are indexed directly and never
+   * resolved through a dotted i18next key. Undefined when no namespace carries
+   * an object node.
    */
   const readActionFieldsNode = (
     objectName: string | undefined,
     actionName: string,
     block: 'resultDialog' | 'preflight',
+    member: 'fields' | 'columns' = 'fields',
   ): Record<string, unknown> | undefined => {
     try {
       for (const ns of getAppNamespaces()) {
-        for (const suffix of actionSuffixes(objectName, actionName, `${block}.fields`)) {
+        for (const suffix of actionSuffixes(objectName, actionName, `${block}.${member}`)) {
           const node = t(`${ns}.${suffix}`, {
             returnObjects: true,
             defaultValue: null,
@@ -257,18 +260,40 @@ export function useObjectLabel() {
    * literal `path`: a non-empty string replaces that row's `label`, a row with
    * none keeps its authored label (an inline per-locale map included), and a
    * node entry naming no declared row adds nothing.
+   *
+   * [#34652] A `format: 'table'` row's `columns[]` headers are overlaid the
+   * same way from the `columns` node (`columns.<path>.<column_path>`), the key
+   * `@objectstack/spec`'s `resolveActionResultDialog` / `resolveActionPreflight`
+   * read: only declared columns, a non-empty string replacing that column's
+   * `label`, a column with none keeping its authored label. A row with no
+   * `columns` is the same reference.
    */
-  const overlayActionFieldLabels = <F extends { path: string; label?: unknown }>(
+  const overlayActionFieldLabels = <F extends { path: string; label?: unknown; columns?: unknown }>(
     fields: F[] | undefined,
     labels: Record<string, unknown> | undefined,
+    columnLabels?: Record<string, unknown>,
   ): F[] | undefined =>
     Array.isArray(fields)
       ? fields.map((field) => {
           if (!field || typeof field.path !== 'string') return field;
           const label = labels?.[field.path];
-          return typeof label === 'string' && label.length > 0 ? { ...field, label } : field;
+          const withColumns = overlayColumnLabels(field, columnLabels?.[field.path]);
+          return typeof label === 'string' && label.length > 0 ? { ...withColumns, label } : withColumns;
         })
       : fields;
+
+  const overlayColumnLabels = <F extends { columns?: unknown }>(field: F, labels: unknown): F => {
+    if (!Array.isArray(field.columns) || !labels || typeof labels !== 'object' || Array.isArray(labels)) return field;
+    const byPath = labels as Record<string, unknown>;
+    const columns = field.columns.map((column: unknown) => {
+      if (!column || typeof column !== 'object') return column;
+      const path = (column as { path?: unknown }).path;
+      if (typeof path !== 'string') return column;
+      const label = byPath[path];
+      return typeof label === 'string' && label.length > 0 ? { ...(column as object), label } : column;
+    });
+    return { ...field, columns };
+  };
 
   const fieldSuffixes = (objectName: string, fieldName: string): string[] => {
     const base = stripNamespace(objectName);
@@ -730,7 +755,8 @@ export function useObjectLabel() {
 
     /**
      * Resolve a translated copy of an action's post-success RESULT DIALOG
-     * (`title` / `description` / `acknowledge` + per-field labels).
+     * (`title` / `description` / `acknowledge` + per-field labels + a table
+     * field's column headers from `resultDialog.columns`).
      * Convention: `{ns}.objects.{objectName}._actions.{actionName}.resultDialog.*`;
      * with no key object, `{ns}.globalActions.{actionName}.resultDialog.*`.
      * Falls back to the metadata's literal strings.
@@ -760,6 +786,7 @@ export function useObjectLabel() {
       const fields = overlayActionFieldLabels(
         spec.fields,
         readActionFieldsNode(objectName, actionName, 'resultDialog'),
+        readActionFieldsNode(objectName, actionName, 'resultDialog', 'columns'),
       );
       return {
         ...spec,
@@ -799,6 +826,7 @@ export function useObjectLabel() {
         fields: overlayActionFieldLabels(
           spec.fields,
           readActionFieldsNode(objectName, actionName, 'preflight'),
+          readActionFieldsNode(objectName, actionName, 'preflight', 'columns'),
         ),
       };
     },
