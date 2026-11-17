@@ -47,9 +47,6 @@ import { composeStacks, defineStack, type ObjectStackDefinition } from '@objects
 import { resolveArtifactPackageOrder } from '@objectstack/core';
 import { devI18nPluginOptions, stackDeclaresTranslations } from './dev-i18n';
 import { DevPlugin } from './dev-plugin';
-// `DevPlugin` reaches the memory driver through a lazy `import()`; its first
-// load is paid here, during collection, never inside a clocked test body.
-import '@objectstack/driver-memory';
 
 const absent = (name: string): Error =>
   Object.assign(new Error(`Cannot find package '${name}'`), { code: 'ERR_MODULE_NOT_FOUND' });
@@ -68,17 +65,17 @@ vi.mock('@objectstack/service-i18n', () => ({
 
 vi.mock('@objectstack/objectql', () => { throw absent('@objectstack/objectql'); });
 vi.mock('@objectstack/runtime', () => { throw absent('@objectstack/runtime'); });
-// ⛔ NO `@objectstack/driver-memory` mock here, deliberately — do not copy one in
-// from the sibling harnesses. `vi.mock` counts as a DECLARATION to
-// `scripts/check-driver-memory-census.mjs`, and that package's consumer set is
-// locked by maintainer ruling (#5499 froze investment, #5704 / #6664 ruled each
-// remaining consumer). A third test consumer is the #6664 defect itself, not a
-// bookkeeping chore. Nothing here needs it: every boot below passes
-// `services: { driver: false }`, and `dev-plugin.ts`'s ONE
+// The memory driver is REPLACED, never loaded: every boot below passes
+// `services: { driver: false }`, and `dev-plugin.ts`'s one
 // `import('@objectstack/driver-memory')` sits inside `if (enabled('driver'))`,
-// so the specifier is never reached. Measured, not assumed: with the line gone
-// this suite is unchanged at 68 passed, both BOOT cases below green in 5ms and
-// 1ms — timings a real `import()` of that package would not fit in.
+// so nothing here needs the real driver. The mock exists because the file
+// reaches that lazy import, and `pnpm check:test-source-alias` asks an edited
+// test to pay such a load during collection or to mock it — paying it would
+// make this file a real consumer of a driver whose consumer set is ruled
+// (#5499, #5704, #6664). A not-found-throwing replacement is not a consumer:
+// it is ledgered as `mock-replacement` in
+// `scripts/driver-memory-census.ledger.json`, like the sibling harnesses.
+vi.mock('@objectstack/driver-memory', () => { throw absent('@objectstack/driver-memory'); });
 vi.mock('@objectstack/service-storage', () => { throw absent('@objectstack/service-storage'); });
 vi.mock('@objectstack/service-realtime', () => { throw absent('@objectstack/service-realtime'); });
 vi.mock('@objectstack/plugin-auth', () => { throw absent('@objectstack/plugin-auth'); });
