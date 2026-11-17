@@ -35,7 +35,7 @@ import type { SchemaRegistry } from './registry.js';
 import { SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { ExpressionEngine, analyzeRelationshipTraversals, formulaReadOrder, isUnparseableDate } from '@objectstack/formula';
 import type { EvalError, EvalOptionLabels, EvalPermissions } from '@objectstack/formula';
-import { declaredOptionLabels } from './formula-option-labels.js';
+import { declaredOptionLabels, planCallsOptionLabel } from './formula-option-labels.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY, AssembledViewArtifactSchema, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
 import type { Expression } from '@objectstack/spec';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
@@ -43,7 +43,7 @@ import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { ValidationError } from './validation/record-validator.js';
 import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
-import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
+import { collectReferenceTraversals, readsPermissionPredicate, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { declaredColumnSet } from './declared-read-columns.js';
 
@@ -3051,37 +3051,87 @@ async function hydrateWriteFormulas(
 /**
  * [ADR-0113 D1, as amended] The `formula` fields computed over a record for
  * the rule validator's `formulaValues`: a required field's `visibleWhen` that
- * reads a formula is judged on the value a read would serve, the value the
- * form shows. The SAME plan and evaluation a read uses, over a copy of the
- * record; the plan is built on the first call, so a write whose predicates
- * read no formula pays nothing. No hop is resolved and no option label is
- * read here, so a formula that needs either faults, and the predicate counts
- * as shown. `undefined` when the object declares no formula.
+ * reads a formula is judged on the value a read would serve. The SAME plan and
+ * evaluation a read uses, over a copy of the record.
+ *
+ * Two kinds of formula that does not compute, answered apart:
+ *
+ * - **Unservable** — the write path cannot know the value a read would serve:
+ *   the formula reads through a reference (no hop is resolved here), calls
+ *   `label()` (no option label is read here), or calls `current_user.can()`
+ *   and this write resolved no permission map; or it reads such a formula,
+ *   at any depth (the plan's read closure, {@link orderFormulaPlan}). A formula
+ *   over one may compute cleanly over the `null` it reads here, and still not
+ *   be the value a read serves, so it is unservable too. Named in `unservable`
+ *   with the reason, and the validator counts a predicate reading one as SHOWN.
+ * - **A fault a read shares** — an operator over an empty operand, an
+ *   undeclared key, a cycle: a read serves `null` for it, and so does this
+ *   copy, so the predicate is judged on that `null`, as the form judges it.
+ *
+ * The plan, and which formulas are unservable, are built on the first call,
+ * so a write whose predicates read no formula pays nothing; a record already
+ * computed is answered from a memo, so the verdicts of several fields over the
+ * same merged and prior records compute each once. `undefined` when the
+ * object declares no formula.
  */
 function formulaValuesFor(
   schema: any,
   execCtx: ExecutionContext | undefined,
   permissions: EvalPermissions | undefined,
-): ((record: Record<string, unknown>) => { record: Record<string, unknown>; faulted: ReadonlySet<string> }) | undefined {
+): ((record: Record<string, unknown>) => { record: Record<string, unknown>; unservable: ReadonlyMap<string, string> }) | undefined {
   const fields = schema?.fields;
   if (!fields || typeof fields !== 'object') return undefined;
   const formulaNames = Object.keys(fields).filter((name) => fields[name]?.type === 'formula');
   if (formulaNames.length === 0) return undefined;
   let plan: FormulaPlanEntry[] | null | undefined;
+  const unservable = new Map<string, string>();
+  const memo = new WeakMap<object, Record<string, unknown>>();
   return (record) => {
     if (plan === undefined) {
       try {
         plan = planFormulaProjection(schema, undefined).plan;
       } catch {
         plan = null;
+        for (const name of formulaNames) unservable.set(name, 'cannot be planned (its expression does not compile)');
+      }
+      // In read order, so a formula's reads are judged before it.
+      for (const entry of plan ?? []) {
+        const why = unservableReason(entry, permissions, unservable);
+        if (why) unservable.set(entry.name, why);
       }
     }
-    if (plan === null) return { record, faulted: new Set(formulaNames) };
+    if (plan === null) return { record, unservable };
+    const hit = memo.get(record);
+    if (hit) return { record: hit, unservable };
     const copy: Record<string, unknown> = { ...record };
-    const faulted = new Set<string>();
-    applyFormulaPlan(plan, [copy], execCtx, permissions, (name) => { faulted.add(name); });
-    return { record: copy, faulted };
+    applyFormulaPlan(plan, [copy], execCtx, permissions);
+    memo.set(record, copy);
+    return { record: copy, unservable };
   };
+}
+
+/**
+ * Why the write path cannot compute the value a read serves for one formula,
+ * or `undefined` when it can ({@link formulaValuesFor}). `known` holds the
+ * formulas already judged unservable, earlier in read order.
+ */
+function unservableReason(
+  entry: FormulaPlanEntry,
+  permissions: EvalPermissions | undefined,
+  known: ReadonlyMap<string, string>,
+): string | undefined {
+  if (entry.hops) {
+    return `reads through ${[...entry.hops.keys()].map((f) => `'${f}'`).join(', ')}, a reference the write path does not follow`;
+  }
+  if (planCallsOptionLabel([entry])) return 'calls label(), which the write path does not answer';
+  if (!permissions && readsPermissionPredicate(entry.expression)) {
+    return 'calls current_user.can(), and this write resolved no permission map';
+  }
+  if (known.size === 0) return undefined;
+  const reads = storedExpressionReads(entry);
+  // Reads the member reader cannot name count as reading every formula.
+  const via = reads === null ? [...known.keys()][0] : [...reads].find((name) => known.has(name));
+  return via === undefined ? undefined : `reads the formula '${via}', which ${known.get(via)}`;
 }
 
 /**

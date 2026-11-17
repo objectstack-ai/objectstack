@@ -11,10 +11,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { analyzeRelationshipTraversals } from '@objectstack/formula';
+import { analyzeRelationshipTraversals, parseCelToAst } from '@objectstack/formula';
 import {
+  callsReceiverMethod,
+  formulaReadsInRequiredVisibleWhen,
   predicateSource,
   referenceReadsInRequiredVisibleWhen,
+  type FieldReader,
   type TraversalReader,
 } from './requiredVisibleWhenReference';
 
@@ -49,5 +52,45 @@ describe('requiredVisibleWhenReference — the advisory (ADR-0113 D1, as amended
     expect(reads({ required: true, visibleWhen: 'record.account.' })).toEqual([]);
     expect(reads({ required: true, visibleWhen: { dialect: 'js', source: 'record.account.tier' } })).toEqual([]);
     expect(predicateSource('   ')).toBeNull();
+  });
+});
+
+const readFields: FieldReader = (source, root) => {
+  const a = analyzeRelationshipTraversals(source, root);
+  return a ? { bare: a.bareFields, through: new Set(a.traversals.keys()) } : null;
+};
+const callsCan = (source: string) => callsReceiverMethod(parseCelToAst(source), 'can');
+
+const SIBLINGS: Record<string, Record<string, unknown>> = {
+  account: { type: 'lookup', reference: 'account' },
+  amount: { type: 'number' },
+  stage: { type: 'select' },
+  risk: { type: 'formula', expression: "record.amount > 100 ? 'high' : 'low'" },
+  tier_name: { type: 'formula', expression: 'record.account.tier' },
+  tier_risk: { type: 'formula', expression: "record.tier_name == 'gold' ? 'high' : 'low'" },
+  stage_label: { type: 'formula', expression: 'label(record.stage)' },
+  can_edit: { type: 'formula', expression: "current_user.can('account', 'edit')" },
+};
+
+const formulaReads = (def: Record<string, unknown>) => formulaReadsInRequiredVisibleWhen(def, SIBLINGS, readFields, callsCan);
+
+describe('requiredVisibleWhenReference — the formula advisory (ADR-0113 D1, as amended)', () => {
+  it('names a formula a required field\'s visibleWhen reads; one the server computes is not unservable', () => {
+    expect(formulaReads({ required: true, visibleWhen: "record.risk == 'high'" })).toEqual({ formulas: ['risk'], unservable: [] });
+  });
+
+  it('marks a formula over a formula that reads through a reference, at any depth', () => {
+    expect(formulaReads({ required: true, visibleWhen: "record.tier_risk == 'high'" }))
+      .toEqual({ formulas: ['tier_risk'], unservable: ['tier_risk'] });
+  });
+
+  it('marks a formula that calls label() or current_user.can()', () => {
+    expect(formulaReads({ required: true, visibleWhen: "record.stage_label == 'Won' || record.can_edit" }))
+      .toEqual({ formulas: ['stage_label', 'can_edit'], unservable: ['stage_label', 'can_edit'] });
+  });
+
+  it('draws nothing for a field that is not required, or a predicate reading no formula', () => {
+    expect(formulaReads({ visibleWhen: "record.risk == 'high'" })).toEqual({ formulas: [], unservable: [] });
+    expect(formulaReads({ required: true, visibleWhen: 'record.amount > 5' })).toEqual({ formulas: [], unservable: [] });
   });
 });

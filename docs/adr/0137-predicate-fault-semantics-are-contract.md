@@ -156,14 +156,17 @@ makes "blank" a declared **third** state rather than a spelling of "no rule".
 > verdict the author did not write, it is the requirement the author did write,
 > left in force — and it is D3's direction carried to the server: a faulting
 > `visibleWhen` shows the field, and a shown required field must be filled.
-> A `formula` field the predicate reads that cannot be computed on the record is
-> such a fault. A clean verdict that is not TRUE (FALSE, or `null`) is not a
-> fault: it hides the field, as the form reads it.
+> A `formula` field the predicate reads whose read value the write path cannot
+> know (it reads through a reference, calls `label()` or `can`, or reads such a
+> formula) is such a fault. A formula that faults for a reason a read shares (an
+> empty operand) is not: the predicate is judged on the `null` a read serves. A
+> clean verdict that is not TRUE (FALSE, or `null`) is not a fault: it hides the
+> field, as the form reads it.
 >
 > | slot, at submit | on a fault |
 > |---|---|
 > | `requiredWhen`, `readonlyWhen`, an option's `visibleWhen` | refused (D2) |
-> | a `required` field's own `visibleWhen` (a formula it reads included) | counted as shown: required, logged (D4) |
+> | a `required` field's own `visibleWhen` (a formula it reads that the write path cannot compute included) | counted as shown: required, logged (D4) |
 
 ### D3 — At RENDER, visibility stays fail-OPEN
 

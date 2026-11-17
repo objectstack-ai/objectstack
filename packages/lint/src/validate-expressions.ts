@@ -171,6 +171,7 @@ import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, re
 import type { StoredObjectExtension } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 import { extensionFormulaLoci, formulaCycleIssues } from './formula-cycle-issues.js';
+import { requiredVisibleWhenFormulaIssue } from './required-visible-when-formula-issue.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -4375,6 +4376,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
             severity: 'warning',
           });
         }
+        // A `formula` the predicate reads: the form does not recompute it, and
+        // one the write path cannot compute keeps the field required on every
+        // write (`required-visible-when-formula-issue.ts`).
+        const formulaRead = objectName ? requiredVisibleWhenFormulaIssue(objectName, fname, f, fieldDefs) : undefined;
+        if (formulaRead) issues.push(formulaRead);
       }
       judgeFieldFormula(fname, f, { objectName, optionFields: optionFieldNames, fieldDefs });
     }

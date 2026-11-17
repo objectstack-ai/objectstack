@@ -145,7 +145,7 @@ import {
   useExternalWriteState,
 } from '../previews/external-object.js';
 import { CelPredicateField } from '../CelPredicateField.js';
-import { useRequiredVisibleWhenReferenceReads } from './requiredVisibleWhenReference.js';
+import { useRequiredVisibleWhenFormulaReads, useRequiredVisibleWhenReferenceReads } from './requiredVisibleWhenReference.js';
 import type { CelLintIssue, CelValueType } from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
 import { FilterConditionField } from './FilterConditionField.js';
@@ -857,6 +857,15 @@ export function ObjectFieldInspector({
     return out;
   }, [view]);
   const visibleWhenReferenceReads = useRequiredVisibleWhenReferenceReads(entry?.def ?? null, siblingTypes);
+  // …and a formula it reads is computed over the saved record there, while the
+  // form judges the value it last read; one the server cannot compute keeps it
+  // required on every save.
+  const siblingDefs = React.useMemo(() => {
+    const out: Record<string, Record<string, unknown> | undefined> = {};
+    for (const e of view.entries) out[e.name] = e.def as Record<string, unknown> | undefined;
+    return out;
+  }, [view]);
+  const visibleWhenFormulaReads = useRequiredVisibleWhenFormulaReads(entry?.def ?? null, siblingDefs);
   // A Chinese Label derives the API name through its pinyin (`romanizeHan`);
   // the dictionary starts loading as soon as the Label holds a Chinese
   // character, so the keystrokes after it derive.
@@ -1952,6 +1961,27 @@ export function ObjectFieldInspector({
                   {tFormat('designer.field.requiredVisibleWhenReference', locale, {
                     fields: visibleWhenReferenceReads.join(', '),
                   })}
+                </span>
+              </p>
+            )}
+            {visibleWhenFormulaReads.formulas.length > 0 && (
+              <p
+                data-testid="field-required-visiblewhen-formula"
+                className="flex items-start gap-1 px-0.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
+              >
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {tFormat('designer.field.requiredVisibleWhenFormula', locale, {
+                    fields: visibleWhenFormulaReads.formulas.join(', '),
+                  })}
+                  {visibleWhenFormulaReads.unservable.length > 0 && (
+                    <>
+                      {' '}
+                      {tFormat('designer.field.requiredVisibleWhenFormulaUnservable', locale, {
+                        fields: visibleWhenFormulaReads.unservable.join(', '),
+                      })}
+                    </>
+                  )}
                 </span>
               </p>
             )}

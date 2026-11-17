@@ -6896,4 +6896,49 @@ describe('a `required` field\'s `visibleWhen` the server cannot use to lift the 
     expect(issues[0].severity).toBe('warning');
     expect(issues[0].message).toContain('`storage.notNull: true`');
   });
+
+  // A formula the predicate reads: the form shows the value it last read and
+  // does not recompute it, and a formula the write path cannot compute (a hop,
+  // `label()`, `can`, at any depth) keeps the field required on every write.
+  it('warns when the predicate reads a formula field: the form does not recompute it', () => {
+    const issues = at(run(order({
+      amount: { type: 'number', label: 'Amount' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message).toContain("reads the formula field 'risk'");
+    expect(issues[0].message).toContain('does not recompute it');
+    expect(issues[0].message).not.toContain('counts the field as SHOWN');
+  });
+
+  it('…and names the chain when a formula it reads reads through a reference, at any depth', () => {
+    const issues = at(run(order({
+      tier_name: { type: 'formula', label: 'Tier', expression: 'record.account.tier', returnType: 'text' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.tier_name == 'gold' ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.risk == 'high'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'risk' reads the formula 'tier_name', which reads through 'account'");
+    expect(issues[0].message).toContain('counts the field as SHOWN on every write');
+  });
+
+  it('…and when a formula it reads calls label()', () => {
+    const issues = at(run(order({
+      stage: { type: 'select', label: 'Stage', options: [{ value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
+      stage_label: { type: 'formula', label: 'Stage label', expression: 'label(record.stage)', returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.stage_label == 'Won'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain("'stage_label' calls label()");
+  });
+
+  it('draws no formula warning on a field that is not required', () => {
+    expect(at(run(order({
+      amount: { type: 'number', label: 'Amount' },
+      risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
+      po_number: { type: 'text', label: 'PO', visibleWhen: "record.risk == 'high'" },
+    })), WHERE)).toEqual([]);
+  });
 });

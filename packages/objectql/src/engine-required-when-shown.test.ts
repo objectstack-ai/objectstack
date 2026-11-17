@@ -204,6 +204,32 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
       },
     } as any, 'test-package');
     engine.registry.registerObject({
+      name: 'rws_formula_label',
+      fields: {
+        stage: { type: 'select', options: [{ value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
+        // `label()` reads the reader's option labels, which no write builds.
+        stage_label: { type: 'formula', expression: 'label(record.stage)', returnType: 'text' },
+        close_note: { type: 'text', required: true, visibleWhen: "record.stage_label == 'Won'" },
+      },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'rws_tier_account',
+      fields: { name: { type: 'text' }, tier: { type: 'text' } },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'rws_tiered',
+      fields: {
+        account: { type: 'lookup', reference: 'rws_tier_account' },
+        // A formula read through a reference: a read resolves the hop, the
+        // write path never does.
+        tier_name: { type: 'formula', expression: 'record.account.tier', returnType: 'text' },
+        // A formula over that formula: it computes CLEANLY over the null the
+        // hop reads on the write path, so it alone looks computable.
+        risk: { type: 'formula', expression: "record.tier_name == 'gold' ? 'high' : 'low'", returnType: 'text' },
+        review_note: { type: 'text', required: true, visibleWhen: "record.risk == 'high'" },
+      },
+    } as any, 'test-package');
+    engine.registry.registerObject({
       name: 'rws_flag',
       fields: {
         title: { type: 'text' },
@@ -391,6 +417,16 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
       expect(storeFor('rws_formula').get(id)?.amount).toBe(50);
     });
 
+    it('a BULK update judges each row on its own computed value, with one formula plan for the batch', async () => {
+      storeFor('rws_formula').set('f1', { id: 'f1', amount: 50, review_note: 'filled' });
+      storeFor('rws_formula').set('f2', { id: 'f2', amount: 50, review_note: null });
+      const err = await refusalOf(() =>
+        engine.update('rws_formula', { amount: 500 }, { where: { review_note: { $ne: 'x' } }, multi: true } as any));
+      const entry = expectRequired(err, 'review_note');
+      expect(entry.message).toContain('(record f2)');
+      expect(rows('rws_formula').map((r) => r.amount)).toEqual([50, 50]);
+    });
+
     it('a dry run judges the computed value the same way', async () => {
       const inside = await engine.validate('rws_formula', { amount: 500 }, { mode: 'insert' } as any);
       expect(inside.results?.[0]?.valid).toBe(false);
@@ -399,12 +435,45 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
       expect(outside.results?.[0]?.valid).toBe(true);
     });
 
-    it('a formula that cannot be computed counts as shown, and the fault is logged', async () => {
-      const err = await refusalOf(() => engine.insert('rws_formula_fault', { amount: 50 }, ADMIN));
+    it('a formula over an EMPTY operand faults on a read too, so the predicate is judged on the null a read serves: hidden', async () => {
+      // `null > 100` has no overload: a read serves `risk_level = null`, and the
+      // form hides the field for `null == 'high'`.
+      await engine.insert('rws_formula', {}, ADMIN);
+      expect(rows('rws_formula')).toHaveLength(1);
+      expect(logger.lines.filter((l: any) => l.level === 'warn' && /review_note/.test(l.msg))).toHaveLength(0);
+    });
+
+    it('a formula that faults on every row (an undeclared key) reads null for a read too: judged on it, hidden', async () => {
+      await engine.insert('rws_formula_fault', { amount: 500 }, ADMIN);
+      expect(rows('rws_formula_fault')).toHaveLength(1);
+    });
+
+    it('a formula calling label() is one the write path cannot compute: the predicate counts as shown, logged', async () => {
+      const err = await refusalOf(() => engine.insert('rws_formula_label', { stage: 'won' }, ADMIN));
+      expectRequired(err, 'close_note');
+      const warn = logger.lines.find((l: any) => l.level === 'warn' && /close_note/.test(l.msg) && /counted as shown/.test(l.msg));
+      expect(warn?.msg).toMatch(/label\(\)/);
+      expect(warn?.meta).toMatchObject({ field: 'close_note', reason: 'predicate-fault' });
+    });
+  });
+
+  // ── (h) a formula the write path cannot compute, read through another ───
+  describe('(h) the formulas a predicate reads are judged through the formulas THEY read', () => {
+    it('a formula over a formula that reads through a reference counts as shown: refused, and logged naming the chain', async () => {
+      const acc = await engine.insert('rws_tier_account', { name: 'Acme', tier: 'gold' }, ADMIN);
+      const err = await refusalOf(() => engine.insert('rws_tiered', { account: acc.id }, ADMIN));
       expectRequired(err, 'review_note');
+      expect(rows('rws_tiered')).toHaveLength(0);
       const warn = logger.lines.find((l: any) => l.level === 'warn' && /review_note/.test(l.msg) && /counted as shown/.test(l.msg));
-      expect(warn?.msg).toMatch(/risk_level/);
-      expect(warn?.meta).toMatchObject({ field: 'review_note', reason: 'predicate-fault' });
+      expect(warn?.msg).toMatch(/'risk'/);
+      expect(warn?.msg).toMatch(/'tier_name'/);
+      expect(warn?.msg).toMatch(/account/);
+    });
+
+    it('…and with the field filled the insert is accepted: the fault costs the waiver, never the write', async () => {
+      const acc = await engine.insert('rws_tier_account', { name: 'Acme', tier: 'gold' }, ADMIN);
+      await engine.insert('rws_tiered', { account: acc.id, review_note: 'checked' }, ADMIN);
+      expect(rows('rws_tiered')).toHaveLength(1);
     });
   });
 

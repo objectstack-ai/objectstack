@@ -27,6 +27,18 @@
  * acting user) are already refused for every field `visibleWhen` by the
  * predicate editor itself, so they draw nothing here.
  *
+ * ## A `formula` the predicate reads
+ *
+ * The server computes each formula the predicate reads over the record being
+ * saved; the form judges the formula value it last read, does not recompute it
+ * while the user edits, and has none on a create. So a save can be
+ * refused naming a field the form keeps hidden, and the advisory says so for
+ * any formula read. A formula the server cannot compute on a save at all (it
+ * reads through a reference, calls `label()` or `current_user.can()`, or reads
+ * such a formula) keeps the field required on every save, which the advisory
+ * says too. The lint's `required-visible-when-formula-issue.ts` is the same
+ * verdict at `objectstack validate`.
+ *
  * ## The reads are found by the parser, never by a pattern
  *
  * `analyzeRelationshipTraversals` is the `@objectstack/formula` export the
@@ -79,11 +91,76 @@ export function referenceReadsInRequiredVisibleWhen(
   return out;
 }
 
+/* ── Formula reads (ADR-0113 D1, as amended) ──────────────────────────── */
+
+/** The fields a source reads as values or through, over one root; `null` when the reader cannot say. */
+export type FieldReader = (source: string, root: string) => { bare: ReadonlySet<string>; through: ReadonlySet<string> } | null;
+
+/** A call of `label(`, spelled as the server's `planCallsOptionLabel` reads it. */
+const LABEL_CALL = /\blabel\s*\(/;
+
+/**
+ * The `formula` fields a `required` field's `visibleWhen` reads, and which of
+ * them the server cannot compute on a save: a formula that reads through a
+ * reference, calls `label()` or calls `current_user.can()`, or reads such a
+ * formula at any depth (the server's `unservableReason`). Both empty when the
+ * field is not required, has no predicate, or the predicate reads no formula.
+ *
+ * Any formula read draws the advisory: the form judges the predicate on the
+ * formula value it last read and does not recompute it, while the server
+ * judges the record being saved. An unservable one keeps the field required on
+ * every save.
+ */
+export function formulaReadsInRequiredVisibleWhen(
+  def: Record<string, unknown> | null | undefined,
+  siblings: Readonly<Record<string, Record<string, unknown> | undefined>>,
+  readFields: FieldReader,
+  callsCan: (source: string) => boolean,
+): { formulas: string[]; unservable: string[] } {
+  const none = { formulas: [], unservable: [] };
+  if (!def || def.required !== true) return none;
+  const source = predicateSource(def.visibleWhen);
+  if (!source) return none;
+  const isFormula = (name: string) => siblings[name]?.type === 'formula';
+  const formulas: string[] = [];
+  for (const root of ['record', 'previous']) {
+    const reads = readFields(source, root);
+    if (!reads) continue;
+    for (const name of [...reads.bare, ...reads.through]) if (isFormula(name) && !formulas.includes(name)) formulas.push(name);
+  }
+  if (formulas.length === 0) return none;
+  const verdicts = new Map<string, boolean>();
+  const unservable = (name: string): boolean => {
+    const known = verdicts.get(name);
+    if (known !== undefined) return known;
+    verdicts.set(name, false);
+    const expr = predicateSource(siblings[name]?.expression);
+    let blocked = false;
+    if (expr) {
+      const reads = readFields(expr, 'record');
+      const hop = reads ? [...reads.through].some((f) => {
+        const type = siblings[f]?.type;
+        return typeof type === 'string' && REFERENCE_VALUE_TYPES.has(type);
+      }) : false;
+      blocked = hop || LABEL_CALL.test(expr) || callsCan(expr)
+        || [...(reads?.bare ?? []), ...(reads?.through ?? [])].some((f) => isFormula(f) && unservable(f));
+    }
+    verdicts.set(name, blocked);
+    return blocked;
+  };
+  return { formulas, unservable: formulas.filter(unservable) };
+}
+
 /* ── The lazily loaded traversal reader ───────────────────────────────── */
 
-type Analyze = (source: string, root: string) => { traversals: ReadonlyMap<string, unknown> } | null;
+type Analyze = (source: string, root: string) => {
+  traversals: ReadonlyMap<string, unknown>;
+  bareFields?: ReadonlySet<string>;
+} | null;
+type ParseAst = (source: string) => unknown;
 
 let analyzeCached: Promise<Analyze | null> | null = null;
+let parseCached: Promise<ParseAst | null> | null = null;
 
 function loadAnalyzer(): Promise<Analyze | null> {
   if (!analyzeCached) {
@@ -94,6 +171,70 @@ function loadAnalyzer(): Promise<Analyze | null> {
       .catch(() => null);
   }
   return analyzeCached;
+}
+
+function loadParser(): Promise<ParseAst | null> {
+  if (!parseCached) {
+    parseCached = import('@objectstack/formula')
+      .then(({ parseCelToAst }) => (typeof parseCelToAst === 'function' ? (parseCelToAst as unknown as ParseAst) : null))
+      .catch(() => null);
+  }
+  return parseCached;
+}
+
+/** Does a cel-js AST hold a receiver call named `method` (`current_user.can(…)`)? */
+export function callsReceiverMethod(node: unknown, method: string): boolean {
+  if (Array.isArray(node)) return node.some((child) => callsReceiverMethod(child, method));
+  if (typeof node !== 'object' || node === null) return false;
+  const { op, args } = node as { op?: unknown; args?: unknown };
+  if (typeof op !== 'string') return false;
+  if (op === 'rcall' && Array.isArray(args) && args[0] === method) return true;
+  return callsReceiverMethod(args, method);
+}
+
+/**
+ * The formula advisory for one field draft, stamped with its inputs like the
+ * reference one below. Empty while the parser loads and when it is unavailable.
+ */
+export function useRequiredVisibleWhenFormulaReads(
+  def: Record<string, unknown> | null | undefined,
+  siblings: Readonly<Record<string, Record<string, unknown> | undefined>>,
+): { formulas: string[]; unservable: string[] } {
+  const source = def && def.required === true ? predicateSource(def.visibleWhen) : null;
+  const key = source ? JSON.stringify([source, siblings]) : '';
+  const [state, setState] = React.useState<{ key: string; formulas: string[]; unservable: string[] }>({ key: '', formulas: [], unservable: [] });
+
+  React.useEffect(() => {
+    if (!key || !source) return;
+    let cancelled = false;
+    void Promise.all([loadAnalyzer(), loadParser()]).then(([analyze, parse]) => {
+      if (cancelled || !analyze) return;
+      const readFields: FieldReader = (src, root) => {
+        try {
+          const a = analyze(src, root);
+          return a ? { bare: a.bareFields ?? new Set<string>(), through: new Set(a.traversals.keys()) } : null;
+        } catch {
+          return null;
+        }
+      };
+      const callsCan = (src: string) => {
+        if (!parse) return false;
+        try {
+          return callsReceiverMethod(parse(src), 'can');
+        } catch {
+          return false;
+        }
+      };
+      setState({ key, ...formulaReadsInRequiredVisibleWhen(def, siblings, readFields, callsCan) });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `key` carries `source` and `siblings`; `def` is read through them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return key && state.key === key ? { formulas: state.formulas, unservable: state.unservable } : { formulas: [], unservable: [] };
 }
 
 /**

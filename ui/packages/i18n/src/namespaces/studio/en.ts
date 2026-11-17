@@ -582,6 +582,10 @@ const STUDIO_EN: Record<string, string> = {
     'While a predicate is true the field becomes visible / read-only / required. Reference the live record as record.<field>, the last saved values as previous.<field>, and (in master-detail line items) the header record as parent.<field>.',
   'designer.field.requiredVisibleWhenReference':
     'This field is required, and the server decides that from this condition on every save. The condition reads through {fields}, a reference the server cannot follow here, so it counts the field as shown: it stays required on every record, including the ones this condition hides it on. Read a field of this object instead.',
+  'designer.field.requiredVisibleWhenFormula':
+    'This field is required, and the server decides that from this condition on every save, with {fields} computed over the record being saved. The form shows the value it last read and does not recompute it while you edit (a new record has none), so a save can be refused naming this field while the form keeps it hidden. Read the formula\'s own inputs instead if the form should follow the edit.',
+  'designer.field.requiredVisibleWhenFormulaUnservable':
+    '{fields} reads through a reference, or calls label() or current_user.can(), itself or through another formula, which the server cannot compute on a save: it counts this field as shown, so it stays required on every record, including the ones this condition hides it on.',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '{n} selected',
   'designer.canvas.bulkMoveTo': 'Move to section',

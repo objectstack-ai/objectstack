@@ -272,7 +272,9 @@ write, including an edit of an unrelated field, naming a field nobody can see or
 fill. The form already drops the marker and the client check for a hidden field
 (D4), and it writes `null` into a field its `visibleWhen` hides (clear-on-hide),
 which the server then refused. The server is the side that decides (ADR-0124
-D1), so it now judges the requirement the way the form shows it.
+D1), so it now judges the requirement from the field's own visibility, as the
+form does, on the record being written. For a `formula` the predicate reads the
+two sides can differ; see the formula paragraph below.
 
 **The rule.** For a field with `required: true` and its own `visibleWhen`
 (`evaluateRequiredWhenShown`, `packages/objectql/src/validation/rule-validator.ts`):
@@ -290,8 +292,8 @@ D1), so it now judges the requirement the way the form shows it.
    moves a record into the condition without filling the field was accepted
    before this amendment and is refused now — on a flow, a bulk update (one such
    row refuses the batch), an import or an API PATCH alike.
-3. **Fault** — the predicate cannot be evaluated (including a `formula` field it
-   reads that cannot be computed on the record): it **counts as shown**, and the
+3. **Fault** — the predicate cannot be evaluated (including a `formula` it reads
+   whose read value the write path cannot know, see below): it **counts as shown**, and the
    field takes exactly the unconditional rule above (an insert must provide it,
    an update may not clear it). The write is not refused for the fault itself:
    this is not ADR-0137 D2's field-rule arm, because the fault costs only the
@@ -311,9 +313,33 @@ the fence below), so that binding serves older stored metadata. `features`,
 never on the write path, so the stored row and the payload do not hold it. The
 engine computes the object's formulas over the merged record and over the prior
 record with the read path's own plan before it evaluates the predicate, so the
-predicate sees the value the form shows. A formula that cannot be computed there
-(it faults, reads through a reference, or calls `label()`) makes the predicate a
-fault, which counts as shown.
+predicate sees the value a read of that record would serve
+(`formulaValuesFor`, `packages/objectql/src/engine-top-level.ts`). A formula
+that does not compute is answered by the reason, in two arms:
+
+- *A fault a read shares* — an operator over an empty operand (`record.amount >
+  100` with `amount` unset), an undeclared key, a cycle of formulas. A read
+  serves `null` for it, so the predicate is judged on that `null`, which is what
+  the form judges: usually hidden. Not a fault of the predicate.
+- *A value only a read can have* — the formula reads through a reference (the
+  write path follows no hop), calls `label()` (no option labels are read on a
+  write), or calls `current_user.can()` and the write resolved no permission
+  map; or it reads such a formula, at any depth of the formulas it reads. A
+  formula over one can compute cleanly over the `null` it reads on the write
+  path and still not be the value a read serves, so the whole read closure
+  counts. The predicate is a fault, which counts as shown: the field keeps the
+  unconditional `required`. The lint warns about it (below).
+
+**Known limit: the form does not recompute a formula.** The form judges the
+predicate on the formula value it last read, over its live values
+(`ruleRecord` in `form.tsx`); a create form has none, and an edit of the
+formula's inputs does not move it. The server judges the record being
+written. So on a create the form keeps a formula-driven field hidden while the
+server may require it (main refused that create too), and an edit that moves
+the computed value into the condition is refused naming a field the form still
+hides; main accepted that edit. The server's answer is the one ruling item 2
+asks for; the form-side recompute is a follow-up card, and until it lands the
+lint warns on every `required` field whose `visibleWhen` reads a formula.
 
 **Author-time fence (narrowed from the ruling's item 4).** The ruling asked for a
 warning on `required` + `visibleWhen` reading roots the server cannot bind. That
@@ -321,10 +347,14 @@ half already exists at a stronger level: `@objectstack/lint` refuses every root
 but `record`, `previous` and `parent` in any field `visibleWhen`
 (`FIELD_RULE_BOUND_ROOTS`), at `objectstack validate`, at the object save door
 and in Studio's predicate editor, so those roots reach the server only from
-older stored metadata, which the fault arm covers. What is added are two
+older stored metadata, which the fault arm covers. What is added are three
 **warnings**, never refusals, since the field keeps the requirement it had:
 a `required` field's `visibleWhen` that reads through a reference field (never
-hydrated at the field level, so it always faults), and `required` + `visibleWhen`
+hydrated at the field level, so it always faults); one that reads a `formula`
+field (the known limit above, and, when a formula in its read closure reads
+through a reference or calls `label()` or `can`, the counts-as-shown
+consequence; `required-visible-when-formula-issue.ts`, with the same verdict as
+a Studio advisory in the field inspector); and `required` + `visibleWhen`
 + `storage.notNull` (the column refuses the null the waiver admits). The latter
 is not a parse refusal like the Q1 rider, because the protocol-17
 `field-required-notnull-explicit` conversion stamped `storage.notNull` onto every

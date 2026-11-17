@@ -437,12 +437,18 @@ export interface EvaluateRulesOptions {
    * [ADR-0113 D1, as amended] The object's `formula` fields computed over a
    * record, as a read computes them: a `formula` is never on the write path
    * (computed on read, never stored), so a required field's `visibleWhen` that
-   * reads one is judged on the value this returns, the value the form sees.
-   * `faulted` names each formula that could not be computed on that record.
-   * Absent: a predicate that reads a formula field cannot be evaluated, and
-   * counts as shown.
+   * reads one is judged on the value this returns, the value a read of the
+   * written record would serve. That is not always the value the form shows:
+   * the form judges the formula value it last read and does not recompute it
+   * while the user edits (a create form has none), so a write that changes a
+   * formula's inputs can be judged on a value the form never showed.
+   * `unservable` names, with the reason, each formula whose read value the
+   * write path cannot know (a hop, `label()`, `can` with no map, or a formula
+   * reading one); a formula that faults for a reason a read shares is `null`
+   * in the record, as a read serves it. Absent: a predicate that reads a
+   * formula field cannot be evaluated, and counts as shown.
    */
-  formulaValues?: (record: Record<string, unknown>) => { record: Record<string, unknown>; faulted: ReadonlySet<string> };
+  formulaValues?: (record: Record<string, unknown>) => { record: Record<string, unknown>; unservable: ReadonlyMap<string, string> };
   /**
    * [#4977] The master-detail header this write's field `requiredWhen`
    * predicates read as `parent` — the SAME binding, resolved by the SAME engine
@@ -3476,6 +3482,10 @@ export function nullPreviousReadDetail(
 /** The three answers a required field's own `visibleWhen` can give a write. */
 type ShownVerdict = 'shown' | 'hidden' | 'fault';
 
+/** Per-source `record` / `previous` member reads for {@link formulaReadsOf}; `null` when unnameable. Bounded like the other parse memos. */
+const visibleWhenReadsCache = new Map<string, ReadonlySet<string> | null>();
+const VISIBLE_WHEN_READS_CACHE_CAP = 512;
+
 /**
  * The `formula` fields a required field's `visibleWhen` reads through `record`
  * or `previous`, by the platform's one member reader. A predicate whose reads
@@ -3486,14 +3496,21 @@ function formulaReadsOf(pred: string | Expression, fields: Record<string, Condit
   if (formulaFields.length === 0) return [];
   const expr = toExpression(pred) as { dialect?: string; source?: unknown };
   if (typeof expr?.source !== 'string' || (expr.dialect !== undefined && expr.dialect !== 'cel')) return formulaFields;
-  const reads = new Set<string>();
-  for (const root of ['record', 'previous']) {
-    const analysis = analyzeRelationshipTraversals(expr.source, root);
-    if (!analysis) return formulaFields;
-    for (const name of analysis.bareFields) reads.add(name);
-    for (const name of analysis.traversals.keys()) reads.add(name);
+  let reads = visibleWhenReadsCache.get(expr.source);
+  if (reads === undefined) {
+    const named = new Set<string>();
+    reads = named;
+    for (const root of ['record', 'previous']) {
+      const analysis = analyzeRelationshipTraversals(expr.source, root);
+      if (!analysis) { reads = null; break; }
+      for (const name of analysis.bareFields) named.add(name);
+      for (const name of analysis.traversals.keys()) named.add(name);
+    }
+    if (visibleWhenReadsCache.size < VISIBLE_WHEN_READS_CACHE_CAP) visibleWhenReadsCache.set(expr.source, reads);
   }
-  return formulaFields.filter((name) => reads.has(name));
+  if (reads === null) return formulaFields;
+  const known = reads;
+  return formulaFields.filter((name) => known.has(name));
 }
 
 /**
@@ -3516,8 +3533,9 @@ function formulaReadsOf(pred: string | Expression, fields: Record<string, Condit
  *   (the exact rule, not D1's no-prior-read over-approximation).
  * - **Fault** — the predicate could not be evaluated (an undeclared key, a read
  *   through a reference, a root this write does not bind, a system write with
- *   no acting user under a `current_user` predicate, a `formula` field that
- *   cannot be computed on the record): it COUNTS AS SHOWN, and
+ *   no acting user under a `current_user` predicate, a `formula` field whose
+ *   read value the write path cannot know, itself or through the formulas it
+ *   reads): it COUNTS AS SHOWN, and
  *   the field falls back to exactly the unconditional `required` it carried
  *   before this amendment — an insert must provide it, an update may not clear
  *   it. Never the `requiredWhen` fault arm (ADR-0137 D2 refuses the write):
@@ -3531,7 +3549,10 @@ function formulaReadsOf(pred: string | Expression, fields: Record<string, Condit
  * option gate reads, and `parent` where the engine resolved a header. A
  * `formula` field the predicate reads is computed over the record first
  * (`opts.formulaValues`, the read path's plan), because it is never on the
- * write path. So a role-gated field is judged per writer; the lint refuses
+ * write path; one that faults for a reason a read shares is judged on the
+ * `null` a read serves. That is the value a read of the written record serves,
+ * not always the one the form shows: the form does not recompute a formula
+ * while the user edits (ADR-0113's known limit). So a role-gated field is judged per writer; the lint refuses
  * `current_user` in a field `visibleWhen` at authoring, so only older stored
  * metadata reaches that binding. `features`, `app` and `page` are never
  * bound server-side; `objectstack validate` and the object save door already
@@ -3563,20 +3584,21 @@ function evaluateRequiredWhenShown(
     extra: Record<string, unknown> | undefined,
   ): { verdict: ShownVerdict; error?: { kind: string; message: string } } => {
     // A `formula` field is not on the write path: judge the predicate on the
-    // computed value, and count a formula that cannot be computed as a fault.
+    // computed value. A formula whose read value this path cannot know, itself
+    // or through the formulas it reads, is a fault; one that faults for a
+    // reason a read shares is judged on the `null` a read serves.
     const formulas = formulaReadsOf(pred, fields);
     if (formulas.length > 0) {
       if (!opts.formulaValues) {
         return { verdict: 'fault', error: { kind: 'formula', message: `reads the formula field ${formulas.map((f) => `'${f}'`).join(', ')}, which this write path does not compute` } };
       }
       const now = opts.formulaValues(record);
-      const then = prior ? opts.formulaValues(prior) : undefined;
-      const faulted = formulas.filter((f) => now.faulted.has(f) || (then?.faulted.has(f) ?? false));
-      if (faulted.length > 0) {
-        return { verdict: 'fault', error: { kind: 'formula', message: `reads the formula field ${faulted.map((f) => `'${f}'`).join(', ')}, which could not be computed on this record` } };
+      const blocked = formulas.filter((f) => now.unservable.has(f));
+      if (blocked.length > 0) {
+        return { verdict: 'fault', error: { kind: 'formula', message: `reads the formula field ${blocked.map((f) => `'${f}', which ${now.unservable.get(f)}`).join('; and ')}` } };
       }
       record = now.record;
-      prior = then ? then.record as PreviousBinding : prior;
+      prior = prior ? opts.formulaValues(prior).record as PreviousBinding : prior;
     }
     const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), {
       ...ruleScope(record, prior, extra),

@@ -2075,10 +2075,12 @@ export class UpdateFacet {
                  readPriorRows,
                );
                if (referencesFirst) await checkReferences();
+               // One formula closure for the batch: its plan is built once.
+               const bulkFormulaValues = formulaValuesFor(updateSchema, opCtx.context, bulkPermissions);
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions, formulaValues: formulaValuesFor(updateSchema, opCtx.context, bulkPermissions) }), this.logger, object);
+                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions, formulaValues: bulkFormulaValues }), this.logger, object);
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -2094,7 +2096,7 @@ export class UpdateFacet {
                    // every such object down the per-row branch above, where the
                    // binding is supplied. This branch only ever runs for the
                    // rule families that never read a header.
-                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions, formulaValues: formulaValuesFor(updateSchema, opCtx.context, bulkPermissions) }), this.logger, object);
+                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions, formulaValues: bulkFormulaValues }), this.logger, object);
                }
                if (!referencesFirst) await checkReferences();
                // `updateMany` presence is part of the ladder verdict resolved above.
