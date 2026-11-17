@@ -63,10 +63,10 @@ const OVERLAY = {
 };
 
 const makeAdapter = () => ({
-  getObjectSchema: vi.fn(async () => structuredClone(PUBLISHED)),
-  create: vi.fn(async () => ({ id: 'r1' })),
-  update: vi.fn(async () => ({ id: 'r1' })),
-  findOne: vi.fn(async () => ({ id: 'r1' })),
+  getObjectSchema: vi.fn(async (_objectName: string): Promise<unknown> => structuredClone(PUBLISHED)),
+  create: vi.fn(async (_object: string, _data: Record<string, unknown>) => ({ id: 'r1' })),
+  update: vi.fn(async (_object: string, _id: string, _data: Record<string, unknown>, _opts?: { ifMatch?: string }) => ({ id: 'r1' })),
+  findOne: vi.fn(async (_object: string, _id: string) => ({ id: 'r1' })),
 });
 
 afterEach(() => {
@@ -180,7 +180,7 @@ describe('usePreviewFormDataSource (objectstack#34807)', () => {
 
   it('in preview it reads the object document through the metadata provider', async () => {
     const adapter = makeAdapter();
-    const getItem = vi.fn(async () => structuredClone(OVERLAY));
+    const getItem = vi.fn(async (_type: string, _name: string): Promise<unknown> => structuredClone(OVERLAY));
     GET_ITEM.fn = getItem;
     const { result } = renderHook(() => usePreviewFormDataSource(adapter), { wrapper: wrap(true) });
     expect(result.current).not.toBe(adapter);
@@ -234,7 +234,7 @@ describe('the global New modal under draft preview (objectstack#34807)', () => {
 
   it('CONTROL: outside preview the published document is read once and the draft field is absent', async () => {
     const adapter = makeAdapter();
-    const getItem = vi.fn(async () => structuredClone(OVERLAY));
+    const getItem = vi.fn(async (_type: string, _name: string): Promise<unknown> => structuredClone(OVERLAY));
     GET_ITEM.fn = getItem;
     renderModal(false, adapter);
     await waitFor(() => expect(screen.getByText('Title')).toBeInTheDocument());

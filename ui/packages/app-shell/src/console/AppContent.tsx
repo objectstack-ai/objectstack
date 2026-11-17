@@ -1799,7 +1799,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   },
                 ),
               }}
-              dataSource={formDataSource}
+              dataSource={formDataSource ?? undefined}
             />
           )}
       </ConsoleLayout>
