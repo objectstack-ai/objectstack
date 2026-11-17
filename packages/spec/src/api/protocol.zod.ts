@@ -1791,8 +1791,11 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
  * request names, else the workspace default, else `en`.
  *
  * The probes name an artifact in `userMessage` by its label where they can read
- * one from the published item, and by its machine name otherwise; `message`
- * keeps the machine names an agent acts on. Where the sentences live is the
+ * one from the published item, and by its machine name otherwise. An object the
+ * publishing caller was refused (or whose read access the server could not
+ * decide) is named by the machine name the refusal carries, as `fix` names it:
+ * the probe reads nothing of it, its label included. `message` keeps the machine
+ * names an agent acts on. Where the sentences live is the
  * producer's own business: the probes keep one catalog beside themselves,
  * covering the platform locale table (`PLATFORM_LOCALES`,
  * `@objectstack/spec/system`).
@@ -1819,8 +1822,8 @@ export const RuntimeBuildIssueSchema = lazySchema(() => z.object({
     type: z.string().describe('Metadata type of what was exercised (`object`, `dataset`).'),
     name: z.string().describe('Its item name.'),
     member: z.string().optional().describe(
-      'The dashboard widget the finding is about, by its `id`, when the '
-      + 'finding is about one widget.',
+      'The dashboard widget the finding is about, when the finding is about '
+      + 'one widget: its `id`, else its `title` as a string, else `?`.',
     ),
   }).optional().describe(
     'What the probe exercised, when that is not the artifact itself: the '
@@ -1849,7 +1852,9 @@ export const RuntimeBuildIssueSchema = lazySchema(() => z.object({
     'The finding\'s sentence for the PERSON who published, composed by its producer in the request\'s '
     + 'locale (else the workspace default locale, else `en`) — the same field name and producer-marked '
     + 'meaning as `RuntimeAuthoringIssueSchema.userMessage` and `ApiErrorSchema.userMessage`. It names an '
-    + 'artifact by its label where the probe can read one, else by its machine name. Present when the '
+    + 'artifact by its label where the probe can read one, else by its machine name; an object the '
+    + 'publishing caller was refused, or whose read access could not be decided, by the machine name '
+    + 'the refusal carries, its label unread. Present when the '
     + 'producer authors a user sentence for this `code`, which the probes do for every code they emit; '
     + 'absent, a consumer shows its own generic sentence. Consumers render it as received and keep no '
     + 'per-code translation table; `code` stays the stable id and `message` / `fix` stay the agent-facing '
@@ -2163,6 +2168,12 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
   // whose `BuildProbeReport` / `RuntimeBuildIssue` are re-exports of the two
   // types declared here. The producer-side conformance suite asserts nothing
   // it emits is stripped.
+  //
+  // This NARROWS the published accept set (`Clause-②: yes (narrowing)`):
+  // `z.unknown()` parsed any `probes` value, and a value that is not the
+  // report (a string, another object, a finding missing a member) no longer
+  // parses; the inferred and input types move from `unknown` to the report.
+  // The platform's one producer emits only the report.
   probes: BuildProbeReportSchema.optional().describe(
     'ADR-0038 L3 post-publish runtime probe report — one real read per '
     + 'published artifact (seeded objects have rows, views are readable, '

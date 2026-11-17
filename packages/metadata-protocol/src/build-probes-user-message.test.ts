@@ -160,7 +160,11 @@ interface ProbeCase {
     readonly run: (userTextLocales?: Locales) => Promise<BuildProbeReport>;
     /** The names and cause the sentence must be rendered from, for one locale. */
     readonly params: (tag: PlatformLocaleTag) => Names;
-    /** API names the sentence must NOT show: the probe could read a label for each. */
+    /**
+     * Names the sentence must NOT show: an API name the probe could read a label
+     * for, or the label of an object the caller was refused (the probe must not
+     * read it).
+     */
     readonly hidden: readonly string[];
     /** Params the sentence does not print (a selector, or a name its wording leaves out). */
     readonly silent?: readonly string[];
@@ -262,10 +266,12 @@ const CASES: readonly ProbeCase[] = [
         params: (tag) => ({
             ...widgetNames(tag),
             dataset: said(DATASET, tag, 'crm_task_totals'),
-            object: PROJECTS,
+            // By the API name the refusal names: the caller was not admitted
+            // to that object, so the probe reads nothing of it, label included.
+            object: 'crm_project',
             cause: 'access',
         }),
-        hidden: ['crm_board', 'w_open_tasks', 'crm_task', 'crm_project', 'PERMISSION_DENIED', 'Access denied'],
+        hidden: ['crm_board', 'w_open_tasks', 'crm_task', PROJECTS, 'PERMISSION_DENIED', 'Access denied'],
         // An access refusal is not about the dataset, so the sentence does not name it.
         silent: ['dataset'],
     },
@@ -284,10 +290,10 @@ const CASES: readonly ProbeCase[] = [
         params: (tag) => ({
             ...widgetNames(tag),
             dataset: said(DATASET, tag, 'crm_task_totals'),
-            object: TASKS,
+            object: 'crm_task',
             cause: 'field-access',
         }),
-        hidden: ['crm_board', 'w_open_tasks', 'crm_task', 'amount'],
+        hidden: ['crm_board', 'w_open_tasks', TASKS, 'amount'],
         silent: ['dataset'],
     },
     {
@@ -320,10 +326,10 @@ const CASES: readonly ProbeCase[] = [
         params: (tag) => ({
             ...widgetNames(tag),
             dataset: said(DATASET, tag, 'crm_task_totals'),
-            object: TASKS,
+            object: 'crm_task',
             cause: 'unavailable',
         }),
-        hidden: ['crm_board', 'w_open_tasks', 'crm_task', 'SERVICE_UNAVAILABLE'],
+        hidden: ['crm_board', 'w_open_tasks', TASKS, 'SERVICE_UNAVAILABLE'],
         silent: ['dataset'],
     },
     {
@@ -436,12 +442,53 @@ describe('every probe finding carries the person\'s sentence, in the request\'s 
         const refused = byTitle('a widget refused read access to an object: the one the refusal names, a joined object');
         expect(onlyIssue(await refused.run(['en-US'])).userMessage).toBe(
             'The widget "Open tasks" on dashboard "Team board" could not load its data: the account that published it '
-                + 'does not have read access to "Projects". Ask an administrator for that access, then publish again. '
+                + 'does not have read access to "crm_project". Ask an administrator for that access, then publish again. '
                 + 'People who already have it can see the widget.',
         );
 
         const bare = byTitle('a widget refused read access, with no object to name');
         expect(onlyIssue(await bare.run(['en-US'])).userMessage).toContain('read access to the data it reads.');
+    });
+
+    it('an object the caller was refused, or whose access the server could not decide, is not read for its label', async () => {
+        const failures = [
+            { code: 'PERMISSION_DENIED', status: 403, object: 'crm_project' },
+            { code: 'PERMISSION_DENIED', status: 403, object: 'crm_task', fields: ['amount'] },
+            { code: 'SERVICE_UNAVAILABLE', status: 503, object: 'crm_task' },
+        ];
+        for (const fields of failures) {
+            const reads: string[] = [];
+            const report = await runBuildProbes({
+                engine: engineWithRows,
+                getItem: async (type, name) => {
+                    reads.push(`${type} ${name}`);
+                    return ITEMS[`${type} ${name}`];
+                },
+                analytics: analyticsThrowing('[Analytics] refused', fields),
+                published: DASHBOARD,
+                userTextLocales: ['en-US'],
+            });
+            const issue = onlyIssue(report);
+            expect(issue.userMessage).toContain(`"${fields.object}"`);
+            // The fix names the same object by the same name.
+            expect(issue.fix).toContain(`object "${fields.object}"`);
+            expect(reads.filter((r) => r.startsWith('object ')), JSON.stringify(fields)).toEqual([]);
+        }
+
+        // CONTROL: a query that fails for another reason reads the dataset's object for its label.
+        const reads: string[] = [];
+        const report = await runBuildProbes({
+            engine: engineWithRows,
+            getItem: async (type, name) => {
+                reads.push(`${type} ${name}`);
+                return ITEMS[`${type} ${name}`];
+            },
+            analytics: analyticsThrowing('measure "total" is not declared'),
+            published: DASHBOARD,
+            userTextLocales: ['en-US'],
+        });
+        expect(onlyIssue(report).code).toBe('widget_query_failed'); // adr0112-ok: D6c build-probe diagnostics code
+        expect(reads).toContain('object crm_task');
     });
 
     it('the agent\'s text stays English and stays where it was: message and fix are not translated', async () => {

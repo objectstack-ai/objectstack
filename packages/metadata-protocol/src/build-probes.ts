@@ -655,7 +655,14 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                         // names: the refused or undecided object when the
                         // error carries one, else the dataset's own. Empty
                         // when there is none, and the sentence says so.
-                        object: saidObject ? await labelOf('object', saidObject) : '',
+                        // After a refusal, or a read gate that could not
+                        // decide, it is named exactly as the `fix` names it,
+                        // by the API name: the caller was not admitted to
+                        // that object, so the probe reads nothing of it (not
+                        // its label either) for this caller's sentence. Only
+                        // a query that failed for another reason reads the
+                        // dataset's object for its label.
+                        object: !saidObject ? '' : refusal || unavailable ? saidObject : await labelOf('object', saidObject),
                         cause: refusal ? (refusal.fields.length ? 'field-access' : 'access') : unavailable ? 'unavailable' : 'query',
                     }),
                 });

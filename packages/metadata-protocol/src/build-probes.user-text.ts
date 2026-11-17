@@ -45,7 +45,7 @@
  * | `object_field_ref_rule_failed` | `object` | the object's label |
  * | `widget_not_probed` | `dashboard`, `widget`, `dataset`, `cause` (`outside-closure` · `ambiguous-in-closure` · `several-holders`) | dashboard label, widget title; the dataset by its API name |
  * | `empty_query` | `dashboard`, `widget`, `dataset`, `object` | all four by label |
- * | `widget_query_failed` | `dashboard`, `widget`, `dataset`, `object`, `cause` (`access` · `field-access` · `unavailable` · `query`) | all four by label; `object` is empty when the refusal names none |
+ * | `widget_query_failed` | `dashboard`, `widget`, `dataset`, `object`, `cause` (`access` · `field-access` · `unavailable` · `query`) | dashboard, widget and dataset by label; `object` by label for `query`, and by the API name the refusal names for `access` · `field-access` · `unavailable` (the caller was not admitted to it, so nothing of it is read); empty when there is none |
  * | `probes_unavailable` | `count` | no name: one finding covers every dashboard of the publish |
  *
  * A label is the published body's own (`label`, a widget's `title`), read

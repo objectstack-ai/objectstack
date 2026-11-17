@@ -229,7 +229,11 @@ describe('publish-drafts widget probes run as the publishing caller (#25484)', (
 });
 
 describe('publish-drafts probe findings carry the person\'s sentence in the request\'s language (ruling record 6929121584)', () => {
-    /** The same app with the labels a person knows it by; `task_item` is readable as an item here. */
+    /**
+     * The same app with the labels a person knows it by. `task_item` carries a label
+     * too, so the refusal legs show that the probe does not read it for a caller
+     * who was refused that object.
+     */
     const LABELLED: Record<string, unknown> = {
         ...ITEMS,
         'dashboard task_board': {
@@ -246,16 +250,20 @@ describe('publish-drafts probe findings carry the person\'s sentence in the requ
     };
 
     it('the caller\'s locale picks the sentence, and the sentence names the labels, not the API names', async () => {
+        // The one exception is the object the caller was refused: the probe reads
+        // nothing of it for this caller, so the sentence names it as the fix does.
         const { probes } = await publishAs(NON_READER, LABELLED, { locale: 'zh-CN', workspaceLocale: 'en' });
         const issue = refusalOf(probes);
 
         expect(issue.userMessage).toBe(
-            '仪表盘“任务看板”中的组件“未完成任务”无法加载数据：发布时使用的账号没有“Tasks”的读取权限。'
+            `仪表盘“任务看板”中的组件“未完成任务”无法加载数据：发布时使用的账号没有“${GATED}”的读取权限。`
                 + '请让管理员授予该权限，然后重新发布。已有该权限的人可以正常看到这个组件。',
         );
-        for (const apiName of ['task_board', 'w_tasks', GATED, 'task_metrics']) {
+        for (const apiName of ['task_board', 'w_tasks', 'task_metrics']) {
             expect(issue.userMessage).not.toContain(apiName);
         }
+        // The refused object's label is not read, so it is not shown.
+        expect(issue.userMessage).not.toContain('Tasks');
         // The agent's channel is untouched by the locale: English, API names, the thrown text.
         expect(issue.message).toContain(`reading "${GATED}" is not permitted for this user`);
         expect(issue.fix).toContain(`read access to object "${GATED}"`);
@@ -268,7 +276,7 @@ describe('publish-drafts probe findings carry the person\'s sentence in the requ
         const english = refusalOf((await publishAs(NON_READER, LABELLED)).probes);
         expect(english.userMessage).toBe(
             'The widget "Open tasks" on dashboard "Task board" could not load its data: the account that published it '
-                + 'does not have read access to "Tasks". Ask an administrator for that access, then publish again. '
+                + `does not have read access to "${GATED}". Ask an administrator for that access, then publish again. `
                 + 'People who already have it can see the widget.',
         );
         // One finding, two readers: only the person's sentence moved.
