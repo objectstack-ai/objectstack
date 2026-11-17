@@ -8289,12 +8289,12 @@ export function AutomationsPillar({
     dialog: flowConflictDialog,
   } = useDraftSaveGuard(client, reloadFlowDraft);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
-  // The aside header's slot for the hosted inspector's header actions (the
-  // flow node's "···" menu), so they sit in the title bar (`InspectorShellHost`).
-  const [configHeaderSlot, setConfigHeaderSlot] = React.useState<HTMLElement | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
+  // The aside header's slot for the hosted inspector's header actions (the
+  // flow node's "···" menu), so they sit in the title bar (`InspectorShellHost`).
+  const [configHeaderSlot, setConfigHeaderSlot] = React.useState<HTMLElement | null>(null);
   // objectstack#26858 — the server's verdict on the flow on screen: the pending
   // draft's (what its publish will refuse), else the layered read's. Taken off
   // each read, never computed here; the inspectors read it at their paths.
