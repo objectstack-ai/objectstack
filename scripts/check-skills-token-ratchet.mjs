@@ -835,7 +835,13 @@ export const CEILINGS = new Map([
   // 15349 bytes (15329 priced) -> 15569 (15549 priced) -> 3888 tokens, pinned AT the
   // measurement, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15549 / 4)
-  ['skills/objectstack-ui/SKILL.md', 3888],
+  // 3888 -> 3921: Master-Detail Forms item 1 names the save's precondition — a parent or
+  // child declaring `enable.apiMethods` must list `'bulk'`, or the one `/api/v1/batch` is
+  // refused 405. Nothing else in this file restates it or was left to cut after the row
+  // above; same standing ruling (record 6513306068). 15569 bytes (15549 priced) -> 15704
+  // (15684 priced) -> 3921 tokens, pinned AT the measurement, zero headroom.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15684 / 4)
+  ['skills/objectstack-ui/SKILL.md', 3921],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -988,7 +994,12 @@ export const CEILINGS = new Map([
   // ceil(16925 / 4) = 4232; the ceiling moves +105, pinned AT the measurement.
   // Raise path the 2026-10-27 ruling 「A:先削重复,余额按实测提高」 (ruling record
   // 6513306068), quoted verbatim and untranslated in the PR body.
-  ['skills/objectstack-data/rules/relationships.md', 4232],
+  // 4232 -> 4229: Inline Editing names the save's `bulk` precondition (+129 bytes), paid by
+  // restatement cut from the same file: the `subforms` sentence (the objectstack-ui pointer
+  // now carries it), the related-list example's "write side" comment (the paragraph above
+  // says it) and "(no UI config)" (the sentence says "purely from how you model"). 16925 ->
+  // 16916 bytes -> ceil(16916 / 4) = 4229; the row follows the measurement down.
+  ['skills/objectstack-data/rules/relationships.md', 4229],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -1470,7 +1481,10 @@ export const CEILINGS = new Map([
   // review's module pointer paid by the custom-Page aside (the ui skill's
   // rule); the row follows the measurement down, zero headroom.
   ['skills/objectstack-data/references/examples-objects.md', 1728],
-  ['skills/objectstack-data/references/lint-rules.md', 970],
+  // 970 -> 934: one row for `relationship/inline-edit-needs-bulk`, and the closing "target a
+  // lint-clean model" paragraph cut — it restated the table's rows one by one. 3829 -> 3735
+  // bytes -> ceil(3735 / 4) = 934; the row follows the measurement down, zero headroom.
+  ['skills/objectstack-data/references/lint-rules.md', 934],
   // 1299 -> 1566 (#26297): the `columns` dataset key and `applyOn: 'create'`
   // — a column a job or an admin owns after the first load is written on
   // create and left alone on every `upsert` replay; which modes it touches,

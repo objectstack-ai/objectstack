@@ -76,7 +76,9 @@ custom page or form config. Prefer, in order:
    DATA MODEL — set `inlineEdit` on the child's `master_detail` field that
    references the parent. Every standard New/Edit form for the parent (modal,
    drawer, full-page) then auto-renders the children and saves parent + children
-   in one atomic `/api/v1/batch`. **No view metadata needed.** The
+   in one atomic `/api/v1/batch`. **No view metadata needed.** A parent or child
+   declaring `enable.apiMethods` must list `'bulk'`, or that save is refused
+   `405 OBJECT_API_METHOD_NOT_ALLOWED`. The
    `true` / `'grid'` / `'form'` ladder and what each value picks:
    **objectstack-data → Relationships → Inline Editing**.
 

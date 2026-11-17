@@ -87,6 +87,57 @@ describe('lintDataModel — relationships', () => {
   });
 });
 
+// R5b — the parent's form saves parent + inline children in ONE cross-object
+// `/api/v1/batch`, which gates every op as `bulk` on the op's own object. A
+// declared `enable.apiMethods` without `bulk` on either side is warned about,
+// naming the object to edit and the value to add; an undeclared list is open.
+describe('lintDataModel — relationship/inline-edit-needs-bulk', () => {
+  const RULE = 'relationship/inline-edit-needs-bulk';
+  const OPEN = ['get', 'list', 'create', 'update', 'delete'];
+  const budget = (enable?: unknown) => ({ name: 'project_budget', ...(enable ? { enable } : {}), fields: { title: { type: 'text' } } });
+  const line = (inlineEdit: unknown, enable?: unknown) => ({
+    name: 'project_budget_line',
+    ...(enable ? { enable } : {}),
+    fields: {
+      project_budget: { type: 'master_detail', reference: 'project_budget', required: true, deleteBehavior: 'cascade', ...(inlineEdit === undefined ? {} : { inlineEdit }) },
+      amount: { type: 'currency' },
+    },
+  });
+  const hits = (objects: any[]) => lintDataModel(objects).filter((i) => i.rule === RULE);
+
+  it.each([true, 'grid', 'form'])('warns on the parent when inlineEdit is %s and its apiMethods omit bulk', (inlineEdit) => {
+    const [issue, ...rest] = hits([budget({ apiMethods: OPEN }), line(inlineEdit)]);
+    expect(rest).toEqual([]);
+    expect(issue?.severity).toBe('warning');
+    expect(issue?.path).toBe('objects[0].enable.apiMethods');
+    expect(issue?.fix).toBe("add 'bulk' to project_budget.enable.apiMethods");
+    expect(issue?.message).toContain('OBJECT_API_METHOD_NOT_ALLOWED');
+  });
+
+  it('warns on the child when the child declares apiMethods without bulk', () => {
+    const [issue, ...rest] = hits([budget(), line('grid', { apiMethods: OPEN })]);
+    expect(rest).toEqual([]);
+    expect(issue?.path).toBe('objects[1].enable.apiMethods');
+    expect(issue?.fix).toBe("add 'bulk' to project_budget_line.enable.apiMethods");
+  });
+
+  it('treats an empty apiMethods (deny-all) as withholding bulk', () => {
+    expect(hits([budget({ apiMethods: [] }), line(true)])).toHaveLength(1);
+  });
+
+  it('reports a parent once however many inline children it has', () => {
+    const second = { ...line('grid'), name: 'project_budget_item' };
+    expect(hits([budget({ apiMethods: OPEN }), line('grid'), second])).toHaveLength(1);
+  });
+
+  it('is silent when apiMethods include bulk, are undeclared, or nothing is inline-edited', () => {
+    expect(hits([budget({ apiMethods: [...OPEN, 'bulk'] }), line('grid', { apiMethods: [...OPEN, 'bulk'] })])).toEqual([]);
+    expect(hits([budget(), line('grid')])).toEqual([]);
+    expect(hits([budget({ apiMethods: OPEN }), line(undefined)])).toEqual([]);
+    expect(hits([budget({ apiMethods: OPEN }), line(false)])).toEqual([]);
+  });
+});
+
 describe('lintDataModel — roll-ups', () => {
   it('suggests a roll-up when a parent owns master_detail children with numeric fields', () => {
     const issues = lintDataModel([
