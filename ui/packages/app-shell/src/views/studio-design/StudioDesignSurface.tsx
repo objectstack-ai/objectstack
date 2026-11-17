@@ -37,6 +37,8 @@ import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
 import { customizationNamespace } from '@objectstack/spec/kernel';
 import { StudioChatDock, type StudioCopilotStatus, type StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { StudioRightSlot } from './StudioRightSlot.js';
+import { AssistantTopBarButton } from '../../layout/AssistantTopBarButton.js';
+import { ChatDockControlProvider, type ChatDockControl } from '../../layout/chatDockControl.js';
 import {
   StudioRightSlotContext,
   isSlotEscapeExempt,
@@ -63,7 +65,7 @@ import {
   STUDIO_KIND_CHIP,
 } from './studio-tokens.js';
 import { StudioInspector } from './StudioInspector.js';
-import { agentDraftMarkOf, DraftChip, DraftSourceLine } from './StudioDraftMark.js';
+import { agentDraftMarkOf, DraftChip, DraftSourceLine, isAgentDraftSurface } from './StudioDraftMark.js';
 import {
   StudioItemHeader,
   StudioItemHeaderFoldedItems,
@@ -216,6 +218,7 @@ import {
   FileQuestion,
   PackageX,
   Library,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -1465,6 +1468,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // objectstack#34610 — the copilot's expand control widens the slot in place
   // (it used to navigate to `/ai/build`, losing this page).
   const [copilotWide, setCopilotWide] = React.useState(false);
+  // objectstack#34725 — the copilot's history list, behind the slot header's History button.
+  const [copilotHistoryOpen, setCopilotHistoryOpen] = React.useState(false);
   const slotHasProps = slotPropsClaims > 0;
   const copilotAvailable = copilotStatus.available;
   // What the slot SHOWS: a missing half never shows.
@@ -1509,6 +1514,21 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [slotHost, slotOpen, setSlotOpen, slotHasProps, copilotAvailable, shownSlotMode]);
+  // objectstack#34725 — the top-bar robot's handle on the slot: pressed while
+  // the slot shows; a press hides it, or shows it on the AI assistant.
+  const openSlotOnCopilot = React.useCallback(() => {
+    setSlotMode('copilot');
+    setSlotOpen(true);
+  }, [setSlotOpen]);
+  const slotRobotControl = React.useMemo<ChatDockControl>(
+    () => ({
+      expanded: slotOpen,
+      fullWindow: copilotWide,
+      toggle: () => (slotOpen ? setSlotOpen(false) : openSlotOnCopilot()),
+      open: openSlotOnCopilot,
+    }),
+    [slotOpen, copilotWide, setSlotOpen, openSlotOnCopilot],
+  );
 
   /**
    * Host side of the live `?surface=` channel. Producers below the provider —
@@ -1748,8 +1768,20 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               )}
               </>)}
               {/* objectui#12725 — the top bar's right-most icon shows or hides
-                  the right slot; `⌘.` switches what it shows. */}
-              {slotHost && slotHasContent && (
+                  the right slot; `⌘.` switches what it shows.
+                  objectstack#34725 — with a copilot served, that icon is the
+                  console top bar's robot (the same component, in the same
+                  place), and it opens the slot on the AI assistant. Without
+                  one, the panel icon stays for the properties. */}
+              {slotHost && slotHasContent && copilotAvailable && (
+                <>
+                  <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
+                  <ChatDockControlProvider value={slotRobotControl}>
+                    <AssistantTopBarButton />
+                  </ChatDockControlProvider>
+                </>
+              )}
+              {slotHost && slotHasContent && !copilotAvailable && (
                 <>
                   <span className="mx-0.5 h-5 w-px shrink-0 bg-border" aria-hidden="true" />
                   <button
@@ -1846,6 +1878,11 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onHeldEditChange={setHeldEdit}
+                onSurfaceLabelChange={setSurfaceLabel}
+                onReviewChanges={() => {
+                  setChangesPosture('review');
+                  setChangesOpen(true);
+                }}
               />
             ) : tab === 'automations' ? (
               <AutomationsPillar
@@ -1925,6 +1962,11 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             planPendingCount={copilotStatus.planPendingCount}
             propsTargetRef={setSlotPropsTarget}
             wideWidth={copilotWide && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
+            wide={copilotWide}
+            onWideChange={setCopilotWide}
+            historyOpen={copilotHistoryOpen}
+            onHistoryOpenChange={setCopilotHistoryOpen}
+            onClose={() => setSlotOpen(false)}
             overlay={isMobile}
             onOverlayDismiss={() => setSlotOpen(false)}
             locale={locale}
@@ -1933,8 +1975,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 packageId={packageId}
                 surfaceLabel={surfaceLabel}
                 onStatusChange={setCopilotStatus}
-                wide={copilotWide}
-                onWideChange={setCopilotWide}
+                historyOpen={copilotHistoryOpen}
+                onHistoryOpenChange={setCopilotHistoryOpen}
               />
             }
           />
@@ -5410,10 +5452,16 @@ export function DataPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onHeldEditChange,
+  onSurfaceLabelChange,
+  onReviewChanges,
 }: {
   packageId: string;
   publishNonce?: number;
   onDraftSaved?: (saved?: StudioSavedDraft) => void;
+  /** objectstack#34725 — the open object's display label and tab, for the copilot's chip (see the Interfaces pillar's prop). */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
+  /** objectstack#34725 — the copilot-changes line's 查看: open the package's pending changes. */
+  onReviewChanges?: () => void;
   /** Courtesy gate: hide/disable metadata-authoring affordances (records stay usable). */
   readOnly?: boolean;
   /** objectstack#28572 — on a read-only base, its pair: the rail lists the pair's objects too, and New lands there. */
@@ -5624,6 +5672,30 @@ export function DataPillar({
   // Validations edits `validations` rules; Settings edits object basics +
   // the ADR-0085 semantic roles. All patch the one `objDraft`.
   const [viewMode, setViewMode] = React.useState<'grid' | 'form' | 'rules' | 'settings' | 'hooks' | 'actions' | 'api'>('grid');
+  // objectstack#34725 — lift the open object's label to the copilot's chip,
+  // with the tab in view: 「正在看：会议 · 记录」, never the machine name. The
+  // Interfaces pillar's report (objectui#8219) is the same seam; keyed on
+  // primitives, the callback read through a ref.
+  const onSurfaceLabelChangeRef = React.useRef(onSurfaceLabelChange);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
+  });
+  const currentObjectName = current?.type === 'object' ? current.name : undefined;
+  const currentObjectLabel = current?.type === 'object' ? current.label : undefined;
+  const viewModeLabel = t(`engine.studio.data.tab.${viewMode === 'grid' ? 'records' : viewMode}`, locale);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current?.(
+      currentObjectName && currentObjectLabel
+        ? { type: 'object', name: currentObjectName, label: `${currentObjectLabel} · ${viewModeLabel}` }
+        : null,
+    );
+  }, [currentObjectName, currentObjectLabel, viewModeLabel]);
+  React.useEffect(
+    () => () => {
+      onSurfaceLabelChangeRef.current?.(null);
+    },
+    [],
+  );
   // objectui#11781 — the field inspector belongs to the view that opened it,
   // so a view switch closes it, the same act as its own Close: the selection
   // goes, and its blocking count expires with it (see `blockingReport`). Left
@@ -6641,6 +6713,53 @@ export function DataPillar({
   // or, objectstack#27176, an `mcp` one: an agent through the MCP build door.
   const fieldAgentMark =
     objLoaded && fieldSel?.kind === 'field' ? agentDraftMarkOf(objDraftChanges, ['fields', fieldSel.id]) : null;
+  // objectstack#34725 — the same marks on the canvas: the records grid's
+  // column header and the Form canvas's field card of every field an AI tool
+  // changed in the pending draft, read off the same `draftChanges` (no other
+  // read), and the line over the canvas counting the draft's AI entries.
+  const agentDraftChanges = objLoaded ? objDraftChanges : null;
+  const agentDraftCount = React.useMemo(
+    () => (agentDraftChanges ?? []).filter((change) => isAgentDraftSurface(change.by)).length,
+    [agentDraftChanges],
+  );
+  const shownFieldNamesKey = readFields(shownDraft.fields).entries.map((e) => e.name).join('\n');
+  const agentMarkedFields = React.useMemo<ReadonlySet<string>>(() => {
+    const marked = new Set<string>();
+    if (!agentDraftChanges || !shownFieldNamesKey) return marked;
+    for (const name of shownFieldNamesKey.split('\n')) {
+      if (agentDraftMarkOf(agentDraftChanges, ['fields', name])) marked.add(name);
+    }
+    return marked;
+  }, [agentDraftChanges, shownFieldNamesKey]);
+  const agentColumnMarks = React.useMemo(() => {
+    if (agentMarkedFields.size === 0) return undefined;
+    const marks: Record<string, React.ReactNode> = {};
+    for (const name of agentMarkedFields) {
+      marks[name] = <DraftChip locale={locale} of={name} testId="studio-grid-column-draft-chip" />;
+    }
+    return marks;
+  }, [agentMarkedFields, locale]);
+  // 放弃全部未发布改动 — the package's discard door (`packages.discardDrafts`),
+  // which drops every pending draft of the package, the author's own too; the
+  // confirm says so. There is no per-turn undo.
+  const [discardingDrafts, setDiscardingDrafts] = React.useState(false);
+  const discardAllDrafts = React.useCallback(async () => {
+    if (!adapter || !window.confirm(t('engine.studio.copilotChanges.discardConfirm', locale))) return;
+    setDiscardingDrafts(true);
+    try {
+      const result = await adapter.getClient().packages.discardDrafts(packageId);
+      if (!result.success || result.failedCount > 0) {
+        const reasons = result.failed.map((f) => `${f.type}/${f.name}: ${f.error}`).join('; ');
+        setError({ message: tFormat('engine.studio.copilotChanges.discardFailed', locale, { reasons }) });
+      }
+    } catch (e) {
+      setError(plainRefusal(e));
+    } finally {
+      setDiscardingDrafts(false);
+      reloadObjDraft();
+      emitMetadataRefresh();
+    }
+  }, [adapter, locale, packageId, reloadObjDraft]);
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
   // objectstack#27511 — opening another object replaces the one buffer the
   // open object's edits live in, and the autosave's timer sends nothing once
@@ -7319,6 +7438,51 @@ export function DataPillar({
                   <ExternalObjectNotice binding={objExternal} state={objExternalWriteState} locale={locale} />
                 </div>
               )}
+              {/* objectstack#34725 — the AI assistant's drafts are on this
+                  canvas: say how many, where to review them, and the one undo
+                  there is (the package's discard). */}
+              {agentDraftCount > 0 && (
+                <div
+                  role="status"
+                  data-testid="studio-copilot-changes"
+                  className={cn(
+                    'mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-1.5 text-xs dark:border-amber-500/30 dark:bg-amber-500/10',
+                    bodyFlush && 'mx-6 mt-3',
+                  )}
+                >
+                  <span className="inline-flex items-center gap-1.5 font-medium text-amber-800 dark:text-amber-200">
+                    <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    {tFormat(
+                      agentDraftCount === 1 ? 'engine.studio.copilotChanges.lineOne' : 'engine.studio.copilotChanges.line',
+                      locale,
+                      { count: agentDraftCount },
+                    )}
+                  </span>
+                  <span className="ml-auto inline-flex items-center gap-3">
+                    {!readOnly && adapter && (
+                      <button
+                        type="button"
+                        data-testid="studio-copilot-changes-discard"
+                        onClick={() => void discardAllDrafts()}
+                        disabled={discardingDrafts}
+                        className="text-muted-foreground hover:text-foreground hover:underline disabled:opacity-50"
+                      >
+                        {t('engine.studio.copilotChanges.discardAll', locale)}
+                      </button>
+                    )}
+                    {onReviewChanges && (
+                      <button
+                        type="button"
+                        data-testid="studio-copilot-changes-view"
+                        onClick={onReviewChanges}
+                        className="font-medium text-amber-700 hover:underline dark:text-amber-300"
+                      >
+                        {t('engine.studio.copilotChanges.view', locale)}
+                      </button>
+                    )}
+                  </span>
+                </div>
+              )}
               {!objLoaded ? (
                 // objectui#11272 — no view of another object's buffer under
                 // this one; after a failed load, the error above says why.
@@ -7451,6 +7615,8 @@ export function DataPillar({
                       }
                     },
                     editColumnLabel: t('engine.studio.data.editFieldProps', locale),
+                    // objectstack#34725 — the AI assistant's draft marks on the column headers.
+                    ...(agentColumnMarks ? { columnMarks: agentColumnMarks } : {}),
                   }}
                 >
                   {/* Provide the adapter as the dataSource context so the object-grid's
@@ -7521,6 +7687,7 @@ export function DataPillar({
                   readOnly={formViewLayout ? formViewReadOnly || !formView.sections : readOnly}
                   modeControl={formToolbarLeading}
                   contributedFields={contributedFields}
+                  draftMarkedFields={agentMarkedFields}
                   formView={formViewLayout}
                 />
                 </>

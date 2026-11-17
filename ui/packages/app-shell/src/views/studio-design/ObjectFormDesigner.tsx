@@ -71,6 +71,7 @@ import { AddFieldPopover } from './AddFieldPopover.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import { fieldTypeName } from '../metadata-admin/previews/fieldTypeName.js';
 import { ContributionMark, contributedItemTitle } from './StudioRailCustomizations.js';
+import { DraftChip } from './StudioDraftMark.js';
 import type { ContributedOnObject } from './contributionRows.js';
 import {
   addFormSection,
@@ -341,6 +342,12 @@ export interface ObjectFormDesignerProps {
    */
   contributedFields?: ReadonlyMap<string, ContributedOnObject>;
   /**
+   * objectstack#34725 — the fields the AI assistant (or an agent through MCP)
+   * changed in the pending draft, by name (`agentDraftMarkOf`): their cards
+   * carry the 草稿 chip the properties panel shows.
+   */
+  draftMarkedFields?: ReadonlySet<string>;
+  /**
    * objectstack#30057 — the form view the app opens for this object
    * (`selectRecordFormView`): its `sections` are the canvas, and every layout
    * edit is handed to `onSectionsChange`, never to `onChange`. `null` / absent:
@@ -371,6 +378,8 @@ interface DesignerSection {
 
 const NO_CONTRIBUTED_FIELDS: ReadonlyMap<string, ContributedOnObject> = new Map();
 const ContributedFieldsContext = React.createContext<ReadonlyMap<string, ContributedOnObject>>(NO_CONTRIBUTED_FIELDS);
+const NO_DRAFT_MARKED_FIELDS: ReadonlySet<string> = new Set();
+const DraftMarkedFieldsContext = React.createContext<ReadonlySet<string>>(NO_DRAFT_MARKED_FIELDS);
 
 /**
  * The Form tab's one toolbar row (objectui#12451): the host's mode control and
@@ -477,6 +486,7 @@ function SortableField({
   // objectstack#29786 — a field another package contributes reads as a
   // read-only card on any surface, and names its package.
   const contributed = React.useContext(ContributedFieldsContext).get(entry.name) ?? null;
+  const draftMarked = React.useContext(DraftMarkedFieldsContext).has(entry.name);
   const locked = readOnly || contributed !== null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: fid(entry.name),
@@ -546,6 +556,7 @@ function SortableField({
           <span className="truncate">{label}</span>
           {required && <span className="text-destructive">*</span>}
         </span>
+        {draftMarked && <DraftChip locale={locale} of={entry.name} testId="studio-form-field-draft-chip" />}
         {contributed && (
           <ContributionMark packageName={contributed.packageName} packageId={contributed.packageId} locale={locale} />
         )}
@@ -772,6 +783,7 @@ export function ObjectFormDesigner({
   readOnly = false,
   modeControl,
   contributedFields = NO_CONTRIBUTED_FIELDS,
+  draftMarkedFields = NO_DRAFT_MARKED_FIELDS,
   formView = null,
 }: ObjectFormDesignerProps): React.ReactElement {
   const locale = useMetadataLocale();
@@ -1071,6 +1083,7 @@ export function ObjectFormDesigner({
 
   return (
     <ContributedFieldsContext.Provider value={contributedFields}>
+    <DraftMarkedFieldsContext.Provider value={draftMarkedFields}>
     <div className="flex min-h-0 flex-1 flex-col">
       <FormToolbar
         leading={modeControl}
@@ -1172,6 +1185,7 @@ export function ObjectFormDesigner({
         </DndContext>
       </div>
     </div>
+    </DraftMarkedFieldsContext.Provider>
     </ContributedFieldsContext.Provider>
   );
 }

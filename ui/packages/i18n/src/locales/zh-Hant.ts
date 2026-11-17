@@ -2400,7 +2400,7 @@ const zhHant = {
       changesApplied: '已生效',
       changesDrafted: '已暫存為草稿',
       changesFailed: '未生效',
-      discussing: '正在討論：{{target}}',
+      discussing: '正在看：{{target}}',
       // changesConfirmMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
       changeVerb: {
         createObject: '新建物件',
@@ -3584,7 +3584,7 @@ const zhHant = {
       detailNone: '未檢測到差異 —— 草稿與已釋出版本一致。',
       fieldOrderChanged: '欄位順序已變更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: '包含由 AI 副駕起草的更改',
+      draftedByCopilot: '包含由 AI 助手起草的更改',
       draftedByMcpClient: '包含由 MCP 客戶端「{{client}}」起草的更改',
       draftedByMcp: '包含由 MCP 客戶端起草的更改',
       detailChangedKeys: '其他變更：',

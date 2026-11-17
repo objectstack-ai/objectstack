@@ -2233,7 +2233,7 @@ const pt = {
       changesApplied: "Aplicado",
       changesDrafted: "Salvo como rascunho",
       changesFailed: "Não aplicado",
-      discussing: "Discutindo: {{target}}",
+      discussing: "Vendo: {{target}}",
       changeVerb: {
         createObject: "Criar objeto",
         addField: "Adicionar campo",
@@ -4712,7 +4712,7 @@ const pt = {
       detailNone: 'Nenhuma diferença detectada — o rascunho corresponde à versão publicada.',
       fieldOrderChanged: 'Ordem dos campos alterada',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclui alterações rascunhadas pelo copiloto de IA',
+      draftedByCopilot: 'Inclui alterações rascunhadas pelo assistente de IA',
       draftedByMcpClient: 'Inclui alterações rascunhadas pelo cliente MCP “{{client}}”',
       draftedByMcp: 'Inclui alterações rascunhadas por um cliente MCP',
       detailChangedKeys: 'Também alterado:',

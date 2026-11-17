@@ -2879,7 +2879,7 @@ const en = {
       changesApplied: 'Applied',
       changesDrafted: 'Saved as draft',
       changesFailed: 'Not applied',
-      discussing: 'Discussing: {{target}}',
+      discussing: 'Viewing: {{target}}',
       // Wording is load-bearing: this is SENT to the agent and must satisfy the
       // cloud confirm gate's English clause `apply (this|the) change`
       // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
@@ -4194,7 +4194,7 @@ const en = {
       detailNone: 'No differences detected — the draft matches the published version.',
       fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Includes changes drafted by the AI copilot',
+      draftedByCopilot: 'Includes changes drafted by the AI assistant',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
       draftedByMcp: 'Includes changes drafted by an MCP client',
       detailChangedKeys: 'Also changed:',
