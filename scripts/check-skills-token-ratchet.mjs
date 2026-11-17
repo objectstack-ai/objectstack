@@ -1673,6 +1673,20 @@ export const CEILINGS = new Map([
   ['skills/objectui/rules/composition.md', 1624],
   ['skills/objectui/rules/protocol.md', 4368],
   ['skills/objectui/rules/styling.md', 2699],
+
+  // ── the objectstack-ask skill joins the catalog — epic ruling 6940528935 (D5 A) ──
+  // A new published skill for a client that answers a business question over
+  // MCP: the governed-metric procedure (`list_datasets` -> `query_dataset` ->
+  // labelled fallback), which until now was written only in a tool description
+  // and the served `/mcp/skill` page. The row is an INITIAL measurement of the
+  // new file on the PR that adds it, pinned AT it — zero headroom, on the same
+  // terms as the objectui rows above. Its evals are unpriced (population 1b).
+  // No existing row moves: the two pointer lines to it land inside the
+  // headroom of `objectstack-ai/SKILL.md` and `objectstack-query/rules/aggregation.md`.
+  // Adding the row is the pricing act the header reserves to the maintainer;
+  // the PR that adds it is Tier H and lands only on the maintainer's approval.
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(5828 / 4)
+  ['skills/objectstack-ask/SKILL.md', 1457],
 ]);
 
 /**
