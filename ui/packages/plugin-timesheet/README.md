@@ -32,9 +32,16 @@ The component can also be rendered directly:
 
 ```tsx
 import { ObjectTimesheet } from '@object-ui/plugin-timesheet';
+import type { DataSource } from '@object-ui/types';
+
+declare const dataSource: DataSource;
 
 <ObjectTimesheet
-  schema={{ objectName: 'time_entry', timesheet: { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' } }}
+  schema={{
+    type: 'object-timesheet',
+    objectName: 'time_entry',
+    timesheet: { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' },
+  }}
   dataSource={dataSource}
 />;
 ```
