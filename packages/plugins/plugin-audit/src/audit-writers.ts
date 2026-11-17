@@ -470,6 +470,28 @@ const NOISE_FIELDS = new Set<string>([
 export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objectstack/metadata-core';
 
 /**
+ * [#33694] The `sys_audit_log.metadata` keys that ride beside `performed_by` /
+ * `on_behalf_of` when the in-product AI performed a record write for a person:
+ * the AI conversation it ran in, and the pending item the person's approval
+ * decided before it ran. Copied from `HookContext.provenance` (and from there
+ * from `ExecutionContext.performedBy`), never from the request.
+ */
+const PERFORMED_IN_CONVERSATION_KEY = 'conversation_id';
+const PERFORMED_UNDER_CONFIRMATION_KEY = 'confirmation_id';
+
+/**
+ * One server-stamped `HookContext.provenance` attribution mark, read only as a
+ * non-blank string (trimmed); anything else reads as absent.
+ */
+function provenanceMark(
+  ctx: HookContext,
+  key: 'performedByClientId' | 'performedByAgentId' | 'performedByConversationId' | 'performedByConfirmationId',
+): string | undefined {
+  const value: unknown = (ctx as any).provenance?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
  * Action name produced from a HookContext.event string.
  *
  * [#21155] Typed by the ledger's record-write vocabulary: these are the rows
@@ -2186,11 +2208,33 @@ export function installAuditWriters(
     // wrote in the Console, and 「这是 AI 代替人类执行」 was not recoverable
     // from the ledger at all. Stamped from `provenance`, never from `session`,
     // because no caller-gating hook may read the client as the caller.
-    const performedByClientId: string | undefined =
-      typeof (ctx as any).provenance?.performedByClientId === 'string' &&
-      (ctx as any).provenance.performedByClientId.trim()
-        ? (ctx as any).provenance.performedByClientId.trim()
-        : undefined;
+    const performedByClientId: string | undefined = provenanceMark(ctx, 'performedByClientId');
+    // [#33694, owner ruling on objectstack-ai/cloud#3826 「3826 照建议（征询版）」]
+    // The SAME channel from its second producer: the server-constructed
+    // in-product AI path, which writes AS the signed-in person in `userId` and
+    // names the agent it ran, the conversation it ran in and, when the person
+    // confirmed the call, the confirmation. The ruling reuses the existing
+    // `performed_by` / `on_behalf_of` pair and adds no actor vocabulary, so the
+    // agent lands in `performed_by` exactly where an OAuth client does. The
+    // /mcp OAuth door and the in-product path each set only their own key
+    // (`clientId` vs `agentId`); if one envelope ever carried both, the OAuth
+    // client keeps the column it has always held.
+    //
+    // The conversation and the confirmation are the in-product path's own
+    // marks, so they are written ONLY when the in-product agent is the
+    // performer this row records — never beside an OAuth client id. That is
+    // what the spec promises a reader of `performed_by`, which holds either
+    // kind: `conversation_id` / `confirmation_id` come from the in-product
+    // path alone.
+    const performedByAgentId: string | undefined = provenanceMark(ctx, 'performedByAgentId');
+    const performedBy: string | undefined = performedByClientId ?? performedByAgentId;
+    const agentIsRecordedPerformer: boolean = !performedByClientId && performedByAgentId !== undefined;
+    const performedInConversationId: string | undefined = agentIsRecordedPerformer
+      ? provenanceMark(ctx, 'performedByConversationId')
+      : undefined;
+    const performedUnderConfirmationId: string | undefined = agentIsRecordedPerformer
+      ? provenanceMark(ctx, 'performedByConfirmationId')
+      : undefined;
     // The ADMINISTRATOR who made this write from an impersonation session. A
     // FOURTH channel, for the same reason as the agent's: `session.userId` is
     // the impersonated user — the session is theirs, the write authorizes as
@@ -2339,12 +2383,20 @@ export function installAuditWriters(
     // SCIM connection performed, beside the `svc:scim:CONNECTION_ID` actor it
     // is read from and a `user_id` that stays null. No key ⇒ no SCIM
     // connection acted.
-    if (performedByClientId || impersonatedBy || signInStamp || scimConnectionId) {
+    //
+    // `conversation_id` / `confirmation_id` (#33694) ride ONLY beside a
+    // `performed_by` naming the in-product agent: the conversation it
+    // performed the write in, and the pending item the person's approval
+    // decided for it. Each is present only when the producer stamped it — no
+    // confirmation key ⇒ the write needed none.
+    if (performedBy || impersonatedBy || signInStamp || scimConnectionId) {
       auditRow.metadata = safeStringify({
         // A sign-in stamp names its event the way a `config_change` row does
         // (`metadata.event`); every other CRUD row still carries no event.
         ...(signInStamp ? { event: SIGN_IN_STAMP_EVENT } : {}),
-        ...(performedByClientId ? { performed_by: performedByClientId, on_behalf_of: userId ?? null } : {}),
+        ...(performedBy ? { performed_by: performedBy, on_behalf_of: userId ?? null } : {}),
+        ...(performedInConversationId ? { [PERFORMED_IN_CONVERSATION_KEY]: performedInConversationId } : {}),
+        ...(performedUnderConfirmationId ? { [PERFORMED_UNDER_CONFIRMATION_KEY]: performedUnderConfirmationId } : {}),
         ...(impersonatedBy ? { [IMPERSONATED_BY_KEY]: impersonatedBy } : {}),
         ...(scimConnectionId ? { [SCIM_CONNECTION_ID_KEY]: scimConnectionId } : {}),
       });
