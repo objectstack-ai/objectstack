@@ -12107,7 +12107,7 @@ export function readBySpecMigrationEntryConsumers(path, roots = SPEC_MIGRATION_E
  * different files, and a respelled name refuses at load instead of resolving by accident.
  */
 export function packageTestSubsetFile(name) {
-  const m = /^pnpm --filter (\S+) exec vitest run (\S+)$/.exec(name);
+  const m = /^pnpm --filter\s(\S+) exec vitest run (\S+)$/.exec(name);
   return m ? m[2] : null;
 }
 
@@ -12190,7 +12190,7 @@ export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {
         throw new Error(
           `dispatch-gates: change-kind row '${row.kind}' gate '${gate.name}' declares a CI-job binding that is not whole — ` +
             'a gate standing in for a CI job carries both `ciJob` and `ciRunner`, and its name begins with that runner — ' +
-            'or, for a package-test subset, carries `ciSubset` and is spelled `pnpm --filter PKG exec vitest run FILE` with `ciSubset` ending in that FILE',
+            'or, for a package-test subset, carries `ciSubset` and is spelled as a pnpm filter on one package, then `exec vitest run FILE`, with `ciSubset` ending in that FILE',
         );
       }
     }
