@@ -35,6 +35,7 @@ const result = FlowSchema.parse(data);
 | **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
+| **defaultActive** | `boolean` | optional | Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator's choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author's switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
 | **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
@@ -260,6 +261,7 @@ const result = FlowSchema.parse(data);
 | **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
+| **defaultActive** | `boolean` | optional | Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator's choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author's switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
 | **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
