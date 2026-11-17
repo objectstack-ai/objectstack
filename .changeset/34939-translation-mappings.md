@@ -10,7 +10,7 @@
 
 feat(spec): a named import mapping's label is translatable at `mappings.NAME.label`
 
-Clause-②: yes (widening) — a new optional translation group `mappings` (one key per mapping, `label`) on `TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema` and `TranslationItemSchema`, a new `translateMapping` export from `@objectstack/spec/system` registered for the `mapping` type, and a new `MetadataProtocol.getPackagedMappingBase`; nothing that parsed before is refused
+Clause-②: yes (widening) — a new optional translation group `mappings` (one key per mapping, `label`) on `TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema` and `TranslationItemSchema`, a new `translateMapping` export from `@objectstack/spec/system` registered for the `mapping` type, and a new `ObjectStackProtocolImplementation.getPackagedMappingBase`; nothing that parsed before is refused
 Metadata-protocol: added
 Skills-docs: follow-up owed — #34962 (skills/objectstack-i18n/SKILL.md group list)
 
