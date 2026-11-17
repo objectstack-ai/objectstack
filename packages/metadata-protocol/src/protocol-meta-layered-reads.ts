@@ -102,6 +102,15 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'de
     if (judged?.kind === 'refused') return judged.error;
     if (judged !== undefined) return undefined;
     const address = await host.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
+    // [#34441 cell 2] …and a base whose dependents' rows at the member are
+    // bundle additions to it is the one holder, read at its address by
+    // {@link getMetaItemLayered} ({@link rowHeldBaseAddressOf}), as the plain
+    // read serves it: no ambiguity to refuse. Beside a package-less row the
+    // refusal stands (#33210).
+    if (address.candidates.length > 1 && !address.unbound) {
+        const base = await rowHeldBaseAddressOf(host, type, name, member);
+        if (base !== undefined && address.candidates.includes(base)) return undefined;
+    }
     return address.candidates.length > 1
         ? withPackageCandidates(
             packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates),
@@ -404,6 +413,18 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             if (alt) regItem = namedMemberOnly(runtimeOnly(host.engine.registry.getItem(alt, request.name, request.packageId, member)));
         }
         if (regItem !== undefined) code = regItem;
+
+        // [#34441 cell 1, #21059] Naming no member, the bare-name read answers
+        // a bundle that ships no canonical member with the member it ships,
+        // until a stored row is hydrated into that bare slot: the hydrated
+        // row is no artifact read (dropped above), and the shipped member it
+        // displaced is the artifact the bare name reads. Without this the same
+        // read answered `code` = the base's `fr-FR` before a restart and
+        // `null` after it (404 on `/layers`), with a dependent's `en-US` row
+        // stored. A named member is never answered here (its own lookups ran).
+        if (code === null && member === undefined && bareActionAnswer === undefined) {
+            code = host.lookupArtifactItem(request.type, request.name, request.packageId) ?? null;
+        }
     }
 
     // [#5840] The code half of the rule #5707 wrote for the overlay half,
@@ -601,7 +622,16 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // With several such rows, the pair's is reported, else the first
     // package's in id order.
     let orphaned = false;
-    if (overlay === null && code !== null && typeof contentPackageId === 'string' && contentPackageId !== '') {
+    // [#34441 cell 1] …and only over a code layer of the member this read
+    // addresses. Naming no member, a bundle whose base ships no canonical
+    // member takes the base's other member as its code layer (the registry's
+    // bare-name read, above); a dependent's row of the canonical member is
+    // then no row the base's document shadows but the dependent's addition
+    // (#28802 R2), and reported as an orphan it became `/published`'s
+    // document, before a restart only. FROM (`main` 31096af83d): A ships
+    // `fr-FR` only, D stores `en-US`: `/published` served D's row (200), where
+    // with no D row it answers 404.
+    if (overlay === null && code !== null && isWantedMember(code) && typeof contentPackageId === 'string' && contentPackageId !== '') {
         const base = contentPackageId;
         let rows: readonly StoredOverlayRow[] = [];
         try {
