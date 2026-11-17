@@ -1427,11 +1427,15 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   if (deps.datasetTools) {
     const service = deps.datasetTools;
     const loadDatasets = async (): Promise<readonly unknown[]> => {
-      const merged = protocol?.();
-      const hasMergedRead = Boolean(merged && typeof merged.getMetaItems === 'function');
-      const items = hasMergedRead
-        ? metaItemsArray(await merged!.getMetaItems({ type: 'dataset' }))
-        : ((await metadataService.list('dataset')) ?? []);
+      const protocolService = protocol?.();
+      let merged: StdioProtocolObjectReads | undefined;
+      let items: readonly unknown[];
+      if (protocolService && typeof protocolService.getMetaItems === 'function') {
+        merged = protocolService;
+        items = metaItemsArray(await protocolService.getMetaItems({ type: 'dataset' }));
+      } else {
+        items = (await metadataService.list('dataset')) ?? [];
+      }
       const translated = await translateMetaList(
         {
           resolveI18nService: async () => {
@@ -1441,7 +1445,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
               return undefined;
             }
           },
-          resolveProtocol: async () => (hasMergedRead ? merged : undefined),
+          resolveProtocol: async () => merged,
           requestLocale: (i18n?: unknown) => metaRequestLocale(undefined, i18n),
         },
         'dataset',
