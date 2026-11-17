@@ -699,10 +699,13 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
     return {
         name: def.name,
         label: def.label ?? def.name,
+        // [#34721] The authored descriptions, off the same served object.
+        ...authoredDescription(def),
         fields: Object.entries(def.fields ?? {}).filter(([k]) => k !== SEARCH_COMPANION_FIELD).map(([k, f]: [string, any]) => ({
             name: k,
             type: f?.type,
             label: f?.label ?? k,
+            ...authoredDescription(f),
             required: f?.required ?? false,
             // [#32530] Judged on the DECLARED field, never the served one: the
             // caller's mask deletes a readable field's `expression` when it
@@ -717,6 +720,23 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
         validations: describedRules(def.validations),
         enableFeatures: def.enable ?? {},
     };
+}
+
+/**
+ * [#34721] An object's or a field's `description` as `list_objects` and
+ * `describe_object` serve it: `{ description }` when the definition, as the
+ * caller is served it ({@link servedToCaller}), carries a non-blank string
+ * there, and nothing otherwise, so an answer for a definition that authors
+ * none keeps the shape it always had. The existing key only: the ADR-0106
+ * projection removes an unreadable field whole, its description with it, and
+ * keeps the prose of everything the caller may read, as the `/meta` object
+ * door serves it.
+ *
+ * The twin is `authoredDescription` in `packages/mcp/src/mcp-server-runtime.ts`.
+ */
+function authoredDescription(def: any): { description?: string } {
+    const text = def?.description;
+    return typeof text === 'string' && text.trim() !== '' ? { description: text } : {};
 }
 
 /**
@@ -1020,6 +1040,8 @@ export function buildMcpBridge(
             out.push({
                 name: o.name,
                 label: o.label ?? o.name,
+                // [#34721] …and its authored description, as the stdio twin serves it.
+                ...authoredDescription(o),
                 fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
             });
         }
