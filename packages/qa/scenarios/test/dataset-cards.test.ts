@@ -2,7 +2,7 @@
 
 /**
  * The dataset-bearing cards (ADR-0149): `expect.datasets` and
- * `run.datasetQuestions` on order_to_cash and invoice_with_line_items. Each
+ * `run.datasetQuestions` on order_to_cash and travel_expense. Each
  * card loads, each declaration is one the platform's own `DatasetSchema`
  * accepts, each question's words make its declared route the right one, the
  * build prompt states every name and word the Build half checks, and the
@@ -26,7 +26,7 @@ import { artifactToEvalGraph } from '../src/score/scenario-graph.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CARDS = resolve(HERE, '../../../../docs/qa/scenarios');
 const AREAS = readCapabilityAreas(resolve(HERE, '../../../../docs/qa/platform-checklist/areas'));
-const DATASET_CARDS = ['order_to_cash', 'invoice_with_line_items'] as const;
+const DATASET_CARDS = ['order_to_cash', 'travel_expense'] as const;
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -75,7 +75,7 @@ const REFUSALS: Array<[string, (typeof DATASET_CARDS)[number], (c: RawCard) => v
   ['a dataset on an object the card does not expect', 'order_to_cash', (c) => (c.expect.datasets[0].object = 'quote'), 'expect.datasets[0].object', /`quote` is not in expect\.objects/],
   ['a sum over a field no seed row carries', 'order_to_cash', (c) => (measure(c, 'order_book', 'booked_amount').field = 'net_amount'), 'expect.datasets[0].measures[0].field', /no seed row of `sales_order` carries `net_amount`/],
   ['a sum over text', 'order_to_cash', (c) => (measure(c, 'order_book', 'booked_amount').field = 'status'), 'expect.datasets[0].measures[0].field', /holds a value that is no number/],
-  ['a count that names a field', 'invoice_with_line_items', (c) => (measure(c, 'invoicing', 'invoice_count').field = 'total'), 'expect.datasets[0].measures[1].field', /a `count` measure counts rows and names no field/],
+  ['a count that names a field', 'travel_expense', (c) => (measure(c, 'reimbursement', 'claim_count').field = 'total_amount'), 'expect.datasets[1].measures[1].field', /a `count` measure counts rows and names no field/],
   ['an exact-hit word that matches two measures', 'order_to_cash', (c) => (dq(c, 'dq_bookings').words = ['revenue']), 'run.datasetQuestions[0].words[0]', /must match exactly the one measure `order_book\.booked_amount`.*matches `order_book\.booked_amount`, `billing\.billed_amount`/],
   ['an ambiguous word that matches one measure', 'order_to_cash', (c) => (dq(c, 'dq_revenue').words = ['bookings']), 'run.datasetQuestions[2].words[0]', /must match exactly the candidates/],
   ['a near-miss word that is a hit', 'order_to_cash', (c) => Object.assign(dq(c, 'dq_booking_total'), { words: ['bookings'], ask: { en: 'What are our bookings?' } }), 'run.datasetQuestions[3].words[0]', /a near-miss word matches no member, and `bookings` matches `order_book\.booked_amount`/],
@@ -124,14 +124,14 @@ describe('the build prompt states every dataset name and word the Build half che
 });
 
 describe('the Build half checks each declared dataset on a built artifact', () => {
-  const expect_ = namespacedScenario(load('invoice_with_line_items').card!).card.expect;
+  const expect_ = namespacedScenario(load('travel_expense').card!).card.expect;
   const member = (name: string, synonyms: string[], description = 'd') => ({ name, label: name, synonyms, description });
   const built = (mutate: (a: RawCard) => void = () => {}) => {
     const a: RawCard = {
       objects: expect_.objects.map((name) => ({ name, fields: {} })),
       datasets: [
-        { name: 'invoicing', object: 'demoinvoice_invoice', measures: [member('invoiced_total', ['invoiced', 'billings', 'revenue', '营收', '开票总额']), member('invoice_count', ['number of invoices', '发票数'])], dimensions: [member('invoice_status', [])] },
-        { name: 'line_sales', object: 'demoinvoice_invoice_line', measures: [member('line_amount', ['sales', 'revenue', '营收', '销售额']), member('units_sold', ['units', 'Quantity Sold', '销量'])], dimensions: [member('line_product', ['item', '产品'])] },
+        { name: 'trip_plan', object: 'demotravel_trip_request', measures: [member('estimated_spend', ['estimated cost', 'trip cost', 'travel spend', '差旅花费', '预计费用']), member('trip_days', ['Days On The Road', '出差天数'])], dimensions: [member('trip_status', ['request_status'])] },
+        { name: 'reimbursement', object: 'demotravel_expense_claim', measures: [member('claimed_amount', ['expense claims', 'travel spend', '差旅花费', '报销金额']), member('claim_count', ['number of claims', '报销单数'])], dimensions: [member('claim_status', [])] },
       ],
     };
     mutate(a);
@@ -141,24 +141,24 @@ describe('the Build half checks each declared dataset on a built artifact', () =
   it('a faithful build passes every dataset check: one per dataset, one per member (synonyms compared as the tools compare a term)', () => {
     const checks = built();
     expect(checks.map((c) => c.check)).toEqual([
-      'dataset:invoicing',
-      'dataset-measure:invoicing.invoiced_total',
-      'dataset-measure:invoicing.invoice_count',
-      'dataset-dimension:invoicing.invoice_status',
-      'dataset:line_sales',
-      'dataset-measure:line_sales.line_amount',
-      'dataset-measure:line_sales.units_sold',
-      'dataset-dimension:line_sales.line_product',
+      'dataset:trip_plan',
+      'dataset-measure:trip_plan.estimated_spend',
+      'dataset-measure:trip_plan.trip_days',
+      'dataset-dimension:trip_plan.trip_status',
+      'dataset:reimbursement',
+      'dataset-measure:reimbursement.claimed_amount',
+      'dataset-measure:reimbursement.claim_count',
+      'dataset-dimension:reimbursement.claim_status',
     ]);
     expect(checks.every((c) => c.pass)).toBe(true);
   });
 
   it('a missing synonym, a missing description, a missing member, another base object and a missing dataset each fail their own check', () => {
     const fails = (mutate: (a: RawCard) => void) => built(mutate).filter((c) => !c.pass).map((c) => [c.check, c.detail]);
-    expect(fails((a) => a.datasets[1].measures[0].synonyms.pop())).toEqual([['dataset-measure:line_sales.line_amount', 'no synonym "销售额"']]);
-    expect(fails((a) => delete a.datasets[0].measures[0].description)).toEqual([['dataset-measure:invoicing.invoiced_total', 'no description']]);
-    expect(fails((a) => a.datasets[0].dimensions.pop())).toEqual([['dataset-dimension:invoicing.invoice_status', 'missing']]);
-    expect(fails((a) => (a.datasets[0].object = 'demoinvoice_account'))).toEqual([['dataset:invoicing', 'on demoinvoice_account, not demoinvoice_invoice']]);
-    expect(fails((a) => a.datasets.pop()).map(([c]) => c)).toEqual(['dataset:line_sales', 'dataset-measure:line_sales.line_amount', 'dataset-measure:line_sales.units_sold', 'dataset-dimension:line_sales.line_product']);
+    expect(fails((a) => a.datasets[1].measures[0].synonyms.pop())).toEqual([['dataset-measure:reimbursement.claimed_amount', 'no synonym "报销金额"']]);
+    expect(fails((a) => delete a.datasets[0].measures[0].description)).toEqual([['dataset-measure:trip_plan.estimated_spend', 'no description']]);
+    expect(fails((a) => a.datasets[0].dimensions.pop())).toEqual([['dataset-dimension:trip_plan.trip_status', 'missing']]);
+    expect(fails((a) => (a.datasets[0].object = 'demotravel_employee'))).toEqual([['dataset:trip_plan', 'on demotravel_employee, not demotravel_trip_request']]);
+    expect(fails((a) => a.datasets.pop()).map(([c]) => c)).toEqual(['dataset:reimbursement', 'dataset-measure:reimbursement.claimed_amount', 'dataset-measure:reimbursement.claim_count', 'dataset-dimension:reimbursement.claim_status']);
   });
 });

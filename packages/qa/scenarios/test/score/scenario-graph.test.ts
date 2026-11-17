@@ -85,7 +85,15 @@ const EXPECTED_GRAPH = {
       { target: 'member', resolves: false },
     ],
   }],
-  datasets: [{ name: 'loan_metrics', measures: ['loan_count'] }],
+  datasets: [{
+    name: 'loan_metrics',
+    object: 'loan',
+    measures: ['loan_count'],
+    members: [
+      { kind: 'measure', name: 'loan_count', synonyms: [], described: false },
+      { kind: 'dimension', name: 'status', synonyms: [], described: false },
+    ],
+  }],
 };
 
 /** The stack parsed as `os build` parses it, round-tripped through JSON as the artifact file is. */
