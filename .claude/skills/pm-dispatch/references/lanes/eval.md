@@ -41,3 +41,4 @@
 
 - 本仓:`docs/qa/scenarios/**`、`packages/qa/`、`packages/cli/src/lint/` 下的跑分器文件。
 - cloud:`packages/service-ai-studio/src/evals/` 的运行与题库维护;代码修改仍走对应车道。
+- cloud 场景库专题建完场景库、运行器与跑分器后,例行运行移交本席,该专题关闭。

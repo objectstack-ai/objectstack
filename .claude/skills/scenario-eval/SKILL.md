@@ -53,10 +53,10 @@ metadata:
   `F` 是该卡已验证的构建,命名空间与卡不符的会被跳过,所以一卡一条命令(`--only ID`);同一份构建跨轮复用,
   换了构建,Reading 点名这一变量。
 - **问数日轮的节奏**:每天一轮 `--ask-repeats 1`,每周一轮 `--ask-repeats 5`;操作回合不重复,只跑一次(README〈Repeats〉)。
-- **问数日轮尚未能跑**:ask 模式现只做非托管安装(`orchestrate.ts` `withInstalledBuild` → `installUnmanaged`),
-  平台拒收带 `capability` 项的包(`422 UNMANAGED_INSTALL_UNCOPYABLE`,`capability` 是 `allowRuntimeCreate: false`);
-  #34687 线程实测 `travel_expense` 的已验证构建因此一题未问。托管安装回退与 `asked-back` 评分修正都归 #34687,
-  尚未落地;落地前日轮不开跑。
+- **问数日轮的开跑条件**:日轮在 #34911(ask 模式遇 `422 UNMANAGED_INSTALL_UNCOPYABLE` 改走托管安装)与 #34882
+  (`asked-back` 不把候选个数、单写的年份算作数字)都合并之后开跑;开跑前查一次两者已合并,未合并就不开跑。
+  缘由:非托管安装拒收带 `capability` 项的包(`capability` 是 `allowRuntimeCreate: false`),#34687 线程实测
+  `travel_expense` 的已验证构建在非托管安装下因此一题未问。
 
 ## 2. 配置
 
@@ -103,7 +103,7 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
   --model haiku --effort medium --create-version VERSION \
   --out "$OUT" --record "$OUT/run.rec.json" > "$OUT/run.log" 2>&1 &
 
-# 问数日轮:一卡一条;卡名照 §1 从卡文件重读,F 是该卡已验证构建的绝对路径(§1:尚未能跑)
+# 问数日轮:一卡一条;卡名照 §1 从卡文件重读,F 是该卡已验证构建的绝对路径(先查 §1 的开跑条件)
 OUT=/abs/path/eval-runs/DATE-ask/haiku-medium/order_to_cash && mkdir -p "$OUT"
 nohup pnpm --filter @objectstack/scenarios run-scenarios \
   --only order_to_cash --modes ask --template /abs/path/F.json \
