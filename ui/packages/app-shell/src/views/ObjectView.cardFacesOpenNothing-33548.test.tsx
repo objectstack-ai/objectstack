@@ -147,6 +147,7 @@ function answer(opts: { apiOperations?: string[]; allowEdit?: boolean }): MePerm
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['admin'],
     systemPermissions: [],
     objects: {

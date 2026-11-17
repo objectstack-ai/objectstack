@@ -828,6 +828,7 @@ describe('AppHeader — the Activity tab asks only a caller who may read sys_act
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member_default'],
     objects: {
       sys_inbox_message: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },

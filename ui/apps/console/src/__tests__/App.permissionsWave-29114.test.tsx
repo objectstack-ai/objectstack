@@ -65,7 +65,7 @@ const ORG = { id: 'org_1', name: 'Acme', slug: 'acme' };
 function respond(input: unknown): Promise<Response> {
   const url = String(input);
   const body = url.includes('/auth/me/permissions')
-    ? { authenticated: true, userId: 'u1', tenantId: ORG.id, positions: [], permissionSets: [], objects: {}, fields: {}, hasAnyQueue: false }
+    ? { authenticated: true, userId: 'u1', tenantId: ORG.id, positions: [], permissionSets: [], objects: {}, fields: {}, hasAnyQueue: false, objectsUsingQueues: [] }
     : url.includes('/me/apps')
       ? { apps: [] }
       : {};
