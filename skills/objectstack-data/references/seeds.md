@@ -49,6 +49,8 @@ export const SeedData = [statusSeed, categorySeed];   // parents first
 | `mode` | `'ignore'` | Import strategy (see below) |
 | `columns` | — | Per-column write policy, keyed by field: `{ FIELD: { applyOn: 'create' } }` (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
+| `locale` | — (every locale) | BCP-47 tags the seed loads for; a locale no set of the object names gets none |
+| `fallback` | — | `true` on ONE `locale` set per object: also loads where no set names the locale (needs `locale`) |
 | `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
 
 Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
