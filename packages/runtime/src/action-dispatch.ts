@@ -698,7 +698,7 @@ async function dispatchAdmittedAction(
         // implementation of the rule (#16370), ahead of everything that builds
         // a trusted context. [#28657] Except ahead of an api forward that needs
         // nothing from the row: its target authorizes the caller itself.
-        actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject);
+        actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject, ec);
 
         // ── api forward (#27506) ── a same-origin `type: 'api'` action is
         // forwarded IN-PROCESS to its declared `target` with the caller's own

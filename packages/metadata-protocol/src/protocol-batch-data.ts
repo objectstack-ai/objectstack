@@ -465,7 +465,7 @@ async function runBatchDataRows(
                     // not-found gate ahead of every hook), so a refused row
                     // reads the same whether or not its id names a record —
                     // see `assertRecordExists`.
-                    if (updated == null) await this.assertRecordExists(object, record.id);
+                    if (updated == null) await this.assertRecordExists(object, record.id, context);
                     omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                     results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                     succeeded++;
@@ -959,7 +959,7 @@ export async function runUpdateManyLoop(
                 // refusals, then its not-found gate ahead of every hook), so a
                 // refused row reads the same whether or not its id names a
                 // record — see `assertRecordExists`.
-                if (updated == null) await this.assertRecordExists(object, record.id);
+                if (updated == null) await this.assertRecordExists(object, record.id, context);
                 omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;
