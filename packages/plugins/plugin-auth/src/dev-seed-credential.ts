@@ -328,7 +328,7 @@ export async function stageDevSeedCredential(email: string): Promise<void> {
 export async function stampDevSeedCredential(
   engine: DevSeedCredentialEngine | undefined,
   account: unknown,
-  logger?: { error?(message: string, meta?: unknown): void },
+  logger?: { error?(message: string, meta?: Record<string, unknown>): void; warn(message: string, meta?: Record<string, unknown>): void },
 ): Promise<void> {
   let staged: { email: string } | undefined;
   try {
@@ -363,12 +363,13 @@ export async function stampDevSeedCredential(
     );
     await stagedSeedCreation.set(undefined);
   } catch (e) {
-    logger?.error?.(
+    const message =
       `[auth] the development seed created user ${userId} but its seed stamp was NOT written: the account works, `
         + 'and on a server that is not in development mode it is refused only while its password is the default '
         + `seed password, not a custom one. Remedy: set a new password with \`${OPERATOR_PASSWORD_RESET_COMMAND} <email>\` `
-        + 'before serving this database outside development, or delete the database and seed it again.',
-      { error: (e as Error)?.message },
-    );
+        + 'before serving this database outside development, or delete the database and seed it again.';
+    const meta = { error: (e as Error)?.message };
+    if (logger?.error) logger.error(message, meta);
+    else logger?.warn(message, meta);
   }
 }

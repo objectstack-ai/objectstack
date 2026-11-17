@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 322 |
+| Write call sites | 325 |
 | Object name statically decidable | 227 |
-| Object name chosen at run time | 95 |
+| Object name chosen at run time | 98 |
 | Against a tenancy-enabled object | 220 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 251 |
+| Threading a tenant context | 254 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 181 |
+| Threading a decidably elevated context | 184 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 129 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-16 at `94cb58c3d`.
+Measured on 2026-11-17 at `94a0d2d44`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1186 |
-| engine-shaped types recognised | 142 |
+| tracked non-test sources scanned | 1192 |
+| engine-shaped types recognised | 144 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 323 |
+| same-named calls subtracted as non-engine | 327 |
 
 ## Every site
 
@@ -162,6 +162,7 @@ Measured on 2026-11-16 at `94cb58c3d`.
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/dev-seed-credential.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | elevated | 1 |
@@ -182,6 +183,8 @@ Measured on 2026-11-16 at `94cb58c3d`.
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `delete` | `objectName` | undecidable | PROVABLY NONE | 5 |
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `insert` | `objectName` | undecidable | options unreadable | 2 |
 | `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `update` | `objectName` | undecidable | options unreadable | 5 |
+| `packages/plugins/plugin-auth/src/operator-password-reset.ts` | `update` | `SystemObjectName.ACCOUNT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/operator-password-reset.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team_member` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
