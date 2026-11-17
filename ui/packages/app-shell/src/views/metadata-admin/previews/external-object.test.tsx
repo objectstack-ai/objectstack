@@ -10,7 +10,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 
 const metaGet = vi.fn();

@@ -21,7 +21,7 @@ import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { t, tFormat } from '../i18n';
+import { t } from '../i18n';
 
 type Row = Record<string, unknown>;
 
