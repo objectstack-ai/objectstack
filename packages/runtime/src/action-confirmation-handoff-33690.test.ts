@@ -109,7 +109,7 @@ function makeHarness(opts: { service?: unknown; audit?: unknown; screens?: Reado
         }),
         // A resume submits the current screen and moves the run on to the next
         // one, still `paused` under the same run id, or completes it after the last.
-        resume: vi.fn(async (runId: string) => {
+        resume: vi.fn(async (runId: string, _signal?: { variables?: Record<string, unknown> }) => {
             const run = runs.get(runId)!;
             run.screen += 1;
             if (run.screen < screens.length) {
