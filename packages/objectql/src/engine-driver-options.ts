@@ -81,6 +81,7 @@ import {
   type TenantLayer0Verdict,
 } from '@objectstack/spec/security';
 import { isFederatedObject } from './federated-object.js';
+import { LockRowsRefusedError } from './lock-rows-refusal-error.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -96,6 +97,7 @@ export interface DriverOptionsHost {
   readonly _registry: ObjectQL['_registry'];
   readonly tenancyPostureProvider: ObjectQL['tenancyPostureProvider'];
   isClosedUnitHandle: ObjectQL['isClosedUnitHandle'];
+  getDriver: ObjectQL['getDriver'];
   transactionCoversDriverFor: ObjectQL['transactionCoversDriverFor'];
   driverWriteTarget: ObjectQL['driverWriteTarget'];
   driverReadScope: ObjectQL['driverReadScope'];
@@ -287,7 +289,7 @@ export function mergeDriverOptionsIntoHookView(
  * this helper does not mask the system path.
  */
 export function buildDriverOptions(
-  this: Pick<DriverOptionsHost, 'isClosedUnitHandle' | 'txStore' | 'transactionCoversDriverFor' | '_registry' | 'driverWriteTarget' | 'driverReadScope' | 'wallExemptedOperation'>,
+  this: Pick<DriverOptionsHost, 'getDriver' | 'isClosedUnitHandle' | 'txStore' | 'transactionCoversDriverFor' | '_registry' | 'driverWriteTarget' | 'driverReadScope' | 'wallExemptedOperation'>,
   object: string,
   execCtx?: ExecutionContext,
   base?: any,
@@ -356,6 +358,21 @@ export function buildDriverOptions(
   // `bypassTenantAudit` / `transaction` still win below), never the rest of
   // the bag it rode in on. See {@link pickDeclaredDriverOptions}.
   const declared = pickDeclaredDriverOptions(base);
+  // [#34373] A caller's `lockRows` is a promise it will act on, so it reaches a
+  // driver only where it holds: the object's driver declares
+  // `supports.lockRows`, and a transaction reaches that driver for the call
+  // (the open unit's handle, or the caller's own). Otherwise it is refused
+  // here, before any driver runs, rather than read unlocked in silence. See
+  // {@link LockRowsRefusedError}.
+  if (declared?.lockRows === true) {
+    const driver = this.getDriver(object);
+    if (driver?.supports?.lockRows !== true) {
+      throw new LockRowsRefusedError(object, 'driver-cannot-lock', driver?.name);
+    }
+    if (!hasTx && declared.transaction === undefined) {
+      throw new LockRowsRefusedError(object, 'no-transaction', driver.name);
+    }
+  }
   if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return declared;
   const opts: any = declared ?? {};
   if (hasTx && opts.transaction === undefined) {
