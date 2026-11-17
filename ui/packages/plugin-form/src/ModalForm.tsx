@@ -35,6 +35,7 @@ import {
   AlertDialogCancel,
   RecordTopBarButton,
   toast,
+  FormSectionNavContext,
 } from '@object-ui/components';
 import { Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
@@ -86,6 +87,7 @@ import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
 import { useInitialFieldFocus } from './initialFieldFocus';
+import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
 import { FormDirtyReportContext } from './formDirtyReport';
 import { useModalFormMaximized } from './modalMaximize';
 
@@ -372,6 +374,11 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // Upload-in-flight gate (objectui#10166): Save is refused, disabled and
   // EXPLAINED while a file/image widget below is still uploading.
   const uploadGate = useUploadGate();
+  // The section navigation between the header and the scrolling body
+  // (objectstack#34605): the form reports its visible sections, the dialog
+  // draws them where they stay in view while the body scrolls.
+  const sectionNav = useFormSectionNav();
+  const drawsSectionNav = (sectionNav.items?.length ?? 0) >= 2;
   const previewMode = usePreviewMode();
   const perms = usePermissions();
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
@@ -510,6 +517,12 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     ? effectiveSections.reduce((n, s) => n + (Array.isArray(s.fields) ? s.fields.length : 0), 0)
     : layoutPool.length;
 
+  // The header's maximize switch (objectstack-ai/objectstack#34604):
+  // maximized, the dialog is `full` whatever its authored or inferred size,
+  // and every reader of the size below — the width class and the undeclared
+  // column count — reads that effective size.
+  const { maximized, toggleMaximized } = useModalFormMaximized(schema.objectName);
+
   // The dialog's size when the author declared none (objectui#12521): bounded
   // — `lg` or `xl`, never `full` — and chosen from the declared grid and the
   // field count, so a short form is not stretched across a wide dialog. An
@@ -517,12 +530,6 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // undeclared grid is at least `DIALOG_DEFAULT_COLUMNS` wide whatever the
   // size, so the size reads that floor and never the count it then bounds
   // (objectstack-ai/objectstack#34607).
-  // The header's maximize switch (objectstack-ai/objectstack#34604):
-  // maximized, the dialog is `full` whatever its authored or inferred size,
-  // and every reader of the size below — the width class and the undeclared
-  // column count — reads that effective size.
-  const { maximized, toggleMaximized } = useModalFormMaximized(schema.objectName);
-
   const effectiveModalSize = useMemo(() => {
     if (maximized) return 'full';
     if (schema.modalSize) return schema.modalSize;
@@ -1257,7 +1264,9 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     </RecordTopBarButton>
   );
   // The header keeps its title clear of the switch and the X from `sm` up.
-  const headerClass = 'shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 sm:pr-20 pb-2 border-b';
+  // Its bottom rule is each arm's: the flat arm hands it to the section nav
+  // strip when one is drawn.
+  const headerClass = 'shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 sm:pr-20 pb-2';
 
   // Unsaved-changes guard — rendered INSIDE DialogContent so its portal
   // inherits the Dialog's Radix layer context (focus scope + dismissable
@@ -1302,7 +1311,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           data-maximized={maximized ? '' : undefined}
         >
           {(schema.title || schema.description) && (
-            <DialogHeader className={headerClass}>
+            <DialogHeader className={cn(headerClass, 'border-b')}>
               {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
               {schema.description ? (
                 <DialogDescription>{schema.description}</DialogDescription>
@@ -1371,7 +1380,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
         data-maximized={maximized ? '' : undefined}
       >
         {(schema.title || schema.description) && (
-          <DialogHeader className={headerClass}>
+          <DialogHeader className={cn(headerClass, !drawsSectionNav && 'border-b')}>
             {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
             {schema.description ? (
               <DialogDescription>{schema.description}</DialogDescription>
@@ -1383,6 +1392,8 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           </DialogHeader>
         )}
 
+        <FormSectionNavContext.Provider value={sectionNav.sink}>
+        <FormSectionNav items={sectionNav.items} className="shrink-0 px-2 sm:px-4" />
         <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
           {/* Every upload widget below reports into this scope, however deep —
               a section, a tab, a subform row (objectui#10166). */}
@@ -1395,6 +1406,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
             </Suspense>
           </UploadGateProvider>
         </div>
+        </FormSectionNavContext.Provider>
 
         {/* Sticky footer — always visible action buttons */}
         {hasFooter && (

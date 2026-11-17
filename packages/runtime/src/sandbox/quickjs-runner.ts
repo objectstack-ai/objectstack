@@ -1033,6 +1033,44 @@ export class QuickJSScriptRunner implements ScriptRunner {
       titleFn.dispose();
     }
 
+    // ── [#34374] `ctx.text(key, params?)` — a declared text, in the
+    // organization's language ────────────────────────────────────────────────
+    //
+    // Installed when the host built the seam (hook bodies, `hook-text.ts`). The
+    // same deferred-promise pump as `title`, never `newAsyncifiedFunction`, for
+    // the same reason: a body awaits it beside `ctx.api` calls. No capability:
+    // it reads no record, and the language it reads is the platform's.
+    // `vm.dump` for both arguments, like every other bridge here; a `params`
+    // that is not a plain object is handed over as no params.
+    if (typeof ctx.text === 'function') {
+      const textFn = vm.newFunction('text', (keyH, paramsH) => {
+        const key = keyH === undefined ? undefined : vm.dump(keyH);
+        const rawParams = paramsH === undefined ? undefined : vm.dump(paramsH);
+        const params = rawParams !== null && typeof rawParams === 'object' && !Array.isArray(rawParams)
+          ? (rawParams as Record<string, unknown>)
+          : undefined;
+        const deferred = vm.newPromise();
+        deferreds.add(deferred);
+        void (async () => {
+          try {
+            const value = await ctx.text!(String(key), params);
+            if (!vm.alive) return;
+            const h = jsonToHandle(vm, value);
+            deferred.resolve(h);
+            h.dispose();
+          } catch (err) {
+            if (!vm.alive) return;
+            const errH = hostErrorToVm(vm, err);
+            deferred.reject(errH);
+            errH.dispose();
+          }
+        })();
+        return deferred.handle;
+      });
+      vm.setProp(ctxObj, 'text', textFn);
+      textFn.dispose();
+    }
+
     // ── [#28251] `ctx.notice(message)` — tell the saver what the save did ───
     //
     // Installed only when the host handed the engine's member over (the hook
