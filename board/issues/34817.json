@@ -1,0 +1,31 @@
+{
+  "number": 34817,
+  "kind": "pull_request",
+  "title": "fix(audit): a search the server widens never names a column the caller may not query",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "os-steve",
+    "id": 317605050,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T11:32:20Z",
+  "updated_at": "2026-11-17T12:57:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34817",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi96xkbCcbB1nF3xM9vBtrWwE)_\n\nFixes #34700\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — no skill or docs page teaches this search set.\n\nScope: the server half of the card as corrected by 6943935258 (claim 6944772620), the list search only. Per the maintainer ruling 6946587690, the card's other items are not in this PR (the ui half is #34741).\n\n## 维护者速读\n\n- **改了什么：** 服务端为搜索自动选出的字段集，不再包含对象自身查询守卫会对该调用者拒绝的列，和 #25672 对「调用者不能查询的字段」的处理一致。调用者在 `searchFields` 里自己点名的列不扣，照旧交守卫判定。\n- **为什么改：** 修 #34700 的列表搜索：守卫的列以前不在安全服务的答案里，所以服务端会替调用者把它们放进搜索集。\n- **风险与回滚：** 守卫本身不变，仍是唯一执行点。新增引擎注册口 `ObjectQL#registerSearchFieldWithholder`，plugin-audit 为 `sys_audit_log` 和 `sys_activity` 各注册一个，用守卫自己的规则作答。不动 spec。回滚即还原本 PR。\n- **先看：** `packages/plugins/plugin-audit/src/parent-field-query-guard.ts` 的 `withheldSearchColumns` 与 `guardRefuses`；`packages/objectql/src/engine-find.ts` 的 `resolveSearchWithheldFields`。\n- **两分钟验证：** `pnpm --filter @objectstack/objectql exec vitest run src/engine-search-field-withholder.test.ts`，预期全绿。\n- **需要你做的：** 出队后的这一笔把一条既有的安全 dogfood 钉从「拒」改为「答而不泄」（匹配与不匹配答得一样；点名守卫列仍拒），请确认。\n\n## What changes\n\n- `packages/objectql`: `ObjectQL#registerSearchFieldWithholder(object, withholder)` (body in `engine-middleware-and-context.ts`; the facade stays delegation-only and under its line ceiling). Before a non-blank `search` is expanded, the withholders registered for the object name fields to leave out of the server-resolved set, beside the `getQueryableFields` answer (`search-filter.ts` `withheldFields`). A field the caller names in `searchFields` is kept. Context-less reads and blank terms ask nothing. A set left empty is the existing `400 INVALID_FIELD`. A throw propagates.\n- `packages/plugins/plugin-audit/src/parent-field-query-guard.ts`: the guard's verdict is one function (`guardRefuses`) shared by the middleware and the new withholder, so the two answer the same rule. An engine without the seam keeps the guard alone.\n- `content/docs/permissions/system-context.mdx`: the census row for the guard owns the new symbol.\n\n## Tests\n\n- `packages/objectql/src/engine-search-field-withholder.test.ts` (new): the seam's contract on `find` / `findOne` / `count`: what is asked, a named field kept, nothing withheld leaves the set whole, context-less and blank searches ask nothing, another object's withholder is not asked, an emptied set is `400 INVALID_FIELD`, a throw propagates.\n- `plugin-audit` `audit-log-predicate-guard.test.ts` and `activity-predicate-guard.test.ts`: the search cases now pin the rule above for both objects, pinned and unpinned, plus `count`; a search naming a guarded column is still refused; the unrestricted control is unchanged.\n- `packages/qa/dogfood/test/audit-log-audit-capability.dogfood.test.ts`: the same rule at the HTTP door on a real boot, for the capability holder, the read-only member and the platform administrator control.\n\n## Verification\n\nHead `12455d5acc`: `54107ea2ac` (L1-c2 ACCEPT 6947307277) plus one test commit after the merge-queue ejection (anchor #34829): an existing dogfood pin in `activity-text-predicate.dogfood.test.ts` asserted the refusal this rule removes; it now asserts the rule (a server-widened search answers a matching and a non-matching probe alike; a search naming a guarded column is still refused). Full dogfood battery at this head under the lock: 478 passed / 3 skipped files, 4056 passed / 68 skipped tests.\n\nAt `54107ea2ac` (merge base `origin/main` 6091b645fd):\n- Suites under the lock: objectql full 608 files / 13617 tests passed (same source, before the rebase onto 6091b645fd); at the head, plugin-audit full 101 files / 1702 tests, objectql search set (`src/engine-search*`, `src/search-filter*`) 62/62, dogfood `audit-log-audit-capability` 14/14. Typecheck objectql and plugin-audit exit 0.\n- Derived gates: `dispatch-gates.mjs --ran` 107 derived, 107 run, 0 NOT-MEASURED, all exit 0, after a full closure build (`turbo run build --continue --filter='!@objectstack/docs'`, exit 0).\n- Ablations (rule-level): the withholder registration removed turns the new plugin-audit search cases red (6) and the dogfood search case red (1), the named-column refusals stay green; restored, all green. Log: area share `34700-ablation.log`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRPxhTmqbUbMrqygh4\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRPxhTmqbUbMrqygh4 -->\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

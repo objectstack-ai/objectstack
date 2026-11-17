@@ -1,0 +1,33 @@
+{
+  "number": 34767,
+  "kind": "issue",
+  "title": "datasets: on a zero-match list_datasets returns near candidates and an ambiguity note, for asking back only (E2 re-ruled to A)",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T10:08:17Z",
+  "updated_at": "2026-11-17T10:20:07Z",
+  "closed_at": "2026-11-17T10:20:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34767",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nA person asks for \"revenue\"; the app has Won Revenue, Annual Revenue and Planned Revenue and no metric named exactly that. The server answers \"no match\", the client falls back to raw rows and states one number with confidence, and the person never learns there were three readings.\n\nWho acts: the spec lane for the tool's output shape, the server lane for the matcher and the tool (`packages/spec/src/ai/dataset-tools.zod.ts`, `packages/services/service-analytics`, `packages/mcp`). Reader: every client that asks a question, with or without a skill.\n\n## Evidence\n\n- `packages/services/service-analytics/src/dataset-term-matcher.ts`: equality after normalisation is a hit; \"a substring, a stem or a near neighbour is not a hit\". On no hit the result carries an empty `matches` and nothing else.\n- A live hosted CRM environment, 30 natural business words in one call: 6 matched; `revenue`, `deals`, `customers` and `sales` matched nothing although measures contain them.\n- `examples/app-crm`, five repetitions per arm: with no skill the client never asked back on a near-miss word; with a skill branch written for it, it did so only part of the time. A tool result is read by every client that made the call; a tool description or a skill is not.\n- Comparable servers answer this in the result: Lightdash `grep_fields` returns closest catalogue matches with an ambiguity note; Snowflake Cortex Analyst documents a `suggestions` field.\n\n## Scope\n\n- When a term matches nothing, the dataset result lists `candidates`: members whose name, label or synonym contains the normalised term, each with label, dataset label and description, marked as not a match. Only members the caller may see.\n- A short note in the result when two or more candidates exist: several readings, ask which is meant.\n- A candidate is never selected by the server and never changes `matches`. ADR-0149 D3 keeps its definition of a match and gains a note recording this ruling.\n- The ask-data skill (#34685) and the served text gain the matching branch: candidates listed means ask, compute nothing yet.\n\n## Done when\n\n- `list_datasets({terms:['revenue']})` on `examples/app-crm` returns the candidates and no match; a term with one exact match returns no candidates.\n- A pin shows a withheld member is never a candidate.\n- The five-repetition ask round (#34687) shows the client asking back on near-miss words.\n\n## Relations\n\n- Parent: #34659. Decision record: #34691 F1 = B. Related: #34685, #34687, #34718.\n- Dedup, open and closed: `list_datasets synonyms` 1 hit, the parent; `list_datasets candidates` none."
+}

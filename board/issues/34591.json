@@ -2,8 +2,8 @@
   "number": 34591,
   "kind": "issue",
   "title": "头像菜单：组织相关菜单项按部署形态显示（单租户不显示），切换组织收进菜单，设置里可覆盖",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "lease:o3-D",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T02:50:14Z",
-  "updated_at": "2026-11-17T07:13:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T14:17:08Z",
+  "closed_at": "2026-11-17T13:47:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34591",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「还要注意切换环境的菜单，组织管理的菜单，只有云端的租户才会有」「私有部署的环境，如果是单租户模式，也不需要显示我的组织。这些应该在设置中都可以配置。」「左上角应该是切换应用的，切换环境操作并不常用。」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 头像菜单写在 `ui/packages/app-shell/src/layout/AppHeader.tsx`（约 :1229–1404）。「My Organizations」(:1310 附近) 和「Create organization」(:1320 附近) 只看 `hasOrgSection`（:604：有组织就显示）。\n- 顶栏另挂着组织切换器 `WorkspaceSwitcher`（:936）。\n- 界面上没有「是否云端托管」「是否单租户」的信号；没有通往云端控制面的链接；云端一层今天没有往租户界面里注入任何菜单项。\n- 唯一的扩展口是 `hidden: true` 的应用会被列进这个菜单（:1343–1358）。\n\n## 要做的\n\n1. 给界面一个部署形态信号（单租户 / 多组织 / 云端托管），来源由 `domain:server` 或设置服务提供，界面只读。\n2. 默认行为：单租户不显示任何组织菜单项；多组织显示「我的组织」「创建组织」，并在用户加入多个组织时显示「切换组织」；云端托管由云端一层注入「切换组织」与通往云端的「组织管理」，不显示「创建组织」。\n3. 顶栏的 `WorkspaceSwitcher` 收进头像菜单（左上角留给应用切换器）。\n4. 提供一个菜单扩展点，让云端一层能声明菜单项（标签、目标地址、可见条件），⛔ 平台界面里不写死任何云端地址。\n5. 设置（Setup）里加一项「组织菜单」：自动（默认，按部署形态）/ 始终显示「我的组织」/ 隐藏全部组织菜单项。\n\n## 不做的\n\n- 云端一侧的注入内容与登录落点在 cloud 仓另立子卡。\n- 不改组织页本身。\n\n## 验收\n\n1. 单租户部署：头像菜单里没有任何组织项，顶栏没有组织切换器。\n2. 多组织部署、用户只在一个组织：有「我的组织」，没有「切换组织」。\n3. 设置里选「隐藏」后，多组织部署也不显示组织项。\n4. 平台仓里搜不到云端控制面的地址。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 6 头像菜单（三种部署形态）</summary>\n\n![图 6 头像菜单（三种部署形态）](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/06-app-switcher-org-entry.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `AppHeader.tsx` 与 `WorkspaceSwitcher.tsx`；部署形态信号与设置项需要 `domain:server` / `domain:services` 配合，扩展点的声明形状需要 `domain:spec`。\n\nDedupe: `repo:objectstack-ai/objectstack account menu \"My Organizations\" single tenant hide` → 1（#33096，QA 运行记录，无关）。"

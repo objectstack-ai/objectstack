@@ -1,0 +1,34 @@
+{
+  "number": 34849,
+  "kind": "issue",
+  "title": "ai routes: nits from PR #34736 — impersonatedBy trim vs \"carried as is\", AIRouteUser keys and oauth sentence, stale anonymous comment",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T13:41:00Z",
+  "updated_at": "2026-11-17T13:47:05Z",
+  "closed_at": "2026-11-17T13:47:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34849",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzfr1xZSFZzCR8HnqXX\n\nNits left by the reviews of PR #34736 (#34184, AI routes: `req.user` carries `impersonatedBy` and the admitting credential kind). The PR lands first under the maintainer's small-flaw rule (2026-11-17 12:44Z, 「只对 nit 级采用」); the nits are carried here as one card, as the seat asked.\n\nRecords: L1 ACCEPT 6949485711 and contract review PASS 6949621570, both at head `30f7347df0539e8fe0e56fcd21c93c9827e9c9a4`.\nBlocked-by: #34736\nSuggested-grade: p3 · domain:server · size S\n\n## 1. `impersonatedBy` is \"carried as is\", but `ai.ts` trims it (L1 N1, contract review N2)\n\n`ai.ts` sets `impersonatedBy` from `typeof ec.impersonatedBy === 'string' ? ec.impersonatedBy.trim() : ''`, and a blank value adds no key. The changeset, the `AIRouteUser.impersonatedBy` docblock and the code comment say \"carried as is\". Core already trims at the source (`resolve-authz-context.ts:693`), so on the dispatcher path the value is the same. The difference shows only for a host that passes its own padded context. Fix: change the wording to \"trimmed; a blank value adds no key\" (keep the trim, which is pinned by `a blank impersonatedBy adds no key`), or drop the trim.\n\n## 2. `AIRouteUser` re-declares `ActorUser`'s keys, and the `oauth` sentence is too wide (contract review N3)\n\n- Derive the shared keys of `AIRouteUser` from the spec type, or pin the two key sets equal. Today a key added to runtime's `ActorUser` alone is not caught, and it would publish an undeclared extra key on `req.user`.\n- The `oauth` bullet says both forms \"resolve to an agent principal carrying the token's scopes\". `apiForwardAgentOf`'s docblock allows an OAuth caller that the MCP door did not resolve to an agent (a token that names no client). That caller cannot reach an AI route, but the sentence should say the scope it covers.\n\n## 3. The anonymous comment is stale (contract review N1)\n\nThe `AIRouteUser` docblock says `user` is \"absent for an anonymous caller (reachable only on a route that declares `auth: false`)\". `handleAIRequest` also leaves `user` absent for an in-process context with `isSystem: true` and no `userId`, on any route. Name that case too."
+}

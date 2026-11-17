@@ -1,0 +1,37 @@
+{
+  "number": 34762,
+  "kind": "pull_request",
+  "title": "fix(app-shell): rename the deployment notice state module so it no longer differs from the component only in case",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:ui",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:56:30Z",
+  "updated_at": "2026-11-17T11:05:11Z",
+  "closed_at": "2026-11-17T11:05:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T11:05:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34762",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9R6fQuMSzSrRW2oowG4K2kQ)_\n\nPart of #34705\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — an internal module rename; no skill page names either file.\n\n> The first of two PRs for #34705. This one is the fix (the rename), so macOS builds work as soon as it lands. The second adds the repository-wide gate (`check:module-name-case`, one step in `lint.yml`, which is Tier H under the workflows split); it is held until this one merges, because the gate is red on `main` until then. The second PR closes the card.\n\n## 维护者速读\n\n- **改了什么**：`ui/packages/app-shell/src/console/deployment-notice/deploymentNotice.ts` 改名为 `deploymentNoticeState.ts`，它的两个导入方（`DeploymentNotice.tsx` 和它的测试）跟着改。一处注释里的文件名同步。\n- **为什么改**：同一目录里 `DeploymentNotice.tsx`（组件）和 `deploymentNotice.ts`（状态模块）只差大小写。在 macOS 默认的大小写不敏感文件系统上，`'../deployment-notice/DeploymentNotice.js'` 解析到了状态模块，`tsc` 构建 app-shell 失败（`TS2724`、`TS1261`）。\n- **风险与回滚**：纯改名，包的导出不变，行为不变。回滚即撤回本 PR。\n- **先看**：`DeploymentNotice.tsx:49` 的导入。\n- **两分钟验证**：`cd ui && pnpm exec vitest run packages/app-shell/src/console/deployment-notice`，预期全绿；`git ls-files ui/packages/app-shell/src/console/deployment-notice` 里不再有两个只差大小写的名字。\n- **需要你做的**：无；本 PR 走普通队列。\n\n## What changes\n\n- `deploymentNotice.ts` → `deploymentNoticeState.ts` (git rename, content unchanged).\n- `DeploymentNotice.tsx:49` and `__tests__/DeploymentNotice.test.tsx:31` import the new name; the docblock at `DeploymentNotice.tsx:27` names it.\n- `.changeset/34705-deployment-notice-state-module-name.md`: `@object-ui/app-shell` patch.\n\nThe component's importers (`console/home/HomePage.tsx:39`, `views/DashboardView.tsx:40`, the HomePage tests' `vi.mock('../../deployment-notice/DeploymentNotice')`) already spell the component and are untouched: on a case-insensitive file system they now reach the only file of that name.\n\n## Premise\n\nOn `origin/main` f6f5b50a05 the folder holds `DeploymentNotice.tsx` and `deploymentNotice.ts`. The pair differs in extension too, so a lower-cased `git ls-files` dedupe finds nothing; compared by the name an import spells (extension removed), they collide. A scan of every tracked path on `main` by that rule finds exactly this pair, and none on this branch (25,990 paths). Reproduced from the tree, not on a macOS file system (the container's is case-sensitive).\n\n## Verification\n\nSee the final-head comment for the head this covers.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request. (The card's gate follows as a second PR, as stated above.)\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (The 维护者速读 section is the maintainer's requested summary.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSYe73LCZ6WxGFvcko\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmSYe73LCZ6WxGFvcko -->\n"
+}

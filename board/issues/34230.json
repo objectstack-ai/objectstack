@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/s",
     "tooling"
   ],
@@ -22,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T01:43:00Z",
-  "updated_at": "2026-11-16T22:29:42Z",
+  "updated_at": "2026-11-17T10:49:58Z",
   "closed_at": "2026-11-16T22:29:39Z",
   "closed_by": {
     "login": "os-zhuang",

@@ -1,0 +1,36 @@
+{
+  "number": 34835,
+  "kind": "pull_request",
+  "title": "test(cli): put two off-grid test-budget headers on the 10 s grid",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T12:39:44Z",
+  "updated_at": "2026-11-17T13:47:36Z",
+  "closed_at": "2026-11-17T13:47:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T13:47:34Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34835",
+  "body": "Fixes #34711\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：两个 CLI 集成测试头部的耗时预算改到 10 秒刻度上(58→60、65→70)，另三个头部补上或换成规定类别。\n- 为什么改：预算不在刻度上，耗时刷新工具读到就拒绝，回归读数整份「没量」。\n- 风险与回滚：只改注释行，不影响运行；回滚即还原这两行。\n- 先看：`dev-host-config-artifact-source.integration.test.ts` 第 2 行(除数值外还补了缺失的类别)。\n- 两分钟验证：对两个文件调用 `readTestBudget`(`scripts/measure-test-shard-timings.mjs` 导出)，预期返回 60 与 70 而不是抛拒绝。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `serve-multi-node-gate-declaration.integration.test.ts:2`: `58` to `60` (local reading 45.86 s x 1.25 = 57.3, rounded up to the grid).\n- `dev-host-config-artifact-source.integration.test.ts:2`: `65` to `70` (local reading 50.80 s x 1.25 = 63.5, rounded up). This header also had no `CLASS:` (the grammar refused it independently), so it now names `spawns the real producer once per single-cause fixture`.\n- Only these two were off-grid.\n\n- Three more headers now name a ruled class, SECONDS and REASON untouched: `serve-crypto-provider-plugin-load-failure` and `serve-set-aside-crypto-provider-plugin` (class text replaced), `start-deployment-durability` (CLASS segment was missing). All use `spawns the real producer once per single-cause fixture`.\n- Left unchanged on purpose: dogfood `service-account-lifecycle` and `service-account-register-key` (20 s, no CLASS). Each is one showcase boot for the whole file, which fits none of the three ruled classes; the class set is not ours to widen. They still refuse `readTestBudget` if the window reads them above 10 s.\n\n## Tests\n\nHeader comment only; the two files are `integration` tier CLI tests, declared to CI, not run locally.\n\n## Acceptance notes\n\n- Declared deviation: no CI reading exists for either file; both values derive from the local readings already in the headers (header rule: reading x 1.25, rounded up). Rounding is up, never down.\n- Declared deviation: the second file's class was chosen by this PR (five real boots, three of them single-cause controls); say if a different class is wanted.\n- `readTestBudget` over every header-bearing file on this head: 2 refused (the dogfood pair above; main refused 7). A looser grep also hits a prose line in `ui/packages/plugin-map/src/index.registration.test.tsx:29` (`// test budget: this file timed out...`), a pre-existing false positive of the reader, not a header.\n- Changeset: none; `packages/cli` ships `dist`, `README.md`, `CHANGELOG.md` only, test files are not published and packages/qa/dogfood is private (`skip-changeset`).\n\n## Verification\n\n- `readTestBudget` on both files after the change: `{seconds: 60}` and `{seconds: 70}`, class accepted; before: both refused (58 not on grid; 65 file grammar).\n- `node scripts/pm/overlap-check.mjs`: VERDICT clean; `check-nul-bytes`: OK.\n- NOT MEASURED: the full timings diff end to end (needs the CI window captures that PR #34314 consumes).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012MmDsS4GoHCgYwA2uv3n3C\n\n<!-- signed: repo:objectstack#4 · os-lizheng · session_012MmDsS4GoHCgYwA2uv3n3C -->"
+}

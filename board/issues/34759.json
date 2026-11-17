@@ -1,0 +1,33 @@
+{
+  "number": 34759,
+  "kind": "issue",
+  "title": "review follow-ups of PR #34708 (plugin dependency cycle refusal): ledger wording, stale door group, step label, resolver note",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:55:14Z",
+  "updated_at": "2026-11-17T09:58:47Z",
+  "closed_at": "2026-11-17T09:58:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34759",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ②: the four nits the contract review of PR #34708 (merged; Fixes #34574) left as follow-ups, comment 6943259717. Dedupe: `PLUGIN_DEPENDENCY_CYCLE` docs/nits; no open card.\n\nSuggested-grade: p3 · domain:server · documentation\n\n## Items\n\n- N1 — the ledger comment says \"two or more of whose packages depend on each other\"; a package whose `manifest.dependencies` names itself is refused under the same code with `details.cycle` of `['a', 'a']` (pinned in `plugin-order.test.ts`). Reword to \"one or more\".\n- N2 — the new row sits in the group headed \"The nine rows below are `door: 'none'` codes … none reaches an HTTP door on this tree\", while the sibling paragraph above still records install-local answering with `PLUGIN_REGISTER_FAILED` (stale on main since #34407 and #34432). Refresh the group count and the sibling door reading in one pass.\n- N3 — `declaredRefusalAnswer`'s docblock and the new test's title call the unrunnable-code step \"1c\"; in the handler it is `1d` (`1c` is the ADR-0087 protocol handshake).\n- N4 — `details.cycle` reaches the wire only because `declaredRefusalAnswer` reads `err.details` itself; the shared `resolveThrownHttpError` does not read a thrown `details`. Record this on the resolver for whoever adds a door that answers this refusal through it (no such door today).\n\nNo behaviour change; text and docblocks only.\n"
+}

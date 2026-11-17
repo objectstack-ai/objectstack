@@ -12,21 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "lease:o2-D",
+    "lease:o3-J",
     "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "os-steve"
+    "os-support-ai"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T03:27:04Z",
-  "updated_at": "2026-11-16T22:30:28Z",
+  "updated_at": "2026-11-17T12:50:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34273",
   "body": "## What\n\nSince 18.5.0 (#33214) a hook can declare a `refusals` catalogue and the server answers a hook refusal in the request's `Accept-Language`, with translations under `hooks.HOOK.refusals.CODE.reasons.REASON.message` in the package's translation packs.\n\nAn **action** body has no equivalent. A person-facing refusal thrown from an action body reaches the user in whatever language the author wrote it, with no way to declare or translate it.\n\n## Where we hit it\n\nAn app project on 18.5.0 moved all 83 hook refusals across 34 hooks into catalogues, with zh-CN, ja-JP and es-ES packs. Two person-facing throws in action bodies could not be moved and still answer in English in a Chinese UI:\n\n- an opportunity `mass_update_stage` action refusing a stage change;\n- a knowledge-article feedback action refusing an anonymous user (the \"sign in\" sentence).\n\n## Expected\n\nAn action can declare refusals the same way a hook does: code, optional reason, params, and `{{ }}` holes. The packs translate them under an `actions.ACTION.refusals…` key, and the REST and console answer carries the localized sentence on `userMessage`, like a hook refusal does.\n\n## Workaround\n\nNone that keeps the rule \"no hook or action composes language itself\". The app leaves these two sentences in English for now and does not work around the gap app-side."

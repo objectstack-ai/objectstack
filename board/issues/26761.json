@@ -2,8 +2,8 @@
   "number": 26761,
   "kind": "issue",
   "title": "[PM seat] domain:server · seat 3 — ⏳ vacant",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,17 +13,19 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-bill"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-27T14:46:52Z",
-  "updated_at": "2026-11-14T15:21:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T09:09:47Z",
+  "closed_at": "2026-11-17T09:09:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 26,
+  "comments": 27,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/26761",
   "body": "domain:server#3 · os-bill · session_01Utp6Ca8rgLxchMQbwak9gh\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 3**. Seat 1 is #6367, seat 2 is #20966, seat 4 is #27737, seat 5 is #28677, seat 6 is #29908 and seat 7 is #32231.\n\n<sub>Refreshed 2026-11-14T15:18Z (sign-off completed after the fact: the holder session stood down without flipping this post or closing its mailbox).</sub>\n\n## Current PM\n\n⏳ **vacant.** Previous holder: `os-bill` · `session_01Utp6CaAUev5V62cLHhQwBi` (project \"Objectstack 多币种 server\", thread 「运行 server 车道 p2 座位 B」), seated 2026-11-11T12:21Z, last active 2026-11-12T18:31Z. The sign-off steps it left were completed by `session_01Utp6Ca8rgLxchMQbwak9gh` (same account) on the order of the maintainer (Bill, `os-bill`), 2026-11-14 in the project \"Objectstack server 31527 devx\": 「你还有好几个信箱没关」 then 「说明相关座位下班流程当时没走完」. `check-handover.mjs --session=session_01Utp6CaAUev5V62cLHhQwBi --account=os-bill` exit 0. Successor: `/pm-dispatch 接手`, then read this post first.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#3` + `head:claude/` PRs.\n- **Landed this term:** #32395 (PR #32617, `b99291d138`).\n- **Handed back:** #32605, #32624, #32622 and #32662 (unstarted) handed back to the epic seat by the holder.\n- **In flight:** none. No claim of this seat is open; no card thread is running.\n- **Queue:** read live (`domain:server` + `pm:queue`); the lane has live sibling seats.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Mailbox:** PR #32417 closed 2026-11-14 (comment 6879225382); the next seat opens its own. **Patrol:** `trig_016y75jcVkTpYDakeSFoniJr` no longer scheduled (the account lists no enabled routine).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:server#3 · os-bill · session_01Utp6Ca8rgLxchMQbwak9gh -->\n"

@@ -2,8 +2,8 @@
   "number": 34668,
   "kind": "issue",
   "title": "表单自动排版：多文件 / 多图字段占整行（与详情页一致）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T05:19:10Z",
-  "updated_at": "2026-11-17T07:44:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T11:12:21Z",
+  "closed_at": "2026-11-17T11:11:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34668",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）；在飞卡 #34607 第 3 项的衍生，⛔ 不是认领。\n维护者 2026-11-17 在 3 号座位线程的选择卡上选了「只放宽多文件附件」（裁定记录见 #34607 的 `Ruled:` 评论）；同日原话「如果影响本专题相关任务落地的，你也应该挂到这个专题下继续开发」。\n\n## 现状（读码，objectstack `origin/main`）\n\n- #34607 让表单弹窗按容器宽度排到 3–4 列，卡面第 3 项要求附件独占整行；PR #34645 只交付了长文本 / 子表一半，附件仍占一格。\n- 表单的宽字段集合 `WIDE_FIELD_TYPES` 在 `ui/packages/plugin-form/src/autoLayout.ts:59` 起，模块私有，不含 file / image。\n- 详情页已有规则：`ui/packages/plugin-detail/src/autoLayout.ts:85–115` 的 `MULTI_FILE_FIELD_TYPES` + `isWideDetailField`，对象字段 `multiple: true` 的 file / image 占整行；单文件刻意不占（同文件 :80–83 注释，plugin-detail CHANGELOG 写明「entry form 由作者用 `span: 'full'` 放宽」）。\n- `ImageField.tsx:315` 是 `grid-cols-4` 的 `size-20` 缩略图，整行约 344px；4 列弹窗的一格约 240px，多图字段会挤（算术，未经浏览器实测）。\n\n## 要做的\n\n1. 表单自动排版（整页和弹窗同一规则）里，对象字段声明 `multiple: true` 的 file / image 字段占整行，判据与 `isWideDetailField` 相同（只读对象字段的 `multiple`）。\n2. 单文件 / 单图字段保持一格；作者显式写了 `span` 的照作者写的来。\n\n## 不做的\n\n- 不把 file / image 加进 `WIDE_FIELD_TYPES`（那会让单文件也占整行，推翻上面写明的设计）。\n- 不加新的元数据键。\n\n## 验收\n\n1. 一个含 `multiple: true` 图片字段的对象，新建弹窗（3–4 列）里该字段占整行，缩略图不重叠；整页表单同样占整行。\n2. 单文件字段仍占一格；写了 `span` 的字段不受影响。\n3. 现有钉住单文件一格的测试保持绿，新增多文件整行的钉子。\n\n## 业务理由与读者\n\n- 谁受益：录入带多张图片或多个附件的业务表单（报价、合同、工单）的用户；不做则 3–4 列弹窗里多图字段挤成一格、文件名被截断，#34607 的第 3 项落不了地。\n- 动手的读者：3 号座位 o3-B 区（表单区），排在 #34607 的 PR #34645 合并之后（同在 plugin-form autoLayout）。\n- 查重：`is:issue \"full row\" image OR file in:title` 9 条（含已关，前十条均无关）；`is:issue 附件 整行` 32 条，唯一相关为 #34607 本身；`is:issue MULTI_FILE_FIELD_TYPES` 1 条（#34607）。"

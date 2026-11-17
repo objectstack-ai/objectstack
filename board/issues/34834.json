@@ -1,0 +1,31 @@
+{
+  "number": 34834,
+  "kind": "issue",
+  "title": "4-hourly full run: red on main (CI)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T12:36:57Z",
+  "updated_at": "2026-11-17T12:47:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34834",
+  "body": "os-4-hourly-full-run-ci — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the 4-hourly full run finds this card instead of filing a new one every 4 hours.\n# 4-hourly full run: red on main (CI)\n_Swept 2026-11-17T12:36:53.714Z · [run log](https://github.com/objectstack-ai/objectstack/actions/runs/44079718096) · commit `3bbda33b78fff2681db9c09732347bc62ffc4cc6` · conclusion `failure`._\n`CI` runs the FULL battery on `main` every 4 hours (#16467, #25771). A `push` run on\n`main` tests only the packages the merge touched, and a merge-queue build tests only what the group\ncontained — so this scheduled run is the only thing that says whether the WHOLE tree is green, and\nthis card is the only channel that reports it. Nothing is blocked by it.\n⛔ The remedy is never to narrow, skip or delete the failing check to make the 4-hourly run green.\nFix what it names and let the next 4-hourly run refresh this card; a card nobody reopens is closed by\nthe next green run being uneventful, not by editing this one.\n## What landed since the last green 4-hourly run\nRange: `2e29287b93` (run 44043569490, the last green `CI` schedule run) .. `3bbda33b78` — [compare](https://github.com/objectstack-ai/objectstack/compare/2e29287b9355b406caa3e63ac35c836a59df9704...3bbda33b78fff2681db9c09732347bc62ffc4cc6)\n- `77b42a1ed0` fix(ui): on a phone the record page keeps Edit in its bottom bar, a compact stage bar and two-column key fields (#34684)\n- `e47c1cb2f7` fix(ui): phone list card shows its amount whole; field-tab strip scrolls at phone width (#34695)\n- `dc66d33082` feat(plugin-form): the form dialog maximizes in place like the record drawer, remembered per object (#34703)\n- `e61af97294` feat(sharing,ui): the In a queue toggle shows only on objects that use queues (#34674)\n- `f6f5b50a05` fix(lint): the inline-edit advisories read every inline-edit mode, not only inlineEdit: true (#34712)\n- `f02f4f6370` fix(core): refuse an artifact package cycle as 422 CYCLIC_ARTIFACT_PACKAGES; install-local answers resolver refusals instead of a 500 (#34708)\n- `a1082f3931` fix(plugin-audit): mark in-product AI calls on the action-invocation, data-export and dataset-query audit rows (#34679)\n- `84e6bbb8c6` feat(app-shell): the action result dialog draws table answer fields, and Import Users shows its result per row (#34647)\n- `ddab49de61` fix(metadata-protocol)!: a dependent's bundle-member row moves no bare read across a restart, and a row-held base's own member is the base's (#34644)\n- `d83a27566a` fix(ui): in a narrow record drawer a relative time stays on one line (#34732)\n- `8f36b0635f` docs(print-pages): leave avoidBreakInside off when a detail table can run past one sheet (#34733)\n- `6dd5716329` fix(plugin-auth)!: a change to a user's credential ends every other outstanding password-reset token of that user (#34667)\n- `4db3750549` feat(console): phone Home folds the setup checklist to one line after the apps; the phone bar's badge and title fit (#34723)\n- `c12fe6649f` docs(pm-dispatch): reading four skips an exempt same-seat claim (#34739)\n- `c4c0794dc0` fix(plugin-auth,app-shell)!: while mail is live, accepting an invitation needs a verified address (#34666)\n- `6091b645fd` feat(objectql): refuse a nested-relation condition and a lookup dimension up front on a driver without the readableIdsLeaf capability (#34565)\n- `f83f7c593e` chore(ci): refresh the Test UI per-file timings dataset (#34317)\n- `50d655fe11` fix(metadata-protocol)!: a package-less action save on an object no package binds the name to writes the environment's own action (#34238)\n- `3dc359948d` fix(lint): flow trigger rule counts the objects of a manifest's declared dependencies (#34663)\n- `73f3abbfb3` fix(ui): the approval request page heads the submitted record's field groups as real sections, with section links (#34743)\n- `9c70c166c9` fix(ui): record:path uses the compact path in a narrow record drawer, keyed on its own width (#34696) (#34737)\n- `64ccf6b07c` docs(adr): ADR-0155 accepted with the maintainer's answers to Q1–Q3 (#34735)\n- `81ea5042de` fix(plugin-detail): the approval badge says editable only when the record is editable (#34757)\n- `ba27c3b88b` docs(pm-dispatch): the cloud lane moves this repo's domain:cloud cards to cloud before working them, and dispatches only p1 (#34748)\n- `0afe509ca5` fix(app-shell): rename the deployment notice state module so it no longer differs from the component only in case (#34762)\n- `64c42855aa` fix(plugin-email): a host's own mail transport reads as in use on GET /api/settings/mail (#34731)\n- `7d904e07a2` ci: widen the Test Core matrix from 8 to 10 shards (#34727)\n- `07f2861fa0` docs(pm-dispatch): the verification seat is summonable: qa + eval in one seat, self-started rounds, daily ask baseline (#34745)\n- `a8aa6ab4e8` feat(plugin-form): a multi file / image field takes the whole row in the form auto-layout (#34698)\n- `1ee3bb82bd` fix(plugin-audit): an activity text names a referenced record by title only to a reader served that title field and admitted to its object (#34653)\n- `3bbda33b78` feat(console): the Studio landing is ordered by what the author came to do (#34747)\n_Filed by `.github/workflows/scheduled-full-run-card.yml`. Generated by [Claude Code](https://claude.ai/code)_"
+}

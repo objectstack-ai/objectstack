@@ -2,8 +2,8 @@
   "number": 34263,
   "kind": "issue",
   "title": "ADR-0150: amendment note — a package-less action row on an object no holder binds is the environment's own item (D4 action key; ruling on #34059)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T02:57:32Z",
-  "updated_at": "2026-11-16T03:50:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T12:39:44Z",
+  "closed_at": "2026-11-17T12:39:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34263",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jTkZnXtRhuEiiyidvJ\n\nFiling gate: a governed text owed by a maintainer ruling. The ruling on #34059 (record 6902014292, option B 「算环境自己的新动作」) says the save fix \"needs an ADR-0150 amendment note for object-bound actions (L181 / R15 read against the D4 action key)\". The code half is PR #34238 (`Fixes #34059`, server area S4). `docs/adr/**` is `domain:skills` text and Tier H, so the note is filed here, not folded into the server PR.\nPrior rulings read: maintainer ruling 6902014292 on #34059; ADR-0150 D4 (the action key `(package, objectName, name)`), L181 (\"a package-less row that bears a package-held name is a customization, never a second item\"), R15; #33898 (the read envelope and the action route key by object). Dedupe: searched open issues for `ADR-0150 amendment action`. The hits are #34059 (the code card) and #31527 (the design epic), and neither carries the note.\n\n## 维护者速读\n\n- 改什么：给 ADR-0150 补一条注记。动作绑在对象上时，“包持有的名字，不带包名的行就是该包的定制”这条（L181、R15）按 D4 的动作键 `(package, objectName, name)` 来读。环境在一个持有者都没绑的对象上不带包名保存同名动作，得到的是环境自己的动作，不会写进那个包。\n- 为什么：维护者在 #34059 选了方案 B，裁决要求补这条注记。代码在 PR #34238。\n- 需要你做的：Tier H 文本，合并需要维护者本人批准。\n\n## The note (drafted by the #34059 dev, report 6905929323; the lane owns the final wording)\n\nAfter D4's customization paragraph (L181), with a pointer from R15 (L311):\n\n> **Amendment note (2026-11-16, #34059 — PR #34238; maintainer ruling 6902014292).** For an action bound to an object, the customization rule above (a package-less row that bears a package-held name is a customization, never a second item) and R15 are read at D4's action key (package, objectName, name), not at (type, name). A package-less action row bound to an object that no holder of the name binds it to is the environment's own bucket-4 item on that object, beside each holder's item. It is never written into a holder, read as a holder's overlay, or moved by ADR-0146 D11's migration. An object-less action is its own key (global). A package-less row on the object a holder binds stays that holder's customization, and R15 is unchanged for it. The save doors write accordingly (`packages/metadata-protocol/src/protocol-save.ts`, `actionHeldOnlyOnOtherObjects`, and the draft address in `sys-metadata-repository.ts`). The read envelope and the action route already key by object (#33898). Moving a package's own action to another object takes a save naming the package (`?package=P`).\n\nR15 row, notes column, append: \"for an action, over a holder's (objectName, name) only (amendment note under D4).\"\n\n## Companion line (domain:spec, may ride this card's PR or the spec lane's next touch of the file)\n\nThe `SaveMetaItemRequest.packageId` `.describe` in `packages/spec/src/api/protocol.zod.ts`, mirrored in `content/docs/references/api/protocol.mdx`, states the package-less active-save address rule without the action exception. It should name the exception in one clause.\n\n## Order\n\nLand after PR #34238 merges, so the note's file pointers name merged code. Read side: #33904, the by-name read and list half of the same ruling."

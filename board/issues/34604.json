@@ -2,8 +2,8 @@
   "number": 34604,
   "kind": "issue",
   "title": "表单弹窗：加放大图标，原地展开为整页，与记录抽屉的放大一致",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T03:00:50Z",
-  "updated_at": "2026-11-17T08:10:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T08:37:00Z",
+  "closed_at": "2026-11-17T08:36:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34604",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「现在新建编辑是弹出窗口，你的建议是改成全屏吗」「展开为整页，现在右侧弹出框已经有放大缩小的图标，可以统一风格。」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- 记录抽屉有放大控件（`navigation-overlay.tsx:523` 的 `maximizedState`，i18n 键 `detail.maximize` 已存在）。`ModalForm` 没有。\n- 控制台的新建 / 编辑写死 `formType: 'modal'`（`ui/packages/app-shell/src/console/AppContent.tsx` 约 :1700–1800）；弹窗尺寸推断只到 lg / xl，从不到 `full`（`ModalForm.tsx:502–512`）。\n- 整页路由 `:objectName/new` 存在（`AppContent.tsx:174`），但 ModalForm 不对外暴露填写中的值，子表行在 `MasterDetailForm` 内部状态里，没有通道带到整页路由。\n\n## 要做的\n\n1. 表单弹窗标题栏加放大 / 还原图标（与记录抽屉同一个图标和位置）。点击后原地把弹窗切到 `full` 尺寸并放开高度上限；表单保持挂载，已填的值、脏状态、子表行都保留。再点还原。\n2. 两条渲染分支（普通表单与带内嵌子表的分支，后者有自己的 `DialogContent`，:1189–1193）都要有这个按钮。\n3. 记住用户上次的选择（按对象）。\n\n## 不做的\n\n- 不走「跳转到整页路由并搬运草稿」的路（需要新的值通道和子表通道，另议）。\n\n## 验收\n\n1. 新建商机弹窗里填了几个字段后点放大，弹窗铺满，已填内容还在；点还原回到原尺寸。\n2. 带行项目的报价单同样可放大，行不丢。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 8 弹窗表单</summary>\n\n![图 8 弹窗表单](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/08-modal-form.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ModalForm.tsx`（两条分支）。\n\nDedupe: `repo:objectstack-ai/objectstack ModalForm maximize expand full page dialog` → 0。"

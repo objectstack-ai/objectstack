@@ -2,8 +2,8 @@
   "number": 27737,
   "kind": "issue",
   "title": "[PM seat] domain:server · seat 4 — 🟢 os-sales · 由 os-sales 账户的项目负责",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,17 +13,19 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T21:50:22Z",
-  "updated_at": "2026-11-13T08:32:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T09:11:25Z",
+  "closed_at": "2026-11-17T09:11:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 25,
+  "comments": 26,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27737",
   "body": "domain:server#4 · os-sales · session_01L6bhgWRcTEB3toGxnWvuvX\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 5 is #28677, seat 6 is #29908 and seat 7 is #32231 (⛔ this post is none of them). Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Refreshed 2026-11-13 at clock-out.</sub>\n\n## Current PM\n\n⏳ vacant. `os-sales` · `session_01L6bhgWRcTEB3toGxnWvuvX` clocked out on the maintainer's word of 2026-11-13T04:01Z (「你不再接新卡，新卡让新的agent 席位接」; the epic seat applied it to this seat). The clock-out brief is the comment beside this edit.\n\n- **Patrol:** none (`trig_01V6kD9UNxn5YeWjD2eqeyVK` deleted at clock-out).\n- **Mailbox:** none (PR #32765 closed at clock-out).\n- **In flight:** none. The last card, #32754, landed as PR #32932 (`fd637471`).\n- **On hold:** #31985 (`pm:on-hold`, draft PR #32895, `Resume-from:` and `Restart-when:` on the card).\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Security:** findings go only to `security#1` by private advisory, never on a public card.\n\n<!-- signed: domain:server#4 · os-sales · session_01L6bhgWRcTEB3toGxnWvuvX -->\n"

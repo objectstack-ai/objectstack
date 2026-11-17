@@ -2,8 +2,8 @@
   "number": 34716,
   "kind": "issue",
   "title": "Chatbot: a reloaded answer draws a redrawn chart twice, because the history reader keeps every visualize_data result instead of the last per chartId",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T08:16:11Z",
-  "updated_at": "2026-11-17T08:16:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T13:48:41Z",
+  "closed_at": "2026-11-17T13:47:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34716",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ④ the framework half of objectstack-ai/cloud#4824 (p1, re-verification of p1 cloud#4796/#4797/#4798 under objectstack#34571), found by the cloud#4824 card thread (os-dev-report objectstack-ai/cloud#4824 comment 6942521456, out-of-scope finding, `carrier: objectstack`). Blocks: the reload half of objectstack-ai/cloud#4824 acceptance 1 (「回答里只有一张图」).\n\n## 维护者速读\n\n问数一次回答里模型重画了一张图时，cloud#4826 让实时对话只剩最后一张（同一个 `data-chart` 部件 id 原位替换）。但刷新页面、从历史重载这段对话时，控制台从每次 `visualize_data` 的结果重建图表，被替换掉的那张又回来了，用户又看到两张图。cloud 现在给每个结果写了 `chartId`：被替换的那张和替换它的那张 id 相同。平台的历史读取只要在同一条消息里按 `chartId` 留最后一张即可。\n\n## Facts (objectstack `b1da9f55db`, cloud PR #4826 head `0e9b21c`)\n\n- `ui/packages/plugin-chatbot/src/toolResultParsers.ts` `extractCharts` (around line 156): a message with no `data-chart` part (server history: the streamed part is transient and never stored) reads its charts from every `visualize_data` result through `chartFromToolResult` (around line 222) and draws each one.\n- A live stream is fine: the AI SDK client reducer folds `data-chart` parts with the same id in place, so `fromParts` holds one chart.\n- Cloud PR #4826 (`visualize_data` with `replacesPrevious`) writes `chartId` at the top level of each `visualize_data` result envelope, beside `chart`. A replacing result carries the same `chartId` as the chart it replaced. A result without `chartId` (older history, other producers) is unchanged.\n\n## Work\n\n1. In `extractCharts`, on the results path only: when two or more `visualize_data` results in ONE message carry the same `chartId`, keep the last one, at the text offset of the FIRST (where the user first saw the chart). Results without `chartId` are kept as today.\n2. Dedupe only within one message, never across messages. `chartId` is unique within one request, not across requests, process restarts or replicas.\n3. The `data-chart` part path is unchanged.\n\n## Acceptance\n\n- Tests: two results with the same `chartId` in one message give one chart, the last result's descriptor at the first result's offset. Two results with different `chartId` give two charts. Results without `chartId` behave byte for byte as today (CONTROL). The same `chartId` in two different messages gives one chart in each.\n- No change to the live stream path.\n\n## Not in scope\n\nCloud's `replacesPrevious` and `chartId` (cloud#4824, PR #4826). The 「（非指标口径）」 label (cloud#4824 item 2, a pending ruling).\n\nDedup words: extractCharts chartId reload two charts; visualize_data persisted chart superseded; toolResultParsers chartFromToolResult."

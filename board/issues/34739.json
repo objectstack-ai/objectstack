@@ -1,0 +1,36 @@
+{
+  "number": 34739,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): reading four skips an exempt same-seat claim",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:19:40Z",
+  "updated_at": "2026-11-17T10:33:37Z",
+  "closed_at": "2026-11-17T10:28:21Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T10:28:21Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34739",
+  "body": "Fixes #33845\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：席位开轮互斥的「读数四」从「首张带同席号 `Claim:` 卡」改为「首张带同席号且非豁免 `Claim:` 卡」，豁免席位留下的认领不再被当成前任的最后活动。\n- 为什么改：执行维护者裁决（评论 6943066754，选 N14 分析 6897235004 的方案 A），只改这一处措辞。\n- 风险与回滚：仅改 `.claude/` 下一份席位规则文档的一行，不涉及任何发布包或运行时代码；回滚即 revert 这一个 commit。\n- 先看：`.claude/skills/pm-dispatch/references/seat-lifecycle.md` 第 10 行（唯一改动）。\n- 两分钟验证：`pnpm check:pm-skill-ratchet`，预期 seat-lifecycle.md 一行显示 `is 100 lines (ceiling 100; headroom 0)`，全绿。\n- 需要你做的：本 PR 触及受管面 `.claude/**`，按其档位等审核记录后落地；保持 draft。\n\n## What changes\n\n- `.claude/skills/pm-dispatch/references/seat-lifecycle.md`, line 10 (reading four of the round-open mutex): the reading now takes the first closed card in the lane whose same-seat `Claim:` is not exempt, so an exempt seat's claim is no longer read as the predecessor's last activity. Wording inserted: 「且非豁免」. This executes the maintainer's ruling recorded in comment 6943066754, option A of analysis 6897235004 (N14).\n\n## Tests\n\n- None added or changed: the diff is one line of internal agent-skill prose and changes no tested behaviour; no ablation applies (configuration/docs class).\n\n## Acceptance notes\n\n- Line budget: the file stays 100 lines against ratchet ceiling 100 (one line changed, none added); line 10 measures 120 bytes, exactly the 120-byte line cap (108 bytes before). The ratchet row for this file is unchanged — no ceiling was raised.\n- Premise re-checked on `origin/main` dc66d33082 before editing: line 10 was the reading-four line, 108 bytes; file 100 lines at ceiling 100.\n- No changeset: `.claude/**` publishes nothing from any released package (`skip-changeset` rides this create).\n- Governed surface (`.claude/**`): left draft; landing waits for its tier's review record.\n\n## Verification\n\nGate record on head de1ff20dd9 (branch head after one merge of `origin/main`): `node scripts/pm/dispatch-gates.mjs --commands --base=origin/main --repo objectstack-ai/objectstack` derived 19 commands; all 19 ran with stdin closed, every one exit 0; `--ran` reconciliation: 19 derived, 19 run, 0 NOT-MEASURED, 0 UNRUN. On the first pass (head cda8df9f07) `check:doc-formula-expressions` exited 3 (prerequisite: `@objectstack/formula` and `@objectstack/lint` not built); after building those two it exited 0.\n\n<details><summary>Gate lines (head de1ff20dd9)</summary>\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:adr-anchors :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-settings-deny-roster :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n\n`check:pm-skill-ratchet` on this file:\n\n```text\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/seat-lifecycle.md: widest table row is 0 bytes (pin 0; headroom 0).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/seat-lifecycle.md is 100 lines (ceiling 100; headroom 0).\n```\n\n`check:pm-skill-id-lint`: `✓ check-skill-id-lint: 118 file(s) clean`.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSXPDB46NVRepWVrL3\n"
+}

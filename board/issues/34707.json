@@ -2,8 +2,8 @@
   "number": 34707,
   "kind": "issue",
   "title": "审批请求页：「提交时的内容」里分组标题和字段标签几乎一样，整页读起来像没有分组",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:ui",
     "enhancement",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T07:26:41Z",
-  "updated_at": "2026-11-17T08:14:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T11:06:07Z",
+  "closed_at": "2026-11-17T11:05:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34707",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「还有审批单显示记录所有字段的时候是不是没有带分组」\n\n承接已合并的 objectstack-ai/objectstack#34588（PR #34631）。那张卡让请求页显示完整记录，这一点已生效；本卡只管分组的呈现。\n\n## 现状（读码与实测，objectstack `origin/main` a34eb0716a，本地 HotCRM 实例，大额商机审批）\n\n- 分组是有的：`ui/packages/app-shell/src/views/approval-decision/SubmittedRecord.tsx` 按对象默认记录页的分组（`deriveRecordDetailSections`）输出，实测商机有「基本信息、财务信息、销售流程、资格评估、商机叙述、分类…」。\n- 但分组标题画成 `mb-2 text-xs font-medium text-muted-foreground`（:420）：12px、灰色、字重 500；字段标签是 `text-[11px] text-muted-foreground`（:432）：11px、同一个灰色。两者只差 1px，标题上下没有分隔线、没有额外间距、没有图标。\n- 实测：一屏里「基本信息」「财务信息」「销售流程」和「商机名称」「金额」「阶段」看起来是同一级的灰色小字，40 多个字段连成一片。\n- 对比：同一个对象的记录页，分组是带图标、14px 以上、前景色的标题，每组一张卡片。\n\n## 要做的\n\n1. 分组标题用和记录页同一套样式（图标、字号、前景色），组与组之间有分隔线或卡片边界，以及明显大于字段行距的间距。优先直接复用记录页的分组标题组件，而不是再写一套。\n2. 保持现有决定：所有分组展开，不因声明了折叠就收起（审批人要看全）。\n3. 长记录加一条分组导航（点分组名滚到该组），可与专题里的 objectstack-ai/objectstack#34605 共用组件；如果 #34605 还没落地，本卡先只做第 1 项。\n\n## 不做的\n\n- 不改显示哪些字段、字段顺序和「已改动 / 当前值」的标注。\n\n## 验收\n\n1. 商机的审批请求页上，一眼能分出 6 个以上的分组，标题样式与商机记录页一致。\n2. 亮色、暗色两套主题下标题与字段标签都有清楚的层级差。\n3. 手机宽度下分组标题不被截断。\n\nReader: `domain:ui` 车道，改 `SubmittedRecord.tsx`。\n\nDedupe: `repo:objectstack-ai/objectstack approval request page section heading group title snapshot 分组 标题` → 0 张相关（含已关；命中的都是席位帖和 QA 报告）。"

@@ -1,0 +1,36 @@
+{
+  "number": 34748,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): the cloud lane moves this repo's domain:cloud cards to cloud before working them, and dispatches only p1",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:33:45Z",
+  "updated_at": "2026-11-17T11:07:21Z",
+  "closed_at": "2026-11-17T11:05:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T11:05:09Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34748",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9NFJ7qF2J9a4S8uHDe5pZv6)_\n\nFixes #34683\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：派发技能的 cloud 车道两条规则改成你 11-17 的两条指示：立在 objectstack 仓、修复落在 cloud 的卡（`domain:cloud`+`repo:cloud`），cloud 席认领前先转进 cloud 仓再做，等转期间的挂标规矩不变；cloud 车道只派 p1，p2/p3 留在队列，安全卡仍照下一行「按级派、不设常设停派」。\n- 为什么改：原文写的是这类卡「留在本仓挂活态」、cloud 车道「先取 p1/p2，再取 p3」，与指示不一致；objectstack 仓只留它自己车队派的活。\n- 风险与回滚：只改两个规则文件的三行，行数不变（两个文件都在上限，原位改写）；缝卡、决策卡、在飞卡不转的例外沿用多仓协调规则 1，不变。安全卡的读法是席位定的（见 Acceptance notes），你批准时可改判。回滚即撤掉本 PR。\n- 先看：`references/lanes/cloud.md` 第 10、20 行，`references/cross-repo-coordination.md` 第 45 行。\n- 两分钟验证：`pnpm check:pm-skill-ratchet && pnpm check:pm-skill-id-lint`，预期都 exit 0。\n- 需要你做的：`.claude/**` 受管文件，等 GOVERNED_APPROVERS 批准后由席位落地。\n\n## Rulings\n\nThe maintainer's orders, in the cloud seat 5 thread on 2026-11-17, quoted verbatim from the card:\n\n- 「只做p 1」\n- 「objectstack的任务由他们仓库的车队负责派发呀」\n- On the seat's proposal to move objectstack-filed cards whose fix lands in cloud into the cloud repository before working them: 「可以，写入skills」\n\n## What changes\n\n- `.claude/skills/pm-dispatch/references/lanes/cloud.md`\n  - Range line (10): the lane's range is the whole cloud repository; a card in this repository carrying `domain:cloud`+`repo:cloud` is moved into it before the lane claims it, with the route and the exceptions taken from cross-repo coordination rule 1. The old line scoped those cards in where they stood.\n  - Priority line (20): the lane dispatches p1 only, security cards excepted to the line below it (dispatched by grade, no standing stop); p2/p3 cards stay in the queue. The old line took p1/p2, then p3.\n- `.claude/skills/pm-dispatch/references/cross-repo-coordination.md`\n  - Line 45 (the card calls it the last line; it is third from last): the labelling rule for a card that is still here stays word for word (both labels, an active pm state, the lane `domain:*` taken off, never `status:parked`), and the line now ends \"move it, then work it\". When the move happens and how (`issue-transfer.mjs`, line 19; the seam-card, decision-card and in-flight exceptions, lines 20 to 21) are on `lanes/cloud.md:10` and rule 1.\n\nBoth files were at their line ceilings (28 and 47) and stay there: three in-place rewrites (116, 120 and 99 bytes, cap 120), no ceiling raised. The rule text carries no date, no quotation and no issue number (id-lint); the dates and the maintainer's words live here.\n\nNo test changed.\n\n## Acceptance notes\n\n- `SKILL.md:173` (the `domain:cloud` lane row) was read: it routes the whole card to the cloud PM and says this repository's lanes do not claim it; no sentence keeps the card here, so it is unchanged and the SKILL.md ratchet is untouched.\n- `cross-repo-coordination.md:46` (a card in another repository that cannot be transferred gets a `repo:cloud` carrier card filed here) and `:47` (an in-flight card here that turns out to touch cloud is released to the cloud lane) were read: neither keeps the card here once the cloud lane takes it, since the rewritten line 45 then moves it. Unchanged.\n- `lanes/cloud.md:8`, `lanes/objectstack.md:16` and `triage-duties.md:9-10` were read: none says an objectstack-filed cloud card stays here. Unchanged.\n- The range line's old pointer (the SKILL.md lane table) became the cross-repo coordination pointer, which now carries the rule.\n- Where the old line 45's pieces live now (D1, L1 6944283468): the whole line 45 is kept, so the active-state, lane-`domain:*`-off and no-`status:parked` clauses stay on it. Around it, `SKILL.md:173` still keeps this repository's lanes from claiming a `domain:cloud` card; the backlog sweep's disjunct ③ and `check-half-states.mjs` H13 still give such a card with no pm state one; and `scripts/pm/ensure-pm-labels.sh:583-589` explains why `status:parked` would exempt it from both.\n- Security cards beside the p1-only line (L1 M1 6944283468, contract review N2 6944360424): the two orders on the lane meet on p2/p3 security cards. L1 read the p1 cut as covering security cards too; the contract review read line 21 as still dispatching them. The seat took the contract review's reading: line 21 is the maintainer's order about security cards specifically, and the specific order wins over the general one. So line 20 names line 21 as its exception and line 21 is unchanged. If the maintainer meant p1 only for security cards too, approving this PR is where to say so; the change is one clause on line 20.\n- p0 cards: the `priority:p0` cut-in in `SKILL.md` is untouched and still applies on this lane (contract review N2).\n- Contract review S1 (6944360424): the first head dropped line 45's labelling clauses; this head keeps them.\n\n## Verification\n\n<details><summary>Gate round on eb2907658 (rework)</summary>\n\n- `dispatch-gates.mjs --commands`: the same 19 families as the first round; 19 of 19 `exit 0`. `--ran`: 19 derived, 19 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm check:pm-skill-ratchet` exit 0; `pnpm check:pm-skill-id-lint` exit 0; `overlap-check.mjs`: VERDICT clean (#34606 merges cleanly).\n\n</details>\n\n<details><summary>Gate round on 1632a325f (first head)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 19 families, each run with stdin closed, exit captured before any pipe; 19 of 19 `exit 0`. `check:doc-formula-expressions` first exited 3 (prerequisite: `@objectstack/formula` and `@objectstack/lint` not built), built through `os-verify-lock.sh` (command-exit 0), then exit 0.\n- `dispatch-gates.mjs --ran`: 19 derived, 19 run, 0 NOT-MEASURED, 0 UNRUN.\n- Acceptance commands: `pnpm check:pm-skill-ratchet` exit 0; `pnpm check:pm-skill-id-lint` exit 0.\n- `node scripts/pm/overlap-check.mjs --repo=objectstack-ai/objectstack`: VERDICT clean; open #34606 shares `lanes/cloud.md` and merges cleanly.\n\n</details>\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmPWSKm4Nz9quUipNZz -->\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 34797,
+  "kind": "issue",
+  "title": "review follow-ups of PR #34565 (readableIdsLeaf refusal): refusal message, bit TSDoc and ADR-0139 note, cli/lint comments, read-scope id source",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T10:54:35Z",
+  "updated_at": "2026-11-17T10:58:27Z",
+  "closed_at": "2026-11-17T10:58:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34797",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ②: the four wording nits the contract review of PR #34565 (merged; Fixes #33876) carried as follow-ups: comments 6937856418, 6941313688, 6942192439. Dedupe: `readableIdsLeaf refusal wording`; no open card.\n\nSuggested-grade: p3 · domain:server · documentation\n\n## Items\n\n- N2 — the where-refusal message says a declaring driver runs the nested-relation condition as one statement. `driver-memory` evaluates it in process, and the named fallbacks keep the id read. Say what each path does.\n- N3 — the TSDoc of the `readableIdsLeaf` bit (and the ADR-0139 amendment that landed with #34565) say the condition is planned as the leaf when the bit is `true` and that a lookup dimension is refused without it. The first omits the fallbacks `relation-semi-join.ts` names; the second holds only where the host bridges the engine. Correct both in one pass.\n- N8 — the new cli and lint comments name the refused condition more widely than the function refuses it: the refusal is for a condition beneath a single-valued relation on a read verb. The cli comment omits \"single-valued\"; the lint comment omits that and the read verb. Match the changeset and the contract docblock.\n- N9 — the changeset route for a read scope, \"`account` `$in` the ids it may read\", does not say where a policy gets those ids. A read scope cannot run the two-step read the entries above describe, so the author holds the ids in the scope or keys the scope on a field of the object. Add that clause where the guidance is published (the changeset itself is released; carry it into the docs that teach the route).\n\nNo behaviour change; text only. The ADR-0139 edit is governed (`docs/adr/**`), so that line lands Tier H.\n"
+}

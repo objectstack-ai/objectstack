@@ -2,8 +2,8 @@
   "number": 34272,
   "kind": "issue",
   "title": "auth: the vendor accept-invitation route admits a session whose email is unverified; require a verified address there too (narrowing, after #34257)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "lease:o2-H",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
@@ -24,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T03:26:19Z",
-  "updated_at": "2026-11-17T07:49:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T10:33:46Z",
+  "closed_at": "2026-11-17T10:32:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

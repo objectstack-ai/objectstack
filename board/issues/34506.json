@@ -11,7 +11,6 @@
     "type": "Bot"
   },
   "labels": [
-    "pm:awaiting-merge",
     "size/m"
   ],
   "assignees": [
@@ -20,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T23:18:30Z",
-  "updated_at": "2026-11-17T03:00:19Z",
+  "updated_at": "2026-11-17T10:42:08Z",
   "closed_at": "2026-11-17T03:00:17Z",
   "closed_by": {
     "login": "os-zhuang",

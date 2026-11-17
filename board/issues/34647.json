@@ -2,9 +2,9 @@
   "number": 34647,
   "kind": "pull_request",
   "title": "feat(app-shell): the action result dialog draws table answer fields, and Import Users shows its result per row",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "protocol:ui",
     "size/l",
     "tests",
@@ -24,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:51:10Z",
-  "updated_at": "2026-11-17T07:39:41Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-17T10:35:44Z",
+  "closed_at": "2026-11-17T10:09:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T10:09:12Z",
   "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34647",

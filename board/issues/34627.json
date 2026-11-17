@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
+    "lease:o3-H",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T03:55:02Z",
-  "updated_at": "2026-11-17T07:02:07Z",
+  "updated_at": "2026-11-17T14:04:39Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34627",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ② the named-consumer half (class b) of objectstack-ai/cloud#4799, from the os-dev report on that card (comment 6937717431, cloud PR #4808). Parent: #34571 (maintainer-directed topic, 「都是p1」). Reader: `domain:ui` (`ui/packages/plugin-chatbot`). Dedupe: `checklist verification line kind` and `Checks passed chip failed`, 0 open hits.\n\n## 维护者速读\n\n1. **问题**：AI 搭建失败时，云端返回的结果卡清单里新增了一行「校验未通过 · N 个问题待修复」，但控制台只认识三种行，会把这一行丢掉。\n2. **影响**：在控制台补上之前，失败的搭建会显示「Checks passed 4/5」，下面却只列 4 行，看起来对不上。同一屏还有一张「Completed · N to fix」卡和红色的「fix the problems」文字，和清单重复说了一遍。\n3. **修法**：控制台识别并显示 `verification` 这一行；清单失败时，只由清单表达失败，不再另起那张卡。\n4. **验收**：失败的搭建显示「4/5」并列出 5 行，其中一行红色写明问题数；同一屏只有一处说失败。\n5. **范围**：只改控制台的 AI 搭建结果卡，云端那一半在 cloud PR #4808。\n6. **需要你做的**：无。\n\n## The seam\n\n- **Producer:** cloud `packages/service-ai-studio/schema/build-cards.schema.json`, `ChecklistVerificationLine`: `{ kind: 'verification', status: 'failed', label, count }`, appended when the build's verdict has errors. `status` and `passed/total` then follow the verdict.\n- **Consumer:** `ui/packages/plugin-chatbot/src/mapMessages.ts` `detectBuildChecklist`, whose `isLineKind` accepts only `object` / `view` / `sampleData` and drops the line. Also `ChatbotEnhanced.tsx` `BuildChecklistRows` and the `build-checklist-chip` ('Checks passed {{passed}}/{{total}}', amber when failed).\n- **Card item 4 of cloud#4799:** the 「Completed · N to fix」 card and the red 「fix the problems」 text (`ChatbotEnhanced.tsx` around :4043–4068) shown beside a failed checklist.\n\n## Expected\n\n1. Render a `verification` line, with its label and count as served (no client-side copy of the producer's wording), styled as failed.\n2. When the checklist's status is failed, the checklist is the one place the failure is stated: no second \"Completed · N to fix\" card.\n3. Tests on the mapper and the card component."

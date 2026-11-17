@@ -1,0 +1,36 @@
+{
+  "number": 34757,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the approval badge says editable only when the record is editable",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:54:49Z",
+  "updated_at": "2026-11-17T11:05:11Z",
+  "closed_at": "2026-11-17T11:05:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T11:05:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34757",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9GQvCZ5M8p8ZspLxWcx1m6C)_\n\nFixes #34701\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：记录页审批徽章的「审批中 · 可编辑」现在只在当前用户真能编辑这条记录时出现；审批节点不锁记录、但权限、编辑按钮的 disabledWhen 或 readonlyWhen 让记录不可编辑时，徽章只写「审批中」。11 种语言都加了这个中性文案。\n- **为什么改**：用户看到「可编辑」后去改，结果每次都被拒（#34701，p1）。徽章原来只看审批节点锁不锁，没看页面已经算好的「能否编辑」。\n- **风险与回滚**：只改文案判据，不改任何写入或权限行为，没有接线的宿主不受影响（默认仍可编辑）。回滚就是撤回本 PR。\n- **先看**：`ui/packages/plugin-detail/src/DetailView.tsx` 徽章那段（新的 `editableHere` 判断）；`ui/packages/plugin-detail/src/__tests__/DetailView.approvalBadgeCanEdit-34701.test.tsx`。\n- **两分钟验证**：`pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/DetailView.approvalBadgeCanEdit-34701.test.tsx`，预期 5 条全绿；把 DetailView.tsx 换回 main 版本后，「THE DEFECT」和「keeps recall」两条变红。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- `ui/packages/plugin-detail/src/DetailView.tsx`: the approval band picks its label and tooltip from three states instead of two. Locked → \"Locked for approval\" (unchanged). Pending, not locked, and the host's `canEdit` is not false → \"In approval · editable\" (unchanged). Pending, not locked, `canEdit` false → \"In approval\" with tooltip \"This record has a pending approval request\" (new). `canEdit` is the record page's existing conjunction (record permission explain, `userActions.edit` `visibleWhen` / `disabledWhen`, an all-fields `readonlyWhen` lock, `!approvalLocked`). The provider default is `true`, so a host that threads no `canEdit` keeps its label.\n- `ui/packages/plugin-detail/src/useDetailTranslation.ts` and all eleven `ui/packages/i18n/src/locales/*.ts`: two new keys, `detail.approvalPending` and `detail.approvalPendingNotEditableTooltip`.\n- Recall, the tally and the band's colour are unchanged: recall belongs to the approval, not to the edit gate.\n\nOut of this PR, per Premise corrected 6944186660 on the card:\n- The server half (an update whose every field is dropped still stamps `updated_by` / `updated_at` and runs `afterUpdate`) is #34746.\n- A refusal that an app raises only inside an imperative lifecycle hook stays invisible to the client. No new \"can this user edit\" surface is added. The app should declare that lock with `userActions.edit.disabledWhen` or `readonlyWhen`, which the record page already reads, and then this badge is right.\n- \"Judge any pending request as the server does\" is not needed. The approvals service refuses a second pending request on the same record (`DUPLICATE_REQUEST`, `approval-service.ts` `openNodeRequest`). Measured with the existing test `approval-service.test.ts` › \"openNodeRequest: deduplicates a pending request per (object, record)\", which passes on `origin/main`. The client's \"first pending request\" read is therefore the only one.\n\n## Tests\n\n- New: `DetailView.approvalBadgeCanEdit-34701.test.tsx` (5 cases). The defect cell, recall kept on the neutral badge, and three controls: `canEdit` true, no `canEdit` threaded, and a locking node.\n- Changed because they rendered an editable badge under `canEdit={false}`, which is the defect itself. Each now threads `canEdit: true` (or `!locked`) where it asserts \"editable\":\n  - `DetailView.approvalBand.test.tsx`: 4 cases (labels a pending-but-unlocked approval as editable; uses a distinct tooltip; lets the host verdict beat the approval_status mirror; renders the tally on an editable node).\n  - `DetailView.approvalRecallGate.test.tsx`: 3 cases (withdraws recall from a non-submitter; keeps recall for the submitter; offers recall with no submitter identity).\n  - `DetailView.approvalReadAnswered-12220.test.tsx`: 1 case (control: an answered `lockRecord: false` request reads editable).\n  - `DetailView.printApprovalBand-12751.test.tsx`: the shared harness now passes `canEdit={!locked}`, which is what the record page threads.\n\n## Verification\n\n<details><summary>Approval band tests and ablation</summary>\n\n- `pnpm --dir ui exec vitest run packages/plugin-detail/src/__tests__/DetailView.approval packages/plugin-detail/src/__tests__/DetailView.printApprovalBand-12751.test.tsx`: 40 passed.\n- Ablation (DetailView.tsx reverted to `origin/main`, new test kept): \"THE DEFECT\" fails, 1 failed / 4 passed. The recall case was then tightened to assert the badge does not say \"editable\", so it fails under the revert too.\n- `pnpm --dir ui exec vitest run packages/i18n/`: 1894 passed, 13 skipped (locale key parity included).\n\n</details>\n\n<details><summary>Derived gates at head c456037f85</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands`: 40 commands, each run under `os-verify-lock.sh` with stdin closed; reconciliation `--ran`: 40 derived, 40 run, 0 NOT-MEASURED, 0 UNRUN.\n- 39 exited 0 on the first pass. `pnpm --dir ui exec vitest run scripts/` exited 1 on the first pass, a prerequisite and not this diff: `unit-registry-absence-collision.test.ts` could not resolve `@objectstack/client` while a parallel build was writing it. After `pnpm turbo run build --filter='@objectstack/client...'` it exited 0 (171 files, 5077 tests passed).\n- `pnpm --dir ui exec vitest run packages/plugin-detail/`: 383 files, 3445 tests passed, 18 skipped.\n- `node scripts/pm/overlap-check.mjs`: clean against `origin/main` and the three open PRs that share the locale files (#34723, #34713, #34677).\n- Ledger: `/mnt/project-files/objectstack-seat2/34701-gates-ran.txt` (seat share).\n\n</details>\n\n## Acceptance notes\n\n- The card's \"and the platform approval lock holds it\" did not hold: the badge says editable only when the pending request's `lock_record` is false, which is the same `nodeConfigLocksRecord` judgement the server's record lock enforces. The refusal came from the app's own hook. Recorded on the card as Premise corrected 6944186660.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmNhzp7pQZtyqYheSKu\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmNhzp7pQZtyqYheSKu -->\n"
+}

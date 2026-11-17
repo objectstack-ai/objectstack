@@ -2,8 +2,8 @@
   "number": 34602,
   "kind": "issue",
   "title": "列表：「In a queue」筛选只在真正用到队列的对象上显示，默认不显示",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "lease:o3-C",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T02:59:27Z",
-  "updated_at": "2026-11-17T07:15:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T09:03:35Z",
+  "closed_at": "2026-11-17T09:02:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34602",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「大部分对象用不到 in a queue ，默认不应该显示」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- 这个筛选在 `ui/packages/plugin-list/src/ListView.tsx:6556–6570` 画，条件在 :2583–2585：组织里至少有一个队列（`hasAnyQueue`），且对象有平台注入的 `queue` 列（`objectHasOwnershipQueue`，:1064–1073，即任何 `ownership: 'user'` 的对象）。\n- 所以组织只要建过一个队列，所有按用户归属的对象列表上都会出现它。实测：商机、报价单、AI 新搭的「会议」列表上都有。\n- 队列的元数据不挂对象：`packages/spec/src/security/queue.zod.ts:96–98` 只有 `label`、`description`、`members`，没有「哪些对象用队列」的信号。\n- 钉住现有条件的测试：`ListView.queueSittingFilter-25769.test.tsx`、`ListView.emptyStateClearFilters-28908.test.tsx:177`、`e2e/list-toolbar-view-name-phone.spec.ts:112`。\n\n## 要做的\n\n1. 增加一个「该对象使用队列」的信号，并把它并进显示条件。形状由 `domain:spec` 定（对象或列表视图上的一个键，或由服务端按「该对象有记录或分配规则指向队列」给出），默认是不显示。\n2. 没有该信号的对象，列表上不出现这个筛选。\n\n## 不做的\n\n- 不改队列的分配与归属机制。\n\n## 验收\n\n1. 组织里有队列，但商机没有声明使用队列：商机列表上没有「In a queue」。\n2. 声明使用队列的对象（如工单）列表上有。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 15（左侧列表头部）</summary>\n\n![图 15（左侧列表头部）](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/15-ai-drawer.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ListView.tsx` 的 `queueFilterOffered`；键的形状需要 `domain:spec` 先出。\n\nDedupe: `repo:objectstack-ai/objectstack \"In a queue\" chip list view queue filter object` → 21，最近 #33957 / #29047 / #29052（均已关，手机工具栏与空状态），没有按对象收窄显示条件的卡。"

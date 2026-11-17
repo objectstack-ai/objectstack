@@ -1,0 +1,38 @@
+{
+  "number": 34761,
+  "kind": "issue",
+  "title": "spec: list_datasets answers a term with no match with a `candidates` list, never selected; ADR-0149 D3 gains the amendment note",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "lease:o3-E",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:56:25Z",
+  "updated_at": "2026-11-17T13:47:36Z",
+  "closed_at": "2026-11-17T13:47:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34761",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34659（MCP 二期与问数专题）；#34691 裁定后的执行卡，⛔ 不是认领。\nRuling: F1 B, #34691 comment 6943126855, option text verbatim 「B 零命中返回候选」 — 「现在就改服务器，list_datasets 零命中时返回候选数据集。专题席的新推荐。」, knocked to #34659 as comment 6943149235. It re-rules E2 of #34659 comment 6940528935 from \"B with a premise\" to A.\n\n## 维护者速读\n\n- **做什么**：`list_datasets` 的返回结构加 `candidates`：用户的词一个成员都没精确命中时，列出相近的成员，只供反问，平台永不替用户选。\n- **为什么**：今天零命中时客户端只能自己猜；候选放进工具结果，任何客户端都读得到，不靠技能措辞。\n- **同卡**给 ADR-0149 D3 加修订说明：「什么算命中」不变；有候选先反问，没有候选才按第 4 条回退。\n- **需要你做的**：PR 含 `docs/adr/**`，是 Tier H，要你亲手合并；没有别的要决定。\n\n## 现状 (objectstack `origin/main` f6f5b50a05, read 2026-11-17; code read, nothing run)\n\n- `ListDatasetsOutputSchema` is `datasets`, `partial`, `warning` (`packages/spec/src/ai/dataset-tools.zod.ts:168-178`); `matches` is per dataset, equality hits only (`:161-164`, `:84-93`). Nothing answers a zero-match.\n- With `terms` the whole admitted catalogue is still returned (`packages/services/service-analytics/src/dataset-tools.ts:389-451`): a zero-match gets every dataset and no pointer to the near ones.\n- ADR-0149 D3 rule 1 already lets a substring or neighbour \"be offered in rule 3's question, never acted on\"; rule 4: no hit falls back (`docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md:151,154`). M1 A keeps AI guidance text out of the spec (`dataset-tools.zod.ts:38-39`).\n\n## 要做的\n\n- `ListDatasetsOutputSchema` gains optional `candidates`. Proposed; the PR settles it and says why if it differs:\n  - entry `{ term, dataset, member, matchedOn }`: `DatasetTermMatchSchema` plus the dataset;\n  - present only when `terms` were sent and a term hit no member of any listed dataset, for those terms only; absent otherwise, so an answer with a hit is unchanged;\n  - order: terms as sent, datasets as listed, measures before dimensions (D3 rule 5); no score;\n  - cap: an exported per-term constant (proposed 5);\n  - `.describe()`: not a match, for a clarifying question, never selected, only members this caller may read.\n- Spec tests (`dataset-tools.test.ts`); regenerate `packages/spec/*/ai.json` and `content/docs/references/ai/dataset-tools.mdx`.\n- ADR-0149 add-only note under D3, in ADR-0011:238's `> **Amendment note**` form: hits unchanged; a term with no hit gets `candidates`; with candidates the caller asks in rule 3's form and acts on none; with none, rule 4 unchanged. It names rule 4 too: asking before the fallback changes the path, not the matching.\n\n## 不做的\n\n- The near-match rule, executor and tool description: the server sibling.\n- Skill text (#34685), `/mcp/skill` (#34686), the cloud planner; any change to `matches` or normalization.\n\n## 验收\n\n- The schema parses answers with and without `candidates`, today's unchanged; generated files committed; spec tests green.\n- The ADR note is add-only.\n\nGoverned: `docs/adr/**` is Tier H (`scripts/pm/check-governed-merges.mjs:1375`). Its add-only arm reads S only beside riders; `packages/spec/**` keeps this PR Tier H, landed by the maintainer's hand.\n\nReader: `domain:spec` · seat 3 area o3-E, L1-c review.\nBlocked-by: none.\nDedupe: `gh api -X GET search/issues -f q='repo:objectstack-ai/objectstack is:issue list_datasets candidates'` → 10 (#34685, #34691, #34659 open; #32072 and QA runs closed; none this). `… ADR-0149 D3 near` → 2 (#34691, #34659)."
+}

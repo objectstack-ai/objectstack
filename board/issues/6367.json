@@ -2,8 +2,8 @@
   "number": 6367,
   "kind": "issue",
   "title": "[PM seat] domain:server · seat 1 — 🟢 os-sales",
-  "state": "open",
-  "state_reason": "reopened",
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -14,17 +14,19 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-07T15:16:20Z",
-  "updated_at": "2026-11-12T22:00:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T09:03:43Z",
+  "closed_at": "2026-11-17T09:03:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 375,
+  "comments": 376,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6367",
   "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677, seat 6 is #29908 and seat 7 is #32231. #6021 and #6024 are archives of this post, ⛔ do not edit them.\n\n<sub>Refreshed 2026-11-12T12:31Z at seating; the seating comment 6823665821 is the record.</sub>\n\n## Current PM — 🟢 os-sales\n\n- **Holder:** `os-sales` · `session_01L6bhgVaKJ9TPfXPRhdqx3e` (project \"Objectstack security ui\", thread 「server 席 A 接 ADR-0150 卡」). Previous PM: `sunhaolin`, clock-out brief 6823311680 on this post.\n- **Mailbox:** PR #32727 (subscribed). **Patrol:** `trig_01M8623Xx5ku7AXfjuXHSv74` · `28 * * * *` (self-bound).\n- **Pointer:** posture and round ledger live in the project; the lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- `packages/metadata-protocol` layered read / pair-address family (inherited from seat 5's queue): #32568 → #32613; #32557 (#32408) → #32552 and #32561, all after the epic seat's PR #32497. ⛔ Re-derive from live `Claim:` comments and PR file lists before each dispatch.\n- `content/docs/deployment/cli.mdx` is touched by both PR #32690 and PR #32630.\n\n## Notes\n\n- **Scope:** `priority:p1` / `priority:p2` cards of epic #31527 (ADR-0150) handed to the server lane, `batch:2`. The epic's serial chain stays with `epic:#31527#1`. Sibling seat 7 (#32231, same account) splits the handover by the seating comment's list.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e -->\n"

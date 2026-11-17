@@ -2,9 +2,9 @@
   "number": 34644,
   "kind": "pull_request",
   "title": "fix(metadata-protocol)!: a dependent's bundle-member row moves no bare read across a restart, and a row-held base's own member is the base's",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/m",
     "tests",
     "tooling"
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:45:23Z",
-  "updated_at": "2026-11-17T07:16:23Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-17T10:36:11Z",
+  "closed_at": "2026-11-17T10:09:12Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T10:09:12Z",
   "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34644",

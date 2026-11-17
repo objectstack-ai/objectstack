@@ -1,0 +1,36 @@
+{
+  "number": 34733,
+  "kind": "pull_request",
+  "title": "docs(print-pages): leave avoidBreakInside off when a detail table can run past one sheet",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:03:43Z",
+  "updated_at": "2026-11-17T10:09:14Z",
+  "closed_at": "2026-11-17T10:09:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T10:09:12Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34733",
+  "body": "Part of #34427\n\nClause-②: no\nMetadata-protocol: none\n\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi99ewj5JRWXTB3u38E9HLhnj)_\n\n## 维护者速读\n\n1. **改了什么**：只改文档 `content/docs/ui/print-pages.mdx`，在 `avoidBreakInside` 的说明下加一段：明细表可能超过一页时不要开这个键。\n2. **为什么改**：按卡上的裁决 C（6942931911）只写文档、不改代码。实测开着这个键时，放不进第一页剩余空间的明细表会整张挪到第二页再断开，第一页下部留白，21 行时还多用一张纸（开 3 张，关 2 张）。\n3. **风险与回滚**：纯文档，无代码、无 spec 改动；回滚即撤本 PR。\n4. **先看**：`content/docs/ui/print-pages.mdx` 新增的那一段。\n5. **两分钟验证**：读那一段，对照卡上 os-dev 实测记录 6931957598 的数字。\n6. **需要你做的**：无。合并后由本区把卡按 not planned 关掉。\n\n## What changes\n\n`content/docs/ui/print-pages.mdx` gets one paragraph under the print keys table, after the existing `avoidBreakInside` guidance. It tells an author to leave `avoidBreakInside` off on a print page whose detail table can run past one sheet, and says why: a table is one block, so with the key on, a table that does not fit the rest of the first sheet moves whole to the next sheet even when no single sheet can hold it, and is broken there. The first sheet keeps only the blocks above the table, and the document can take one sheet more.\n\nThe figure in the paragraph (an A4 invoice page, a 21-line table on 3 sheets with the key on and 2 with it off) is the reading in os-dev report 6931957598 on #34427, taken on the real print-page DOM in Chromium through service-print's `page.pdf` path. The key keeps its published meaning, as ruled on #34228 (6922479414) and on this card (6942931911, letter C), so no code, stylesheet or `packages/spec` describe changes.\n\nThis PR does not close the card. Under the ruling the card ends as not planned once this doc lands, and the area marks it so by hand after the merge.\n\n## Verification\n\nAt head `02e081472aac51ab6ed554504bdbf7d0ee25ad37` (one commit over `origin/main` `dc66d33082`):\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 44 commands for this diff. Each ran with stdin closed and its exit taken before any pipe; all 44 exited 0.\n- Five first exited for a missing prerequisite, not a finding: `check:doc-formula-expressions`, `check:doc-security-posture`, `check:docs-transcript-drift` (exit 3, `@objectstack/lint` not built), `spec check:docs` (exit 1, `packages/spec/json-schema` not generated) and `spec check:skill-examples` (exit 3, `client-react` declarations not built). After building `@objectstack/lint...`, `@objectstack/spec...` and `@objectstack/client-react...` under the verify lock (exit 0 each), every one re-ran with exit 0.\n- `dispatch-gates --ran`: \"44 derived famil(ies) accounted for — 44 run, 0 NOT-MEASURED\". Exit 0.\n- No changeset: the PR changes only `content/docs`, which ships no package, so it carries `skip-changeset`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSYVw1sqCsaHSJS9JC\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmSYVw1sqCsaHSJS9JC -->\n"
+}

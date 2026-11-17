@@ -1,0 +1,37 @@
+{
+  "number": 34840,
+  "kind": "pull_request",
+  "title": "fix(plugin-chatbot): a reloaded answer draws a redrawn chart once, keeping the last visualize_data result per chartId",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T13:02:35Z",
+  "updated_at": "2026-11-17T13:47:39Z",
+  "closed_at": "2026-11-17T13:47:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T13:47:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34840",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBNgJrQDxaUNx2so1ektgf6A)_\nFixes #34716\n\nClause-②: no\nMetadata-protocol: none\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzfrh8TiPJf1i2kMSoa\n\n## 维护者速读\n\n- **改了什么**：聊天历史读取（`extractCharts` 的 `visualize_data` 结果路径）在同一条消息里按结果信封顶层的 `chartId` 合并：同一 `chartId` 只画一张图，用最后一次结果的图，放在第一次出现的位置。\n- **为什么改**：模型在一次回答里重画图表时，实时对话只剩一张；刷新页面从历史重载后，被替换的那张又回来，用户看到两张图。\n- **风险与回滚**：低。没有 `chartId` 的结果（旧历史、其它生产者）逐字节照旧；从不跨消息合并；`data-chart` 部件路径（实时流）不变。回滚 = revert 本 PR。\n- **先看**：`ui/packages/plugin-chatbot/src/toolResultParsers.ts`（`extractCharts` 中 `resultIndexByChartId` 一段，`chartFromToolResult` 改为同时返回 `chartId`）；`ui/packages/plugin-chatbot/src/__tests__/mapMessages.chartIdDedupe-34716.test.ts`。\n- **两分钟验证**：`pnpm --dir ui exec vitest run packages/plugin-chatbot/src/__tests__/mapMessages.chartIdDedupe-34716.test.ts`，预期 7 passed。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- `chartFromToolResult` now returns the chart together with the envelope's top-level `chartId` (only a non-empty string counts as an id).\n- `extractCharts`, on the results path only: within ONE message, a result whose `chartId` was already seen replaces that earlier chart in place (last descriptor, first result's `textOffset`). A result without a `chartId` is pushed exactly as before. The map is local to one call, so nothing is merged across messages. The `data-chart` part branch is unchanged (still preferred whenever the message has one).\n- Changeset: `@object-ui/plugin-chatbot` patch.\n\n## Tests\n\nNew file `mapMessages.chartIdDedupe-34716.test.ts` (7 tests), per the card's Acceptance:\n\n- same `chartId` twice in one message: one chart, last descriptor, first offset;\n- different `chartId`s: two charts at their own offsets;\n- a redraw keeps the first chart's position among other charts;\n- CONTROL: results without `chartId` (same descriptor twice) give two charts at their own offsets, as today;\n- same `chartId` in two messages: one chart in each;\n- legacy string `content` (unanchored): the redraw collapses, no offset;\n- `data-chart` parts present: parts win, every part kept, results ignored.\n\n## Acceptance notes\n\n- The card's premise was re-measured on base `c513d62a` before coding: `extractCharts` pushed every `visualize_data` hit into `fromResults`, and no `chartId` reader existed under `ui/packages/plugin-chatbot/src` (`grep -rn chartId` returned nothing).\n- If the LAST result for a `chartId` is unrenderable (no series), it is skipped by the existing descriptor narrowing and the earlier chart stays. Noted, not pinned.\n\n## Verification\n\nAll readings at head `59e6bcaa`, in worktree `objectstack-issue-34716`.\n\n<details><summary>Package tests and typecheck</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-chatbot/` under the verify lock: `Test Files 102 passed (102)`, `Tests 1035 passed (1035)`, VERDICT command-exit 0.\n- `pnpm --filter @object-ui/plugin-chatbot run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`; the test project includes `src/**/*.test.ts`): VERDICT command-exit 0.\n\n</details>\n\n<details><summary>Ablation (one, the collapse lookup)</summary>\n\n`node scripts/ablation-replace.mjs` replaced the `resultIndexByChartId.get(chartId)` lookup with a constant `undefined` (anchor 1 to 0, blob a5f650e0 to 8eb18380). The suite imports `../mapMessages` from source, so no build sits between the edit and the run. Result: 3 failed, 4 passed. The three same-`chartId` tests went red; CONTROL, different ids, two messages and the `data-chart` path stayed green. Restore: blob back to a5f650e0, which equals HEAD, and `git diff HEAD` is empty.\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, 38)</summary>\n\nAll 38 derived commands ran locally with exit 0, including `pnpm --dir ui exec vitest run scripts/` (171 files passed, 2 skipped). `dispatch-gates --ran` reconciliation: 38 derived, 38 run, 0 NOT-MEASURED (a derived zero: every entry carries an exit code). `check:new-line-citations`: 0 new citations. After the last commit (it changed only the test file), `check:nul-bytes`, `check:cross-package-test-inputs` and `check:test-source-alias` were re-run: exit 0. The type-check lanes and repo-wide families belong to CI.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzfrh8TiPJf1i2kMSoa)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzfrh8TiPJf1i2kMSoa -->\n"
+}

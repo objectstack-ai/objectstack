@@ -2,8 +2,8 @@
   "number": 34574,
   "kind": "issue",
   "title": "install-local: a composed artifact with a package dependency cycle answers an opaque 500 instead of naming the cycle",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "bug",
     "domain:server",
     "finding",
-    "lease:o2-D",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T01:50:14Z",
-  "updated_at": "2026-11-17T07:45:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T09:52:01Z",
+  "closed_at": "2026-11-17T09:36:00Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34574",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: a class a candidate, from the final report on card #34432 (PR #34573), passed on by area `o2-D`. Dedupe: `composed artifact dependency cycle 500`, `resolvePluginOrder Circular dependency install-local`; no open card.\n\nreach (half measured): on a real runtime, `POST /api/v1/marketplace/install-local` with a composed artifact whose two packages depend on each other makes the handler throw a bare `Error(\"[Kernel] Circular dependency detected: PKG\")`. The throw was measured. That the transport then answers `500 INTERNAL_ERROR` with no reason was read from `installErrorEnvelopeSeam` in plugin-hono-server `adapter.ts` and was not measured. Evidence: the file header of runtime `artifact-collections.ts` records the cycle as a bare Error (`resolveArtifactPackageOrder` / `resolveArtifactCollections`).\n\nSuggested-grade: p2 · `domain:server` · `pm:queue` (the claimant measures the 500 first)\n\n## 维护者速读\n\n- 现象：本地安装一个组合制品时，如果里面两个包互相依赖，接口只回一个不带原因的 500。作者不知道问题是循环依赖。\n- 为什么要修：安装失败要告诉作者哪里错了、怎么改;不透明的 500 只能去翻服务端日志。\n- 需要你做的：无。\n\n## Change\n\nTurn the cycle into a typed refusal that names the packages in the cycle, at the same door and with the same envelope as the resolver's other refusals (422 with a code and the cycle path). Do not add a second error shape. Pin it with an install-local test on a two-package cycle.\n\n## Done when\n\nThe pin test gets a 4xx with a code and the cycle's package names, and no bare Error reaches the transport.\n"

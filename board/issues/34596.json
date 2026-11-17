@@ -2,8 +2,8 @@
   "number": 34596,
   "kind": "issue",
   "title": "手机端首页：初始化清单占掉半屏；AI 悬浮按钮遮住应用图标并与「+」叠放；通知角标被裁",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "lease:o3-D",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T02:53:13Z",
-  "updated_at": "2026-11-17T07:07:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T10:36:04Z",
+  "closed_at": "2026-11-17T10:28:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34596",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 初始化清单是 `ui/apps/console/src/pages/settings/FirstRunChecklist.tsx`，可按设备关闭，没有看到手机宽度下的折叠处理。实测 375 宽：清单占首屏约 40%，应用宫格只露出一行。\n- AI 悬浮按钮 `ui/packages/app-shell/src/layout/ConsoleChatbotFab.tsx`：手机上 `bottom-20 right-6`，只是挪位置不隐藏；碰到带 `data-fab-yield` 的元素才让位。实测：首页第三个应用名被遮成「Marke…」；列表页与新建的「+」上下叠成两个，挡住卡片右侧。\n- 顶栏通知角标「9+」上半截被裁掉；页面标题被挤成「Opportun…」。\n\n## 要做的\n\n1. 手机宽度下初始化清单默认折叠成一行（进度加「继续」），放到应用宫格之后。\n2. 手机宽度下不显示悬浮的 AI 按钮，AI 入口走顶栏图标（与专题的 AI 抽屉子卡一致）。\n3. 通知角标完整显示；手机顶栏只留搜索、通知、头像，标题不被挤截。\n\n## 不做的\n\n- 不改清单的内容与完成判定。\n\n## 验收\n\n1. 375 宽首页首屏能看到至少两行应用图标。\n2. 首页和列表页没有悬浮的 AI 按钮，只有一个新建按钮。\n3. 角标「9+」完整。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 10 手机首页</summary>\n\n![图 10 手机首页](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/10-mobile-home.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `FirstRunChecklist.tsx`、`ConsoleChatbotFab.tsx` 与手机顶栏。\n\nDedupe: `repo:objectstack-ai/objectstack FirstRunChecklist mobile collapse ConsoleChatbotFab phone` → 0。"

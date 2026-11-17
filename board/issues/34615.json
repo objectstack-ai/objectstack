@@ -2,8 +2,8 @@
   "number": 34615,
   "kind": "issue",
   "title": "手机端：列表卡片的金额被截断；表单页签在 375 宽下横向溢出",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "lease:o3-C",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T03:14:28Z",
-  "updated_at": "2026-11-17T07:06:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T08:30:42Z",
+  "closed_at": "2026-11-17T08:29:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34615",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。由 3 号座位（#34584）按维护者「任务很多，你是总指挥，如何分拆」补立：专题子卡里没有这一项。⛔ 不是认领。\n\n## 现状（读码，origin/main 144cdc254e；界面实测 375×812 浏览器模拟，不是真机）\n\n- 手机列表卡片（`buildMobileCardRenderer`，ObjectGrid.tsx:3315 起，objectstack#28484）：标题一行，副标题一行由前两个非状态列拼成，每段 `<span className=\"min-w-0 truncate\">`（:3409），右侧一个状态徽标 `max-w-[45%] shrink-0 truncate`（:3416）。金额若落在副标题里，与客户名平分剩余宽度一起被截断；状态徽标还先拿走最多 45%。设计图 11 把金额放在卡片右侧单独一格、不截断。\n- 表单页签（字段页签，`fieldTabs`）：`TabsList` 只有 `self-start` 和上下间距（form.tsx:4473–4482），没有 `max-w-full`、横向滚动或溢出收纳；页签多时整条超出弹窗宽度，页面出现横向滚动。设计图 13 把放不下的页签收进「更多 ▾」。\n\n## 要做的\n\n1. 卡片：金额（`currency` / 数字类主值）不进副标题平分，单独放在卡片右侧（或副标题末尾 `shrink-0`），完整显示；状态徽标移到第二行左侧或与金额错开，与图 11 一致。\n2. 表单页签：页签条不超出容器 —— 放不下的页签收进末尾「更多」下拉（带出错标记），或至少 `max-w-full overflow-x-auto` 横向滚动且隐藏滚动条；活动页签始终可见。\n3. 两处各补一个 375 宽的测试（卡片金额文本完整、页签条 `scrollWidth <= clientWidth` 或「更多」出现）。\n\n## 不做的\n\n- 不改桌面端表格与页签外观；首页清单、悬浮按钮、角标、详情底栏见 #34596 / #34595。\n\n## 验收\n\n1. 375 宽商机列表，「CN¥1,200,000.00」完整显示。\n2. 375 宽编辑商机（5 个页签），页面无横向滚动，第 5 个页签可从「更多」或滑动到达，出错页签的红点仍可见。\n\n## 设计图\n\n<details><summary>图 11 手机 · 列表</summary>\n\n![图 11](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/11-mobile-list.png?raw=true)\n\n</details>\n<details><summary>图 13 手机 · 编辑表单</summary>\n\n![图 13](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/13-mobile-form.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ObjectGrid.tsx` 的手机卡片与 `form.tsx` 的页签条。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue mobile card amount truncated subtitle` → 1（#6015 席位帖）；`… grid-card-subtitle phone card amount currency` → 0；`… form tabs overflow horizontally mobile TabsList` → 0。已立的同组卡：#34596（首页清单 / 悬浮按钮 / 角标）、#34595（详情底栏 / 阶段条）。"

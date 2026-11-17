@@ -1,0 +1,36 @@
+{
+  "number": 34744,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): write the maintainer's p3 first-touch standard into triage grading",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:22:24Z",
+  "updated_at": "2026-11-17T12:48:46Z",
+  "closed_at": "2026-11-17T12:45:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T12:45:09Z",
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34744",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9171vgqqqLwGXb1ijPmb3ta)_\n\nPart of #34153\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:把您 11-15 定的 p3 首触标准(无用户影响的 p3 首触即关,附您批过的例子)写进分诊定级规则 `triage-duties.md`,共 5 行;另把 cloud 兜底一行并成指针(内容在 `lanes/cloud.md` 原样有),净 +4 行,行数上限 104→108。\n- **为什么**:您 2026-11-17 在决策卡上选「四张全部 A」:「p3 标准写进规则并放宽 4 行」,席位录为卡上评论 6943048358。标准原话与例子的出处是分诊记录 6906416184。\n- **没改什么**:卡上改动 2、3(复审尾巴卡怎么收、裁决 B 是否收窄)您未裁,本 PR 不碰 `filing-gate.md`,卡保持开着。\n- **风险与回滚**:只改规则文字与一行上限;只有「命中关条且不命中留条」才关,其余默认留卡。回滚即 revert。\n- **取代**:草稿 PR #34266(已下班的技能席)同改此文件并带未裁的改动 2,本 PR 取代它。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/triage-duties.md` (104 → 108 lines):\n\n- **Added** at lines 59–63, directly after the missing-`reach:` line (58), one bullet with four continuation lines, the p3 first-touch standard:\n  - **Scope and precedence:** only a card impact grading has already graded p3; never the shipped surfaces of `filing-gate.md`〈读数判据〉 (outside the radius); grading rules 2 and 3 of `filing-gate.md` win on conflict.\n  - **Close rule:** a close item hit and no keep item hit ⇒ close not_planned, a reason per card. This outranks every not-closed rule of this file and of `filing-gate.md` (for example line 58's \"not closed for this\", the later \"first-touch close outside the three classes clears only pre-gate stock\", and the filing gate's return-not-close and close-only-when-no-class-fits lines). Anything else stays (the default), so a keep item always wins over a close item.\n  - **Close list:** no customer or user effect (pins only, ADR/jsdoc wording, internal refactors, test-title rewording); stale readings, superseded or already delivered; corners no user is measured reaching by either `reach:` form (two-holder edges, a newline inside a path segment).\n  - **Keep list:** user-visible defects, published docs and skills, security items, maintainer-directed work, anything an open PR carries or a seat has taken, and anything irreversible or with a hard deadline (which line 87 then reports to the maintainer).\n- **Folded into a pointer** (line 9): the cloud line now reads that cloud first touch and the over-4-h fallback follow `lanes/cloud.md`. The separate fallback line is gone; its whole rule (write to the cloud lane's seats, triage never labels for them) is `lanes/cloud.md:24`, and `lanes/cloud.md:8` says the cloud lane owns first touch and triage only the fallback. The old \"见多仓协调\" tail is dropped: triage reads `cross-repo-coordination.md` every fire.\n- The (c) metadata definition (line 56) is unchanged.\n\n`scripts/pm/check-skill-line-ratchet.mjs`: the `triage-duties.md` ceiling 104 → 108, with a comment naming the ruling of record (comment 6943048358, decision card `cmsg_01FdL1XeUyvVNxLreh3F4Qi9WwExMWYmK6rBq81gx1Ameh`) and the measured delta +4.\n\n## Acceptance notes\n\n- **Ruled raise, measured:** the ruling allows at most 108 \"by the measured growth\". Five lines are the tightest packing with every example (widest 119 bytes); one line paid through a pointer brings the net to +4, so the ceiling lands at 108 with headroom 0.\n- **Round 2 (L1 record 6944166942 M1; L2 record 6944184044 S1, N1, N2):**\n  - M1: the first head deleted two lines whose second homes triage does not read. The (c) definition is restored; the cloud fallback is reachable through the line-9 pointer to `lanes/cloud.md`.\n  - S1: the precedence clause now covers the whole close list (close rule above), so clause 3 outranks line 58.\n  - N1: no quoted phrase stands for filing-gate text any more; the clause names the rules by kind.\n  - N2: keep wins when both lists hit (\"关条中且留条不中\").\n- **Round 3 (L2 record 6944913173 S2, N5, N6):** an irreversible or hard-deadline p3 card that hits a close item is kept, so line 87 (report to the maintainer) still governs it; the precedence names `filing-gate.md` (\"该文\") instead of the 立卡门 nickname; the ratchet comment names the file its pointer lives in.\n- **With #34751 (same card family):** a card that the focus rule there grades down to p3 is an \"already graded p3\" card here; the standard applies to it at first touch, like any other p3.\n- **Clause 3 source:** the maintainer approved clause 3 by example, not in a sentence of its own (record 6906416184: #20178, #25946, #20470, #7877, then the full-review closes). The text ties it to the two `reach:` forms defined in `filing-gate.md`.\n- **Review history:** draft PR #34266 (head `a7ccc0ee`) was failed by review record 6906365063. This PR is written from `main`: the `Suggested-grade:` reader line and the `reach:` definition stay as on `main`; the standard has its own bullet with scope, precedence and default keep. `filing-gate.md` is untouched (change 2 narrows ruling B, which is not ruled).\n- **Cross-file move ledger:** `triage-duties.md` is a source of the declared move into `lanes/director.md`; with the new ceiling the source decrease reads 12 against that move's +11, and the ratchet passes.\n- **Changes 2 and 3** of the card wait on the maintainer; hence `Part of`, not `Fixes`.\n\n## Verification\n\nHead `9c61792e70bdb576a1b132748ff82d89a8e5da61` (three commits on `origin/main` dc66d33082).\n\n<details><summary>Derived gate round on head 9c61792e70 (dispatch-gates --commands, 41 commands)</summary>\n\n```\ndispatch-gates --commands → 41 commands\n41 :: exit 0, stdin closed, exit codes captured before any pipe\ndispatch-gates --ran → 41 derived, 41 run, 0 NOT-MEASURED\npnpm check:pm-skill-ratchet :: exit 0 — triage-duties.md is 108 lines (ceiling 108; headroom 0); widest new line 119 bytes\npnpm check:pm-skill-id-lint :: exit 0 — 118 file(s) clean\n```\n\n</details>\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSXPDB46NVRepWVrL3\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmSXPDB46NVRepWVrL3 -->\n"
+}

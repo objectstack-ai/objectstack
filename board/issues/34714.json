@@ -2,8 +2,8 @@
   "number": 34714,
   "kind": "issue",
   "title": "Studio 着陆页：加一张「本环境的定制」汇总，所有已安装应用的改动列在一处",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,15 +15,21 @@
     "enhancement",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T08:09:57Z",
-  "updated_at": "2026-11-17T08:09:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T14:18:07Z",
+  "closed_at": "2026-11-17T13:47:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34714",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「组织自定义元数据的概念吗？除了流程还有很多，是否建议一个统一的入口吗？」；看过效果图后：「Studio 着陆页 可以」。\n\n## 现状（读码，objectstack `origin/main` a34eb0716a；界面实测在本地 HotCRM 实例）\n\n- 定制的机制已经统一：ADR-0146 规定对已安装应用的每一处定制都进它配对的 `.custom` 包（专题 #28236，46 张子卡已全部关闭）。\n- 入口没有统一。着陆页 `ui/packages/app-shell/src/views/studio-design/BuilderLanding.tsx` 上，每个只读应用的卡片只有一行数量「已定制 N 项，已停用 N 项」（:147–161，用 `fetchPackageCustomizationCounts`）。想知道「这个环境到底改了哪些东西」，要一个应用一个应用点进去看。\n- 服务端已有完整清单：`GET /packages/:id/customizations`（`packages/runtime/src/domains/packages.ts` 的 `readPackageCustomizations`）返回四张清单 overrides、extensions、switchedOff、contributions；前端 `packageCustomizations-io.ts` 已有取完整清单的 `fetchPackageCustomizations`（:59），着陆页只用了取数量的那个（:86）。\n- 应用内已有定制列表组件 `StudioRailCustomizations`。\n\n## 要做的\n\n1. 着陆页加「本环境的定制」面板：对每个已安装的只读应用调一次现有的 customizations 读取，合并成一张清单。\n2. 每行：条目名（用标签）、类型、所属应用、改动方式（改了原有的 = overrides；新增的 = extensions；已停用 = switchedOff），点击打开该条目在 Studio 里的页面。\n3. 按类型的页签筛选（全部 / 新增字段 / 表单与视图 / 流程 / 已停用），可切换为按应用分组；带搜索。\n4. 默认只显示前若干行，其余在「全部」里；一项定制都没有时，面板显示一句空状态，不占大块面积。\n5. 读取失败或无权读取的应用，在面板里说明「这个应用的定制读不到」，不把失败当成 0 项。\n\n## 不做的（ADR-0146 D6 已排除，写明以免被读成遗漏）\n\n- 不做与原版的差异对比、不显示「基于哪个版本」、不做克隆来源追溯。\n- 不做按组织区分的定制：定制的单位是环境。\n- 不改服务端接口；不动 `.custom` 的存储划分。\n- contributions（其他包带来的内容）不算本环境的定制，不进这张清单。\n\n## 验收\n\n1. 一个环境里对两个已安装应用各做一处定制、停用一条流程：着陆页的面板列出 3 行，所属应用与改动方式正确，点击能打开对应条目。\n2. 面板上的总数等于各应用卡片上「已定制 + 已停用」之和。\n3. 没有任何定制时显示空状态；某个应用的读取返回 403 时，面板说明读不到，其余应用照常列出。\n\n## 设计图（静态示意稿，标「新」的是改动；示例数据是虚构的）\n\n<details><summary>图 19 Studio 着陆页</summary>\n\n![图 19 Studio 着陆页](https://github.com/objectstack-ai/objectstack/blob/69284a23681f1f94a5a0250a5f208e1293019f3c/19-studio-landing.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `BuilderLanding.tsx`，复用 `packageCustomizations-io.ts` 与 `StudioRailCustomizations`。\n\nDedupe: `repo:objectstack-ai/objectstack Studio landing customizations summary across packages BuilderLanding` → 3 条命中，没有跨应用汇总的卡（含已关）。"

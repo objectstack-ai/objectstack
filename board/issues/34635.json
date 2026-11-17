@@ -2,8 +2,8 @@
   "number": 34635,
   "kind": "issue",
   "title": "objectql: in one multi-row insert, a parent field derived from a summary (and a summary of a summary) still reads its pre-batch value",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "duplicate",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:22:04Z",
-  "updated_at": "2026-11-17T05:50:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T11:44:56Z",
+  "closed_at": "2026-11-17T11:44:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34635",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: contract review N1 on PR #34612 (Fixes #34466, ruling family #25579 \"a batch equals one by one\"), passed on by area `o2-E`. Dedupe: `summary batch formula parent`, `\"summary of a summary\"`; no open card.\n\nSuggested-grade: p2 · domain:server\n\n## 维护者速读\n\n- 现象：一次插入多行明细时,#34466 修好后，父记录上的汇总字段在同批内会逐行累加；但由这个汇总派生出来的父字段(公式字段，或者「行数 ≥ 2 即已满」这类存储的表达式字段)在同一批里仍读批前的值。汇总的汇总(再往上一层父记录)也一样。\n- 为什么要修：逐条插入时，这些派生字段在每次重算后都会更新，读它们的明细条件会在第 k 行拒绝；一次批量插入则全部放过。这和已裁的「批量等于逐条」(#25579)不一致。\n- 需要你做的：无(分诊定级;若修复碰契约面，按收窄照常交人审批)。\n\n## Observed (by review, not yet re-run)\n\nPR #34612 overlays the summary field itself, row by row, inside one multi-row insert. Two reads stay at the pre-batch value:\n\n1. A parent field derived from that summary: a formula field, or a stored expression field such as \"is full when `line_count >= 2`\". A child `requiredWhen` that reads `parent.is_full` passes every row of the batch. Inserted one by one, the field is re-derived after each recompute and the later rows are refused.\n2. A summary of a summary one level up (grandparent rolls up the parent's summary). The overlay moves only the direct parent's summary.\n\n## Premise check (run first)\n\nOn main after #34612 merges: a parent with `line_count` (count of children) and a formula `is_full = line_count >= 2`; a child rule `requiredWhen: parent.is_full` on `description`. Insert three children with empty `description` in one call, then the same three one by one. If the batch also refuses the third row, close this card as not reproducible.\n\n## Done when\n\nThe batch and one-by-one paths give the same verdict for both shapes above, or the limit is ruled and documented. Pin tests in `packages/objectql/src/summary-rollup.test.ts`.\n"

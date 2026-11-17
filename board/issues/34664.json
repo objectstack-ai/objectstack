@@ -2,8 +2,8 @@
   "number": 34664,
   "kind": "issue",
   "title": "lint: `security-rollup-source-unreadable` is advisory (\"the pair is legal and is often meant\") but has no way to acknowledge a meant pair, so `os lint --strict` forces either a widened child read or a hidden total",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T05:10:02Z",
-  "updated_at": "2026-11-17T05:55:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T13:14:24Z",
+  "closed_at": "2026-11-17T12:45:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34664",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nFound while building hotcrm#2557 (Order to Cash invoices and payments move under the account as master-detail). Read in code on `main` 3452dec219.\n\n## The rule says the pair is legal\n\n`packages/lint/src/validate-rollup-source-visibility.ts` header: *\"Advisory on purpose: the pair is legal and is often meant (an order total visible to staff who may not see line costs).\"* The rule emits a **warning**. `os lint --strict` fails on any warning, and there is no per-finding or per-rule acknowledgement anywhere in `packages/lint` (grep: no acknowledge / suppress / override mechanism). So the only exits a strict-lint app has are the two the rule calls remedies for an *un*meant pair:\n\n- grant the set read on the child, which opens rows. Under a `controlled_by_parent` child, `readScope: 'own'` on that grant does not narrow the rows (measured by the hotcrm lane on 18.5.0); or\n- hide the parent total with `readable: false`.\n\n## The meant case, ruled by the hotcrm maintainer\n\nOn 2026-11-17 05:08Z the maintainer ruled 「保持现在的范围」: once invoices and payments hang under the account, service, marketing and default users **read the account's totals but not the invoice and payment rows**. Today hotcrm satisfies strict lint with an inert read grant on `crm_invoice` / `crm_payment`, which is inert only because the rows hang off the contract, which those sets cannot read. With the account as master, that grant opens every row (View All on accounts). Dropping it draws 12 `security-rollup-source-unreadable` warnings, and strict lint goes red.\n\n## Asked\n\nA declared acknowledgement of a meant pair, at authoring time. For example, on the permission set's field entry for the summary (`fields['crm_account.invoiced_amount']: { readable: true, rollupOverUnreadableChild: 'intended' }`), or on the summary field itself. It must:\n\n- turn that finding into `info` (or nothing), with the reason kept in the metadata where a reviewer sees it;\n- leave every other finding of the rule untouched;\n- be taught in the security / data-modeling skill beside the rule's explanation.\n\nThe name and placement are the platform's call.\n\n## Done when\n\nA permission set that reads a roll-up but not its child, with the acknowledgement declared, passes `os lint --strict`. The same set without it still warns.\n\nBlocks: objectstack-ai/hotcrm#2557 and #2560."

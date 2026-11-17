@@ -2,8 +2,8 @@
   "number": 34614,
   "kind": "issue",
   "title": "窄记录抽屉：关键字段里的徽标被截成一个字母，相对时间逐词换行",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "lease:o3-A",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T03:14:03Z",
-  "updated_at": "2026-11-17T07:11:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T10:10:52Z",
+  "closed_at": "2026-11-17T10:09:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34614",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。由 3 号座位（#34584）按维护者「任务很多，你是总指挥，如何分拆」补立：专题子卡里没有这一项。⛔ 不是认领。\n\n## 现状（读码，origin/main 144cdc254e；界面实测在 staging os-4e4qa4）\n\n- 窄抽屉里记录页按容器宽度走单列堆叠（< 760px，`recordPageTierFor`），关键字段条 `HeaderHighlight` 在栅格版本是 `grid-cols-2 @lg:grid-cols-3`（:132–134），在非栅格版本是 `flex flex-wrap` + 每格 `basis-[9rem] min-w-[min(9rem,100%)]`（:136、:360–365）。\n- 有值的格子把 `CellRenderer` 包在 `<span className=\"block min-w-0 truncate …\">` 里（:448–462）。`truncate` 适合纯文本，对选项徽标、用户头像这类内联块会把整块裁掉而不加省略号；格子里还有一个编辑笔按钮（:490–503，手机 `min-w-[44px]`）占宽。\n- 元信息行（创建 / 更新 · 相对时间）`MetaEntry`（RecordMetaFooter.tsx:186–212）：标签、用户、点、`<time>` 都在一个 `inline-flex` 里，父级 `flex flex-wrap gap-x-4`（:273–276）。没有 `whitespace-nowrap` / `shrink-0`，窄宽度下 `<time>` 按词换行。\n- 页头标题行 `RecordTitleChip`（:120–127）是 `flex-wrap`，标题 `truncate`，不像是徽标被裁的来源，排查时一并确认。\n\n## 要做的\n\n1. 在 400px 左右宽的记录抽屉里复现两处问题（HotCRM 商机手写页与一个默认页对象各一次），确认落点。\n2. 徽标：选项 / 状态这类块状值不再被 `truncate` 裁成单字 —— 徽标自身 `max-w-full` 内截断文字（带省略号与 title），或让块状值的格子允许换行。\n3. 相对时间：`<time>` 与「· 时间」整体 `whitespace-nowrap`，不够宽时整段换到下一行，而不是逐词断开；动态里的时间同样处理。\n4. 加一个按容器宽度（≈ 380px）测量的回归测试（e2e 或组件测试里断言单行高度 / 徽标文本完整）。\n\n## 不做的\n\n- 不改抽屉宽度与单栏 / 两列布局（专题第 4 项的其余方向待定）。\n\n## 验收\n\n1. 380px 宽抽屉里，「方案报价」这样的徽标至少完整显示或以省略号截断并可悬停看全名，不出现只剩一个字。\n2. 「3 天前」「3 days ago」不逐词换行。\n3. 宽屏布局不变。\n\n## 设计图\n\n<details><summary>图 2 记录详情（窄抽屉）</summary>\n\n![图 2](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/02-record-drawer.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，先复现再改 `HeaderHighlight.tsx` 与 `RecordMetaFooter.tsx`；与 #34595 第 3 条协调。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue record drawer badge truncated relative time wraps` → 3（#6015 席位帖、#25943 与 #32908，均无关）。专题子卡列表里没有这一项。"

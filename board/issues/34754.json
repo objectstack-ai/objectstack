@@ -1,0 +1,30 @@
+{
+  "number": 34754,
+  "kind": "issue",
+  "title": "service-print: printing a record gives the app no business-rule seam — POST /print/records archives the PDF without a refusable hook on the parent record",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T09:48:54Z",
+  "updated_at": "2026-11-17T10:48:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34754",
+  "body": "## What (18.5.0)\n\n`POST /api/v1/print/records` (`@objectstack/service-print`, `PrintService.printRecordToFile`) checks only **permissions** before it renders and archives:\n- a human caller;\n- a print page;\n- a readable record;\n- `enable.files`;\n- the security-only `assertMayAttach` (edit on the parent plus create on `sys_attachment`).\n\nIt then archives through `attachFileAs` (a `sys_attachment` insert) **without writing the parent record**, so no hook on the parent object runs.\n\nAn app therefore has no legitimate place to enforce a business rule such as \"this quote may not be printed (handed to the customer) until it is approved\":\n- an app cannot hook `sys_attachment` (ADR-0130 R4);\n- a record-change flow triggered by the attachment cannot veto the insert, because its failure is only logged;\n- `PagePrintSchema` is strict and has no condition key.\n\nThe app can hide its print button, but the REST route still prints and archives.\n\n## Repro (app project, 18.5.0)\n\n1. A quote rule refuses moving a hand-priced quote out of Draft before the manager approves it. The rule is a `beforeUpdate` hook refusal from the app's catalogue.\n2. As the rep, print that draft quote through the print door (the same `attachFileAs` path).\n3. Result:\n   - one `sys_attachment` is created (the PDF);\n   - the quote stays `draft`;\n   - the follow-up flow that would mark it presented fails in the log with the app's refusal.\n\n   The document reached the customer-facing archive anyway.\n\n## Ask\n\nGive print a refusable seam, for example:\n- a pre-print hook event on the parent object (e.g. `beforePrint`), whose refusal follows the hook refusal contract: envelope code, localized `userMessage` from the app's catalogue, and **no attachment written**; or\n- a CEL condition on `page.print` (and the print action) that the server evaluates against the record before rendering, with a declared refusal message.\n\nEither way, the console's print button should honour the same decision."
+}

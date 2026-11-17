@@ -1,0 +1,33 @@
+{
+  "number": 34829,
+  "kind": "issue",
+  "title": "Queue-flake anchor: test/activity-text-predicate.dogfood.test.ts",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding",
+    "queue-flake-anchor"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T12:24:56Z",
+  "updated_at": "2026-11-17T12:48:25Z",
+  "closed_at": "2026-11-17T12:48:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34829",
+  "body": "`test/activity-text-predicate.dogfood.test.ts` has ejected **12 pull requests** from the merge\nqueue within a rolling 24 hours — **1 independent hit** once\nGitHub's speculative stacking is accounted for. This issue is the single place for\nthat conversation; it is refreshed by the merge-queue-triage workflow on every\nfurther ejection.\n\n| PR | stack | queue build |\n|---|---|---|\n| #34347 | S1 · inherited | [44080349559](https://github.com/objectstack-ai/objectstack/actions/runs/44080349559) |\n| #34654 | S1 · inherited | [44080346297](https://github.com/objectstack-ai/objectstack/actions/runs/44080346297) |\n| #34713 | S1 · inherited | [44080289780](https://github.com/objectstack-ai/objectstack/actions/runs/44080289780) |\n| #34744 | S1 · inherited | [44080241884](https://github.com/objectstack-ai/objectstack/actions/runs/44080241884) |\n| #34750 | S1 · inherited | [44080198671](https://github.com/objectstack-ai/objectstack/actions/runs/44080198671) |\n| #34751 | S1 · inherited | [44080151845](https://github.com/objectstack-ai/objectstack/actions/runs/44080151845) |\n| #34753 | S1 · inherited | [44080397986](https://github.com/objectstack-ai/objectstack/actions/runs/44080397986) |\n| #34775 | S1 · inherited | [44080060061](https://github.com/objectstack-ai/objectstack/actions/runs/44080060061) |\n| #34813 | S1 · inherited | [44080293971](https://github.com/objectstack-ai/objectstack/actions/runs/44080293971) |\n| #34814 | S1 · inherited | [44080802901](https://github.com/objectstack-ai/objectstack/actions/runs/44080802901) |\n| #34815 | S1 · inherited | [44080618620](https://github.com/objectstack-ai/objectstack/actions/runs/44080618620) |\n| #34817 | S1 · root | [44078624886](https://github.com/objectstack-ai/objectstack/actions/runs/44078624886) |\n\n⚠️ **Queue depth is not evidence.** The `stack` column is read out of the queue\nbranch names: GitHub builds each queued PR on top of the previous entry, so a\nbuild whose BASE chain reaches another victim's queue HEAD (directly, or through\ngreen groups queued between them) contains that victim's tree by construction.\nA single deterministic break therefore ejects every PR\nbehind it, and the raw victim count climbs with QUEUE DEPTH until the owner\nlands a fix. Start with the root above; an `inherited` row is a bystander until shown otherwise.\n\n**This issue is a NAME, not a diagnosis.** The workflow that files it reads the\nfailing test file path out of the job logs and counts PRs; it does not\nknow whether this is a flake, a load/timing cliff, a semantic conflict between\nqueued PRs, or a real regression, and it does not act on any of those. No test is\nskipped, quarantined or re-queued by it, and no PR is labelled by it — weakening\na gate stays a human act.\n\nWhat to do with it: read one victim PR's triage comment for the failure REASON\nline beside the FAIL line (a timeout and an assertion are the same FAIL line and\nopposite diagnoses), decide the cause, and close this issue with the fix or with\nthe reason it is not one.\n\nA later queue build that went green on the same `main` is a control only if its\naffected-only selection ran the failing package; a green group that never selected\nit carried the same tree without testing it.\n\nLast refreshed by queue build [44080397986](https://github.com/objectstack-ai/objectstack/actions/runs/44080397986) (PR #34753).\n\n---\n_Filed by the merge-queue-triage workflow (#4859, aggregation #10128)._\n\n<!-- queue-signature-anchor:test/activity-text-predicate.dogfood.test.ts -->"
+}

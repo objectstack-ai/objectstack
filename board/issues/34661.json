@@ -2,8 +2,8 @@
   "number": 34661,
   "kind": "issue",
   "title": "ADR-0087 upgrade-guide entries for the date-text verdicts name formulas and predicates only, not flow value envelopes",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "documentation",
     "domain:spec",
     "finding",
-    "pm:blocked",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T05:08:09Z",
-  "updated_at": "2026-11-17T05:11:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T13:09:58Z",
+  "closed_at": "2026-11-17T13:09:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34661",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQAXHSQEgnYyx9tstb\n\nFiling gate: ① measured. Found in the #34451 dev round (PR #34654, open question 3). ⛔ Not a claim.\n\nBlocked-by: #34451\nSuggested-grade: p3 — upgrade-guide text; the verdicts and their rewrites are already registered.\n\n## What\n\nPR #34654 lets the date-text verdicts reach flow value envelopes and declares its ADR-0087 disposition `not-required (already-registered formula-timestamp-date-only-refused, formula-date-text-call-refused, formula-date-subtraction-refused)`. Those three semantic entries' surface text names formulas and predicates (validation rules, field rules, flow conditions) only. An author whose flow stops registering because of an `update_record` / `create_record` field or an `assignment` value finds no upgrade-guide entry naming that site.\n\n## Where\n\n`packages/spec/src/migrations/entries/semantic/18.*.ts`: the three entries named above. This touches `packages/spec/src`, so it lands through Tier H.\n\n## Done when\n\nEach of the three entries names flow value envelopes among its sites, with the same rewrite (`isoDate(addDays(record.<date field>, N))`).\n\nDedupe words: ADR-0087 semantic entry value envelope, formula-timestamp-date-only-refused surface, upgrade guide flow fields date-text."

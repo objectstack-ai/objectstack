@@ -1,0 +1,38 @@
+{
+  "number": 34731,
+  "kind": "pull_request",
+  "title": "fix(plugin-email): a host's own mail transport reads as in use on GET /api/settings/mail",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T08:57:47Z",
+  "updated_at": "2026-11-17T11:09:09Z",
+  "closed_at": "2026-11-17T11:05:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T11:05:09Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34731",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9SCDb2wCYDLuCsxUCkbNfGs)_\n\nFixes #32799\n\nClause-②: yes (widening) — the served `live` entry of `GET /api/settings/:namespace` now also admits `{ value: null, source: 'environment' }`; every entry served before is served unchanged\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 宿主交给 plugin-email 的自带投递方式(选项表叫不出名字，比如托管平台代发通道)，现在在 `GET /api/settings/mail` 上报为 `live.provider = { value: null, source: 'environment' }`，即「在用、来自运行环境、选项表叫不出名」。spec 只改 `live` 的说明文字(形状不变)，service-settings 判定放行 `environment + null` 这一种组合。\n- **为什么改：** 按裁决 C(6942903820)。托管环境邮件一直在发，但设置清单读不到，邮件行显示未完成。\n- **风险与回滚：** 低。只多放行一种组合;`settings + null`、无选项表的键照旧丢弃;内置 smtp/resend/postmark 读数不变。回滚即 revert 本 PR。控制台 `isMailDelivering` 目前把 `environment + null` 读成未完成，要等 ui 跟进卡 #34749 才会打勾。\n- **先看：** `packages/services/service-settings/src/settings-service.ts`(`judgeLiveValue` 新增一行)、`packages/plugins/plugin-email/src/live-transport-status.ts`(新增一个分支)、`packages/spec/src/system/settings-manifest.zod.ts`(`live` 说明)。\n- **两分钟验证：** `pnpm --filter @objectstack/plugin-email exec vitest run src/live-transport-status.pin.test.ts`，预期 21 个通过，其中「environment: the host's own transport …」一条读到 `{ value: null, source: 'environment' }`。\n- **需要你做的：** 待契约复审(L2)通过后，由席位请你批准这个 spec 面 PR。\n\n## What changes\n\n- **`@objectstack/spec`** — `SettingsNamespacePayloadSchema.live`: the docblock and the `value`/`source` describes now say a non-null `value` is one of the key's options, and `value` is `null` under `'none'` (nothing in use) or `'environment'` (in use, supplied by the boot environment or host, named by no option). In-use is read from `source`, never from `value === null`; `'settings'` always names an option. Shape unchanged. Generated `content/docs/references/system/settings-manifest.mdx` regenerated.\n- **`@objectstack/service-settings`** — `judgeLiveValue` serves `{ value: null, source: 'environment' }`. `settings` + `null` and any entry on a key with no option table stay dropped. `SettingsLiveValue` / `SettingsLiveStatus.values` docs follow.\n- **`@objectstack/plugin-email`** — `describeLiveMailTransport` states `{ value: null, source: 'environment' }` for an `environment`-origin transport no `provider` option names (a plain `IEmailTransport` the host hands over). Stock transports read as before; a transport swapped in through `setTransport` is still not stated; a `settings` origin with no option is still not stated.\n- Root changeset `.changeset/32799-host-mail-transport-live-environment.md` (patch × 3).\n\n## Tests\n\n- `packages/plugins/plugin-email/src/live-transport-status.pin.test.ts` — **changed existing test**: \"states nothing for a transport no option names, or one this plugin did not install\" split in two. The host's-own-transport half now asserts `{ value: null, source: 'environment' }` through the served door (real `SettingsService` + mail manifest, body parsed by `SettingsNamespacePayloadSchema`), as ruling C requires. The swapped-transport half keeps \"not stated\", plus a host-own transport swapped through `setTransport`. New unit pin: a no-option transport is stated only under `environment` (not `settings`, not without an origin).\n- `packages/services/service-settings/src/settings-routes.live-status.pin.test.ts` — new: `environment` + `null` served on the mail page with no warn; new drop row: a key with no option table as `environment` + `null`. The existing `settings` + `null` drop row is relabelled (\"no value under source \\\"settings\\\"\").\n- `packages/spec/src/system/settings-manifest.test.ts` — the payload parses `environment` + `null`.\n\n## Acceptance notes\n\n- Console follow-up owed (`domain:ui`, not in this claim, ruling C's \"另立 ui 卡\"): `ui/apps/console/src/pages/settings/firstRunChecklistLogic.ts` `isMailDelivering` treats `environment` as done only with a non-empty string `value`, so `{ value: null, source: 'environment' }` reads not done (before this PR the absent statement fell back to `isMailConfigured(values)`). `ui/apps/console/src/pages/settings/types.ts` still documents \"`null` exactly when `source` is `'none'`\". Filed #34749.\n\n## Verification\n\nAt head `9e70d11b5a453c4a787655c649a0284c4f29f896` (merge base origin/main `dc66d330`); full report: card comment 6944198803.\n\n- Package suites under `os-verify-lock`: `@objectstack/service-settings` 76 files / 1516 passed; `@objectstack/plugin-email` 54 / 1025 passed; `@objectstack/spec` `src/system` 73 / 2577 passed.\n- Typecheck: spec, service-settings, plugin-email exit 0.\n- `dispatch-gates --commands` derives 117; `--ran`: 117 run, 0 NOT-MEASURED, 0 UNRUN.\n\n<details><summary>Ablations (scripts/ablation-replace.mjs; each restored blob == HEAD, git diff HEAD empty)</summary>\n\n- Judge line `if (source === 'environment' && value === null) …` removed: service-settings pin 1 failed / 23 passed. The plugin-email pins resolve the service-settings dist built before the mutation, so no dist leg was taken there.\n- plugin-email branch `else if (!option && origin === 'environment') …` removed: plugin-email pin 2 failed / 19 passed (the unit pin and the served-door pin).\n\n</details>\n\n<details><summary>Gate re-runs</summary>\n\nThe first pass ran beside a locked build on a shared box. Four commands were non-zero and each passed when re-run: `check-plugin-teardown-shape --self-test` exited 3 until the pinned commit was fetched; spec `check:generated` and spec `typecheck` hit a tsc out-of-memory and passed alone; `check:skill-examples` and `check:dual-build-cjs-loads` exited 3 (no built dist) and passed after a turbo build of `./packages/**`.\n\n</details>\n\nCI at this head: 68 check-runs, 58 success, 10 skipped, 0 failed.\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmTBjYWuaUonx8DhAbB -->\n"
+}

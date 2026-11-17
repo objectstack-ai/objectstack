@@ -1,0 +1,38 @@
+{
+  "number": 34812,
+  "kind": "pull_request",
+  "title": "chore(repo): refuse two names in one folder that differ only in letter case",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "domain:ui",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T11:07:30Z",
+  "updated_at": "2026-11-17T13:29:34Z",
+  "closed_at": "2026-11-17T13:29:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34812",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9R6fQuMSzSrRW2oowG4K2kQ)_\n\nFixes #34705\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — a repository gate; no skill page teaches file naming.\n\n> **Tier H.** The second of two PRs for #34705. The first, #34762 (merged), renamed the colliding file. This one adds the regression gate. Its `lint.yml` step reads Tier H under the workflows split (a new `continue-on-error`, as every sibling step in that job carries), so it stays **draft** and the seat lands it. The area thread does not flip it ready.\n\n## 维护者速读\n\n- **改了什么**：新增 `pnpm check:module-name-case`（`scripts/check-module-name-case.mjs`），读全仓 `git ls-files`，同一目录里两个名字只差大小写就红（脚本文件按导入名比较，全名也比较）；在 `lint.yml` 的 Lint & Repo Gates 作业里加一步跑它。\n- **为什么改**：#34705 的根因是 `DeploymentNotice.tsx` 和 `deploymentNotice.ts` 只差大小写，Linux CI 区分大小写所以不红，macOS 上构建失败。这一对扩展名也不同，所以只比较完整文件名的检查查不出来；本检查对脚本文件比较的是导入时写的名字（去掉扩展名）。\n- **风险与回滚**：只加一道检查，不动任何包。当前 main 上 26018 个路径全过。回滚即撤回本 PR。\n- **先看**：`scripts/check-module-name-case.mjs` 头部注释（什么算冲突、什么不算），以及 `lint.yml` 新增的那一步。\n- **两分钟验证**：`pnpm check:module-name-case`，预期 self-test 30 条通过、全仓无冲突；在任一目录加 `Foo.ts` 和 `foo.tsx` 两个文件并 `git add`，再跑应红。\n- **需要你做的**：Tier H（workflow 新增 `continue-on-error`），按 GOVERNED_APPROVERS 批准；其余由席位落地。\n\n## What changes\n\n- `scripts/check-module-name-case.mjs` (new). Within one folder, two entries whose keys are equal ignoring case but differ in case are a collision. A script file's key is its module name (one of `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` removed, with its `.d.` form); any other file's key is its full name; a sub-folder's key is its name (an import of the folder spells it). Whole paths that differ only in case are the same rule one level up. Full names are compared too, in a key space of their own (a module name is never matched against a full name), so `Foo.ts` beside `foo.TS`, or a folder `Foo.ts/` beside a file `foo.ts`, collide (L2 S1, fixed at `660781e5`). Not a collision: the same key in the same case (`foo.ts` beside `foo.tsx`, `Foo.ts` beside `Foo.test.ts`). Population: every path `git ls-files` lists. `--self-test` holds 30 assertions, among them #34705's own pair and the rename that fixed it. Declared `whole-tree-population` for `dispatch-gates`.\n- `package.json`: `check:module-name-case` runs the self-test, then the scan.\n- `.github/workflows/lint.yml`: one step after `Staged gitlinks are declared in .gitmodules`, in the same shape (`id`, `continue-on-error: true`, `run: pnpm check:module-name-case`); the job's final step reads every step's outcome from `toJSON(steps)`, so the new step is counted without another edit.\n- No changeset: nothing published changes (`skip-changeset`).\n\n## Verification\n\nSee the final-head comment for the head this covers. Acceptance 2 of the card (\"a deliberate pair reds\"): the scan exits 1 on `origin/main` f6f5b50a05, naming `ui/packages/app-shell/src/console/deployment-notice/  DeploymentNotice.tsx  deploymentNotice.ts`, and exits 0 on main after #34762.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request. (The card's fix landed first as #34762, as that PR stated.)\n- [x] 5. A change that publishes carries a changeset: this one publishes nothing; both declaration lines are filled in here.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (The 维护者速读 section is the maintainer's requested summary.)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSYe73LCZ6WxGFvcko\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmSYe73LCZ6WxGFvcko -->\n\n"
+}

@@ -2,8 +2,8 @@
   "number": 33288,
   "kind": "issue",
   "title": "[PM seat] domain:devx · seat 4 — ⏳ vacant",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,17 +13,19 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T15:40:23Z",
-  "updated_at": "2026-11-15T12:45:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T09:13:37Z",
+  "closed_at": "2026-11-17T09:13:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33288",
   "body": "domain:devx#4 · os-project-manager · session_01FEkQ5ooRyyS95kdyC2dPEX\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:devx` seat 4**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here).\n- The other devx seats: seat 1 objectstack-ai/objectstack#6023 (`os-elon-musk`, mailbox #30657), seat 2 #20163 (vacant), seat 3 #26373 (vacant). ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-15T12:45Z (off duty).</sub>\n\n## Current PM — ⏳ vacant\n\n- **Off duty** on the maintainer's word in the project chat: 「当前任务处理完，合并后就下班」, then 「你把剩下在做的任务都写到座位帖，万一没 token 了也好交接」. Last holder: `os-project-manager` · `session_01FEkQ5ooRyyS95kdyC2dPEX` (project thread 「运行 devx 车道席位」).\n- **Mailbox:** PR #33289, closed at sign-off. **Patrol:** `trig_01KobrAdJ9GA8uSHTEGGtw3o`, deleted at sign-off. No subscriptions held.\n- **Posture ledger:** the labels, the assignee, the `Claim:` comments carrying `Seat: domain:devx#4`, and the `head:claude/` PRs.\n- **Successor:** `/pm-dispatch 接手`, read this post first. Every item below is a card on the board; this post only points at it.\n\n## Ledger\n\n- **In flight:** none. `check-handover.mjs --session=session_01FEkQ5ooRyyS95kdyC2dPEX --account=os-project-manager` exit 0. No open PR of this seat.\n- **Landed this term:** #33256, #33275, #32908 (with #33328–#33332), #33334, #33371, #33353 (text half), #33414, #33415 (PR #33453), #33351 (PR #33467), #33497 (PR #33556), #33133 (objectstack-ai/gallery#2, merged by hand: gallery has auto-merge off), #33753 (PR #33776), #33754 (PR #33797), #33798 (PR #33823, the 18.5.0 release notes).\n\n## Owed, by card (open work a successor picks up)\n\n1. **#33798 → at the 18.5.0 cut** (whoever merges Version PR #33097): the list is in the landing record 6894474213. In short: the status blockquotes on `content/docs/releases/v18/18-5.mdx` and `v18/index.mdx`; the index table's 18.5.0 npm date; the release-facts rows (version commit, tags, npm); the v18 entry in `content/docs/releases/index.mdx`; any changeset landing on `main` after `1e65a389`. Also a question for the maintainer, not filed: the 自动迁移 heading overstates this release (all 22 entries under it are semantic, `os migrate meta` does not rewrite them).\n2. **#31518 (p1, merge queue)** — released to `pm:queue` (6893420203). Owed: the 7-day re-reading over the window 9–15 November, posted on or after 16 November, by devx#2's step-1 method (6722460022) with the transitive-cascade rule, plus two columns from triage#1's instance (6887877895): minutes `main` stood still, and rebuilds per root counting a front-jump. Then Wanted 2's fix per class with ≥3 roots.\n3. **#33793 (p2, `pm:queue`, never claimed)** — follow-up of #33753: `leave_balances` weekday drift after the date rebase, plus the `docs/qa/scenarios` README paragraph.\n4. **#33761 (p1, v18.5.0 sweep anchor)** — qa#3 runs the rounds; the anchor stays unassigned. devx owes its checklist-accuracy close-out once the run records land (as on #32908).\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- **Standing constraints (carried from #20163 / #26373, ruling 6720656982):** the root `.github/workflows/ci.yml` is inside devx bounds (Tier H); `ui/.github/**` stays ⛔ out of bounds; changesets go to the root `.changeset/`; no PR on the objectui repository.\n- **Contract reviews** for this account's PRs go to review#1 (maintainer's word in the project).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
