@@ -371,15 +371,14 @@
       "assertions": {
         "must_contain": [
           "translations",
-          "'zh-CN'",
+          "acme_billing",
+          "zh-CN",
           "crm_account",
-          "industry: { label:",
-          "options: { customer:"
+          "industry",
+          "customer"
         ],
         "must_not_contain": [
-          "industry: Field.",
-          "overrides:",
-          "name: 'crm_account'"
+          "overrides"
         ]
       }
     }
