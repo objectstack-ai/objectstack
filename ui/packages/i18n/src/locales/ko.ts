@@ -2174,7 +2174,7 @@ const ko = {
       changesApplied: "적용됨",
       changesDrafted: "초안으로 저장됨",
       changesFailed: "적용되지 않음",
-      discussing: "논의 중: {{target}}",
+      discussing: "보는 중: {{target}}",
       changeVerb: {
         createObject: "객체 생성",
         addField: "필드 추가",
@@ -4606,7 +4606,7 @@ const ko = {
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
       fieldOrderChanged: '필드 순서가 변경됨',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI 코파일럿이 초안으로 작성한 변경 사항 포함',
+      draftedByCopilot: 'AI 어시스턴트가 초안으로 작성한 변경 사항 포함',
       draftedByMcpClient: 'MCP 클라이언트 “{{client}}”이(가) 초안으로 작성한 변경 사항 포함',
       draftedByMcp: 'MCP 클라이언트가 초안으로 작성한 변경 사항 포함',
       detailChangedKeys: '기타 변경:',

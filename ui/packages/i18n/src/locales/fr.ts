@@ -2236,7 +2236,7 @@ const fr = {
       changesApplied: "Appliqué",
       changesDrafted: "Enregistré comme brouillon",
       changesFailed: "Non appliqué",
-      discussing: "Sujet : {{target}}",
+      discussing: "Affiché : {{target}}",
       changeVerb: {
         createObject: "Créer un objet",
         addField: "Ajouter un champ",
@@ -4716,7 +4716,7 @@ const fr = {
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
       fieldOrderChanged: 'Ordre des champs modifié',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclut des modifications rédigées par le copilote IA',
+      draftedByCopilot: 'Inclut des modifications rédigées par l’assistant IA',
       draftedByMcpClient: 'Inclut des modifications rédigées par le client MCP « {{client}} »',
       draftedByMcp: 'Inclut des modifications rédigées par un client MCP',
       detailChangedKeys: 'Également modifié :',

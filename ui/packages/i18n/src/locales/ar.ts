@@ -2429,7 +2429,7 @@ const ar = {
       changesApplied: "تم التطبيق",
       changesDrafted: "حُفظ كمسودة",
       changesFailed: "لم يُطبَّق",
-      discussing: "قيد المناقشة: {{target}}",
+      discussing: "قيد العرض: {{target}}",
       changeVerb: {
         createObject: "إنشاء كائن",
         addField: "إضافة حقل",

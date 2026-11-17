@@ -1783,6 +1783,14 @@ interface ChatPaneProps {
   onDebug?: () => void;
   /** Show the Build Doctor button — true only for build-agent conversations. */
   showDebug?: boolean;
+  /**
+   * objectstack#34725 — the host draws the panel's one title bar itself (the
+   * Studio right slot: 属性 | AI 助手, History, widen, Close), so the pane
+   * omits its own header row: the agent switcher, the app chip, Share and the
+   * Build Doctor button. The host then offers Share where it chooses.
+   * @default false
+   */
+  hideHeader?: boolean;
 }
 
 export function ChatPane({
@@ -1812,6 +1820,7 @@ export function ChatPane({
   onShare,
   onDebug,
   showDebug,
+  hideHeader = false,
 }: ChatPaneProps) {
   const { t, language } = useObjectTranslation();
   const navigate = useNavigate();
@@ -2989,7 +2998,7 @@ export function ChatPane({
         packageRemovalPartialLabel={(failed) => t('console.ai.packageRemovalPartial', { count: failed })}
         surface="plain"
         maxHeight="100%"
-        headerSlot={headerSlot}
+        headerSlot={hideHeader ? undefined : headerSlot}
         // objectui#12978 — the drafts line (`pendingDraftsBar` above) is a row
         // of the composer's own area, in
         // flow above the input. The bar used to float (`absolute bottom-20`)
@@ -3280,7 +3289,7 @@ export function ChatPane({
         surfaceContextLabel={
           surfaceContext?.artifact
             ? t('console.ai.discussing', {
-                defaultValue: 'Discussing: {{target}}',
+                defaultValue: 'Viewing: {{target}}',
                 target:
                   surfaceArtifactLabel ||
                   `${surfaceContext.artifact.type} · ${surfaceContext.artifact.name}`,

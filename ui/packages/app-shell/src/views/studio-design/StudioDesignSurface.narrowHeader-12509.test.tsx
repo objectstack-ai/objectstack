@@ -61,8 +61,11 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
+// The source loads `@objectstack/lint` lazily; paid here, at collection, not
+// inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
-import { STUDIO_HEADER, STUDIO_HEADER_PILLAR, STUDIO_HEADER_PILLAR_NAV } from './studio-tokens';
+import { STUDIO_HEADER, STUDIO_HEADER_PILLAR, STUDIO_HEADER_PILLAR_NAME, STUDIO_HEADER_PILLAR_NAV } from './studio-tokens';
 import { t } from '../metadata-admin/i18n';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
@@ -158,7 +161,11 @@ describe('Studio shell header below and above 640 px (objectui#12509)', () => {
       expect(link).toHaveClass(...STUDIO_HEADER_PILLAR.split(' '));
       // objectui#12725 — named from 1024 px (`lg`, was `xl`): the right slot
       // leaves the top bar room for the four names at the card's 1010 reading.
-      expect(within(link).getByText(t(`engine.studio.pillar.${key}`, 'en'))).toHaveClass('sr-only', 'lg:not-sr-only');
+      // objectstack#34725 — from a 724 px BAR (the old 1024 − 300 px slot):
+      // the slot is resizable now, so the bar's own width decides.
+      expect(within(link).getByText(t(`engine.studio.pillar.${key}`, 'en'))).toHaveClass(
+        ...STUDIO_HEADER_PILLAR_NAME.split(' '),
+      );
     }
 
     // The chip is the piece that gives way on a tight row.

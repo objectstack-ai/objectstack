@@ -2174,7 +2174,7 @@ const de = {
       changesApplied: "Angewendet",
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
-      discussing: "Thema: {{target}}",
+      discussing: "Angezeigt: {{target}}",
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",
@@ -4607,7 +4607,7 @@ const de = {
       detailNone: 'Keine Unterschiede erkannt — der Entwurf entspricht der veröffentlichten Version.',
       fieldOrderChanged: 'Feldreihenfolge geändert',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Enthält Änderungen, die der KI-Copilot entworfen hat',
+      draftedByCopilot: 'Enthält Änderungen, die der KI-Assistent entworfen hat',
       draftedByMcpClient: 'Enthält Änderungen, die der MCP-Client „{{client}}“ entworfen hat',
       draftedByMcp: 'Enthält Änderungen, die ein MCP-Client entworfen hat',
       detailChangedKeys: 'Ebenfalls geändert:',

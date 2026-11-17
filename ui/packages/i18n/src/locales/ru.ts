@@ -2308,7 +2308,7 @@ const ru = {
       changesApplied: "Применено",
       changesDrafted: "Сохранено как черновик",
       changesFailed: "Не применено",
-      discussing: "Обсуждается: {{target}}",
+      discussing: "Просмотр: {{target}}",
       changeVerb: {
         createObject: "Создать объект",
         addField: "Добавить поле",
@@ -4842,7 +4842,7 @@ const ru = {
       detailNone: 'Различий не обнаружено — черновик совпадает с опубликованной версией.',
       fieldOrderChanged: 'Порядок полей изменён',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Включает изменения, подготовленные ИИ-копилотом',
+      draftedByCopilot: 'Включает изменения, подготовленные ИИ-ассистентом',
       draftedByMcpClient: 'Включает изменения, подготовленные MCP-клиентом «{{client}}»',
       draftedByMcp: 'Включает изменения, подготовленные MCP-клиентом',
       detailChangedKeys: 'Также изменено:',

@@ -2403,7 +2403,7 @@ const zh = {
       changesApplied: '已生效',
       changesDrafted: '已暂存为草稿',
       changesFailed: '未生效',
-      discussing: '正在讨论：{{target}}',
+      discussing: '正在看：{{target}}',
       changesConfirmMessage: '确认修改，应用你刚才提议的改动。',
       changeVerb: {
         createObject: '新建对象',
@@ -3587,7 +3587,7 @@ const zh = {
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
       fieldOrderChanged: '字段顺序已变更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: '包含由 AI 副驾起草的更改',
+      draftedByCopilot: '包含由 AI 助手起草的更改',
       draftedByMcpClient: '包含由 MCP 客户端「{{client}}」起草的更改',
       draftedByMcp: '包含由 MCP 客户端起草的更改',
       detailChangedKeys: '其他变更：',

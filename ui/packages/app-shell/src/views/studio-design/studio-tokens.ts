@@ -21,7 +21,7 @@
  * the switcher at full width on the second (`STUDIO_HEADER_PILLAR_NAV`).
  */
 export const STUDIO_HEADER =
-  'grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b px-3 py-2 sm:h-12 sm:grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] sm:py-0';
+  '@container/studio-header grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b px-3 py-2 sm:h-12 sm:grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] sm:py-0';
 /** The pillar switcher: its own full-width row below `sm`, the middle column from `sm` up. */
 export const STUDIO_HEADER_PILLAR_NAV =
   'order-last col-span-2 flex items-center gap-0.5 rounded-lg bg-muted p-[3px] sm:order-none sm:col-span-1';
@@ -40,6 +40,21 @@ export const STUDIO_HEADER_PILLAR =
  * tooltip. Literal class strings: Tailwind finds a class by scanning source.
  */
 export const STUDIO_HEADER_PACKAGE_COLUMN = '@container';
+
+/**
+ * objectstack#34725 — the pillar names, and the words of "All metadata" and
+ * Create app, answer the top bar's OWN width, not the viewport's: the right
+ * panel beside it is resizable now (the console drawer's 420 px, dragged up to
+ * the canvas's 520 px floor), so a 1163 px window can leave the bar 520 px. A
+ * viewport breakpoint kept the names on and pushed the bar's right end, the AI
+ * assistant's robot, under the panel. The thresholds are the bar widths the
+ * old breakpoints gave beside the old fixed slot: 724 px (1024 − 300) for the
+ * four pillar names, 920 px (1280 − 360) for the two longer words. Below them
+ * the names stay in the accessible name and the tooltip. Literal class
+ * strings: Tailwind finds a class by scanning source.
+ */
+export const STUDIO_HEADER_PILLAR_NAME = 'sr-only @min-[724px]/studio-header:not-sr-only';
+export const STUDIO_HEADER_WIDE_WORD = 'sr-only @min-[920px]/studio-header:not-sr-only';
 export const STUDIO_PKG_READONLY_WORD = 'hidden @min-[300px]:inline';
 
 /** Rail: 240 px, the sidebar surface, a right border. */
