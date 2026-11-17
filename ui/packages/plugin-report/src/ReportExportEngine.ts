@@ -9,6 +9,7 @@
 import type { ReportComponentSchema, ReportExportConfig, ReportExportFormat, ReportField } from '@object-ui/types';
 
 import { DISPLAY_LOCALE_LAST_RESORT } from './displayLocale';
+import { csvBlob } from '@object-ui/core';
 
 /**
  * Report Export Engine
@@ -51,7 +52,7 @@ export function exportAsCSV(report: ReportComponentSchema, data: any[], config?:
     ...rows.map(r => r.join(','))
   ].join('\n');
 
-  downloadFile(csvContent, config?.filename || `${report.title || 'report'}.csv`, 'text/csv');
+  downloadBlob(csvBlob(csvContent), config?.filename || `${report.title || 'report'}.csv`);
 }
 
 /**
@@ -272,7 +273,13 @@ function validateOrientation(orientation: string | undefined): string {
  * Helper to trigger file download
  */
 function downloadFile(content: string, filename: string, mimeType: string): void {
-  const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+  downloadBlob(new Blob([content], { type: `${mimeType};charset=utf-8` }), filename);
+}
+
+/**
+ * Helper to hand a built file to the browser's download
+ */
+function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

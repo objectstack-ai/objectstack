@@ -62,7 +62,9 @@ const RETIRED_BITS = [
  * `aggregationFilter` is the fifth, under the same rule: `engine.aggregate`
  * reads it (with method presence) to send a per-measure filter to the driver.
  *
- * [#33697] `zonedDateBucketing` is the sixth, under the same rule:
+ * `lockRows` is the sixth: a predicate delete's cascade arm reads it (with an
+ * open transaction) to send its matched-row read with `DriverOptions.lockRows`.
+ * [#33697] `zonedDateBucketing` is the seventh, under the same rule:
  * `engine.aggregate` reads it (with method presence) to send a date bucket in
  * a non-UTC reference zone to the driver (ADR-0053 Phase 2 D2 as amended).
  */
@@ -72,6 +74,7 @@ const LIVE_BITS = [
   'batchSchemaSync',
   'transactionsUnsupported',
   'aggregationFilter',
+  'lockRows',
   'zonedDateBucketing',
 ] as const;
 
@@ -83,6 +86,7 @@ describe('DriverCapabilitiesSchema', () => {
       batchSchemaSync: true,
       transactionsUnsupported: true,
       aggregationFilter: true,
+      lockRows: true,
       zonedDateBucketing: true,
     };
 
@@ -101,6 +105,8 @@ describe('DriverCapabilitiesSchema', () => {
     expect(parsed).not.toHaveProperty('transactionsUnsupported');
     // Absent = the engine aggregates a filtered measure in memory, as before the bit.
     expect(parsed).not.toHaveProperty('aggregationFilter');
+    // Absent = the engine sends no lock request with a predicate delete's read.
+    expect(parsed).not.toHaveProperty('lockRows');
     // [#33697] Absent = the engine buckets a non-UTC zone in memory, as before the bit.
     expect(parsed).not.toHaveProperty('zonedDateBucketing');
   });
@@ -109,11 +115,15 @@ describe('DriverCapabilitiesSchema', () => {
     expect(DriverCapabilitiesSchema.safeParse({ aggregationFilter: 'yes' }).success).toBe(false);
   });
 
+  it('refuses a non-boolean lockRows', () => {
+    expect(DriverCapabilitiesSchema.safeParse({ lockRows: 'yes' }).success).toBe(false);
+  });
+
   it('refuses a non-boolean zonedDateBucketing', () => {
     expect(DriverCapabilitiesSchema.safeParse({ zonedDateBucketing: 'postgres' }).success).toBe(false);
   });
 
-  it('declares exactly the audited shape: 6 live bits + 31 tombstones', () => {
+  it('declares exactly the audited shape: 7 live bits + 31 tombstones', () => {
     const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
     const keys = Object.keys(shape).sort();
     expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
@@ -214,7 +224,7 @@ describe('tsc channel: the retired bits are unwritable in DriverCapabilities', (
     const props = new Map(capsType.getProperties().map((p) => [p.getName(), p]));
 
     // Anti-vacuity: the walked shape is the audited key set — 31 tombstones
-    // plus the live bits (6 since `zonedDateBucketing`).
+    // plus the live bits (7 since `zonedDateBucketing`).
     expect([...props.keys()].sort()).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
 
     const decl = capsAlias!.declarations?.[0];
@@ -475,5 +485,18 @@ describe('driverSupportsTransactions — a driver that cannot honour transaction
 
   it('only the literal `true` denies — an absent or undefined bit is not a denial', () => {
     expect(driverSupportsTransactions({ ...withMethod, supports: { transactionsUnsupported: undefined } })).toBe(true);
+  });
+});
+
+// `DriverOptions.lockRows` — the lock request a predicate delete's matched-row
+// read carries to a driver declaring `supports.lockRows`. A declared key, so the
+// engine's closed driver-option hop (`pickDeclaredDriverOptions`) passes it.
+describe('DriverOptions.lockRows', () => {
+  it('keeps a boolean lockRows', () => {
+    expect(DriverOptionsSchema.parse({ lockRows: true }).lockRows).toBe(true);
+  });
+
+  it('refuses a non-boolean lockRows', () => {
+    expect(DriverOptionsSchema.safeParse({ lockRows: 'yes' }).success).toBe(false);
   });
 });

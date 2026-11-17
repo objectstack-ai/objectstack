@@ -1029,6 +1029,28 @@ export interface ActionDispatchRequest extends AIActionConfirmation {
 }
 
 /**
+ * [#34386] One resume from a host's own door: {@link dispatchActionResume}'s
+ * input. The approval leg of a handed-off `resume_run`
+ * (`ActionConfirmationHandOff.run`): the run and the values the hand-off
+ * carried, the approving person, and that person's confirmation.
+ */
+export interface ActionResumeRequest extends AIActionConfirmation {
+    /**
+     * The approving person, as the host authenticated them; used as given,
+     * exactly as {@link ActionDispatchRequest.executionContext} is. The run
+     * resumes only for the person who started it, so this is that person.
+     * An anonymous caller is refused `401`.
+     */
+    executionContext: ExecutionContext;
+    /** The environment the run lives in, placed as {@link ActionDispatchRequest.environmentId} is. */
+    environmentId?: string;
+    /** The paused run to resume (`ActionConfirmationHandOff.run.runId`). */
+    runId: string;
+    /** The screen's field values the handed-off call carried (`ActionConfirmationHandOff.run.values`). */
+    values?: Record<string, unknown>;
+}
+
+/**
  * {@link dispatchAction}'s answer: the REST door's response for the same call,
  * byte for byte — `status`, the `{ success, data }` / `{ success, error }`
  * body, and the headers an api forward relays (a credential rotation its
@@ -1247,4 +1269,53 @@ export async function dispatchAction(kernel: ObjectKernel, request: ActionDispat
         hostDispatchers.set(kernel, dispatcher);
     }
     return dispatcher.dispatchHostAction(request);
+}
+
+/**
+ * [#34386] Resume a handed-off `resume_run` as the person who approved it —
+ * the MCP `resume_run` door's steps, as a function a host's approve door
+ * calls instead of keeping a copy of them. It is the approval leg the
+ * confirmation contract promises (`IActionConfirmationService`,
+ * `@objectstack/spec/contracts`): approving a hand-off that carries a run
+ * resumes THAT parked run with the values the call carried, as the approver,
+ * who must be the run's owner, every gate re-checked at that moment; it never
+ * starts a new run.
+ *
+ * The steps are `resume_run`'s, asked again as `executionContext`: the run
+ * must still be paused and started by this person (else the door's one
+ * not-found `404`); the flow action that admits it must pass every
+ * `run_action` gate, its confirmation gate reading `confirm` as
+ * {@link dispatchAction}'s does (`428 ACTION_CONFIRMATION_REQUIRED` without
+ * it on a declared-gated action, and an AI service account refused whatever
+ * it carries); the subject record is read again as the person; the run must
+ * be paused on a screen (else `409`). Then it resumes, and nothing is
+ * handed off again.
+ *
+ * A run that is no longer paused is the only replay refused here. A wizard
+ * that this call moved on to its next screen is still paused under the same
+ * run id, so a second call with the same hand-off passes every step again and
+ * resumes that next screen with the values given. Deciding a pending item
+ * once, and voiding an item whose run has moved on, are the host's.
+ *
+ * `kernel`, the placement and the gates that stay the host's job are
+ * {@link dispatchAction}'s, and so is the answer's shape: `200` with
+ * `resume_run`'s `{ ok, action, objectName, recordId?, result }` as `data`,
+ * where a run that pauses on its next screen answers `result.status:
+ * 'paused'` with its `screen`, or the refusal's envelope.
+ *
+ * @example
+ * // In the host's approve door, after a person's signed-in session approved
+ * // a pending item whose hand-off carries `run`:
+ * const answer = await dispatchActionResume(kernel, {
+ *   executionContext: approver, runId: handOff.run.runId, values: handOff.run.values, confirm: true,
+ * });
+ * if (answer.status !== 200) recordRefusal(pendingId, answer.body.error);
+ */
+export async function dispatchActionResume(kernel: ObjectKernel, request: ActionResumeRequest): Promise<ActionDispatchAnswer> {
+    let dispatcher = hostDispatchers.get(kernel);
+    if (!dispatcher) {
+        dispatcher = new HttpDispatcher(kernel);
+        hostDispatchers.set(kernel, dispatcher);
+    }
+    return dispatcher.resumeHostActionRun(request);
 }

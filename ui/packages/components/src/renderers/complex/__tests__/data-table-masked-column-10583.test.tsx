@@ -94,7 +94,9 @@ const payloads = () => writeText.mock.calls.map((call) => call[0]);
 async function exportedCsv(): Promise<string> {
   fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
   expect(createObjectURL, 'CONTROL: the export produced a file').toHaveBeenCalledTimes(1);
-  return (createObjectURL.mock.calls[0]![0] as Blob).text();
+  // The file opens with one UTF-8 byte-order mark (pinned at the byte level in
+  // data-table-csvByteOrderMark-34420.test.tsx); these pins read the text after it.
+  return (await (createObjectURL.mock.calls[0]![0] as Blob).text()).replace(/^\uFEFF/, '');
 }
 
 describe('data-table — `masked: true` withholds the raw value (objectui#10583)', () => {

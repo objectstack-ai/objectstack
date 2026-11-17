@@ -767,8 +767,23 @@ export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
  * through the same admitted sequence, every gate and permission re-checked; a
  * hand-off that carries a run ({@link ActionConfirmationHandOff.run}) resumes
  * that run instead of starting one. On rejection nothing runs. When an item
- * lapses, and how the caller learns its outcome, are the host's to define. A
- * host may build it over its own pending-action store; the
+ * lapses, and how the caller learns its outcome, are the host's to define.
+ *
+ * The approval leg runs through the framework's host doors, so a host keeps
+ * no copy of the admission rules (`@objectstack/runtime`):
+ * `dispatchAction(kernel, { …, posture: 'ai', confirm: true })` runs a
+ * handed-off `run_action` as the approving person, and
+ * `dispatchActionResume(kernel, { executionContext, runId, values, confirm:
+ * true })` resumes the run a handed-off `resume_run` carries
+ * ({@link ActionConfirmationHandOff.run}) as that person, asking every
+ * `resume_run` gate again: a run no longer paused, or one another person
+ * started, is refused. That is the only replay it refuses: a wizard the first
+ * approval moved on to its next screen is still paused under the same run id,
+ * and a second call with the same hand-off resumes it again with the values
+ * given. Deciding a pending item once, and voiding an item whose run has
+ * moved on, are the host's.
+ *
+ * A host may build it over its own pending-action store; the
  * `held` outcome of {@link IAIService.approvePendingAction} is the existing
  * precedent for a write that waits on a person outside the conversation.
  */

@@ -133,7 +133,7 @@ import { withoutOperationPrivateKeys } from '@objectstack/core';
 import { resolveDisplayField } from '@objectstack/spec/data';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import { redactSnapshot, resolveReadableSnapshotFields, type FieldVisibilitySource } from './payload-redaction.js';
-import { readerLabelsFor, type ReaderLabelI18n } from './reader-locale-labels.js';
+import { negotiatedReaderLocale, readerLabelsFor, type ReaderLabelI18n } from './reader-locale-labels.js';
 
 export const APPROVALS_HOOK_PACKAGE = 'plugin-approvals:lock';
 
@@ -328,13 +328,20 @@ function recordLockRefusal(
  * {@link readerLabelsFor}, the approvals door's one reader-locale label pick)
  * and the deployment's `errors.<key>` override. Absent, the built-in catalog
  * still renders the writer's locale and the object keeps its declared label.
+ *
+ * [#34454] The locale returned is the NEGOTIATED one
+ * ({@link negotiatedReaderLocale}), so the label and the override are asked
+ * with the same tag: a bare `zh` writer reads a deployment's zh-CN
+ * `errors.record_locked*` override, not the built-in sentence around a zh-CN
+ * label. The built-in catalog matches the negotiated tag as it matched the raw
+ * one.
  */
 function refusalLocalization(
   ctx: any,
   i18nService: (() => ReaderLabelI18n | undefined) | undefined,
 ): { locale: string | undefined; service: ReaderLabelI18n | undefined; translate: ValidationMessageTranslator | undefined } {
   const raw = ctx?.session?.locale;
-  const locale = typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+  const requested = typeof raw === 'string' && raw.length > 0 ? raw : undefined;
   let service: ReaderLabelI18n | undefined;
   try {
     service = i18nService?.();
@@ -342,6 +349,7 @@ function refusalLocalization(
     // i18n is optional and late-bound; a missing service degrades the wording, never the lock.
     service = undefined;
   }
+  const locale = negotiatedReaderLocale(service, requested);
   const svc = service;
   const translate: ValidationMessageTranslator | undefined = svc && typeof svc.t === 'function'
     ? (key, loc, params) => svc.t(key, loc, params)
