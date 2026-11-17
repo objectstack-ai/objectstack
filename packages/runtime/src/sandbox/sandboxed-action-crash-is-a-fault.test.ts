@@ -29,6 +29,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { QuickJSScriptRunner, SandboxError } from './quickjs-runner.js';
 import type { ScriptRunOptions } from './script-runner.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid during collection, never inside a case's clocked window: the door's
+// reach loads this package lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 const runner = new QuickJSScriptRunner({ hookTimeoutMs: 10_000, actionTimeoutMs: 10_000 });
 const actionOpts: ScriptRunOptions = { origin: { kind: 'action', name: 'submit_signoff' } };
