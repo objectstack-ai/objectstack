@@ -3070,41 +3070,12 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getPairTranslationBundle(protocolHost(this), basePackageId);
     }
 
-    /**
-     * [#33952, ADR-0146 D10] For each CODE package that patches the fields of
-     * object `name` (`objectExtensions[].fieldPatches`), the packaged base
-     * ({@link getPackagedObjectBase}) with THAT package's patches applied and
-     * no other's, beside its package id; highest precedence first. The
-     * registry's `getPackagedFieldPatchBases`, whose docblock carries the
-     * rule. The serving layer pairs each entry with
-     * {@link getPackageTranslationBundle} for the translators' `patchBundles`
-     * (`@objectstack/spec/system`): a slot a code package's patch wrote reads
-     * that package's own translations, below the pair's (ruling 6942920667).
-     *
-     * `[]` — "no patching package known", which the translators read as
-     * before the option existed — for an object no code package owns, an
-     * unknown name, a registry without the read (a partial double) and a read
-     * that throws.
-     */
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases} in `protocol-discovery-and-bases.ts` [#33952]. */
     getPackagedFieldPatchBases(name: string): Array<{ packageId: string; base: unknown }> {
         return ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases(protocolHost(this), name);
     }
 
-    /**
-     * [#33952] The translations package `packageId` ships itself,
-     * locale-keyed (`{ [locale]: data }`), for the translators' `patchBundles`
-     * (`@objectstack/spec/system`), paired with {@link getPackagedFieldPatchBases}.
-     *
-     * Needed for {@link getPairTranslationBundle}'s reason: the catalog the
-     * deployment serves deep-merges every package's translations with the
-     * package ids dropped, so a dependent package's translation of its own
-     * patch and the owner's translation of the text it replaced are one key,
-     * and which one the catalog holds is load order. This reads that one
-     * package's share: the `translations` its installed package record
-     * carries, then its own active `translation` rows over them.
-     *
-     * `undefined` when the package carries neither, and for an empty id.
-     */
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle} in `protocol-discovery-and-bases.ts` [#33952]. */
     getPackageTranslationBundle(packageId: string): Promise<TranslationBundle | undefined> {
         return ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle(protocolHost(this), packageId);
     }

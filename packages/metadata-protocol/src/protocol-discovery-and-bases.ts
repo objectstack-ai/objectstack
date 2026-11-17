@@ -956,7 +956,24 @@ export class ProtocolDiscoveryAndBasesFacet {
         return Object.keys(layer).length > 0 ? (layer as TranslationBundle) : undefined;
     }
 
-    /** The body of `ObjectStackProtocolImplementation#getPackagedFieldPatchBases`; the method's docblock there is its contract. */
+    /**
+     * The body of `ObjectStackProtocolImplementation#getPackagedFieldPatchBases`.
+     *
+     * [#33952, ADR-0146 D10] For each CODE package that patches the fields of
+     * object `name` (`objectExtensions[].fieldPatches`), the packaged base
+     * (`getPackagedObjectBase`) with THAT package's patches applied and
+     * no other's, beside its package id; highest precedence first. The
+     * registry's `getPackagedFieldPatchBases`, whose docblock carries the
+     * rule. The serving layer pairs each entry with
+     * {@link getPackageTranslationBundle} for the translators' `patchBundles`
+     * (`@objectstack/spec/system`): a slot a code package's patch wrote reads
+     * that package's own translations, below the pair's (ruling 6942920667).
+     *
+     * `[]` — "no patching package known", which the translators read as
+     * before the option existed — for an object no code package owns, an
+     * unknown name, a registry without the read (a partial double) and a read
+     * that throws.
+     */
     static getPackagedFieldPatchBases(host: Pick<ProtocolHost, 'engine'>, name: string): Array<{ packageId: string; base: unknown }> {
         if (typeof name !== 'string' || name === '') return [];
         const registry = (host.engine as any)?.registry;
@@ -973,8 +990,21 @@ export class ProtocolDiscoveryAndBasesFacet {
     }
 
     /**
-     * The body of `ObjectStackProtocolImplementation#getPackageTranslationBundle`;
-     * the method's docblock there is its contract.
+     * The body of `ObjectStackProtocolImplementation#getPackageTranslationBundle`.
+     *
+     * [#33952] The translations package `packageId` ships itself,
+     * locale-keyed (`{ [locale]: data }`), for the translators' `patchBundles`
+     * (`@objectstack/spec/system`), paired with {@link getPackagedFieldPatchBases}.
+     *
+     * Needed for {@link getPairTranslationBundle}'s reason: the catalog the
+     * deployment serves deep-merges every package's translations with the
+     * package ids dropped, so a dependent package's translation of its own
+     * patch and the owner's translation of the text it replaced are one key,
+     * and which one the catalog holds is load order. This reads that one
+     * package's share: the `translations` its installed package record
+     * carries, then its own active `translation` rows over them.
+     *
+     * `undefined` when the package carries neither, and for an empty id.
      *
      * Two halves, laid on locale by locale in the order the i18n service lays
      * the deployment catalog (`FileI18nAdapter.getTranslations`: the shipped
