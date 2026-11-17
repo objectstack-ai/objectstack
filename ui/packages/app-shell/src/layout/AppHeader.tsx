@@ -926,7 +926,7 @@ export function AppHeader({
             the left of the bar is the product mark and the app switcher. What
             stays here: the mobile shell's own connection-switcher button
             (renders only inside a shell that announces it), and the read-only
-            indicator for a single membership on a walled deployment
+            organization name on a walled deployment, at any membership count
             (objectui#5287). */}
         <WorkspaceSwitcher />
         <CurrentOrganizationIndicator />
@@ -1301,9 +1301,9 @@ export function AppHeader({
                * and "Create organization" unless the cloud manages this
                * environment (organizations are created on the cloud there).
                *
-               * On a walled posture the active organization's name rides under
-               * "My Organizations": the bar no longer carries the switcher that
-               * used to show it.
+               * On a walled posture the active organization's name also rides
+               * under "My Organizations", beside the entries that act on it; the
+               * bar names it read-only (`CurrentOrganizationIndicator`).
                */}
               {orgMenu.myOrganizations && (
                 <DropdownMenuItem

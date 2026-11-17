@@ -26,7 +26,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act, within } from '@testing-library/react';
+import { render, screen, act, within } from '@testing-library/react';
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', () => ({
@@ -201,14 +201,14 @@ describe('AppHeader — organization context at one membership (#5287)', () => {
     expect(screen.queryByText('Switch organization')).not.toBeInTheDocument();
   });
 
-  it('multiple memberships: the switcher is the avatar menu\'s, the bar draws none, and the indicator stands down', async () => {
+  it('multiple memberships: the switcher is the avatar menu\'s, the bar draws none, and the indicator still names the organization', async () => {
     organizations = [SOLO, SECOND];
     render(<AppHeader variant="home" />);
-    await settle();
 
+    const indicator = await screen.findByTestId('current-organization-indicator');
+    expect(within(indicator).getByText('Titanwind EHR')).toBeInTheDocument();
     expect(screen.getByTestId('header-switch-organization')).toBeInTheDocument();
     expect(screen.queryByTestId('workspace-switcher')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('current-organization-indicator')).not.toBeInTheDocument();
   });
 
   it('single-tenant posture: nothing new renders — no organization name anywhere', async () => {
