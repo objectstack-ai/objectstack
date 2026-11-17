@@ -3352,8 +3352,11 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * A registered name resolves exactly as the verbs resolve it, and the field
    * map is the one they read, so the verdict (and the object name inside its
-   * message) is the one execution would give. It stops before `getDriver`:
-   * nothing is resolved from or sent to a datasource.
+   * message) is the one execution would give. It calls no driver and sends
+   * nothing to a datasource; [#33876] it reads the object's driver's DECLARED
+   * capabilities for the one admission verdict that depends on them (a
+   * nested-relation condition on a driver without `readableIdsLeaf`), and
+   * skips that verdict when this engine routes the object to no driver.
    *
    * It judges the FILTER, not the object's existence. For a name the registry
    * does not resolve, the verbs refuse the object itself (`OBJECT_NOT_FOUND`,
@@ -4308,6 +4311,7 @@ export class ObjectQL implements IObjectQLEngine {
       get relatedSchemaOf() { return readRelatedSchemaOf(); },
       find: (...a) => this.find(...a),
       relationSemiJoinServes: (...a) => this.relationSemiJoinServes(...a),
+      relationReadDriver: (name) => this.getDriver(name),
     };
     return (lowerRelationConditions<W>).call(host, object, operation, where, execCtx);
   }
@@ -6098,6 +6102,7 @@ export class ObjectQL implements IObjectQLEngine {
       set datasourceMapping(v) { engine.datasourceMapping = v; },
       get defaultDriver() { return engine.defaultDriver; },
       get drivers() { return engine.drivers; },
+      getDriver: (...a) => engine.getDriver(...a),
       get logger() { return engine.logger; },
       get manifests() { return engine.manifests; },
       get relatedSchemaOf() { return engine.relatedSchemaOf; },

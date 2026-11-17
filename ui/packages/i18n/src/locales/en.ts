@@ -1513,6 +1513,8 @@ const en = {
     writeStrippedUnknownReason: 'Not applied by the server: {{fields}}',
     approvalPendingEditable: 'In approval · editable',
     approvalPendingTooltip: 'This record has a pending approval request; this step still allows editing',
+    approvalPending: 'In approval',
+    approvalPendingNotEditableTooltip: 'This record has a pending approval request',
     approvalProgress: 'Approvals — {{got}} of {{need}}',
     approvalProgressGroups: 'Sign-off — {{got}} of {{need}} groups',
     approvalProgressLabel: 'Approval progress',
@@ -2499,6 +2501,8 @@ const en = {
       view: 'View',
       confirm: 'Confirm',
       cancel: 'Cancel',
+      // The folded card's way back in, on a phone (objectstack#34596).
+      continue: 'Continue',
       prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
       organizationName: {
         title: 'Name your organization',

@@ -139,6 +139,10 @@ vi.mock('../../../layout/ActivityObjectLabel', () => ({ ActivityObjectLabel: () 
 // like every other source this page reads.
 vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
+// The page reaches `capabilityLint`'s dynamic `@objectstack/lint` import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 
 /** Enough apps that the strip folds the rest behind "More". */
@@ -249,5 +253,64 @@ describe('"Recently accessed" and the activity feed (objectstack#29147)', () => 
   it('"View all activity" is 44 px tall below sm', () => {
     render(<HomePage />);
     expectPhoneTarget(screen.getByTestId('home-activity-view-all'), ['inline-flex', 'items-center'], ['max-sm:min-h-11']);
+  });
+});
+
+describe('the host checklist slot: above the page on a desktop, after the apps on a phone (objectstack#34596)', () => {
+  const realWidth = window.innerWidth;
+  function atWidth(width: number) {
+    Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
+  }
+  afterEach(() => atWidth(realWidth));
+
+  /** Records each placement Home asks for and draws a marker there. */
+  function slot() {
+    const placements: string[] = [];
+    const checklist = (placement: string) => {
+      placements.push(placement);
+      return <div data-testid={`checklist-slot-${placement}`} />;
+    };
+    return { placements, checklist };
+  }
+  const follows = (a: HTMLElement, b: HTMLElement) =>
+    Boolean(b.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it('1024 px: drawn once, above the greeting and the apps; never after them', () => {
+    atWidth(1024);
+    const { placements, checklist } = slot();
+    render(<HomePage checklist={checklist} />);
+    const marker = screen.getByTestId('checklist-slot-top');
+    expect(screen.queryByTestId('checklist-slot-afterApps')).toBeNull();
+    expect(new Set(placements)).toEqual(new Set(['top']));
+    expect(follows(screen.getByTestId('home-work-summary'), marker)).toBe(true);
+    expect(follows(screen.getByTestId('home-apps-count'), marker)).toBe(true);
+  });
+
+  it('375 px: drawn once, after the apps and before "My work"; never above them', () => {
+    atWidth(375);
+    const { placements, checklist } = slot();
+    render(<HomePage checklist={checklist} />);
+    const marker = screen.getByTestId('checklist-slot-afterApps');
+    expect(screen.queryByTestId('checklist-slot-top')).toBeNull();
+    expect(new Set(placements)).toEqual(new Set(['afterApps']));
+    expect(follows(marker, screen.getByTestId('app-tile-app_0'))).toBe(true);
+    expect(follows(screen.getByTestId('home-my-work-open-inbox'), marker)).toBe(true);
+  });
+
+  it('375 px with no app yet: there are no apps to keep, so it is drawn above the empty state', () => {
+    atWidth(375);
+    state.apps = [];
+    const { placements, checklist } = slot();
+    render(<HomePage checklist={checklist} />);
+    expect(screen.getByTestId('checklist-slot-top')).toBeInTheDocument();
+    expect(new Set(placements)).toEqual(new Set(['top']));
+  });
+
+  it('CONTROL: with no slot given the page draws as it did', () => {
+    atWidth(375);
+    render(<HomePage />);
+    expect(screen.queryByTestId('checklist-slot-top')).toBeNull();
+    expect(screen.queryByTestId('checklist-slot-afterApps')).toBeNull();
+    expect(screen.getByTestId('home-apps-count')).toBeInTheDocument();
   });
 });
