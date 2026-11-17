@@ -14,6 +14,11 @@ change** — this ADR only rearranges how the objectui console *renders and wire
 chat surfaces.
 **Amended**: Amendment A2 (2026-09-28) — the dock binds its build thread to the
 current authorable app, reversing A1.b's dock clause (objectui#10926).
+Amendment A3 (2026-11-17) — the right-side drawer is the ONLY chat container:
+the top-bar robot toggles it, maximize fills the window in place, the
+floating button and the full page are retired and the `/ai…` addresses open
+the drawer (objectstack#34608). It supersedes §3's focus mode, A2's maximize
+clause and open questions 2 and 5.
 **Author**: ObjectUI app-shell / Studio team
 **Consumers**: `@object-ui/app-shell`
 (`console/ai/AiChatPage.tsx`, `layout/ConsoleFloatingChatbot.tsx`,
@@ -213,11 +218,15 @@ convention repeated five times.
   collapsed**, resizable. Replaces the FAB as the canonical console chat; the FAB
   button becomes the launcher / keyboard toggle (⌘I / ⌘L idiom). Default-collapsed
   preserves the FAB's virtue — zero layout cost, no reflow of dense data grids —
-  until invoked.
-- **Focus / full-screen.** `/ai` = the same panel **maximized** (build + Live
+  until invoked. *(Amendment A3: the launcher is the top-bar robot, a toggle;
+  the floating button is retired.)*
+- **Focus / full-screen.** ~~`/ai` = the same panel **maximized** (build + Live
   Canvas). "Expand" from the rail, "collapse" back — **same thread**. Deep links
   (`/ai/build/:conversationId`, share links, ADR-0013) open the dock maximized on
-  that thread.
+  that thread.~~ **Superseded by Amendment A3:** maximize is the same drawer
+  filling the window **in place**, on the page underneath, with no route of
+  its own; the same control restores it. Deep links and share links open the
+  drawer, maximized, on the thread they name.
 - **Bubble / embedded.** Runtime apps + the SDUI `chatbot` keep the
   support-widget chrome; **same state code**, different presentation.
 - **Side = right** (VS Code / Cursor norm; the left is nav). **Consequence:**
@@ -404,10 +413,12 @@ The terms it was presented with (objectui#10926):
   `app:PKG:build` yet, it adopts the product-only thread only if that
   thread's own history binds it to `PKG`. So the dock and the full page
   arrive at the same thread whichever of them resolves first.
-- **Maximize.** A bound dock opens `/ai/build?package=PKG`, carrying the same
+- **Maximize.** ~~A bound dock opens `/ai/build?package=PKG`, carrying the same
   one-shot full-page opt-out the Studio dock's door sets, so the built-moment
   transition (objectui#5799) does not bounce the arrival straight on to
-  Studio. An app-less dock opens `/ai`, as before.
+  Studio. An app-less dock opens `/ai`, as before.~~ **Superseded by Amendment
+  A3:** maximize no longer navigates. The bound thread stays bound while the
+  drawer fills the window; the key decision above is unchanged.
 
 **Consequences.** Each authorable app a maker opens the dock in gets its own
 build thread, minted on first open, as the Studio copilot already does per
@@ -417,6 +428,75 @@ and in the dock outside any authorable app. This extends A1's direction
 ("the `app` axis becomes always present for `build`") to the one surface
 A1.b had kept product-only. Implemented under objectui#10926.
 
+## Amendment A3 (2026-11-17, Accepted) — one drawer, maximized in place
+
+**What it changes.** §3's focus mode ("`/ai` = the same panel maximized"), A2's
+maximize clause ("Maximize goes to `/ai/build?package=PKG`"), open question 2
+(the floating button stays as the dock's collapsed affordance) and open
+question 5 ("the routes are untouched"). Everything else stands: one
+conversation context (§1), one resolver (§2), the runtime bubble (§4), one
+gate and OSS → nothing (§5, §6), A1 and A2's key decision.
+
+**Why.** Measured on staging (epic objectstack#34571, comment 6936163971):
+the console drew one conversation in two containers, the rail and the `/ai`
+page. The top-bar robot was a link to that page, and the dock's maximize
+navigated to it too, so a user who maximized lost the page they were on. The
+build page nested a second shell inside the console's, with the chat
+squeezed to about 310 px. The floating button was a third entry, which sat on
+page content (objectui#12248).
+
+**Maintainer ruling** (objectstack#34608, recorded 2026-11-17T03:40Z in
+comment 6937495221), verbatim, not translated:
+
+> 同意
+
+It accepted the seat's recommendation as presented:
+
+- The AI assistant becomes one right-side drawer.
+- Maximize is in place and restores.
+- The in-app bottom-right AI button is removed; the top-bar robot is the one
+  entry.
+- Old `/ai` and `/ai/build` links, shared links included, redirect to the
+  opened drawer.
+- Kept: A1, a new build starts UNBOUND (no empty app is created first).
+  ADR-0063 stays compatible: the product is still chosen by principal.
+
+**Decision.**
+
+- **One container.** The console's right-side drawer is the only place the
+  console draws the assistant's conversation: the rail on a desktop, a bottom
+  sheet on a phone. Home hosts the same drawer as every app page. There is no
+  `/ai` page.
+- **Entry.** The top-bar robot opens and closes the drawer on the current
+  page; the address does not change. It carries the plan-awaiting-approval
+  marker the floating button carried (objectui#11666). The floating button is
+  retired, and with it the corner-yield rule written for it (objectui#12248).
+  The keyboard toggle stays.
+- **Maximize.** The drawer's expand control makes the same element fill the
+  window in place, so the conversation is not remounted and a stream in
+  flight continues. The same control restores the rail. Leaving the page
+  (for a record the chat linked to) restores the rail too.
+- **History.** At rail width the conversation history is behind a "History"
+  button. Maximized, it is a column beside the chat.
+- **Addresses.** `/ai`, `/ai/:agent` and `/ai/:agent/:conversationId`, with
+  `?package=` and `?new=`, stay routed so bookmarks, share links (ADR-0013)
+  and links from surfaces without a drawer keep working. Each one opens the
+  drawer, maximized, on the thread it names, over the declared landing. What
+  the drawer shows is kept per tab, never in the URL. A Builder handoff still
+  travels only as navigation state (objectui#12493).
+- **Entries.** "Build with AI" and "Ask AI" on Home and "Edit with AI" in app
+  management open the drawer on the agent, package or fresh thread they used
+  to address.
+- **Builder guidance.** Inside an app, a maker's empty state names both
+  halves, data questions and changes, as the composer hint already did.
+
+**Consequences.** The full-page chat component is no longer routed. A page
+that is not wrapped by a drawer host can still link to an `/ai…` address and
+reach the drawer. A surface whose state matters for deep-linking (ui ADR-0054
+C3) reaches the drawer through those addresses, not through a query
+parameter on every page. Implemented under objectstack#34608; the Live Canvas
+presentation (ADR-0037) follows in objectstack#34610.
+
 ## Open design questions
 
 1. **Dock side under Studio (P3).** ~~Chat right vs properties right.~~
@@ -425,9 +505,11 @@ A1.b had kept product-only. Implemented under objectui#10926.
    P3c** (Interfaces pillar `[Canvas | Properties]` center tabs; Data/Automations
    keep their in-center inspectors).
 2. **FAB retirement path (P3).** ~~Hard-retire, or keep the FAB as the collapsed
-   affordance?~~ **DECIDED (2026-07-13): the FAB becomes the dock's collapsed
+   affordance?~~ ~~**DECIDED (2026-07-13): the FAB becomes the dock's collapsed
    affordance** — the bottom-right button stays and expands the right rail
-   (gentle migration; the familiar entry point survives).
+   (gentle migration; the familiar entry point survives).~~ **RE-DECIDED
+   (2026-11-17, Amendment A3): hard-retired.** The top-bar robot is the one
+   entry and toggles the drawer.
 3. **Handoff aggressiveness (P4).** **DECIDED & SHIPPED: explicit** "Open in
    Builder →" (#2439), carrying the ask conversation as first-turn context
    (#2444 + cloud#819). A second handoff landing on a pending blueprint simply
@@ -437,10 +519,13 @@ A1.b had kept product-only. Implemented under objectui#10926.
    custom agents withdrawn). Confirm the resolver **rejects** anything else rather
    than silently falling through.
 5. **Focus-mode routing.** ~~Does `/ai/build/:conversationId` stay a deep-linkable,
-   shareable URL (ADR-0013) once the dock is canonical?~~ **DECIDED & SHIPPED
+   shareable URL (ADR-0013) once the dock is canonical?~~ ~~**DECIDED & SHIPPED
    (P3c): yes** — the routes are untouched; the full page IS the dock maximized
    (same P1 thread), with a maximize button on the rail and a collapse-to-dock
-   button on the page bridging the two presentations.
+   button on the page bridging the two presentations.~~ **RE-DECIDED
+   (2026-11-17, Amendment A3):** the URLs stay deep-linkable and shareable,
+   but there is no page behind them: each opens the drawer, maximized, on the
+   thread it names.
 
 ## Alternatives considered
 
