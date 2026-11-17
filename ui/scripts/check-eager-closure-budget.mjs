@@ -2307,16 +2307,21 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // 80,600, ⛔ not by a measurement here. The maintainer's words, verbatim,
   // 2026-11-17 16:29Z: 「可以 提高上限」, then 「提高上限 30%」 (yes, raise the
   // ceiling; raise it by 30%). This chunk read 61,952 gzipped bytes on
-  // objectstack#34925's tree merged with `main` that day, 48 under the line, so
-  // the next eager English key anywhere ejected a PR from the queue. ⛔ Rounded nowhere:
-  // 62,000 × 1.30 is 80,600 exactly.
+  // objectstack#34925's tree merged with `main` that day, 48 under the line,
+  // so the next eager English key anywhere ejected a PR from the queue.
+  // ⛔ Rounded nowhere: 62,000 × 1.30 is 80,600 exactly.
   //
-  // HEADROOM, one console build on objectstack#34927's branch (`CI=true
-  // VITE_BASE_PATH=/console/ pnpm exec vite build` in `apps/console`, read by
-  // `pnpm --dir ui run check:eager-closure`): this chunk reads 61,935 gzipped
-  // bytes, so 65 bytes under 62,000 before and 18,665 under 80,600 after. The
-  // headroom `pnpm check:eager-closure` prints on YOUR build is the figure in
-  // force, ⛔ not this one.
+  // HEADROOM — one console build, one instrument: `CI=true
+  // VITE_BASE_PATH=/console/ pnpm exec vite build` in `apps/console` on
+  // `main` at `189358f21` (this file is not a console build input, so the
+  // branch builds the same bytes), read by `pnpm --dir ui run
+  // check:eager-closure` from `apps/console/dist/eager-closure.json` with the
+  // old ceiling and then the new one. This chunk reads 61,841 gzipped bytes:
+  // headroom 159 bytes under 62,000 before, 18,759 under 80,600 after (0.03x
+  // REGRESSION_THIS_GATE_MUST_CATCH_BYTES). The eager closure read 1,941,575,
+  // inside the aggregate ceiling either way. The headroom
+  // `pnpm check:eager-closure` prints on YOUR build is the figure in force,
+  // ⛔ not this one.
   //
   // WHAT MOVED WITH IT, read from "Raising one" above and the two constraints
   // it names as checked: this ceiling passes on its baseline below, and
