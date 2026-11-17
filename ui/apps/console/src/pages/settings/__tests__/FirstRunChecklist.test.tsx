@@ -149,6 +149,8 @@ function freshLocalization(): Record<string, ReturnType<typeof resolved>> {
 
 let localizationValues = freshLocalization();
 let mailValues: Record<string, ReturnType<typeof resolved>> = { provider: resolved('smtp') };
+// The mail page's `live` statement, when the test serves one.
+let mailLive: Record<string, unknown> | null = null;
 let putRefusal: unknown = null;
 // Manifests listed beside localization and mail (the `ai` one, for the built-in AI row), and the `ai` page.
 let extraManifests: unknown[] = [];
@@ -169,7 +171,9 @@ function routeFetch() {
     if (url === '/api/settings/localization' && method === 'GET') {
       return ok({ manifest: LOCALIZATION_MANIFEST, values: localizationValues });
     }
-    if (url === '/api/settings/mail' && method === 'GET') return ok({ manifest: MAIL_MANIFEST, values: mailValues });
+    if (url === '/api/settings/mail' && method === 'GET') {
+      return ok({ manifest: MAIL_MANIFEST, values: mailValues, ...(mailLive ? { live: mailLive } : {}) });
+    }
     if (url === '/api/settings/localization' && method === 'PUT') {
       if (putRefusal) {
         return { ok: false, status: 400, statusText: 'Bad Request', json: async () => putRefusal } as unknown as Response;
@@ -246,6 +250,7 @@ beforeEach(() => {
   localStorage.clear();
   localizationValues = freshLocalization();
   mailValues = { provider: resolved('smtp') };
+  mailLive = null;
   putRefusal = null;
   extraManifests = [];
   aiPayload = null;
@@ -686,6 +691,16 @@ describe('the built-in AI: the provider the server runs, from live.provider (obj
     expect(within(r).getByText('DeepSeek (OpenAI-compatible), detected from the server environment.')).toBeTruthy();
   });
 
+  it('handed over by the host and named by no option (environment, null): done, and says the platform manages it (objectstack#34749)', async () => {
+    serveAi({ value: null, source: 'environment' }, null);
+    renderChecklist(ADMIN);
+    await showDone();
+    const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
+    expect(r.getAttribute('data-done')).toBe('true');
+    expect(within(r).getByText('The AI provider, its model and credentials are managed by the platform.')).toBeTruthy();
+    expect(within(r).queryByText(/detected from the server environment/)).toBeNull();
+  });
+
   it('a saved provider the running system does not use is not done: live decides, not values', async () => {
     serveAi({ value: null, source: 'none' }, 'openai');
     renderChecklist(ADMIN);
@@ -1010,6 +1025,17 @@ describe('the host profile: a managed environment adds the first-app and first-r
   it('CONTROL: managed, mail that delivers is drawn, done', async () => {
     MANAGED();
     mailValues = DELIVERING();
+    SHELL.apps = [SETUP_APP];
+    activityAdapter([]);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-first_record');
+    await showDone();
+    expect(row('mail').getAttribute('data-done')).toBe('true');
+  });
+
+  it("managed, the host's own transport (live provider environment, null) with nothing saved: mail is drawn, done (objectstack#34749)", async () => {
+    MANAGED();
+    mailLive = { provider: { value: null, source: 'environment' } };
     SHELL.apps = [SETUP_APP];
     activityAdapter([]);
     renderChecklist(ADMIN);

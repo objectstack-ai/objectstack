@@ -40,6 +40,7 @@ import { formatNumber, useObjectTranslation } from '@object-ui/i18n';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { useAiUsage, type AiMeterUsage } from '../hooks/useAiUsage.js';
 import { cloudConsoleUrl } from '../console/marketplace/marketplaceApi.js';
+import { getUpgradeUrl } from '../runtime-config.js';
 
 /** Fraction at/above which the pool is "running low" (amber + CTA). */
 export const NEAR_FULL = 0.8;
@@ -214,9 +215,11 @@ export function AiUsageIndicator({ apiBase, enabled = true, className }: AiUsage
     return null;
   };
 
-  // No upstream cloud named by the runtime ⇒ no control plane to send anyone
-  // to, so no CTA (objectui#7253).
-  const showCta = tone !== 'ok' && (pool.upgrade || pool.topUp) && !!cloudConsoleUrl();
+  // The control plane's declared upgrade entry when served (objectstack#34622),
+  // else its origin. Neither ⇒ no control plane to send anyone to, so no CTA
+  // (objectui#7253).
+  const ctaUrl = getUpgradeUrl() ?? cloudConsoleUrl();
+  const showCta = tone !== 'ok' && (pool.upgrade || pool.topUp) && !!ctaUrl;
   const reset = resetLabel(pool);
 
   return (
@@ -258,7 +261,7 @@ export function AiUsageIndicator({ apiBase, enabled = true, className }: AiUsage
                 size="sm"
                 className="mt-1 h-auto p-0 text-xs"
                 data-testid="ai-usage-cta"
-                onClick={() => window.open(cloudConsoleUrl(), '_blank', 'noopener,noreferrer')}
+                onClick={() => window.open(ctaUrl, '_blank', 'noopener,noreferrer')}
               >
                 {pool.upgrade
                   ? t('console.ai.usage.ctaUpgrade', { defaultValue: 'Upgrade to keep going' })
