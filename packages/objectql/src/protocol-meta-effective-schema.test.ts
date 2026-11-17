@@ -710,4 +710,30 @@ describe('[#33952] a zh-CN read of a patched field label, echoed back, is stored
             expect(en.fields.registration_number.label).toBe('Tax ID');
         });
     }
+
+    // [#34836 S1] A tenant row that typed the patching package's translation
+    // over the patched slot owns that text: the read serves `税号` in every
+    // locale, so a whole-body save in another locale carries it back and must
+    // store it as it came, the unrelated edit beside it included.
+    it("keeps a stored '税号' typed over the patched slot through an en whole-body save with an unrelated edit", async () => {
+        const { host, protocol, layers } = hostWithCodeLayers();
+        const folded: any = structuredClone(layers.getObject('crm_account') as any);
+        const row: any = {
+            name: 'crm_account', label: 'Account', sharingModel: 'private',
+            fields: { name: folded.fields.name, registration_number: { ...folded.fields.registration_number, label: '税号' } },
+        };
+        await host.engine.insert('sys_metadata', {
+            type: 'object', name: 'crm_account', organization_id: null, package_id: null, state: 'active', metadata: JSON.stringify(row),
+        });
+        const echo: any = translateMetadataDocument('object', structuredClone(row), bundle as any, await readOptions(protocol, 'en'));
+        // The precondition: the en read serves the tenant's text as written.
+        expect(echo.fields.registration_number.label).toBe('税号');
+        echo.fields.name.label = 'Account Name';
+
+        await protocol.saveMetaItem({ type: 'object', name: 'crm_account', item: echo, mode: 'publish' } as any);
+
+        const stored = storedOf(host);
+        expect(stored.fields.registration_number.label).toBe('税号');
+        expect(stored.fields.name.label).toBe('Account Name');
+    });
 });

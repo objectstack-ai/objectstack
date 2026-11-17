@@ -184,3 +184,48 @@ describe('[#33952] restoreTranslatedEchoes with the read\'s patchBundles', () =>
         expect(item.fields.registration_number.label).toBe('税号');
     });
 });
+
+describe('[#34836] a patch entry answers a slot its patch changed, and only where the stored row has no text of its own there', () => {
+    const catalog = {
+        'zh-CN': { objects: { crm_account: { fields: { name: { label: '名称' }, registration_number: { label: '注册号', help: '注册号说明' } } } } },
+    } as unknown as TranslationBundle;
+    const regField = { type: 'text', label: 'Registration No.', description: 'Registration number' };
+    const packagedBase = { name: 'crm_account', fields: { name: { type: 'text', label: 'Name' }, registration_number: regField } };
+    // The patch changes the label only; the description stays the packaged text.
+    const patchedBase = { ...packagedBase, fields: { ...packagedBase.fields, registration_number: { ...regField, label: 'Tax ID' } } };
+    const patchBundles = [{
+        patchedBase,
+        bundle: { 'zh-CN': { objects: { crm_account: { fields: { registration_number: { label: '税号' } } } } } } as unknown as TranslationBundle,
+    }];
+    const row = (reg: Record<string, unknown>) => ({ name: 'crm_account', fields: { name: { type: 'text', label: 'Name' }, registration_number: { type: 'text', ...reg } } });
+    const read = (doc: unknown, locale: string) =>
+        structuredClone(translateObject(doc as any, catalog, { locale, packagedBase, patchBundles } as any)) as any;
+
+    it('a stored `税号` typed over the patched slot survives a whole-body save in another locale with an unrelated edit', () => {
+        const source = row({ label: '税号', description: 'Registration number' });
+        const echo = read(source, 'en');
+        // The precondition: the read serves the tenant's text as written.
+        expect(echo.fields.registration_number.label).toBe('税号');
+        echo.fields.name.label = 'Account Name';
+        const { item, restored } = restoreTranslatedEchoes(echo, { source, bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.registration_number.label).toBe('税号');
+        expect(item.fields.name.label).toBe('Account Name');
+        expect(restored).toEqual([]);
+    });
+
+    it('the catalog\'s translation of a packaged slot the patch left alone, typed over a tenant\'s rename, is the author\'s', () => {
+        const source = row({ label: 'Tax ID', description: 'Our own note' });
+        const echo = read(source, 'zh-CN');
+        expect(echo.fields.registration_number.description).toBe('Our own note');
+        echo.fields.registration_number.description = '注册号说明';
+        const { item } = restoreTranslatedEchoes(echo, { source, bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.registration_number.description).toBe('注册号说明');
+    });
+
+    it('a slot the patch left alone is no patch source even where the stored row sets nothing', () => {
+        const source = row({ label: 'Tax ID' });
+        const { item, restored } = restoreTranslatedEchoes(row({ label: 'Tax ID', description: '注册号说明' }), { source, bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.registration_number.description).toBe('注册号说明');
+        expect(restored).toEqual([]);
+    });
+});
