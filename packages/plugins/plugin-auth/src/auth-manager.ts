@@ -3416,7 +3416,7 @@ export class AuthManager {
 
   /**
    * The addresses the admission gate admitted in each in-flight better-auth
-   * request by the invitation they PRESENT (under `invite_only`), keyed by
+   * request by their invitation alone (`isAdmittedByInvitationAlone`), keyed by
    * that request's endpoint context — the object better-auth hands the
    * admission gate and every database hook of the same endpoint call, as
    * {@link usersCreatedInRequest} is. `settleMembership`
@@ -3430,7 +3430,7 @@ export class AuthManager {
    */
   private invitationAdmissionsInRequest = new WeakMap<object, Set<string>>();
 
-  /** Record that the current request's admission gate admitted `email` by the invitation it presents. */
+  /** Record that the current request's admission gate admitted `email` by its invitation alone. */
   private stageInvitationAdmission(ctx: unknown, email: string): void {
     if (!ctx || typeof ctx !== 'object') return;
     let staged = this.invitationAdmissionsInRequest.get(ctx);
@@ -3441,13 +3441,13 @@ export class AuthManager {
     staged.add(email.trim().toLowerCase());
   }
 
-  /** Did this request admit any address by the invitation it presents? In-memory only. */
+  /** Did this request admit any address by its invitation alone? In-memory only. */
   private hasInvitationAdmissionInRequest(ctx: unknown): boolean {
     if (!ctx || typeof ctx !== 'object') return false;
     return (this.invitationAdmissionsInRequest.get(ctx)?.size ?? 0) > 0;
   }
 
-  /** Did this request admit `email` by the invitation it presents? In-memory only. */
+  /** Did this request admit `email` by its invitation alone? In-memory only. */
   private isInvitationAdmissionInRequest(ctx: unknown, email: string): boolean {
     if (!ctx || typeof ctx !== 'object') return false;
     return this.invitationAdmissionsInRequest.get(ctx)?.has(email.trim().toLowerCase()) === true;

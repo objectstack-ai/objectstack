@@ -539,7 +539,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
 
   if (!objectDef) {
     return (
-      <div className="h-full flex items-center justify-center p-8">
+      <div className="h-full flex items-center justify-center p-8" data-testid="object-not-found">
         <Empty>
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <Database className="h-6 w-6 text-muted-foreground" />

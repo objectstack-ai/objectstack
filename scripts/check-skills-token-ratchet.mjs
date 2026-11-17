@@ -1695,7 +1695,17 @@ export const CEILINGS = new Map([
   // a match either. 5848 -> 6105 bytes (+257), less the 20-byte stamp line:
   // 5828 -> 6085 priced bytes, ceil(6085 / 4) = 1522 (+65). Still the new
   // file's own measurement, pinned AT it, zero headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1522],
+  // 1522 -> 1491, a LOWERING, re-measured on the PR that makes step 2 read the
+  // answer's `candidates` (ADR-0149 D3 amendment note): a word with no match
+  // and a candidate listed is a question for the user, a lone candidate
+  // included, and no match with no candidate is the labelled fallback. Cut:
+  // the two loose-form rows and the paragraph that defined a loose form over
+  // the catalogue, since the server's `candidates` replaces the client's own
+  // check. Added: one step 1 bullet naming `candidates`, and the two rows that
+  // read it. 6105 -> 5981 bytes (-124), less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(5961 / 4)
+  // = 1491 (-31). Pinned AT the measurement, zero headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1491],
 ]);
 
 /**
