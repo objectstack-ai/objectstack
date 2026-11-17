@@ -33,7 +33,12 @@ import { DroppedFieldsEventSchema } from '../data/data-engine.zod';
  * there. Its switch is its own `status`: `'obsolete'` disarms it and
  * `'active'` arms it, published with the complete definition through
  * `PUT /api/v1/automation/:name`. The toggle door refuses such a flow with
- * 409 `RESOURCE_CONFLICT`, names that switch, and changes nothing.
+ * 409 `RESOURCE_CONFLICT`, names that switch, and changes nothing. It refuses
+ * the same way a switch ON of a packaged flow whose own `status` disables it
+ * (`'obsolete'` / `'invalid'`): the ledger row alone would leave the flow off
+ * while the caller read it as on, so it answers 409 `RESOURCE_CONFLICT`,
+ * names publishing the definition `'active'`, and writes nothing. A switch
+ * OFF of such a flow is accepted and records the choice.
  *
  * @example Endpoints
  * ```

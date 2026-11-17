@@ -222,3 +222,35 @@ describe('collectExpectedEntries — answer table column labels', () => {
     ]);
   });
 });
+
+describe('collectExpectedEntries — an action\'s refusal catalogue (#34273)', () => {
+  const refusals = {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
+    STAGE_LOCKED: { message: 'Locked.', reasons: { closed: { message: 'A {{ stage }} deal is closed.' } }, params: ['stage'] },
+  };
+  const body = { language: 'js', source: "throw { code: 'NOT_DRAFT' };" };
+  const entries = collectExpectedEntries({
+    objects: [{
+      name: 'crm_invoice',
+      fields: {},
+      actions: [{ name: 'submit_signoff', label: 'Submit', type: 'script', body, refusals }],
+    }],
+    actions: [{ name: 'export_all', label: 'Export', type: 'script', body, refusals: { NOT_DRAFT: refusals.NOT_DRAFT } }],
+  }, { warnedGroups: new Set() });
+  const at = (path: string) => entries.find((e) => e.path.join('.') === path);
+
+  it('yields objects.<object>._actions.<action>.refusals.<CODE>.message with the declared sentence', () => {
+    expect(at('objects.crm_invoice._actions.submit_signoff.refusals.NOT_DRAFT.message')?.sourceValue)
+      .toBe('Only a draft invoice can be signed off.');
+  });
+
+  it('yields each declared reason under its code', () => {
+    expect(at('objects.crm_invoice._actions.submit_signoff.refusals.STAGE_LOCKED.reasons.closed.message')?.sourceValue)
+      .toBe('A {{ stage }} deal is closed.');
+  });
+
+  it('yields an object-less action\'s refusals under globalActions', () => {
+    expect(at('globalActions.export_all.refusals.NOT_DRAFT.message')?.sourceValue)
+      .toBe('Only a draft invoice can be signed off.');
+  });
+});

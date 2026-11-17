@@ -41,6 +41,12 @@ import {
   type PackageCustomizations,
 } from './packageCustomizations-io.js';
 import { LandingCustomizationsPanel, type AppCustomizationRead } from './LandingCustomizationsPanel.js';
+import {
+  readActionObjects,
+  switchedOffActionListPath,
+  switchedOffActionPath,
+  type ActionObjects,
+} from './switchedOffActionTargets.js';
 import { customizationPackageId, isCustomizationPackage } from '@objectstack/spec/kernel';
 import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
@@ -67,12 +73,26 @@ const RECENT_PACKAGES_SHOWN = 3;
  * read. No entry means the read has not answered: the line shows no number.
  */
 type CustomizationLine =
-  | { kind: 'read'; counts: PackageCustomizationCounts; read: PackageCustomizations }
+  | {
+      kind: 'read';
+      counts: PackageCustomizationCounts;
+      read: PackageCustomizations;
+      /**
+       * objectstack#34724 — which object holds each switched-off action, read
+       * only when the base has one (`readActionObjects`); empty when that read
+       * failed, so every action then links to its item page.
+       */
+      actionObjects?: ActionObjects;
+    }
   | { kind: 'failed'; message: string };
 
 /** A package's Studio address on one pillar, the way `open` below spells it. */
 const studioPillarPath = (packageId: string, pillar: 'data' | 'automations') =>
   `/studio/${encodeURIComponent(packageId)}/${pillar}`;
+
+/** How many switched-off actions the landing line names before its "more" link (objectstack#34724). */
+const SWITCHED_OFF_ACTIONS_NAMED = 3;
+
 
 export function BuilderLanding(): React.ReactElement {
   const navigate = useNavigate();
@@ -172,6 +192,7 @@ export function BuilderLanding(): React.ReactElement {
     .map((p) => p.id)
     .join('\n');
   const [customizationLines, setCustomizationLines] = React.useState<Record<string, CustomizationLine>>({});
+  const metadataClient = useMetadataClient();
   React.useEffect(() => {
     if (!customizationTargetKey) return;
     let cancelled = false;
@@ -179,21 +200,31 @@ export function BuilderLanding(): React.ReactElement {
       // objectstack#34714 — the whole answer is kept: the card draws its two
       // numbers off it and the "Customizations in this environment" panel its
       // rows, so one read serves both and the panel's total is the cards' sum.
-      fetchPackageCustomizations(id).then(
-        (read) => {
-          if (!cancelled) {
-            setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'read', counts: customizationCountsOf(read), read } }));
-          }
-        },
-        (e: unknown) => {
-          const message = e instanceof Error ? e.message : String(e);
-          if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'failed', message } }));
-        },
-      );
+      fetchPackageCustomizations(id)
+        .then(async (read) => {
+          const counts = customizationCountsOf(read);
+          // objectstack#34724 — a switched-off action's link needs its object,
+          // which the ledger row does not name: read it before drawing the line.
+          if (!counts.switchedOffActions?.length) return { counts, read };
+          const actionObjects = await readActionObjects(metadataClient, id).catch((): ActionObjects => ({}));
+          return { counts, read, actionObjects };
+        })
+        .then(
+          (line) => {
+            if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'read', ...line } }));
+          },
+          (e: unknown) => {
+            const message = e instanceof Error ? e.message : String(e);
+            if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'failed', message } }));
+          },
+        );
     }
     return () => {
       cancelled = true;
     };
+    // Keyed on the ids alone: the client only carries the reads, and a new
+    // client identity must not read every card again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customizationTargetKey]);
   // objectstack#34714 — the panel's apps are the cards' bases, in card order;
   // its reads are the same answers the cards draw.
@@ -205,7 +236,7 @@ export function BuilderLanding(): React.ReactElement {
   const customizationReads = React.useMemo(() => {
     const out: Record<string, AppCustomizationRead> = {};
     for (const [id, line] of Object.entries(customizationLines)) {
-      out[id] = line.kind === 'read' ? { kind: 'read', read: line.read } : line;
+      out[id] = line.kind === 'read' ? { kind: 'read', read: line.read, actionObjects: line.actionObjects } : line;
     }
     return out;
   }, [customizationLines]);
@@ -215,7 +246,6 @@ export function BuilderLanding(): React.ReactElement {
   // The entry is drawn once the read says there is at least one; a failed read
   // draws it with no number, so the scope stays reachable when the count is
   // unknown. `null` = not answered yet.
-  const metadataClient = useMetadataClient();
   const [packageLessFlows, setPackageLessFlows] = React.useState<number | 'failed' | null>(null);
   React.useEffect(() => {
     let cancelled = false;
@@ -280,6 +310,21 @@ export function BuilderLanding(): React.ReactElement {
       customized: line.counts.customized,
     });
     const linkClass = 'hover:text-foreground hover:underline';
+    // objectstack#34724 — the "switched off" count leads to the items: a flow's
+    // switch is in the Automations pillar, an action's where the action is
+    // drawn (`switchedOffActionPath`: its object's Actions view, or its own
+    // item page when no object holds it). When every switched-off item is an
+    // action, the count opens it (one) or the action list (several); when
+    // flows are among them, the count opens Automations. Whenever the count
+    // alone does not land on the action, the line names each switched-off
+    // action as a link to where it is switched (the action list marks none of
+    // them), up to SWITCHED_OFF_ACTIONS_NAMED, then a "more" link to the list.
+    const offActions = line.counts.switchedOffActions ?? [];
+    const actionPath = (name: string) => switchedOffActionPath(baseId, name, line.actionObjects?.[name]);
+    const offOnlyActions = offActions.length > 0 && offActions.length === line.counts.switchedOff;
+    const nameActions = offActions.length > 1 || (offActions.length > 0 && !offOnlyActions);
+    const namedActions = offActions.slice(0, SWITCHED_OFF_ACTIONS_NAMED);
+    const moreActions = offActions.length - namedActions.length;
     return (
       <p data-testid="studio-landing-customizations" data-state="read" className={lineClass}>
         {pair ? (
@@ -296,8 +341,19 @@ export function BuilderLanding(): React.ReactElement {
         )}
         {t('engine.studio.landing.customizations.separator', locale)}
         <Link
-          to={studioPillarPath(baseId, 'automations')}
-          title={t('engine.studio.landing.customizations.switchedOffTitle', locale)}
+          to={
+            !offOnlyActions
+              ? studioPillarPath(baseId, 'automations')
+              : offActions.length === 1
+                ? actionPath(offActions[0])
+                : switchedOffActionListPath(baseId)
+          }
+          title={t(
+            offOnlyActions
+              ? 'engine.studio.landing.customizations.switchedOffActionsTitle'
+              : 'engine.studio.landing.customizations.switchedOffTitle',
+            locale,
+          )}
           data-testid="studio-landing-customizations-switched-off"
           className={linkClass}
         >
@@ -305,6 +361,37 @@ export function BuilderLanding(): React.ReactElement {
             switchedOff: line.counts.switchedOff,
           })}
         </Link>
+        {nameActions && (
+          <span data-testid="studio-landing-customizations-switched-off-actions">
+            {t('engine.studio.landing.customizations.separator', locale)}
+            {t('engine.studio.landing.customizations.switchedOffActionsLead', locale)}
+            {namedActions.map((name, i) => (
+              <React.Fragment key={name}>
+                {i > 0 && t('engine.studio.landing.customizations.separator', locale)}
+                <Link
+                  to={actionPath(name)}
+                  title={t('engine.studio.landing.customizations.switchedOffActionsTitle', locale)}
+                  data-testid="studio-landing-customizations-switched-off-action"
+                  className={`${linkClass} font-mono`}
+                >
+                  {name}
+                </Link>
+              </React.Fragment>
+            ))}
+            {moreActions > 0 && (
+              <>
+                {' '}
+                <Link
+                  to={switchedOffActionListPath(baseId)}
+                  data-testid="studio-landing-customizations-switched-off-actions-more"
+                  className={linkClass}
+                >
+                  {tFormat('engine.studio.landing.customizations.switchedOffActionsMore', locale, { count: moreActions })}
+                </Link>
+              </>
+            )}
+          </span>
+        )}
       </p>
     );
   };

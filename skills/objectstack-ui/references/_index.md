@@ -9,7 +9,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Core schemas
 
-- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionSchema
+- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionRefusalSchema
 - `node_modules/@objectstack/spec/src/ui/app.zod.ts` — Exports: ObjectNavItemSchema, DashboardNavItemSchema, PageNavItemSchema, UrlNavItemSchema, ReportNavItemSchema
 - `node_modules/@objectstack/spec/src/ui/chart.zod.ts` — Unified Chart Type Taxonomy
 - `node_modules/@objectstack/spec/src/ui/component.zod.ts` — Exports: PageContainerProps, PageHeaderProps, PageTabsProps, PageCardProps, RecordDetailsProps
@@ -25,6 +25,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
 - `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
+- `node_modules/@objectstack/spec/src/data/declared-entry.zod.ts` — The declared-entry factory: one sentence a declaration hands over in the
 - `node_modules/@objectstack/spec/src/data/feed.zod.ts` — Activity-timeline UI config enums, and the `sys_activity.type` built-in set.
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, UniqueScopeSchema

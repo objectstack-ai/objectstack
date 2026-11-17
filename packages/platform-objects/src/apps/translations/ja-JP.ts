@@ -38,7 +38,6 @@ export const jaJP: TranslationData = {
       navigation: {
         group_overview: { label: '概要' },
         group_apps: { label: 'アプリ' },
-        nav_packaged_actions: { label: 'パッケージアクション' },
         nav_marketplace_browse: { label: 'マーケットプレイスを閲覧' },
         nav_marketplace_installed: { label: 'インストール済みアプリ' },
         nav_cloud_connection: { label: 'クラウド接続' },

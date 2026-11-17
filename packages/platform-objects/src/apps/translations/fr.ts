@@ -38,7 +38,6 @@ export const fr: TranslationData = {
       navigation: {
         group_overview: { label: 'Aperçu' },
         group_apps: { label: 'Applications' },
-        nav_packaged_actions: { label: 'Actions fournies par les packages' },
         nav_marketplace_browse: { label: 'Parcourir la Marketplace' },
         nav_marketplace_installed: { label: 'Applications installées' },
         nav_cloud_connection: { label: 'Connexion au cloud' },

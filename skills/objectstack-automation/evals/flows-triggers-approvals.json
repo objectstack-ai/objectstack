@@ -420,6 +420,21 @@
           "STACK_TRIGGER_CAPABILITY_REQUIRED"
         ]
       }
+    },
+    {
+      "id": 24,
+      "prompt": "Our `crm` package adds a `record-after-update` flow on `crm_quote` that drafts a contract once a quote is accepted. Some customers will want it, others not, so it must arrive switched off and an administrator should be able to turn it on per deployment, and keep it on through our later upgrades. How do I declare that?",
+      "expected_output": "Declare `defaultActive: false` on the flow, beside `status: 'active'`. On an installation where no administrator has switched it, the flow is not armed and does not run (`GET /api/v1/automation/_status` reports `enabled: false`). An administrator turns it on with the packaged-flow switch, `POST /api/v1/automation/:name/toggle` with `{ enabled: true }`; that choice wins over the declared default and survives a restart, an upgrade and a reinstall. Not `status: 'obsolete'`, which disarms the flow everywhere and which the switch does not override, and not a flow the deployment authors itself, which is refused the key (its switch is its `status`).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "defaultActive: false",
+          "toggle"
+        ],
+        "must_not_contain": [
+          "isActive"
+        ]
+      }
     }
   ]
 }
