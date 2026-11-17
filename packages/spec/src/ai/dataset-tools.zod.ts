@@ -191,8 +191,11 @@ export const DatasetNextStepDecision = z.enum(['one_measure', 'several_measures'
  * with it.
  *
  * The caller's terms can be in different cases (one equals a measure, another
- * has only candidates). Which case one answer reports is the executor's rule;
- * the shape says which terms the reported case is about.
+ * has only candidates). An answer still carries one `nextStep`, and it reports
+ * one case. Which case is reported when the terms are in several, the
+ * precedence among the cases, is the executor's: card #34919 fixes and
+ * documents it, and the spec declares no order. `terms` says which of the
+ * terms sent the reported case covers.
  *
  * What a schema cannot refuse is the executor's to hold, as it is for
  * `candidates`: that `decision` is the case the named terms are in, and that
