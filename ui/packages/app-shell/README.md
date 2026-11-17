@@ -1267,48 +1267,49 @@ registers:
 ```
 
 The block takes no props — its `properties` bag accepts only `{}`. It draws
-from the request record the page binds: the server-computed decision progress
-(when the request is pending and aggregates more than one decision) above the
-request's own declared decision actions at `record_section`, each shown or
-hidden by its `visible` predicate over the request's `viewer` block. A decided
-request, or a viewer who may not decide, gets no decision buttons. After a
-decision the request record and its timeline are re-read in place. Placed on
-any other page, the block draws a short notice that it works only on approval
-request pages. `className` styles the wrapper.
+the whole request from the request record the page binds, and objectstack's
+request page (`sys_approval_request_detail`) puts it last, below the header
+and the highlights, with no tabs (objectstack#34588). Placed on any other
+page, the block draws a short notice that it works only on approval request
+pages. `className` styles the wrapper.
 
-Above the progress, the block shows what was submitted, from the request row's
-record snapshot (`payload`) and the server's display values
-(`payload_display`), against the target object's declared fields: the
-declared amount (the first non-zero field declared `type: 'currency'`, or
-declared `type: 'summary'` with a `summaryOperations` `sum` over a field the
-summarized object declares `type: 'currency'`; else the first such field),
-then the first six business fields, each under its declared label and through
-the record page's own cell. Telling a roll-up total apart reads the
-summarized object's definition from the metadata store, for one object at
-most; if that definition cannot be read, the roll-up is an ordinary row. A
-key that only looks like an amount by its name never leads. A key the object
-does not declare, a framework column, an
-unresolved reference id, a field declared `hidden: true` and a field the
-reader may not read take no row. Without the target object's definition, the
-summary is not drawn. The summary is headed "As submitted"
-(`approvalsInbox.snapshotAsSubmitted`): the snapshot is the target record as it
-was submitted, not its current state, so after a decision its values can
-differ from the request's status in the page's highlights. The record's
-current values are the Details tab's record card.
+On top: a "Flow-initiated" marker when no person submitted the request (its
+`submitter_id` absent or null), the deciding action's comment on a decided
+request, and the request's own declared decision actions at
+`record_section`, each shown or hidden by its `visible` predicate over the
+request's `viewer` block. A decided request, or a viewer who may not decide,
+gets no decision buttons. After a decision the request record and its thread
+are re-read in place.
 
-Two more parts come from the same request row. A request no person submitted
-(its `submitter_id` absent or null, as the approvals get serves a request a
-flow run opened with no user context) is marked "Flow-initiated", above the
-summary; a request a person submitted carries no marker. Below the summary,
-the block draws the vertical step line of the request's own route
-(`flow_route`, served by the approvals get) when it has more than one step,
-at any status: the steps the request's flow run passed, its own step, and,
-while it is pending, the steps ahead that the flow's graph alone decides.
-Past an undecided branch nothing is drawn. The line is the same stepper the
-record approvals panel draws, it never scrolls sideways, and it never draws
-the row's `flow_steps`, the flow graph's first branch at every decision. The
-marker and the line's accessible name are the Approval Center's
-`approvalsInbox.*` rows.
+Below, two columns (one on a narrow page):
+
+- **The record, as submitted** (`approvalsInbox.snapshotAsSubmitted`): every
+  field of the request's record snapshot (`payload`) the reader may read, in
+  the sections and order of the target object's default record page, each
+  under its declared label and through the record page's own cell, with the
+  server's display values (`payload_display`) for references. A field the
+  object does not declare, a framework column, a field declared
+  `hidden: true` and a field the reader may not read are not drawn. The block
+  also reads the target record once (`findOne`, no params): a field whose
+  current value differs from the submitted one is marked "Changed"
+  (`approvalsInbox.snapshotChanged`) with its current value beside it. If the
+  record cannot be read, nothing is marked and the card says so. Below the
+  card, the record's child tables (owned `master_detail` children and
+  `relatedList: 'primary'` tables), read-only, with their CURRENT rows and a
+  note saying so: the snapshot keeps the record's own row only. Without the
+  target object's definition, or with no snapshot, the record is not drawn.
+- **The right rail**, in this order: approval progress (the vertical step line
+  of the request's own route, `flow_route`, when it has more than one step;
+  the server-computed decision tally when the request is pending and
+  aggregates more than one decision; who it waits on), the record's
+  attachment fields, and the request's activity: its thread
+  (`sys_approval_action`), newest first, read through the page's data source,
+  only for a reader whose verdict allows reading `sys_approval_action`.
+
+The step line is the same stepper the record approvals panel draws, it never
+scrolls sideways, and it never draws the row's `flow_steps`, the flow graph's
+first branch at every decision. Past an undecided branch nothing is drawn.
+Copy is the Approval Center's `approvalsInbox.*` rows.
 
 ## User-scoped state (favorites, recent items)
 

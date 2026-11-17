@@ -25,9 +25,15 @@
  * - Only a stamp `withRecordBeingEdited` issued counts. The key written as
  *   data — on a document's form field, an action's params — is no stamp, so
  *   no host is opted in by what it is handed.
- * - An entry whose referenced value is empty — null, unset, `''`, an empty
- *   list, a hop whose lookup is unset — is left out of the query, the rule an
- *   unset `dependsOn` parent follows.
+ * - An entry whose referenced value is empty — null, unset, `''`, a hop whose
+ *   lookup is unset — is left out of the query, the rule an unset `dependsOn`
+ *   parent follows.
+ * - A path through or to a multi-valued field — the record or the hop's row
+ *   holds a list there (`accounts.cb_market` through a `multiple: true`
+ *   lookup, `tags`, `account.markets`) — has no single value to compare, the
+ *   spec's rule (`LookupFilterRecordReferenceSchema`): its entry is left out,
+ *   never sent with the list as a scalar comparand, and a development build
+ *   says so once per path.
  * - A hop whose row cannot be read is left out the same way: the picker
  *   narrows the choice only, and the save is the server's to judge.
  * - ⛔ No `{ $record }` value ever reaches the wire: `lookupFiltersToRecord`
@@ -170,10 +176,11 @@ export function readRecordBeingEdited(field: unknown): RecordBeingEdited | undef
 }
 
 /**
- * The value a `{ $record }` path names, or `undefined` when it is empty or
- * cannot be read. `hopRows` holds the rows read for each hop's lookup, by
- * `via`; an expanded row on the record itself is read first, so a host that
- * already holds the related record costs no request.
+ * The value a `{ $record }` path names, or `undefined` when it is empty,
+ * cannot be read, or is multi-valued (a list on the record or the hop's
+ * row). `hopRows` holds the rows read for each hop's lookup, by `via`; an
+ * expanded row on the record itself is read first, so a host that already
+ * holds the related record costs no request.
  */
 function readRecordPath(
   path: string,
@@ -182,22 +189,28 @@ function readRecordPath(
 ): unknown {
   const dot = path.indexOf('.');
   if (dot < 0) {
-    const v = collapseReference(record[path]);
+    const own = record[path];
+    if (Array.isArray(own)) return warnMultiValuedPath(path, `"${path}" holds a list`);
+    const v = collapseReference(own);
     return isEmptyValue(v) ? undefined : v;
   }
   const via = path.slice(0, dot);
   const field = path.slice(dot + 1);
   const held = record[via];
+  if (Array.isArray(held)) return warnMultiValuedPath(path, `the lookup "${via}" holds a list of records`);
   if (isEmptyValue(held)) return undefined;
   const row = isRow(held) && Object.prototype.hasOwnProperty.call(held, field) ? held : hopRows[via];
   if (!row) return undefined;
-  const v = collapseReference(row[field]);
+  const end = row[field];
+  if (Array.isArray(end)) return warnMultiValuedPath(path, `"${field}" on the "${via}" row holds a list`);
+  const v = collapseReference(end);
   return isEmptyValue(v) ? undefined : v;
 }
 
 /**
  * `filters` with every `{ $record }` value replaced by the value it names on
- * `record`, and every entry whose value is empty or unreadable left out.
+ * `record`, and every entry whose value is empty, unreadable or multi-valued
+ * left out.
  * Literal entries pass through untouched, in order.
  */
 export function resolveLookupFilters(
@@ -218,24 +231,45 @@ export function resolveLookupFilters(
   return out;
 }
 
-const warnedHops = new Set<string>();
+const warned = new Set<string>();
 
 /**
- * Said once per hop: the entry is left out, so the picker offers more than the
- * author wrote — visible here rather than only as a wider list.
+ * The development-build warning for an entry left out of the candidate query,
+ * said once per `key`: the picker then offers more than the author wrote —
+ * visible here rather than only as a wider list.
  */
-function warnUnreadableHop(via: string, field: string, object: string | undefined): void {
+function warnLeftOut(key: string, path: string, reason: string): void {
   if ((globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === 'production') return;
-  const key = `${via}.${field}`;
-  if (warnedHops.has(key)) return;
-  warnedHops.add(key);
-  console.warn(
-    `[LookupField] lookupFilters { $record: "${key}" } is left out of the candidate query: `
-      + (object
-        ? `no data source here can read ${object} rows.`
-        : `the record holds "${via}" as an id, and this host did not name the object it points at `
-          + `(a record form stamps it with withRecordBeingEdited).`),
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(`[LookupField] lookupFilters { $record: "${path}" } is left out of the candidate query: ${reason}`);
+}
+
+/** Said once per hop whose row cannot be read. */
+function warnUnreadableHop(via: string, field: string, object: string | undefined): void {
+  const path = `${via}.${field}`;
+  warnLeftOut(
+    `hop:${path}`,
+    path,
+    object
+      ? `no data source here can read ${object} rows.`
+      : `the record holds "${via}" as an id, and this host did not name the object it points at `
+        + `(a record form stamps it with withRecordBeingEdited).`,
   );
+}
+
+/**
+ * Said once per path through or to a multi-valued field; answers `undefined`,
+ * the value such a path resolves to.
+ */
+function warnMultiValuedPath(path: string, where: string): undefined {
+  warnLeftOut(
+    `multi:${path}`,
+    path,
+    `the path is multi-valued — ${where} — and a { $record } path names a single value. `
+      + 'Point it at a single-valued field.',
+  );
+  return undefined;
 }
 
 interface HopSource {

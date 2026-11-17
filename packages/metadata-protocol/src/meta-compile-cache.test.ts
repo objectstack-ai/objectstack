@@ -57,6 +57,13 @@ interface HarnessOptions {
     registryRevision?: boolean;
     /** The metadata service: `true` (counted, with a loader mark), `'no-revision'`, `'no-mark'`, or `false` (none). */
     metadataService?: true | 'no-revision' | 'no-mark' | false;
+    /**
+     * [#34554] `registerItem` and `registerObject` move `revision` (and
+     * `objectRevision` for an object), as every public write of the real
+     * `SchemaRegistry` does (`registry-revision.ts`), so a list read's
+     * hydration moves the counters even when it registers what is there.
+     */
+    hydrationMovesRevision?: boolean;
 }
 
 function harness(rows: Row[], opts: HarnessOptions = {}) {
@@ -76,8 +83,14 @@ function harness(rows: Row[], opts: HarnessOptions = {}) {
         getPackage: () => undefined,
         getArtifactItem: () => undefined,
         isPackageDisabled: () => false,
-        registerItem: () => { registryCalls.push('registerItem'); },
-        registerObject: () => { registryCalls.push('registerObject'); },
+        registerItem: () => {
+            registryCalls.push('registerItem');
+            if (opts.hydrationMovesRevision) (registry.revision as number) += 1;
+        },
+        registerObject: () => {
+            registryCalls.push('registerObject');
+            if (opts.hydrationMovesRevision) { (registry.revision as number) += 1; (registry.objectRevision as number) += 1; }
+        },
         applyNavContributions: (app: unknown) => app,
         // ADR-0150 D3: a by-name read of a package-scoped type needs the resolver.
         readsByPackage: () => true,
@@ -634,15 +647,55 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         mark.restore();
     });
 
-    it('a counter move retires the row cache: a peer\'s write the row cache predates is in the new bucket\'s answer', async () => {
+    it('[#34554] a counter move keeps the row sets read within the last bound, and a peer\'s write is in the answer by the next bound', async () => {
         vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '600000'); // the row cache outlives every bound here
-        atBound();
+        const clock = atBound();
         const rows = [storedObject('Widget')];
         const h = harness(rows);
         expect((await read(h)).item.label).toBe('Widget'); // the row cache is warm
         rows[0] = storedObject('Gadget', '2026-11-16T01:00:00.000Z'); // a peer replica with no bridge
         (h.registry.revision as number)++; // a local counter move opens a new bucket
+        // The item's active rows (the row cache's by-name read, a `find`).
+        const rowReads = () => h.reads.filter((r) => r.op === 'find' && r.where.name === 'widget').length;
+        const before = rowReads();
+        // The rows were read inside this bound: kept, so no row is more than one bound old.
+        expect((await read(h)).item.label).toBe('Widget');
+        expect(rowReads()).toBe(before);
+        clock.pass(); // the new bucket's first bound ends one bound after those rows were read
         expect((await read(h)).item.label).toBe('Gadget');
+    });
+
+    it('[#34554] the bucket a counter move opens ends its first bound one bound after the kept rows were read, not one bound after the move', async () => {
+        vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '600000'); // the row cache outlives every bound here
+        let now = 1_000_000;
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        const rows = [storedObject('Widget')];
+        const h = harness(rows);
+        expect((await read(h)).item.label).toBe('Widget'); // the row cache is warm, its rows read at T
+        now += 20_000; // part of a bound later
+        rows[0] = storedObject('Gadget', '2026-11-16T01:00:00.000Z'); // a peer replica with no bridge
+        (h.registry.revision as number)++; // a local counter move opens a new bucket at T + 20 s
+        const rowReads = () => h.reads.filter((r) => r.op === 'find' && r.where.name === 'widget').length;
+        const before = rowReads();
+        expect((await read(h)).item.label).toBe('Widget'); // kept: the rows are less than a bound old
+        expect(rowReads()).toBe(before);
+        now = 1_000_000 + 30_001; // one bound after the rows were read, less than one after the move
+        expect((await read(h)).item.label).toBe('Gadget');
+    });
+
+    it('a counter move retires the row cache once its rows are more than a bound old: a peer\'s write the row cache predates is in the new bucket\'s answer', async () => {
+        vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '600000'); // the row cache outlives every bound here
+        const clock = atBound();
+        const rows = [storedObject('Widget')];
+        const h = harness(rows);
+        expect((await read(h)).item.label).toBe('Widget'); // the row cache is warm
+        rows[0] = storedObject('Gadget', '2026-11-16T01:00:00.000Z'); // a peer replica with no bridge
+        clock.pass();
+        const mark = onStoreMark(h, async (real) => real());
+        (h.registry.revision as number)++; // a local counter move opens a new bucket
+        expect((await read(h)).item.label).toBe('Gadget');
+        expect(mark.calls).toBe(0); // the new bucket retired the rows: no confirmation was needed
+        mark.restore();
     });
 
     it('a counter move costs no store read: the new bucket takes its reading at its first bound', async () => {
@@ -673,4 +726,47 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
             expect(h.byNameReads('widget')).toBeGreaterThan(before);
         }
     });
+});
+
+describe('[#34554] a list read that hydrates moves a counter, and the reads after it are no dearer than with the cache off', () => {
+    // review#2 S5 on #34494: on a kernel whose list read registers the stored
+    // rows back into the registry, every list read moves `registry.revision`
+    // with nothing changed. Each move opened a bucket that retired the row
+    // cache, so the list read and the item reads after it all went to the
+    // store. Measured before the fix: 3 store reads per round with the cache
+    // on against 1 with it off (one item), 7 against 3 (three items).
+    const rowsOf = (n: number): Row[] => Array.from({ length: n }, (_, i) => ({
+        id: `r_w${i}`, type: 'object', name: `widget_${i}`, state: 'active', package_id: null,
+        updated_at: '2026-11-16T00:00:00.000Z',
+        metadata: JSON.stringify({ name: `widget_${i}`, label: `Widget ${i}`, fields: {} }),
+    }));
+
+    async function storeReadsPerRound(ttl: string | undefined, items: number): Promise<number[]> {
+        vi.unstubAllEnvs();
+        if (ttl !== undefined) vi.stubEnv(META_COMPILE_CACHE_TTL_ENV, ttl);
+        const h = harness(rowsOf(3), { hydrationMovesRevision: true });
+        const perRound: number[] = [];
+        for (let round = 0; round < 4; round++) {
+            const before = h.reads.length;
+            const revision = h.registry.revision as number;
+            await h.protocol.getMetaItems({ type: 'object' });
+            // Non-vacuity: the list read moved the counter the cache reads.
+            expect(h.registry.revision).toBeGreaterThan(revision);
+            for (let i = 0; i < items; i++) {
+                expect((await h.protocol.getMetaItem({ type: 'object', name: `widget_${i}` })).item.label).toBe(`Widget ${i}`);
+            }
+            perRound.push(h.reads.length - before);
+        }
+        return perRound;
+    }
+
+    for (const items of [1, 3]) {
+        it(`list then ${items} item read(s), in alternation: store reads per round equal the cache-off read`, async () => {
+            const on = await storeReadsPerRound(undefined, items);
+            const off = await storeReadsPerRound('0', items);
+            expect(on).toEqual(off);
+            // After the first round neither the list nor an item's rows are read again.
+            expect(on.slice(1)).toEqual([items, items, items]);
+        });
+    }
 });
