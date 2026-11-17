@@ -190,13 +190,55 @@ export const ru: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Число пользователей' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Число организаций' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Число сеансов' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Число установок' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'Число пользователей',
+          description: 'Число учётных записей пользователей, как активных, так и неактивных.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'Число организаций',
+          description: 'Число организаций; у каждой свои участники, данные и настройки.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'Число сеансов',
+          description: 'Число сеансов входа: по одному на каждый вход из браузера или с устройства.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'Число установок',
+          description: 'Число установок пакетов: по одной на каждый установленный пакет.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Тип действия' }, user_id: { label: 'Пользователь' } },
-      measures: { event_count: { label: 'Число событий' } },
+      dimensions: {
+        action: {
+          label: 'Тип действия',
+          description: 'Тип действия, которое фиксирует запись журнала аудита: создание, изменение, удаление, вход или изменение конфигурации.',
+        },
+        user_id: {
+          label: 'Пользователь',
+          description: 'Пользователь, выполнивший действие; записи, которые платформа создаёт сама, объединены под «Система».',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'Число событий',
+          description: 'Число записей журнала аудита; каждая фиксирует одно действие в системе, выполненное пользователем или самой платформой.',
+        },
+      },
     },
   },
 

@@ -176,13 +176,55 @@ export const jaJP: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'ユーザー' } } },
-    sys_organization_metrics: { measures: { org_count: { label: '組織' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'セッション' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'インストール' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'ユーザー',
+          description: '登録されているユーザーアカウントの数（有効・無効を問いません）。',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: '組織',
+          description: '登録されている組織の数。各組織はそれぞれ独自のメンバー、データ、設定を持ちます。',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'セッション',
+          description: '記録されているサインインセッションの数。ブラウザーやデバイスからのサインインごとに 1 つ作成されます。',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'インストール',
+          description: '記録されているパッケージのインストール数。インストールされたパッケージごとに 1 件です。',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'アクション' }, user_id: { label: 'ユーザー' } },
-      measures: { event_count: { label: 'イベント' } },
+      dimensions: {
+        action: {
+          label: 'アクション',
+          description: '監査ログのエントリが記録する操作の種類（作成、更新、削除、ログイン、設定変更など）。',
+        },
+        user_id: {
+          label: 'ユーザー',
+          description: '監査対象の操作を行ったユーザー。プラットフォーム自身が書き込んだエントリは「システム」にまとめられます。',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'イベント',
+          description: '監査ログのエントリ数。各エントリは、ユーザーまたはプラットフォーム自身がシステムで行った 1 回の操作を記録します。',
+        },
+      },
     },
   },
 
