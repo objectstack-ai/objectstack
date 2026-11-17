@@ -2619,7 +2619,7 @@ const fr = {
       expandToPage: "Ouvrir en pleine page",
       openAsPage: "Ouvrir en pleine page",
       objectNotFound: "Objet introuvable",
-      objectNotFoundDescription: "L'objet « {{objectName}} » n'existe pas dans la configuration actuelle.",
+      objectNotFoundDescription: "L'objet « {{objectName}} » n'existe pas, ou vous n'y avez pas accès.",
       objectNotFoundHint: "Vérifiez les paramètres de navigation de votre application ou sélectionnez un autre objet dans la barre latérale.",
       objectPackageDisabled: "L'objet « {{objectName}} » appartient à un package désactivé et n'est donc pas servi.",
       filterOrGroupNotEditable: "Ce filtre comporte un groupe OU à côté d'autres conditions, que l'éditeur de filtres ne peut pas afficher, il est donc en lecture seule ici. La vue l'applique toujours.",
@@ -3495,7 +3495,6 @@ const fr = {
   },
   empty: {
     objectNotFound: "Objet introuvable",
-    objectNotFoundDescription: "La définition de l'objet \"{{name}}\" est manquante. Vérifiez votre configuration ou revenez en arrière.",
     interfacePageSourceMissing: "Cette page d'interface référence \"{{name}}\", qui n'est pas disponible.",
     pageNotFound: "Page introuvable",
     pageNotFoundDescription: "La page \"{{name}}\" est introuvable. Elle a peut-être été supprimée ou renommée.",

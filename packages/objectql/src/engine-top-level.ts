@@ -44,7 +44,7 @@ import { ValidationError } from './validation/record-validator.js';
 import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
-import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import type { ReferentialClearExemption, RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { declaredColumnSet } from './declared-read-columns.js';
 
 /**
@@ -2240,7 +2240,11 @@ export function undeclaredWriteFieldErrors(
  * ⛔ Keyed on `type === 'formula'` literally — the test the read path's
  * projection and `driver-sql`'s `fieldHasColumn` use. `summary` is NOT here: a
  * roll-up HAS a column, and a caller-supplied value is persisted (measured on
- * #20805, SQLite and memory) — a separate question, not this door's.
+ * #20805, SQLite and memory) — a separate question, not this door's. [#34672]
+ * Its answer is the update's static-`readonly` strip
+ * ({@link summaryFieldsLockedOnUpdate}), which exempts the `isSystem` write
+ * the roll-up recompute makes; this door, which runs in every context, would
+ * take that write too.
  *
  * Pure: the caller's objects are never mutated. A row keeps its reference when
  * nothing was taken, else it is a shallow copy without the keys.
@@ -2455,13 +2459,56 @@ export function insertStaticReadonlySubject(
  * reads the wall's flag once and hands that one value to all of them, so the
  * hook view and the stored row cannot disagree about the column. [#25062] The
  * `update`-mode preview's strip reads it too.
+ *
+ * [#34672] ...and with every roll-up `summary` field read as `readonly: true`
+ * ({@link summaryFieldsLockedOnUpdate}): the engine owns that value on
+ * update, so a person's or an import's write to it is taken and reported as
+ * `readonly`, exactly as if the author had declared the flag. The roll-up's
+ * own write is `isSystem` and skips these passes. Because the lock lives in
+ * this one view, every pass named above takes the same keys.
  */
 export function updateStaticReadonlySubject(schema: unknown, wallJudgesOrganization: boolean): unknown {
-  if (!staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return schema;
+  const sparesOrganization = staticReadonlySparesOrganization(schema, wallJudgesOrganization);
+  const rollUps = summaryFieldsLockedOnUpdate(schema);
+  if (!sparesOrganization && rollUps.length === 0) return schema;
   const { name, fields } = schema as { name?: string; fields: Record<string, unknown> };
   const kept = { ...fields };
-  delete kept[SystemFieldName.ORGANIZATION_ID];
+  if (sparesOrganization) delete kept[SystemFieldName.ORGANIZATION_ID];
+  for (const field of rollUps) kept[field] = { ...(kept[field] as Record<string, unknown>), readonly: true };
   return { name, fields: kept };
+}
+
+/**
+ * [#34672] The roll-up `summary` fields an UPDATE judges read-only although
+ * the author did not declare `readonly: true`. The engine computes a roll-up
+ * from its child rows and writes it through `update()` under an `isSystem`
+ * context (`recomputeSummaries`, the backfill, the enable refresh), which the
+ * static strip exempts. So the only writes this lock takes are a caller's:
+ * a REST `PATCH`, an import with `writeMode: 'update'`, a predicate update.
+ * Before it, such a write was stored and read downstream until the next
+ * child write recomputed the roll-up.
+ *
+ * ⛔ UPDATE only. An insert keeps a caller's initial value: seed data and a
+ * historical import may carry a pre-computed total, and
+ * `initializeSummaryFields` seeds only the roll-ups the caller left out. See
+ * the `summary` note on `RUNTIME_OWNED_FIELD_TYPES` in
+ * `validation/rule-validator.ts`, which keeps the type out of the
+ * insert-side runtime-owned strip for that reason.
+ *
+ * Keyed on `type === 'summary'` literally, like the roll-up readers
+ * (`getSummaryDescriptors`, `summary-enable-refresh.ts`). A field already
+ * declared `readonly: true` is left as it is.
+ */
+export function summaryFieldsLockedOnUpdate(schema: unknown): string[] {
+  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  const locked: string[] = [];
+  for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+    if (!def || typeof def !== 'object') continue;
+    const d = def as { type?: unknown; readonly?: unknown };
+    if (d.type === 'summary' && d.readonly !== true) locked.push(name);
+  }
+  return locked;
 }
 
 /**
@@ -4431,12 +4478,14 @@ export function staticReadonlyStoredView(
     preserveAudit: boolean;
     hookWrittenKeys: ReadonlySet<string> | undefined;
     wallJudgesOrganization?: boolean;
+    /** The walk's referential clear, which the strip keeps — so the view keeps it too. */
+    referentialClear?: ReferentialClearExemption;
   },
 ): Record<string, unknown> {
   if (!strip.runs) return data;
   return stripReadonlyFields(
     updateStaticReadonlySubject(schema, strip.wallJudgesOrganization === true) as any, data, supplied, undefined,
-    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
+    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys, referentialClear: strip.referentialClear },
   ) ?? data;
 }
 
@@ -5225,13 +5274,39 @@ export const SECURITY_SERVICE_SOURCE_SLOT: unique symbol = Symbol.for('objectsta
  */
 const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondition');
 
+/**
+ * The engine's own channel for a referential write to one lookup on one row,
+ * on the `update` it issues: `{ object, id, field }` of the holder row and
+ * lookup. Two writers, both engine-owned referential integrity and never a
+ * caller write: the `set_null` delete walk's clear (`cascadeDeleteRelations`)
+ * and the recycle-bin restore's re-link of that clear and its undo (ADR-0148
+ * D2, `recycle-bin/restore.ts`). `update()` hands the read-only strips that one
+ * key, at the value the write received ({@link ReferentialClearOption}).
+ *
+ * A module-private symbol, the shape of {@link WRITE_PRECONDITION_OPTION}, and
+ * for the same reason: no options object a door builds, no hook's `ctx.api`
+ * write and nothing outside this package can carry it. ⛔ Not the
+ * operation-private `__referentialFieldClear` context key, which a write a
+ * hook issues through `ctx.api` during the cleanup dispatch INHERITS
+ * (`buildReferentialFieldClear`); and ⛔ not `isSystem`, whose exemption is
+ * total. ⛔ Not re-exported by `index.ts` or `core.ts`.
+ */
+const REFERENTIAL_CLEAR_OPTION: unique symbol = Symbol('objectql.referentialClear');
+
+/** What the delete walk or the restore puts under {@link REFERENTIAL_CLEAR_OPTION}: the holder row and the lookup it writes. */
+interface ReferentialClearOption {
+  readonly object: string;
+  readonly id: string;
+  readonly field: string;
+}
+
 // [#29986 codemod] Declared above without `export`, and read by `engine.ts` or a section module.
 export {
   AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, AutonumberReaders, CascadeBatchNarrowed,
   CascadeIssuedDelete, DISPATCHABLE_HOOK_EVENTS, cascadeBatchIdsOf, ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
   ENGINE_QUERY_SLOTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WIRE_ONLY_SLOTS, FormulaFaultSink, FormulaRelated,
   IssuedAutonumber, METADATA_ARRAY_KEYS, ReadableIdsSecurityResolution, StoredExpressionServing, TransactionScope,
-  WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
+  REFERENTIAL_CLEAR_OPTION, ReferentialClearOption, WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
   assertDispatchableHookEvent, assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable,
   assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects, assertValidHookObject,
   assertValidUnscopedMultiWriteFlag, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,

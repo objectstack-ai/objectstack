@@ -906,10 +906,11 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     // `учетной` is the regression this line exists to catch.
     expect(at(builtInLocales.ru, 'empty.appNotFoundDescription')).toContain('учётной');
     // The quote style around `{{name}}` follows the sibling empty-state value in
-    // the SAME pack: zh curly, ja corner brackets, the rest ASCII.
-    expect(at(builtInLocales['zh-Hans'], 'empty.objectNotFoundDescription')).toContain('“{{name}}”');
+    // the SAME pack: zh curly, ja corner brackets, the rest ASCII. That sibling,
+    // `empty.objectNotFoundDescription`, retired in objectstack-ai/objectstack#34740
+    // (the record routes draw `console.objectView.objectNotFoundDescription`), so
+    // the style is pinned on this value alone.
     expect(at(builtInLocales['zh-Hans'], 'empty.interfacePageSourceMissing')).toContain('“{{name}}”');
-    expect(at(builtInLocales.ja, 'empty.objectNotFoundDescription')).toContain('「{{name}}」');
     expect(at(builtInLocales.ja, 'empty.interfacePageSourceMissing')).toContain('「{{name}}」');
     for (const lang of ['ko', 'fr', 'es', 'pt-BR', 'ru', 'ar'] as const) {
       expect(at(builtInLocales[lang], 'empty.interfacePageSourceMissing'), `${lang} quotes`).toContain('"{{name}}"');
@@ -920,9 +921,9 @@ describe('objectui#3546 slice seven — the ratchet residue', () => {
     // slice wrote the correctly paired „…“ and filed the mismatch instead of
     // copying it. objectui#3876 then fixed the 20 siblings, and this assertion is
     // the one the card named as "the place to look back at when that lands" — so
-    // it now pins the *convergence*: both values carry the same paired „…“. The
-    // durable pack-wide invariant lives in `de-quote-pairing-3876.test.ts`.
-    expect(at(builtInLocales.de, 'empty.objectNotFoundDescription')).toContain('„{{name}}“');
+    // it pinned the *convergence*: both values carried the same paired „…“. The
+    // sibling retired in objectstack-ai/objectstack#34740; the durable pack-wide
+    // invariant lives in `de-quote-pairing-3876.test.ts`.
     expect(at(builtInLocales.de, 'empty.interfacePageSourceMissing')).toContain('„{{name}}“');
   });
 

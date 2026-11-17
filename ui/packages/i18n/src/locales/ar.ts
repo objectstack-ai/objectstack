@@ -2818,7 +2818,7 @@ const ar = {
       expandToPage: "فتح كصفحة كاملة",
       openAsPage: "فتح كصفحة كاملة",
       objectNotFound: "الكائن غير موجود",
-      objectNotFoundDescription: "الكائن \"{{objectName}}\" غير موجود في الإعدادات الحالية.",
+      objectNotFoundDescription: "الكائن \"{{objectName}}\" غير موجود، أو ليس لديك صلاحية الوصول إليه.",
       objectNotFoundHint: "تحقق من إعدادات التنقل في تطبيقك أو اختر كائنًا آخر من الشريط الجانبي.",
       objectPackageDisabled: "الكائن \"{{objectName}}\" ينتمي إلى حزمة معطّلة، لذلك لا يتم تقديمه.",
       filterOrGroupNotEditable: "يحتوي هذا الفلتر على مجموعة «أو» إلى جانب شروط أخرى، ولا يستطيع محرر الفلاتر عرضها، لذا فهو للقراءة فقط هنا. لا يزال العرض يطبّقه.",
@@ -3724,7 +3724,6 @@ const ar = {
   },
   empty: {
     objectNotFound: "الكائن غير موجود",
-    objectNotFoundDescription: "تعريف الكائن \"{{name}}\" مفقود. تحقق من الإعداد أو ارجع للخلف.",
     interfacePageSourceMissing: "تشير صفحة الواجهة هذه إلى \"{{name}}\"، وهو غير متاح.",
     pageNotFound: "الصفحة غير موجودة",
     pageNotFoundDescription: "الصفحة \"{{name}}\" غير موجودة. ربما تم إزالتها أو إعادة تسميتها.",

@@ -2557,7 +2557,7 @@ const ja = {
       expandToPage: "フルページで開く",
       openAsPage: "フルページで開く",
       objectNotFound: "オブジェクトが見つかりません",
-      objectNotFoundDescription: "オブジェクト「{{objectName}}」は現在の設定に存在しません。",
+      objectNotFoundDescription: "オブジェクト「{{objectName}}」は存在しないか、アクセスする権限がありません。",
       objectNotFoundHint: "アプリのナビゲーション設定を確認するか、サイドバーから別のオブジェクトを選択してください。",
       objectPackageDisabled: "オブジェクト「{{objectName}}」が属するパッケージは無効になっているため、提供されていません。",
       filterOrGroupNotEditable: "このフィルターには他の条件と並んで OR グループが含まれており、フィルターエディターでは表示できないため、ここでは読み取り専用です。ビューには引き続き適用されます。",
@@ -3425,7 +3425,6 @@ const ja = {
   },
   empty: {
     objectNotFound: "オブジェクトが見つかりません",
-    objectNotFoundDescription: "オブジェクト「{{name}}」の定義が見つかりません。設定を確認するか、有効なオブジェクトを選択してください。",
     interfacePageSourceMissing: "このインターフェースページは「{{name}}」を参照していますが、利用できません。",
     pageNotFound: "ページが見つかりません",
     pageNotFoundDescription: "ページ「{{name}}」が見つかりません。削除または名前変更された可能性があります。",

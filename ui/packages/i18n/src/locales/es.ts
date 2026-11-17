@@ -2623,7 +2623,7 @@ const es = {
       expandToPage: "Abrir como página completa",
       openAsPage: "Abrir como página completa",
       objectNotFound: "Objeto no encontrado",
-      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe en la configuración actual.",
+      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe o no tiene acceso a él.",
       objectNotFoundHint: "Verifique la configuración de navegación de su aplicación o seleccione un objeto diferente en la barra lateral.",
       objectPackageDisabled: "El objeto \"{{objectName}}\" pertenece a un paquete deshabilitado, por lo que no se está sirviendo.",
       filterOrGroupNotEditable: "Este filtro tiene un grupo O junto a otras condiciones, que el editor de filtros no puede mostrar, así que aquí es de solo lectura. La vista lo sigue aplicando.",
@@ -3499,7 +3499,6 @@ const es = {
   },
   empty: {
     objectNotFound: "Objeto no encontrado",
-    objectNotFoundDescription: "Falta la definición del objeto \"{{name}}\". Verifique su configuración o navegue hacia atrás.",
     interfacePageSourceMissing: "Esta página de interfaz hace referencia a \"{{name}}\", que no está disponible.",
     pageNotFound: "Página no encontrada",
     pageNotFoundDescription: "La página \"{{name}}\" no fue encontrada. Puede haber sido eliminada o renombrada.",

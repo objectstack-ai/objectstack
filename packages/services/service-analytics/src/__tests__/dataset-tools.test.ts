@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { getDatasetToolJsonSchemas } from '@objectstack/spec/ai';
+import { ListDatasetsOutputSchema, getDatasetToolJsonSchemas } from '@objectstack/spec/ai';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { AnalyticsService } from '../analytics-service.js';
@@ -762,5 +762,68 @@ describe('[#32072] query_dataset resolves the dataset by package (ADR-0150 D3)',
     const { answer, spy } = await run([broken]);
     expect(answer).toMatchObject({ code: 'NOT_FOUND', status: 404 });
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('[#34763] list_datasets candidates — only what this caller may read, never beside a match', () => {
+  /** Every candidate names a dataset the same answer lists and a member that entry lists. */
+  function expectResolvable(out: Awaited<ReturnType<ReturnType<AnalyticsService['datasetTools']>['listDatasets']>>) {
+    for (const c of out.candidates ?? []) {
+      const entry = out.datasets.find((d) => d.name === c.dataset);
+      expect(entry, `${c.dataset} is listed`).toBeDefined();
+      const [kind, name] = c.member.split('.') as ['measures' | 'dimensions', string];
+      expect(entry![kind].map((m) => m.name), `${c.member} is listed in ${c.dataset}`).toContain(name);
+    }
+    expect(ListDatasetsOutputSchema.safeParse(out).success).toBe(true);
+  }
+
+  const TERMS = ['rev', '营收', 'secret', 'rate', 'tot', 'marg'];
+
+  it('offers the readable near member for a term that matched nothing, and nothing for a term that matched', async () => {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadSaved }).listDatasets({ terms: TERMS }, ME);
+    // `secret` (an internal-field member), `rate` and `marg` (members over the
+    // unreadable `margin`) and `tot` (a measure of locked_ds, which u_me may
+    // not query, and of closed_ds, which is not API-exposed) offer nothing.
+    expect(out.candidates).toEqual([{ term: 'rev', dataset: 'pipeline', member: 'measures.revenue' }]);
+    expect(out.datasets[0].matches).toEqual([{ term: '营收', member: 'measures.revenue', matchedOn: 'label' }]);
+    expectResolvable(out);
+  });
+
+  it('a caller who reads more is offered more, from the same rule; an unexposed dataset is offered to nobody', async () => {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: loadSaved }).listDatasets({ terms: TERMS }, ADMIN);
+    expect(out.candidates).toEqual([
+      { term: 'rev', dataset: 'pipeline', member: 'measures.revenue' },
+      { term: 'rate', dataset: 'pipeline', member: 'measures.margin_rate' },
+      // `margin_total` folds to "margin total", which contains `tot`; datasets in listing order.
+      { term: 'tot', dataset: 'pipeline', member: 'measures.margin_total' },
+      { term: 'tot', dataset: 'locked_ds', member: 'measures.total' },
+      { term: 'marg', dataset: 'pipeline', member: 'measures.margin_total' },
+      { term: 'marg', dataset: 'pipeline', member: 'measures.margin_rate' },
+    ]);
+    expect(out.candidates!.some((c) => c.dataset === 'closed_ds' || c.member === 'measures.secret_sum')).toBe(false);
+    expectResolvable(out);
+  });
+
+  it('a term with a match anywhere in the answer has no candidate, though a member is near it', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    // `margin` equals margin_total's label; margin_rate ("Margin rate") contains it and is not offered.
+    const matched = await tools.listDatasets({ terms: ['margin'] }, ADMIN);
+    expect(matched.datasets[0].matches).toEqual([{ term: 'margin', member: 'measures.margin_total', matchedOn: 'label' }]);
+    expect('candidates' in matched).toBe(false);
+    // The control: the near form alone is offered both members.
+    const near = await tools.listDatasets({ terms: ['marg'] }, ADMIN);
+    expect(near.candidates?.map((c) => c.member)).toEqual(['measures.margin_total', 'measures.margin_rate']);
+  });
+
+  it('omits the key when nothing is offered: no terms, every term matched, or nothing readable is near', async () => {
+    const { service } = await bootWired();
+    const tools = service.datasetTools({ loadDatasets: loadSaved });
+    for (const input of [{}, { terms: ['营收', 'phase'] }, { terms: ['secret', 'rate', 'tot', 'qa_no_word'] }]) {
+      const out = await tools.listDatasets(input, ME);
+      expect('candidates' in out, JSON.stringify(input)).toBe(false);
+    }
   });
 });

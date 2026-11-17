@@ -2555,7 +2555,7 @@ const de = {
       expandToPage: "Als ganze Seite öffnen",
       openAsPage: "Als ganze Seite öffnen",
       objectNotFound: "Objekt nicht gefunden",
-      objectNotFoundDescription: "Das Objekt „{{objectName}}“ existiert in der aktuellen Konfiguration nicht.",
+      objectNotFoundDescription: "Das Objekt „{{objectName}}“ existiert nicht, oder Sie haben keinen Zugriff darauf.",
       objectNotFoundHint: "Überprüfen Sie Ihre App-Navigationseinstellungen oder wählen Sie ein anderes Objekt aus der Seitenleiste.",
       objectPackageDisabled: "Das Objekt „{{objectName}}“ gehört zu einem deaktivierten Paket und wird daher nicht bereitgestellt.",
       filterOrGroupNotEditable: "Dieser Filter enthält neben anderen Bedingungen eine ODER-Gruppe, die der Filter-Editor nicht darstellen kann, daher ist er hier schreibgeschützt. Die Ansicht wendet ihn weiterhin an.",
@@ -3423,7 +3423,6 @@ const de = {
   },
   empty: {
     objectNotFound: "Objekt nicht gefunden",
-    objectNotFoundDescription: "Definition des Objekts „{{name}}“ fehlt. Überprüfen Sie Ihre Konfiguration oder navigieren Sie zurück.",
     interfacePageSourceMissing: "Diese Interface-Seite verweist auf „{{name}}“, das nicht verfügbar ist.",
     pageNotFound: "Seite nicht gefunden",
     pageNotFoundDescription: "Die Seite „{{name}}“ wurde nicht gefunden. Sie wurde möglicherweise entfernt oder umbenannt.",
