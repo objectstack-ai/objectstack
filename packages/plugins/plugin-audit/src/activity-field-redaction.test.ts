@@ -39,7 +39,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
-import { referenceTitlesPerRead, resolveServedFields, servesReferencedTitleTarget } from './activity-field-redaction.js';
+import { referenceTitlesPerRead, resolveServedFields } from './activity-field-redaction.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -404,8 +404,8 @@ const REF_TITLED_VISIBLE = 'afr_ref_titled_visible';
 const REF_TRACKED = 'afr_ref_tracked';
 /** Referenced by the exposure case; titled by `title`; its declaration serves no API operation. */
 const REF_UNEXPOSED = 'afr_ref_unexposed';
-/** Titled by a lookup into {@link REF_UNEXPOSED} that declares `referenceNameVisible`. */
-const REF_TITLED_UNEXPOSED = 'afr_ref_titled_unexposed';
+/** Titled by `name`; tracks a lookup into {@link REF_UNEXPOSED} and one into {@link REF_TARGET}. */
+const REF_TRACKED_MIXED = 'afr_ref_tracked_mixed';
 const REF_PACKAGE = 'com.objectstack.audit.test.activity-reference-title';
 
 /** Served neither target's title field; admitted to every object. */
@@ -459,33 +459,15 @@ const refObjects = [
     fields: { title: { name: 'title', label: 'Title', type: 'text' as const } },
   },
   {
-    name: REF_TITLED_UNEXPOSED, label: 'Reference Titled Unexposed', nameField: 'target',
+    name: REF_TRACKED_MIXED, label: 'Reference Tracked Mixed', nameField: 'name',
     fields: {
       name: { name: 'name', label: 'Name', type: 'text' as const },
-      target: refLookup(REF_UNEXPOSED, { referenceNameVisible: true }),
+      hidden: { name: 'hidden', label: 'Hidden', type: 'lookup' as const, reference: REF_UNEXPOSED, trackHistory: true },
+      open: { name: 'open', label: 'Open', type: 'lookup' as const, reference: REF_TARGET, trackHistory: true },
     },
   },
 ];
 
-/**
- * A row in the mirror's declared shape, naming the record's referenced record
- * by `title` in its label and its summary: the shape the mirror writes for an
- * object titled by a lookup, inserted as written so the target's declaration
- * can be judged at read time whatever it was when the row was written.
- */
-const declaredReferenceRow = (object: string, recordId: string, target: string, title: string): Row => ({
-  type: 'created',
-  timestamp: new Date().toISOString(),
-  object_name: object,
-  record_id: recordId,
-  record_label: title,
-  summary: `Created ${object} "${title}"`,
-  metadata: JSON.stringify({
-    old: null,
-    new: { target },
-    text_sources: { summary: ['target'], record_label: ['target'] },
-  }),
-});
 
 describe('an activity text naming a referenced record by its title is served only to a reader served that title field and admitted to its object', () => {
   let kernel: ObjectKernel;
@@ -558,17 +540,12 @@ describe('an activity text naming a referenced record by its title is served onl
     ids[REF_TRACKED] = await insert(REF_TRACKED, { name: 'tracked', target: one });
     await engine.update(REF_TRACKED, { target: two }, { where: { id: ids[REF_TRACKED] }, context: SYS });
 
-    // [ADR-0049] The exposure case and its control: one row each in the
-    // mirror's declared shape, naming the referenced record by its title.
-    const unexposed = await insert(REF_UNEXPOSED, { title: T.unexposed });
-    ids.unexposedRecord = await insert(REF_TITLED_UNEXPOSED, { name: 'unexposed', target: unexposed });
-    ids.exposedRecord = await insert(REF_TITLED, { name: 'exposed', target: one });
-    for (const row of [
-      declaredReferenceRow(REF_TITLED_UNEXPOSED, ids.unexposedRecord, unexposed, T.unexposed),
-      declaredReferenceRow(REF_TITLED, ids.exposedRecord, one, T.one),
-    ]) {
-      await engine.insert(ACTIVITY, row, { context: SYS });
-    }
+    // [ADR-0049] One change moving a reference into a target whose exposure
+    // serves no `get` (the mirror names it by its id) and one into an exposed
+    // target (named by its title).
+    ids.unexposed = await insert(REF_UNEXPOSED, { title: T.unexposed });
+    ids[REF_TRACKED_MIXED] = await insert(REF_TRACKED_MIXED, { name: 'mixed' });
+    await engine.update(REF_TRACKED_MIXED, { hidden: ids.unexposed, open: one }, { where: { id: ids[REF_TRACKED_MIXED] }, context: SYS });
   }, 120_000);
 
   afterAll(async () => {
@@ -634,28 +611,20 @@ describe('an activity text naming a referenced record by its title is served onl
     expect(String(tracked?.summary)).toContain(T.two);
   });
 
-  it('a referenced object whose API exposure does not serve get serves its title to no reader, referenceNameVisible included', async () => {
-    const atRest = (await engine.find(ACTIVITY, {
-      where: { object_name: REF_TITLED_UNEXPOSED, record_id: ids.unexposedRecord },
-      context: SYS,
-    })) as Row[];
-    expect(atRest.some((r) => r.record_label === T.unexposed)).toBe(true);
-    const refused = (await engine.find(ACTIVITY, {
-      where: { object_name: REF_TITLED_UNEXPOSED, record_id: ids.unexposedRecord },
-      context: REF_CONTROL,
-    })) as Row[];
-    expect(refused.length).toBeGreaterThanOrEqual(1);
-    expect(JSON.stringify(refused)).not.toContain(T.unexposed);
-    for (const row of refused) {
-      expect(row.record_id).toBe(ids.unexposedRecord);
-      if (row.record_label !== undefined) expect(row.record_label).not.toBe(T.unexposed);
-    }
-    // Control: the same row shape about an exposed target is served whole.
-    const exposed = (await engine.find(ACTIVITY, {
-      where: { object_name: REF_TITLED, record_id: ids.exposedRecord },
-      context: REF_CONTROL,
-    })) as Row[];
-    expect(exposed.filter((r) => r.record_label === T.one && String(r.summary).includes(T.one)).length).toBeGreaterThanOrEqual(1);
+  it('a change naming an unexposed target by its id and an exposed one by its title is served to a reader who may read that title, and to no reader withheld it', async () => {
+    const updatedAs = async (context: EngineQueryOptions['context']) =>
+      (await rowsAbout(REF_TRACKED_MIXED, context)).find((r) => r.type === 'updated');
+    const atRest = await updatedAs(SYS);
+    expect(String(atRest?.summary)).toContain(T.one);
+    expect(String(atRest?.summary)).toContain(ids.unexposed);
+    expect(String(atRest?.summary)).not.toContain(T.unexposed);
+    const control = await updatedAs(REF_CONTROL);
+    expect(String(control?.summary)).toContain(T.one);
+    expect(String(control?.summary)).toContain(ids.unexposed);
+    const withheld = await updatedAs(TITLE_WITHHELD);
+    expect(withheld).toBeTruthy();
+    expect(withheld).not.toHaveProperty('summary');
+    expect(JSON.stringify(withheld)).not.toContain(T.one);
   });
 
   it('findOne: the by-id read is judged like the list', async () => {
@@ -730,15 +699,12 @@ describe('referenceTitlesPerRead — a referenced title is served only to a read
     expect(await referenceTitlesPerRead(schemaOf, security(false), reader, answer([]))('parent', ['untitled'])).toBe(true);
   });
 
-  it('a target whose API exposure does not serve get is refused for every reader; an exposed target is the control', async () => {
-    const judge = referenceTitlesPerRead(schemaOf, security(true), reader, answer(['title']));
-    expect(await judge('parent', ['hidden'])).toBe(false);
-    expect(await judge('parent', ['listonly'])).toBe(false);
-    expect(await judge('parent', ['target'])).toBe(true);
-    expect(servesReferencedTitleTarget(schemas.hidden)).toBe(false);
-    expect(servesReferencedTitleTarget(schemas.listonly)).toBe(false);
-    expect(servesReferencedTitleTarget(schemas.target)).toBe(true);
-    expect(servesReferencedTitleTarget({ name: 'x', enable: { apiMethods: ['get'] } })).toBe(true);
+  it('a target whose API exposure serves no get is judged by the reader like any other: its exposure was decided where the title was read', async () => {
+    for (const field of ['hidden', 'listonly']) {
+      expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer(['title']))('parent', [field])).toBe(true);
+      expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer([]))('parent', [field])).toBe(false);
+    }
+    expect(await referenceTitlesPerRead(schemaOf, security(false), reader, answer(['title']))('parent', ['listonly'])).toBe(false);
   });
 
   it('no admission member: the field-level answer alone decides; no answer for the target narrows nothing', async () => {

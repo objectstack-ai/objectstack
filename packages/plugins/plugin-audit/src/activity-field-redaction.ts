@@ -81,16 +81,20 @@
  *  - and the security service admits the reader to the target object
  *    (`canReadObject`), unless the reference field declares
  *    `referenceNameVisible`: that key lifts the object-level refusal and never
- *    the field-level rule, as on `$expand`;
- *  - and the target's declared API exposure serves `get`
- *    ({@link servesReferencedTitleTarget}, ADR-0049), for every reader:
- *    `$expand` withholds a target that exposure refuses whatever the field
- *    declares.
+ *    the field-level rule, as on `$expand`.
  *
  * Otherwise the text is dropped whole, like any text this reader is not served,
  * and the row's `record_id` is the bare id it is named by. A text whose
  * provenance is unknown keeps the rule of rows without a declaration, below. No
  * row is read: the answers are asked once per target object per read.
+ *
+ * The target's declared API exposure (ADR-0049) is decided where the title is
+ * READ: the mirror reads a title only from a target whose exposure serves
+ * `get` (`servesSummaryTitleTarget`, `audit-writers.ts`) and names every other
+ * referenced record by its stored id, per id, so one text can title one
+ * reference and name another by its id. A row is a snapshot of that write, and
+ * this redaction judges its reader against every reference a text names by
+ * the two answers above, whatever the target's exposure.
  *
  * ## Rows without a declaration
  *
@@ -184,7 +188,7 @@
  */
 
 import type { ISecurityService, SecurityContext } from '@objectstack/spec/contracts';
-import { canServeApiOperation, referenceTargetOf, resolveDisplayField, type EnableLike } from '@objectstack/spec/data';
+import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
 import {
   ACTIVITY_CHANGED_FIELDS_COLUMN,
   ACTIVITY_KIND_KEY,
@@ -377,21 +381,6 @@ async function sourcesServed(
 }
 
 /**
- * [ADR-0049] May a text this redaction serves carry a title read from the
- * object `targetSchema` declares? Asked of the spec's one exposure decision for
- * `get`: the operation the data door's `$expand` asks of a target before it
- * serves anything of it, and the one the mirror asks before it reads a title
- * at write time (`servesSummaryTitleTarget`, `audit-writers.ts`). It takes no
- * reader: a target whose declaration does not serve `get` serves its title to
- * nobody, a reference declaring `referenceNameVisible` included. A declaration
- * that is not an object declares no `enable` block, which refuses nothing.
- */
-export function servesReferencedTitleTarget(targetSchema: unknown): boolean {
-  const enable = isRecord(targetSchema) ? (targetSchema.enable as EnableLike | null | undefined) : undefined;
-  return canServeApiOperation(enable, 'get');
-}
-
-/**
  * One read's answer to "may this reader read every referenced title a text
  * composed from the declared `sources` of `parent` names?" — `true` when no
  * source is a reference field.
@@ -407,12 +396,11 @@ export type ReferenceTitlesServedFor = (parent: string, sources: readonly string
  *
  *  - the target declares no title field, or names the primary key: the mirror
  *    names such a record by its id, which is no title;
- *  - otherwise the target's declared exposure serves `get`
- *    ({@link servesReferencedTitleTarget}), AND the reader is served the
- *    target's title field (`resolveDisplayField`) by `servedFor` — a target
- *    the service gives no answer for is not narrowed, as for the parent — AND
- *    the security service admits the reader to the target object
- *    (`canReadObject`, `=== true`; a throw refuses). A reference field declaring `referenceNameVisible` lifts
+ *  - otherwise the reader is served the target's title field
+ *    (`resolveDisplayField`) by `servedFor` — a target the service gives no
+ *    answer for is not narrowed, as for the parent — AND the security service
+ *    admits the reader to the target object (`canReadObject`, `=== true`; a
+ *    throw refuses). A reference field declaring `referenceNameVisible` lifts
  *    only that admission, as it does on `$expand`. A service that answers no
  *    `canReadObject` leaves the title to the field-level answer, as the
  *    parent-record gate leaves its own objects to the caller-scoped read.
@@ -481,7 +469,6 @@ export function referenceTitlesPerRead(
         if (!targetSchema) return false;
         const titleField = resolveDisplayField(targetSchema as Parameters<typeof resolveDisplayField>[0]);
         if (!titleField || titleField === 'id') return true;
-        if (!servesReferencedTitleTarget(targetSchema)) return false;
         const served = await servedFor(target);
         if (served !== undefined && !served.some((f) => String(f) === titleField)) return false;
         if (isRecord(def) && def.referenceNameVisible === true) return true;
