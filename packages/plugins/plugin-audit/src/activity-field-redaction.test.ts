@@ -39,7 +39,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 
 import { AuditPlugin } from './audit-plugin.js';
-import { resolveServedFields } from './activity-field-redaction.js';
+import { referenceTitlesPerRead, resolveServedFields } from './activity-field-redaction.js';
 import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -385,5 +385,336 @@ describe('[#21081] resolveServedFields — the security service answer, as the r
       getReadableFields: readable,
       getQueryableFields: async () => { throw new Error('boom'); },
     }, 'o', ctx)).toEqual([]);
+  });
+});
+
+// ── a text composed from a reference names the referenced record's title ──
+
+/** Referenced by every reference below; titled by `secret_name`. */
+const REF_TARGET = 'afr_ref_target';
+/** Referenced by the object-level cases; titled by `title`. */
+const REF_CLOSED = 'afr_ref_closed';
+/** Titled by a lookup into {@link REF_TARGET}. */
+const REF_TITLED = 'afr_ref_titled';
+/** Titled by a lookup into {@link REF_CLOSED}. */
+const REF_TITLED_CLOSED = 'afr_ref_titled_closed';
+/** Titled by a lookup into {@link REF_CLOSED} that declares `referenceNameVisible`. */
+const REF_TITLED_VISIBLE = 'afr_ref_titled_visible';
+/** Titled by `name`; tracks a lookup into {@link REF_TARGET}. */
+const REF_TRACKED = 'afr_ref_tracked';
+/** Referenced by the exposure case; titled by `title`; its declaration serves no API operation. */
+const REF_UNEXPOSED = 'afr_ref_unexposed';
+/** Titled by `name`; tracks a lookup into {@link REF_UNEXPOSED} and one into {@link REF_TARGET}. */
+const REF_TRACKED_MIXED = 'afr_ref_tracked_mixed';
+const REF_PACKAGE = 'com.objectstack.audit.test.activity-reference-title';
+
+/** Served neither target's title field; admitted to every object. */
+const TITLE_WITHHELD = { userId: 'u_title_withheld', tenantId: 'org_1', positions: ['org_member'] };
+/** Served every field; refused the closed target object. */
+const OBJECT_REFUSED = { userId: 'u_object_refused', tenantId: 'org_1', positions: ['org_member'] };
+/** Served every field, admitted to every object. */
+const REF_CONTROL = { userId: 'u_ref_control', tenantId: 'org_1', positions: ['org_member'] };
+
+/** Synthetic titles. */
+const T = { one: 'AFRREFTITLEONE71', two: 'AFRREFTITLETWO72', closed: 'AFRREFCLOSED73', unexposed: 'AFRREFUNEXPOSED74' };
+
+const refLookup = (reference: string, extra: Record<string, unknown> = {}) =>
+  ({ name: 'target', label: 'Target', type: 'lookup' as const, reference, ...extra });
+const refObjects = [
+  {
+    name: REF_TARGET, label: 'Reference Target', nameField: 'secret_name',
+    fields: {
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      secret_name: { name: 'secret_name', label: 'Secret Name', type: 'text' as const },
+    },
+  },
+  {
+    name: REF_CLOSED, label: 'Reference Closed', nameField: 'title',
+    fields: { title: { name: 'title', label: 'Title', type: 'text' as const } },
+  },
+  {
+    name: REF_TITLED, label: 'Reference Titled', nameField: 'target',
+    fields: { name: { name: 'name', label: 'Name', type: 'text' as const }, target: refLookup(REF_TARGET) },
+  },
+  {
+    name: REF_TITLED_CLOSED, label: 'Reference Titled Closed', nameField: 'target',
+    fields: { name: { name: 'name', label: 'Name', type: 'text' as const }, target: refLookup(REF_CLOSED) },
+  },
+  {
+    name: REF_TITLED_VISIBLE, label: 'Reference Titled Visible', nameField: 'target',
+    fields: {
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      target: refLookup(REF_CLOSED, { referenceNameVisible: true }),
+    },
+  },
+  {
+    name: REF_TRACKED, label: 'Reference Tracked', nameField: 'name',
+    fields: {
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      target: refLookup(REF_TARGET, { trackHistory: true }),
+    },
+  },
+  {
+    name: REF_UNEXPOSED, label: 'Reference Unexposed', nameField: 'title', enable: { apiEnabled: false },
+    fields: { title: { name: 'title', label: 'Title', type: 'text' as const } },
+  },
+  {
+    name: REF_TRACKED_MIXED, label: 'Reference Tracked Mixed', nameField: 'name',
+    fields: {
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      hidden: { name: 'hidden', label: 'Hidden', type: 'lookup' as const, reference: REF_UNEXPOSED, trackHistory: true },
+      open: { name: 'open', label: 'Open', type: 'lookup' as const, reference: REF_TARGET, trackHistory: true },
+    },
+  },
+];
+
+
+describe('an activity text naming a referenced record by its title is served only to a reader served that title field and admitted to its object', () => {
+  let kernel: ObjectKernel;
+  let engine: ObjectQL;
+  const ids: Record<string, string> = {};
+
+  const allFields = (object: string): string[] =>
+    Object.keys(((engine as any).getSchema(object)?.fields ?? {}) as Record<string, unknown>);
+
+  /** The double: the field answers and the object-level read admission, per reader. */
+  const security = {
+    async getReadableFields(object: string, context?: any): Promise<string[] | undefined> {
+      const all = allFields(object);
+      if (context?.userId === TITLE_WITHHELD.userId) {
+        if (object === REF_TARGET) return all.filter((f) => f !== 'secret_name');
+        if (object === REF_CLOSED) return all.filter((f) => f !== 'title');
+      }
+      return all;
+    },
+    async getQueryableFields(object: string, context?: any): Promise<string[] | undefined> {
+      return security.getReadableFields(object, context);
+    },
+    async canReadObject(object: string, context?: any): Promise<boolean> {
+      return !(context?.userId === OBJECT_REFUSED.userId && object === REF_CLOSED);
+    },
+    async getReadFilter(): Promise<Record<string, unknown> | undefined> {
+      return undefined;
+    },
+    async explain(_request: { object: string }, context?: any): Promise<{ allowed: boolean }> {
+      return { allowed: !context?.isSystem };
+    },
+  };
+
+  const rowsAbout = (object: string, context: EngineQueryOptions['context']) =>
+    engine.find(ACTIVITY, {
+      where: { object_name: object, record_id: ids[object] },
+      orderBy: [{ field: 'timestamp', order: 'asc' }],
+      context,
+    }) as Promise<Row[]>;
+
+  beforeAll(async () => {
+    kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use({
+      name: 'test.security-double',
+      version: '0.0.0',
+      init: async (ctx: any) => ctx.registerService('security', security),
+      start: async () => {},
+    } as any);
+    await kernel.use(singlePostureTenancy());
+    await kernel.use(new AuditPlugin());
+    await kernel.bootstrap();
+
+    engine = kernel.getService<ObjectQL>('objectql');
+    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    engine.registerDriver(driver, true);
+    for (const object of refObjects) engine.registry.registerObject(object as any, REF_PACKAGE);
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+
+    const insert = async (object: string, data: Row) => String((await engine.insert(object, data, { context: SYS })).id);
+    const one = await insert(REF_TARGET, { name: 'one', secret_name: T.one });
+    const two = await insert(REF_TARGET, { name: 'two', secret_name: T.two });
+    const closed = await insert(REF_CLOSED, { title: T.closed });
+    ids[REF_TITLED] = await insert(REF_TITLED, { name: 'titled', target: one });
+    await engine.update(REF_TITLED, { name: 'titled again' }, { where: { id: ids[REF_TITLED] }, context: SYS });
+    ids[REF_TITLED_CLOSED] = await insert(REF_TITLED_CLOSED, { name: 'closed', target: closed });
+    ids[REF_TITLED_VISIBLE] = await insert(REF_TITLED_VISIBLE, { name: 'visible', target: closed });
+    ids[REF_TRACKED] = await insert(REF_TRACKED, { name: 'tracked', target: one });
+    await engine.update(REF_TRACKED, { target: two }, { where: { id: ids[REF_TRACKED] }, context: SYS });
+
+    // [ADR-0049] One change moving a reference into a target whose exposure
+    // serves no `get` (the mirror names it by its id) and one into an exposed
+    // target (named by its title).
+    ids.unexposed = await insert(REF_UNEXPOSED, { title: T.unexposed });
+    ids[REF_TRACKED_MIXED] = await insert(REF_TRACKED_MIXED, { name: 'mixed' });
+    await engine.update(REF_TRACKED_MIXED, { hidden: ids.unexposed, open: one }, { where: { id: ids[REF_TRACKED_MIXED] }, context: SYS });
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) {
+      await Promise.race([kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+    }
+  }, 30_000);
+
+  it('control: at rest, the mirror names each referenced record by its title', async () => {
+    const titled = await rowsAbout(REF_TITLED, SYS);
+    expect(titled.map((r) => r.type)).toEqual(['created', 'updated']);
+    for (const row of titled) expect(row.record_label).toBe(T.one);
+    expect((await rowsAbout(REF_TITLED_CLOSED, SYS))[0]?.record_label).toBe(T.closed);
+    expect(JSON.stringify(await rowsAbout(REF_TRACKED, SYS))).toContain(T.two);
+  });
+
+  it('a reader not served the referenced title field is served the rows without the label or a summary naming it, and keeps the record id', async () => {
+    const rows = await rowsAbout(REF_TITLED, TITLE_WITHHELD);
+    expect(rows.map((r) => r.type)).toEqual(['created', 'updated']);
+    for (const row of rows) {
+      expect(row).not.toHaveProperty('record_label');
+      expect(row).not.toHaveProperty('summary');
+      expect(row.record_id).toBe(ids[REF_TITLED]);
+    }
+    expect(JSON.stringify(rows)).not.toContain(T.one);
+  });
+
+  it('a reader refused the referenced object is served no text naming its records by title', async () => {
+    const rows = await rowsAbout(REF_TITLED_CLOSED, OBJECT_REFUSED);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toHaveProperty('record_label');
+    expect(rows[0]).not.toHaveProperty('summary');
+    expect(JSON.stringify(rows)).not.toContain(T.closed);
+  });
+
+  it('referenceNameVisible lifts the object-level refusal and never the field-level rule', async () => {
+    const refused = await rowsAbout(REF_TITLED_VISIBLE, OBJECT_REFUSED);
+    expect(refused[0]?.record_label).toBe(T.closed);
+    const withheld = await rowsAbout(REF_TITLED_VISIBLE, TITLE_WITHHELD);
+    expect(withheld).toHaveLength(1);
+    expect(withheld[0]).not.toHaveProperty('record_label');
+    expect(JSON.stringify(withheld)).not.toContain(T.closed);
+  });
+
+  it('a tracked reference change names the referenced records by title only to a reader served that title', async () => {
+    const withheld = (await rowsAbout(REF_TRACKED, TITLE_WITHHELD)).find((r) => r.type === 'updated');
+    expect(withheld).toBeTruthy();
+    expect(withheld).not.toHaveProperty('summary');
+    expect(JSON.stringify(withheld)).not.toContain(T.one);
+    expect(JSON.stringify(withheld)).not.toContain(T.two);
+    // The record's own label is not composed from the reference: it stays.
+    expect(withheld?.record_label).toBe('tracked');
+  });
+
+  it('control: a reader who may read every referenced title reads every row whole', async () => {
+    for (const row of await rowsAbout(REF_TITLED, REF_CONTROL)) {
+      expect(row.record_label).toBe(T.one);
+      expect(String(row.summary)).toContain(T.one);
+    }
+    expect((await rowsAbout(REF_TITLED_CLOSED, REF_CONTROL))[0]?.record_label).toBe(T.closed);
+    const tracked = (await rowsAbout(REF_TRACKED, REF_CONTROL)).find((r) => r.type === 'updated');
+    expect(String(tracked?.summary)).toContain(T.one);
+    expect(String(tracked?.summary)).toContain(T.two);
+  });
+
+  it('a change naming an unexposed target by its id and an exposed one by its title is served to a reader who may read that title, and to no reader withheld it', async () => {
+    const updatedAs = async (context: EngineQueryOptions['context']) =>
+      (await rowsAbout(REF_TRACKED_MIXED, context)).find((r) => r.type === 'updated');
+    const atRest = await updatedAs(SYS);
+    expect(String(atRest?.summary)).toContain(T.one);
+    expect(String(atRest?.summary)).toContain(ids.unexposed);
+    expect(String(atRest?.summary)).not.toContain(T.unexposed);
+    const control = await updatedAs(REF_CONTROL);
+    expect(String(control?.summary)).toContain(T.one);
+    expect(String(control?.summary)).toContain(ids.unexposed);
+    const withheld = await updatedAs(TITLE_WITHHELD);
+    expect(withheld).toBeTruthy();
+    expect(withheld).not.toHaveProperty('summary');
+    expect(JSON.stringify(withheld)).not.toContain(T.one);
+  });
+
+  it('findOne: the by-id read is judged like the list', async () => {
+    const [created] = await rowsAbout(REF_TITLED, SYS);
+    const row = await engine.findOne(ACTIVITY, { where: { id: created.id }, context: TITLE_WITHHELD }) as Row;
+    expect(row?.id).toBe(created.id);
+    expect(row).not.toHaveProperty('record_label');
+    expect(JSON.stringify(row)).not.toContain(T.one);
+  });
+});
+
+describe('referenceTitlesPerRead — a referenced title is served only to a reader served its title field and admitted to its object', () => {
+  const schemas: Record<string, unknown> = {
+    parent: {
+      name: 'parent',
+      fields: {
+        name: { type: 'text' },
+        target: { type: 'lookup', reference: 'target' },
+        visible: { type: 'lookup', reference: 'target', referenceNameVisible: true },
+        untitled: { type: 'lookup', reference: 'untitled' },
+        gone: { type: 'lookup', reference: 'not_registered' },
+        hidden: { type: 'lookup', reference: 'hidden', referenceNameVisible: true },
+        listonly: { type: 'lookup', reference: 'listonly' },
+      },
+    },
+    target: { name: 'target', nameField: 'title', fields: { title: { type: 'text' } } },
+    untitled: { name: 'untitled', nameField: 'id', fields: {} },
+    hidden: { name: 'hidden', nameField: 'title', enable: { apiEnabled: false }, fields: { title: { type: 'text' } } },
+    listonly: { name: 'listonly', nameField: 'title', enable: { apiMethods: ['list'] }, fields: { title: { type: 'text' } } },
+  };
+  const schemaOf = (object: string) => schemas[object];
+  const reader = { userId: 'u' };
+  const answer = (served: string[] | undefined) => async () => served;
+  const security = (admits: boolean | Error | undefined) => ({
+    getReadableFields: async (): Promise<string[]> => [],
+    getQueryableFields: async (): Promise<string[]> => [],
+    ...(admits === undefined
+      ? {}
+      : {
+          canReadObject: async (): Promise<boolean> => {
+            if (admits instanceof Error) throw admits;
+            return admits === true;
+          },
+        }),
+  });
+
+  it('a source that is not a reference is judged by the parent alone', async () => {
+    const judge = referenceTitlesPerRead(schemaOf, security(false), reader, answer([]));
+    expect(await judge('parent', ['name'])).toBe(true);
+  });
+
+  it('a reference is served only when the reader is served the target title field and admitted to the target', async () => {
+    expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer(['title']))('parent', ['target'])).toBe(true);
+    expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer([]))('parent', ['target'])).toBe(false);
+    expect(await referenceTitlesPerRead(schemaOf, security(false), reader, answer(['title']))('parent', ['target'])).toBe(false);
+  });
+
+  it('referenceNameVisible lifts the admission and never the field-level answer', async () => {
+    expect(await referenceTitlesPerRead(schemaOf, security(false), reader, answer(['title']))('parent', ['visible'])).toBe(true);
+    expect(await referenceTitlesPerRead(schemaOf, security(false), reader, answer([]))('parent', ['visible'])).toBe(false);
+  });
+
+  it('fail closed: a throwing admission, or a target that is not registered, serves no title', async () => {
+    const warnings: string[] = [];
+    const logger = { warn: (m: string) => warnings.push(m) };
+    expect(await referenceTitlesPerRead(schemaOf, security(new Error('boom')), reader, answer(['title']), logger)('parent', ['target'])).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer(['title']))('parent', ['gone'])).toBe(false);
+  });
+
+  it('a target with no title field is named by its id, which is no title to withhold', async () => {
+    expect(await referenceTitlesPerRead(schemaOf, security(false), reader, answer([]))('parent', ['untitled'])).toBe(true);
+  });
+
+  it('a target whose API exposure serves no get is judged by the reader like any other: its exposure was decided where the title was read', async () => {
+    for (const field of ['hidden', 'listonly']) {
+      expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer(['title']))('parent', [field])).toBe(true);
+      expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer([]))('parent', [field])).toBe(false);
+    }
+    expect(await referenceTitlesPerRead(schemaOf, security(false), reader, answer(['title']))('parent', ['listonly'])).toBe(false);
+  });
+
+  it('no admission member: the field-level answer alone decides; no answer for the target narrows nothing', async () => {
+    expect(await referenceTitlesPerRead(schemaOf, security(undefined), reader, answer(['title']))('parent', ['target'])).toBe(true);
+    expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer(undefined))('parent', ['target'])).toBe(true);
+  });
+
+  it('every declared reference source is judged: one the reader may not read refuses the text', async () => {
+    const judge = referenceTitlesPerRead(schemaOf, security(true), reader, async (o: string) => (o === 'target' ? ['title'] : []));
+    expect(await judge('parent', ['name', 'target'])).toBe(true);
+    expect(await judge('parent', ['target', 'gone'])).toBe(false);
   });
 });

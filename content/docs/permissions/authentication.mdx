@@ -314,6 +314,14 @@ the user signs in again with the new password. It is not a setting: the former
 configuration that still carries it, at any value, is refused at boot — delete
 the key.
 
+Any change to a user's password ends every other reset link and texted reset
+code still outstanding for that user: a completed reset, the user's own
+`POST /api/v1/auth/change-password`, an administrator's
+`POST /api/v1/auth/admin/set-user-password` and a first password set through
+`POST /api/v1/auth/set-initial-password`. An ended link or code answers exactly
+what one that was never issued answers (`400 INVALID_TOKEN` at
+`reset-password`); a link or code requested after the change works as usual.
+
 #### Setting a first local password
 
 `POST /api/v1/auth/set-initial-password` sets an **initial** local password for a
