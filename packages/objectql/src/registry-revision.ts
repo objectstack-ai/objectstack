@@ -91,6 +91,7 @@ export const SCHEMA_REGISTRY_METHOD_KINDS: Readonly<Record<SchemaRegistryMethodN
   getObjectOwner: 'read',
   getPackagedObjectOwner: 'read',
   getPackagedObjectBase: 'read',
+  getPackagedFieldPatchBases: 'read',
   extendContributionRefusal: 'read',
   registerObjectExtension: 'write',
   withdrawObjectExtension: 'write',

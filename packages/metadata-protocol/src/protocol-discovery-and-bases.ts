@@ -37,7 +37,7 @@
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import type { TranslationBundle } from '@objectstack/spec/system';
-import { engineCanRollBack, readAuthoredTranslationLayer } from '@objectstack/core';
+import { deepMerge, engineCanRollBack, readAuthoredTranslationLayer } from '@objectstack/core';
 import { restoreTranslatedEchoes } from './protocol-translated-echo.js';
 import type { RestoredTranslatedSlot } from './protocol-translated-echo.js';
 import {
@@ -954,6 +954,71 @@ export class ProtocolDiscoveryAndBasesFacet {
         // the document itself.
         if (layer === null) return undefined;
         return Object.keys(layer).length > 0 ? (layer as TranslationBundle) : undefined;
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#getPackagedFieldPatchBases`; the method's docblock there is its contract. */
+    static getPackagedFieldPatchBases(host: Pick<ProtocolHost, 'engine'>, name: string): Array<{ packageId: string; base: unknown }> {
+        if (typeof name !== 'string' || name === '') return [];
+        const registry = (host.engine as any)?.registry;
+        if (typeof registry?.getPackagedFieldPatchBases !== 'function') return [];
+        try {
+            const entries: unknown = registry.getPackagedFieldPatchBases(name);
+            return Array.isArray(entries) ? entries : [];
+        } catch {
+            // A read over in-memory contributors; a failure here must never
+            // turn a served schema into a 5xx. No entry is "no patching
+            // package known": a patched slot keeps its own text, as before.
+            return [];
+        }
+    }
+
+    /**
+     * The body of `ObjectStackProtocolImplementation#getPackageTranslationBundle`;
+     * the method's docblock there is its contract.
+     *
+     * Two halves, laid on locale by locale in the order the i18n service lays
+     * the deployment catalog (`FileI18nAdapter.getTranslations`: the shipped
+     * bundles, then the authored layer over them), so the bundle is that
+     * package's share of the catalog with its package kept: the `translations`
+     * its installed package record carries (`registry.getPackage(id).manifest`,
+     * what `registerApp` installs, the body `AppPlugin.loadTranslations` hands
+     * the i18n service), then the environment's active `translation` rows
+     * bound to it, read as {@link getPairTranslationBundle} reads the pair's.
+     */
+    static async getPackageTranslationBundle(host: Pick<ProtocolHost, 'engine' | 'findEnvironmentRows'>, packageId: string): Promise<TranslationBundle | undefined> {
+        if (typeof packageId !== 'string' || packageId === '') return undefined;
+        let byLocale: Record<string, Record<string, unknown>> = {};
+        const lay = (locale: string, data: unknown): void => {
+            if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+            byLocale = { ...byLocale, [locale]: deepMerge(byLocale[locale] ?? {}, data as Record<string, unknown>) };
+        };
+        let shipped: unknown;
+        try {
+            shipped = (host.engine as any)?.registry?.getPackage?.(packageId)?.manifest?.translations;
+        } catch {
+            // An in-memory read; a failure leaves the shipped half empty.
+            shipped = undefined;
+        }
+        if (Array.isArray(shipped)) {
+            for (const bundle of shipped) {
+                if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) continue;
+                for (const [locale, data] of Object.entries(bundle as Record<string, unknown>)) lay(locale, data);
+            }
+        }
+        let authored: Record<string, Record<string, unknown>> | null = null;
+        try {
+            authored = await readAuthoredTranslationLayer({
+                find: (table: string, opts: { where?: Record<string, unknown>; [key: string]: unknown } = {}) =>
+                    host.findEnvironmentRows(table, { ...opts, where: { ...opts.where, package_id: packageId } }),
+            });
+        } catch {
+            // `null` is the layer's own "read failed": the shipped half stands.
+            authored = null;
+        }
+        if (authored !== null) {
+            for (const [locale, data] of Object.entries(authored)) lay(locale, data);
+        }
+        return Object.keys(byLocale).length > 0 ? (byLocale as TranslationBundle) : undefined;
     }
 
     /**

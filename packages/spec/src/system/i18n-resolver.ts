@@ -419,6 +419,38 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * Absent, every translator answers exactly as it does without it.
    */
   pairBundle?: TranslationBundle;
+  /**
+   * [#33952, ADR-0146 D10] The translations each CODE package that patches
+   * the served object's fields (`objectExtensions[].fieldPatches`) ships
+   * itself, one entry per such package, the one whose patch the served object
+   * carries first:
+   *
+   *  - `patchedBase` — {@link packagedBase} with THAT package's `fieldPatches`
+   *    applied and no other's: the text the package writes on each slot it
+   *    patches;
+   *  - `bundle` — that package's own translations, locale-keyed as `bundle`
+   *    is, its package kept.
+   *
+   * Needed for the reason {@link pairBundle} is: `bundle` is every package's
+   * translations deep-merged with the package ids dropped, so the key a
+   * patching package translates its patch under
+   * (`objects.<object>.fields.<field>.label`) is the key the owner translates
+   * its own text under, and which one the merged catalog holds is load order.
+   * Only {@link translateObject} reads it, and only on a field slot the served
+   * value changed against {@link packagedBase}: when that value is exactly
+   * what an entry's `patchedBase` carries (the one comparison,
+   * {@link scalarOverridesPackagedBase}'s), the slot reads that package's
+   * translations below the pair's ({@link labelCatalogs}' order gains the
+   * middle rank: the pair's translation, then the patching package's, then
+   * the served text). The owner's translation never applies to a patched
+   * slot. A value no entry carries (a tenant's rename) keeps the order
+   * without it.
+   *
+   * Supplied by the serving layer, which reads which package patches what
+   * off the registry; nothing is stamped on the document (ADR-0029 D9.2a).
+   * Absent or empty, every translator answers exactly as it does without it.
+   */
+  patchBundles?: ReadonlyArray<{ readonly patchedBase: unknown; readonly bundle: TranslationBundle }>;
 }
 
 /**
@@ -463,6 +495,12 @@ interface LabelCatalogs {
  *    pair that ships only `en` never displaces the base's `zh-CN` on a string
  *    it left alone.
  *
+ * [#33952] A field slot of an object that a code package's `fieldPatches`
+ * changed sits one rank lower in the same order: the pair's translation, then
+ * that patching package's own ({@link TranslateDocumentOptions.patchBundles},
+ * read by {@link translateObject} through {@link patchCatalogsOf}), then the
+ * served text.
+ *
  * With no `pairBundle` — or one that answers none of the chain's locales — the
  * unchanged catalog IS `bundle` (the same reference) and the changed one is
  * empty, which is exactly what every translator did
@@ -495,6 +533,36 @@ function labelCatalogs(
 /** The catalog a string is read from: {@link labelCatalogs}' rule, by whether the override changed it. */
 function catalogFor(catalogs: LabelCatalogs, changed: boolean): TranslationBundle | undefined {
   return changed ? catalogs.changed : catalogs.unchanged;
+}
+
+/**
+ * [#33952] One {@link TranslateDocumentOptions.patchBundles} entry, ready to
+ * read: the patching package's base, and the catalog a slot carrying its text
+ * reads — the pair's translations laid over that package's, locale by locale
+ * along the chain, as {@link labelCatalogs} lays the pair over the deployment
+ * catalog (so the pair keeps its first rank, and a pair that ships only `en`
+ * never displaces the package's `zh-CN`).
+ */
+interface PatchCatalog {
+  readonly base: Record<string, unknown>;
+  readonly catalog: TranslationBundle | undefined;
+}
+
+/**
+ * The {@link PatchCatalog}s of `opts`, in its order. An entry with no object
+ * base is dropped: with no base, nothing can show that a slot carries its
+ * package's text.
+ */
+function patchCatalogsOf(opts: TranslateDocumentOptions | undefined): readonly PatchCatalog[] {
+  const sources = opts?.patchBundles;
+  if (!Array.isArray(sources) || sources.length === 0) return [];
+  const out: PatchCatalog[] = [];
+  for (const source of sources) {
+    const base = asRecord(source?.patchedBase);
+    if (base === undefined) continue;
+    out.push({ base, catalog: labelCatalogs(source.bundle, opts).unchanged });
+  }
+  return out;
 }
 
 /**
@@ -4973,6 +5041,15 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * {@link TranslateDocumentOptions.packagedBase} — so this is a field a tenant
  * overlay or a tenant-provenance extension authored); the
  * built-in system-field labels apply only where the catalog may.
+ *
+ * [#33952] A changed field slot is not left to its served text alone when a
+ * code package's `fieldPatches` wrote it: if the served value is exactly what
+ * one entry of {@link TranslateDocumentOptions.patchBundles} writes on that
+ * slot (the field's `label`, its help slot, an option's `label`, judged by the
+ * same comparison against that entry's `patchedBase`), the slot reads that
+ * package's own translations, under the pair's. The deployment catalog still
+ * never applies there: its row under the same key may be the owner's
+ * translation of the text the patch replaced.
  * The embedded `listViews` follow the VIEW translator's
  * application of the same rule (ADR-0029 D9.2a, as {@link translateView}
  * applies it), judged per view against the packaged object's own `listViews` —
@@ -5070,22 +5147,42 @@ export function translateObject<T extends ObjectLike>(
   const pluralLabel = resolveScalar('pluralLabel', doc.pluralLabel);
   const description = resolveScalar('description', doc.description);
   const packagedObject = asRecord(opts?.packagedBase);
+  const patchCatalogs = patchCatalogsOf(opts);
 
   const translateField = (name: string, def: ObjectFieldLike): ObjectFieldLike => {
     const next: ObjectFieldLike = { ...def };
     const packagedField = packagedObjectField(packagedObject, name);
-    // Each slot reads the catalog `labelCatalogs` assigns by whether its
-    // served value diverged from the packaged field's (ADR-0029 D9.2a,
-    // ADR-0146 D2; see the docblock).
+    // [#33952] The same field as each patching package writes it.
+    const patchedFields = patchCatalogs.map((patch) => packagedObjectField(patch.base, name));
+    // The catalog one slot reads, by whether its served value diverged from
+    // its packaged counterpart (ADR-0029 D9.2a, ADR-0146 D2; see the
+    // docblock): unchanged, the deployment catalog under the pair's; changed,
+    // the catalog of the first patching package whose patch wrote exactly
+    // that value (the pair's over that package's, #33952), else the pair's
+    // alone. `patched(field)` finds the slot's owner in one patching
+    // package's field, as `packaged` was found in the packaged field.
+    const partCatalog = (
+      packaged: unknown,
+      patched: (field: Record<string, unknown> | undefined) => unknown,
+      slot: string,
+      value: unknown,
+    ): TranslationBundle | undefined => {
+      if (!valueOverridesPackagedBase(packaged, slot, value)) return catalogs.unchanged;
+      for (let index = 0; index < patchCatalogs.length; index += 1) {
+        const part = patched(patchedFields[index]);
+        if (part !== undefined && !valueOverridesPackagedBase(part, slot, value)) return patchCatalogs[index].catalog;
+      }
+      return catalogs.changed;
+    };
     const slotCatalog = (slot: string, value: unknown): TranslationBundle | undefined =>
-      catalogFor(catalogs, valueOverridesPackagedBase(packagedField, slot, value));
+      partCatalog(packagedField, (field) => field, slot, value);
     // The field `label`: a value that diverged from the packaged field's — an
     // extension's `fieldPatches` label, a tenant's rename — reads only the
-    // pair's catalog, and the built-in system-field labels apply only where
-    // the deployment catalog may.
+    // catalog `slotCatalog` assigns a changed slot, and the built-in
+    // system-field labels apply only where the deployment catalog may.
     const labelChanged = valueOverridesPackagedBase(packagedField, 'label', def.label);
     const translatedLabel = labelChanged
-      ? lookupObjectFieldAttr(catalogs.changed, objectName, name, 'label', opts)
+      ? lookupObjectFieldAttr(slotCatalog('label', def.label), objectName, name, 'label', opts)
       : lookupObjectFieldAttr(catalogs.unchanged, objectName, name, 'label', opts) ??
         builtinSystemFieldLabel(name, def.label, opts);
     if (translatedLabel) next.label = translatedLabel;
@@ -5135,12 +5232,15 @@ export function translateObject<T extends ObjectLike>(
       const packagedOptionsOwner = picklist === undefined ? packagedField : undefined;
       next.options = def.options.map((opt) => {
         if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
-        const packagedOption = packagedPart(
-          packagedOptionsOwner,
-          'options',
-          (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(opt.value),
+        const sameValue = (candidate: Record<string, any>): boolean =>
+          isOptionValue(candidate.value) && String(candidate.value) === String(opt.value);
+        const packagedOption = packagedPart(packagedOptionsOwner, 'options', sameValue);
+        const catalog = partCatalog(
+          packagedOption,
+          (field) => (picklist === undefined ? packagedPart(field, 'options', sameValue) : undefined),
+          'label',
+          opt.label,
         );
-        const catalog = catalogFor(catalogs, valueOverridesPackagedBase(packagedOption, 'label', opt.label));
         const translated =
           lookupObjectFieldOption(catalog, objectName, name, opt.value, opts) ??
           (picklist !== undefined ? lookupPicklistOption(catalog, picklist, opt.value, opts) : undefined);
