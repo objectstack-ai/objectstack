@@ -660,9 +660,9 @@ describe('referenceTitlesPerRead — a referenced title is served only to a read
     expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer(undefined))('parent', ['target'])).toBe(true);
   });
 
-  it('unknown provenance is judged against every reference field of the parent', async () => {
-    expect(await referenceTitlesPerRead(schemaOf, security(true), reader, answer(['title']))('parent', 'unknown')).toBe(false);
-    const known = { ...schemas, parent: { name: 'parent', fields: { name: { type: 'text' }, target: { type: 'lookup', reference: 'target' } } } };
-    expect(await referenceTitlesPerRead((o) => known[o], security(true), reader, answer(['title']))('parent', 'unknown')).toBe(true);
+  it('every declared reference source is judged: one the reader may not read refuses the text', async () => {
+    const judge = referenceTitlesPerRead(schemaOf, security(true), reader, async (o: string) => (o === 'target' ? ['title'] : []));
+    expect(await judge('parent', ['name', 'target'])).toBe(true);
+    expect(await judge('parent', ['target', 'gone'])).toBe(false);
   });
 });

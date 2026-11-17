@@ -84,9 +84,9 @@
  *    the field-level rule, as on `$expand`.
  *
  * Otherwise the text is dropped whole, like any text this reader is not served,
- * and the row's `record_id` is the bare id it is named by. A text of unknown
- * provenance is judged against every reference field of the parent. No row is
- * read: the answers are asked once per target object per read.
+ * and the row's `record_id` is the bare id it is named by. A text whose
+ * provenance is unknown keeps the rule of rows without a declaration, below. No
+ * row is read: the answers are asked once per target object per read.
  *
  * ## Rows without a declaration
  *
@@ -374,10 +374,10 @@ async function sourcesServed(
 
 /**
  * One read's answer to "may this reader read every referenced title a text
- * composed from `sources` of `parent` names?" — `true` when no source is a
- * reference field. `'unknown'` provenance names every field of the parent.
+ * composed from the declared `sources` of `parent` names?" — `true` when no
+ * source is a reference field.
  */
-export type ReferenceTitlesServedFor = (parent: string, sources: string[] | 'unknown') => Promise<boolean>;
+export type ReferenceTitlesServedFor = (parent: string, sources: readonly string[]) => Promise<boolean>;
 
 /**
  * {@link ReferenceTitlesServedFor} for ONE read, asked of the reader `context`
@@ -472,8 +472,7 @@ export function referenceTitlesPerRead(
   };
 
   return async (parent, sources) => {
-    const fields = sources === 'unknown' ? Object.keys(fieldsOf(parent)) : sources;
-    for (const field of fields) if (!(await titleServed(parent, field))) return false;
+    for (const field of sources) if (!(await titleServed(parent, field))) return false;
     return true;
   };
 }
@@ -746,8 +745,9 @@ export async function redactActivityRows(
     if (!provenance) continue;
     for (const col of TEXT_COLUMNS) {
       if (!(col in row)) continue;
-      const served = (await servedWhole(provenance[col]))
-        && (!referenceTitles || (await referenceTitles(object, provenance[col])));
+      const sources = provenance[col];
+      const served = (await servedWhole(sources))
+        && (!referenceTitles || sources === 'unknown' || (await referenceTitles(object, sources)));
       if (!served) delete row[col];
     }
   }
