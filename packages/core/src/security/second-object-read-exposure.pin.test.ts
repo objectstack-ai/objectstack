@@ -195,6 +195,16 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', call: 'servesSummaryTitleTarget(objectName' },
     pin: 'packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts',
   },
+  'packages/plugins/plugin-audit/src/activity-field-redaction.ts': {
+    kind: 'decided',
+    read:
+      "the activity timeline's read redaction (`referenceTitlesPerRead` serves a row's label or summary naming a " +
+      "referenced record by title only when the target's declaration, field answer and object admission serve it)",
+    operation: 'get',
+    decision: { file: 'packages/plugins/plugin-audit/src/activity-field-redaction.ts', fn: 'servesReferencedTitleTarget' },
+    wiring: { file: 'packages/plugins/plugin-audit/src/activity-field-redaction.ts', call: 'servesReferencedTitleTarget(targetSchema' },
+    pin: 'packages/plugins/plugin-audit/src/activity-field-redaction.test.ts',
+  },
   // The engine's relation group join: an analytics cross-object dimension as one `LEFT JOIN … GROUP BY`.
   'packages/objectql/src/relation-group-join.ts': {
     kind: 'decided',
@@ -514,6 +524,7 @@ describe('[#22661] every read that reaches a second object asks that object its 
         'servesLabelTarget',
         'servesPayloadDisplayTarget',
         'servesReferenceTarget',
+        'servesReferencedTitleTarget',
         'servesSummaryTitleTarget',
       ]);
 
