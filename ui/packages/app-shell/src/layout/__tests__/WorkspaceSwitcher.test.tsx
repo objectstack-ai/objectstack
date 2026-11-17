@@ -175,10 +175,11 @@ describe('WorkspaceSwitcherMenu — phone width: inline rows, no submenu', () =>
     expect(authState.switchOrganization).toHaveBeenCalledWith('org_b');
   });
 
-  it('at 375 px under group posture: the working-organization hint stays', () => {
+  it('at 375 px under group posture: the working-organization hint stays, width-bounded so it wraps', () => {
     setWidth(375);
     render(<WorkspaceSwitcherMenu isGroupPosture />);
-    expect(screen.getByTestId('workspace-switcher-group-hint')).toBeInTheDocument();
+    // The menu sizes to its content: an unbounded hint line widened it to 442 px on a 375 px screen.
+    expect(screen.getByTestId('workspace-switcher-group-hint')).toHaveClass('max-w-60');
   });
 
   it('control: at 1024 px the submenu trigger renders and the inline label does not', () => {

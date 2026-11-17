@@ -131,8 +131,10 @@ export function WorkspaceSwitcherMenu({ isGroupPosture }: { isGroupPosture: bool
       <DropdownMenuLabel className="text-xs text-muted-foreground">
         {t('organization.switcher.groupLabel', { defaultValue: 'Working organization' })}
       </DropdownMenuLabel>
+      {/* Bounded width: the menu sizes to its content, so an unbounded line
+          widens it past a phone screen instead of wrapping. */}
       <p
-        className="px-2 pb-1.5 text-xs font-normal leading-snug text-muted-foreground"
+        className="max-w-60 px-2 pb-1.5 text-xs font-normal leading-snug text-muted-foreground"
         data-testid="workspace-switcher-group-hint"
       >
         {t('organization.switcher.groupHint', {
