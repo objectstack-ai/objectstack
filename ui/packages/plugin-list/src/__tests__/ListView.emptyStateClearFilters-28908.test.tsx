@@ -71,6 +71,7 @@ const session: MePermissionsResponse = {
   userId: 'u1',
   tenantId: 'org_1',
   hasAnyQueue: true,
+  objectsUsingQueues: [OBJECT],
   positions: [],
   permissionSets: ['member_default'],
   objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },

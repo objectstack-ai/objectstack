@@ -187,6 +187,7 @@ const envelope = (bits: Record<string, boolean>, fields: MePermissionsAuthentica
   userId: 'u-pin',
   tenantId: null,
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits },

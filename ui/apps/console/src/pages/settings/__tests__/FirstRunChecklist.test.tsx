@@ -194,6 +194,7 @@ function permissionsPayload(systemPermissions: string[] | undefined): MePermissi
     tenantId: 'org_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: {},
     fields: {},
