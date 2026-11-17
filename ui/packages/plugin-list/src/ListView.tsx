@@ -2245,6 +2245,21 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const draftOnlyFields = React.useMemo(() => readDraftOnlyFieldNames(objectDef), [objectDef]);
 
   /**
+   * objectstack#34807 — the view's `searchableFields` as every query this list
+   * makes or hands down sends them: without a draft-only field, which the data
+   * door refuses as `$searchFields` (`400 INVALID_FIELD`, an unknown field)
+   * and with it the whole list. The authored list itself outside the preview,
+   * or when it names none. When every entry is draft-only nothing is sent, and
+   * the term searches the object's default fields.
+   */
+  const searchFieldsSent = React.useMemo(() => {
+    const declared = schema.searchableFields;
+    if (!declared || draftOnlyFields.size === 0) return declared;
+    const kept = declared.filter((f) => !refersToDraftOnlyField(f, draftOnlyFields));
+    return kept.length === declared.length ? declared : kept;
+  }, [schema.searchableFields, draftOnlyFields]);
+
+  /**
    * objectui#12966 — the object's `search` resolves to no field, so the server
    * refuses any term with `400 INVALID_FIELD`: no quick-search box, and a term
    * restored at mount or carried across a view switch is not applied, for the
@@ -4249,8 +4264,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
            ...(expandFields.length > 0 ? { $expand: expandFields } : {}),
            ...(searchTerm ? {
              $search: searchTerm,
-             ...(schema.searchableFields && schema.searchableFields.length > 0
-               ? { $searchFields: schema.searchableFields }
+             ...(searchFieldsSent && searchFieldsSent.length > 0
+               ? { $searchFields: searchFieldsSent }
                : {}),
            } : {}),
         };
@@ -4449,7 +4464,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, draftOnlyFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, draftOnlyFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -5006,8 +5021,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ...(gridOwnsGroupedFetch
             ? {
                 filter: selfQueryFilter,
-                ...(schema.searchableFields && schema.searchableFields.length > 0
-                  ? { searchableFields: schema.searchableFields }
+                ...(searchFieldsSent && searchFieldsSent.length > 0
+                  ? { searchableFields: searchFieldsSent }
                   : {}),
               }
             : {}),
@@ -5358,8 +5373,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ...(ganttSearchTerm
             ? {
                 search: ganttSearchTerm,
-                ...(schema.searchableFields && schema.searchableFields.length > 0
-                  ? { searchableFields: schema.searchableFields }
+                ...(searchFieldsSent && searchFieldsSent.length > 0
+                  ? { searchableFields: searchFieldsSent }
                   : {}),
               }
             : {}),
@@ -5548,7 +5563,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, serverSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
@@ -6055,8 +6070,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // with objectstack#4230; older ones ignore it and behave as before.
             ...(searchTerm ? {
               search: searchTerm,
-              ...(schema.searchableFields && schema.searchableFields.length > 0
-                ? { searchFields: schema.searchableFields }
+              ...(searchFieldsSent && searchFieldsSent.length > 0
+                ? { searchFields: searchFieldsSent }
                 : {}),
             } : {}),
             sort,
@@ -6138,7 +6153,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setShowExport(false);
     // `searchTerm` / `searchableFields` belong here: the export now narrows by
     // the active search, so a stale closure would export the wrong row set.
-  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel, t, draftOnlyFields]);
+  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, searchFieldsSent, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel, t, draftOnlyFields]);
 
   // All available fields for hide/show (with i18n)
   //
@@ -7835,8 +7850,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               ? {
                   lanePaging: {
                     search: searchTerm,
-                    ...(schema.searchableFields && schema.searchableFields.length > 0
-                      ? { searchFields: schema.searchableFields }
+                    ...(searchFieldsSent && searchFieldsSent.length > 0
+                      ? { searchFields: searchFieldsSent }
                       : {}),
                     reloadKey: `${refreshKey}:${String(schema.refreshTrigger ?? '')}`,
                   },

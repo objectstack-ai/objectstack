@@ -2035,6 +2035,24 @@ describe('ListView.draftOnlyColumn-34807', () => {
     expect(sortOptions).not.toContain('Priority (draft)');
   });
 
+  it('leaves it out of $searchFields, keeping the search and the rest of the declared fields', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true }, { searchableFields: ['title', 'priority'] }, {
+      initialSearchTerm: 'spec',
+    });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$search).toBe('spec');
+    expect(lastParams().$searchFields).toEqual(['title']);
+  });
+
+  it('CONTROL: with the field published, $searchFields carries it as declared', async () => {
+    const { lastParams } = await mountList({ draft: false }, { searchableFields: ['title', 'priority'] }, {
+      initialSearchTerm: 'spec',
+    });
+    expect(lastParams().$search).toBe('spec');
+    expect(lastParams().$searchFields).toEqual(['title', 'priority']);
+  });
+
   it('CONTROL: the same view with the field published asks for it as before, with no note', async () => {
     const { lastParams } = await mountList({ draft: false }, {
       sort: [{ field: 'priority', order: 'desc' }],
