@@ -4026,7 +4026,7 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'column\'s `summary` and `prefix`), `hiddenFields`, `fieldOrder`, ' +
       '`grouping` (and a grouping level\'s `orderBy`), `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
       '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
-      '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
+      '`timeline`, `gallery`, `map`, `tree` or `timesheet` block. Nothing resolves the name at render time: the ' +
       'view renders successfully with a blank, empty or wrong result, and nothing else reports the ' +
       'miss. The verdict\'s "Did you mean" names the nearest field the object declares.',
     'An error where the miss changes what the view returns or collapses what it lays out — for ' +
@@ -4036,7 +4036,8 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'collapses every card into one lane; a required date field of a `gantt`, `calendar` or ' +
       '`timeline` leaves nothing to place; a map with no coordinate field plots no marker; a ' +
       '`tree.parentField` flattens the tree; a `gantt.lockField` unfreezes every row and a ' +
-      '`gantt.objectField` stops every bar opening its record. A warning where one decoration ' +
+      '`gantt.objectField` stops every bar opening its record, and every `timesheet` binding is written ' +
+      'into each record a typed cell creates. A warning where one decoration ' +
       'drops and the rest renders — an optional colour, title, tooltip or cover binding, or a stale ' +
       '`hiddenFields` or `fieldOrder` entry, which hides or orders nothing.',
     LIST_VIEW_HEAD_ONLY,
