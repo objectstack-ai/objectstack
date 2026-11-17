@@ -45,6 +45,8 @@
     "BulkActionOperationSchema": "ui/BulkActionOperation",
     "BulkActionParam": "ui/BulkActionParam",
     "BulkActionParamSchema": "ui/BulkActionParam",
+    "BulkActionResult": "ui/BulkActionResult",
+    "BulkActionResultSchema": "ui/BulkActionResult",
     "CalendarConfig": "ui/CalendarConfig",
     "CalendarConfigSchema": "ui/CalendarConfig",
     "ChartAggregate": "ui/ChartAggregate",
