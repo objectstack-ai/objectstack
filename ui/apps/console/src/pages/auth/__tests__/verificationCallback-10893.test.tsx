@@ -177,12 +177,15 @@ describe('RegisterPage — the verification mail carries ?redirect= (objectui#10
     const sp = new URLSearchParams(window.location.search);
     expect(sp.get('email')).toBe('wangwei@example.com');
     expect(sp.get('redirect')).toBe('/accept-invitation/inv_1');
+    // objectstack#34706 — the sign-up sent the mail, and says so to the prompt.
+    expect(sp.get('sent')).toBe('1');
   });
 });
 
 describe('VerifyEmailPromptPage — the resent mail carries ?redirect= too (objectui#10893)', () => {
   async function resendCallback(name: MountName, search: string): Promise<[unknown, unknown]> {
-    const mount = mountConsole(name, `/verify-email-prompt${search}`);
+    // The resend after a sign-up, which marks its arrival as sent (objectstack#34706).
+    const mount = mountConsole(name, `/verify-email-prompt${search}&sent=1`);
     renderAt(mount.basename, <VerifyEmailPromptPage />);
     await userEvent.click(await screen.findByRole('button', { name: /Resend verification email/ }));
     await waitFor(() => expect(wire.resend).toHaveLength(1));
@@ -206,5 +209,50 @@ describe('VerifyEmailPromptPage — the resent mail carries ?redirect= too (obje
     const [, callback] = await resendCallback('embedded', '?email=wangwei%40example.com');
     expect(callback).toBeUndefined();
     expect(Object.keys(wire.resend[0])).not.toContain('callbackURL');
+  });
+});
+
+describe('VerifyEmailPromptPage — the standing copy says a link was sent only when one was (objectstack#34706)', () => {
+  const SENT_COPY = 'We sent a verification link to your email address. Please click the link to verify your account.';
+  const ADDRESS = 'wangwei@example.com';
+
+  function arriveAt(search: string) {
+    const mount = mountConsole('standalone', `/verify-email-prompt${search}`);
+    renderAt(mount.basename, <VerifyEmailPromptPage />);
+  }
+
+  // The sign-in arrival (`/login` on EMAIL_NOT_VERIFIED) and the accept-invitation
+  // arrivals carry `email` and `redirect` and no `sent`: nothing was mailed.
+  it('an arrival that sent nothing asks the person to send the link, and claims no mail before the button is pressed', async () => {
+    arriveAt(`?email=wangwei%40example.com&${INVITE.slice(1)}`);
+
+    expect(await screen.findByText(
+      `Your email address has not been verified yet. Send a verification link to ${ADDRESS}, then click the link to verify your account.`,
+    )).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Send verification email$/ })).toBeTruthy();
+    expect(screen.queryByText(SENT_COPY)).toBeNull();
+    expect(screen.queryByText(/Sent to:/)).toBeNull();
+    expect(screen.queryByText(/Didn't receive the email/)).toBeNull();
+    expect(wire.resend).toHaveLength(0);
+  });
+
+  it('pressing the button sends the mail, and only then does the page say it was sent', async () => {
+    arriveAt(`?email=wangwei%40example.com&${INVITE.slice(1)}`);
+    await userEvent.click(await screen.findByRole('button', { name: /^Send verification email$/ }));
+
+    await waitFor(() => expect(wire.resend).toHaveLength(1));
+    expect(wire.resend[0].email).toBe(ADDRESS);
+    expect(await screen.findByText(/Sent to:/)).toBeTruthy();
+    expect(screen.getByText(/Didn't receive the email/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Email sent! Check your inbox' })).toBeTruthy();
+  });
+
+  it('CONTROL: the sign-up arrival (`sent=1`) keeps its "we sent" copy and offers a resend', async () => {
+    arriveAt(`?email=wangwei%40example.com&${INVITE.slice(1)}&sent=1`);
+
+    expect(await screen.findByText(SENT_COPY)).toBeTruthy();
+    expect(screen.getByText(/Sent to:/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Resend verification email$/ })).toBeTruthy();
+    expect(screen.getByText(/Didn't receive the email/)).toBeTruthy();
   });
 });

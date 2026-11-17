@@ -29,12 +29,13 @@ import { render, screen, renderHook, act } from '@testing-library/react';
 import React from 'react';
 import { builtInLocales, registerBuiltInLocales } from '@object-ui/i18n/locales';
 
-vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+const { navigateSpy } = vi.hoisted(() => ({ navigateSpy: vi.fn() }));
+vi.mock('react-router-dom', () => ({ useNavigate: () => navigateSpy }));
 
 const authFetchSpy = vi.fn();
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useAuth: () => ({ user: { id: 'u1', name: 'User', image: null }, activeOrganization: null }),
+  useAuth: () => ({ user: { id: 'u1', name: 'User', email: 'user@example.test', image: null }, activeOrganization: null }),
   createAuthenticatedFetch: () => authFetchSpy,
 }));
 
@@ -114,8 +115,19 @@ const APPROVE = {
   params: [{ name: 'comment', label: 'Comment', type: 'textarea' }],
 };
 
+/** The invitation inbox's accept, as `sys_invitation` declares it. */
+const ACCEPT = {
+  name: 'accept_invitation',
+  label: 'Accept Invitation',
+  type: 'api',
+  target: '/api/v1/auth/organization/accept-invitation',
+  recordIdParam: 'invitationId',
+  refreshAfter: true,
+};
+
 const OBJECTS = [
   { name: 'sys_user', actions: [BAN, PING, NOTE] },
+  { name: 'sys_invitation', actions: [ACCEPT] },
   { name: 'sys_environment', actions: [CREATE_ENV] },
   { name: 'showcase_task', actions: [RECALC] },
   { name: 'sys_approval_request', actions: [APPROVE] },
@@ -152,6 +164,7 @@ function sent(): { url: string; method: string; body: any } {
 
 beforeEach(() => {
   authFetchSpy.mockReset();
+  navigateSpy.mockReset();
 });
 
 describe('objectstack#27611 — a declared same-origin api click goes through the action door', () => {
@@ -299,5 +312,51 @@ describe('objectstack#27611 — what the door answers once objectstack#27738 lan
     expect(req.url.endsWith(`${DOOR}sys_approval_request/approval_approve`)).toBe(true);
     expect(req.body).toEqual({ recordId: 'req_1', params: { comment: 'ok', 'outputs.reason': 'within budget' } });
     expect(out).toEqual({ success: true, data: { request: { id: 'req_1', record_title: 'Q4 budget' } }, reload: true });
+  });
+});
+
+describe('objectstack#34706 — the invitation inbox accept, refused for an unverified address, opens the verification screen', () => {
+  // better-auth's flat refusal body, relayed by the door as the target answered it.
+  const UNVERIFIED = {
+    code: 'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
+    message: 'Email verification required before accepting or rejecting invitation',
+  };
+  const VERIFY = '/verify-email-prompt?email=user%40example.test&redirect=%2Faccept-invitation%2Finv_1';
+
+  it('through the door: navigates to the prompt for the account, returning to that invitation, with no toast and no refresh', async () => {
+    answer(403, UNVERIFIED);
+    const { result, onRefresh } = mount('sys_invitation');
+
+    const out = await click(result, { ...ACCEPT, params: { _rowRecord: { id: 'inv_1' } } });
+
+    expect(sent().url.endsWith(`${DOOR}sys_invitation/accept_invitation`)).toBe(true);
+    expect(navigateSpy).toHaveBeenCalledTimes(1);
+    expect(navigateSpy).toHaveBeenCalledWith(VERIFY);
+    expect(out).toEqual({ success: false });
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it('through the direct call (no declaration in this host\'s objects): the same hand-over', async () => {
+    answer(403, UNVERIFIED);
+    const { result } = mount('sys_invitation', []);
+
+    const out = await click(result, { ...ACCEPT, params: { _rowRecord: { id: 'inv_1' } } });
+
+    expect(sent().url).toBe(ACCEPT.target);
+    expect(navigateSpy).toHaveBeenCalledWith(VERIFY);
+    expect(out).toEqual({ success: false });
+  });
+
+  it('CONTROL: another refusal of the same door keeps its sentence and navigates nowhere', async () => {
+    answer(403, {
+      code: 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION',
+      message: 'You are not the recipient of the invitation',
+    });
+    const { result } = mount('sys_invitation');
+
+    const out = await click(result, { ...ACCEPT, params: { _rowRecord: { id: 'inv_1' } } });
+
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(out).toEqual({ success: false, error: 'You are not the recipient of the invitation' });
   });
 });
