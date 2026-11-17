@@ -3290,7 +3290,7 @@ const pt = {
     aiAssistant: "Assistente de IA",
     designInStudio: "Projetar no Studio",
     editApp: "Editar aplicativo",
-    openAppInStudio: "Ver aplicativo no Studio",
+    openAppInStudio: "Ver {{app}} no Studio",
   },
   home: {
     build: {

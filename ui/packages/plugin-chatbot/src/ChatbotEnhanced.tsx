@@ -3803,7 +3803,15 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // (`has`) only, never as a dependency.
     const supersededPlans = supersededPlanIds(messages);
 
-    const renderToolDetail = (tool: RenderedToolInvocation) => {
+    /**
+     * objectstack#34627 — `failureOnChecklist`: the turn's result card shows a
+     * failed checklist, which states the build's failure; this card then draws
+     * neither its issue-count chip nor the red summary beside it.
+     */
+    const renderToolDetail = (
+      tool: RenderedToolInvocation,
+      { failureOnChecklist = false }: { failureOnChecklist?: boolean } = {},
+    ) => {
       const state =
         tool.state ??
         (tool.errorText
@@ -4087,7 +4095,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                       WHY a build did or didn't auto-publish without reading
                       tool JSON. Green = referentially clean; amber = blocking
                       issues, the build stays draft until the agent repairs. */}
-                  {tool.draftReview.verification ? (
+                  {tool.draftReview.verification && !(failureOnChecklist && tool.draftReview.verification.errors > 0) ? (
                     tool.draftReview.verification.errors > 0 ? (
                       <span
                         className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 text-xs font-medium text-amber-700"
@@ -4131,6 +4139,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     {(() => {
                       const issues = tool.draftReview!.issues!;
                       const errorCount = issues.filter((i) => i.severity === 'error').length;
+                      if (errorCount > 0 && failureOnChecklist) return null;
                       return (
                         <div
                           className={cn(
@@ -5517,7 +5526,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         </Reasoning>
                       ) : null}
                       {!isUser && detailedTools.length > 0
-                        ? detailedTools.map(renderToolDetail)
+                        ? detailedTools.map((tool) =>
+                            renderToolDetail(tool, { failureOnChecklist: buildChecklist?.status === 'failed' }),
+                          )
                         : null}
                       {isUser ? (
                         message.content ? (
@@ -6539,28 +6550,51 @@ function PlanCardObjectRows({
  * rows): every line the producer measured on the build, objects in one column
  * and views and the sample data in the other, each with its own pass mark.
  * The lines are the producer's words, read verbatim from `checklist.lines`.
+ * objectstack#34627 — a `verification` line states the build's failed verdict
+ * in red: the producer's `label`, then its issue `count`. A failed checklist is
+ * then the one place the card's turn states the failure.
  */
 function BuildChecklistRows({ checklist }: { checklist: BuildResultChecklist }) {
+  const { t } = useObjectTranslation();
   const objectLines = checklist.lines.filter((l) => l.kind === 'object');
   const otherLines = checklist.lines.filter((l) => l.kind !== 'object');
   const column = (lines: BuildResultChecklist['lines'], testId: string) =>
     lines.length > 0 ? (
       <ul className="flex flex-col" data-testid={testId}>
-        {lines.map((l, idx) => (
-          <li
-            key={idx}
-            className="flex items-start gap-2 py-1 text-xs text-foreground/90"
-            data-testid="build-checklist-line"
-            data-status={l.status}
-          >
-            {l.status === 'passed' ? (
-              <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
-            ) : (
-              <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
-            )}
-            <span className="min-w-0">{l.line}</span>
-          </li>
-        ))}
+        {lines.map((l, idx) =>
+          l.kind === 'verification' ? (
+            <li
+              key={idx}
+              className="flex items-start gap-2 py-1 text-xs text-red-600 dark:text-red-400"
+              data-testid="build-checklist-line"
+              data-status={l.status}
+              data-kind={l.kind}
+            >
+              <XCircle className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0">
+                {l.label}
+                {' · '}
+                <span data-testid="build-checklist-verification-count">
+                  {t('chatbot.build.issuesCount', { count: l.count, defaultValue: '{{count}} to fix' })}
+                </span>
+              </span>
+            </li>
+          ) : (
+            <li
+              key={idx}
+              className="flex items-start gap-2 py-1 text-xs text-foreground/90"
+              data-testid="build-checklist-line"
+              data-status={l.status}
+            >
+              {l.status === 'passed' ? (
+                <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+              ) : (
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-600" />
+              )}
+              <span className="min-w-0">{l.line}</span>
+            </li>
+          ),
+        )}
       </ul>
     ) : null;
   return (

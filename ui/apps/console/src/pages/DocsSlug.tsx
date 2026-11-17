@@ -15,6 +15,7 @@ import { DocShell } from './DocShell';
 import BookPage, { DocRefusal } from './BookPage';
 import { useBookData } from './use-book-data';
 import { bookNamedBy, bookSlug, homeBook, pkgOf } from './book-nav';
+import { readsByNameAfter } from './doc-address';
 
 /** What the server says about one segment the member's lists do not answer. */
 type SegmentAnswer = { slug: string; refusal: string | null };
@@ -27,6 +28,12 @@ type SegmentAnswer = { slug: string; refusal: string | null };
  * the server's reason comes back as the answer; anything else (404, a served
  * item) leaves the portal's own answer standing. `@objectstack/client` rejects a
  * non-2xx read with the status in `httpStatus`.
+ *
+ * The route's package segment is prefer-local context, not an exact address
+ * (objectstack#34247, `doc-address.ts`): a name the segment's package ships
+ * none of is asked about again by name, so a cross-reference to another
+ * package's doc, and the app-name segment of a package that ships several
+ * apps, reach the audience verdict of the doc's holder.
  */
 async function refusalFor(
   client: { meta: { getItem: (type: string, name: string, options?: { packageId?: string }) => Promise<unknown> } },
@@ -35,7 +42,13 @@ async function refusalFor(
 ): Promise<string | null> {
   for (const type of ['doc', 'book'] as const) {
     try {
-      await client.meta.getItem(type, name, options);
+      try {
+        await client.meta.getItem(type, name, options);
+      } catch (localErr) {
+        const packageId = options?.packageId;
+        if (!packageId || !readsByNameAfter(localErr, packageId)) throw localErr;
+        await client.meta.getItem(type, name);
+      }
       return null; // served: not a refusal
     } catch (err) {
       const status = (err as { httpStatus?: unknown } | null)?.httpStatus;

@@ -3505,7 +3505,7 @@ const ar = {
     aiAssistant: "مساعد الذكاء الاصطناعي",
     designInStudio: "التصميم في Studio",
     editApp: "تعديل التطبيق",
-    openAppInStudio: "عرض التطبيق في Studio",
+    openAppInStudio: "عرض {{app}} في Studio",
   },
   home: {
     build: {
