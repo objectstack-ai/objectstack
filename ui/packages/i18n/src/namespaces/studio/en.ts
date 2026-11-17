@@ -3346,6 +3346,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pillar.metadata': 'All metadata',
   // Header · package-level publish + app bridge
   'engine.studio.changes': 'Changes',
+  // objectstack#34593 — the header's way back to the package's running app,
+  // the mirror of the app bar's Edit app; with several apps it opens a picker.
+  'engine.studio.openApp': 'Open app',
+  'engine.studio.openAppTitle': 'Open {app} — leave Studio for the running app',
+  'engine.studio.openAppPick': 'Open which app?',
   'engine.studio.publishTitle': 'Review and publish every pending draft in this package together',
   'engine.studio.publishNoneTitle': 'No drafts pending publish',
   'engine.studio.publishedAll': 'Published all drafts in this package',

@@ -23,8 +23,11 @@
  * why the client cannot compute this and a "missing scope means read-only" rule
  * would have flipped every Studio base read-only.
  *
- * Kernel packages (scope `system` / `cloud`) are hidden here whatever their
- * verdict says: that filter is about visibility, not writability.
+ * Kernel packages (scope `system` / `cloud`) are hidden from the switcher
+ * whatever their verdict says: that filter is about visibility, not
+ * writability. A manifest-scoped one is left out of this list; a flat-scoped
+ * one stays in it, tagged `kernel`, and the switcher hides it
+ * (`offeredPackages` in `PackageSwitcher.tsx`, ADR-0016 §3.8).
  */
 
 import { EnsureCustomizationPackageResponseSchema } from '@objectstack/spec/api';
@@ -58,10 +61,10 @@ export interface PkgEntry {
   /**
    * #27356 row 12 — set (only ever `true`) on a row the registry half serves
    * flat with a kernel `scope` (`system` / `cloud`) at the top level. Such a
-   * row stays in the list (the switcher's visibility reads the manifest's
-   * `scope` alone, see {@link parsePackages}), but the app → Studio entries
+   * row stays in the list, because the app → Studio entries read this tag to
    * draw nothing for it (`useStudioEntryGate`), as for the manifest-scoped
-   * kernel packages this list leaves out.
+   * kernel packages this list leaves out. The Studio package switcher does
+   * not offer it (`offeredPackages`, ADR-0016 §3.8).
    */
   kernel?: true;
 }
@@ -88,9 +91,10 @@ export interface PkgEntry {
  * is the server's own computed verdict (see the module doc), a field the
  * manifest does not and should not carry.
  *
- * `scope` is deliberately left manifest-only: widening it would change which
- * packages the switcher HIDES, which is a different question from what it
- * NAMES and is not this card's.
+ * `scope` is read in both positions, for two different answers: a manifest
+ * kernel scope drops the row here, while a flat one keeps the row and tags it
+ * `kernel` — the app → Studio entry gate reads that tag, and the switcher
+ * hides the tagged row (`offeredPackages` in `PackageSwitcher.tsx`).
  */
 export function parsePackages(payload: unknown): PkgEntry[] {
   const root = (payload as { data?: unknown })?.data ?? payload;

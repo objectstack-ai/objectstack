@@ -2954,6 +2954,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pillar.metadata': '全部元数据',
   // Header · package-level publish + app bridge
   'engine.studio.changes': '变更',
+  'engine.studio.openApp': '打开应用',
+  'engine.studio.openAppTitle': '打开 {app}：离开 Studio，回到运行中的应用',
+  'engine.studio.openAppPick': '打开哪个应用？',
   'engine.studio.publishTitle': '检查并一并发布本软件包的全部待发布草稿',
   'engine.studio.publishNoneTitle': '没有待发布的草稿',
   'engine.studio.publishedAll': '已发布本软件包的全部草稿',
