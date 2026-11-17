@@ -9,9 +9,9 @@
 /**
  * objectstack#27052 → objectstack#27524, Target 4 — `RecordPageColumns` with
  * the reader's ONE switch, ⊟ (the right column). The timeline switch, its
- * folded 「动态」 card and the related rail retired: 动态 is the right column's
- * first panel, so ⊟ takes the 动态 panel and the related panels out
- * together, and the details take the row. The stack has no right column, so
+ * folded 「动态」 card and the related rail retired: 动态 is a panel of the right
+ * column (its last since objectstack#34590), so ⊟ takes the 动态 panel and the
+ * related panels out together, and the details take the row. The stack has no right column, so
  * the switch does not reach it. The blocks are stubbed (each node draws its
  * type), so what is measured is where each node lands.
  */
@@ -52,11 +52,12 @@ const shown = (container: HTMLElement) =>
 afterEach(() => cleanup());
 
 describe('RecordPageColumns — the right-column switch ⊟ (objectstack#27052, objectstack#27524)', () => {
-  it('absent or on: details | right column, 动态 first', () => {
+  it('absent or on: details | right column, 动态 last (objectstack#34590)', () => {
     for (const rightColumn of [undefined, true]) {
       const { container, unmount } = render(<RecordPageColumns tier="wide" columns={columns} rightColumn={rightColumn} />);
       expect(shown(container)).toBe('details right');
-      expect(nodesIn(column(container, 'right'))).toEqual(['record:activity', 'record:related_list', 'record:related_list']);
+      // objectstack#34590 — 动态 last (supersedes objectstack#27524 Targets 5 and 8 for the column).
+      expect(nodesIn(column(container, 'right'))).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
       unmount();
     }
   });
@@ -79,6 +80,7 @@ describe('RecordPageColumns — the right-column switch ⊟ (objectstack#27052, 
   it('the stack does not read it: its panels follow the details whatever the switch says', () => {
     const { container } = render(<RecordPageColumns tier="stack" columns={columns} rightColumn={false} />);
     expect(shown(container)).toBe('details');
-    expect(nodesIn(column(container, 'right'))).toEqual(['record:activity', 'record:related_list', 'record:related_list']);
+    // objectstack#34590 — the stack ends with 动态 (supersedes objectstack#27524 Targets 5 and 8 for the stack).
+    expect(nodesIn(column(container, 'right'))).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
   });
 });

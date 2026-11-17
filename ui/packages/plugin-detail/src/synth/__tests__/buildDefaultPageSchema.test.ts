@@ -330,15 +330,16 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-      // Details, the Timeline, then Related (objectstack#27524: 动态 is
-      // second for every object).
+      // Details, Related, then the Timeline — 动态 is last for every object
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
       expect(tabItems(tabs)).toHaveLength(3);
-      expect(tabItems(tabs)[2].label).toBe('Related');
-      expect(tabItems(tabs)[2].children).toHaveLength(2);
-      expect(tabItems(tabs)[2].children[0].type).toBe('record:related_list');
-      expect(props(tabItems(tabs)[2].children[0]).objectName).toBe('task');
-      expect(props(tabItems(tabs)[2].children[0]).relationshipField).toBe('lead_id');
-      expect(props(tabItems(tabs)[2].children[0]).limit).toBe(10);
+      expect(tabItems(tabs)[1].label).toBe('Related');
+      expect(tabItems(tabs)[2].value).toBe('timeline');
+      expect(tabItems(tabs)[1].children).toHaveLength(2);
+      expect(tabItems(tabs)[1].children[0].type).toBe('record:related_list');
+      expect(props(tabItems(tabs)[1].children[0]).objectName).toBe('task');
+      expect(props(tabItems(tabs)[1].children[0]).relationshipField).toBe('lead_id');
+      expect(props(tabItems(tabs)[1].children[0]).limit).toBe(10);
     });
 
     it('draws an isPrimary related list as a body table of the Details tab (objectstack#27055)', () => {
@@ -361,7 +362,8 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Activity stream', 'Related']);
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
+      expect(labels).toEqual(['Details', 'Related', 'Activity stream']);
       const related = tabItems(tabs).find((t: any) => t.label === 'Related');
       expect(related.children).toHaveLength(2);
       expect(related.children.map((c: any) => props(c).objectName)).toEqual(['task', 'note']);
@@ -396,26 +398,27 @@ describe('buildDefaultPageSchema', () => {
       });
     });
 
-    it('every object opens its Timeline second — a worked one and any other (objectstack#27524, Target 5)', () => {
+    it('every object puts its Timeline last — a worked one and any other (objectstack#34590, superseding objectstack#27524 Target 5)', () => {
       const related = [{ objectName: 'task', relationshipField: 'lead_id' }];
       const worked = { ...leadDef, stageField: 'status' } as ObjectDefLike;
       const workedTabs = buildDefaultPageSchema(worked, { related }).regions[0].components.find((c: any) => c.type === 'page:tabs');
-      expect(tabItems(workedTabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
+      expect(tabItems(workedTabs).map((t: any) => t.value)).toEqual(['details', 'related', 'timeline']);
       const plainTabs = buildDefaultPageSchema(leadDef, { related }).regions[0].components.find((c: any) => c.type === 'page:tabs');
-      expect(tabItems(plainTabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
+      expect(tabItems(plainTabs).map((t: any) => t.value)).toEqual(['details', 'related', 'timeline']);
     });
 
-    it('Details / Timeline / Related / Approvals tab order is stable', () => {
+    it('Details / Related / Approvals / Timeline tab order is stable (objectstack#34590)', () => {
       const page = buildDefaultPageSchema(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { count: 1 },
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Activity stream',
         'Related',
         'Approvals',
+        'Activity stream',
       ]);
     });
 
@@ -478,10 +481,11 @@ describe('buildDefaultPageSchema', () => {
         slots: { details: { type: 'div', id: 'custom-details' } },
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Activity stream',
         'Related',
+        'Activity stream',
       ]);
       expect(tabItems(tabs)[0].children).toEqual([{ type: 'div', id: 'custom-details' }]);
       // record:details default body must be gone
@@ -555,15 +559,16 @@ describe('buildDefaultPageSchema', () => {
       expect(types).toContain('record:path');
     });
 
-    it('buildDefaultTabs emits Details/Timeline/Related in order', () => {
+    it('buildDefaultTabs emits Details/Related/Timeline in order (objectstack#34590)', () => {
       const tabs = buildDefaultTabs(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
       });
       expect(tabs.type).toBe('page:tabs');
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Activity stream',
         'Related',
+        'Activity stream',
       ]);
     });
 
@@ -602,8 +607,8 @@ describe('buildDefaultPageSchema', () => {
       const tabs = buildDefaultTabs(filesDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
       });
-      // The Timeline opens second, as for every object (objectstack#27524).
-      expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
+      // The Timeline comes last, as for every object (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
+      expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details', 'related', 'timeline']);
       const related = tabItems(tabs).find((t: any) => t.value === 'related');
       expect(related.children.map((c: any) => c.type)).toEqual(['record:related_list', 'record:attachments']);
     });
@@ -650,17 +655,18 @@ describe('buildDefaultPageSchema', () => {
       expect(tab.children).toEqual([{ type: 'record:approvals', properties: { ...nodePayload } }]);
     });
 
-    it('the Approvals tab sits after Related, for every object (objectstack#27524)', () => {
+    it('the Approvals tab sits after Related and before the Timeline, for every object (objectstack#27524, objectstack#34590)', () => {
       const plain = buildDefaultTabs(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { node: nodePayload },
       });
-      expect(tabItems(plain).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related', 'approvals']);
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
+      expect(tabItems(plain).map((t: any) => t.value)).toEqual(['details', 'related', 'approvals', 'timeline']);
       const worked = buildDefaultTabs({ ...leadDef, enable: { files: true } }, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { node: nodePayload },
       });
-      expect(tabItems(worked).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related', 'approvals']);
+      expect(tabItems(worked).map((t: any) => t.value)).toEqual(['details', 'related', 'approvals', 'timeline']);
     });
 
     it('a details slot override keeps the Approvals tab', () => {
@@ -953,12 +959,13 @@ describe('buildDefaultTabs — stable tab values (objectui#2257)', () => {
   const relA = { title: 'Invoices', objectName: 'invoice', relationshipField: 'account', isPrimary: true };
   const relB = { title: 'Notes', objectName: 'note', relationshipField: 'account' };
 
-  it('emits semantic values: details (primary in its body) / timeline / related (rest)', () => {
+  it('emits semantic values: details (primary in its body) / related (rest) / timeline', () => {
     const tabs = buildDefaultTabs(undefined, {
       related: [relA, relB],
     });
+    // objectstack#34590 — 动态 last (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
     expect(tabItems(tabs).map((i: any) => i.value)).toEqual([
-      'details', 'timeline', 'related',
+      'details', 'related', 'timeline',
     ]);
   });
 

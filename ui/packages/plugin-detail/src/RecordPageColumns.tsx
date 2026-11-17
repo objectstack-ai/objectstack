@@ -224,8 +224,10 @@ const COLUMN_STACK = 'flex min-w-0 flex-col gap-4 [&>*:has(>[hidden]:only-child)
 /**
  * The synthesized default record page, laid out by the width it has
  * (objectstack#26678; one rule since objectstack#27524, Target 6): one record
- * header, then the details and the right column — the 动态 panel first, then
- * the related panels in the reader's arrangement.
+ * header, then the details and the right column — the related panels in the
+ * reader's arrangement (attachments and approvals close them), then the 动态
+ * panel, last (objectstack#34590, which supersedes objectstack#27524 Targets
+ * 5 and 8's 动态-first for the right column, the stack and the tab row).
  *
  *  - `two-column` / `wide`: details | the right column (320 / 380 px). The
  *    wide tier lets a details section take three field columns (two
@@ -350,18 +352,17 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     }
   }
 
-  // ── The tab row (Target 8): 概览, 动态, the panels in the reader's order ──
+  // ── The tab row (Target 8): 概览, the panels in the reader's order, 动态 ──
   // The panels with records first and the empty ones in the dropdown
-  // (objectstack#28469), as the right column folds its empty panels.
+  // (objectstack#28469), as the right column folds its empty panels. 动态 is
+  // the row's last tab, as it is the right column's last panel
+  // (objectstack#34590, superseding objectstack#27524 Target 8's 动态-second).
   const panelTab = (id: RelatedCardId): RecordTab => ({
     id,
     label: relatedNodeTitle(panelNodes.get(id)),
     count: countOf(id),
   });
   const tabs: RecordTab[] = [{ id: RECORD_TAB_OVERVIEW, label: t('detail.recordTabOverview', { defaultValue: 'Overview' }) }];
-  if (hasTimeline) {
-    tabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: t('detail.timeline', { defaultValue: 'Activity' }), count: streamCount });
-  }
   // While the panels' first count set is still out (the right column draws its
   // count skeletons meanwhile) their tabs wait off the row, so a tab that turns
   // out empty never draws on the row and then leaves it: the tabs appear once,
@@ -372,13 +373,26 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   );
   tabs.push(...panelTabs.withRecords);
   if (openBodyTable) tabs.push(openBodyTable);
+  // 动态 comes after the panels' tabs, so it too waits off the row while their
+  // first set is out (every panel still pending): drawn at once, it would move
+  // when they land in front of it — the move the rule above keeps out
+  // (objectstack#28469, Target 2). Drawn when it is the active tab.
+  const firstPanelSetOut =
+    resolved.order.length > 0 && resolved.order.every((id) => counts.stateOf(id).kind === 'pending');
+  const timelineHeld = hasTimeline && firstPanelSetOut && activeTab !== RECORD_PAGE_TIMELINE_PANEL;
+  if (hasTimeline && !timelineHeld) {
+    tabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: t('detail.timeline', { defaultValue: 'Activity' }), count: streamCount });
+  }
   const hiddenTabs = resolved.hidden.map(panelTab);
   const selectTab = (id: string) => {
     if (id === RECORD_TAB_OVERVIEW) onCloseEnlargedRelated?.();
     else onEnlargeRelated?.(id);
   };
+  // A held 动态 tab still counts toward drawing the row, so the row is there
+  // from the first paint (概览 alone while the set is out) and the page below
+  // it does not shift when the tabs land.
   const tabRow =
-    onEnlargeRelated && tabs.length + panelTabs.empty.length + hiddenTabs.length > 1 ? (
+    onEnlargeRelated && tabs.length + (timelineHeld ? 1 : 0) + panelTabs.empty.length + hiddenTabs.length > 1 ? (
       <RecordTabRow
         tabs={tabs}
         emptyTabs={panelTabs.empty}
@@ -402,16 +416,8 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       data-record-column="right"
       aria-label={t('detail.relatedColumn', { defaultValue: 'Right column' })}
     >
-      {hasTimeline && (
-        <RecordTimelinePanel
-          nodes={columns.timeline}
-          entries={wide ? RECORD_TIMELINE_PANEL_MAX_ENTRIES : 3}
-          onViewAll={onEnlargeRelated ? viewAllTimeline : undefined}
-          count={streamCount}
-          onCount={reportTimelineCount}
-        />
-      )}
-      {/* The related panels, in the reader's arrangement (objectstack#27055). */}
+      {/* The related panels, in the reader's arrangement (objectstack#27055),
+          then the 动态 panel, last (objectstack#34590: 「「动态」在最后」). */}
       <RelatedListCompactContext.Provider value>
         <RelatedCardStack
           nodes={columns.related}
@@ -422,6 +428,15 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
           counts={counts}
         />
       </RelatedListCompactContext.Provider>
+      {hasTimeline && (
+        <RecordTimelinePanel
+          nodes={columns.timeline}
+          entries={wide ? RECORD_TIMELINE_PANEL_MAX_ENTRIES : 3}
+          onViewAll={onEnlargeRelated ? viewAllTimeline : undefined}
+          count={streamCount}
+          onCount={reportTimelineCount}
+        />
+      )}
     </aside>
   ) : null;
   // A face with neither the 动态 panel nor its tab drawn — another tab open,
