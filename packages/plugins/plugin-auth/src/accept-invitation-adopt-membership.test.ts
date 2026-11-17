@@ -198,6 +198,17 @@ const membersOf = (engine: MemoryEngine, organizationId: string, userId: string)
 const invitationsFor = (engine: MemoryEngine, email: string) =>
   (engine.tables.get('sys_invitation') ?? []).filter((i) => i.email === email);
 
+/**
+ * Mark a fixture user's address verified, as completing the verification mail
+ * does: accepting an invitation needs a verified address
+ * (`invitation-acceptance-verified-address.test.ts`).
+ */
+const verify = (engine: MemoryEngine, userId: string) => {
+  const user = (engine.tables.get('sys_user') ?? []).find((u) => u.id === userId);
+  expect(user, `no user ${userId}`).toBeDefined();
+  user!.email_verified = true;
+};
+
 /** Force a membership role directly, the way an operator's data would look. */
 const setRole = (engine: MemoryEngine, organizationId: string, userId: string, role: string) => {
   const [row] = membersOf(engine, organizationId, userId);
@@ -259,6 +270,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
     const invitee = await signUp(manager, engine, 'invitee@example.com');
     expect(membersOf(engine, DEFAULT_ORG, invitee.userId)).toHaveLength(1);
 
+    verify(engine, invitee.userId);
     const accept = await post(
       manager,
       '/organization/accept-invitation',
@@ -300,6 +312,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
     // The reconciler's default, which adoption must not silently keep.
     expect(membersOf(engine, DEFAULT_ORG, invitee.userId)[0]!.role).toBe('member');
 
+    verify(engine, invitee.userId);
     const accept = await post(
       manager,
       '/organization/accept-invitation',
@@ -336,6 +349,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
       expires_at: new Date(Date.now() + 86_400_000),
     });
 
+    verify(engine, owner.userId);
     const accept = await post(
       manager,
       '/organization/accept-invitation',
@@ -376,6 +390,7 @@ describe('#7725 — accepting an invitation when the invitee is already auto-bou
     expect(membersOf(engine, DEFAULT_ORG, invitee.userId)).toHaveLength(1);
     expect(membersOf(engine, PARTNER_ORG, invitee.userId)).toHaveLength(0);
 
+    verify(engine, invitee.userId);
     const accept = await post(
       manager,
       '/organization/accept-invitation',

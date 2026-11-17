@@ -81,6 +81,19 @@ const readCode = (err: unknown): string | undefined => {
   return typeof code === 'string' ? code : undefined;
 };
 
+/**
+ * The server's refusals for a session whose email address is not verified:
+ * accepting, declining, reading or listing an invitation needs a verified
+ * address (better-auth's own codes). The page answers them with its
+ * verify-email state.
+ */
+const UNVERIFIED_ADDRESS_CODES: ReadonlySet<string> = new Set([
+  'EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION',
+  'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
+]);
+
+const isUnverifiedAddressRefusal = (err: unknown): boolean => UNVERIFIED_ADDRESS_CODES.has(readCode(err) ?? '');
+
 export function AcceptInvitationPage() {
   const { t } = useObjectTranslation();
   // Dates and numbers on this surface read the display locale; a bare
@@ -125,7 +138,8 @@ export function AcceptInvitationPage() {
   // Joined through the one-step door: the organization's name to welcome the
   // visitor to (the door answers no role).
   const [oneStepJoined, setOneStepJoined] = useState<{ orgName: string } | null>(null);
-  // The provider session's address is not the invited one, or not verified.
+  // The session's address is not the invited one, or not verified: the
+  // one-step door's `verify_email`, or a refusal in UNVERIFIED_ADDRESS_CODES.
   const [needsVerifiedEmail, setNeedsVerifiedEmail] = useState(false);
 
   // The proof leaves the address bar as soon as it has been read.
@@ -199,10 +213,14 @@ export function AcceptInvitationPage() {
         if (!cancelled) setInvitation(inv);
       })
       .catch((err) => {
-        if (!cancelled)
-          // objectstack#33650 — the lookup's own not-found answer carries no
-          // code; read by route, status and the missing code, never the text.
-          setError(resolveInvitationLookupMessage(err, t));
+        if (cancelled) return;
+        if (isUnverifiedAddressRefusal(err)) {
+          setNeedsVerifiedEmail(true);
+          return;
+        }
+        // objectstack#33650 — the lookup's own not-found answer carries no
+        // code; read by route, status and the missing code, never the text.
+        setError(resolveInvitationLookupMessage(err, t));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -220,6 +238,11 @@ export function AcceptInvitationPage() {
       await switchOrganization(invitation.organizationId).catch(() => null);
       setJoined(true);
     } catch (err) {
+      setIsAccepting(false);
+      if (isUnverifiedAddressRefusal(err)) {
+        setNeedsVerifiedEmail(true);
+        return;
+      }
       // objectui#4474 — the card's site 5: a wrong recipient produced better-auth's
       // English sentence under the translated title. Mapped by `code` now.
       toast.error(
@@ -228,7 +251,6 @@ export function AcceptInvitationPage() {
           defaultValue: 'Failed to accept invitation',
         }),
       );
-      setIsAccepting(false);
     }
   };
 
@@ -277,13 +299,17 @@ export function AcceptInvitationPage() {
       toast.success(t('organization.accept.declined', { defaultValue: 'Invitation declined' }));
       navigate('/organizations');
     } catch (err) {
+      setIsDeclining(false);
+      if (isUnverifiedAddressRefusal(err)) {
+        setNeedsVerifiedEmail(true);
+        return;
+      }
       toast.error(
         resolveOrgErrorMessage(err, t, {
           key: 'organization.accept.declineFailed',
           defaultValue: 'Failed to decline invitation',
         }),
       );
-      setIsDeclining(false);
     }
   };
 

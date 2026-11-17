@@ -206,7 +206,11 @@ describe('#26020 — the signed-out invitation preview', () => {
   });
 
   it('unknown, expired, accepted, rejected and cancelled ids all answer the identical not-found', async () => {
-    const { direct, invite, preview, owner, signUp, invitationRow } = await stage();
+    const { engine, direct, invite, preview, owner, signUp, invitationRow } = await stage();
+    // Accepting or declining needs a verified address (`invitation-acceptance-verified-address.test.ts`).
+    const verified = (userId: string) => {
+      (engine.tables.get('sys_user') ?? []).find((u: any) => u.id === userId)!.email_verified = true;
+    };
 
     const expired = await invite('expired@acme.test');
     invitationRow(expired).expires_at = new Date(Date.now() - 60_000);
@@ -216,12 +220,14 @@ describe('#26020 — the signed-out invitation preview', () => {
 
     const accepted = await invite('accepted@acme.test');
     const acceptor = await signUp('accepted@acme.test', 'Acceptor');
+    verified(acceptor.userId);
     const acceptRes = await direct('POST', '/organization/accept-invitation', { invitationId: accepted }, acceptor.cookie);
     expect(acceptRes.status, await acceptRes.clone().text()).toBe(200);
     expect(invitationRow(accepted).status).toBe('accepted');
 
     const rejected = await invite('rejected@acme.test');
     const rejector = await signUp('rejected@acme.test', 'Rejector');
+    verified(rejector.userId);
     const rejectRes = await direct('POST', '/organization/reject-invitation', { invitationId: rejected }, rejector.cookie);
     expect(rejectRes.status, await rejectRes.clone().text()).toBe(200);
     expect(invitationRow(rejected).status).toBe('rejected');

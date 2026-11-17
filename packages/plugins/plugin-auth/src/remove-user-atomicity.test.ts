@@ -364,6 +364,8 @@ describe('#7724 — removing a user is one unit of work that can actually comple
     expect(invitation).toBeDefined();
 
     const invitee = await signUp(manager, engine, 'invitee@example.com');
+    // Accepting needs a verified address (`invitation-acceptance-verified-address.test.ts`).
+    userRow(engine, invitee.userId)!.email_verified = true;
     const accept = await post(
       manager,
       '/organization/accept-invitation',

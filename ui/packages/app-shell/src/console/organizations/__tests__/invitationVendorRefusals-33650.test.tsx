@@ -278,6 +278,57 @@ describe('#33650 face 2 — inviting someone who is already a member', () => {
   });
 });
 
+describe('an invitation needs a verified email address: the refusal draws the verify-email state', () => {
+  // better-auth 1.7.12 (`crud-invites.mjs`), verbatim: the two refusals the
+  // server answers a session whose address is not verified.
+  const READ_REFUSED_MESSAGE = 'Email verification required to view or list invitations for the session email';
+  const READ_REFUSED: Answer = {
+    status: 403,
+    body: { code: 'EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION', message: READ_REFUSED_MESSAGE },
+  };
+  const ACCEPT_OR_DECLINE_REFUSED: Answer = {
+    status: 403,
+    body: {
+      code: 'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
+      message: 'Email verification required before accepting or rejecting invitation',
+    },
+  };
+
+  it('a refused invitation read draws the verify-email state, not the vendor\'s English', async () => {
+    answers.set('/organization/get-invitation', READ_REFUSED);
+    renderIn('zh', <AcceptInvitationPage />);
+
+    const state = await screen.findByTestId('accept-invitation-verify-email');
+    expect(state).toHaveTextContent(zh.organization.accept.verifyEmailTitle);
+    expect(state).toHaveTextContent(zh.organization.accept.verifyEmailDescription);
+    expect(screen.getByTestId('accept-invitation-page')).not.toHaveTextContent(READ_REFUSED_MESSAGE);
+  });
+
+  it('a refused accept draws the verify-email state, not a toast', async () => {
+    answers.set('/organization/get-invitation', { status: 200, body: PENDING });
+    answers.set('/organization/accept-invitation', ACCEPT_OR_DECLINE_REFUSED);
+    renderIn('en', <AcceptInvitationPage />);
+
+    await screen.findByTestId('accept-invitation-role');
+    fireEvent.click(screen.getByText(en.organization.accept.accept));
+    const state = await screen.findByTestId('accept-invitation-verify-email');
+    expect(state).toHaveTextContent(en.organization.accept.verifyEmailTitle);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('a refused decline draws the verify-email state, not a toast', async () => {
+    answers.set('/organization/get-invitation', { status: 200, body: PENDING });
+    answers.set('/organization/reject-invitation', ACCEPT_OR_DECLINE_REFUSED);
+    renderIn('en', <AcceptInvitationPage />);
+
+    await screen.findByTestId('accept-invitation-role');
+    fireEvent.click(screen.getByText(en.organization.accept.decline));
+    const state = await screen.findByTestId('accept-invitation-verify-email');
+    expect(state).toHaveTextContent(en.organization.accept.verifyEmailTitle);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
 describe('#33650 — every shipped pack carries the new sentence', () => {
   it('organization.errors.alreadyMember is a translated string in each pack', () => {
     const packs = Object.keys(builtInLocales) as Array<keyof typeof builtInLocales>;

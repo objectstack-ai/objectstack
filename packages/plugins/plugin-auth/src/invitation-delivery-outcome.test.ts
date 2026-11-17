@@ -326,7 +326,7 @@ describe('#27843 (c) — copy_invitation_link is answered only inside the invite
   });
 
   it('a canceled invitation is refused 409, and so is an accepted one', async () => {
-    const { direct, invite, owner, signUp, copyLink, invitationRow } = await stage();
+    const { engine, direct, invite, owner, signUp, copyLink, invitationRow } = await stage();
     const canceled = (await invite('carl.canceled@acme.test')).body.id as string;
     const cancelRes = await direct('POST', '/organization/cancel-invitation', { invitationId: canceled }, owner.cookie);
     expect(cancelRes.status, await cancelRes.clone().text()).toBe(200);
@@ -334,6 +334,8 @@ describe('#27843 (c) — copy_invitation_link is answered only inside the invite
 
     const accepted = (await invite('ada.accepted@acme.test')).body.id as string;
     const acceptor = await signUp('ada.accepted@acme.test', 'Ada Accepted');
+    // Accepting needs a verified address (`invitation-acceptance-verified-address.test.ts`).
+    (engine.tables.get('sys_user') ?? []).find((u: any) => u.id === acceptor.userId)!.email_verified = true;
     const acceptRes = await direct('POST', '/organization/accept-invitation', { invitationId: accepted }, acceptor.cookie);
     expect(acceptRes.status, await acceptRes.clone().text()).toBe(200);
     expect(invitationRow(accepted).status).toBe('accepted');

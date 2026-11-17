@@ -966,6 +966,10 @@ describe('on a cloud-managed environment, membership and its tiers are managed b
     expect(issued.status, `fixture: the invitation is issued while unmanaged — ${issued.text}`).toBe(200);
     const [invitation] = s.invitationsOf(email);
     expect(invitation?.status, 'fixture: the invitation is pending').toBe('pending');
+    // The invitee's address is verified, so only the posture decides: accepting
+    // or declining an invitation needs a verified address
+    // (`invitation-acceptance-verified-address.test.ts`).
+    s.users().find((u) => String(u.id) === s.ids.member)!.email_verified = true;
     return String(invitation.id);
   };
 

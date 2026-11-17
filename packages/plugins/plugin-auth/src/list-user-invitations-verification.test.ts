@@ -1,8 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#16569] `GET /organization/list-user-invitations` must honour the declared
-// `requireEmailVerificationOnInvitation: false`, exactly as `accept-invitation`,
-// `reject-invitation` and `get-invitation` already do.
+// [#16569] `GET /organization/list-user-invitations` honours the declared
+// `requireEmailVerificationOnInvitation`, exactly as `accept-invitation`,
+// `reject-invitation` and `get-invitation` do. The platform declares it
+// `true`: a session whose address is not verified can neither list, read,
+// accept nor decline an invitation, so the listing never hands it an id.
 //
 // These run the REAL better-auth pipeline through a REAL `AuthManager` — the
 // organization plugin, the audience-gate invitation carve-out, the membership
@@ -12,11 +14,6 @@
 // .listUserInvitations(email)`, which is the one definition of "which
 // invitations may this session see" — this suite pins that the rebuilt route
 // never widens it (own email only, no client-side `?email=`).
-//
-// The premise the fix rests on is MEASURED here, not quoted: the same
-// unverified invitee already gets 200 from accept / reject / get-invitation on
-// this deployment shape, so a listing scoped to the session's own email grants
-// nothing the deployment has not already granted.
 //
 // ## One fixture fact every inbox assertion has to know
 //
@@ -172,9 +169,9 @@ const get = (manager: AuthManager, path: string, cookie?: string) =>
   );
 
 /**
- * Sign a user up and return their session cookie + user id. No mailer is wired
- * (the deployment shape the declared option exists for), so the account stays
- * UNVERIFIED — asserted, because that is the whole population of this suite.
+ * Sign a user up and return their session cookie + user id. No mailer is wired,
+ * so the account starts UNVERIFIED — asserted; a case that needs a verified
+ * session marks it with {@link verify}.
  */
 const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string) => {
   const invitationId = await inviteForAudienceGate(engine, email);
@@ -182,7 +179,7 @@ const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string)
   expect(res.status, await res.clone().text()).toBe(200);
   const user = (engine.tables.get('sys_user') ?? []).find((u) => u.email === email);
   expect(user, `sign-up did not create ${email}`).toBeDefined();
-  expect(Boolean(user!.email_verified), `${email} should be unverified (no mailer)`).toBe(false);
+  expect(Boolean(user!.email_verified), `${email} should start unverified (no mailer)`).toBe(false);
   return { cookie: cookieFrom(res), userId: String(user!.id) };
 };
 
@@ -228,10 +225,7 @@ const issuedRows = (body: any[]) => body.filter((i) => i.organizationId !== AUDI
 
 /**
  * Bring up a deployment with an owner of BOTH organizations who can issue
- * invitations into either. The owner is unverified too (no mailer), which is
- * what makes the owner's own `/invite-member` 200s a second reading of the
- * premise: invitation-family routes are already open to unverified sessions
- * on this shape.
+ * invitations into either.
  */
 const bootWithOwner = async () => {
   const engine = createMemoryEngine();
@@ -265,7 +259,14 @@ const bootInbox = async () => {
   return { engine, manager, owner, b, bDefault, bPartner, cPartner };
 };
 
-describe('#16569 — list-user-invitations honours the declared requireEmailVerificationOnInvitation', () => {
+/** Mark a fixture user's address verified, as completing the verification mail does. */
+const verify = (engine: MemoryEngine, userId: string) => {
+  const user = (engine.tables.get('sys_user') ?? []).find((u) => u.id === userId);
+  expect(user, `no user ${userId}`).toBeDefined();
+  user!.email_verified = true;
+};
+
+describe('the invitation inbox and its three siblings require a verified address, as the platform declares', () => {
   beforeEach(() => {
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -275,44 +276,43 @@ describe('#16569 — list-user-invitations honours the declared requireEmailVeri
     vi.restoreAllMocks();
   });
 
-  it('PREMISE (measured, not quoted): the same unverified invitee already gets 200 from accept, reject and get-invitation', async () => {
+  it('a session whose address is not verified is refused by the listing, accept, reject and get-invitation alike', async () => {
     const { engine, manager, b, bDefault, bPartner } = await bootInbox();
+    const refused = async (res: Response, code: string) => {
+      const text = await res.clone().text();
+      expect(res.status, text).toBe(403);
+      expect((JSON.parse(text) as { code?: unknown }).code).toBe(code);
+      return text;
+    };
 
-    // get-invitation — the vendor reads the option here.
-    const got = await get(manager, `/organization/get-invitation?id=${bPartner.id}`, b.cookie);
-    expect(got.status, await got.clone().text()).toBe(200);
-
-    // reject — reads the option.
-    const rejected = await post(
-      manager,
-      '/organization/reject-invitation',
-      { invitationId: bPartner.id },
-      b.cookie,
+    const listed = await refused(await get(manager, LIST_USER_INVITATIONS_PATH, b.cookie), EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION.code);
+    expect(listed).not.toContain(bDefault.id);
+    expect(listed).not.toContain(bPartner.id);
+    await refused(
+      await get(manager, `/organization/get-invitation?id=${bPartner.id}`, b.cookie),
+      EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION.code,
     );
-    expect(rejected.status, await rejected.clone().text()).toBe(200);
-
-    // accept — reads the option. Accepting is strictly stronger than listing:
-    // it writes a membership.
-    const accepted = await post(
-      manager,
-      '/organization/accept-invitation',
-      { invitationId: bDefault.id },
-      b.cookie,
+    await refused(
+      await post(manager, '/organization/reject-invitation', { invitationId: bPartner.id }, b.cookie),
+      'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
     );
-    expect(accepted.status, await accepted.clone().text()).toBe(200);
-    expect(membersOf(engine, DEFAULT_ORG, b.userId)).toHaveLength(1);
+    await refused(
+      await post(manager, '/organization/accept-invitation', { invitationId: bPartner.id }, b.cookie),
+      'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
+    );
 
-    // Still unverified after all three — the option, not a verification, let
-    // them through.
-    const user = (engine.tables.get('sys_user') ?? []).find((u) => u.id === b.userId);
-    expect(Boolean(user?.email_verified)).toBe(false);
+    expect(membersOf(engine, PARTNER_ORG, b.userId)).toHaveLength(0);
+    const statuses = (engine.tables.get('sys_invitation') ?? [])
+      .filter((i) => i.id === bDefault.id || i.id === bPartner.id)
+      .map((i) => i.status);
+    expect(statuses).toEqual(['pending', 'pending']);
   });
 
-  it('the reported bug: the unverified invitee can LIST the invitations they can already accept', async () => {
-    const { manager, b, bDefault, bPartner } = await bootInbox();
+  it('a verified session lists the invitations addressed to it, and accepts one', async () => {
+    const { engine, manager, b, bDefault, bPartner } = await bootInbox();
+    verify(engine, b.userId);
 
     const res = await get(manager, LIST_USER_INVITATIONS_PATH, b.cookie);
-    // Before the fix: 403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION.
     expect(res.status, await res.clone().text()).toBe(200);
     const body: any = await res.json();
     expect(Array.isArray(body), 'the vendor route answers a bare array').toBe(true);
@@ -321,10 +321,15 @@ describe('#16569 — list-user-invitations honours the declared requireEmailVeri
       expect(inv.email).toBe('b@example.com');
       expect(inv.status).toBe('pending');
     }
+
+    const accepted = await post(manager, '/organization/accept-invitation', { invitationId: bPartner.id }, b.cookie);
+    expect(accepted.status, await accepted.clone().text()).toBe(200);
+    expect(membersOf(engine, PARTNER_ORG, b.userId)).toHaveLength(1);
   });
 
   it('SCOPE PIN: the listing is the session email\'s own — another user\'s invitation is never visible', async () => {
-    const { manager, b, cPartner } = await bootInbox();
+    const { engine, manager, b, cPartner } = await bootInbox();
+    verify(engine, b.userId);
 
     const res = await get(manager, LIST_USER_INVITATIONS_PATH, b.cookie);
     expect(res.status, await res.clone().text()).toBe(200);
@@ -337,7 +342,8 @@ describe('#16569 — list-user-invitations honours the declared requireEmailVeri
   });
 
   it('SCOPE PIN: a client-side `?email=` is still refused with the vendor\'s 400 — no listing by arbitrary address', async () => {
-    const { manager, b } = await bootInbox();
+    const { engine, manager, b } = await bootInbox();
+    verify(engine, b.userId);
 
     const res = await get(
       manager,
@@ -355,8 +361,9 @@ describe('#16569 — list-user-invitations honours the declared requireEmailVeri
     expect(res.status, await res.clone().text()).toBe(400);
   });
 
-  it('only PENDING rows are listed — a rejected invitation drops out, as it does for a verified user', async () => {
-    const { manager, b, bDefault, bPartner } = await bootInbox();
+  it('only PENDING rows are listed — a rejected invitation drops out', async () => {
+    const { engine, manager, b, bDefault, bPartner } = await bootInbox();
+    verify(engine, b.userId);
 
     const rejected = await post(
       manager,
@@ -371,32 +378,14 @@ describe('#16569 — list-user-invitations honours the declared requireEmailVeri
     const body: any[] = await res.json();
     expect(issuedRows(body).map((i) => i.id)).toEqual([bDefault.id]);
   });
-
-  it('PARITY: the unverified answer is byte-for-byte the VERIFIED answer — the option grants exactly the verified listing, nothing more', async () => {
-    const { engine, manager, b, bDefault, bPartner } = await bootInbox();
-
-    const unverified = await get(manager, LIST_USER_INVITATIONS_PATH, b.cookie);
-    expect(unverified.status, await unverified.clone().text()).toBe(200);
-    const unverifiedBody: any[] = await unverified.json();
-
-    const user = (engine.tables.get('sys_user') ?? []).find((u) => u.id === b.userId);
-    user!.email_verified = true;
-
-    const verified = await get(manager, LIST_USER_INVITATIONS_PATH, b.cookie);
-    expect(verified.status, await verified.clone().text()).toBe(200);
-    const verifiedBody: any[] = await verified.json();
-
-    expect(unverifiedBody).toEqual(verifiedBody);
-    expect(issuedRows(verifiedBody).map((i) => i.id).sort()).toEqual([bDefault.id, bPartner.id].sort());
-  });
 });
 
 describe('#16569 — listingRequiresVerifiedEmail honours ONLY the declared option', () => {
-  it('declared false → not required (the deployment shape the option exists for)', () => {
+  it('declared false → not required', () => {
     expect(listingRequiresVerifiedEmail({ requireEmailVerificationOnInvitation: false })).toBe(false);
   });
 
-  it('declared true → required, exactly as the vendor answers today', () => {
+  it('declared true → required, as the platform declares it and as the vendor answers', () => {
     expect(listingRequiresVerifiedEmail({ requireEmailVerificationOnInvitation: true })).toBe(true);
   });
 
