@@ -1002,7 +1002,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // server resolves it — refusing the submit would leave the user with
           // nothing sensible to type.
           required: isRequiredInForm(field, isCreateFormMode(schema)),
-          disabled: schema.readOnly || schema.mode === 'view' || field.readonly,
+          // `_draftOnly`: a field only the draft declares, under the console's
+          // draft preview — drawn, never fillable (see `fromObjectSchema`).
+          disabled: schema.readOnly || schema.mode === 'view' || field.readonly || field._draftOnly === true,
           placeholder: field.placeholder,
           // The help line under the control: the spec's `inlineHelpText`,
           // else `description`, through the one read `fromObjectSchema`
