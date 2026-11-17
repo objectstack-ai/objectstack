@@ -3261,7 +3261,7 @@ const zh = {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中设计',
     editApp: '编辑应用',
-    openAppInStudio: '在 Studio 中查看应用',
+    openAppInStudio: '在 Studio 中查看 {{app}}',
     openAssistant: '打开{{name}}助手',
     offline: '离线',
     usersOnline: '当前在线用户',

@@ -3195,7 +3195,7 @@ const ko = {
     aiAssistant: "AI 어시스턴트",
     designInStudio: "Studio에서 디자인",
     editApp: "앱 편집",
-    openAppInStudio: "Studio에서 앱 보기",
+    openAppInStudio: "Studio에서 {{app}} 보기",
   },
   home: {
     build: {

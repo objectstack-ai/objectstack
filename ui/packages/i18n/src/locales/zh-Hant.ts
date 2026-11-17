@@ -3261,7 +3261,7 @@ const zhHant = {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中設計',
     editApp: '編輯應用',
-    openAppInStudio: '在 Studio 中檢視應用',
+    openAppInStudio: '在 Studio 中檢視 {{app}}',
     openAssistant: '開啟{{name}}助手',
     offline: '離線',
     usersOnline: '當前線上使用者',

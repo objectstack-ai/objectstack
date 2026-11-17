@@ -3340,7 +3340,7 @@ const ru = {
     aiAssistant: "ИИ-ассистент",
     designInStudio: "Дизайн в Studio",
     editApp: "Редактировать приложение",
-    openAppInStudio: "Открыть приложение в Studio",
+    openAppInStudio: "Открыть {{app}} в Studio",
   },
   home: {
     build: {
