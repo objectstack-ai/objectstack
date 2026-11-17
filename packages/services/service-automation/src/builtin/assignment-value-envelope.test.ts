@@ -648,6 +648,69 @@ describe('value envelope — the date-text family at registerFlow (#34451)', () 
     }
   });
 
+  // The stand-downs: the typing holds only where the run's `record` IS a row
+  // of the typed object — a record-triggered flow or a sweep of it — and the
+  // flow binds no `record` of its own. Each CONTROL carries the refused source
+  // and registers, with no todo in the stored pass.
+  const REFUSED = 'timestamp(record.borrow_date)';
+  const registersClean = (engine: AutomationEngine, name: string, flow: unknown, label: string): void => {
+    expect(() => engine.registerFlow(name, flow as never), label).not.toThrow();
+    expect(engineWith(true).canonicalizeStoredFlow(name, flow as never).todos, label).toEqual([]);
+  };
+
+  it.each([
+    ['an inbound hook (api) start', 'api', { objectName: 'library_loan', triggerType: 'api', secretRef: 'LOAN_HOOK_SECRET' }],
+    ['a start with no trigger (started by hand or by a parent)', 'autolaunched', { objectName: 'library_loan' }],
+    ['a schedule', 'schedule', { objectName: 'library_loan', schedule: '0 * * * *' }],
+  ])('CONTROL: %s is not typed — registers', (_label, type, start) => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      registersClean(engineWith(true), 'loan_due', { ...loanFlow(slot, REFUSED, start), type }, slot);
+    }
+  });
+
+  it('CONTROL: a child flow a parent starts through `subflow` is not typed — both register', () => {
+    const engine = engineWith(true);
+    const child = { ...loanFlow('update_record', REFUSED, { objectName: 'library_loan' }), name: 'loan_due_child', type: 'autolaunched' };
+    registersClean(engine, 'loan_due_child', child, 'child');
+    const parent = {
+      name: 'loan_due_parent', label: 'Loan due parent', type: 'record_change',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: 'library_loan', triggerType: 'record-after-update' } },
+        { id: 'call', type: 'subflow', label: 'Call', config: { flowName: 'loan_due_child' } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
+    };
+    expect(() => engine.registerFlow('loan_due_parent', parent as never)).not.toThrow();
+  });
+
+  it('CONTROL: a record-triggered flow that declares a `record` variable is not typed — registers', () => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      const flow = { ...loanFlow(slot, REFUSED), variables: [{ name: 'record', type: 'object' }] };
+      registersClean(engineWith(true), 'loan_due', flow, slot);
+    }
+  });
+
+  it('CONTROL: a record-triggered flow whose assignment assigns `record` is not typed — registers', () => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      const flow = loanFlow(slot, REFUSED);
+      const rebound = {
+        ...flow,
+        nodes: [
+          flow.nodes[0],
+          { id: 'rebind', type: 'assignment', label: 'Rebind', config: { assignments: { record: { dialect: 'cel', source: '{"borrow_date": "2026-01-01"}' } } } },
+          ...flow.nodes.slice(1),
+        ],
+        edges: [
+          { id: 'e0', source: 'start', target: 'rebind' },
+          { id: 'e1', source: 'rebind', target: 'n1' },
+          flow.edges[1],
+        ],
+      };
+      registersClean(engineWith(true), 'loan_due', rebound, slot);
+    }
+  });
+
   it('without a resolver, and at evaluation, the envelope is judged untyped as before', () => {
     expect(() => engineWith(false).registerFlow('loan_due', loanFlow('update_record', MEASURED))).not.toThrow();
     // The evaluator's call: no field types, so no new refusal — it faults on the live value instead.

@@ -3105,7 +3105,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    *
    * [#34451] `fieldTypes`: the field types of the object the flow's run binds
    * as `record` — the object its conditions are typed against (the start
-   * node's `objectName`, else a time-relative flow's swept object). Handed on
+   * node's `objectName`, else a time-relative flow's swept object) — passed
+   * only where that binding holds: a record-triggered flow or a sweep of the
+   * typed object, with no flow variable named `record` (the caller's
+   * `valueEnvelopeFieldTypes`). Handed on
    * as `ExprSchemaHint.flowValueEnvelope`, which lets the date-text verdict
    * family alone reach the envelope, over its `record.<field>` /
    * `previous.<field>` reads: `timestamp(record.<date field>)` faults on the
@@ -3312,6 +3315,18 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       triggerKind,
       sweepsTypedObject: sweepObject !== undefined && sweepObject === objectName,
     });
+    // [#34451] The value envelopes' typing holds on the same flows: where the
+    // run's `record` IS a row of the typed object — the flows a condition has
+    // a proven outcome on — and only while the flow binds no `record` of its
+    // own (`celScope` spreads the run's variables over the context, so a
+    // declared, assigned or output `record` is what an envelope reads).
+    // Elsewhere (an inbound hook, a schedule, a flow a parent's `subflow` /
+    // `map` starts) `record` holds whatever the entrance handed the run, and
+    // the envelope is judged untyped. The engine's `registerFlow` stands down
+    // on the same set (`flow-registration-checks.ts`).
+    const valueEnvelopeFieldTypes = flowFaultOutcome !== undefined && objectName && !declaredVariables.has('record')
+      ? fieldTypeIndex.get(objectName)
+      : undefined;
     // [#29959] The names the run binds over the flattening — its declared
     // variables and node ids, and the engine's own — which a bare read holds
     // instead of the field: the type check never types them as the field.
@@ -3539,7 +3554,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // design — there is no field reading to displace.
           if (found.entry.role === 'value') {
             const from = issues.length;
-            if (!checkDeclaredValue(slotWhere, found.value, objectName ? fieldTypeIndex.get(objectName) : undefined).refused) {
+            if (!checkDeclaredValue(slotWhere, found.value, valueEnvelopeFieldTypes).refused) {
               refuseUnboundRoots(slotWhere, found.value, from, 'value');
             }
             continue;

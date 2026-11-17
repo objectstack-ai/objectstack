@@ -824,7 +824,9 @@ export type FlowFunctionResolver = (
  * advisory (logged as a warning, never thrown). One verdict is not: on a flow
  * VALUE envelope it adds the date-text family's refusal (#34451,
  * {@link AutomationEngine.valueEnvelopeRefusals}), an expression that faults on
- * every run, so a flow carrying one stops registering once a resolver is wired.
+ * every run, so a flow carrying one stops registering once a resolver is wired —
+ * on a record-triggered flow or a time-relative sweep of the typed object that
+ * binds no `record` variable of its own, the flows whose `record` is that row.
  */
 export type FlowObjectSchemaResolver = (
   objectName: string,
@@ -4756,7 +4758,9 @@ export class AutomationEngine implements IAutomationService {
      * unknown-field refs, likely bare-field typos, and text/boolean fields
      * misused in arithmetic. Everything it adds on a condition is advisory
      * (logged, never thrown); on a flow value envelope it adds one refusal,
-     * the date-text family (#34451, {@link valueEnvelopeRefusals}). Passing
+     * the date-text family (#34451, {@link valueEnvelopeRefusals}), where the
+     * run's `record` is the typed object's row (a record-triggered flow or a
+     * sweep of that object, binding no `record` variable itself). Passing
      * `null` detaches the bridge (registration reverts to syntax + bare-ref
      * validation only).
      */
@@ -10861,9 +10865,12 @@ export class AutomationEngine implements IAutomationService {
      * time-relative flow's swept object, read off {@link deriveTriggerBinding}
      * (#30396).
      * The fatal set is unchanged by it but for one verdict: a flow VALUE
-     * envelope is typed with the same object, and the date-text family it
-     * fails (#34451, {@link valueEnvelopeRefusals}) is thrown — in both modes,
-     * so the stored pass previews it. `advisory: false` skips the advisory pass: the stored pass
+     * envelope is typed with the same object where the run's `record` is that
+     * object's row — a record-triggered flow, or a time-relative sweep of the
+     * typed object, that binds no `record` variable itself — and the date-text
+     * family it fails (#34451, {@link valueEnvelopeRefusals}) is thrown — in
+     * both modes, so the stored pass previews it. Any other flow's envelopes
+     * are judged untyped, as before. `advisory: false` skips the advisory pass: the stored pass
      * previews refusals ({@link registrationCheckRefusals}), and an advisory
      * finding is none.
      *
@@ -11409,7 +11416,9 @@ export class AutomationEngine implements IAutomationService {
      *
      * [#34451] `fieldTypes` — handed ONLY by `registerFlow`'s pass (and the
      * stored pass that previews it), as the field types of the object the
-     * run binds as `record`, read through {@link setObjectSchemaResolver} —
+     * run binds as `record`, read through {@link setObjectSchemaResolver} and
+     * handed only where that binding holds (a record-triggered flow or a sweep
+     * of the typed object, with no flow variable named `record`) —
      * adds one more refusal: the date-text verdict family over the
      * envelope's `record.<field>` / `previous.<field>` reads
      * (`ExprSchemaHint.flowValueEnvelope`, `@objectstack/formula`), the

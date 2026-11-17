@@ -633,6 +633,55 @@ export function collectUndeclaredConfigKeys(
     }
 }
 
+/** The config keys whose value names a variable the node binds (`@objectstack/lint`'s `VARIABLE_NAME_CONFIG_KEYS`). */
+const VARIABLE_NAME_CONFIG_KEYS = ['iteratorVariable', 'indexVariable', 'errorVariable', 'outputVariable'] as const;
+/** The keys an `assignments` array entry names its target with, in `logic-nodes.ts`'s precedence. */
+const ASSIGNMENT_ENTRY_NAME_KEYS = ['variable', 'name', 'key'] as const;
+
+/**
+ * [#34451] Whether the flow binds a variable named `record` itself — a
+ * declared variable, a node id, a node's `outputVariable` / iterator / index /
+ * error variable, or an `assignment` target in any of its three shapes — in
+ * any graph. The rows are `@objectstack/lint`'s `collectFlowVariableNames`,
+ * asked about one name: that package is not a dependency of this one, and the
+ * two doors must stand down on the same flows.
+ */
+function flowBindsRecordVariable(flow: FlowParsed): boolean {
+    const RECORD = 'record';
+    const declared = (flow as { variables?: unknown }).variables;
+    if (Array.isArray(declared) && declared.some((v) => !!v && typeof v === 'object' && (v as { name?: unknown }).name === RECORD)) {
+        return true;
+    }
+    for (const graph of collectFlowGraphs(flow)) {
+        for (const node of graph.nodes) {
+            if (!node || typeof node !== 'object') continue;
+            if (node.id === RECORD) return true;
+            const config = node.config;
+            if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+            const cfg = config as Record<string, unknown>;
+            if (VARIABLE_NAME_CONFIG_KEYS.some((key) => cfg[key] === RECORD)) return true;
+            if (node.type !== 'assignment') continue;
+            const raw = cfg.assignments;
+            if (Array.isArray(raw)) {
+                // Shape 2: [{ variable | name | key, value }, …], the first name key present wins.
+                for (const item of raw) {
+                    if (!item || typeof item !== 'object') continue;
+                    const entry = item as Record<string, unknown>;
+                    const nameKey = ASSIGNMENT_ENTRY_NAME_KEYS.find((k) => typeof entry[k] === 'string' && entry[k]);
+                    if (nameKey && entry[nameKey] === RECORD) return true;
+                }
+            } else if (raw && typeof raw === 'object') {
+                // Shape 1: { <var>: <value>, … }.
+                if (Object.prototype.hasOwnProperty.call(raw, RECORD)) return true;
+            } else if (Object.prototype.hasOwnProperty.call(cfg, RECORD)) {
+                // Shape 3: no wrapper — the config's own keys are the variable names.
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /** The body of {@link AutomationEngine.validateFlowExpressions}, moved unedited; that method's docblock is its contract. */
 export function validateFlowExpressions(
     this: Pick<RegistrationCheckHost, 'logger' | 'objectSchemaResolver' | 'valueEnvelopeRefusals' | 'deriveTriggerBinding'>,
@@ -672,6 +721,28 @@ export function validateFlowExpressions(
             const s = this.objectSchemaResolver?.(objectName);
             return s ? { objectName, fields: s.fields, fieldTypes: s.fieldTypes, scope: 'flattened' as const } : undefined;
         })()
+        : undefined;
+
+    // [#34451] The value-envelope typing below holds only where the run's
+    // `record` IS a row of the typed object: a record-change trigger on it,
+    // or a time-relative sweep of it — the two kinds `@objectstack/lint`
+    // declares a proven outcome for on a flow condition — and only while the
+    // flow binds no variable named `record` of its own (`celScope` resolves
+    // `record` through the variable spread, so a declared, assigned or output
+    // `record` is what the envelope reads). Anywhere else (an inbound hook, a
+    // schedule, a flow started by a parent's `subflow` / `map` or by hand) the
+    // name holds what the entrance handed the run, and no verdict is given.
+    // `objectstack validate` stands down on the same set.
+    const startCfg = (startNode?.config ?? {}) as Record<string, unknown>;
+    const sweep = (startCfg.timeRelative ?? {}) as Record<string, unknown>;
+    const runBindsTypedRow = bound?.triggerType === 'record_change'
+        // The array form routes here only to be refused at bind: it never fires.
+        ? typeof startCfg.triggerType === 'string'
+        : bound?.triggerType === 'time_relative'
+            && typeof sweep.object === 'string'
+            && (typeof startCfg.objectName !== 'string' || startCfg.objectName === sweep.object);
+    const valueEnvelopeFieldTypes = runBindsTypedRow && !flowBindsRecordVariable(flow)
+        ? schemaHint?.fieldTypes
         : undefined;
 
     const check = (path: string, where: string, raw: unknown, useSchemaHint = true): void => {
@@ -893,12 +964,13 @@ export function validateFlowExpressions(
                 // JSON, a record column holding the envelope object), with
                 // nothing said at any layer.
                 //
-                // [#34451] Typed with the bound object's field types, so the
-                // date-text family reaches the envelope — the same hint
-                // `objectstack validate` passes. Thrown, in both modes: the
-                // envelope faults on every run.
+                // [#34451] Typed with the bound object's field types where the
+                // run's `record` is that object's row (`valueEnvelopeFieldTypes`
+                // above), so the date-text family reaches the envelope — the
+                // same set `objectstack validate` refuses. Thrown, in both
+                // modes: the envelope faults on every run.
                 if (found.entry.role === 'value') {
-                    for (const refusal of this.valueEnvelopeRefusals(found.value, schemaHint?.fieldTypes)) {
+                    for (const refusal of this.valueEnvelopeRefusals(found.value, valueEnvelopeFieldTypes)) {
                         refuse(slotPath, slotWhere, refusal.message, refusal.source);
                     }
                     continue;

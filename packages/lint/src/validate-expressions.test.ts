@@ -6680,4 +6680,76 @@ describe('validateStackExpressions — flow value envelopes take the date-text f
     expect(validateStackExpressions(stackWith('update_record', 'record.title * 2'))).toEqual([]);
     expect(validateStackExpressions(stackWith('update_record', 'record.due_date + 1'))).toEqual([]);
   });
+
+  // The stand-downs: the typing holds only where the run's `record` IS a row
+  // of the typed object — a record-triggered flow or a sweep of it — and the
+  // flow binds no `record` of its own. Each CONTROL carries the refused source.
+  const REFUSED = 'timestamp(record.borrow_date)';
+
+  it('CONTROL: an inbound hook (api) start is not typed — zero findings', () => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      expect(validateStackExpressions(stackWith(slot, REFUSED, { objectName: 'library_loan', triggerType: 'api', secretRef: 'LOAN_HOOK_SECRET' })), slot).toEqual([]);
+    }
+  });
+
+  // No entrance of these hands the run a record, so the existing unbound-root
+  // refusal (#22565) already names every `record.` read in them — the bare
+  // `record.borrow_date` read included. The CONTROL is that `timestamp()` over
+  // it adds nothing: the findings are the bare read's, one for one.
+  it.each([
+    ['a start with no trigger (started by hand)', { objectName: 'library_loan' }],
+    ['a schedule', { objectName: 'library_loan', schedule: '0 * * * *' }],
+  ])('CONTROL: %s is not typed — no finding beyond the bare read\'s', (_label, start) => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      const shape = (source: string) => validateStackExpressions(stackWith(slot, source, start))
+        .map((i) => [i.severity, i.path, i.message.replace(/record\.borrow_date|borrow_date/g, 'X')]);
+      const refused = shape(REFUSED);
+      expect(refused, slot).toEqual(shape('record.borrow_date'));
+      expect(refused.some(([, , m]) => /addDays/.test(String(m))), slot).toBe(false);
+    }
+  });
+
+  it('CONTROL: a child flow a parent starts through `subflow` is not typed — zero findings', () => {
+    const stack = stackWith('update_record', REFUSED, { objectName: 'library_loan' });
+    stack.flows[0] = { ...stack.flows[0], name: 'loan_due_child' };
+    stack.flows.push({
+      name: 'loan_due_parent',
+      nodes: [
+        { id: 'start', type: 'start', config: { objectName: 'library_loan', triggerType: 'record-after-update' } },
+        { id: 'call', type: 'subflow', config: { flowName: 'loan_due_child' } } as never,
+        { id: 'end', type: 'end' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
+    });
+    expect(validateStackExpressions(stack)).toEqual([]);
+  });
+
+  it('CONTROL: a record-triggered flow that declares a `record` variable is not typed — zero findings', () => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      const stack = stackWith(slot, REFUSED);
+      stack.flows[0] = { ...stack.flows[0], variables: [{ name: 'record', type: 'object' }] } as never;
+      expect(validateStackExpressions(stack), slot).toEqual([]);
+    }
+  });
+
+  it('CONTROL: a record-triggered flow whose assignment assigns `record` is not typed — zero findings', () => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      const stack = stackWith(slot, REFUSED);
+      const flow = stack.flows[0];
+      stack.flows[0] = {
+        ...flow,
+        nodes: [
+          flow.nodes[0],
+          { id: 'rebind', type: 'assignment', config: { assignments: { record: envelope('{"borrow_date": "2026-01-01"}') } } } as never,
+          ...flow.nodes.slice(1),
+        ],
+        edges: [
+          { id: 'e0', source: 'start', target: 'rebind' },
+          { id: 'e1', source: 'rebind', target: 'n1' },
+          flow.edges[1],
+        ],
+      };
+      expect(validateStackExpressions(stack), slot).toEqual([]);
+    }
+  });
 });
