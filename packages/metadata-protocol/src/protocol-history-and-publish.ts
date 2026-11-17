@@ -1605,7 +1605,10 @@ export class ProtocolHistoryAndPublishFacet {
          * objects must have rows, views must be readable, dashboard widgets'
          * dataset selections must execute and return data. `issues` carries
          * BuildIssue-shaped findings (layer 'runtime') for the agent / chat
-         * health surfaces; probes never fail the publish itself.
+         * health surfaces; probes never fail the publish itself. Each finding
+         * has the agent's `message` / `fix` and the person's `userMessage`,
+         * which the probe composes in the request's language from
+         * `userTextLocales` (ruling record 6929121584).
          */
         probes?: import('./build-probes.js').BuildProbeReport;
         /** ADR-0067 — id of the commit this publish recorded (absent if nothing published). */
@@ -2641,7 +2644,8 @@ export class ProtocolHistoryAndPublishFacet {
         // artifact — so "Published!" can never again mean "and silently
         // broken". Best-effort by design: a probe crash is swallowed (the
         // publish already happened and must report as such), and findings ride
-        // the response for the agent / chat health card to act on.
+        // the response for the agent / chat health card to act on: `message`
+        // and `fix` for the agent, `userMessage` for the person.
         let probes: import('./build-probes.js').BuildProbeReport | undefined;
         if (published.length > 0) {
             try {
@@ -2657,6 +2661,11 @@ export class ProtocolHistoryAndPublishFacet {
                     ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
                     organizationId: null,
                     ...(request.context !== undefined ? { context: request.context } : {}),
+                    // [ruling record 6929121584] The request's own locales:
+                    // the probe composes each finding's `userMessage` under
+                    // the ladder the door already states for this publish.
+                    ...(request.userTextLocales !== undefined
+                        ? { userTextLocales: request.userTextLocales } : {}),
                 });
             } catch {
                 probes = undefined;
