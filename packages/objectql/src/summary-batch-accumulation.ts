@@ -58,6 +58,7 @@ import { SUMMARY_GROUPED_AGGREGATE_CHUNK, summaryEmptySetValue } from './summary
 import { ROLLUP_AGGREGATE_OPTION } from './record-currency-aggregate-door.js';
 import { declaredFieldClasses, declaredJsonStoredFields, matchesAggregationFilter } from './having-filter.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import { isNoOperatorObject } from './no-operator-object-door.js';
 
 /** One parent's delta from the batch's admitted rows, for one descriptor. */
 interface ParentDelta {
@@ -123,6 +124,8 @@ function filterReadsThroughReference(cond: unknown): boolean {
       continue;
     }
     if (key.startsWith('$')) continue;
+    // An empty object beneath a field is the nested form too, as the engine reads it (`isNoOperatorObject`).
+    if (isNoOperatorObject(value)) return true;
     if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)
       && Object.keys(value).some((inner) => !inner.startsWith('$'))) return true;
   }
@@ -444,10 +447,22 @@ export interface PredicateUpdateSummaryFold {
 
 /**
  * The fields of parent `parentId` (a row of `object`) calculated from its
- * roll-ups, computed over that parent with `moved` (the folded roll-up
- * values) in place of the stored ones; `undefined` when none is.
+ * roll-ups, as a rule reads them before the next matched row: computed over
+ * that parent with `moved` (the folded roll-up values) in place of the stored
+ * ones; `undefined` when none is.
+ *
+ * `advance`, when present, is told after each matched row is judged, once per
+ * parent that row names (as stored or as left) and with the roll-ups as that
+ * row leaves them: one by one, the recompute writes each such parent after the
+ * child's update, and the NEXT recompute's write starts from the row that
+ * write stored, not from the row as stored before the update. A stored
+ * computed field that reads its own stored value (a high-water mark), or a
+ * chain of them declared against their reading order, only comes out as one
+ * by one when the fold carries that image forward the same way.
  */
-export type SummaryDependents = (object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => Record<string, unknown> | undefined;
+export type SummaryDependents = ((object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => Record<string, unknown> | undefined) & {
+  advance?: (object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => void;
+};
 
 /** What one row adds to one parent's roll-up. */
 interface Contribution { parentId: string; value: number | undefined }
@@ -555,9 +570,8 @@ export function createPredicateUpdateSummaryFold(
 
   let dependents: SummaryDependents | undefined;
 
-  const patchRow = (object: string, row: Record<string, unknown>): Record<string, unknown> | undefined => {
-    const parentId = singleId(row.id);
-    if (parentId === undefined) return undefined;
+  /** The folded roll-up values of one parent in the current state, or `undefined` when this fold moves none of them. */
+  const movedOf = (object: string, parentId: string): Record<string, number | null> | undefined => {
     const moved: Record<string, number | null> = {};
     let any = false;
     for (const desc of live.keys()) {
@@ -567,7 +581,14 @@ export function createPredicateUpdateSummaryFold(
       moved[desc.summaryField] = value;
       any = true;
     }
-    if (!any) return undefined;
+    return any ? moved : undefined;
+  };
+
+  const patchRow = (object: string, row: Record<string, unknown>): Record<string, unknown> | undefined => {
+    const parentId = singleId(row.id);
+    if (parentId === undefined) return undefined;
+    const moved = movedOf(object, parentId);
+    if (!moved) return undefined;
     let patched: Record<string, unknown> | undefined;
     for (const [field, value] of Object.entries(moved)) {
       if (!(field in row)) continue;
@@ -614,6 +635,20 @@ export function createPredicateUpdateSummaryFold(
       if (!pair) continue;
       move(desc, pair[0], -1);
       move(desc, pair[1], 1);
+    }
+    // One by one, the recompute writes every parent the row names, after the row's update.
+    const states = matched[i];
+    if (!dependents?.advance || !states) return;
+    const named = new Map<string, { object: string; parentId: string }>();
+    for (const desc of live.keys()) {
+      for (const state of [states.previous, states.next]) {
+        const parentId = singleId(state?.[desc.fkField]);
+        if (parentId !== undefined) named.set(`${desc.parentObject}|${parentId}`, { object: desc.parentObject, parentId });
+      }
+    }
+    for (const { object, parentId } of named.values()) {
+      const moved = movedOf(object, parentId);
+      if (moved) dependents.advance(object, parentId, moved);
     }
   };
 

@@ -2394,6 +2394,13 @@ export class UpdateFacet {
  *    computed it: a planned formula reading one (`room = ceiling - total`,
  *    `ceiling = budget + extra`) reads it as the by-id rule's read does.
  *
+ * The stored pass carries one image per parent through the update, as one by
+ * one does: after each matched row is judged, the parents it names are
+ * written again (`advance`), from the row the previous write stored, and the
+ * next row reads that row. A stored computed field reading its own stored
+ * value (a high-water mark) or a chain of them declared against their reading
+ * order then holds what one by one holds at every row, not only the second.
+ *
  * Each pass runs synchronously, with the read path's own evaluator
  * ({@link applyFormulaPlan}). An object no such field reads a folded roll-up
  * of reads nothing.
@@ -2447,22 +2454,41 @@ async function loadSummaryFoldDependents(
       formulaLabels: host.formulaOptionLabels(schema, formulaPlan, systemCtx),
     });
   }
-  return (object, parentId, moved) => {
-    const entry = served.get(object);
-    const stored = entry?.rows.get(parentId);
-    if (!entry || !stored) return undefined;
-    // The write's image: the stored row, no formula on it, the folded roll-ups in place.
-    const scratch: Record<string, unknown> = { ...stored, ...moved };
+  type Served = NonNullable<ReturnType<typeof served.get>>;
+  /** What the recompute's write stores from `from` with the folded roll-ups `moved`: no formula on it, the stored fields computed. */
+  const written = (entry: Served, from: Record<string, unknown>, moved: Readonly<Record<string, number | null>>): Record<string, unknown> => {
+    const scratch: Record<string, unknown> = { ...from, ...moved };
     for (const name of entry.formulaFields) delete scratch[name];
     // Twice, as the write computes them: before its hooks, then over the row with the moved values.
     for (let pass = 0; pass < 2 && entry.storedPlan.length > 0; pass += 1) {
       applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels);
     }
+    return scratch;
+  };
+  /** Parent (`object|id`) → the row the last recompute the fold carried for it stored. */
+  const images = new Map<string, Record<string, unknown>>();
+  const dependents = ((object, parentId, moved) => {
+    const entry = served.get(object);
+    const stored = entry?.rows.get(parentId);
+    if (!entry || !stored) return undefined;
+    // The row the rule reads: the one the previous row's recompute stored, or, before any, the
+    // write's image over the stored row.
+    const image = images.get(`${object}|${parentId}`);
+    const scratch = image ? { ...image, ...moved } : written(entry, stored, moved);
     // The read's row: the formulas the plan does not recompute back at their stored values.
     for (const name of entry.unplannedFormulas) if (name in stored) scratch[name] = stored[name];
     if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels);
     const values: Record<string, unknown> = {};
     for (const step of [...entry.storedPlan, ...entry.formulaPlan]) values[step.name] = scratch[step.name];
     return values;
+  }) as SummaryDependents;
+  // After each matched row, the recompute writes the parents it names: the next write starts from that row.
+  dependents.advance = (object, parentId, moved) => {
+    const entry = served.get(object);
+    const stored = entry?.rows.get(parentId);
+    if (!entry || !stored || entry.storedPlan.length === 0) return;
+    const key = `${object}|${parentId}`;
+    images.set(key, written(entry, images.get(key) ?? stored, moved));
   };
+  return dependents;
 }

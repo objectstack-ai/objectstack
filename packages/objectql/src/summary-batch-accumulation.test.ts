@@ -248,6 +248,25 @@ describe('[#34465] the fold hands the folded roll-ups to what computes the paren
     expect(binding.order!.row).toEqual({ id: 'o1', remaining: 20 });
     expect(asked).toEqual([['xt_order', 'o1', { total: 80 }], ['xt_order', 'o1', { total: 110 }]]);
   });
+
+  it('tells the dependents, after each judged row, every parent that row names (as stored and as left) with the roll-ups it leaves', () => {
+    const sum = desc({});
+    const matched: MatchedRowStates[] = [
+      { previous: { id: 'a', order: 'o1', amount: 40 }, next: { id: 'a', order: 'o2', amount: 40 } },
+      { previous: { id: 'b', order: 'o1', amount: 40 }, next: { id: 'b', order: 'o1', amount: 70 } },
+    ];
+    const base = (s: number) => ({ count: 0, sum: s, nonNull: 0, min: null, max: null });
+    const fold = createPredicateUpdateSummaryFold(new Map([[sum, new Map([['o1', base(80)], ['o2', base(0)]])]]), matched, CHILD_FIELDS)!;
+    const advanced: unknown[] = [];
+    const dependents = Object.assign(() => undefined, { advance: (object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => { advanced.push([object, parentId, { ...moved }]); } });
+    fold.setDependents(dependents);
+    fold.advance(0);
+    fold.advance(1);
+    expect(advanced).toEqual([
+      ['xt_order', 'o1', { total: 40 }], ['xt_order', 'o2', { total: 40 }],
+      ['xt_order', 'o1', { total: 70 }],
+    ]);
+  });
 });
 
 describe('[#34465] loadPredicateUpdateSummaryBases — the base a predicate update folds over', () => {

@@ -1432,6 +1432,12 @@ describe('[#34465] a predicate update judges each matched row against the parent
         cap_ref: { type: 'lookup', reference: 'inv_cap' },
         cap_left: { type: 'formula', expression: 'record.cap_ref.amount - record.total', returnType: 'number' },
         slack: { type: 'number', expression: { dialect: 'cel', source: 'record.remaining' } },
+        // A stored computed field reading its own stored value and the roll-up: a high-water mark.
+        peak: { type: 'number', expression: { dialect: 'cel', source: 'record.peak == null || record.total > record.peak ? record.total : record.peak' } },
+        // Three stored computed fields chained against declaration order: x reads y, y reads z, z reads the roll-up.
+        chain_x: { type: 'number', expression: { dialect: 'cel', source: 'record.chain_y' } },
+        chain_y: { type: 'number', expression: { dialect: 'cel', source: 'record.chain_z' } },
+        chain_z: { type: 'number', expression: { dialect: 'cel', source: 'record.total' } },
         // A formula over the roll-up that also reads a formula reading no roll-up (`room` over `ceiling`).
         extra: { type: 'number' },
         ceiling: { type: 'formula', expression: 'record.budget + record.extra', returnType: 'number' },
@@ -1469,6 +1475,8 @@ describe('[#34465] a predicate update judges each matched row against the parent
         // A stored computed field reading a formula: what does the rule read for it?
         { name: 'slack_set', type: 'script', severity: 'error', message: 'invoice slack is set', condition: "record.tag == 'slack' && record.inv.slack != null" },
         { name: 'gap_floor', type: 'script', severity: 'error', message: 'invoice head gap below 0', condition: "record.tag == 'gap' && record.inv.head_gap < 0" },
+        { name: 'peak_cap', type: 'script', severity: 'error', message: 'invoice peak at 150 or more', condition: "record.tag == 'peak' && record.inv.peak >= 150" },
+        { name: 'chain_cap', type: 'script', severity: 'error', message: 'invoice chain at 150 or more', condition: "record.tag == 'chain' && record.inv.chain_x != null && record.inv.chain_x >= 150" },
         { name: 'room_floor', type: 'script', severity: 'error', message: 'invoice room below 0', condition: "record.tag == 'room' && record.inv.room != null && record.inv.room < 0" },
       ],
     } as any);
@@ -1672,6 +1680,47 @@ describe('[#34465] a predicate update judges each matched row against the parent
     // Computed once in declaration order, `head_gap` would read the stored `headroom` (20) and the rule admit both rows.
     expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })), 'invoice head gap below 0');
     expect(inv(p.id).head_gap).toBe(20);
+  });
+
+  it('one by one (the reference answer), three rows: a high-water mark reads every total so far, so the third line reads 160 and is refused', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 0, tag: 'x' });
+    const b = await engine.insert('inv_line', { inv: p.id, amount: 100, tag: 'x' });
+    const c = await engine.insert('inv_line', { inv: p.id, amount: 0, tag: 'peak' });
+    expect(inv(p.id).peak).toBe(100);
+    // Totals 100 -> 160 -> 120: the peak climbs to 160 at the first update and stays there.
+    await engine.update('inv_line', { id: a.id, amount: 60 });
+    await engine.update('inv_line', { id: b.id, amount: 60 });
+    expect(inv(p.id).peak).toBe(160);
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { id: c.id, amount: 60 })), 'invoice peak at 150 or more');
+  });
+
+  it('predicate update, three rows: each recompute starts from the row the previous one stored, so the third row reads the peak of 160 and is refused', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 0, tag: 'x' }, { inv: p.id, amount: 100, tag: 'x' }, { inv: p.id, amount: 0, tag: 'peak' }]);
+    // Restarted from the stored row at every row, the third would read the larger of 100 and 120 and be admitted.
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 60 }, { where: { inv: p.id }, multi: true })), 'invoice peak at 150 or more');
+    expect(inv(p.id).peak).toBe(100);
+  });
+
+  it('one by one (the reference answer), three rows: a chain declared against its reading order moves one write behind, so the third line reads 150 and is refused', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'x' });
+    const b = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'x' });
+    const c = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'chain' });
+    // Totals 120 -> 150 -> 180: `chain_x` holds the total from one write before.
+    await engine.update('inv_line', { id: a.id, amount: 70 });
+    expect(inv(p.id).chain_x).toBe(120);
+    await engine.update('inv_line', { id: b.id, amount: 70 });
+    expect(inv(p.id).chain_x).toBe(150);
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { id: c.id, amount: 70 })), 'invoice chain at 150 or more');
+  });
+
+  it('predicate update, three rows: the chain is carried forward as one by one moves it, so the third row reads 150 and is refused', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'x' }, { inv: p.id, amount: 40, tag: 'x' }, { inv: p.id, amount: 40, tag: 'chain' }]);
+    // Restarted from the stored row at every row, `chain_x` would read 120 at the third row and the rule admit.
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })), 'invoice chain at 150 or more');
   });
 
   it('predicate update that reparents: the header a parent. predicate reads counts the rows moved before', async () => {
