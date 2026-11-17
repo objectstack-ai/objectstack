@@ -257,6 +257,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/build-probes-dataset-holders.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/meta-compile-cache.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3562,6 +3567,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/hook-refusal-after-decision.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/hook-refusal-after-decision.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3933,6 +3948,21 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/implicit-account-linking.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/invitation-one-step-acceptance-34257.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/invitation-one-step-acceptance-34257.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/invitation-one-step-acceptance-34257.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -5594,6 +5624,21 @@
     {
       "file": "packages/services/service-automation/src/datasource-pull.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/dry-run.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/dry-run.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/dry-run.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

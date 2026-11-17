@@ -1129,6 +1129,15 @@ function isPinnedRightColumn(col: { className?: unknown }): boolean {
 const AUTO_WIDTH_ATTR = 'data-auto-width-key';
 
 /**
+ * The narrowest an auto-sized foreign-key column is drawn in an editable
+ * table, where its cells edit through the record picker (objectstack#34601):
+ * room for the picker's trigger to show a name. The same width `GridField`
+ * (`@object-ui/fields`) gives its lookup columns, `MIN_WIDTH_BY_TYPE.lookup`;
+ * this layer cannot import that package, so the value is spelled here.
+ */
+const LOOKUP_PICKER_MIN_WIDTH = 168;
+
+/**
  * The column an auto-width target names: only one the estimate sizes (no
  * explicit `width`, not `fitContent`), and never a masked one, whose values
  * the estimate does not read (objectui#10657). A chip column is read with an
@@ -1548,7 +1557,17 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       width: col.width,
       fitContent: col.fitContent,
       masked: col.masked === true,
+      // objectstack#34601 — a foreign-key column whose cells edit opens the
+      // record picker; see `pickerFloor` below.
+      pickerEdits: editable && col.foreignKey === true && col.editable !== false,
     }));
+    // objectstack#34601 — the floor of a column whose editor is the record
+    // picker: sized from the short names its cells draw, an editable lookup
+    // column left the picker's trigger a few dozen px, and the open list cut
+    // every name. Only the estimate is floored: an explicit width (an author's
+    // pin, a user's resize) is skipped above it and drawn as written.
+    const pickerFloor = (col: { pickerEdits: boolean }, width: number) =>
+      (col.pickerEdits ? Math.max(width, LOOKUP_PICKER_MIN_WIDTH) : width);
     for (const col of cols) {
       if (col.width) continue; // Skip columns with explicit widths
       // `fitContent` columns (e.g. the row-actions column) size to their own
@@ -1571,7 +1590,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // cell (and the header) needs to render whole, padding included.
       const drawnPx = col.masked ? undefined : drawnSizes?.px?.[col.accessorKey];
       if (drawnPx !== undefined) {
-        widths[col.accessorKey] = Math.min(400, Math.max(80, drawnPx));
+        widths[col.accessorKey] = pickerFloor(col, Math.min(400, Math.max(80, drawnPx)));
         continue;
       }
       const headerLen = (col.header || '').length;
@@ -1599,10 +1618,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         }
       }
       // Estimate pixel width: ~8px per character + 48px padding, min 80, max 400
-      widths[col.accessorKey] = Math.min(400, Math.max(80, maxLen * 8 + 48));
+      widths[col.accessorKey] = pickerFloor(col, Math.min(400, Math.max(80, maxLen * 8 + 48)));
     }
     return widths;
-  }, [rawColumns, data, drawnSizes]);
+  }, [rawColumns, data, drawnSizes, editable]);
 
   // State management
   const [searchQuery, setSearchQuery] = useState('');

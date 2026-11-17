@@ -254,7 +254,7 @@ export default class MigrateAuditSideCopies extends Command {
         update: (object, data, options) => engine.update(object, data, options),
       };
 
-      const seal = redaction.seal(stack.kernel, engine);
+      const seal = await redaction.seal(stack.kernel, engine);
       // [ADR-0154 D3 amended] An --apply run holds the audit seal lock from before its first rewrite to after its
       // last, archive runs included, on the copy tables it rewrites (`--object` narrows them), so no sealer pass
       // seals a row it rewrites; where the database offers no session lock, a run on a sealed object needs

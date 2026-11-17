@@ -1203,6 +1203,7 @@ export {
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
+  lintInlineEditBulk,
   lintDataModel,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
@@ -1214,6 +1215,7 @@ export {
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
 
@@ -1249,10 +1251,15 @@ export type {
 // ladder (request locale, then the workspace default, then `en`) over the
 // platform locale table. The door that holds the request puts it on the wire
 // as `RuntimeAuthoringIssueSchema.userMessage`; also on
-// `@objectstack/lint/runtime`. The catalogs and the ladder itself stay
-// internal: `findingUserMessage` is their one caller-facing door.
-export { findingUserMessage } from './finding-user-text.js';
-export type { UserTextParams } from './finding-user-text.js';
+// `@objectstack/lint/runtime`. The rules' catalogs stay internal:
+// `findingUserMessage` is their one caller-facing door. The ladder is exported
+// beside it (`userTextLocaleOf`, `renderUserText`) for a producer outside this
+// package that keeps its own catalog next to its own findings, such as the
+// post-publish build probes in `@objectstack/metadata-protocol`
+// (`RuntimeBuildIssueSchema.userMessage`), so every producer's sentences go
+// through the one ladder and none writes a second.
+export { findingUserMessage, renderUserText, userTextLocaleOf } from './finding-user-text.js';
+export type { UserTextEntry, UserTextParams } from './finding-user-text.js';
 
 // The runtime publish gate over that registry. Also published as the
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports.

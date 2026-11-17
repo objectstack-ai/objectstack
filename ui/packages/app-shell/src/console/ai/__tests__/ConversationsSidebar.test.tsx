@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const remove = vi.fn(async () => undefined);
 const rename = vi.fn(async () => undefined);
@@ -112,5 +112,61 @@ describe('ConversationsSidebar', () => {
     const mark = document.querySelector('mark');
     expect(mark).toBeInTheDocument();
     expect(mark).toHaveTextContent(/pipe/i);
+  });
+});
+
+// objectstack#34608 (ui ADR-0057 as amended) — hosted by the chat drawer, the
+// history moves the drawer instead of the address: a row, "New" and deleting
+// the open conversation call the host back and never navigate, and the row
+// the drawer shows is the highlighted one, whatever the URL says.
+describe('ConversationsSidebar — hosted by the chat drawer (objectstack#34608)', () => {
+  function Where() {
+    const location = useLocation();
+    return <output data-testid="where">{`${location.pathname}${location.search}`}</output>;
+  }
+
+  function renderHosted() {
+    const onSelectConversation = vi.fn();
+    const onNewConversation = vi.fn();
+    const onNavigate = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/apps/crm/opportunity']}>
+        <ConversationsSidebar
+          userId="u1"
+          apiBase="/api/v1/ai"
+          activeConversationId="conv-b"
+          onSelectConversation={onSelectConversation}
+          onNewConversation={onNewConversation}
+          onNavigate={onNavigate}
+        />
+        <Where />
+      </MemoryRouter>,
+    );
+    return { onSelectConversation, onNewConversation, onNavigate };
+  }
+
+  it('a row opens that conversation in the drawer, leaving the URL alone', () => {
+    const { onSelectConversation, onNavigate } = renderHosted();
+    fireEvent.click(screen.getByTestId('ai-conversation-select-conv-a'));
+    expect(onSelectConversation).toHaveBeenCalledWith(expect.objectContaining({ id: 'conv-a' }));
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/opportunity');
+  });
+
+  it('highlights the conversation the drawer shows', () => {
+    renderHosted();
+    expect(screen.getByTestId('ai-conversation-row-conv-b').className).toContain('border-primary');
+    expect(screen.getByTestId('ai-conversation-row-conv-a').className).not.toContain('border-primary');
+  });
+
+  it('"New" and deleting the open conversation start a new one in the drawer', async () => {
+    const { onNewConversation } = renderHosted();
+    fireEvent.click(screen.getByTestId('ai-new-chat'));
+    expect(onNewConversation).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('ai-conversation-delete-conv-b'));
+    await vi.waitFor(() => expect(onNewConversation).toHaveBeenCalledTimes(2));
+    expect(remove).toHaveBeenCalledWith('conv-b');
+    expect(screen.getByTestId('where')).toHaveTextContent('/apps/crm/opportunity');
   });
 });

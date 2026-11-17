@@ -118,6 +118,8 @@ import {
 } from '@object-ui/plugin-chatbot/core';
 
 import { AppHeader } from '../../layout/AppHeader.js';
+import { readBuilderHandoffState, type BuilderHandoffState } from '../../layout/chatDockTarget.js';
+import { useOpenAssistant } from '../../layout/chatDockControl.js';
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
 import { armChatDockExpanded, readDockReturnLocation } from '../../layout/chatDockState.js';
 import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
@@ -152,7 +154,12 @@ import { artifactStudioPath } from './artifactStudioPath.js';
 import { studioChangesReviewTarget } from '../../views/studio-design/studioChangesLink.js';
 import { BuildDebugDrawer } from './BuildDebugDrawer.js';
 import { isConversationZh } from './conversationLanguage.js';
-import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundAgentText.js';
+import {
+  resolveAttachmentNoteText,
+  resolveOutboundAgentText,
+  type AttachmentNoteKey,
+  type OutboundAgentTextKey,
+} from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
 import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
@@ -503,9 +510,12 @@ export function agentEmptyState(
               app: editContext.appLabel,
             })
           : t('console.ai.empty.editApp.titleGeneric', { defaultValue: 'Edit this app' }),
-        description: t('console.ai.empty.editApp.description', {
+        // objectstack#34608 item 4 — the maker's one composer answers data
+        // questions too (build is a data superset, cloud#1673), so the empty
+        // state offers both: asking about the app's data, and changing it.
+        description: t('console.ai.empty.editApp.askOrChangeDescription', {
           defaultValue:
-            'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
+            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         }),
       };
     }
@@ -855,32 +865,9 @@ export function resolveCollapseToDockTarget(
  *  render would churn the pane's `initialMessages` identity for no reason. */
 const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
 
-/**
- * objectui#12493 — the ADR-0057 P4 Builder handoff ("Open in Builder →" on the
- * `ask` surface) travels as react-router NAVIGATION STATE, never as a URL
- * parameter. A URL can be written by anyone and opened by a signed-in user in
- * one click; the build surface sends its seeded first message with no further
- * user action, so a URL-borne prompt would let a link author (and, with
- * `autoPublishAiBuilds`, publish) metadata as that user. Navigation state can
- * only be set by this app's own in-app `navigate()` call.
- */
-interface BuilderHandoffState {
-  /** The build prompt the `ask` agent handed off; sent once as the build surface's first message. */
-  handoffPrompt?: string;
-  /** The source `ask` conversation id, forwarded as the build agent's first-turn context (cloud#817). */
-  parentConversationId?: string;
-}
-
-/** Reads the handoff from `location.state`; anything that is not a non-empty string is absent. */
-function readBuilderHandoffState(state: unknown): BuilderHandoffState {
-  if (!state || typeof state !== 'object') return {};
-  const record = state as Record<string, unknown>;
-  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
-  return {
-    handoffPrompt: text(record.handoffPrompt),
-    parentConversationId: text(record.parentConversationId),
-  };
-}
+// objectui#12493 — the ADR-0057 P4 Builder handoff travels as navigation state
+// (or an in-memory drawer call), never in a URL: `BuilderHandoffState` and its
+// reader live with the drawer's target grammar (objectstack#34608).
 
 export interface PendingFirstMessage {
   content: string;
@@ -2011,15 +1998,19 @@ export function ChatPane({
   // own packageId, else this surface's edit package (`?package=` only scopes the
   // surface; it sends nothing). cloud#817: also carry THIS (ask) thread's id so
   // the Builder's first turn starts with the ask conversation as context.
+  //
+  // objectstack#34608 — inside the console's drawer this retargets the drawer
+  // in place; under no drawer host it navigates to `/ai/build` as before.
+  const openAssistant = useOpenAssistant();
   const openBuilder = useCallback(
     (handoff: { prompt: string; packageId?: string }) => {
       const pkg = handoff.packageId || editPackageId;
       const state: BuilderHandoffState = {};
       if (handoff.prompt) state.handoffPrompt = handoff.prompt;
       if (conversationId) state.parentConversationId = conversationId;
-      navigate(`/ai/build${pkg ? `?package=${encodeURIComponent(pkg)}` : ''}`, { state });
+      openAssistant({ agent: 'build', packageId: pkg }, state);
     },
-    [navigate, editPackageId, conversationId],
+    [openAssistant, editPackageId, conversationId],
   );
 
   // cloud#1658 — land the user on the record an `open_record` hand-off names.
@@ -2378,6 +2369,10 @@ export function ChatPane({
       resolveOutboundAgentText(convZh, key, vars),
     [convZh],
   );
+  // The thread so far, read when a turn is prepared (objectstack#34461)
+  // without making the send callbacks change identity on every message.
+  const threadMessagesRef = useRef({ runtimeMessages, initialMessages });
+  threadMessagesRef.current = { runtimeMessages, initialMessages };
   const planApproveMessage = outboundText('planApproveMessage');
   const planApproveDefaultsMessage = outboundText('planApproveDefaultsMessage');
   // Same rule for the granular change-confirm card. It used to send a hard-coded
@@ -2459,6 +2454,16 @@ export function ChatPane({
     ): Promise<{ text: string; parts?: readonly ChatFilePart[]; sentText: string }> => {
       const sheets = files.filter(isSpreadsheetAttachment);
       const nonSheets = files.filter((f) => !isSpreadsheetAttachment(f));
+      // objectstack#34461 — the notes follow the conversation's language, as
+      // all outbound text does: the turn's own words decide it, as they will
+      // once the turn is in the thread; a turn with no words takes the
+      // thread's language so far.
+      const thread = threadMessagesRef.current;
+      const zh = content.trim()
+        ? isConversationZh([{ role: 'user', content }])
+        : isConversationZh(thread.runtimeMessages) || isConversationZh(thread.initialMessages);
+      const note = (key: AttachmentNoteKey, vars: Readonly<Record<string, string>>) =>
+        resolveAttachmentNoteText(zh, key, vars);
       let merged = content;
       if (sheets.length > 0) {
         const cap = (s: string) => (s.length > 40 ? `${s.slice(0, 40)}…` : s);
@@ -2471,22 +2476,29 @@ export function ChatPane({
             const headers = rows[0] ?? [];
             const samples = rows.slice(1, 4);
             merged += [
-              `\n\n[附件表格 ${f.name} — ${Math.max(0, rows.length - 1)} 数据行 × ${headers.length} 列(控制台已在本地解析,文件本体未上传)]`,
-              `表头: ${line(headers)}`,
-              ...samples.map((r, i) => `样例${i + 1}: ${line(r)}`),
+              `\n\n${note('sheetBrief', {
+                name: f.name,
+                rows: String(Math.max(0, rows.length - 1)),
+                columns: String(headers.length),
+              })}`,
+              note('sheetHeaders', { cells: line(headers) }),
+              ...samples.map((r, i) => note('sheetSample', { n: String(i + 1), cells: line(r) })),
             ].join('\n');
           } catch (err) {
-            merged += `\n\n[附件表格 ${f.name}] 解析失败(${err instanceof Error ? err.message : 'unknown'})— 请引导用户改用对象列表的 Import 上传该文件。`;
+            merged += `\n\n${note('sheetParseFailed', {
+              name: f.name,
+              reason: err instanceof Error ? err.message : 'unknown',
+            })}`;
           }
         }
-        if (sheets.length > 2) merged += `\n\n(另有 ${sheets.length - 2} 个表格附件未读取 — 一次最多读取 2 个。)`;
+        if (sheets.length > 2) merged += `\n\n${note('sheetsNotRead', { count: String(sheets.length - 2) })}`;
       }
       // What `onSent` is told: the sheet brief is part of it, the file notes
       // are not (as before objectstack#34462).
       const sentText = merged;
       if (nonSheets.length === 0) return { text: merged, sentText };
       const outcome = await uploadChatAttachments(nonSheets, upload, window.location.href);
-      return { text: merged + chatAttachmentNotes(outcome), parts: outcome.parts, sentText };
+      return { text: merged + chatAttachmentNotes(outcome, zh), parts: outcome.parts, sentText };
     },
     [upload],
   );
@@ -2649,9 +2661,12 @@ export function ChatPane({
   // change in <app>" + change-oriented starters, instead of the from-scratch
   // magic-flow guidance. Computed here (not earlier) so it can read the app name.
   const editing = isBuildSurface && Boolean(editPackageId);
+  // objectstack#34608 item 4 — bound to an app, the maker's starters lead with
+  // two data questions before the change-oriented ones.
   const suggestions = useMemo<string[] | undefined>(() => {
     if (hydrated.length > 0) return undefined;
-    return buildAgentSuggestions(activeAgent, activeAgentLabel, t, editing);
+    const starters = buildAgentSuggestions(activeAgent, activeAgentLabel, t, editing);
+    return editing ? [...editAppDataSuggestions(t), ...starters] : starters;
   }, [hydrated.length, activeAgent, activeAgentLabel, t, editing]);
   const emptyState = useMemo(
     () => agentEmptyState(t, activeAgent, editing ? { appLabel: editAppLabel } : undefined),
@@ -2819,7 +2834,7 @@ export function ChatPane({
             // to the Select when many custom agents would overflow the header.
             <Tabs
               value={activeAgent}
-              onValueChange={(name) => navigate(`/ai/${agentRouteName(name)}`)}
+              onValueChange={(name) => openAssistant({ agent: name })}
             >
               <TabsList
                 className="h-7 gap-0.5 p-0.5"
@@ -2842,7 +2857,7 @@ export function ChatPane({
           ) : (
             <Select
               value={activeAgent}
-              onValueChange={(name) => navigate(`/ai/${agentRouteName(name)}`)}
+              onValueChange={(name) => openAssistant({ agent: name })}
               disabled={agentsLoading}
             >
               <SelectTrigger
@@ -2914,7 +2929,7 @@ export function ChatPane({
                   className="text-xs"
                   onSelect={() => {
                     if (pkg.id !== boundPackageId) {
-                      navigate(`/ai/build?package=${encodeURIComponent(pkg.id)}`);
+                      openAssistant({ agent: 'build', packageId: pkg.id });
                     }
                   }}
                 >
@@ -2927,7 +2942,7 @@ export function ChatPane({
               <DropdownMenuItem
                 data-testid="ai-build-package-option-new"
                 className="text-xs"
-                onSelect={() => navigate('/ai/build?new=1')}
+                onSelect={() => openAssistant({ agent: 'build', fresh: true })}
               >
                 <SparklesIcon className="size-3 shrink-0" />
                 {t('console.ai.newApp', { defaultValue: 'New app' })}
@@ -3585,6 +3600,18 @@ function editAppSuggestions(t: TranslationFn): string[] {
     t('console.ai.suggestions.editApp.addSampleData', {
       defaultValue: 'Fill the existing objects with realistic sample records so I can demo the app.',
     }),
+  ];
+}
+
+/**
+ * objectstack#34608 item 4 — the data-question starters the build agent offers
+ * beside its edit chips when bound to an app: the maker's composer answers data
+ * questions too. Reuses the data agent's own strings.
+ */
+export function editAppDataSuggestions(t: TranslationFn): string[] {
+  return [
+    t('console.ai.suggestions.dataChat.recentRecords', { defaultValue: 'List the 5 most recently created records.' }),
+    t('console.ai.suggestions.dataChat.recordCounts', { defaultValue: 'Count records for each object.' }),
   ];
 }
 

@@ -475,6 +475,39 @@ function isDeclaredRegisterRefusal(err: unknown): boolean {
 }
 
 /**
+ * [#34407, #34432] The answer to a package body the artifact resolver refuses
+ * before any write (`resolveStackCollection` → `resolveArtifactPackageEntries`:
+ * `INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`,
+ * `DUPLICATE_ARTIFACT_PACKAGE`, each an ADR-0112 envelope with its declared
+ * `status: 422`): that refusal's own declared status and code, the resolver's
+ * sentence, and that nothing was written. The one reader of such a refusal on
+ * this door's pre-write steps — the D5e gate (2b) and the declared renames
+ * (2c″) both read the bodies through the resolver, so the same bytes are
+ * answered the same way whichever step reads them first.
+ *
+ * `undefined` for a throw that declares no status below 500 — an undeclared
+ * throw (the resolver's own dependency-cycle error among them) or a declared
+ * 5xx: the caller rethrows it, never relabels it.
+ */
+function declaredRefusalAnswer(
+    manifestId: string,
+    err: unknown,
+): { status: number; body: { success: false; error: { code: string; message: string } } } | undefined {
+    const refusal = resolveThrownHttpError(err);
+    if (refusal.declaredStatus === undefined || refusal.status >= 500) return undefined;
+    return {
+        status: refusal.status,
+        body: {
+            success: false,
+            error: {
+                code: refusal.code,
+                message: `Package '${manifestId}' cannot be installed: ${String((err as any)?.message ?? err)} Nothing was installed or written.`,
+            },
+        },
+    };
+}
+
+/**
  * [#21490] The one `protocol` verb this plugin calls: the runner of the
  * uninstall cleanups domain plugins register through
  * `registerUninstallCleanup` — the same registry, through the same runner,
@@ -1297,16 +1330,32 @@ function planUnitWithdrawal(
 }
 
 /**
- * [#28039] The datasources a package body declares, as `AppPlugin` reads a
- * stack's: a list, or a map keyed by name.
+ * [#28039] The datasources a package artifact declares, as `AppPlugin` reads a
+ * stack's: a list, or a map keyed by name. The ONE reading for every door of
+ * this plugin that judges or connects them — the held-name check (2a), the
+ * connect of an install or an upgrade (4b′) and the `kernel:ready` rehydrate.
+ *
+ * [#34431, ADR-0130 D4] The list is read through `resolveStackCollection`, as
+ * the seed datasets are ({@link seedDatasetsOf}): the top-level list when the
+ * artifact carries one (a flat bundle, or a composed artifact that still
+ * carries its flattened union — read once, never again per package),
+ * otherwise every package body's, in the artifact's package order. A composed
+ * bundle carries no top-level `datasources`, and a top-level-only read
+ * connected none of its package bodies' datasources and judged none of their
+ * names. Entries are kept as declared, a name declared twice included, as a
+ * flat bundle's pair is: the runtime's path judges the pair.
+ *
+ * The map form is read at the top level only, where a flat bundle may carry
+ * it: a package body's `datasources` is a list by the package entry schema,
+ * and the resolver refuses a body that carries a map.
+ *
+ * @throws The resolver's ADR-0112 refusal for a malformed `packages`
+ *   (`INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`, …).
  */
-function declaredDatasources(body: unknown): any[] {
-    const defs = isPlainObject(body) ? body.datasources : undefined;
-    return Array.isArray(defs)
-        ? defs
-        : isPlainObject(defs)
-            ? Object.entries(defs).map(([name, def]) => ({ name, ...(def as any) }))
-            : [];
+function declaredDatasources(artifact: unknown): any[] {
+    const top = isPlainObject(artifact) ? artifact.datasources : undefined;
+    if (isPlainObject(top)) return Object.entries(top).map(([name, def]) => ({ name, ...(def as any) }));
+    return resolveStackCollection(artifact, 'datasources');
 }
 
 /**
@@ -3061,7 +3110,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     engine as well (a driver the legacy `onEnable` bridge registered
         //     has no metadata item), and a holder that cannot be read refuses
         //     `503`: a check that did not run is never taken for "no holder".
-        const heldDatasource = await this.findHeldDatasourceName(ctx, manifest, manifestId);
+        //     [#34431] The names are every package body's on a composed
+        //     bundle, so a `packages` the resolver refuses is answered here
+        //     with that refusal, before any write
+        //     ({@link declaredRefusalAnswer}), as 2b and 2c″ answer it. An
+        //     undeclared throw stays a throw.
+        let heldDatasource: Awaited<ReturnType<MarketplaceInstallLocalPlugin['findHeldDatasourceName']>>;
+        try {
+            heldDatasource = await this.findHeldDatasourceName(ctx, manifest, manifestId);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
+        }
         if (heldDatasource && 'reading' in heldDatasource) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] install of ${manifestId} refused: whether another holder owns its datasource `
@@ -3123,20 +3184,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     `packages` the resolver refuses (ADR-0112 `code` + its declared
         //     4xx status, the refusal the `manifest` service raises on the same
         //     bytes) is answered here, before anything is written — never
-        //     thrown out of the door. An undeclared throw stays a throw.
+        //     thrown out of the door ({@link declaredRefusalAnswer}). An
+        //     undeclared throw stays a throw.
         let gate: ReturnType<MarketplaceInstallLocalPlugin['evaluateGlobalUniqueGate']>;
         try {
             gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
-        } catch (err: any) {
-            const refusal = resolveThrownHttpError(err);
-            if (refusal.declaredStatus === undefined || refusal.status >= 500) throw err;
-            return c.json({
-                success: false,
-                error: {
-                    code: refusal.code,
-                    message: `Package '${manifestId}' cannot be installed: ${String(err?.message ?? err)} Nothing was installed or written.`,
-                },
-            }, refusal.status);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
         }
         if (gate.blocked) {
             ctx.logger?.warn?.(
@@ -3204,7 +3260,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      the physical table by the driver's own rule
         //      ({@link evaluateDeclaredRenames}); a declaration it cannot
         //      honour is refused `422 VALIDATION_ERROR`, naming the field, the
-        //      old key and the reason. Asked before 2c′, so a refusal no token
+        //      old key and the reason; [#34432] a body the artifact resolver
+        //      refuses is answered with that refusal's own status and code, as
+        //      at 2b, and only a table that could not be read answers 503.
+        //      Asked before 2c′, so a refusal no token
         //      answers is never preceded by a 409 asking for one. The carry
         //      itself runs right before step 3, the last moment the running
         //      version still serves the old key.
@@ -4566,6 +4625,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * - **A refusal**: `422 VALIDATION_ERROR` (this door's body refusal),
      *   each in `details.refusals` with its object, field, old key(s) and
      *   reason. No token answers it: the package must change.
+     * - **A body the artifact resolver refuses** (a composed artifact whose
+     *   `packages` is not a list, or one of whose entries the entry contract
+     *   refuses): that refusal's own declared status and code
+     *   ({@link declaredRefusalAnswer}, step 2b's reader), before any table is
+     *   read. An undeclared throw out of the resolver is rethrown, never
+     *   relabelled.
      * - **A reading that failed** (the table could not be read): `503
      *   SERVICE_UNAVAILABLE`, never taken for "nothing to carry".
      * - Otherwise the tables to carry, which step 2f carries.
@@ -4575,7 +4640,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         converted: unknown,
         installed: unknown,
-    ): Promise<{ refusal?: { body: Record<string, unknown>; status: 422 | 503 }; tables: InstallRenameTable[] }> => {
+    ): Promise<{ refusal?: { body: Record<string, unknown>; status: number }; tables: InstallRenameTable[] }> => {
+        // [#34432] The bodies the plan reads, resolved FIRST through the fold
+        // the plan reads them by ({@link packageUpgradeSideOf}: the
+        // `resolveStackCollection` reads of `objects`, `objectExtensions` and
+        // `data`), so a body the resolver refuses is told apart from a table
+        // that could not be read: the resolver is deterministic over the same
+        // bytes, so the plan below never meets its refusal, and what the plan
+        // throws is answered as the table read's. Without this, the
+        // resolver's 422 was answered as the 503 below and its author was told
+        // to retry once the database answers.
+        try {
+            packageUpgradeSideOf(converted);
+            if (installed !== null && installed !== undefined) packageUpgradeSideOf(installed);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return { tables: [], refusal: refused };
+        }
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
             plan = await planDeclaredRenames(ctx, manifestId, converted, installed);
@@ -6832,6 +6914,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * `failed-credentials` verdict, which the datasource answers and a read of
      * a bound object names (`ERR_DATASOURCE_UNAVAILABLE`).
      *
+     * [#34431, ADR-0130 D4] The datasources and the objects are read through
+     * the one reader of a package-owned collection ({@link declaredDatasources},
+     * `resolveStackCollection`), so a composed bundle hands the path every
+     * package body's, in package order, as a flat bundle hands its own. Every
+     * one is stamped with `manifestId`, the id the ledger entry, the uninstall
+     * cleanup and the held-name judge key on.
+     *
      * Answers each declared datasource's verdict, or `undefined` when the
      * package declares none (or the runtime predates the path). Never throws:
      * the package is installed either way.
@@ -6842,7 +6931,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         version: string | undefined,
     ): Promise<Array<{ name: string; status: string }> | undefined> => {
-        const declared = declaredDatasources(manifest);
+        let declared: any[];
+        let objects: any[];
+        try {
+            declared = declaredDatasources(manifest);
+            objects = resolveStackCollection(manifest, 'objects');
+        } catch (err: any) {
+            // The register before this step resolved the same bytes, so this
+            // is not expected; nothing is connected, and the log says so.
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] the datasources of ${manifestId} could not be read, so none is registered or connected: `
+                + `${err?.message ?? err}. The objects bound to them have no driver until a fixed version is installed.`,
+            );
+            return undefined;
+        }
         let connect: typeof import('@objectstack/runtime')['connectPackageDatasources'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
@@ -6857,7 +6959,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             return undefined;
         }
-        const objects = isPlainObject(manifest) && Array.isArray(manifest.objects) ? manifest.objects : [];
         try {
             // Called with an empty list too: a reinstall whose new version
             // declares none withdraws what the previous version registered.
@@ -7132,14 +7233,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * automation service, or one that cannot list, the status is `unknown`.
      * `writable` is the references the credential door can store, as the
      * listing says; `undefined` when there is no listing to say it.
+     *
+     * [#34431, ADR-0130 D4] `connectors` through `resolveStackCollection`: the
+     * top-level list when the body carries one, otherwise every package
+     * body's, in package order. A composed bundle carries no top-level
+     * `connectors`, and the top-level read named none of its credentials.
      */
     private describeInstalledCredentialRefs = async (
         ctx: PluginContext,
         converted: unknown,
     ): Promise<{ entries: InstalledCredentialRef[]; writable?: ReadonlySet<string> } | undefined> => {
-        const connectors = (converted as { connectors?: unknown } | null)?.connectors;
         const declared = new Map<string, string[]>();
-        for (const raw of Array.isArray(connectors) ? connectors : []) {
+        for (const raw of resolveStackCollection(converted, 'connectors')) {
             const entry = raw as { name?: unknown; provider?: unknown; auth?: { credentialRef?: unknown } } | null;
             if (typeof entry?.name !== 'string' || typeof entry.provider !== 'string') continue;
             const ref = entry.auth?.credentialRef;
@@ -7273,7 +7378,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             const bundles: Array<Record<string, unknown>> = [];
             bundles.push(...(resolveStackCollection(manifest, 'translations') as Array<Record<string, unknown>>));
-            if (Array.isArray(manifest?.i18n)) bundles.push(...manifest.i18n);
 
             if (bundles.length > 0) {
                 let i18nService: any;
