@@ -640,7 +640,7 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
   const EDGES = [
     { source: 'start', target: 'manager_review' },
     { source: 'manager_review', target: 'big', label: 'approve' },
-    { source: 'big', target: 'each' },
+    { source: 'big', target: 'each', label: 'Yes, over 1M' },
   ];
   const DRAFT = { name: 'opportunity_approval', label: 'Large Deal Approval', nodes: NODES, edges: EDGES };
 
@@ -682,7 +682,7 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     expect(seen?.stepLabel({ id: 'manager_review', type: 'approval' })).toBe('经理审核');
   });
 
-  it('draws the translated approval-step labels on the canvas, nested ones included; decision and edge labels stay authored', () => {
+  it('draws the translated approval-step labels on the canvas, nested ones included; decision and branch-edge labels stay authored', () => {
     const { container } = render(
       <FlowLabelTranslationsProvider value={zh()}>
         <FlowCanvas nodes={NODES} edges={EDGES} editable={false} designMode={false} selectedId={null} onSelect={() => {}} />
@@ -692,7 +692,9 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     expect(card('manager_review').textContent).toContain('经理审核');
     expect(card('manager_review').textContent).not.toContain('Manager review');
     expect(card('big').textContent).toContain('Over 1M?');
-    expect(screen.getByText('approve')).toBeInTheDocument();
+    // A decision branch's authored edge label has no package key, so it stays as written. (An approval's
+    // `approve` / `reject` outcome pills are the designer's own vocabulary, not the package bundle's.)
+    expect(screen.getByText('Yes, over 1M')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Expand nested regions' }));
     expect(card('each').textContent).toContain('总监签批');
     expect(card('each').textContent).not.toContain('Director sign-off');
