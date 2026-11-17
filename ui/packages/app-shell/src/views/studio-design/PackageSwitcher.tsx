@@ -167,7 +167,9 @@ export function PackageSwitcher({
   // flat with a kernel `scope` stays in that list, tagged `kernel`, because the
   // app → Studio entry gate reads the tag. The switcher hides it here.
   const offered = offeredPackages(pkgs);
-  const listedCurrent = offered?.find((p) => p.id === packageId) ?? null;
+  // The trigger NAMES the open package, which is not offering it: a kernel
+  // package opened by its URL is still named from its listed row.
+  const listedCurrent = pkgs?.find((p) => p.id === packageId) ?? null;
   // Only once the list has answered, so the three trigger states stay its own.
   const current = listedCurrent ?? (pkgs !== null && openEntry?.id === packageId ? openEntry : null);
   // objectstack#28572 (ADR-0146 D3) — a base's paired `<base>.custom` has no

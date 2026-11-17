@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The Studio header's way back to the running app: 「打开应用」/ "Open app"
+ * The Studio header's way back to the running app: "Open app"
  * (objectstack#34593), the mirror of the app bar's Edit app (ADR-0080's
  * app → Studio bridge, `appStudioRoutePath`).
  *

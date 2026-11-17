@@ -3,7 +3,7 @@
 /**
  * objectstack#34593 — the Studio workbench and the running app, both ways.
  *
- *  1. The header offers 「打开应用」/ "Open app", the mirror of the app bar's
+ *  1. The header offers "Open app", the mirror of the app bar's
  *     Edit app: from the object in focus (`?surface=object:<name>`, the
  *     target Edit app hands Studio) it lands on that object's list in the
  *     app; with no surface in focus it lands on the app's home. A package
