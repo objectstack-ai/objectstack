@@ -996,6 +996,15 @@ export async function resolveDatasetDrillFilter(
       // A non-string `reference` carrier: not a relationship this layer can walk.
       target = undefined;
     }
+    // A multi-valued relationship cannot be drilled by `{ FIELD: { $in: ids } }`
+    // (its column holds an array, and `$in` compares a scalar), so it stops here.
+    // "Multi-valued" is decided by the SPEC predicate `isMultiValueField`, and this
+    // code follows the spec side of objectstack#17469, the card on the spec
+    // predicate disagreeing with `driver-sql`'s storage rule for `multiple: true`
+    // outside `MULTI_CAPABLE_TYPES`. That card closed with the driver aligned to
+    // the spec: `isMultiValuedColumn` in driver-sql's `sql-driver-top-level.ts`
+    // now asks `isMultiValueField`, and `FieldSchema` refuses the flag on the
+    // other types. If the two sides ever split again, this refusal follows the spec.
     if (!target || isMultiValueField(def as Parameters<typeof isMultiValueField>[0])) {
       throw new DrillResolutionStop({ status: 'unavailable', reason: 'unknown-relationship', field: fieldPath });
     }
