@@ -13,6 +13,7 @@ import { LocaleSchema } from '../system/translation.zod';
 import { findClosestMatches, formatSuggestion } from '../shared/suggestions.zod';
 import { resolveInjectedSystemColumns, type InjectedSystemColumnName } from './injected-system-columns';
 import { ColumnApplyOnSchema } from './column-apply-on.zod';
+import { dependentRequired } from '../shared/refinement-projection';
 import { FILE_REFERENCE_TYPES } from './field-value.zod';
 import {
   SeedFileContentSchema,
@@ -355,10 +356,10 @@ export const SeedSchema = lazySchema(() => strictObject({
    *   resolved a locale for) loads every dataset, the fallback set included,
    *   and warns, as for any locale-scoped dataset.
    *
-   * Omitted (or `false`), the dataset loads only for the locales it lists, as
-   * before this key existed.
+   * The one value is `true`; omitted, the dataset loads only for the locales it
+   * lists, as before this key existed.
    */
-  fallback: z.boolean().optional()
+  fallback: z.literal(true).optional()
     .describe(
       'Marks this locale-scoped dataset as its object\'s fallback: it also loads for a resolved locale that no ' +
       'other locale-scoped dataset of the same object lists. Requires `locale`: a dataset with no locale already ' +
@@ -444,30 +445,20 @@ export const SeedSchema = lazySchema(() => strictObject({
   // (#4001 findings log, entry 2). Declared here so closing the shape cannot
   // repeat it.
   ...MetadataProtectionFields,
-}).superRefine(refuseFallbackWithoutLocale));
-
-/**
- * {@link SeedSchema.shape.fallback} on a dataset with no `locale`: an unscoped
- * dataset already loads for every locale, so the marker could only promise a
- * behaviour the loader does not have. Refused, with the fix, rather than read
- * as redundant: a marker that is silently a no-op is the declared-not-enforced
- * shape ADR-0049 forbids.
- */
-function refuseFallbackWithoutLocale(
-  seed: { object?: unknown; fallback?: boolean; locale?: readonly string[] },
-  ctx: z.RefinementCtx,
-): void {
-  if (seed.fallback !== true || seed.locale !== undefined) return;
-  ctx.addIssue({
-    code: 'custom',
-    path: ['fallback'],
-    message:
-      `The ${String(seed.object)} seed declares \`fallback: true\` with no \`locale\`. A dataset with no locale ` +
-      'already loads for every locale, so it cannot also be the set that loads only when no other set matches. ' +
-      'List the locales this dataset is written in (`locale: [\'en\']`) and keep `fallback: true`, or drop ' +
-      '`fallback`.',
-  });
-}
+}).refine(dependentRequired({ fallback: ['locale'] }), {
+  // [Seed.fallback] Declared through the closed projection list, so the
+  // published JSON Schema carries the rule as `dependentRequired` instead of
+  // accepting what this parse refuses. A dataset with no `locale` already loads
+  // for every locale, so the marker could only promise a behaviour the loader
+  // does not have: refused, with the fix, rather than read as redundant — a
+  // marker that is silently a no-op is the declared-not-enforced shape ADR-0049
+  // forbids.
+  path: ['fallback'],
+  message:
+    '`fallback: true` needs `locale`. A dataset with no locale already loads for every locale, so it cannot ' +
+    'also be the set that loads only when no other set matches. List the locales this dataset is written in ' +
+    '(`locale: [\'en\']`) and keep `fallback: true`, or drop `fallback`.',
+}));
 
 /** Parsed/output type — all defaults are applied (env, mode, externalId always present) */
 export type Seed = z.input<typeof SeedSchema>;

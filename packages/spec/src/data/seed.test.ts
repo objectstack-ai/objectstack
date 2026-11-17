@@ -309,6 +309,55 @@ describe('SeedSchema', () => {
     });
   });
 
+  // ── Fallback locale set ──────────────────────────────────────────────────
+  //
+  // `fallback: true` marks the set an organization receives when its locale
+  // matches no locale-scoped set of the object. The loader decides when it
+  // loads; the schema owns the one per-dataset rule: the marker needs `locale`.
+
+  describe('fallback locale set', () => {
+    const withFallback = (extra: Record<string, unknown>) =>
+      SeedSchema.safeParse({ object: 'price_book', records: [], ...extra });
+
+    it('accepts `fallback: true` on a locale-scoped dataset, and keeps it', () => {
+      // Value reachability: the WHOLE parse succeeds, not only "no unrecognized key".
+      const parsed = withFallback({ locale: ['en', 'en-US'], fallback: true });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.fallback).toBe(true);
+      expect(parsed.success && parsed.data.locale).toEqual(['en', 'en-US']);
+    });
+
+    it('is optional with no default: a seed without it parses to no key', () => {
+      const parsed = SeedSchema.parse({ object: 'price_book', locale: ['zh-CN'], records: [] });
+      expect('fallback' in parsed).toBe(false);
+    });
+
+    it('refuses `fallback: true` with no `locale`, at the fallback key, naming the fix', () => {
+      const parsed = withFallback({ fallback: true });
+      expect(parsed.success).toBe(false);
+      const issue = !parsed.success ? parsed.error.issues[0] : undefined;
+      expect(issue?.code).toBe('custom');
+      expect(issue?.path).toEqual(['fallback']);
+      expect(issue?.message.split('. ')[0]).toBe('`fallback: true` needs `locale`');
+    });
+
+    it('takes only `true`: `false` and a string are refused at the key', () => {
+      for (const value of [false, 'true', 1]) {
+        const parsed = withFallback({ locale: ['en'], fallback: value });
+        expect(parsed.success, `fallback: ${JSON.stringify(value)}`).toBe(false);
+        expect(!parsed.success && parsed.error.issues[0]?.path).toEqual(['fallback']);
+      }
+    });
+
+    it('defineSeed carries the marker onto the seed and refuses it without a locale', () => {
+      const PriceBook = { name: 'price_book', fields: { name: { type: 'text' } } } as const;
+      const seed = defineSeed(PriceBook, { locale: ['en'], fallback: true, records: [{ name: 'Standard' }] });
+      expect(seed.fallback).toBe(true);
+      expect(() => defineSeed(PriceBook, { fallback: true, records: [{ name: 'Standard' }] }))
+        .toThrow(/fallback: true` needs `locale`/);
+    });
+  });
+
   // ── Column policies (#25761) ─────────────────────────────────────────────
   //
   // `columns.<field>.applyOn: 'create'` is the import door's create-only column
