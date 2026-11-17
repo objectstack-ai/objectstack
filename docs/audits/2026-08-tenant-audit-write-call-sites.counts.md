@@ -33,13 +33,13 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 323 |
+| Write call sites | 325 |
 | Object name statically decidable | 227 |
-| Object name chosen at run time | 96 |
+| Object name chosen at run time | 98 |
 | Against a tenancy-enabled object | 220 |
 | Against an object declaring tenancy off | 7 |
 | Threading a tenant context | 251 |
-| Provably carrying none | 13 |
+| Provably carrying none | 15 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-17 at `5a448780c`.
+Measured on 2026-11-17 at `73ce021c1`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1189 |
+| tracked non-test sources scanned | 1191 |
 | engine-shaped types recognised | 143 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 326 |
+| same-named calls subtracted as non-engine | 328 |
 
 ## Every site
 
@@ -158,7 +158,7 @@ Measured on 2026-11-17 at `5a448780c`.
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/credential-change-ends-reset-tokens.ts` | `delete` | `VERIFICATION` | undecidable | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/credential-change-ends-reset-tokens.ts` | `delete` | `VERIFICATION` | undecidable | PROVABLY NONE | 3 |
 | `packages/plugins/plugin-auth/src/default-organization-invariant.ts` | `insert` | `sys_organization` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
