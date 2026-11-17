@@ -873,7 +873,7 @@ const ActionAnswerTableColumnSchema = strictObject({
     '`table` is a field format, not a cell format: a cell draws one value of one row, and a table does not '
     + 'nest. Drop `format` (a cell value that does not fit its format, an object or an array included, draws as compact JSON text), or '
     + "write `format: 'json'`.",
-  ).optional().describe('Cell format: the field formats minus `table`; omitted, `text`. A value that does not fit the cell\'s format, whatever it is (an object or an array under `text`, a number under `secret`), draws as compact JSON text; a missing or `null` value draws an empty cell.'),
+  ).optional().describe('Cell format: the field formats minus `table`; omitted, `text`. A value that does not fit the cell\'s format, whatever it is (an object or an array under `text`, a number under `secret`), draws as compact JSON text; a missing or `null` value draws an empty cell. Inside a cell, `text` and `code-list` draw the value alone with no copy control, while `secret` keeps its mask, reveal and copy and `qrcode` keeps its code and copy.'),
 });
 
 /**
@@ -1815,7 +1815,10 @@ const actionObject = () => strictObject({
    *   `text` take a string, `code-list` an array of strings. Any value that
    *   does not fit, whatever the column's format (an object or an array under
    *   the omitted `text`, a number under `secret`), draws as compact JSON
-   *   text, which is also how `json` draws in a cell. An element that is not
+   *   text, which is also how `json` draws in a cell. Inside a cell, `text`
+   *   and `code-list` draw the value alone with no copy control, while
+   *   `secret` keeps its mask, reveal and copy and `qrcode` keeps its code
+   *   and copy. An element that is not
    *   a plain object (an array, `null` or a scalar) has no paths to read: its
    *   row draws the element itself as compact JSON text in the first cell and
    *   leaves the other cells empty. `[]` draws the header
