@@ -12,6 +12,12 @@
  * - Responsive grid layout
  * - i18n support
  *
+ * The host's checklist slot (`checklist`, objectstack#34596): on a desktop it
+ * is drawn above the page's sections; on a phone (`usePhoneViewport`, below
+ * 768 px) it is drawn after the apps, so the first screen keeps the launcher.
+ * With no app yet it is drawn above the empty state at every width, and while
+ * the page is loading it is not drawn, so it mounts once, where it stays.
+ *
  * @module
  */
 
@@ -69,6 +75,22 @@ import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
+import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
+
+/**
+ * Where Home draws its host's checklist: `top`, above the page's sections (a
+ * desktop, or a page with no app yet), or `afterApps`, in the content column
+ * right after the apps (a phone).
+ */
+export type HomeChecklistPlacement = 'top' | 'afterApps';
+
+export interface HomePageProps {
+  /**
+   * The host's checklist, drawn where Home places it (see the module doc).
+   * Called on each render with the placement; it may draw nothing.
+   */
+  checklist?: (placement: HomeChecklistPlacement) => React.ReactNode;
+}
 
 /**
  * Which AI home CTAs to surface, driven by the live agent catalog (the single
@@ -348,8 +370,10 @@ function usePendingDraftsRow(t: (key: string, opts?: any) => string, language: s
 /** Home's labels read each object they name by name (objectstack#29121). */
 const BY_NAME: NavTargetLabelOptions = { byName: true };
 
-export function HomePage() {
+export function HomePage({ checklist }: HomePageProps = {}) {
   const navigate = useNavigate();
+  // Phone or desktop decides where the checklist is mounted (module doc).
+  const phone = usePhoneViewport();
   const { t, language } = useObjectTranslation();
   const metadata = useMetadata();
   const { apps, loading } = metadata;
@@ -574,6 +598,7 @@ export function HomePage() {
         {/* objectstack#30120 — administrators, production only: what this
             server keeps on its own disk. Above the recovery nudge, which is
             one person's; this is the deployment's. */}
+        {checklist?.('top')}
         <DeploymentNotice placement="home" />
         <RecoveryPasswordReminder t={t} />
         <ConnectAssistantCard />
@@ -661,6 +686,8 @@ export function HomePage() {
 
   return (
     <div className="relative min-h-full bg-background">
+      {/* The host's checklist, above the page on a desktop (module doc). */}
+      {!phone && checklist?.('top')}
       {/* objectstack#30120 — see the empty-state branch above. */}
       <DeploymentNotice placement="home" />
       <RecoveryPasswordReminder t={t} />
@@ -836,6 +863,10 @@ export function HomePage() {
                error card. */
             marketplaceEnabled={marketplaceEnabled}
           />
+
+          {/* On a phone the host's checklist comes after the apps, so the
+              first screen keeps them (objectstack#34596). */}
+          {phone && checklist?.('afterApps')}
 
           {/* My work (objectui#12602) — approvals, then unread notifications,
               with the pending-drafts row under its heading. */}

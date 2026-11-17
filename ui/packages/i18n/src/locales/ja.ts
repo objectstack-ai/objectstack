@@ -2312,6 +2312,7 @@ const ja = {
       view: "表示",
       confirm: "確定",
       cancel: "キャンセル",
+      continue: "続ける",
       prefilled: "未設定の項目にはブラウザーから推測した値が入っています。確定するまで何も保存されません。",
       organizationName: {
         title: "組織に名前を付ける",

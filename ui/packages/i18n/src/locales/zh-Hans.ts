@@ -2065,6 +2065,7 @@ const zh = {
       view: '查看',
       confirm: '确认',
       cancel: '取消',
+      continue: '继续',
       prefilled: '尚未设置的项已按你的浏览器给出建议。确认之前不会保存任何内容。',
       organizationName: {
         title: '为组织命名',

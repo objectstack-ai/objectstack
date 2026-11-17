@@ -2490,6 +2490,8 @@ const en = {
       view: 'View',
       confirm: 'Confirm',
       cancel: 'Cancel',
+      // The folded card's way back in, on a phone (objectstack#34596).
+      continue: 'Continue',
       prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
       organizationName: {
         title: 'Name your organization',

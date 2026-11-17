@@ -2310,6 +2310,7 @@ const ko = {
       view: "보기",
       confirm: "확인",
       cancel: "취소",
+      continue: "계속",
       prefilled: "아직 설정되지 않은 값은 브라우저를 기준으로 제안되었습니다. 확인하기 전에는 아무것도 저장되지 않습니다.",
       organizationName: {
         title: "조직 이름 정하기",
