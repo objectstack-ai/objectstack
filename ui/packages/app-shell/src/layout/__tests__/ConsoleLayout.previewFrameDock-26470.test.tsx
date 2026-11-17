@@ -20,6 +20,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The layout reaches `import('@objectstack/lint')` (the draft bar's publish
+// preflight); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
@@ -47,7 +50,12 @@ vi.mock('../../hooks/useAiSurface', () => ({
 
 // Chrome this card does not touch.
 vi.mock('../UnifiedSidebar', () => ({ UnifiedSidebar: () => null }));
-vi.mock('../AppHeader', () => ({ AppHeader: () => <div data-testid="app-header-stub" /> }));
+// objectstack#34608 — the launcher is the top-bar robot: the header stand-in
+// draws the real one.
+vi.mock('../AppHeader', async () => {
+  const { AssistantTopBarButton } = await import('../AssistantTopBarButton');
+  return { AppHeader: () => <div data-testid="app-header-stub"><AssistantTopBarButton /></div> };
+});
 vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: () => null }));
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
@@ -97,8 +105,8 @@ describe('a framed console keeps its assistant dock to itself (objectstack#26470
     mountConsole();
     expect(screen.getByTestId('route-content')).toBeInTheDocument();
     expect(screen.queryByTestId('chat-dock-panel')).not.toBeInTheDocument();
-    // Collapsed, so its launcher is there: the dock is still one click away.
-    expect(screen.getByTestId('console-chatbot-fab')).toBeInTheDocument();
+    // Collapsed, so its launcher reads closed: the dock is still one click away.
+    expect(screen.getByTestId('topbar-ai-assistant')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('opening and closing the dock inside a frame leaves the host page’s flag as it was', () => {
@@ -106,7 +114,7 @@ describe('a framed console keeps its assistant dock to itself (objectstack#26470
     renderInsideFrame();
     mountConsole();
 
-    fireEvent.click(screen.getByTestId('console-chatbot-fab'));
+    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
     expect(screen.getByTestId('chat-dock-panel')).toBeInTheDocument();
     expect(window.sessionStorage.getItem(DOCK_EXPANDED_STORAGE_KEY)).toBe('0');
 

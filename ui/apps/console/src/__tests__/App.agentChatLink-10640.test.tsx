@@ -21,8 +21,9 @@
  * `internalFormShell.test.tsx` does. A hand-copied route list would be free to
  * agree with whatever the source does. Everything `App.tsx` imports but this
  * card does not touch is stubbed, with the same list that file uses. The
- * catch-all's element (`RedirectWithSplash`) and the chat page
- * (`DefaultAiChatPage`) are stubbed to markers; the chat stub reports the
+ * catch-all's element (`RedirectWithSplash`) and the chat address's element
+ * (`AiAddressRedirect`, which opens the chat drawer since objectstack#34608)
+ * are stubbed to markers; the chat stub reports the
  * `:agent` and `:conversationId` params and the `new` flag it was routed with.
  *
  * The href is not written here: it is the one the REAL registered agent
@@ -91,7 +92,9 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => {
     DefaultInvitationsPage: stub('invitations-page'),
     DefaultSettingsPage: stub('settings-page'),
     DefaultAcceptInvitationPage: stub('accept-invitation-page'),
-    DefaultAiChatPage: AiChatPageProbe,
+    // objectstack#34608 — the `/ai…` routes render `AiAddressRedirect` (it opens
+    // the chat drawer on the address); the probe reports what it was routed with.
+    AiAddressRedirect: AiChatPageProbe,
     StudioDesignSurface: stub('studio-design-surface'),
     BuilderLanding: stub('builder-landing'),
     getProductName: () => 'ObjectOS',
