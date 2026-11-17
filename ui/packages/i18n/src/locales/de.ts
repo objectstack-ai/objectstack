@@ -2321,6 +2321,7 @@ const de = {
       view: "Anzeigen",
       confirm: "Bestätigen",
       cancel: "Abbrechen",
+      continue: "Fortsetzen",
       prefilled: "Noch nicht festgelegte Werte sind aus Ihrem Browser vorgeschlagen. Gespeichert wird erst, wenn Sie bestätigen.",
       organizationName: {
         title: "Organisation benennen",
