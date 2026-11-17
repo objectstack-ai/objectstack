@@ -25,6 +25,9 @@ import { ActionProvider, SchemaRenderer } from '@object-ui/react';
 // Module scope, not a hook: registers PageRenderer and `statistic`
 // (AGENTS.md §测试纪律).
 import '../renderers';
+// `react-page.tsx` (reached through `../renderers`) loads this dynamically;
+// paying its transform here keeps it out of any test's clocked window.
+import '@object-ui/react-runtime';
 
 function tile(id: string) {
   return { type: 'statistic', id, label: id, value: 1 };
