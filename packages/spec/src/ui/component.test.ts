@@ -2820,30 +2820,33 @@ describe('RecordActivityProps (enhanced)', () => {
 // #34383 — a feed `types` without 'comment' beside the comment composer
 // ---------------------------------------------------------------------------
 describe('RecordActivityProps — a `types` that leaves out comment is refused while the composer is on (#34383)', () => {
-  const refusedAtTypes = (result: { success: boolean; error?: { issues: z.core.$ZodIssue[] } }) => {
+  const refusedAtComposer = (result: { success: boolean; error?: { issues: z.core.$ZodIssue[] } }) => {
     expect(result.success).toBe(false);
-    const issues = result.error!.issues.filter((i) => i.path.join('.') === 'types');
+    // Located at the composer the list rules out, not at `types` (see the
+    // check's docblock), so nothing reads it as a refusal of the list itself.
+    const issues = result.error!.issues.filter((i) => i.path.join('.') === 'showCommentInput');
+    expect(result.error!.issues.filter((i) => i.path[0] === 'types')).toEqual([]);
     expect(issues).toHaveLength(1);
     expect(issues[0].code).toBe('custom');
     return issues[0];
   };
 
   it('refuses the measured producer shape (HotCRM lead_activity: types [task], composer by default)', () => {
-    const issue = refusedAtTypes(RecordActivityProps.safeParse({ types: ['task'], limit: 20, showCompleted: true }));
+    const issue = refusedAtComposer(RecordActivityProps.safeParse({ types: ['task'], limit: 20, showCompleted: true }));
     // Both fixes are named; the message is the author's prescription.
     expect(issue.message).toContain("add 'comment' to `types`");
     expect(issue.message).toContain('set `showCommentInput: false`');
   });
 
   it('refuses it when the composer is asked for explicitly, and for a list of contributed kinds only', () => {
-    refusedAtTypes(RecordActivityProps.safeParse({ types: ['task', 'email'], showCommentInput: true }));
-    refusedAtTypes(RecordActivityProps.safeParse({ types: ['scheduled'] }));
+    refusedAtComposer(RecordActivityProps.safeParse({ types: ['task', 'email'], showCommentInput: true }));
+    refusedAtComposer(RecordActivityProps.safeParse({ types: ['scheduled'] }));
     // An empty list shows nothing at all, so it shows no comment either.
-    refusedAtTypes(RecordActivityProps.safeParse({ types: [] }));
+    refusedAtComposer(RecordActivityProps.safeParse({ types: [] }));
   });
 
   it('matches exactly, as the renderers do: a cased spelling is not the comment kind', () => {
-    refusedAtTypes(RecordActivityProps.safeParse({ types: ['Comment', 'task'] }));
+    refusedAtComposer(RecordActivityProps.safeParse({ types: ['Comment', 'task'] }));
   });
 
   it('accepts the first fix: comment added to types', () => {
@@ -2876,11 +2879,11 @@ describe('RecordActivityProps — a `types` that leaves out comment is refused w
 
   it('is the row both mounts judge with: record:activity, and the feed of record:chatter / record:discussion', () => {
     expect(ComponentPropsMap['record:activity']).toBe(RecordActivityProps);
-    refusedAtTypes(ComponentPropsMap['record:activity'].safeParse({ types: ['task'] }));
+    refusedAtComposer(ComponentPropsMap['record:activity'].safeParse({ types: ['task'] }));
     for (const type of ['record:chatter', 'record:discussion'] as const) {
       const result = ComponentPropsMap[type].safeParse({ feed: { types: ['task'] } });
       expect(result.success, type).toBe(false);
-      const issue = result.error!.issues.find((i) => i.path.join('.') === 'feed.types');
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'feed.showCommentInput');
       expect(issue?.code, type).toBe('custom');
       expect(ComponentPropsMap[type].safeParse({ feed: { types: ['task'], showCommentInput: false } }).success, type).toBe(true);
     }

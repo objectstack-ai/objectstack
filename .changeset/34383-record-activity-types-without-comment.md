@@ -6,7 +6,7 @@ fix(spec)!: a `record:activity` feed whose `types` leaves out `comment` is refus
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: none — `git grep` of `skills/` finds no `record:activity` block, feed `types` list or `showCommentInput` taught anywhere; the two `.describe()` texts and the generated reference page (`content/docs/references/ui/component.mdx`) carry the rule in this change.
+Skills-docs: follow-up #34534
 
 <!-- adr-0087: registered record-activity-types-without-comment-beside-composer-refused -->
 
@@ -14,8 +14,8 @@ Skills-docs: none — `git grep` of `skills/` finds no `record:activity` block, 
 
 What moves (each line FROM → TO):
 
-- `RecordActivityProps` (`@objectstack/spec/ui`, the `record:activity` row of `ComponentPropsMap`) with `types` present, `'comment'` not in it, and `showCommentInput` absent or `true`: FROM parsed clean TO refused with one `custom` issue at `types` whose message names both fixes. `os lint`, `os validate`, `os build` and the page authoring door report it at error as `component-props-invalid` at `properties.types`.
-- `RecordChatterProps.feed` (the same object, on `record:chatter` and `record:discussion`): the same, reported at `properties.feed.types`.
+- `RecordActivityProps` (`@objectstack/spec/ui`, the `record:activity` row of `ComponentPropsMap`) with `types` present, `'comment'` not in it, and `showCommentInput` absent or `true`: FROM parsed clean TO refused with one `custom` issue at `showCommentInput` (the composer the list rules out; `types` itself is not refused) whose message names both fixes. `os lint`, `os validate`, `os build` and the page authoring door report it at error as `component-props-invalid` at `properties.showCommentInput`.
+- `RecordChatterProps.feed` (the same object, on `record:chatter` and `record:discussion`): the same, reported at `properties.feed.showCommentInput`.
 
 The fix: add `'comment'` to `types` when the block should take comments, or set `showCommentInput: false` when it should stay comment-free. Which one is a judgement about the block, so nothing is converted (ADR-0087 D3, entry `record-activity-types-without-comment-beside-composer-refused`).
 

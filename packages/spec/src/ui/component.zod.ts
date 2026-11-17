@@ -1987,7 +1987,14 @@ export const RecordHighlightsProps = strictObject({
  * default `true` (the composer is on); the console mirror strips spec
  * defaults, so `undefined` reads as on there too — `!== false` is the one
  * reading both doors share. An absent `types` means every kind and is never
- * refused. Matching is exact, as the renderers match: `'Comment'` is not
+ * refused.
+ *
+ * Located at `showCommentInput`, not at `types`: `types` on its own is valid
+ * (any list of kinds, the open-vocabulary ruling), and what this feed cannot
+ * honour is the composer beside it — the key whose value (written, or the
+ * default) asks for something the list rules out. An issue AT `types` would
+ * also read, to a per-key judge such as the console's member probe, as the
+ * container itself being refused. Matching is exact, as the renderers match: `'Comment'` is not
  * `'comment'`. A `types` that already failed its own element check (a
  * non-string entry) is left to that issue.
  */
@@ -2000,7 +2007,7 @@ function refuseFeedTypesWithoutCommentBesideComposer(
   if (feed.types.includes('comment')) return;
   ctx.addIssue({
     code: 'custom',
-    path: ['types'],
+    path: ['showCommentInput'],
     message: `\`types\` (${JSON.stringify(feed.types)}) leaves out 'comment', so this feed never shows a comment, `
       + 'yet `showCommentInput` (default true) asks for a comment composer on it: a comment posted there would be '
       + 'stored and never shown on this feed. To take comments on this feed, add \'comment\' to `types`; '

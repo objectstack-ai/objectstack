@@ -18,7 +18,8 @@ export const entry: SemanticMigration = {
   replacement:
     'Add \'comment\' to `types` when the block should take comments, or set `showCommentInput: false` when it should '
     + 'stay comment-free. Omitting `types` (every feed item kind) is unaffected. Refused at error as '
-    + '`component-props-invalid` at properties.types (properties.feed.types on record:chatter / record:discussion).',
+    + '`component-props-invalid` at properties.showCommentInput (properties.feed.showCommentInput on record:chatter / '
+    + 'record:discussion), the composer the list rules out.',
   reason:
     '`types` is the allow-list of feed item kinds the feed shows, and `comment` is one of them; both renderers of '
     + 'this shape filter their rows by it. With \'comment\' left out and the composer on, a comment posted through '
@@ -29,7 +30,8 @@ export const entry: SemanticMigration = {
     + 'the two fixes the author meant is a judgement about the block.',
   acceptanceCriteria:
     'Load every page (`os validate` or `os build`): no `component-props-invalid` finding at '
-    + 'components[N].properties.types or properties.feed.types naming \'comment\'. Each record:activity block and '
-    + 'record:chatter / record:discussion feed either omits `types`, lists \'comment\' in it, or sets '
+    + 'components[N].properties.showCommentInput or properties.feed.showCommentInput naming \'comment\'. '
+    + 'Each record:activity block and record:chatter / record:discussion feed either omits `types`, lists '
+    + '\'comment\' in it, or sets '
     + '`showCommentInput: false`.',
 };
