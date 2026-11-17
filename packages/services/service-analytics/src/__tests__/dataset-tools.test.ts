@@ -886,7 +886,8 @@ const CRM_LINE_ITEM_METRICS = {
   name: 'crm_line_item_metrics',
   label: 'Line Item Metrics',
   object: 'crm_opportunity_line_item',
-  dimensions: [{ name: 'product', label: 'Product', field: 'product', type: 'string' }],
+  // `deal count` is also `opp_count`'s synonym in the other dataset: a word equal to a measure there and a dimension here.
+  dimensions: [{ name: 'product', label: 'Product', field: 'product', type: 'string', synonyms: ['deal count'] }],
   measures: [
     { name: 'line_amount', label: 'Line Amount', aggregate: 'sum', field: 'amount', synonyms: ['deal value', '明细金额'] },
     { name: 'quantity_total', label: 'Quantity', aggregate: 'sum', field: 'quantity' },
@@ -1014,6 +1015,10 @@ describe('[#34919] list_datasets nextStep — the precedence among mixed cases',
     expect(await decide(['库存周转', '销售阶段'])).toEqual({ decision: 'no_measure', terms: ['库存周转', '销售阶段'] });
     // Two words with one measure each are two metrics: both named, in the order sent.
     expect(await decide(['商机金额', '商机数', '销售阶段'])).toEqual({ decision: 'one_measure', terms: ['商机金额', '商机数'] });
+  });
+
+  it('a word equal to one measure and to a dimension is one_measure: the dimension is not counted', async () => {
+    expect(await decide(['deal count'])).toEqual({ decision: 'one_measure', terms: ['deal count'] });
   });
 
   it('a word sent twice is one word, and the member it equals is counted once', async () => {
