@@ -5451,7 +5451,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   marked menu; the approver's own bar is unchanged. While the
                   bar draws the request's Recall, it is the page's one Recall:
                   `onDrawnActionsChange` is how the page learns that and tells
-                  the DetailView band below to keep its lock badge only. */}
+                  the DetailView band below to keep its lock badge only.
+
+                  objectstack#34361 (ruling A) — for the approver themselves,
+                  `foldDecisions` draws one band: a status line naming the
+                  task, the step and the submitter, the decisions as the only
+                  buttons, and every other lever in one menu. The request page
+                  (`ApprovalDecisionPanel`) draws the same band. */}
               {approvalBarMounted && (
                 <DeclaredActionsBar
                   className="mb-4"
@@ -5461,6 +5467,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   exclude={[...RECORD_APPROVAL_EXCLUDED_ACTIONS]}
                   onDone={handleApprovalActionDone}
                   foldOverrides
+                  foldDecisions
                   onDrawnActionsChange={setApprovalBarDrawn}
                 />
               )}
