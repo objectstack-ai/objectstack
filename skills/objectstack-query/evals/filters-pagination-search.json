@@ -80,6 +80,16 @@
         "must_contain": ["filter", "$or", "$lte: 0", "$null: true"],
         "must_not_contain": []
       }
+    },
+    {
+      "id": 9,
+      "prompt": "Monthly deal revenue on Taipei calendar months, plus a count of won deals per month, in one aggregate call. Does the database do the bucketing, on PostgreSQL and on SQLite? What changes if I pass the zone as `+08:00`?",
+      "expected_output": "`engine.aggregate('deal', { groupBy: [{ field: 'closed_at', dateGranularity: 'month' }], aggregations: [{ function: 'sum', field: 'amount', alias: 'revenue' }, { function: 'count', alias: 'won', filter: { stage: 'closed_won' } }], timezone: 'Asia/Taipei' })`. On PostgreSQL the driver declares `supports.zonedDateBucketing`, and `Asia/Taipei` resolves to an area/location, so the zoned bucket and the filtered count run in the database. SQLite declares no zoned bucketing, so the whole call runs in memory there. `+08:00` resolves to no area/location, so it keeps the whole call in memory on every driver, PostgreSQL included; pass the IANA name.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["timezone: 'Asia/Taipei'", "dateGranularity: 'month'", "zonedDateBucketing", "in memory", "in the database"],
+        "must_not_contain": ["date_trunc", "timezone: '+08:00'"]
+      }
     }
   ]
 }
