@@ -165,10 +165,12 @@ const CAP_TEXT = 'An invoice holds at most two lines.';
  * The capped invoice and its lines. `rule` caps the count with a validation
  * rule; `computed` caps a stored computed field over it (`room = 2 -
  * line_count`, recomputed on the recompute's own write) with a rule; `bound`
- * declares `min: 0` on that field and has no rule at all.
+ * declares `min: 0` on that field and has no rule at all; `option` declares
+ * nothing: a stored select computed from the count names a value its option
+ * list lacks past the cap, which the write refuses as it would any value.
  */
-function capObjects(parent: string, line: string, mode: 'rule' | 'computed' | 'bound') {
-  const viaComputed = mode !== 'rule';
+function capObjects(parent: string, line: string, mode: 'rule' | 'computed' | 'bound' | 'option') {
+  const viaComputed = mode === 'computed' || mode === 'bound';
   return [
     {
       name: parent,
@@ -177,8 +179,15 @@ function capObjects(parent: string, line: string, mode: 'rule' | 'computed' | 'b
         name: { type: 'text', label: 'Name' },
         line_count: { type: 'summary', label: 'Lines', summaryOperations: { object: line, function: 'count' } },
         ...(viaComputed ? { room: { type: 'number', label: 'Room', expression: '2 - record.line_count', ...(mode === 'bound' ? { min: 0 } : {}) } } : {}),
+        ...(mode === 'option' ? {
+          fill: {
+            type: 'select', label: 'Fill',
+            options: [{ label: 'Open', value: 'open' }, { label: 'Full', value: 'full' }],
+            expression: "record.line_count == null || record.line_count < 2 ? 'open' : (record.line_count == 2 ? 'full' : 'over')",
+          },
+        } : {}),
       },
-      validations: mode === 'bound' ? [] : [{
+      validations: mode === 'bound' || mode === 'option' ? [] : [{
         name: 'cap_lines', type: 'script', severity: 'error', message: CAP_TEXT,
         condition: viaComputed ? 'record.room != null && record.room < 0' : 'record.line_count != null && record.line_count > 2',
       }],
@@ -196,6 +205,7 @@ function capObjects(parent: string, line: string, mode: 'rule' | 'computed' | 'b
 const CAP = { parent: 'r33795_cap', line: 'r33795_cap_line' };
 const CCAP = { parent: 'r33795_ccap', line: 'r33795_ccap_line' };
 const BCAP = { parent: 'r33795_bcap', line: 'r33795_bcap_line' };
+const OCAP = { parent: 'r33795_ocap', line: 'r33795_ocap_line' };
 
 /**
  * [#33795] A stored computed field of the CHILD that reads the parent's
@@ -281,6 +291,7 @@ const FORMULA_OBJECTS = [
 const OBJECTS = [
   ...rollupPair(0), ...rollupPair(1), ...rollupPair(2), ...KIND_OBJECTS, ...RULE_OBJECTS,
   ...capObjects(CAP.parent, CAP.line, 'rule'), ...capObjects(CCAP.parent, CCAP.line, 'computed'), ...capObjects(BCAP.parent, BCAP.line, 'bound'),
+  ...capObjects(OCAP.parent, OCAP.line, 'option'),
   ...FORMULA_OBJECTS, ...SEEN_OBJECTS,
 ];
 
@@ -692,6 +703,8 @@ const PARITY_CASES: Array<{ name: string; make: ParityCase; live: (answer: any, 
   { name: '(ii) a line readonlyWhen reads the header computed field over its count on parent', make: roomCase, live: (_answer, state) => state.lines[1].note === null, coeLive: true },
   // The same cap spelled as a declared bound (`min: 0` on the stored `room`), no rule.
   { name: '(iii) a declared bound on the parent stored computed field over its count', make: capCase(BCAP), live: refused },
+  // No declaration at all: a stored select computed from the count, whose option list lacks the value past the cap.
+  { name: '(iii) a stored computed field over its count with no bound, refused by its own option list', make: capCase(OCAP), live: refused },
   // Not a rule: a child's stored field computed from the parent's summary.
   { name: 'a child stored computed field reads the owner count one hop', make: rankCase, live: (_answer, state) => state.ranks[0] !== state.ranks[1], coeLive: true },
 ];

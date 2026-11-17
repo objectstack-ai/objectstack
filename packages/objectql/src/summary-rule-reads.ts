@@ -30,10 +30,14 @@
  *   `requiredWhen` / `readonlyWhen`. The recompute's own write is an update of
  *   that row, judged by those rules: one by one they judge every intermediate
  *   value (an atomic move A→B then B→A over a cap refuses the first), so
- *   deferred they would judge only the last. A declared bound (`min`, `max`,
- *   `minLength`, `maxLength`, `pattern`, `unique`, `required`) on a value that
- *   write stores, the summary itself or a stored computed field, is judged the
- *   same way and counts as a rule reading that value.
+ *   deferred they would judge only the last. That write also judges every
+ *   value it stores against its declaration, so the same holds without a
+ *   rule: a declared bound on the summary itself (`min`, `max`, `minLength`,
+ *   `maxLength`, `pattern`, `precision`, `unique`, `required`, or an
+ *   object-level unique index naming it) counts as reading it, and EVERY
+ *   stored computed field of its object counts as read, bound or not, since
+ *   the write computes it and judges it whatever it declares (a bound, an
+ *   option list, a value domain, or a number that is not finite).
  *
  * A stored computed field (an `expression` on a field that is not a
  * `formula`) that reads another row one hop is stored from what it read at its
@@ -64,11 +68,26 @@ const PARENT_ROOT = 'parent';
 const PARENT_PREDICATE_SLOTS = ['requiredWhen', 'readonlyWhen'] as const;
 
 /**
- * The declared bounds a write judges on a stored value (`validateRecord`'s
- * `min_value` / `max_value` / `min_length` / `max_length` / pattern and
- * `required` checks, and a unique index).
+ * The declared bounds a write judges on the summary's stored value
+ * (`validateRecord`'s `min_value` / `max_value` / `min_length` / `max_length`
+ * / `max_precision` and `required` checks, and a field-level unique index).
+ * `pattern` / `regex` are read by no check today: an over-read, which costs
+ * only statements. A declared index with `unique` is read beside this list.
  */
-const WRITE_BOUND_KEYS = ['min', 'max', 'minLength', 'maxLength', 'pattern', 'regex', 'unique', 'required'] as const;
+const SUMMARY_BOUND_KEYS = ['min', 'max', 'minLength', 'maxLength', 'pattern', 'regex', 'precision', 'unique', 'required'] as const;
+
+/** The fields an object-level declared index with `unique` names (`'global'`, `'organization'`, or a stored bare `true`). */
+function uniquelyIndexed(indexes: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(indexes)) return out;
+  for (const index of indexes) {
+    if (!index || typeof index !== 'object') continue;
+    const { unique, fields } = index as { unique?: unknown; fields?: unknown };
+    if (unique === undefined || unique === null || unique === false || !Array.isArray(fields)) continue;
+    for (const field of fields) if (typeof field === 'string') out.add(field);
+  }
+  return out;
+}
 
 /** The CEL roots a rule reads its own row under: the row, and the row before the write. */
 const OWN_ROW_ROOTS = ['record', 'previous'] as const;
@@ -115,7 +134,7 @@ export function ruleReadKey(object: string, field: string): string {
 }
 
 /** An object definition as this module reads it. */
-type ObjectDef = { name?: unknown; fields?: Record<string, Record<string, unknown> | null | undefined>; validations?: unknown[] } | null | undefined;
+type ObjectDef = { name?: unknown; fields?: Record<string, Record<string, unknown> | null | undefined>; validations?: unknown[]; indexes?: unknown } | null | undefined;
 
 /** The parts of a roll-up descriptor the chain closure reads. */
 export interface ChainLink {
@@ -189,15 +208,23 @@ export function summaryFieldsReadByRules(objects: Iterable<unknown>, links: Iter
         for (const root of OWN_ROW_ROOTS) for (const field of fieldsReadOn(source, root)) own.add(field);
       }
     }
-    // (iii) A declared bound on a field the recompute's own write stores: the
-    // summary itself, or a stored computed field (an `expression` on a field
-    // that is not a `formula`). The write computes it onto the payload and
-    // judges it (`validateRecord`, a unique index), so one by one every
-    // intermediate value is judged; the closure below adds what it reads.
+    // (iii) What the recompute's own write judges without a rule. It stores
+    // the summary and every stored computed field (an `expression` on a field
+    // that is not a `formula`), computed onto its payload, and judges each
+    // against its declaration (`validateRecord`, a unique index), so one by
+    // one every intermediate value is judged. The summary counts when it
+    // declares a bound or a unique index names it; a stored computed field
+    // counts always, since its type alone can refuse a value (an option, a
+    // value domain, a number that is not finite). The closure below adds
+    // what a stored computed field reads.
+    const indexed = uniquelyIndexed(schema?.indexes);
     for (const [field, def] of Object.entries(fields)) {
       if (!def || typeof def !== 'object') continue;
-      const stored = def.type === 'summary' || (def.type !== 'formula' && celSource(def.expression) !== undefined);
-      if (stored && WRITE_BOUND_KEYS.some((key) => def[key] !== undefined && def[key] !== null && def[key] !== false)) own.add(field);
+      if (def.type === 'summary') {
+        if (indexed.has(field) || SUMMARY_BOUND_KEYS.some((key) => def[key] !== undefined && def[key] !== null && def[key] !== false)) own.add(field);
+      } else if (def.type !== 'formula' && celSource(def.expression) !== undefined) {
+        own.add(field);
+      }
     }
     if (name) for (const field of own) out.add(ruleReadKey(name, field));
     // A stored computed field reading another row one hop (`record.inv.line_total`)

@@ -665,9 +665,11 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      * rule reads is not deferred (ruling 6928862195). A validation rule of any
      * object reading it one hop through a reference, a detail object's
      * `requiredWhen` / `readonlyWhen` reading it on `parent`, a rule of the
-     * summary's own object reading it on its own row, or a declared bound
-     * (`min`, `max`, `unique`, …) on the summary or on a stored computed field
-     * of that object calculated from it, each counts, whether it reads the
+     * summary's own object reading it on its own row, a declared bound
+     * (`min`, `max`, `precision`, `unique`, …) or unique index on the summary,
+     * or any stored computed field of that object calculated from it (the
+     * recompute's write judges its value whatever it declares), each counts,
+     * whether it reads the
      * summary directly, through a formula or stored computed field calculated
      * from it, or up a chain of summaries; so does a stored computed field of
      * any object that reads it one hop, since it stores what it read. Any of
