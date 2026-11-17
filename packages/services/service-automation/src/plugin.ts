@@ -6216,6 +6216,14 @@ export class AutomationServicePlugin implements Plugin {
             }
         }
         this.syncedFlowNames = freshNames;
+        // [#34655, L2 S4] A reload may have changed the loader's set (a hot
+        // upgrade of a base package), and the loop above keeps some bodies it
+        // did not re-register: a winner the mutation sync armed from this same
+        // stored row, and one whose re-registration threw. A declared
+        // override's stored body does not change with its base, so the
+        // package default the engine read for it must be read again here, not
+        // only when a body is registered.
+        this.engine.refreshPackagedFlowDefaults();
         // [#21725] Every mark is spent: from here on this re-sync's
         // registrations are the ones the engine holds.
         this.mutationArmedFlows.clear();

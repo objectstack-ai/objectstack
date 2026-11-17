@@ -8,11 +8,13 @@
 // environment.
 
 import { describe, it, expect, vi } from 'vitest';
+import { LiteKernel } from '@objectstack/core';
+import type { Plugin, PluginContext } from '@objectstack/core';
 import { AutomationEngine } from './engine.js';
 import type { FlowTrigger, FlowTriggerBinding } from './engine.js';
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
 import { registerSubflowNode } from './builtin/subflow-node.js';
-import { packagedFlowDefaultReader } from './plugin.js';
+import { AutomationServicePlugin, packagedFlowDefaultReader } from './plugin.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 
 function createTestLogger(): any {
@@ -444,6 +446,179 @@ describe('#34655 (seat ruling on S2) — a declared `.custom` override does not 
         engine.registerFlow('draft_contract', packagedFlow('draft_contract', { description: 'customized', version: 2 }), OVERRIDE);
         expect(stateOf(engine, 'draft_contract')).toMatchObject({ enabled: true });
         expect(reader).toHaveBeenCalledTimes(asked + 1);
+    });
+
+    it('(L2 S4) a change to the loader\'s set reaches a held override with no ledger row, both ways', async () => {
+        const defaults: Record<string, boolean | undefined> = { draft_contract: false };
+        const { engine, isBound } = bootWithLoaderDefaults(defaults);
+        engine.registerFlow('draft_contract', packagedFlow('draft_contract', { description: 'customized' }), OVERRIDE);
+        expect(isBound('draft_contract')).toBe(false);
+
+        // The base is upgraded to ship it on; the held override body is not re-registered.
+        defaults.draft_contract = undefined;
+        expect(engine.refreshPackagedFlowDefaults()).toEqual(['draft_contract']);
+        expect(isBound('draft_contract')).toBe(true);
+        expect(stateOf(engine, 'draft_contract')).toMatchObject({ enabled: true, bound: true });
+        expect((await engine.execute('draft_contract')).success).toBe(true);
+
+        // And back to off.
+        defaults.draft_contract = false;
+        expect(engine.refreshPackagedFlowDefaults()).toEqual(['draft_contract']);
+        expect(isBound('draft_contract')).toBe(false);
+        expect(stateOf(engine, 'draft_contract')).toMatchObject({ enabled: false });
+        expect((await engine.execute('draft_contract')).code).toBe('FLOW_DISABLED');
+    });
+
+    it('(L2 S4) CONTROL: the refresh moves nothing a ledger row or the loader\'s own body decides', async () => {
+        const defaults: Record<string, boolean | undefined> = { draft_contract: undefined, on_absent: undefined };
+        const { engine, isBound } = bootWithLoaderDefaults(defaults);
+        engine.registerFlow('draft_contract', packagedFlow('draft_contract', { description: 'customized' }), OVERRIDE);
+        await engine.toggleFlow('draft_contract', false);
+        engine.registerFlow('on_absent', packagedFlow('on_absent', { defaultActive: false }), PULL);
+        expect(isBound('draft_contract')).toBe(false);
+        expect(isBound('on_absent')).toBe(false);
+
+        // The reader flips both; the row decides the override, the loader's body decides its own flow.
+        defaults.draft_contract = true;
+        defaults.on_absent = true;
+        expect(engine.refreshPackagedFlowDefaults()).toEqual([]);
+        expect(isBound('draft_contract')).toBe(false);
+        expect(isBound('on_absent')).toBe(false);
+    });
+
+    it('(L2 N13) a body rolled back from the history reads the default of the set installed now', async () => {
+        const defaults: Record<string, boolean | undefined> = { draft_contract: false };
+        const { engine } = bootWithLoaderDefaults(defaults);
+        engine.registerFlow('draft_contract', packagedFlow('draft_contract', { description: 'v1' }), OVERRIDE);
+        engine.registerFlow('draft_contract', packagedFlow('draft_contract', { description: 'v2', version: 2 }), OVERRIDE);
+        const [first] = engine.getFlowVersionHistory('draft_contract').map((h) => h.version);
+        expect(stateOf(engine, 'draft_contract')).toMatchObject({ enabled: false });
+
+        defaults.draft_contract = undefined;
+        engine.refreshPackagedFlowDefaults();
+        engine.rollbackFlow('draft_contract', first);
+        expect(((await engine.getFlow('draft_contract')) as { description?: string } | null)?.description).toBe('v1');
+        expect(stateOf(engine, 'draft_contract')).toMatchObject({ enabled: true });
+    });
+});
+
+describe('#34655 (L2 S4) — a hot upgrade that flips the base\'s default reaches an override the mutation sync armed', () => {
+    const BASE = 'com.acme.crm';
+    const FLOW = 'draft_contract';
+    /** The pair's declared override, as the protocol's view serves it in the base's slot. */
+    const served = (label: string) =>
+        packagedFlow(FLOW, { label, _packageId: BASE, overrides: { package: BASE, basedOn: '1.0.0' } });
+
+    /**
+     * The automation plugin over a protocol stand-in: the view serves the
+     * override, the loader's set holds the base's own body with `baseDefault`,
+     * and the test raises the mutation signal and `metadata:reloaded`. No
+     * activation ledger: no row decides.
+     */
+    async function bootComposition(baseDefault: boolean | undefined) {
+        const state = { view: [served('OVERRIDE')], baseDefault };
+        const listeners: Array<(evt: { type: string; name: string; state: string; organizationId?: string | null }) => void> = [];
+        const captured: { ctx?: PluginContext } = {};
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        kernel.use({
+            name: 'fake-composition',
+            version: '1.0.0',
+            async init(ctx: PluginContext) {
+                captured.ctx = ctx;
+                const register = (ctx as unknown as { registerService(n: string, s: unknown): void }).registerService;
+                register('objectql', { registry: { listItems: () => [], getObject: () => undefined } });
+                register('protocol', {
+                    packagedArtifactOwner: (r: { type: string; name: string }) => (r.type === 'flow' && r.name === FLOW ? BASE : undefined),
+                    shippedArtifactsOf: (type: string, name: string) =>
+                        type === 'flow' && name === FLOW
+                            ? [packagedFlow(FLOW, {
+                                label: 'BASE',
+                                _packageId: BASE,
+                                ...(state.baseDefault === undefined ? {} : { defaultActive: state.baseDefault }),
+                            })]
+                            : [],
+                    async getMetaItemsForExecution(q: { type: string }) {
+                        return { items: q.type === 'flow' ? state.view : [] };
+                    },
+                    onMetadataMutation(listener: (typeof listeners)[number]) {
+                        listeners.push(listener);
+                        return () => listeners.splice(listeners.indexOf(listener), 1);
+                    },
+                });
+            },
+        } as Plugin);
+        kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
+        await kernel.bootstrap();
+        const engine = kernel.getService<AutomationEngine>('automation');
+        const recordChange = recordingTrigger('record_change');
+        engine.registerTrigger(recordChange.trigger);
+        const armedLabel = async () => ((await engine.getFlow(FLOW)) as { label?: string } | null)?.label;
+        return {
+            kernel,
+            engine,
+            isBound: recordChange.isBound,
+            registrations: () => engine.getFlowVersionHistory(FLOW).length,
+            /** A direct active save of the override (no reload): the mutation sync arms it and marks its slot. */
+            async saveOverride(label: string) {
+                state.view = [served(label)];
+                listeners.forEach((l) => l({ type: 'flow', name: FLOW, state: 'active', organizationId: null }));
+                await vi.waitFor(async () => expect(await armedLabel()).toBe(label));
+            },
+            /** A hot upgrade of the base package: its own body's declaration moves, then the reload. */
+            async upgradeBase(next: boolean | undefined) {
+                state.baseDefault = next;
+                await captured.ctx!.trigger('metadata:reloaded', { changed: [`app/${BASE}`] });
+            },
+        };
+    }
+
+    it('the base moves from on to off: the override stops', async () => {
+        const c = await bootComposition(undefined);
+        try {
+            await c.saveOverride('OVERRIDE-2');
+            expect(c.isBound(FLOW)).toBe(true);
+            const registrations = c.registrations();
+
+            await c.upgradeBase(false);
+            expect(c.registrations(), 'the re-sync kept the body the mutation sync armed').toBe(registrations);
+            expect(c.isBound(FLOW)).toBe(false);
+            expect(stateOf(c.engine, FLOW)).toMatchObject({ enabled: false });
+            expect((await c.engine.execute(FLOW)).code).toBe('FLOW_DISABLED');
+        } finally {
+            await c.kernel.shutdown();
+        }
+    });
+
+    it('the base moves from off to on: the override starts', async () => {
+        const c = await bootComposition(false);
+        try {
+            await c.saveOverride('OVERRIDE-2');
+            expect(c.isBound(FLOW)).toBe(false);
+            const registrations = c.registrations();
+
+            await c.upgradeBase(true);
+            expect(c.registrations(), 'the re-sync kept the body the mutation sync armed').toBe(registrations);
+            expect(c.isBound(FLOW)).toBe(true);
+            expect(stateOf(c.engine, FLOW)).toMatchObject({ enabled: true, bound: true });
+            expect((await c.engine.execute(FLOW)).success).toBe(true);
+        } finally {
+            await c.kernel.shutdown();
+        }
+    });
+
+    it('CONTROL: a reload that leaves the base\'s declaration as it was moves nothing', async () => {
+        const c = await bootComposition(false);
+        try {
+            await c.saveOverride('OVERRIDE-2');
+            const registrations = c.registrations();
+
+            await c.upgradeBase(false);
+            expect(c.registrations()).toBe(registrations);
+            expect(c.isBound(FLOW)).toBe(false);
+            expect((await c.engine.execute(FLOW)).code).toBe('FLOW_DISABLED');
+        } finally {
+            await c.kernel.shutdown();
+        }
     });
 });
 

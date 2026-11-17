@@ -3143,11 +3143,16 @@ export class AutomationEngine implements IAutomationService {
     private packagedFlowDefaultSource?: PackagedFlowDefaultSource;
     /**
      * [#34655, L2 N9] What {@link packagedFlowDefaultSource} answered for an
-     * armed body, asked once per registration: keyed by the body
-     * {@link registerFlow} armed, so every re-registration (the
-     * `metadata:reloaded` re-sync after an upgrade re-registers the winner)
-     * asks again, and {@link isFlowEnabled} never reads the loader's set.
-     * Replaced whenever either reader is attached.
+     * armed body, so {@link isFlowEnabled} never reads the loader's set:
+     * keyed by the body {@link registerFlow} armed, which is a new object on
+     * every registration, so a registration asks again. A re-sync does not
+     * always re-register (L2 S4: the `metadata:reloaded` re-sync keeps a body
+     * the metadata-mutation sync armed from the same stored row, and keeps
+     * the body it had when a re-registration throws), and the answer depends
+     * on the loader's set, not on the body. So the map is replaced whenever
+     * either reader is attached and at every re-sync
+     * ({@link refreshPackagedFlowDefaults}), which also re-judges the flows
+     * whose answer moved.
      */
     private packagedFlowDefaults = new WeakMap<FlowParsed, { readonly value: boolean | undefined }>();
     /**
@@ -6373,7 +6378,9 @@ export class AutomationEngine implements IAutomationService {
      * With no reader attached, only an armed loader's body answers.
      *
      * [L2 N9] The reader's answer is asked once per armed body
-     * ({@link packagedFlowDefaults}), not on every {@link isFlowEnabled}.
+     * ({@link packagedFlowDefaults}), not on every {@link isFlowEnabled},
+     * and asked again after each change to the loader's set
+     * ({@link refreshPackagedFlowDefaults}).
      */
     private packagedFlowDefault(key: string): boolean | undefined {
         const armed = this.flows.get(key);
@@ -6387,6 +6394,48 @@ export class AutomationEngine implements IAutomationService {
         const value = owner === undefined ? undefined : source(this.flowSlots.slot(key)?.name ?? key, owner);
         this.packagedFlowDefaults.set(armed, { value });
         return value;
+    }
+
+    /**
+     * [#34655, L2 S4] The loader's set may have changed (a package installed,
+     * upgraded or removed): forget every default {@link packagedFlowDefault}
+     * cached, and send each held flow whose armed body is NOT the loader's
+     * own (a declared `.custom` override, a `runtime` body under a held name)
+     * back through the arming gate when its enablement moved. Returns the
+     * keys it moved.
+     *
+     * The cache is keyed by the armed body, and a re-sync does not always
+     * re-register: the automation plugin's `metadata:reloaded` re-sync keeps
+     * the body the metadata-mutation sync armed from the same stored row, and
+     * keeps the body it had when a re-registration throws. An override's
+     * stored body does not change when its base is upgraded, so without this
+     * the default read from the previous version's body would stay until the
+     * next registration of that flow or a restart: a flow the new version
+     * ships off would keep running, and one it ships on would stay off. The
+     * plugin calls this at every re-sync; a body {@link rollbackFlow} puts
+     * back is asked again too, since the map it was cached in is gone.
+     *
+     * A loader-armed flow reads its own body's declaration and is never
+     * cached, so it is not re-judged here: its re-registration is what moves
+     * it. An activation ledger row decides before any default is read, so a
+     * flow an administrator switched does not move.
+     */
+    refreshPackagedFlowDefaults(): string[] {
+        const before = new Map<string, boolean>();
+        for (const [key, armed] of this.flows) {
+            if (this.flowArms.get(armed)?.source !== 'package') before.set(key, this.isFlowEnabled(key));
+        }
+        this.packagedFlowDefaults = new WeakMap();
+        const moved: string[] = [];
+        for (const [key, wasEnabled] of before) {
+            if (this.isFlowEnabled(key) === wasEnabled) continue;
+            if (wasEnabled) this.deactivateFlowTrigger(key);
+            else this.activateFlowTrigger(key);
+            moved.push(key);
+        }
+        // [#20725, ADR-0126 §7.3] The callers of a subflow that moved, through the same gate.
+        for (const key of moved) this.rejudgeSubflowCallers(key);
+        return moved;
     }
 
     /**
