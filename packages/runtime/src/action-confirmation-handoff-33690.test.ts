@@ -36,10 +36,11 @@ import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
 
 import { ACTION_CONFIRMATION_SERVICE, AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
+import { ANONYMOUS_DENY_CODE } from '@objectstack/core';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import { actionConfirmationElicitSubject, actionConfirmationRefusal } from './action-execution.js';
-import { dispatchAction } from './action-dispatch.js';
+import { dispatchAction, dispatchActionResume } from './action-dispatch.js';
 
 const OBJECT = 'crm_lead';
 
@@ -77,7 +78,7 @@ function makeConfirmationService() {
     return { submit: vi.fn(async (_handOff: unknown, _ec: unknown) => ({ pendingId: `pa_${++n}` })) };
 }
 
-function makeHarness(opts: { service?: unknown } = {}) {
+function makeHarness(opts: { service?: unknown; audit?: unknown } = {}) {
     const leads = [
         { id: 'lead_1', owner: 'u1', name: 'Ada', status: 'open' },
         { id: 'lead_2', owner: 'u2', name: 'Grace', status: 'open' },
@@ -135,6 +136,8 @@ function makeHarness(opts: { service?: unknown } = {}) {
     const services: Record<string, unknown> = {
         objectql: ql, data: ql, metadata, automation,
         ...(opts.service ? { [ACTION_CONFIRMATION_SERVICE]: opts.service } : {}),
+        // [#34386] The audit slot's invocation writer, when a pin reads the row.
+        ...(opts.audit ? { audit: opts.audit } : {}),
     };
     const resolve = (name: string) => services[name] ?? null;
     const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
@@ -149,7 +152,10 @@ function makeHarness(opts: { service?: unknown } = {}) {
     };
     const viaHost = (ec: unknown, action: string, extra: Record<string, unknown> = {}) =>
         dispatchAction(kernel, { executionContext: ec as any, environmentId: 'platform', objectName: OBJECT, actionName: action, ...extra } as any);
-    return { ql, automation, runs, leads, bridgeAs, viaRest, viaHost };
+    // [#34386] The host's resume door: the approval leg of a handed-off resume_run.
+    const resumeAsHost = (ec: unknown, extra: Record<string, unknown>) =>
+        dispatchActionResume(kernel, { executionContext: ec as any, environmentId: 'platform', ...extra } as any);
+    return { ql, automation, runs, leads, bridgeAs, viaRest, viaHost, resumeAsHost };
 }
 
 async function refusalOf(p: Promise<unknown>): Promise<{ code: unknown; status: unknown; message: string; details?: any }> {
@@ -579,5 +585,134 @@ describe('[#33712] the question names the record by the title its read served', 
         const subject = actionConfirmationElicitSubject(GATED, GATED.name, OBJECT, 'lead_1', SCHEMA, { id: 'lead_1', name: 'Ada' });
         expect(subject).not.toHaveProperty('recordTitle');
         expect(subject.recordId).toBe('lead_1');
+    });
+});
+
+/**
+ * [#34386] The approval leg of a handed-off `resume_run`: the host's approve
+ * door calls `dispatchActionResume` with the run and values the hand-off
+ * carried, as the approving person, and their confirmation. It asks
+ * `resume_run`'s gates again as that person and resumes THAT parked run once;
+ * it never starts a new run and never hands off again.
+ */
+describe('[#34386] dispatchActionResume: approving a handed-off resume_run resumes that run as the approver', () => {
+    /** A run owned by u1, paused on its screen, handed off by its resume_run call. */
+    async function handedOffResume(h: ReturnType<typeof makeHarness>, service: ReturnType<typeof makeConfirmationService>) {
+        const started: any = await h.automation.execute(GATED_FLOW.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
+        h.automation.execute.mockClear();
+        const pending = await h.bridgeAs(PERSON).resumeRun(started.runId, { values: { reason: 'approved later' } });
+        expect(pending).toMatchObject({ status: 'pending_confirmation' });
+        const handOff = (service.submit.mock.calls[0] as any[])[0];
+        service.submit.mockClear();
+        return handOff.run as { runId: string; values: Record<string, unknown> };
+    }
+
+    it('the approving person resumes THAT parked run once, with the values the hand-off carried', async () => {
+        const service = makeConfirmationService();
+        const audit = { recordActionInvocation: vi.fn(async (_event: unknown) => undefined) };
+        const h = makeHarness({ service, audit });
+        const run = await handedOffResume(h, service);
+
+        const answer: any = await h.resumeAsHost(PERSON, { runId: run.runId, values: run.values, confirm: true });
+
+        expect(answer.status).toBe(200);
+        expect(answer.body).toMatchObject({
+            success: true,
+            data: { ok: true, action: GATED_FLOW.name, objectName: OBJECT, recordId: 'lead_1', result: { status: 'completed' } },
+        });
+        expect(h.automation.resume).toHaveBeenCalledTimes(1);
+        expect(h.automation.resume.mock.calls[0]).toEqual([run.runId, { variables: { reason: 'approved later' } }]);
+        expect(h.runs.get(run.runId)?.status).toBe('completed');
+        // Never a new run, and never handed off again.
+        expect(h.automation.execute).not.toHaveBeenCalled();
+        expect(service.submit).not.toHaveBeenCalled();
+        // One invocation row, as the host action door writes it: no surface,
+        // because the call came through neither REST nor MCP.
+        expect(audit.recordActionInvocation).toHaveBeenCalledTimes(1);
+        const event = audit.recordActionInvocation.mock.calls[0][0] as any;
+        expect(event).toMatchObject({
+            actionName: GATED_FLOW.name, objectName: OBJECT, recordId: 'lead_1', branch: 'flow', runId: run.runId, outcome: 'succeeded',
+        });
+        expect(event.context.userId).toBe('u1');
+        expect(event.context).not.toHaveProperty('surface');
+    });
+
+    it('another person is refused with the one not-found answer, and the run stays parked', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const run = await handedOffResume(h, service);
+
+        const refused: any = await h.resumeAsHost({ userId: 'u2', systemPermissions: [] }, { runId: run.runId, values: run.values, confirm: true });
+
+        expect({ status: refused.status, code: refused.body?.error?.code }).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+        expect(refused.body.error.message).toContain('Only the user whose call started a run can resume it');
+        expect(h.automation.resume).not.toHaveBeenCalled();
+        expect(h.runs.get(run.runId)?.status).toBe('paused');
+    });
+
+    it('a run that is no longer parked is refused: a run the first approval completed is not resumed again', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const run = await handedOffResume(h, service);
+
+        const first: any = await h.resumeAsHost(PERSON, { runId: run.runId, values: run.values, confirm: true });
+        const second: any = await h.resumeAsHost(PERSON, { runId: run.runId, values: run.values, confirm: true });
+
+        expect(first.status).toBe(200);
+        expect({ status: second.status, code: second.body?.error?.code }).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+        expect(h.automation.resume).toHaveBeenCalledTimes(1);
+    });
+
+    it('without the person\'s confirmation a gated resume is refused 428 (the member gate), never handed off again', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const run = await handedOffResume(h, service);
+
+        for (const extra of [{}, { [AI_ACTION_CONFIRMATION_MEMBER]: false }]) {
+            const refused: any = await h.resumeAsHost(PERSON, { runId: run.runId, values: run.values, ...extra });
+            expect({ status: refused.status, code: refused.body?.error?.code }, JSON.stringify(extra)).toEqual({
+                status: 428, code: 'ACTION_CONFIRMATION_REQUIRED',
+            });
+            // The member gate's refusal: no contract reason.
+            expect(refused.body.error.details).toEqual({
+                actionName: GATED_FLOW.name, objectName: OBJECT, confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+            });
+        }
+        expect(service.submit).not.toHaveBeenCalled();
+        expect(h.automation.resume).not.toHaveBeenCalled();
+        expect(h.runs.get(run.runId)?.status).toBe('paused');
+    });
+
+    it('[ADR-0151 D3 rule 3] an AI service account is refused whatever it carries, reason service_account', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const started: any = await h.automation.execute(GATED_FLOW.target, { userId: 'bot_1', object: OBJECT, record: { id: 'lead_1' } });
+
+        const refused: any = await h.resumeAsHost(ACCOUNT, { runId: started.runId, values: { reason: 'x' }, confirm: true });
+
+        expect({ status: refused.status, code: refused.body?.error?.code }).toEqual({ status: 428, code: 'ACTION_CONFIRMATION_REQUIRED' });
+        expect(refused.body.error.details).toMatchObject({ reason: 'service_account' });
+        expect(h.automation.resume).not.toHaveBeenCalled();
+        expect(service.submit).not.toHaveBeenCalled();
+    });
+
+    it('the subject record is read again as the approver: one they can no longer read is refused 404, nothing resumes', async () => {
+        const service = makeConfirmationService();
+        const h = makeHarness({ service });
+        const run = await handedOffResume(h, service);
+        h.leads[0] = { ...h.leads[0], owner: 'u2' };
+
+        const refused: any = await h.resumeAsHost(PERSON, { runId: run.runId, values: run.values, confirm: true });
+
+        expect({ status: refused.status, code: refused.body?.error?.code }).toEqual({ status: 404, code: 'RECORD_NOT_FOUND' });
+        expect(h.automation.resume).not.toHaveBeenCalled();
+        expect(h.runs.get(run.runId)?.status).toBe('paused');
+    });
+
+    it('an anonymous caller is refused 401 before anything is read', async () => {
+        const h = makeHarness({ service: makeConfirmationService() });
+        const refused: any = await h.resumeAsHost({}, { runId: 'run_1', confirm: true });
+        expect({ status: refused.status, code: refused.body?.error?.code }).toEqual({ status: 401, code: ANONYMOUS_DENY_CODE });
+        expect(h.automation.getRun).not.toHaveBeenCalled();
     });
 });
