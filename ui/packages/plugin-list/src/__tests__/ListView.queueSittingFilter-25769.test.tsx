@@ -17,7 +17,9 @@
  *    at least one queue (`hasAnyQueue`, objectstack#28428); an object without
  *    the column, or with an author's own non-system `queue` field, gets no
  *    toggle, and neither does any object while `hasAnyQueue` is false or
- *    unknown (no permission provider, or an anonymous answer);
+ *    unknown (no permission provider, or an anonymous answer), nor an object
+ *    the session's `objectsUsingQueues` does not name (objectstack#34602: no
+ *    record of it sits in a queue and no assignment rule routes it into one);
  *  - storage: an ADR-0015 `external` (federated) object serves the injected
  *    column too, but the remote database owns its schema, so no row can sit
  *    in a queue and the toggle is not offered (`platformProvisionsStorage`);
@@ -34,7 +36,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, waitFor, cleanup, fireEvent, screen } from '@testing-library/react';
-import { ListView, buildEffectiveFilter, objectHasOwnershipQueue, QUEUE_SITTING_CONDITIONS } from '../ListView';
+import { ListView, buildEffectiveFilter, objectHasOwnershipQueue, objectUsesQueues, QUEUE_SITTING_CONDITIONS } from '../ListView';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
 import type { ListViewSchema } from '@object-ui/types';
@@ -59,13 +61,18 @@ function dataSourceServing(fields: Record<string, unknown>, extra: Record<string
 
 const schema = { type: 'list-view', objectName: OBJECT, fields: ['subject'] } as unknown as ListViewSchema;
 
-/** The session double: the `/auth/me/permissions` answer, serving `hasAnyQueue`. */
-function session(hasAnyQueue: boolean): MePermissionsResponse {
+/**
+ * The session double: the `/auth/me/permissions` answer, serving `hasAnyQueue`
+ * and `objectsUsingQueues` — by default this list's object uses queues exactly
+ * when the organization has one (objectstack#34602).
+ */
+function session(hasAnyQueue: boolean, objectsUsingQueues: string[] = hasAnyQueue ? [OBJECT] : []): MePermissionsResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 'org_1',
     hasAnyQueue,
+    objectsUsingQueues,
     positions: [],
     permissionSets: ['member_default'],
     objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
@@ -242,5 +249,44 @@ describe('ListView "In a queue" toggle — offered only where the platform provi
     const ds = dataSourceServing({ queue: INJECTED_QUEUE }, { ownership: 'user' });
     mount(ds, session(true));
     expect(await screen.findByTestId('queue-sitting-filter')).toBeTruthy();
+  });
+});
+
+describe('ListView "In a queue" toggle — offered only on an object that uses queues (objectstack#34602)', () => {
+  it('objectUsesQueues reads membership in a present list only', () => {
+    expect(objectUsesQueues([OBJECT, 'crm_lead'], OBJECT)).toBe(true);
+    expect(objectUsesQueues(['crm_lead'], OBJECT)).toBe(false);
+    expect(objectUsesQueues([], OBJECT)).toBe(false);
+    expect(objectUsesQueues(undefined, OBJECT)).toBe(false);
+    expect(objectUsesQueues([OBJECT], undefined)).toBe(false);
+  });
+
+  it('the organization has a queue but this object is not named: no toggle, and no queue condition on the fetch', async () => {
+    const ds = dataSourceServing({ queue: INJECTED_QUEUE });
+    mount(ds, session(true, ['crm_lead']));
+    await settled(ds);
+    expect(screen.queryByTestId('queue-sitting-filter')).toBeNull();
+    expect(JSON.stringify(lastFilter(ds) ?? null)).not.toContain('owner_id');
+  });
+
+  it('this object is named: the toggle is offered', async () => {
+    const ds = dataSourceServing({ queue: INJECTED_QUEUE });
+    mount(ds, session(true, ['crm_lead', OBJECT]));
+    expect(await screen.findByTestId('queue-sitting-filter')).toBeTruthy();
+  });
+
+  it('an answer without the list (a server that does not send it) hides the toggle: unknown is not a yes', async () => {
+    const ds = dataSourceServing({ queue: INJECTED_QUEUE });
+    const { objectsUsingQueues: _absent, ...withoutList } = session(true) as Extract<MePermissionsResponse, { authenticated: true }>;
+    mount(ds, withoutList as unknown as MePermissionsResponse);
+    await settled(ds);
+    expect(screen.queryByTestId('queue-sitting-filter')).toBeNull();
+  });
+
+  it('the list names the object but the object has no injected column: still no toggle', async () => {
+    const ds = dataSourceServing({ queue: { name: 'queue', type: 'text' } });
+    mount(ds, session(true, [OBJECT]));
+    await settled(ds);
+    expect(screen.queryByTestId('queue-sitting-filter')).toBeNull();
   });
 });

@@ -387,6 +387,7 @@ describe('ListView.emptyStateAccess-25898', () => {
     userId: USER,
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: ['member'],
     permissionSets: ['member'],
     objects: { [OBJECT]: bits },
@@ -1430,7 +1431,7 @@ describe('ListView.printButtonSemantics', () => {
  * group does not pin. Withheld, the toggle adds nothing to the query, and a
  * view that offers it again shows it off.
  *
- * The toggle's own offer rules (the injected column, `hasAnyQueue`, storage)
+ * The toggle's own offer rules (the injected column, `hasAnyQueue`, `objectsUsingQueues`, storage)
  * are pinned in `ListView.queueSittingFilter-25769.test.tsx`.
  */
 describe('ListView.queueToggleOwnerPin-34580', () => {
@@ -1468,6 +1469,7 @@ describe('ListView.queueToggleOwnerPin-34580', () => {
     userId: USER,
     tenantId: 'org_34580',
     hasAnyQueue: true,
+    objectsUsingQueues: [OBJECT],
     positions: [],
     permissionSets: ['member_default'],
     objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },

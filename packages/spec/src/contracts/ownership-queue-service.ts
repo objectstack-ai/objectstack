@@ -254,6 +254,33 @@ export interface IOwnershipQueueService {
   hasAnyQueue?(organizationId: string | null): Promise<boolean>;
 
   /**
+   * The objects of `organizationId`, by name, on which a queue filter can find
+   * something — the union of two readings, so neither misses what the other
+   * sees:
+   *
+   * - **sitting now**: some record of the object, in the organization, has no
+   *   owner and a queue set (the list's "in a queue" filter, verbatim). An
+   *   object with no tenant column and no declared tenant field holds
+   *   environment-wide records, and is read environment-wide;
+   * - **routed**: an active assignment rule routes the object's new records
+   *   into a queue — an organization's `sys_assignment_rule` row, or a
+   *   declared rule the activation ledger leaves on.
+   *
+   * Only objects that carry the platform's `queue` column with storage behind
+   * it are considered. Resolved under system context; ordered by name.
+   *
+   * The answer `GET /auth/me/permissions` carries as `objectsUsingQueues`
+   * (`MePermissionsAuthenticatedResponseSchema`, `@objectstack/spec/api`),
+   * narrowed there to the objects the caller may read. It discloses no queue
+   * name and no count. A caller that has already learned `hasAnyQueue` is
+   * false need not ask: with no queue, nothing can sit in one.
+   *
+   * Optional, as {@link hasAnyQueue} is: the route answers `[]` when the
+   * registered service does not carry it.
+   */
+  objectsUsingQueues?(organizationId: string | null): Promise<string[]>;
+
+  /**
    * The declared queue named `name`, whether or not the activation ledger
    * switches it off — `null` when no package declares it. Optional: the
    * activation door looks a `queue` row's subject up through it (a queue

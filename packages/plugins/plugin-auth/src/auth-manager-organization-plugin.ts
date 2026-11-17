@@ -81,6 +81,7 @@ import {
 import { buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { resolveInvitationLimitOption } from './invitation-limit.js';
+import { refuseUnverifiedAcceptWhileMailIsLive } from './invitation-accept-verified-email.js';
 import { invitationAcceptPath } from './invitation-link-action.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { blankInvitationRoleRefusal } from './invite-role-not-found-code.js';
@@ -108,6 +109,7 @@ export interface OrganizationPluginHost {
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
+  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   multiOrgPostureEffective: AuthManager['multiOrgPostureEffective'];
   orgRolesMap: AuthManager['orgRolesMap'];
   resolveMembershipRole: AuthManager['resolveMembershipRole'];
@@ -192,11 +194,15 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     // portal exposes a Teams page; without this flag those endpoints
     // 404 and the section silently breaks.
     teams: { enabled: true },
-    // Without a mailer wired in framework, requiring email verification
-    // before accepting invitations dead-ends every invite flow with
-    // FORBIDDEN EMAIL_VERIFICATION_REQUIRED…. Default-off here keeps
-    // the built-in /accept-invitation route usable for pilots; operators
-    // who wire a real mailer can re-enable downstream.
+    // The vendor's switch governs accept, reject and get-invitation
+    // together, and is read once, at boot. Declared off here: on a
+    // deployment with no live mail nothing can ever verify an address, so
+    // turning it on would dead-end every invite flow with FORBIDDEN
+    // EMAIL_VERIFICATION_REQUIRED…. [#34272] Where mail IS live, the
+    // accept door alone still refuses an unverified session, asked per
+    // request by `beforeAcceptInvitation` below
+    // (`invitation-accept-verified-email.ts`); reading and declining an
+    // invitation stay open, as does every door while mail is not live.
     requireEmailVerificationOnInvitation: false,
     // Cap how many orgs a user can CREATE (OS_ORG_LIMIT). Counts only orgs
     // the user OWNS (role=owner) — never orgs they were merely invited into —
@@ -424,6 +430,20 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
             code: INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE,
           });
         }
+      },
+      // [#34272] While mail is live, an unverified session may not accept:
+      // the address it holds was never proven to be the invitee's mailbox.
+      // Fired by the vendor inside the accept endpoint, after its recipient
+      // and expiry checks and before anything is written, with the
+      // `session.user` its own verification check reads. A no-op while mail
+      // is not live. `invitation-accept-verified-email.ts` states the rule.
+      beforeAcceptInvitation: async ({ user }: any) => {
+        await refuseUnverifiedAcceptWhileMailIsLive(user, {
+          isEmailDeliveryLive: () => this.isEmailDeliveryLive(),
+          verificationRequired:
+            organizationPlugin?.$ERROR_CODES
+              ?.EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION,
+        });
       },
       // [ADR-0105 D8] Accept-time application + host seam. The placement
       // the issuance gate approved lands WITH the better-auth membership,

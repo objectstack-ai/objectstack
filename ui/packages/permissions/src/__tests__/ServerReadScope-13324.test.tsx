@@ -39,6 +39,7 @@ const ANSWER: MePermissionsAuthenticatedResponse = {
   userId: 'u1',
   tenantId: 'org_1',
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['member'],
   permissionSets: ['member_default'],
   objects: { invoice: { allowRead: true, allowEdit: true } },

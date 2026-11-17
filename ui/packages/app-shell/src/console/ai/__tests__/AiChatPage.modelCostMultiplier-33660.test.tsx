@@ -57,7 +57,7 @@ vi.mock('../../../providers/AdapterProvider', async (importOriginal) => ({
 vi.mock('../../../hooks/useCanAuthorMetadata', () => ({ useCanAuthorMetadata: () => true }));
 vi.mock('../../../layout/AiUsageIndicator', () => ({ AiUsageIndicator: () => null }));
 vi.mock('../ConversationsSidebar', () => ({ ConversationsSidebar: () => null }));
-vi.mock('../LiveCanvas', () => ({ LiveCanvas: () => null }));
+
 vi.mock('../PendingDraftsBar', () => ({ PendingDraftsBar: () => null }));
 
 import { I18nProvider } from '@object-ui/i18n';

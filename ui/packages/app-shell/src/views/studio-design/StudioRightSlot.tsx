@@ -53,7 +53,7 @@ export interface StudioRightSlotProps {
   copilot: React.ReactNode;
   /** Callback ref for the properties portal target. */
   propsTargetRef: (el: HTMLElement | null) => void;
-  /** A width in px while the copilot's Live Canvas is open; `undefined` otherwise. */
+  /** A width in px while the copilot is widened in place (objectstack#34610); `undefined` otherwise. */
   wideWidth?: number;
   /** Under `md`: the slot overlays the page instead of reflowing it. */
   overlay?: boolean;

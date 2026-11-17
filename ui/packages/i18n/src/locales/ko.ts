@@ -1379,6 +1379,8 @@ const ko = {
     writeStrippedUnknownReason: "다음 필드는 서버에서 적용되지 않았습니다: {{fields}}",
     approvalPendingEditable: "승인 진행 중 · 편집 가능",
     approvalPendingTooltip: "이 레코드에 대기 중인 승인 요청이 있지만 이 단계에서는 편집할 수 있습니다",
+    approvalPending: "승인 진행 중",
+    approvalPendingNotEditableTooltip: "이 레코드에 대기 중인 승인 요청이 있습니다",
     approvalProgress: "승인 — {{need}}건 중 {{got}}건",
     approvalProgressGroups: "합의 — {{need}}개 그룹 중 {{got}}개",
     approvalProgressLabel: "승인 진행 상황",
@@ -1925,6 +1927,16 @@ const ko = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        publishFromBar_one: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        publishFromBar_other: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        showDraftToPublish: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraftToPublish_one: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraftToPublish_other: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraft: '초안 보기',
+        receipt: '게시했습니다. 변경 사항이 반영되었습니다.',
+        dismissReceipt: '닫기',
         count: "게시되지 않은 변경이 {{count}}건 있습니다 — 사용자에게는 보이지 않습니다.",
         publish: "게시",
         published: "대기 중인 변경 사항이 모두 반영되었습니다.",
@@ -2321,6 +2333,7 @@ const ko = {
       view: "보기",
       confirm: "확인",
       cancel: "취소",
+      continue: "계속",
       prefilled: "아직 설정되지 않은 값은 브라우저를 기준으로 제안되었습니다. 확인하기 전에는 아무것도 저장되지 않습니다.",
       organizationName: {
         title: "조직 이름 정하기",
@@ -3210,7 +3223,7 @@ const ko = {
     aiAssistant: "AI 어시스턴트",
     designInStudio: "Studio에서 디자인",
     editApp: "앱 편집",
-    openAppInStudio: "Studio에서 앱 보기",
+    openAppInStudio: "Studio에서 {{app}} 보기",
   },
   home: {
     build: {
@@ -4573,6 +4586,10 @@ const ko = {
       pendingHere: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
       pendingHere_one: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
       pendingHere_other: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
+      pendingInApp_one: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
+      pendingInApp_other: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
     },
     changes: {
       title: '대기 중인 변경 사항',
@@ -4708,6 +4725,8 @@ const ko = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: '이 앱은 아직 게시되지 않았습니다. 작동하지만 빌더만 볼 수 있습니다. 게시하면 사용자에게 표시됩니다.',
       message: '게시되지 않은 앱 — 기능은 모두 작동하지만 빌더만 볼 수 있습니다. 게시하면 사용자에게 표시됩니다.',
       publish: '게시',
       publishing: '게시 중…',

@@ -49,7 +49,9 @@
  *  - `metadata`: `surface`, `action_name`, `branch`, `outcome`, and on a
  *    failure the HTTP `status` and the error's machine code; `run_id` for a
  *    `resume_run`; and `performed_by` / `on_behalf_of` when an agent performed
- *    the call (ADR-0090 D10 rule 4, the same pair the CRUD mirror writes);
+ *    the call (ADR-0090 D10 rule 4, the same pair the CRUD mirror writes),
+ *    with `conversation_id` / `confirmation_id` beside an in-product AI agent,
+ *    by the CRUD mirror's rule (`auditPerformerMetadata`);
  *  - [#28281] the two rows of an `api` forward to another action route name
  *    each other: the outer row's `target` is the action's declared target
  *    (the declaration, not the interpolated path, which can carry a param
@@ -65,6 +67,7 @@ import { isMissingTableError } from '@objectstack/types';
 import {
   auditFailureCauseKey,
   auditFailureCauseSummary,
+  auditPerformerMetadata,
   createFieldPresenceProbe,
 } from './audit-writers.js';
 import type { AuthEventAuditLogger } from './auth-event-audit.js';
@@ -156,7 +159,6 @@ export function buildActionInvocationAuditRow(
 ): Record<string, unknown> {
   const ctx = event.context ?? {};
   const userId = nonEmpty(ctx.userId);
-  const performedBy = nonEmpty(ctx.performedBy?.clientId);
   const surface = ctx.surface === 'rest' || ctx.surface === 'mcp' ? ctx.surface : null;
 
   const metadata: Record<string, unknown> = {
@@ -178,11 +180,11 @@ export function buildActionInvocationAuditRow(
   if (forwardedFrom) metadata.forwarded_from = forwardedFrom;
   // [ADR-0090 D10 rule 4] The same pair, under the same names, the CRUD mirror
   // writes for a delegated write — present only when an agent performed the
-  // call, so the two shapes stay distinguishable by absence.
-  if (performedBy) {
-    metadata.performed_by = performedBy;
-    metadata.on_behalf_of = userId ?? null;
-  }
+  // call, so the two shapes stay distinguishable by absence. [#33694] Read by
+  // the CRUD mirror's own rule (`auditPerformerMetadata`): an OAuth client or
+  // the in-product AI agent, and beside the agent only, the conversation it
+  // ran in and the confirmation the person gave.
+  Object.assign(metadata, auditPerformerMetadata(ctx.performedBy, userId));
   // The impersonating administrator, under the key the CRUD mirror writes,
   // present only when an impersonation session made the call.
   const impersonatedBy = impersonatorOf(ctx);

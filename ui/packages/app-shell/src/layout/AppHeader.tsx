@@ -679,12 +679,18 @@ export function AppHeader({
   //
   // #27356 row 12 — a read-only package's app is not left with no way in: the
   // same gate answers it with the `view` posture, and this bar and the app
-  // switcher draw a browse entry (an eye, 「Open app in Studio」) where a
+  // switcher draw a browse entry (an eye, 「Open {app} in Studio」) where a
   // writable package's app gets the pencil. The posture is the gate's, read
   // once; the console's own apps and an unread list still draw neither.
   const studioEntry = useStudioEntryGate(
     isApp ? appStudioRoutePath(currentApp, true, { type: routeType, name: pathParts[3] }) : null,
   );
+  // ADR-0146 D5 — the read-only entry's words: 「Open {app} in Studio」, the
+  // app switcher's row text, named for the app the bar is in.
+  const viewInStudioText = t('topbar.openAppInStudio', {
+    defaultValue: 'Open {{app}} in Studio',
+    app: currentApp ? appLabel(currentApp) : (appName ?? ''),
+  });
 
   // The crumbs drawn after the app pill from `sm` up: a report or `system/*`
   // route's.
@@ -1017,8 +1023,10 @@ export function AppHeader({
 
             {/* Mobile: the current page's label. A list's view switcher is
                 the list's own title, drawn in its toolbar row on a phone
-                (objectstack#27058), so the bar draws no view dropdown. */}
-            <span className="text-sm font-medium sm:hidden truncate min-w-0 ml-1">
+                (objectstack#27058), so the bar draws no view dropdown. No
+                margin of its own: the pill's padding already parts the two,
+                and the width goes to the label (objectstack#34596). */}
+            <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
               {lastSegmentLabel}
             </span>
           </>
@@ -1036,10 +1044,12 @@ export function AppHeader({
           With the search centered, the search group here holds only the icon
           button and leaves at 960 px; the three `min-[960px]:` rules keyed on
           `data-topbar-search` keep the group after it from drawing a divider
-          next to nothing. */}
+          next to nothing. Below `sm` the groups draw no divider and no gap
+          beyond the cluster's own: the phone bar's 44 px controls sit side by
+          side and the room goes to the page title (objectstack#34596). */}
       <div
         className={cn(
-          'flex items-center gap-0.5 sm:gap-1 shrink-0 [&>*+*[data-topbar-group]]:ml-1 [&>[data-topbar-group]+[data-topbar-group]]:border-l [&>[data-topbar-group]+[data-topbar-group]]:border-border/60 [&>[data-topbar-group]+[data-topbar-group]]:pl-1 sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2 sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
+          'flex items-center gap-0.5 sm:gap-1 shrink-0 sm:[&>*+*[data-topbar-group]]:ml-1 sm:[&>[data-topbar-group]+[data-topbar-group]]:border-l sm:[&>[data-topbar-group]+[data-topbar-group]]:border-border/60 sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2 sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
           centersSearch &&
             'min-[960px]:flex-1 min-[960px]:min-w-max min-[960px]:justify-end min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:ml-1 min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:border-l-0 min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:pl-0',
         )}
@@ -1119,19 +1129,25 @@ export function AppHeader({
             </Button>
           )}
           {/* #27356 row 12 — a read-only package's app: the same slot, an eye
-              that opens it in Studio's browse-only posture. */}
+              that opens it in Studio's browse-only posture. ADR-0146 D5 — it
+              draws WITH its text, 「Open {app} in Studio」, so a look is not
+              mistaken for the pencil's edit. The name truncates inside a
+              capped width, and below `sm` the button is not drawn at all
+              (objectstack#29075: the app switcher's Studio row carries it). */}
           {studioEntry?.posture === 'view' && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 max-sm:hidden shrink-0"
+              size="sm"
+              className="h-8 max-md:h-11 max-sm:hidden shrink-0 gap-1.5 px-2 max-w-[14rem]"
               asChild
               data-testid="app-view-in-studio-button"
-              aria-label={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
-              title={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
+              title={viewInStudioText}
             >
               <Link to={studioEntry.path}>
-                <Eye className="h-4 w-4" />
+                <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span data-slot="view-in-studio-text" className="truncate text-xs font-medium">
+                  {viewInStudioText}
+                </span>
               </Link>
             </Button>
           )}

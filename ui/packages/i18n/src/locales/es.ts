@@ -1421,6 +1421,8 @@ const es = {
     writeStrippedUnknownReason: "No aplicado por el servidor: {{fields}}",
     approvalPendingEditable: "En aprobación · editable",
     approvalPendingTooltip: "Este registro tiene una solicitud de aprobación pendiente; este paso todavía permite la edición",
+    approvalPending: "En aprobación",
+    approvalPendingNotEditableTooltip: "Este registro tiene una solicitud de aprobación pendiente",
     approvalProgress: "Aprobaciones — {{got}} de {{need}}",
     approvalProgressGroups: "Firmas — {{got}} de {{need}} grupos",
     approvalProgressLabel: "Progreso de la aprobación",
@@ -1981,6 +1983,18 @@ const es = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        publishFromBar_one: '{{count}} cambio sin publicar. Publícalo desde la barra del borrador de arriba.',
+        publishFromBar_many: '{{count}} de cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        publishFromBar_other: '{{count}} cambios sin publicar. Publícalos desde la barra del borrador de arriba.',
+        showDraftToPublish: '{{count}} cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraftToPublish_one: '{{count}} cambio sin publicar. Muestra el borrador para revisarlo y publicarlo.',
+        showDraftToPublish_many: '{{count}} de cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraftToPublish_other: '{{count}} cambios sin publicar. Muestra el borrador para revisarlos y publicarlos.',
+        showDraft: 'Mostrar borrador',
+        receipt: 'Publicado. Tus cambios ya están activos.',
+        dismissReceipt: 'Cerrar',
         count: "{{count}} cambio(s) aún no se han publicado — los usuarios no pueden verlos.",
         publish: "Publicar",
         published: "Todos los cambios pendientes están activos.",
@@ -2387,6 +2401,7 @@ const es = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Los valores aún sin configurar se sugieren a partir de su navegador. No se guarda nada hasta que confirme.",
       organizationName: {
         title: "Asigne un nombre a su organización",
@@ -3280,7 +3295,7 @@ const es = {
     aiAssistant: "Asistente de IA",
     designInStudio: "Diseñar en Studio",
     editApp: "Editar aplicación",
-    openAppInStudio: "Ver la aplicación en Studio",
+    openAppInStudio: "Ver {{app}} en Studio",
   },
   home: {
     build: {
@@ -4684,6 +4699,11 @@ const es = {
       pendingHere_one: 'Vista previa del borrador · {{count}} cambio sin publicar en esta página',
       pendingHere_many: 'Vista previa del borrador · {{count}} de cambios sin publicar en esta página',
       pendingHere_other: 'Vista previa del borrador · {{count}} cambios sin publicar en esta página',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Vista previa del borrador · {{count}} cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_one: 'Vista previa del borrador · {{count}} cambio sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_many: 'Vista previa del borrador · {{count}} de cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
+      pendingInApp_other: 'Vista previa del borrador · {{count}} cambios sin publicar en esta app. Nada de esto está activo hasta que publiques.',
     },
     changes: {
       title: 'Cambios pendientes',
@@ -4848,6 +4868,8 @@ const es = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Esta app aún no está publicada. Funciona, pero solo los creadores pueden verla. Publícala para que tus usuarios la vean.',
       message: 'Aplicación sin publicar — totalmente funcional, pero solo la ven los creadores. Publíquela para que sus usuarios la vean.',
       publish: 'Publicar',
       publishing: 'Publicando…',
