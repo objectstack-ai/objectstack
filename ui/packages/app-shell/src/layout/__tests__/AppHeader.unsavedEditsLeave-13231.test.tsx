@@ -92,7 +92,6 @@ vi.mock('@object-ui/components', async (importOriginal) => {
     DropdownMenuSub: Pass,
     DropdownMenuSubTrigger: Pass,
     DropdownMenuSubContent: Pass,
-    DropdownMenuPortal: Pass,
     Avatar: Pass,
     AvatarImage: () => null,
     AvatarFallback: Pass,

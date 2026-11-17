@@ -45,7 +45,6 @@ vi.mock('@object-ui/components', async (importOriginal) => {
     DropdownMenuSub: Pass,
     DropdownMenuSubTrigger: Pass,
     DropdownMenuSubContent: Pass,
-    DropdownMenuPortal: ({ children }: any) => <>{children}</>,
     DropdownMenuItem: ({ onClick, children, ...p }: any) => (
       <button type="button" onClick={onClick} {...p}>{children}</button>
     ),

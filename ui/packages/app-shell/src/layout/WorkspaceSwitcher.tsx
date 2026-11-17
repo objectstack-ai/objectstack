@@ -40,7 +40,6 @@ import { nativeHostCan, nativeShowConnectionSwitcher, useNativeHost } from '@obj
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuPortal,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -124,37 +123,35 @@ export function WorkspaceSwitcherMenu({ isGroupPosture }: { isGroupPosture: bool
         <ArrowLeftRight className="mr-2 h-4 w-4" />
         {t('organization.switcher.label', { defaultValue: 'Switch organization' })}
       </DropdownMenuSubTrigger>
-      <DropdownMenuPortal>
-        <DropdownMenuSubContent className="w-60" data-testid="workspace-switcher-menu">
-          {isGroupPosture && (
-            <>
-              <DropdownMenuLabel className="text-xs text-muted-foreground">
-                {t('organization.switcher.groupLabel', { defaultValue: 'Working organization' })}
-              </DropdownMenuLabel>
-              <p
-                className="px-2 pb-1.5 text-xs font-normal leading-snug text-muted-foreground"
-                data-testid="workspace-switcher-group-hint"
-              >
-                {t('organization.switcher.groupHint', {
-                  defaultValue: 'New records are created here. Views show data from all your organizations.',
-                })}
-              </p>
-            </>
-          )}
-          {orgList.map((org) => (
-            <DropdownMenuItem
-              key={org.id}
-              onClick={() => handleSwitch(org)}
-              className="cursor-pointer gap-2"
-              data-testid={`workspace-switcher-org-${org.id}`}
+      <DropdownMenuSubContent className="w-60" data-testid="workspace-switcher-menu">
+        {isGroupPosture && (
+          <>
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              {t('organization.switcher.groupLabel', { defaultValue: 'Working organization' })}
+            </DropdownMenuLabel>
+            <p
+              className="px-2 pb-1.5 text-xs font-normal leading-snug text-muted-foreground"
+              data-testid="workspace-switcher-group-hint"
             >
-              <OrgBadge name={org.name} />
-              <span className="flex-1 truncate">{org.name}</span>
-              {org.id === current.id && <Check className="h-4 w-4 shrink-0" />}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuSubContent>
-      </DropdownMenuPortal>
+              {t('organization.switcher.groupHint', {
+                defaultValue: 'New records are created here. Views show data from all your organizations.',
+              })}
+            </p>
+          </>
+        )}
+        {orgList.map((org) => (
+          <DropdownMenuItem
+            key={org.id}
+            onClick={() => handleSwitch(org)}
+            className="cursor-pointer gap-2"
+            data-testid={`workspace-switcher-org-${org.id}`}
+          >
+            <OrgBadge name={org.name} />
+            <span className="flex-1 truncate">{org.name}</span>
+            {org.id === current.id && <Check className="h-4 w-4 shrink-0" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
     </DropdownMenuSub>
   );
 }
