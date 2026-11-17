@@ -21,11 +21,13 @@ import { defineDataset } from '@objectstack/spec/ui';
  *
  * The dataset tools match a term by EQUALITY after `normalizeDatasetTerm`, so
  * a phrase an administrator asks in ("how many users", 「有多少用户」) answers
- * only where it is written as one synonym. Each word below names one member
- * across all five datasets: a word on two measures makes the tools ask which
- * one is meant. The other language's label is listed too (`users` beside
- * 「用户」), because the label a caller is matched against is the one served in
- * the caller's locale.
+ * only where it is written as one synonym. No synonym below is a word of
+ * another measure in any of the five datasets, in any locale: a word on two
+ * measures makes the tools ask which one is meant. The other language's label
+ * is listed too (`users` beside 「用户」), because the label a caller is matched
+ * against is the one served in the caller's locale. 「用户」 is also the zh-CN
+ * label of the audit log's `user_id` dimension; a dimension match alone picks
+ * no number, so the word still answers with `user_count`.
  */
 
 export const SysUserDataset = defineDataset({
