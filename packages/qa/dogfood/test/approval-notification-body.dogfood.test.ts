@@ -188,3 +188,151 @@ describe('an approval notification reaches its recipient with its text in the bo
     120_000,
   );
 });
+
+// ── the record a notification names, as each recipient may read it ─────────
+//
+// An approval notification names its record by a title the recipient may read,
+// else by its id: here a FORMULA title over a field one approver's permission
+// set withholds, which the security plugin withholds with it. On a booted app
+// with the real security, approvals and messaging chain, read back from each
+// approver's `GET /api/v1/notifications`: the withheld approver's notification
+// carries no part of the withheld field, and the control approver's carries
+// the title whole. Armed first: the data plane serves the withheld approver the
+// record without the title, and the control with it.
+
+const TITLED = 'anb_titled';
+const TITLED_WITHHELD = 'anb-titled-withheld@example.com';
+const TITLED_CONTROL = 'anb-titled-control@example.com';
+const TITLED_SUBMITTER = 'anb-titled-submitter@example.com';
+const WITHHELD_CODE = 'ANBTITLECODE57';
+
+const AnbTitled = ObjectSchema.create({
+  name: TITLED,
+  label: 'Titled Request',
+  pluralLabel: 'Titled Requests',
+  sharingModel: 'public_read_write',
+  nameField: 'display_title',
+  fields: {
+    name: Field.text({ label: 'Name', required: true }),
+    code: Field.text({ label: 'Code' }),
+    display_title: Field.formula({ label: 'Display Title', expression: "record.name + ' ' + record.code", returnType: 'text' } as never),
+  },
+});
+
+const AnbTitledFlow = defineFlow({
+  name: 'anb_titled_flow',
+  label: 'Titled Request Flow',
+  description: 'Fires on insert and routes to two user approvers, authored as emails.',
+  type: 'autolaunched',
+  status: 'active',
+  nodes: [
+    { id: 'start', type: 'start', label: 'On Create', config: { objectName: TITLED, triggerType: 'record-after-create' } },
+    {
+      id: 'review',
+      type: 'approval',
+      label: 'Review',
+      config: {
+        approvers: [{ type: 'user', value: TITLED_WITHHELD }, { type: 'user', value: TITLED_CONTROL }],
+        behavior: 'first_response',
+      },
+    },
+    { id: 'approved', type: 'end', label: 'Approved' },
+    { id: 'rejected', type: 'end', label: 'Rejected' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'review' },
+    { id: 'e2', source: 'review', target: 'approved', label: 'approve' },
+    { id: 'e3', source: 'review', target: 'rejected', label: 'reject' },
+  ],
+});
+
+const anbTitledStack = defineStack({
+  manifest: {
+    id: 'com.dogfood.approval-notification-title',
+    namespace: 'anb',
+    version: '0.0.0',
+    type: 'app',
+    name: 'Approval Notification Title Fixture',
+    description: 'One object titled by a formula, one flow routed to two email-authored user approvers.',
+  },
+  requires: ['automation', 'triggers'],
+  objects: [AnbTitled],
+  flows: [AnbTitledFlow],
+});
+
+const titledGrants = { [TITLED]: { allowRead: true, allowCreate: true, allowEdit: false, allowDelete: false } };
+const anbTitledMemberSet = PermissionSetSchema.parse({
+  name: 'anb_titled_member',
+  label: 'Titled member — create + read on anb_titled only',
+  objects: titledGrants,
+});
+const anbTitledWithholdSet = PermissionSetSchema.parse({
+  name: 'anb_titled_withhold',
+  label: 'Titled withhold — the code field is not readable',
+  objects: titledGrants,
+  fields: { [`${TITLED}.code`]: { readable: false, editable: false } },
+});
+
+describe('an approval notification names its record by a title the recipient may read, else not at all', () => {
+  it(
+    'a recipient withheld a field of a formula title reads no part of it; the control reads the title',
+    async () => {
+      const stack = await bootStack(anbTitledStack as unknown as Parameters<typeof bootStack>[0], {
+        automation: true,
+        security: new SecurityPlugin({
+          defaultPermissionSets: [...securityDefaultPermissionSets, anbTitledMemberSet, anbTitledWithholdSet],
+          fallbackPermissionSet: anbTitledMemberSet.name,
+        }),
+        extraPlugins: [
+          new MessagingServicePlugin({ reliableDelivery: false }),
+          new RecordChangeTriggerPlugin(),
+          new ApprovalsServicePlugin(),
+        ],
+      });
+      try {
+        const ql = (await stack.kernel.getServiceAsync('objectql')) as any;
+        const submitterToken = await stack.signUp(TITLED_SUBMITTER);
+        const withheldToken = await stack.signUp(TITLED_WITHHELD);
+        const controlToken = await stack.signUp(TITLED_CONTROL);
+        const withheldUser = await ql.findOne('sys_user', { where: { email: TITLED_WITHHELD }, context: { isSystem: true } });
+        await ql.insert(
+          'sys_user_permission_set',
+          { user_id: withheldUser.id, permission_set: anbTitledWithholdSet.name },
+          { context: { isSystem: true } },
+        );
+
+        const created = await stack.apiAs(submitterToken, 'POST', `/data/${TITLED}`, { name: 'contract', code: WITHHELD_CODE });
+        expect(created.status).toBe(201);
+        const createdBody = (await created.json()) as { id?: string; record?: { id?: string } };
+        const recordId = String(createdBody.id ?? createdBody.record?.id ?? '');
+
+        // Armed: the data plane serves the withheld approver the record without
+        // its title, and the control with it — else the case below measures an
+        // unrestricted recipient.
+        const titleAs = async (token: string) => {
+          const res = await stack.apiAs(token, 'GET', `/data/${TITLED}/${recordId}`);
+          expect(res.status).toBe(200);
+          const body = (await res.json()) as Record<string, any>;
+          return (body.record ?? body).display_title ?? null;
+        };
+        expect(await titleAs(withheldToken)).toBeNull();
+        expect(await titleAs(controlToken)).toBe(`contract ${WITHHELD_CODE}`);
+
+        const requested = async (token: string): Promise<InboxRow[]> => {
+          const res = await stack.apiAs(token, 'GET', `/notifications?${new URLSearchParams({ type: 'approval.requested' })}`);
+          expect(res.status).toBe(200);
+          return ((await res.json()) as { data: { notifications: InboxRow[] } }).data.notifications;
+        };
+        const toWithheld = await requested(withheldToken);
+        const toControl = await requested(controlToken);
+        expect(toWithheld, "the withheld approver's inbox holds the one request notification").toHaveLength(1);
+        expect(toControl, "the control approver's inbox holds the one request notification").toHaveLength(1);
+        expect(JSON.stringify(toWithheld)).not.toContain(WITHHELD_CODE);
+        expect(`${toControl[0].title} ${toControl[0].body}`).toContain(`contract ${WITHHELD_CODE}`);
+      } finally {
+        await stack.stop();
+      }
+    },
+    120_000,
+  );
+});

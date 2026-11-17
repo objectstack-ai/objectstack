@@ -1418,6 +1418,8 @@ const fr = {
     writeStrippedUnknownReason: "Non appliqué par le serveur : {{fields}}",
     approvalPendingEditable: "En approbation · modifiable",
     approvalPendingTooltip: "Cet enregistrement a une demande d'approbation en attente ; cette étape autorise encore la modification",
+    approvalPending: "En approbation",
+    approvalPendingNotEditableTooltip: "Cet enregistrement a une demande d'approbation en attente",
     approvalProgress: "Approbations — {{got}} sur {{need}}",
     approvalProgressGroups: "Validation — {{got}} sur {{need}} groupes",
     approvalProgressLabel: "Progression de l'approbation",
@@ -1977,6 +1979,18 @@ const fr = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} modifications non publiées. Publiez-les depuis la barre du brouillon en haut.',
+        publishFromBar_one: '{{count}} modification non publiée. Publiez-la depuis la barre du brouillon en haut.',
+        publishFromBar_many: '{{count}} de modifications non publiées. Publiez-les depuis la barre du brouillon en haut.',
+        publishFromBar_other: '{{count}} modifications non publiées. Publiez-les depuis la barre du brouillon en haut.',
+        showDraftToPublish: '{{count}} modifications non publiées. Affichez le brouillon pour les vérifier et les publier.',
+        showDraftToPublish_one: '{{count}} modification non publiée. Affichez le brouillon pour la vérifier et la publier.',
+        showDraftToPublish_many: '{{count}} de modifications non publiées. Affichez le brouillon pour les vérifier et les publier.',
+        showDraftToPublish_other: '{{count}} modifications non publiées. Affichez le brouillon pour les vérifier et les publier.',
+        showDraft: 'Afficher le brouillon',
+        receipt: 'Publié. Vos modifications sont en ligne.',
+        dismissReceipt: 'Fermer',
         count: "{{count}} modification(s) ne sont pas encore publiée(s) — les utilisateurs ne peuvent pas les voir.",
         publish: "Publier",
         published: "Toutes les modifications en attente sont actives.",
@@ -3277,7 +3291,7 @@ const fr = {
     aiAssistant: "Assistant IA",
     designInStudio: "Concevoir dans Studio",
     editApp: "Modifier l'application",
-    openAppInStudio: "Voir l'application dans Studio",
+    openAppInStudio: "Voir {{app}} dans Studio",
   },
   home: {
     build: {
@@ -4681,6 +4695,11 @@ const fr = {
       pendingHere_one: 'Aperçu du brouillon · {{count}} modification non publiée sur cette page',
       pendingHere_many: 'Aperçu du brouillon · {{count}} de modifications non publiées sur cette page',
       pendingHere_other: 'Aperçu du brouillon · {{count}} modifications non publiées sur cette page',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Aperçu du brouillon · {{count}} modifications non publiées dans cette app. Rien ici n’est en ligne avant la publication.',
+      pendingInApp_one: 'Aperçu du brouillon · {{count}} modification non publiée dans cette app. Rien ici n’est en ligne avant la publication.',
+      pendingInApp_many: 'Aperçu du brouillon · {{count}} de modifications non publiées dans cette app. Rien ici n’est en ligne avant la publication.',
+      pendingInApp_other: 'Aperçu du brouillon · {{count}} modifications non publiées dans cette app. Rien ici n’est en ligne avant la publication.',
     },
     changes: {
       title: 'Modifications en attente',
@@ -4845,6 +4864,8 @@ const fr = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Cette app n’est pas encore publiée. Elle fonctionne, mais seuls les créateurs la voient. Publiez-la pour que vos utilisateurs la voient.',
       message: 'Application non publiée — entièrement fonctionnelle, mais visible seulement par les créateurs. Publiez-la pour la rendre visible à vos utilisateurs.',
       publish: 'Publier',
       publishing: 'Publication…',

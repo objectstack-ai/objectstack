@@ -93,6 +93,7 @@ import {
 import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import { StudioNavItemInspector, StudioPicker } from './StudioNavItemInspector.js';
 import { PACKAGE_LIST_TOAST_ID, PackageSwitcher, STUDIO_LANDING_PATH } from './PackageSwitcher.js';
+import { StudioOpenApp, type StudioOpenAppTarget } from './StudioOpenApp.js';
 import {
   ContributedNavRows,
   InterfacesNavContributionsContext,
@@ -1255,8 +1256,8 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 
   // Builder → running-app bridge (Airtable's Launch): the builder edits the
   // package (the design surface), the app is its published front-end. If this
-  // package ships an app, offer Open app — opened in a new tab so the builder
-  // context survives. (App → builder is the reverse bridge, tracked separately.)
+  // package ships a published app, the header offers Open app (`StudioOpenApp`,
+  // objectstack#34593), in the same tab, mirroring the app bar's Edit app.
   const shellNavigate = useNavigate();
   React.useEffect(() => {
     openAccessRef.current = () => {
@@ -1273,6 +1274,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // order: the Automations rail orders its groups by it. Read off the same
   // app row as `packageApp`, so the pillar adds no read of its own.
   const [packageAppObjectOrder, setPackageAppObjectOrder] = React.useState<readonly string[]>([]);
+  // objectstack#34593 — the package's PUBLISHED apps, the header's Open app
+  // targets: a draft app has no running front-end to open. Read off the same
+  // list as `packageApp`.
+  const [publishedApps, setPublishedApps] = React.useState<readonly StudioOpenAppTarget[]>([]);
   // Create app (package has no app yet): create a draft `app` item — the
   // published front-end's on-ramp. The button flips to Open app after the
   // package publish.
@@ -1373,11 +1378,17 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     if (packageId === null) {
       setPackageApp(null);
       setPackageAppObjectOrder([]);
+      setPublishedApps([]);
       return;
     }
     try {
       const apps = (await shellClient.list('app', { packageId })) as Array<Record<string, unknown>>;
       setPackageAppObjectOrder(navigationObjectOrder((apps || []).find((a) => a?.name)?.navigation));
+      setPublishedApps(
+        (apps || [])
+          .filter((a) => a?.name)
+          .map((a) => ({ name: String(a.name), label: (a.label ?? a.name) as I18nLabel })),
+      );
       let first = (apps || [])
         .map((a) => ({
           name: String(a.name ?? ''),
@@ -1398,6 +1409,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     } catch {
       setPackageApp(null);
       setPackageAppObjectOrder([]);
+      setPublishedApps([]);
     }
   }, [shellClient, packageId]);
   React.useEffect(() => {
@@ -1462,7 +1474,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     available: false,
     planPendingCount: 0,
   });
-  const [copilotCanvasOpen, setCopilotCanvasOpen] = React.useState(false);
+  // objectstack#34610 — the copilot's expand control widens the slot in place
+  // (it used to navigate to `/ai/build`, losing this page).
+  const [copilotWide, setCopilotWide] = React.useState(false);
   const slotHasProps = slotPropsClaims > 0;
   const copilotAvailable = copilotStatus.available;
   // What the slot SHOWS: a missing half never shows.
@@ -1663,10 +1677,21 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               {/* objectstack#26708 — nothing to create, review or publish in a
                   package that is not there. */}
               {!pkgMissing && (<>
-              {/* objectui#5800 — the Open app teleport is retired: the canvas's
-                  Run mode IS the way to try the app without leaving the
-                  workbench. The published-app state needs no chrome at all.
-                  objectui#11553 — the package-less scope has no app to create. */}
+              {/* objectstack#34593 — the way back to the running app, the
+                  mirror of the app bar's Edit app: it lands on the object (or
+                  interface) in focus, in the same tab. The canvas's Run mode
+                  stays the way to try the app without leaving the workbench.
+                  objectui#11553 — the package-less scope has no app. */}
+              {packageId !== null && (
+                <StudioOpenApp
+                  packageId={packageId}
+                  apps={publishedApps}
+                  locale={locale}
+                  beforeNavigate={confirmLeavePillar}
+                  navigate={shellNavigate}
+                />
+              )}
+              {/* objectui#11553 — the package-less scope has no app to create. */}
               {packageId === null || packageApp ? null : appDraftPending ? (
                 <span
                   title={t('engine.studio.app.willOpenAfterPublish', locale)}
@@ -1922,17 +1947,17 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             copilotAvailable={copilotAvailable}
             planPendingCount={copilotStatus.planPendingCount}
             propsTargetRef={setSlotPropsTarget}
-            wideWidth={copilotCanvasOpen && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
+            wideWidth={copilotWide && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
             overlay={isMobile}
             onOverlayDismiss={() => setSlotOpen(false)}
             locale={locale}
             copilot={
               <StudioChatDock
                 packageId={packageId}
-                locale={locale}
                 surfaceLabel={surfaceLabel}
                 onStatusChange={setCopilotStatus}
-                onCanvasOpenChange={setCopilotCanvasOpen}
+                wide={copilotWide}
+                onWideChange={setCopilotWide}
               />
             }
           />

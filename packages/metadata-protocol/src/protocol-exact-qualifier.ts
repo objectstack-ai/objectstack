@@ -272,6 +272,23 @@ function refusal(
 }
 
 /**
+ * [ruling 6917064203 on #34398, ADR-0150 D5] The refusal of an address naming
+ * a package that holds no item of the name, for a type outside the exact
+ * qualifier ({@link admitExactQualifier} judges the covered set): the same
+ * `not-held-by-qualifier` refusal, naming each package that holds the name.
+ * Asked only where another package holds it; a name nothing holds is the
+ * read's own miss.
+ */
+export function notHeldByQualifierRefusal(
+    type: string,
+    name: string,
+    packageId: string,
+    holders: readonly string[],
+): PackageScopedNameRefusedError {
+    return refusal(type, name, packageId, 'not-held-by-qualifier', holders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
+}
+
+/**
  * Judge a by-name read that names package `packageId` as its exact qualifier.
  *
  * @returns `undefined` when the rule does not apply (no package named, a type
