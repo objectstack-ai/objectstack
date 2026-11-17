@@ -2,6 +2,7 @@
 '@objectstack/spec': minor
 '@objectstack/runtime': minor
 '@objectstack/lint': minor
+'@object-ui/core': patch
 ---
 
 feat(actions): an action body refuses in the caller's language through a declared refusal catalogue
@@ -19,3 +20,5 @@ A `script` action's `js` body can now refuse the way a hook does: declare the re
 - An action without `refusals` is answered exactly as before.
 
 The shared declared-entry factory (`packages/spec/src/data/declared-entry.zod.ts`) now builds `HookRefusalSchema`, `ActionRefusalSchema` and `HookTextSchema`; the published hook schemas are unchanged.
+
+`@object-ui/core` lists `refusals` among the spec's declared action keys, so an action carrying a catalogue is not reported as having an unknown key; the console reads nothing new, because the refusal arrives already rendered on `userMessage`.

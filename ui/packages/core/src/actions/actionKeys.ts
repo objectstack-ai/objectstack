@@ -338,6 +338,14 @@ export const SPEC_ACTION_KEYS = [
   'recordIdField',
   'recordIdParam',
   'refreshAfter',
+  // Added to `ActionSchema` by objectstack#34273: the refusal catalogue a
+  // `script` action's `js` body throws codes against. The SERVER answers it —
+  // the refusal reaches the console already rendered, its sentence on
+  // `userMessage`, which the failure toast already shows — so it is listed for
+  // the reason `overrides` is: this array restates the spec's declared keys, so
+  // an action carrying it is not reported as having an unknown key. `ActionDef`
+  // does NOT declare it and the runner does not read it.
+  'refusals',
   'requiredPermissions',
   'requiresFeature',
   // Added to `ActionSchema` in @objectstack/spec 17.7.0 (objectui#11717): the
