@@ -3786,8 +3786,10 @@ export async function classifyResumeResult(
  *                                  disables it → 409 `RESOURCE_CONFLICT` naming the
  *                                  status; nothing changes. 200 answers
  *                                  `{ name, enabled }` with `enabled` read back from
- *                                  `getFlowRuntimeStates` (echoed only by a service
- *                                  that does not implement that read)
+ *                                  `getFlowRuntimeStates` while the name has one
+ *                                  row there (echoed by a service that does not
+ *                                  implement that read, and for a name two packages
+ *                                  hold, which reads one row per holder)
  *                                  ⚑ authoring write — `manage_metadata` (commit 266436a7f):
  *                                    enablement is environment-wide, so an
  *                                    unentitled toggle reached every organization
