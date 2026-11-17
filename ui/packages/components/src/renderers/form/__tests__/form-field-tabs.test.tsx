@@ -27,6 +27,8 @@ import { toast } from '../../../ui/sonner';
 // cold transform is billed to `hookTimeout`, which is why this carried a raised
 // timeout. See object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).
 import '../../../renderers';
+// The renderer barrel reaches `react-page.tsx`, which loads this dynamically: pay the load at collection.
+import '@object-ui/react-runtime';
 
 beforeEach(() => {
   vi.spyOn(toast, 'error').mockImplementation(() => 'id' as any);
