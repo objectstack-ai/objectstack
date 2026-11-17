@@ -1045,6 +1045,30 @@ describe('[#34602] OwnershipQueueService.objectsUsingQueues — the per-object q
     expect(wheres.find((w) => w.object === 'crm_case')).toHaveProperty('organization_id', 'org_a');
   });
 
+  it('an object walled on a declared tenancy.tenantField (no organization_id) is read with the caller\'s tenantId — another organization\'s sitting row does not name it', async () => {
+    // `systemFields.tenant: false` + `tenancy.tenantField`: no organization_id column, but the driver walls
+    // rows on `tenant_org` whenever the read carries a tenantId. Emulated here exactly so: with a tenantId,
+    // only that tenant's rows are visible; without one, every row is.
+    const objects = [...OBJECTS, {
+      name: 'glb_ticket', systemFields: { tenant: false },
+      tenancy: { enabled: true, strategy: 'shared', tenantField: 'tenant_org' }, fields: { tenant_org: { type: 'text' } },
+    }];
+    const rows = { glb_ticket: [{ id: 't1', owner_id: null, queue: 'ticket_desk', tenant_org: 'org_b' }] };
+    const engine = engineWith({ rows, objects });
+    const find = engine.find;
+    const contexts: Record<string, unknown>[] = [];
+    engine.find = async (object: string, options?: any) => {
+      if (object !== 'glb_ticket') return find(object, options);
+      contexts.push(options?.context ?? {});
+      const tenantId = options?.context?.tenantId;
+      // The wall is a predicate the driver adds before its limit, as the SQL driver does.
+      return find(object, tenantId ? { ...options, where: { ...(options?.where ?? {}), tenant_org: tenantId } } : options);
+    };
+    expect(await service(engine).objectsUsingQueues('org_a')).toEqual([]);
+    expect(contexts[0]).toHaveProperty('tenantId', 'org_a');
+    expect(await service(engine).objectsUsingQueues('org_b')).toEqual(['glb_ticket']);
+  });
+
   it('a failed read leaves that object out, logged once — the other objects still answer', async () => {
     const warn = vi.fn();
     const rows = { crm_lead: [{ id: 'l1', owner_id: null, queue: 'lead_desk', organization_id: 'org_a' }] };

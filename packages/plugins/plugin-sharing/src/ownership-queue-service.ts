@@ -438,7 +438,7 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     const remaining = [...candidates.keys()].filter((object) => !out.has(object));
     for (let i = 0; i < remaining.length; i += SITTING_READ_CONCURRENCY) {
       const batch = remaining.slice(i, i + SITTING_READ_CONCURRENCY);
-      const verdicts = await Promise.all(batch.map((object) => this.hasSittingRecord(engine, object, candidates.get(object) === true ? organizationId : null)));
+      const verdicts = await Promise.all(batch.map((object) => this.hasSittingRecord(engine, object, organizationId, candidates.get(object) === true)));
       batch.forEach((object, k) => { if (verdicts[k]) out.add(object); });
     }
     return [...out].sort();
@@ -446,10 +446,10 @@ export class OwnershipQueueService implements IOwnershipQueueService {
 
   /**
    * The registered objects that carry the `queue` column with storage behind
-   * it, each mapped to whether it also carries the tenant column
-   * (`organization_id`, the platform's or the author's). An object without it
-   * is read unscoped: filtering on a column the table lacks is refused by the
-   * driver, which would hide its queue filter for good.
+   * it, each mapped to whether it also carries the `organization_id` column
+   * (the platform's or the author's). The sitting read names that column only
+   * when it exists: filtering on a column the table lacks is refused by the
+   * driver, which would hide the object's queue filter for good.
    */
   private queueColumnObjects(engine: OwnershipQueueEngine): Map<string, boolean> {
     let all: unknown[] | undefined;
@@ -514,17 +514,26 @@ export class OwnershipQueueService implements IOwnershipQueueService {
   }
 
   /**
-   * Is a record of `object` sitting in a queue now: no owner, a queue set? In
-   * `organizationId` when given; `null` reads the object unscoped (no
-   * organization, or an object with no tenant column).
+   * Is a record of `object` sitting in a queue now: no owner, a queue set? The
+   * read always carries `organizationId` as the context's `tenantId`, so a
+   * driver that walls the object on a declared `tenancy.tenantField` keeps
+   * other organizations' rows out. The explicit `organization_id` predicate is
+   * added only when the object has that column (`scopeByColumn`); an object
+   * with neither column nor a declared tenant field holds environment-wide
+   * rows and is read as such.
    */
-  private async hasSittingRecord(engine: OwnershipQueueEngine, object: string, organizationId: string | null): Promise<boolean> {
+  private async hasSittingRecord(
+    engine: OwnershipQueueEngine,
+    object: string,
+    organizationId: string | null,
+    scopeByColumn: boolean,
+  ): Promise<boolean> {
     try {
       const rows = await engine.find(object, {
         where: {
           owner_id: { $empty: true },
           queue: { $empty: false },
-          ...(organizationId ? { organization_id: organizationId } : {}),
+          ...(organizationId && scopeByColumn ? { organization_id: organizationId } : {}),
         },
         fields: ['id'],
         limit: 1,

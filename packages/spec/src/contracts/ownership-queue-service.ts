@@ -259,7 +259,9 @@ export interface IOwnershipQueueService {
    * sees:
    *
    * - **sitting now**: some record of the object, in the organization, has no
-   *   owner and a queue set (the list's "in a queue" filter, verbatim);
+   *   owner and a queue set (the list's "in a queue" filter, verbatim). An
+   *   object with no tenant column and no declared tenant field holds
+   *   environment-wide records, and is read environment-wide;
    * - **routed**: an active assignment rule routes the object's new records
    *   into a queue — an organization's `sys_assignment_rule` row, or a
    *   declared rule the activation ledger leaves on.
