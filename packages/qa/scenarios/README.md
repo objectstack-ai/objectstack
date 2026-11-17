@@ -135,6 +135,14 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   `Iterate · Run · guardrails`): `guardrail:injection_as_data pass`, `… fail`, or `… not measured:
   <reason>`; a half recorded before it was graded shows nothing. It owns `WRITE_TOOLS`, which the
   runner's observer re-exports.
+- `scenario-dataset-grade.ts` — a card's dataset question (`run.datasetQuestions`) graded on the route the answer took,
+  never its figure (`gradeDatasetQuestion`; card-level `gradeCardDatasetQuestion`), by the grader its expected route
+  names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
+  arguments the model sent decide nothing), `asked-back` (the reply asks, names every candidate by a word other than
+  the asked one, and states no figure; an option list's numbering is no figure) and `fallback-labelled` (an object
+  query on the expected object answered, no dataset did, and the reply says the figure is not a governed metric: a
+  closed word list, English and Chinese, in `labelsFallback`). Its notes say what the turn did on the way, ungraded: a
+  loaded skill, no `list_datasets` call, the `candidates` a `list_datasets` answer offered.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -211,6 +219,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --author-timeout 90       # m
 pnpm --filter @objectstack/scenarios run-scenarios --author-max-turns 400    # turns per authoring turn, every card (default by tier)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-max-turns 20        # turns per question or operation turn (default 12)
 pnpm --filter @objectstack/scenarios run-scenarios --ask-repeats 3           # ask each question turn 3 times, score k/3 (default 1; operations once)
+pnpm --filter @objectstack/scenarios run-scenarios --ask-skills ./skills     # place these skills in every question and operation turn (default: none)
 pnpm --filter @objectstack/scenarios run-scenarios --modes ask --template dist/objectstack.json --ask-model haiku  # questions and operations only, on a build you supply
 pnpm --filter @objectstack/scenarios run-scenarios --modes scratch,ask --author-model opus --ask-model haiku   # ask mode on this run's scratch build
 pnpm --filter @objectstack/scenarios run-scenarios --model sonnet            # the model every turn asks for (default: the login's own)
@@ -244,7 +253,8 @@ files only: no model, no network, and no score of its own — every figure is th
   record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
   `this run’s from-scratch build` takes that run's scratch author.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
-  driver (a replay is its own driver). When they do not, that table is refused with a line naming each difference and
+  driver (a replay is its own driver), and the ask skills (`--ask-skills`: names and sha256; a record without them
+  reads `none`). When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
 - **Older records**: a field a record predates (served models, ask cost and time, the package source) reads
   `not recorded`, never a zero. An effort set only through `CLAUDE_CODE_EFFORT_LEVEL` was never recorded, so runs that
@@ -342,6 +352,13 @@ npx @objectstack/scenarios help                                      # the comma
   no stream reports the effort a turn was served, so there is no served effort to compare. The scorecard shows it
   beside the served model, on the author rows (`… · claude-haiku-5-5 · effort high`) and the `Run · model` rows
   (`claude-haiku-5-5 ×24 · effort low`). A turn that asked for none ran at the CLI's default and shows none.
+- **Ask skills** (`ask-skills.ts`, `driver.ts`): `--ask-skills DIR` (live `claude` driver only; off by default) takes
+  one skill directory (it holds a `SKILL.md`) or a directory of them. They are read once, before any card runs (a
+  directory that holds no skill is refused), and every question and operation turn gets those bytes at
+  `.claude/skills/NAME/` in its working directory, with `Skill` beside `mcp__app` in `--allowedTools`; authoring turns
+  never see them. The record's driver states which skills the turns had (`askSkills`: the directory, and per skill its
+  name, the sha256 of its files and the front-matter `version` when it has one), and the console's driver line names
+  them. Off, the turn's arguments and the record are as before, byte for byte.
 - **Cost** (`scorecard.ts`): every turn records the cost its driver reported (`reportedCostUsd`: the `claude` CLI's
   `total_cost_usd`, notional under a subscription login, or an external command's report) and, from an external
   command, its `inputTokens` and `outputTokens`; a turn that reported none records none, never a zero. The scorecard's
@@ -373,6 +390,12 @@ npx @objectstack/scenarios help                                      # the comma
   without repeats still replays. `--ask-repeats` is not a live-only flag: with `--driver recorded:F` it decides how
   many recorded asks of each question turn are read (the first N), and an N larger than the recording holds of any
   question turn is refused before any card runs, naming the turn and the count found.
+- **Dataset questions** (`orchestrate.ts`, `scorecard.ts`): a card's `run.datasetQuestions` are asked after its
+  questions and before its operations, as the admin, each a fresh session honouring `--ask-repeats`, and graded by
+  `scenario-dataset-grade.ts`. The record keeps each on the half (`datasetQuestions`: the grade, the turn), and the
+  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back 1/2 ·
+  fallback-labelled 1/1)`) only on a card that declares them. A run on a build whose app serves no datasets answers
+  them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet.
 - **Ask, then confirm** (`orchestrate.ts`, `prompts.ts`, `driver.ts`, `scorecard.ts`): a `pending_confirmation`
   operation whose first turn asked first and wrote nothing gets a second turn as the same persona over the same MCP
   door. No driver resumes a session, so it is a fresh turn whose prompt (`confirmPrompt`) quotes the operation's ask
