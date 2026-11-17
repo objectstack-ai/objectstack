@@ -4558,6 +4558,8 @@ const ru = {
     progressBar: 'Ход решения',
     declaredActions: 'Действия',
     decisionPanelOffRequestPage: 'Панель решения по согласованию работает только на страницах запросов на согласование.',
+    openNextAfterDecision: 'Открывать следующий после решения',
+    queueDone: 'В этом списке больше нет ожидающих запросов.',
     snapshotAsSubmitted: 'На момент подачи',
     attachmentChip: 'Вложение',
     attachmentOpenFailed: 'Не удалось открыть вложение — попробуйте ещё раз',

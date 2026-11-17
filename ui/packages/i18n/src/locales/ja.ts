@@ -4351,6 +4351,8 @@ const ja = {
     progressBar: '承認の進捗',
     declaredActions: 'アクション',
     decisionPanelOffRequestPage: '承認の決定パネルは承認リクエストのページでのみ機能します。',
+    openNextAfterDecision: '決定後に次を開く',
+    queueDone: 'このリストの保留中のリクエストはすべて処理済みです。',
     snapshotAsSubmitted: '申請時の内容',
     attachmentChip: '添付ファイル',
     attachmentOpenFailed: '添付ファイルを開けませんでした。もう一度お試しください',

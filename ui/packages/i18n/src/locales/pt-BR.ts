@@ -4444,6 +4444,8 @@ const pt = {
     progressBar: 'Progresso da decisão',
     declaredActions: 'Ações',
     decisionPanelOffRequestPage: 'O painel de decisão de aprovação só funciona nas páginas de solicitações de aprovação.',
+    openNextAfterDecision: 'Abrir a próxima após decidir',
+    queueDone: 'Não há mais solicitações pendentes nesta lista.',
     snapshotAsSubmitted: 'Conforme enviado',
     attachmentChip: 'Anexo',
     attachmentOpenFailed: 'Não foi possível abrir o anexo — tente novamente',

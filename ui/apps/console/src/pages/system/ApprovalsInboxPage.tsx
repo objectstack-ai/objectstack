@@ -31,7 +31,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ConsolePageHeader, objectHostAppSegment, useMetadata } from '@object-ui/app-shell';
+import { ConsolePageHeader, approvalQueueState, objectHostAppSegment, useMetadata } from '@object-ui/app-shell';
 import {
   Button,
   buttonVariants,
@@ -959,25 +959,6 @@ function ApprovalsQueue() {
   const [environmentPendingCount, setEnvironmentPendingCount] = useState<number | null>(null);
 
   /**
-   * Open a request on its page (objectui#12484): the page objectstack serves
-   * for it, on the standard record route. A navigation, so Back returns to the
-   * queue with its tab, filters and scroll as they were. It opens under the
-   * app that owns the row's record (`requestPagePath`).
-   */
-  const openRequest = useCallback(
-    (r: ApprovalRequestRow) =>
-      navigate(
-        requestPagePath(
-          Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
-          r.object_name,
-          appName,
-          r.id,
-        ),
-      ),
-    [navigate, appName, metadataApps],
-  );
-
-  /**
    * objectui#5211 — an approver can be routed a request about a record they
    * cannot read (approver routing goes by position; record visibility is a
    * separate gate). The link below then dead-ends on the record page's
@@ -1252,6 +1233,39 @@ function ApprovalsQueue() {
     }
     return sorted;
   }, [rows, deferredQuery, processFilter, objectFilter, statusFilter, tab, sortKey, hiddenFields, displayLocale]);
+
+  /**
+   * Open a request on its page (objectui#12484): the page objectstack serves
+   * for it, on the standard record route. A navigation, so Back returns to the
+   * queue with its tab, filters and scroll as they were. It opens under the
+   * app that owns the row's record (`requestPagePath`).
+   *
+   * objectstack#34586 — from 「待我审批」 the page is handed the queue as this
+   * list shows it, filtered and sorted (`approvalQueueState`): its top bar
+   * draws 「第 N 条，共 M 条」 with ↓ ↑ and `j` / `k` over it, and a decision
+   * that takes the request out of the queue opens the next one. The other
+   * tabs list requests the reader is not deciding, so they hand no queue.
+   */
+  const openRequest = useCallback(
+    (r: ApprovalRequestRow) =>
+      navigate(
+        requestPagePath(
+          Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
+          r.object_name,
+          appName,
+          r.id,
+        ),
+        tab === 'pending'
+          ? {
+              state: approvalQueueState(
+                { pathname: `${location.pathname}${location.search}`, label: inboxTitle },
+                filteredRows.map((row) => row.id),
+              ),
+            }
+          : undefined,
+      ),
+    [navigate, appName, metadataApps, tab, location.pathname, location.search, inboxTitle, filteredRows],
+  );
 
   // Reset selection when underlying filtered list changes (avoid acting on hidden rows).
   useEffect(() => {

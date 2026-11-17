@@ -4349,6 +4349,8 @@ const de = {
     progressBar: 'Entscheidungsfortschritt',
     declaredActions: 'Aktionen',
     decisionPanelOffRequestPage: 'Der Entscheidungsbereich für Genehmigungen funktioniert nur auf Seiten von Genehmigungsanfragen.',
+    openNextAfterDecision: 'Nach der Entscheidung die nächste öffnen',
+    queueDone: 'In dieser Liste sind keine offenen Anfragen mehr.',
     snapshotAsSubmitted: 'Wie eingereicht',
     attachmentChip: 'Anhang',
     attachmentOpenFailed: 'Anhang konnte nicht geöffnet werden – bitte erneut versuchen',

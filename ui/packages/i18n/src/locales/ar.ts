@@ -4746,6 +4746,8 @@ const ar = {
     progressBar: 'تقدم القرار',
     declaredActions: 'الإجراءات',
     decisionPanelOffRequestPage: 'لوحة قرار الموافقة تعمل فقط في صفحات طلبات الموافقة.',
+    openNextAfterDecision: 'فتح التالي بعد اتخاذ القرار',
+    queueDone: 'لا توجد طلبات معلقة أخرى في هذه القائمة.',
     snapshotAsSubmitted: 'كما قُدِّم',
     attachmentChip: 'مرفق',
     attachmentOpenFailed: 'تعذّر فتح المرفق — يرجى المحاولة مرة أخرى',
