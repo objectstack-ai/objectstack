@@ -106,13 +106,21 @@ function makeDriver(opts: { deleteMany?: boolean } = {}) {
 
 const text = (name: string) => ({ name, type: 'text' });
 
-async function makeEngine(opts: { deleteMany?: boolean; lines?: number } = {}) {
+async function makeEngine(opts: { deleteMany?: boolean; lines?: number; parentLookup?: boolean } = {}) {
   const log = () => {};
   const engine = new ObjectQL({ logger: { debug: log, info: log, warn: log, error: log } } as any);
   const driver = makeDriver(opts);
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject({ name: 'acct', label: 'acct', fields: { id: { ...text('id'), primaryKey: true }, name: text('name') } } as any, '__test__');
+  engine.registry.registerObject({
+    name: 'acct', label: 'acct',
+    fields: {
+      id: { ...text('id'), primaryKey: true }, name: text('name'),
+      // A `set_null` relation into `acct` on `acct` itself, so the walk meets
+      // it before `line`.
+      ...(opts.parentLookup ? { parent: { name: 'parent', type: 'lookup', reference: 'acct', deleteBehavior: 'set_null' } } : {}),
+    },
+  } as any, '__test__');
   engine.registry.registerObject({
     name: 'line', label: 'line',
     fields: {
@@ -557,5 +565,23 @@ describe('[c1] the walk takes the collection\'s probe until its first write', ()
 
     expect(driver.rowsOf('memo')).toEqual([]);
     expect(driver.writes).toEqual(['deleteMany line l1,l2,l3', 'delete memo m9', 'delete acct a1']);
+  });
+
+  it('a row a set_null clear\'s hook writes is still found by the next cascading relation\'s probe', async () => {
+    const { engine, driver } = await makeEngine({ parentLookup: true });
+    await engine.insert('acct', { id: 'a2', name: 'B', parent: 'a1' });
+    // The walk clears `a2.parent` before it reaches `line`, whose probe the
+    // collection walk already read; the clear's hook adds a line it never saw.
+    engine.on('afterUpdate', 'acct', async (ctx: any) => {
+      if (ctx.input?.id === 'a2') await driver.create('line', { id: 'l9', name: 'late', acct: 'a1' });
+    });
+    driver.writes.length = 0;
+
+    await engine.delete('acct', { where: { id: 'a1' }, context: { ...CALLER } });
+
+    expect(driver.rowsOf('acct')).toEqual([expect.objectContaining({ id: 'a2', parent: null })]);
+    expect(driver.rowsOf('line')).toEqual([]);
+    // l9 is outside the collected set, so it goes by id, as m9 does above.
+    expect(driver.writes).toEqual(['deleteMany line l1,l2,l3', 'delete line l9', 'delete acct a1']);
   });
 });
