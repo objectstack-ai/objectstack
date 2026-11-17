@@ -2716,16 +2716,16 @@ export class AuthManager {
    * "policy says there will never be one" and skip a pointless re-read;
    * `undefined` means the reconciler could not be consulted at all.
    */
-  private settleMembership(userId: unknown): Promise<ReconcileOutcome | undefined> {
+  private settleMembership(userId: unknown, ctx?: unknown): Promise<ReconcileOutcome | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy' | 'hasStagedInvitationAdmissions' | 'isStagedInvitationAdmission'> = {
+    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy' | 'hasInvitationAdmissionInRequest' | 'isInvitationAdmissionInRequest'> = {
       get config() { return readConfig(); },
       getMembershipPolicy: (...a) => this.getMembershipPolicy(...a),
-      hasStagedInvitationAdmissions: (...a) => this.hasStagedInvitationAdmissions(...a),
-      isStagedInvitationAdmission: (...a) => this.isStagedInvitationAdmission(...a),
+      hasInvitationAdmissionInRequest: (...a) => this.hasInvitationAdmissionInRequest(...a),
+      isInvitationAdmissionInRequest: (...a) => this.isInvitationAdmissionInRequest(...a),
     };
-    return settleMembership.call(host, userId);
+    return settleMembership.call(host, userId, ctx);
   }
 
   /**
@@ -2834,18 +2834,6 @@ export class AuthManager {
 
   private static readonly OWNER_STAMP_STAGE_TTL_MS = 10 * 60 * 1000;
 
-  /**
-   * Sign-ups the admission gate admitted by the invitation they PRESENT (under
-   * `invite_only`), staged for the membership settle — same shape and lifetime
-   * discipline as {@link pendingSelfRegistrationGrants} (keyed by lowercased
-   * email, pruned by age). Read, never consumed: both settle seams (the first
-   * session and `user.create.after`) ask it about the same creation and must
-   * answer alike. `settleMembership` (`auth-manager-membership-admission.ts`)
-   * states the rule it serves.
-   */
-  private pendingInvitationAdmissions = new Map<string, { stagedAtMs: number }>();
-
-  private static readonly INVITATION_ADMISSION_STAGE_TTL_MS = 10 * 60 * 1000;
 
   /**
    * [#14157] Addresses the deployment's OWN boot command is provisioning right
@@ -3426,29 +3414,43 @@ export class AuthManager {
     }
   }
 
-  /** Stage a sign-up the admission gate admitted by the invitation it presents. */
-  private stageInvitationAdmission(email: string): void {
-    this.prunePendingInvitationAdmissions();
-    this.pendingInvitationAdmissions.set(email.trim().toLowerCase(), { stagedAtMs: Date.now() });
-  }
+  /**
+   * The addresses the admission gate admitted in each in-flight better-auth
+   * request by the invitation they PRESENT (under `invite_only`), keyed by
+   * that request's endpoint context — the object better-auth hands the
+   * admission gate and every database hook of the same endpoint call, as
+   * {@link usersCreatedInRequest} is. `settleMembership`
+   * (`auth-manager-membership-admission.ts`) states the rule it serves.
+   *
+   * Request-scoped on purpose: the admission belongs to the creation it
+   * admitted, so nothing staged here can be read by another creation of the
+   * same address (an administrator's, a boot command's) in a later request,
+   * and both settle seams of THIS creation read the same entry. A `WeakMap`,
+   * so the entry dies with the endpoint context.
+   */
+  private invitationAdmissionsInRequest = new WeakMap<object, Set<string>>();
 
-  /** Is any sign-up admitted by a presented invitation staged now? */
-  private hasStagedInvitationAdmissions(): boolean {
-    this.prunePendingInvitationAdmissions();
-    return this.pendingInvitationAdmissions.size > 0;
-  }
-
-  /** Was the sign-up of this address admitted by the invitation it presented? Not consumed. */
-  private isStagedInvitationAdmission(email: string): boolean {
-    this.prunePendingInvitationAdmissions();
-    return this.pendingInvitationAdmissions.has(email.trim().toLowerCase());
-  }
-
-  private prunePendingInvitationAdmissions(): void {
-    const cutoff = Date.now() - AuthManager.INVITATION_ADMISSION_STAGE_TTL_MS;
-    for (const [key, value] of this.pendingInvitationAdmissions) {
-      if (value.stagedAtMs < cutoff) this.pendingInvitationAdmissions.delete(key);
+  /** Record that the current request's admission gate admitted `email` by the invitation it presents. */
+  private stageInvitationAdmission(ctx: unknown, email: string): void {
+    if (!ctx || typeof ctx !== 'object') return;
+    let staged = this.invitationAdmissionsInRequest.get(ctx);
+    if (!staged) {
+      staged = new Set();
+      this.invitationAdmissionsInRequest.set(ctx, staged);
     }
+    staged.add(email.trim().toLowerCase());
+  }
+
+  /** Did this request admit any address by the invitation it presents? In-memory only. */
+  private hasInvitationAdmissionInRequest(ctx: unknown): boolean {
+    if (!ctx || typeof ctx !== 'object') return false;
+    return (this.invitationAdmissionsInRequest.get(ctx)?.size ?? 0) > 0;
+  }
+
+  /** Did this request admit `email` by the invitation it presents? In-memory only. */
+  private isInvitationAdmissionInRequest(ctx: unknown, email: string): boolean {
+    if (!ctx || typeof ctx !== 'object') return false;
+    return this.invitationAdmissionsInRequest.get(ctx)?.has(email.trim().toLowerCase()) === true;
   }
 
   /**

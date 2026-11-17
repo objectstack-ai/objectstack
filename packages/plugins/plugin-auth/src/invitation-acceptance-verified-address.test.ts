@@ -26,6 +26,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { SIGN_UP_INVITATION_ID_FIELD } from './presented-invitation.js';
+import { operatorProvisioningField } from './audience-gate-test-support';
 import { ACCEPT_INVITATION_ONE_STEP_PATH } from './invitation-mailbox-proof.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 
@@ -445,8 +446,11 @@ describe('under invite_only, a sign-up admitted by the invitation it presents jo
     expect(await d.allMemberships()).toEqual([]);
   });
 
-  it('CONTROL: a sign-up the invitation mail proof verifies is bound and accepted with the invited role', async () => {
-    const d = await deployment({}, { into: DEFAULT_ORG });
+  it('CONTROL: a sign-up the invitation mail proof verifies is bound to the default organization at creation, and accepts the invited role', async () => {
+    // Invited into the partner organization: a default-organization row can
+    // only come from the bind at creation, and the partner row only from the
+    // acceptance.
+    const d = await deployment();
     const res = await send(d.manager, 'POST', ACCEPT_INVITATION_ONE_STEP_PATH, {
       invitationId: d.invitationId,
       proof: proofFromMail(d),
@@ -454,7 +458,46 @@ describe('under invite_only, a sign-up admitted by the invitation it presents jo
       password: PASSWORD,
     });
     expect(res.status, await res.clone().text()).toBe(200);
-    expect((await d.allMemberships()).map((m) => [m.organization_id, m.role])).toEqual([[DEFAULT_ORG, 'admin']]);
+    const held = (await d.allMemberships()).map((m) => [m.organization_id, m.role]).sort();
+    expect(held).toEqual([[DEFAULT_ORG, 'member'], [PARTNER_ORG, 'admin']].sort());
+  });
+
+  it('CONTROL: an unrelated address an operator provisions while an invitation sign-up is in flight is bound to the default organization', async () => {
+    const d = await deployment({}, { into: DEFAULT_ORG });
+    const other = 'provisioned@acme.example';
+    const [invitee, provisioned] = await Promise.all([
+      send(d.manager, 'POST', '/sign-up/email', {
+        email: INVITEE, password: PASSWORD, name: 'Invitee', [SIGN_UP_INVITATION_ID_FIELD]: d.invitationId,
+      }),
+      send(d.manager, 'POST', '/sign-up/email', {
+        email: other, password: PASSWORD, name: 'Provisioned', ...operatorProvisioningField(d.manager, other),
+      }),
+    ]);
+    expect(invitee.status, await invitee.clone().text()).toBe(200);
+    expect(provisioned.status, await provisioned.clone().text()).toBe(200);
+    const [user] = await rows(d.engine, 'sys_user', { email: other });
+    expect((await rows(d.engine, 'sys_member', { user_id: user.id })).map((m) => [m.organization_id, m.role])).toEqual([[DEFAULT_ORG, 'member']]);
+    expect(await d.allMemberships()).toEqual([]);
+  });
+
+  it('CONTROL: the same address, created again through the operator door after an invitation sign-up of it, is bound to the default organization', async () => {
+    const d = await deployment({}, { into: DEFAULT_ORG });
+    await unverifiedPasswordSession(d);
+    expect(await d.allMemberships()).toEqual([]);
+    // The invitation sign-up's account is removed, and an operator provisions
+    // the address afresh, moments later.
+    const first = await d.inviteeRow();
+    for (const object of ['sys_session', 'sys_account']) {
+      await d.engine.delete(object, { where: { user_id: first.id }, multi: true, context: { isSystem: true } } as never);
+    }
+    await d.engine.delete('sys_user', { where: { id: first.id }, context: { isSystem: true } } as never);
+    expect(await d.inviteeRow()).toBeUndefined();
+
+    const res = await send(d.manager, 'POST', '/sign-up/email', {
+      email: INVITEE, password: PASSWORD, name: 'Invitee', ...operatorProvisioningField(d.manager, INVITEE),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await d.allMemberships()).map((m) => [m.organization_id, m.role])).toEqual([[DEFAULT_ORG, 'member']]);
   });
 
   it('CONTROL: the first account of the deployment is still bound to the default organization', async () => {

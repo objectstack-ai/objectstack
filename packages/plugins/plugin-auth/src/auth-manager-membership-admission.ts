@@ -85,10 +85,10 @@ export interface MembershipAdmissionHost {
   getMembershipPolicy: AuthManager['getMembershipPolicy'];
   hasPendingInvitationFor: AuthManager['hasPendingInvitationFor'];
   hasPresentedPendingInvitation: AuthManager['hasPresentedPendingInvitation'];
-  hasStagedInvitationAdmissions: AuthManager['hasStagedInvitationAdmissions'];
+  hasInvitationAdmissionInRequest: AuthManager['hasInvitationAdmissionInRequest'];
   isBootstrapCreation: AuthManager['isBootstrapCreation'];
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
-  isStagedInvitationAdmission: AuthManager['isStagedInvitationAdmission'];
+  isInvitationAdmissionInRequest: AuthManager['isInvitationAdmissionInRequest'];
   selfRegistrationSetResolvable: AuthManager['selfRegistrationSetResolvable'];
   stageInvitationAdmission: AuthManager['stageInvitationAdmission'];
   stageOwnerVerifiedStamp: AuthManager['stageOwnerVerifiedStamp'];
@@ -116,17 +116,22 @@ export interface MembershipAdmissionHost {
  *    path that can write `email_verified` (the verification link, an
  *    administrator's edit, a provider sign-in, a directory sync).
  *
- * Answers whether the user `userId` is such a sign-up. Asked only while an
- * admission is staged (`stageInvitationAdmission`), so every other creation
- * pays one in-memory lookup. A user row that cannot be read while one is
- * staged answers yes: the settle then binds nothing, the direction that keeps
- * the rule.
+ * Answers whether the user `userId` is such a sign-up, for the creation in the
+ * request `ctx` (the endpoint context better-auth hands the admission gate
+ * and both settle seams of one creation; `tryGetCurrentAuthEndpointContext()`
+ * when a seam hands none). The admission is staged on that request
+ * (`stageInvitationAdmission`), so it never reaches another creation of the
+ * same address in another request, and every creation this request did not
+ * admit by a presented invitation pays one in-memory lookup. A user row that
+ * cannot be read while this request staged an admission answers yes: the
+ * settle then binds nothing, the direction that keeps the rule.
  */
 async function invitationSignUpAwaitsVerification(
-  this: Pick<MembershipAdmissionHost, 'config' | 'hasStagedInvitationAdmissions' | 'isStagedInvitationAdmission'>,
+  this: Pick<MembershipAdmissionHost, 'config' | 'hasInvitationAdmissionInRequest' | 'isInvitationAdmissionInRequest'>,
   userId: string,
+  ctx: unknown,
 ): Promise<boolean> {
-  if (!this.hasStagedInvitationAdmissions()) return false;
+  if (!this.hasInvitationAdmissionInRequest(ctx)) return false;
   const engine = this.config.dataEngine;
   if (!engine) return true;
   try {
@@ -136,22 +141,34 @@ async function invitationSignUpAwaitsVerification(
     const rows = await reader.find('sys_user', { where: { id: userId }, fields: ['id', 'email', 'email_verified'], limit: 1 });
     const row = (Array.isArray(rows) ? rows[0] : undefined) as { email?: unknown; email_verified?: unknown } | undefined;
     if (!row || typeof row.email !== 'string') return true;
-    return this.isStagedInvitationAdmission(row.email) && !row.email_verified;
+    return this.isInvitationAdmissionInRequest(ctx, row.email) && !row.email_verified;
   } catch {
     return true;
   }
 }
 
+/** The request a settle seam runs in: the context it was handed, else better-auth's current one. */
+async function settleRequestContext(ctx: unknown): Promise<unknown> {
+  if (ctx && typeof ctx === 'object') return ctx;
+  try {
+    const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
+    return tryGetCurrentAuthEndpointContext();
+  } catch {
+    return undefined;
+  }
+}
+
 /** The body of `AuthManager#settleMembership`; the method's docblock there is its contract. */
 export async function settleMembership(
-  this: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy' | 'hasStagedInvitationAdmissions' | 'isStagedInvitationAdmission'>,
+  this: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy' | 'hasInvitationAdmissionInRequest' | 'isInvitationAdmissionInRequest'>,
   userId: unknown,
+  ctx?: unknown,
 ): Promise<ReconcileOutcome | undefined> {
   try {
     const id = typeof userId === 'string' && userId ? userId : undefined;
     // A sign-up admitted by a presented invitation is not bound while its
     // address is unverified ({@link invitationSignUpAwaitsVerification}).
-    if (id && (await invitationSignUpAwaitsVerification.call(this, id))) {
+    if (id && (await invitationSignUpAwaitsVerification.call(this, id, await settleRequestContext(ctx)))) {
       this.config.logger?.info?.(
         '[membership] not bound: a sign-up admitted by the invitation it presents joins by accepting the invitation once its address is verified',
         { userId: id },
@@ -299,7 +316,7 @@ export async function validateAudienceAdmission(
     // Admitted by the invitation it presents: the membership settle does not
     // bind this sign-up while its address is unverified (`settleMembership`).
     if (email && admittedByPresentedInvitation) {
-      this.stageInvitationAdmission(email);
+      this.stageInvitationAdmission(ctx, email);
     }
     if (verdict.grantPermissionSet) {
       const setName = audience.selfRegistrationPermissionSet;
