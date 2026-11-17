@@ -837,7 +837,8 @@ ADR-0147's leaf and `delete` keep it as written. B and C were not taken.
   seam and what its recipient rule checks on that record's anchor (D4). They land with the governed edit that records
   the maintainer's rulings in this record's Status line. The first acceptance criterion already requires that edit,
   and the same rulings decide which notes are owed. None is in this record's diff, which adds this record and its
-  index row and edits no other record.
+  index row and edits no other record. **Landed** (2026-11-17): all five, dated and append-only, in the edit that
+  records the rulings in the Status line.
 - **O8** — Readers of `buildReadFilter` and of the security service's read filter outside this repository (the cloud
   repository's packages) were not read from this tree, and neither was any host that registers an object-scoped
   middleware or a find hook for `sys_record_share` by name (D4), an opt-in of that table into record-view auditing
