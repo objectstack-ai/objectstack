@@ -27,7 +27,7 @@ import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 type Candidate = { kind: 'package'; packageId: string } | { kind: 'environment' };
-const THROW: { type?: string; name?: string; candidates?: Candidate[] } = {};
+const THROW: { type?: string; name?: string; candidates?: Candidate[]; holderReadFails?: boolean } = {};
 
 // ── Fixtures (the #20193 parity rig's docs) ───────────────────────────────────
 
@@ -130,6 +130,8 @@ function protocolDouble() {
         getMetaItems: vi.fn(async ({ type }: any) => clone(STORE[singular(type)] ?? [])),
         getMetaItem: vi.fn(async ({ type, name, packageId }: any) => {
             refuseIfAsked(type, name, packageId);
+            // A holder read that fails: the store behind the holder's address is down.
+            if (THROW.holderReadFails && packageId !== 'sales') throw new Error('metadata store unavailable');
             const environmentItem = packageId === undefined && singular(type) === 'view'
                 ? ENVIRONMENT_VIEWS.find((i) => i.name === name)
                 : undefined;
@@ -236,12 +238,14 @@ const PATH = (type: string, name: string, suffix: string) => `/meta/${type}/${na
  */
 async function answersFor(
     callerName: CallerName, name: string, type = 'doc', packageId = 'sales', candidates?: Candidate[],
+    holderReadFails = false,
 ): Promise<Array<Answer & { door: string }>> {
     const answers: Array<Answer & { door: string }> = [];
     if (packageId === 'sales') {
         THROW.type = type;
         THROW.name = name;
         THROW.candidates = candidates;
+        THROW.holderReadFails = holderReadFails;
     }
     try {
         for (const suffix of DOORS) {
@@ -253,6 +257,7 @@ async function answersFor(
         THROW.type = undefined;
         THROW.name = undefined;
         THROW.candidates = undefined;
+        THROW.holderReadFails = undefined;
     }
     return answers;
 }
@@ -348,6 +353,25 @@ describe('[#34247] the view gate judges every holder the refusal names, the envi
             expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
                 .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
             expect(JSON.stringify(answer.body), answer.door).toContain('crm');
+        }
+    });
+});
+
+describe('[#34247] a holder the view gate cannot read fails closed, both transports', () => {
+    it('a holder read that rejects is answered a fault with no candidates on the plain read and /layers, for a refused and an admitted member alike', async () => {
+        for (const c of ['non-holder', 'view-holder'] as const) {
+            for (const answer of await answersFor(c, 'crm_pipeline_review', 'view', 'sales', undefined, true)) {
+                expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
+                    .toEqual([500, 'INTERNAL_ERROR', false, answer.door]);
+                expect(JSON.stringify(answer.body ?? null), answer.door).not.toContain('crm"');
+            }
+        }
+    });
+
+    it('CONTROL: the same address with a holder that reads is the gate\'s answer, not a fault', async () => {
+        for (const answer of await answersFor('view-holder', 'crm_pipeline_review', 'view', 'sales', undefined, false)) {
+            expect([answer.status, answer.code, answer.door], JSON.stringify(answer.body))
+                .toEqual([409, 'RESOURCE_CONFLICT', answer.door]);
         }
     });
 });

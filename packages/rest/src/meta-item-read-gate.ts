@@ -4774,9 +4774,9 @@ export type MetaHolderItemReader = (holder: MetaHolderCandidate) => Promise<unkn
  * `not-held-by-qualifier` refusal names any holder. An exact `?package=X` read
  * of a name X holds no item of, while another holder holds it, is refused by
  * the protocol `409 RESOURCE_CONFLICT` `not-held-by-qualifier` with the
- * holders as its candidates; that refusal is answered only to a caller the
- * type's own read gate admits. A caller the gate refuses is answered the
- * gate's own refusal instead, which names no holder:
+ * holders as its candidates. For a `doc` and a `view`, that refusal is
+ * answered only to a caller the type's own read gate admits; a caller the gate
+ * refuses is answered the gate's own refusal instead, which names no holder:
  *
  *  - `doc`: the ADR-0046 §6.7 docs audience, `401 UNAUTHENTICATED` /
  *    `403 PERMISSION_DENIED`. The doc arm of {@link createMetaItemReadGate}

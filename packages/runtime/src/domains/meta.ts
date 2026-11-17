@@ -2460,10 +2460,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         // answers before the `not-held-by-qualifier` refusal
                         // names any holder (`gateHolderNamingRefusal`,
                         // `RestServer`'s question).
-                        const gated = await gateHolderNamingRefusal(
-                            metaItemReadGateSources(deps, _context, protocol), singularType, name, RENDERED_DOCUMENT_POLICY, e,
-                            holderItemReader(protocol, singularType, name, memberSelector),
-                        );
+                        let gated: Awaited<ReturnType<typeof gateHolderNamingRefusal>>;
+                        try {
+                            gated = await gateHolderNamingRefusal(
+                                metaItemReadGateSources(deps, _context, protocol), singularType, name, RENDERED_DOCUMENT_POLICY, e,
+                                holderItemReader(protocol, singularType, name, memberSelector),
+                            );
+                        } catch (fault: any) {
+                            // A gate input that cannot be read is a fault, answered
+                            // as the layered read answers it: never this handler's
+                            // outer absence, and never the refusal naming holders.
+                            return { handled: true, response: deps.errorFromThrown(fault, 500) };
+                        }
                         if (gated) return { handled: true, response: deps.error(gated.message, gated.status, { code: gated.code }) };
                         throw e;
                     }
