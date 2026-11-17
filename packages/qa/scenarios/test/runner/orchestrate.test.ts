@@ -26,6 +26,7 @@ import { validateRollupSourceVisibility } from '@objectstack/lint';
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
+import { seedDoorAnswer } from './seed-door.js';
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
@@ -185,6 +186,21 @@ class FakeApp implements AppHarness {
   async installUnmanaged(manifest: Record<string, unknown>) {
     this.installed = manifest;
     return this.installAnswer;
+  }
+  /** True while the seed door loads rows: a double that judges a state machine in its insert skips it then, as the platform's seed posture does. */
+  seeding = false;
+  /** The managed door: a data-only package's `data[]` is the seed ({@link seedDoorAnswer}); any other manifest is a build. */
+  async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+    if (!Array.isArray(manifest.data)) {
+      this.installed = manifest;
+      return this.installAnswer;
+    }
+    this.seeding = true;
+    try {
+      return await seedDoorAnswer((object, row) => this.insertRow(object, row), manifest);
+    } finally {
+      this.seeding = false;
+    }
   }
   async metadataAsArtifact(collections: readonly string[]) {
     const src = (this.installed ?? {}) as Record<string, unknown[]>;
@@ -583,15 +599,16 @@ class ThrowingApp extends RefusingApp {
   }
 }
 
-describe('runCard — a seed insert that throws keeps the partial tally in the record', () => {
-  it('ac1 and ac3 inserted, ac2 refused, then ct1 throws: the half records exactly that next to its error', async () => {
+describe('runCard — a seed load that throws keeps the tally it reached in the record', () => {
+  it('the one seed load throws: the half records what was counted before it (the rewrites, no row) next to its error', async () => {
     const { scenario, ops, driver } = setup({ app: () => new ThrowingApp('democrm_contact/ct1') });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const half = run.modes[0]!.run!;
     expect(half.error).toContain('connection reset while seeding');
-    expect(half.seed).toEqual({ inserted: 2, refused: [{ object: 'democrm_account', id: 'ac2', code: 'VALIDATION_FAILED', message: 'democrm_account ac2 refused' }], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] });
+    // The rows go in as one load, which answered nothing: no row is counted inserted or refused.
+    expect(half.seed).toEqual({ inserted: 0, refused: [], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] });
     expect(half.questions).toEqual([]);
-    expect(cardScorecard(run).modes[0]!.first.seed).toEqual({ inserted: 2, total: 3, refused: 1 }); // total counts the rows the tally reached
+    expect(cardScorecard(run).modes[0]!.first.seed).toEqual({ inserted: 0, total: 0, refused: 0 }); // total counts the rows the tally reached
   });
 });
 
@@ -600,7 +617,7 @@ describe('runCard — a refused seed row makes what reads it not measured, never
     const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_contact/ct4'])) });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const half = run.modes[0]!.run!;
-    expect(half.seed).toMatchObject({ inserted: 7, refused: [{ object: 'democrm_contact', id: 'ct4', code: 'VALIDATION_FAILED' }] });
+    expect(half.seed).toMatchObject({ inserted: 7, refused: [{ object: 'democrm_contact', id: 'ct4', message: 'Failed to write democrm_contact record #3 (id=ct4): democrm_contact ct4 refused' }] });
 
     // Only the turns whose expected answer ct4 (the one unattached contact) feeds are out; the other contact
     // questions, `contacts_per_account` as `sdr` among them (its scope never reads ct4), are asked and graded.
@@ -870,6 +887,91 @@ describe('seedApp — the requisition_to_receipt seed loads whole through its de
   });
 });
 
+const TRAVEL_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json');
+
+/**
+ * The travel_expense build's own rules, as the round's kept build declares them: a claim's `status`
+ * state machine whose only entry state is `draft`, the `claim` and `trip` lookups, and the trip's
+ * `end_after_start` script rule. The user door (`insertRow`) meets all of them; the seed door
+ * (`installManaged` with a data-only package, `seeding`) skips only the state machine, as the
+ * platform's seed posture does.
+ */
+class TravelRulesApp extends FakeApp {
+  static readonly STATE_REFUSAL = 'This status change is not allowed; a paid claim cannot be changed.';
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    const refuse = (message: string): HttpAnswer => ({ ok: false, status: 400, body: {}, code: 'VALIDATION_FAILED', message });
+    const has = (o: string, id: unknown) => (this.rows[o] ?? []).some((r) => r.id === id);
+    if (object === 'demotravel_trip_request' && String(row.end_date) < String(row.start_date)) return refuse('The end date cannot be before the start date.');
+    if (object === 'demotravel_expense_claim') {
+      if (!has('demotravel_trip_request', row.trip)) return refuse(`Trip: no demotravel_trip_request record has id "${String(row.trip)}"`);
+      if (!this.seeding && row.status !== 'draft') return refuse(TravelRulesApp.STATE_REFUSAL);
+    }
+    if ((object === 'demotravel_claim_line' || object === 'demotravel_approval_step') && !has('demotravel_expense_claim', row.claim)) {
+      return refuse(`Claim: no demotravel_expense_claim record has id "${String(row.claim)}"`);
+    }
+    return super.insertRow(object, row);
+  }
+}
+
+describe('seedApp — a card row already past its entry state loads through the seed path, which skips the state machine a user write meets', () => {
+  const travel = () => namespacedScenario(load(TRAVEL_FILE));
+
+  it('the double\'s user door refuses a paid claim, as the build does a user write', async () => {
+    const app = new TravelRulesApp();
+    await app.insertRow('demotravel_trip_request', { id: 't001', start_date: '2026-06-28', end_date: '2026-06-30' });
+    const c001 = travel().card.run.seed.demotravel_expense_claim!.find((r) => r.id === 'c001')!;
+    expect(c001.status).toBe('paid');
+    expect(await app.insertRow('demotravel_expense_claim', { ...c001 })).toMatchObject({ ok: false, message: TravelRulesApp.STATE_REFUSAL });
+  });
+
+  it('all 757 rows load: the 114 claims past draft go in as the card states them, and each line and step holds its claim by the card\'s own id', async () => {
+    const scenario = travel();
+    const app = new TravelRulesApp();
+    const seed = await seedApp(scenario, app, []);
+    expect(seed.refused).toEqual([]);
+    expect(seed.inserted).toBe(757);
+    const claims = app.rows.demotravel_expense_claim!;
+    expect(claims.filter((c) => c.status !== 'draft')).toHaveLength(114);
+    expect(claims.find((c) => c.id === 'c001')).toMatchObject({ status: 'paid', paid_on: '2026-07-13' });
+    expect(app.rows.demotravel_claim_line!.find((l) => l.id === 'ln_001_hotel')).toMatchObject({ claim: 'c001' });
+    expect(app.rows.demotravel_approval_step!.find((a) => a.id === 'as_001_1')).toMatchObject({ claim: 'c001' });
+  });
+
+  it('control: a row that breaks a rule other than the state machine is still refused and recorded, and what hangs off it with it', async () => {
+    const scenario = travel();
+    scenario.card.run.seed.demotravel_trip_request![0]!.end_date = '2026-01-01'; // t001 now ends before it starts
+    const seed = await seedApp(scenario, new TravelRulesApp(), []);
+    expect(seed.refused.map((r) => `${r.object}/${r.id}`)).toEqual([
+      'demotravel_trip_request/t001',
+      'demotravel_expense_claim/c001',
+      'demotravel_claim_line/ln_001_hotel',
+      'demotravel_claim_line/ln_001_meals',
+      'demotravel_approval_step/as_001_1',
+      'demotravel_approval_step/as_001_2',
+    ]);
+    expect(seed.refused[0]!.message).toBe('Failed to write demotravel_trip_request record #0 (id=t001): The end date cannot be before the start date.');
+    expect(seed.refused.every((r) => r.code === undefined)).toBe(true); // the seed door names no error code
+    expect(seed.inserted).toBe(751);
+  });
+
+  it('restoreSeededRows puts a removed paid claim back through the same seed path', async () => {
+    const scenario = travel();
+    const app = new TravelRulesApp();
+    await seedApp(scenario, app, []);
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
+    expect(await restoreSeededRows(scenario, app, [], seeded)).toEqual({ restored: { reinserted: ['demotravel_expense_claim/c001'] } });
+    expect(app.rows.demotravel_expense_claim!.find((r) => r.id === 'c001')).toMatchObject({ status: 'paid' });
+  });
+
+  it('a harness with no managed install door refuses every row, saying so', async () => {
+    const scenario = travel();
+    const seed = await seedApp(scenario, Object.assign(new TravelRulesApp(), { installManaged: undefined }), []);
+    expect([seed.inserted, seed.refused.length]).toEqual([0, 757]);
+    expect(seed.refused[0]!.message).toBe('this app harness has no managed install door, which the seed loads through');
+  });
+});
+
 const DESK_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json');
 
 /** One account per persona of `scenario`, as `FakeApp.createPersona` mints them (`u-<persona>`). */
@@ -1003,7 +1105,7 @@ describe('runCard — a build that makes both sides of a reference cycle require
     expect(sc.modes[0]!.findings).toEqual([`build: ${finding}`, `iterate build: ${finding}`]);
     expect(renderScorecard(sc)).toContain(`- scratch finding: build: ${finding}`);
     const seed = r.modes[0]!.run!.seed;
-    expect(seed.refused.filter((x) => x.object === 'demopurchase_department').map((x) => x.message)).toEqual(Array(5).fill('manager is required'));
+    expect(seed.refused.filter((x) => x.object === 'demopurchase_department').map((x) => x.message!.replace(/^Failed to write \S+ record #\d+ \(id=[^)]+\): /, ''))).toEqual(Array(5).fill('manager is required'));
     expect(seed.inserted).toBe(card.run.seed.demopurchase_supplier!.length); // only what hangs off neither side
   });
 
@@ -2642,7 +2744,8 @@ describe('runCard — ask mode installs a build the unmanaged door refuses UNMAN
       if (this.unmanaged.ok) this.installed = manifest;
       return this.unmanaged;
     }
-    async installManaged(manifest: Record<string, unknown>) {
+    override async installManaged(manifest: Record<string, unknown>) {
+      if (Array.isArray(manifest.data)) return super.installManaged(manifest); // the seed, not the build
       this.managedCalls.push(manifest);
       if (this.managedAnswer.ok) this.installed = manifest;
       return this.managedAnswer;
@@ -2743,7 +2846,7 @@ describe('runCard — ask mode installs a build the unmanaged door refuses UNMAN
     class UnmanagedOnly extends FakeApp {
       override installAnswer = UNCOPYABLE;
     }
-    const bare = setup({ app: () => new UnmanagedOnly() });
+    const bare = setup({ app: () => Object.assign(new UnmanagedOnly(), { installManaged: undefined }) });
     const b = await runCard(bare.scenario, bare.driver, bare.ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
     expect(b.modes[0]!.template).toMatchObject({ installMode: 'unmanaged', install: { code: 'UNMANAGED_INSTALL_UNCOPYABLE' } });
     expect(b.modes[0]!.findings).toEqual([`unmanaged install refused: 422 UNMANAGED_INSTALL_UNCOPYABLE ${UNCOPYABLE.message} (this app harness has no managed install door to fall back to)`]);
@@ -3400,7 +3503,7 @@ describe('runHalf — an operation an earlier write would meet runs on a fresh s
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const second = opsOf(run)[1]!;
     expect(second.notMeasured).toMatch(
-      /^restore: no fresh copy of the app could be seeded for it \(the copy's seed did not load as the run's did: it loaded \d+ rows, the run \d+; it refused demoasset_employee\/e05 VALIDATION_FAILED, the run nothing\); what had moved: demoasset_asset: 1 added \(new-receive_and_issue_from_text\)$/,
+      /^restore: no fresh copy of the app could be seeded for it \(the copy's seed did not load as the run's did: it loaded \d+ rows, the run \d+; it refused demoasset_employee\/e05, the run nothing\); what had moved: demoasset_asset: 1 added \(new-receive_and_issue_from_text\)$/,
     );
     expect([second.turn, second.grade, second.restored]).toEqual([undefined, undefined, undefined]);
     expect(driver.seen.some((k) => k.includes('/extend_overdue_loaner/'))).toBe(false);
