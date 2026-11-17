@@ -50,8 +50,12 @@
  * registers through its runtime manifest (`datasets: SystemOverviewDatasets`),
  * is neither an authored stack nor a publish-door write, so the advisory never
  * reads it. A dataset the platform ships answers to its name and to its label
- * as the platform's translation bundle gives it in the caller's locale, and to
- * no synonym unless its source writes one.
+ * as served in the caller's locale: the one translation-bundle label resolved
+ * along the resolver's locale chain (the requested locale by the platform
+ * locale ladder, variant expansion included, then the deployment's declared
+ * fallback locale, skipped when the caller's locale is the authored one), or
+ * the authored label where the bundle carries none. It answers to no synonym
+ * unless its source writes one.
  */
 
 import { collectionEntries } from './collection-entries.js';
