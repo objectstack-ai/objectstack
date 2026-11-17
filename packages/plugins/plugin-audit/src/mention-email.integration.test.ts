@@ -139,9 +139,9 @@ async function boot(): Promise<Rig> {
   });
 
   for (const [id, name] of [[ALICE, 'Alice'], [CAROL, 'Carol'], [DAVE, 'Dave']]) {
-    await engine.insert('sys_user', { id, name, email: `${id}@example.com`, locale: 'en' }, { context: SYSTEM } as any);
+    await engine.insert('sys_user', { id, name, email: `${id}@example.com`, locale: 'en' }, { context: SYSTEM });
   }
-  await engine.insert(TASK, { id: 't1', title: 'Launch plan' }, { context: SYSTEM } as any);
+  await engine.insert(TASK, { id: 't1', title: 'Launch plan' }, { context: SYSTEM });
 
   return {
     engine,
@@ -160,11 +160,11 @@ async function mention(engine: ObjectQL, mentions: string[], body = `note ${++se
     author_name: 'Alice',
     organization_id: DEFAULT_ORGANIZATION_ID,
     mentions: JSON.stringify(mentions),
-  }, { context: SYSTEM } as any);
+  }, { context: SYSTEM });
 }
 
 async function deliveries(engine: ObjectQL): Promise<Array<Record<string, any>>> {
-  return (await engine.find('sys_notification_delivery', { where: { topic: 'collab.mention' }, context: SYSTEM } as any)) as any[];
+  return (await engine.find('sys_notification_delivery', { where: { topic: 'collab.mention' }, context: SYSTEM })) as any[];
 }
 
 /** Wait (real time) until every mention delivery left `pending` / `in_flight`. */
@@ -205,7 +205,7 @@ describe('an @mention reaches the mentioned person by e-mail as well as the inbo
       channel: 'email',
       enabled: false,
       organization_id: DEFAULT_ORGANIZATION_ID,
-    }, { context: SYSTEM } as any);
+    }, { context: SYSTEM });
 
     await mention(rig.engine, [CAROL, DAVE]);
 
