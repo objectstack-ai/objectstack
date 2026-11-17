@@ -44,7 +44,7 @@ import { ValidationError } from './validation/record-validator.js';
 import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
-import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import type { ReferentialClearExemption, RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { declaredColumnSet } from './declared-read-columns.js';
 
 /**
@@ -4431,12 +4431,14 @@ export function staticReadonlyStoredView(
     preserveAudit: boolean;
     hookWrittenKeys: ReadonlySet<string> | undefined;
     wallJudgesOrganization?: boolean;
+    /** The walk's referential clear, which the strip keeps — so the view keeps it too. */
+    referentialClear?: ReferentialClearExemption;
   },
 ): Record<string, unknown> {
   if (!strip.runs) return data;
   return stripReadonlyFields(
     updateStaticReadonlySubject(schema, strip.wallJudgesOrganization === true) as any, data, supplied, undefined,
-    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
+    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys, referentialClear: strip.referentialClear },
   ) ?? data;
 }
 
@@ -5225,13 +5227,39 @@ export const SECURITY_SERVICE_SOURCE_SLOT: unique symbol = Symbol.for('objectsta
  */
 const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondition');
 
+/**
+ * The engine's own channel for a referential write to one lookup on one row,
+ * on the `update` it issues: `{ object, id, field }` of the holder row and
+ * lookup. Two writers, both engine-owned referential integrity and never a
+ * caller write: the `set_null` delete walk's clear (`cascadeDeleteRelations`)
+ * and the recycle-bin restore's re-link of that clear and its undo (ADR-0148
+ * D2, `recycle-bin/restore.ts`). `update()` hands the read-only strips that one
+ * key, at the value the write received ({@link ReferentialClearOption}).
+ *
+ * A module-private symbol, the shape of {@link WRITE_PRECONDITION_OPTION}, and
+ * for the same reason: no options object a door builds, no hook's `ctx.api`
+ * write and nothing outside this package can carry it. ⛔ Not the
+ * operation-private `__referentialFieldClear` context key, which a write a
+ * hook issues through `ctx.api` during the cleanup dispatch INHERITS
+ * (`buildReferentialFieldClear`); and ⛔ not `isSystem`, whose exemption is
+ * total. ⛔ Not re-exported by `index.ts` or `core.ts`.
+ */
+const REFERENTIAL_CLEAR_OPTION: unique symbol = Symbol('objectql.referentialClear');
+
+/** What the delete walk or the restore puts under {@link REFERENTIAL_CLEAR_OPTION}: the holder row and the lookup it writes. */
+interface ReferentialClearOption {
+  readonly object: string;
+  readonly id: string;
+  readonly field: string;
+}
+
 // [#29986 codemod] Declared above without `export`, and read by `engine.ts` or a section module.
 export {
   AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, AutonumberReaders, CascadeBatchNarrowed,
   CascadeIssuedDelete, DISPATCHABLE_HOOK_EVENTS, cascadeBatchIdsOf, ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
   ENGINE_QUERY_SLOTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WIRE_ONLY_SLOTS, FormulaFaultSink, FormulaRelated,
   IssuedAutonumber, METADATA_ARRAY_KEYS, ReadableIdsSecurityResolution, StoredExpressionServing, TransactionScope,
-  WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
+  REFERENTIAL_CLEAR_OPTION, ReferentialClearOption, WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
   assertDispatchableHookEvent, assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable,
   assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects, assertValidHookObject,
   assertValidUnscopedMultiWriteFlag, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
