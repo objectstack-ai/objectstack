@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: a pooled real better-sqlite3 engine and a fresh AuthManager per case, each case's SCIM provision, ban, last-administrator and sign-in sequence its subject; 1.8 s in a local run; slowest CI reading 10.3 s (scheduled full-battery run 41237094739, Test Core shard log) x 1.25, rounded up
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a pooled real better-sqlite3 engine and a fresh AuthManager per case, each case's SCIM provision, ban, re-activation, last-administrator and sign-in sequence its subject; a LOCAL reading, taken because no CI reading of the 51-case file could be read where it was measured (the Test Core shard log of PR run 44056183677 holds it past the readable tail): 9.4 s, the slowest of four local runs of this file alone (vitest tests time, shared box), x 1.25, rounded up; the last CI reading, 10.3 s at 38 cases (scheduled run 41237094739), gives the same budget
 
 /**
  * [#14360] SCIM `active: false` disables the account again — end to end,
