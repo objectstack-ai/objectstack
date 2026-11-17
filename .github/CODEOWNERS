@@ -10,9 +10,11 @@
 #
 # The owner list on EVERY row mirrors `GOVERNED_APPROVERS` in
 # scripts/pm/check-governed-queue-guard.mjs — the one list of accounts whose
-# APPROVED review lands a Tier H surface (「os-zhuang hotlong 批准算数」). The
-# rows mirror the Tier H rows of `GOVERNED_SURFACES` in
-# scripts/pm/check-governed-merges.mjs. This file is static and can import
+# APPROVED review lands a Tier H surface. Since 2026-11-17 that is `os-zhuang`
+# alone (maintainer, triage session, verbatim: 「hotlong 从批准账户中去掉，只保留
+# os-zhuang」), superseding the membership of 2026-08-27 (「os-zhuang hotlong
+# 批准算数」), which this line carried until then. The rows mirror the Tier H
+# rows of `GOVERNED_SURFACES` in scripts/pm/check-governed-merges.mjs. This file is static and can import
 # neither, so the two stay in step the only way a static file can:
 # `node scripts/pm/check-governed-queue-guard.mjs --self-test` reads this file
 # (`codeownersMirrorVerdict`) and reds when a Tier H row has no line here, when
@@ -36,10 +38,12 @@
 # code owner without write access is ignored by GitHub without a word:
 # `GET /repos/{owner}/{repo}/codeowners/errors` reads this file's own verdict.
 #
-# Both logins are verified, not assumed: `hotlong` authors the bulk of main's
-# history as 50353452+hotlong@users.noreply.github.com (GitHub's {id}+{login}
-# noreply form ties the login to the account); `os-zhuang` is named by the
-# ruling above and has readied and reviewed this repository's pulls.
+# The login is verified, not assumed: `os-zhuang` is named by both rulings
+# above and has readied and reviewed this repository's pulls. Until 2026-11-17
+# every row also named `@hotlong` (verified then as the account authoring the
+# bulk of main's history, 50353452+hotlong@users.noreply.github.com); the
+# 2026-11-17 ruling removed it, because `hotlong` runs seats and an approver
+# account never does.
 #
 # The enforcement chain is routed the same way, deliberately: a PR that edits
 # the audit script, the approver constant or this file is a governance change —
@@ -48,21 +52,21 @@
 
 # Tier H governed surfaces — the register's rows with tier H, less the
 # low-risk arm's `/docs/adr/` and `/skills/` rows (see the header)
-/AGENTS.md @os-zhuang @hotlong
-/CLAUDE.md @os-zhuang @hotlong
-/docs/NORTH-STAR.md @os-zhuang @hotlong
-/.github/workflows/ @os-zhuang @hotlong
+/AGENTS.md @os-zhuang
+/CLAUDE.md @os-zhuang
+/docs/NORTH-STAR.md @os-zhuang
+/.github/workflows/ @os-zhuang
 
 # Tier H governed surfaces of the nested `ui/` workspace (#25712) — the same
 # register rows, under `ui/`; `ui/.claude/` is Tier H, unlike the root tree;
 # `/ui/skills/` carries the low-risk arm too and has no line
-/ui/docs/adr/ @os-zhuang @hotlong
-/ui/.claude/ @os-zhuang @hotlong
-/ui/AGENTS.md @os-zhuang @hotlong
-/ui/CLAUDE.md @os-zhuang @hotlong
-/ui/.github/workflows/ @os-zhuang @hotlong
+/ui/docs/adr/ @os-zhuang
+/ui/.claude/ @os-zhuang
+/ui/AGENTS.md @os-zhuang
+/ui/CLAUDE.md @os-zhuang
+/ui/.github/workflows/ @os-zhuang
 
 # The enforcement chain
-/.github/CODEOWNERS @os-zhuang @hotlong
-/scripts/pm/check-governed-merges.mjs @os-zhuang @hotlong
-/scripts/pm/check-governed-queue-guard.mjs @os-zhuang @hotlong
+/.github/CODEOWNERS @os-zhuang
+/scripts/pm/check-governed-merges.mjs @os-zhuang
+/scripts/pm/check-governed-queue-guard.mjs @os-zhuang

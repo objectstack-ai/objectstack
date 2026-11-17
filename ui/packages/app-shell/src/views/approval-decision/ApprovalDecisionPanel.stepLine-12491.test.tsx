@@ -155,13 +155,14 @@ describe('ApprovalDecisionPanel — the step line draws the served route (object
     expect(within(panel).getByTestId('declared-actions-probe')).toBeTruthy();
   });
 
-  it('the line sits above the tally, and the tally above the decisions', () => {
+  it('the decisions sit on top; the line sits above the tally, both in the progress card of the rail (objectstack#34588)', () => {
     const panel = mount(requestRow({ decision_progress: { behavior: 'quorum', got: 1, need: 2 } }));
-    const line = within(panel).getByLabelText(STEP_LINE_NAME);
-    const bar = within(panel).getByRole('progressbar');
+    const progressCard = within(panel).getByTestId('approval-decision-progress');
+    const line = within(progressCard).getByLabelText(STEP_LINE_NAME);
+    const bar = within(progressCard).getByRole('progressbar');
     const actions = within(panel).getByTestId('declared-actions-probe');
     // DOCUMENT_POSITION_FOLLOWING: the argument comes after the receiver.
+    expect(actions.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(line.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(bar.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

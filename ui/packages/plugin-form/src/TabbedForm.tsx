@@ -39,6 +39,7 @@ import {
 } from './loadFailure';
 import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
+import { useReportedDirtyChange } from './formDirtyReport';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
 import { useFormChromeTranslation } from './formChrome';
 
@@ -374,8 +375,10 @@ export const TabbedForm: React.FC<TabbedFormProps> = ({
   // this record, to its object or to `'*'` re-reads the record IN PLACE through
   // the effect below while the form is pristine, and is held while it is dirty.
   // Dirtiness is the form renderer's `onDirtyChange`, wired below.
-  const { refetch: recordRefetch, onDirtyChange: handleDirtyChange, saved: recordSaved } =
+  const { refetch: recordRefetch, onDirtyChange: onBusDirtyChange, saved: recordSaved } =
     useRecordInvalidation(schema.objectName, schema.recordId, !!schema.recordId && schema.mode !== 'create');
+  // Also reported to a hosting master-detail form (`formDirtyReport.ts`).
+  const handleDirtyChange = useReportedDirtyChange(onBusDirtyChange);
 
   // Fetch initial data for edit/view modes
   React.useEffect(() => {

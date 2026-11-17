@@ -132,7 +132,9 @@
  * refusal catalogue: the hook must be one the stack defines (or a sibling
  * package's, through the artifact carrier), and the code one its `refusals`
  * declares — the body runner reads the key for a declared code and nothing
- * else. An unknown hook and an undeclared code are each an orphan.
+ * else. An unknown hook and an undeclared code are each an orphan. So is
+ * (#34374) a `hooks.<name>.texts.<key>` key over a text the hook's `texts`
+ * does not declare: `ctx.text` reads the key for a declared text only.
  *
  * `flows.<name>.successMessage` / `.errorMessage` (#22507), the terminal
  * toasts, are judged against the flow itself: `translateFlow` overlays a toast
@@ -564,6 +566,8 @@ interface Universe {
    */
   /** [#26170] Each hook's declared refusal codes, and (#33214) each code's declared reasons. */
   hooks: Map<string, Map<string, Set<string>>>;
+  /** [#34374] Each hook's declared text keys (`HookSchema.texts`) — what a `hooks.<name>.texts.<key>` key may name. */
+  hookTexts: Map<string, Set<string>>;
   /** Object-less actions — the ones `globalActions.*` may name. */
   globalActions: Map<string, AnyRec>;
   /** Action name → owning object, so a misfiled `globalActions` key can say where it belongs. */
@@ -1689,6 +1693,7 @@ function buildUniverse(stack: AnyRec): Universe {
   // the artifact carrier; the declaration this leg is JUDGING keeps the slot,
   // the flows' decision.
   const hooks = new Map<string, Map<string, Set<string>>>();
+  const hookTexts = new Map<string, Set<string>>();
   const collectHookRecord = (hook: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
     const hookName = strName(hook.name);
     if (!hookName) return;
@@ -1698,6 +1703,8 @@ function buildUniverse(stack: AnyRec): Universe {
       codes.set(code, new Set(Object.keys(asRecord(isRec(entry) ? entry.reasons : undefined))));
     }
     hooks.set(hookName, codes);
+    // [#34374] The text keys `hooks.<name>.texts.<key>` may name.
+    hookTexts.set(hookName, new Set(Object.keys(asRecord(hook.texts))));
   };
   for (const hook of recordsOf(stack.hooks)) collectHookRecord(hook, { ownDeclaration: true });
   for (const hook of artifactProvidedRecords(stack, 'hooks')) {
@@ -1806,6 +1813,7 @@ function buildUniverse(stack: AnyRec): Universe {
     dashboards,
     flows,
     hooks,
+    hookTexts,
     globalActions,
     actionOwners,
     picklists,
@@ -2552,7 +2560,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · hook "${hookName}"`,
             hookPath,
             `Translations are keyed to hook "${hookName}", which this stack does not define, so its ` +
-              `refusals keep their declared messages.` +
+              `refusals and texts keep their declared messages.` +
               suggest(hookName, universe.hooks.keys()),
             `Match the key to a hook's \`name\`, or drop it.`,
           );
@@ -2591,6 +2599,23 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 suggest(code, declared.keys()),
             `Refusal translations are keyed by a code the hook's \`refusals\` declares; declare it there, ` +
               `or drop the key.`,
+          );
+        }
+        // ── hooks.<name>.texts.<key> (#34374) ─────────────────────────────
+        const texts = universe.hookTexts.get(hookName) ?? new Set<string>();
+        for (const key of Object.keys(asRecord(rawHook.texts))) {
+          if (texts.has(key)) continue;
+          orphan(
+            `${inLocale} · hook "${hookName}" · text "${key}"`,
+            `${hookPath}.texts.${key}`,
+            texts.size === 0
+              ? `Translations are keyed to text "${key}", but hook "${hookName}" declares no \`texts\`, so ` +
+                `nothing resolves this key.`
+              : `Translations are keyed to text "${key}", a key hook "${hookName}" does not declare under ` +
+                `\`texts\`, so nothing resolves this key.` +
+                suggest(key, texts),
+            `Text translations are keyed by a key the hook's \`texts\` declares; declare it there, or drop ` +
+              `the key.`,
           );
         }
       }
