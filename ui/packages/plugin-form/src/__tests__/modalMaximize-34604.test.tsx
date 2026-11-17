@@ -298,6 +298,12 @@ describe('#34604 — the master-detail (subforms) arm', () => {
   }
 
   const qtyInputs = () => screen.queryAllByLabelText('Qty') as HTMLInputElement[];
+  /** The same input ELEMENTS, in order — identity, not structural equality. */
+  const expectSameLines = (lines: HTMLInputElement[]) => {
+    const now = qtyInputs();
+    expect(now.length).toBe(lines.length);
+    now.forEach((el, i) => expect(el).toBe(lines[i]));
+  };
 
   it('draws the switch and toggles the same content node in place', async () => {
     renderMd();
@@ -321,15 +327,19 @@ describe('#34604 — the master-detail (subforms) arm', () => {
     const before = qtyInputs().length;
     fireEvent.click(screen.getByRole('button', { name: /add/i }));
     await waitFor(() => expect(qtyInputs().length).toBe(before + 1));
-    const line = qtyInputs()[before];
+    // Type into the first line, so the grid's own trailing-row behaviour on
+    // its last line stays out of the count.
+    const lines = qtyInputs();
+    const line = lines[0];
     fireEvent.change(line, { target: { value: '7' } });
+    expectSameLines(lines);
 
     fireEvent.click(maximizeButton());
     fireEvent.click(maximizeButton());
     fireEvent.click(maximizeButton());
     expectMaximized(dialog());
-    expect(qtyInputs().length).toBe(before + 1);
-    expect(qtyInputs()[before]).toBe(line);
+    // The same line inputs, element for element: nothing below remounted.
+    expectSameLines(lines);
     expect(line.value).toBe('7');
     expect(await headerInput()).toBe(title);
     expect(title.value).toBe('Q-1');
