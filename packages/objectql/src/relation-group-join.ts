@@ -67,8 +67,6 @@
  * group is `NULL`; the caller tells it from a real `NULL` attribute by the
  * resolved column, and so keeps its "restricted" bucket exactly.
  *
- * ## Declined, never half-served
- *
  * ## Refused, on a driver that compiles no semi-join
  *
  * [#33876] A read whose driver lacks the `DriverCapabilities.readableIdsLeaf`
@@ -76,6 +74,8 @@
  * ({@link relationGroupDriverRefusal}): the outcome is `refused`, carrying
  * an `INVALID_QUERY` / 400 the caller throws instead of serving its
  * FK-expand. The same bit decides a nested-relation `where` on that driver.
+ *
+ * ## Declined, never half-served
  *
  * Every other case this module cannot prove is the same read as the
  * FK-expand's is DECLINED: the engine runs nothing more and writes the reason to the
