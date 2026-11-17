@@ -61,7 +61,7 @@ ObjectStack provides lifecycle events organized by operation type:
 | **Purpose** | Validation, enrichment, transformation | Side effects, notifications, logging |
 | **Can modify** | `ctx.input` (mutable) | `ctx.result` (mutable) |
 | **Can abort** | Yes (throw error → rollback) | A sync after-hook's throw still rolls back the transaction (see error handling) |
-| **Transaction** | Within transaction | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
+| **Transaction** | One transaction with the outer write: a refusal anywhere in it (a validation, a later hook, a driver constraint) rolls back the hook's `ctx.api` writes too; no per-hook opt-out. Exits: a transaction the caller opened decides; an object off the default datasource, or a default driver with no transactions (turso's remote transport), opens none, so those writes stay stored; a hook registered in code (`registerHook`) opens none. MongoDB needs a replica set (read in code, not measured) | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
 | **Error handling** | Aborts by default (`onError: 'abort'`) | **Also aborts by default** — `onError` defaults to `'abort'` unconditionally; set `onError: 'log'` on side-effect hooks |
 
 ---
@@ -811,8 +811,11 @@ the layout both real hook modules in the repo use.
 cross-object operations; refuse a business rule by a
 [declared code](#declared-refusals-refusals); test hooks in isolation.
 
-❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); let a
-hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
+❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); write
+business records to another datasource from a `before*` hook through `ctx.api`
+(refused there with `CrossDatasourceTransactionWriteError`; only an append-only
+ledger, `lifecycle.class` `audit` / `telemetry` / `event`, is written outside the
+transaction and survives its rollback); let a hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
 `after*` unless the failure must abort the operation; react to a refused or
 rolled-back write from an `async: true` hook, which never runs then — use a sync
 hook (its `ctx.api` writes roll back with the write) or record it in the caller,
