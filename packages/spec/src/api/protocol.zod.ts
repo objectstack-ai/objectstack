@@ -1762,6 +1762,146 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One finding of the ADR-0038 L3 runtime probes: the element of
+ * {@link BuildProbeReportSchema}'s `issues[]`, which rides the batch publish
+ * response as `PublishPackageDraftsResponseSchema.probes`.
+ *
+ * It is the ADR-0038 `BuildIssue` verification contract at `layer: 'runtime'`,
+ * declared member for member against what its one producer emits
+ * (`runBuildProbes` in `@objectstack/metadata-protocol`, which re-exports this
+ * type as its `RuntimeBuildIssue` rather than declaring a second interface).
+ * The shape stayed undeclared while `probes` was an opaque passthrough; it is
+ * declared because a consumer reads its fields (the console's publish-health
+ * line reads `message`, and `userMessage` once it carries one), which is the
+ * trigger the staging ruling named: model it when a consumer needs a field.
+ *
+ * ## Two readers, two channels (ruling records 6819749037 and 6929121584)
+ *
+ * A build finding has two readers, and each has its own channel. `message` and
+ * `fix` are written for the AGENT that built the app (ADR-0038: agent-
+ * actionable, naming the exact artifact and member): English, machine names,
+ * instructions. `userMessage` is the sentence for the PERSON who published, in
+ * the request's language: the producer of a finding composes its user-facing
+ * text, `code` stays the stable id, and every client receives the text already
+ * in that language instead of keeping a per-code translation table. Same field
+ * name and same producer-marked meaning as
+ * {@link RuntimeAuthoringIssueSchema}'s `userMessage` and
+ * `ApiErrorSchema.userMessage` (`contract.zod.ts`), under the ladder its
+ * "Language" section declares for platform-composed text: the locale the
+ * request names, else the workspace default, else `en`.
+ *
+ * The probes name an artifact in `userMessage` by its label where they can read
+ * one from the published item, and by its machine name otherwise. An object the
+ * publishing caller was refused (or whose read access the server could not
+ * decide) is named by the machine name the refusal carries, as `fix` names it:
+ * the probe reads nothing of it, its label included. `message` keeps the machine
+ * names an agent acts on. Where the sentences live is the
+ * producer's own business: the probes keep one catalog beside themselves,
+ * covering the platform locale table (`PLATFORM_LOCALES`,
+ * `@objectstack/spec/system`).
+ */
+export const RuntimeBuildIssueSchema = lazySchema(() => z.object({
+  layer: z.literal('runtime').describe(
+    'The ADR-0038 verification plane that found it. Always `runtime` on this '
+    + 'report: these are the post-publish probes.',
+  ),
+  severity: z.enum(['error', 'warning']).describe(
+    '`error`: the published artifact is broken at runtime, or the check that '
+    + 'judges it could not run (`object_field_ref_rule_failed`). `warning`: a '
+    + 'dashboard widget was not probed, so nothing is known about it. Neither '
+    + 'fails the publish.',
+  ),
+  artifact: z.object({
+    type: z.string().describe('Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`).'),
+    name: z.string().describe(
+      'Item name of the artifact. On `probes_unavailable` it is the name of '
+      + 'every dashboard whose widgets went unprobed, joined by `, `.',
+    ),
+  }).describe('The published artifact whose runtime behaviour the finding is about.'),
+  ref: z.object({
+    type: z.string().describe('Metadata type of what was exercised (`object`, `dataset`).'),
+    name: z.string().describe('Its item name.'),
+    member: z.string().optional().describe(
+      'The dashboard widget the finding is about, when the finding is about '
+      + 'one widget: its `id`, else its `title` as a string, else `?`.',
+    ),
+  }).optional().describe(
+    'What the probe exercised, when that is not the artifact itself: the '
+    + 'object a seed loads into or a view reads, the dataset a widget is bound '
+    + 'to. Absent when the finding is about the artifact as a whole.',
+  ),
+  code: z.string().describe(
+    'Stable machine id of the finding class, lowercase snake: a diagnostics '
+    + 'code carried in a 200, not an ADR-0112 error code. The probes emit '
+    + '`seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, '
+    + '`object_field_ref_rule_failed`, `empty_query`, `widget_query_failed`, '
+    + '`widget_not_probed` and `probes_unavailable`. The list is the '
+    + 'producer\'s and may grow: a consumer treats an id it does not know as '
+    + 'any other finding.',
+  ),
+  message: z.string().describe(
+    'What is wrong, written for the AGENT that built the app (ADR-0038): '
+    + 'English, naming the exact artifact and member by machine name. Not the '
+    + 'sentence for the person who published; that is `userMessage`.',
+  ),
+  fix: z.string().optional().describe(
+    'How to repair it, written for the same agent. Absent when the probe has '
+    + 'no remedy to name.',
+  ),
+  userMessage: z.string().optional().describe(
+    'The finding\'s sentence for the PERSON who published, composed by its producer in the request\'s '
+    + 'locale (else the workspace default locale, else `en`) — the same field name and producer-marked '
+    + 'meaning as `RuntimeAuthoringIssueSchema.userMessage` and `ApiErrorSchema.userMessage`. It names an '
+    + 'artifact by its label where the probe can read one, else by its machine name; an object the '
+    + 'publishing caller was refused, or whose read access could not be decided, by the machine name '
+    + 'the refusal carries, its label unread. Present when the '
+    + 'producer authors a user sentence for this `code`, which the probes do for every code they emit; '
+    + 'absent, a consumer shows its own generic sentence. Consumers render it as received and keep no '
+    + 'per-code translation table; `code` stays the stable id and `message` / `fix` stay the agent-facing '
+    + 'text.',
+  ),
+}));
+
+/**
+ * The ADR-0038 L3 post-publish runtime probe report: what
+ * `PublishPackageDraftsResponseSchema.probes` carries.
+ *
+ * After a batch publish the build pipeline exercises what was just published,
+ * one real read per artifact, and reports what is broken AT RUNTIME: a seed
+ * whose rows never materialized, a view that cannot read its object, a
+ * dashboard widget whose dataset selection fails or returns nothing over a
+ * populated object, an object whose own field-name lists name a field it does
+ * not have. Probes are reads; they never fail the publish they verify.
+ *
+ * Declared member for member against the producer (`runBuildProbes`,
+ * `@objectstack/metadata-protocol`, which re-exports this type as its
+ * `BuildProbeReport`). `issues[]` is the findings ({@link RuntimeBuildIssueSchema})
+ * and `checked` is the receipt that tells "nothing of that kind was probed"
+ * from "everything probed was clean".
+ */
+export const BuildProbeReportSchema = lazySchema(() => z.object({
+  issues: z.array(RuntimeBuildIssueSchema).describe(
+    'The findings, in probe order (seeds, views, objects, dashboard widgets). '
+    + 'Empty when every probe passed.',
+  ),
+  checked: z.object({
+    seeds: z.number().int().describe('Published seeds whose target object was read for rows.'),
+    views: z.number().int().describe('Published views whose bound object was read.'),
+    widgets: z.number().int().describe(
+      'Dataset-bound dashboard widgets whose dataset selection was executed. '
+      + 'Stays 0 when no analytics service is mounted; `probes_unavailable` '
+      + 'then says how many went unprobed.',
+    ),
+    objects: z.number().int().describe('Published objects whose own field-name lists were judged.'),
+  }).describe(
+    'How many probes actually ran, per plane. A 0 means nothing of that kind '
+    + 'was probed, never that something was probed and passed: read it beside '
+    + '`issues`, so that "no object was inspected" and "every object was '
+    + 'clean" are different numbers.',
+  ),
+}));
+
+/**
  * Publish Package Drafts Response — the "publish whole app" door.
  *
  * Describes the FULL body `POST /api/v1/packages/:id/publish-drafts` answers
@@ -1803,8 +1943,12 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
  * `outcome` (#10462) names which of the four exits answered, so no consumer
  * has to reverse-engineer that from `failed.length`.
  *
- * **`probes` is deliberately OPAQUE** — see its own note below. Do not model
- * it here without a consumer-driven card (#9406 ruling).
+ * **`probes` is MODELED** ({@link BuildProbeReportSchema}; ruling record
+ * 6929121584). The #9406 ruling staged it as an opaque passthrough until a
+ * consumer needed a field of it; the console's publish-health line reads
+ * `checked` and `issues[].message`, and `issues[].userMessage` once the
+ * finding carries one, so the report and its finding are declared — see the
+ * note on the member below.
  */
 export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe(
@@ -2013,21 +2157,32 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     + 'or a side-effect failure. Best-effort, same contract as '
     + '`seedApplied`.',
   ),
-  // #9406 ruling: `probes` (`BuildProbeReport`) gets a DELIBERATELY OPAQUE
-  // passthrough declaration — the key is declared so the face is complete and
-  // nothing strips it, but its inner shape is NOT modeled here. It upgrades to
-  // a modeled Zod schema only when a consumer needs a field of it (maintainer,
-  // 2026-08-18: "Do not model it speculatively"). The TS shape lives on
-  // `packages/metadata-protocol/src/build-probes.ts` (`BuildProbeReport`:
-  // `issues[]` + per-plane `checked` counters).
-  probes: z.unknown().optional().describe(
+  // `probes` is MODELED (ruling record 6929121584). The #9406 ruling declared
+  // the key as a deliberately opaque passthrough and named its own upgrade
+  // trigger: a modeled Zod schema once a consumer needs a field of it
+  // (maintainer, 2026-08-18: "Do not model it speculatively"). The trigger
+  // fired: the console's publish-health line reads `checked` and
+  // `issues[].message`, and `issues[].userMessage` once the finding carries
+  // one. So the report is declared member for member against its producer,
+  // `runBuildProbes` in `packages/metadata-protocol/src/build-probes.ts`,
+  // whose `BuildProbeReport` / `RuntimeBuildIssue` are re-exports of the two
+  // types declared here. The producer-side conformance suite asserts nothing
+  // it emits is stripped.
+  //
+  // This NARROWS the published accept set (`Clause-②: yes (narrowing)`):
+  // `z.unknown()` parsed any `probes` value, and a value that is not the
+  // report (a string, another object, a finding missing a member) no longer
+  // parses; the inferred and input types move from `unknown` to the report.
+  // The platform's one producer emits only the report.
+  probes: BuildProbeReportSchema.optional().describe(
     'ADR-0038 L3 post-publish runtime probe report — one real read per '
     + 'published artifact (seeded objects have rows, views are readable, '
-    + 'widget dataset selections execute). DELIBERATELY OPAQUE in this '
-    + 'contract: the key is declared and carried through verbatim, '
-    + 'but its inner shape is intentionally not modeled until a consumer '
-    + 'needs a field of it. Present only when something was publishable; '
-    + 'probes never fail the publish.',
+    + 'widget dataset selections execute and return data, an object\'s own '
+    + 'field-name lists resolve). `issues[]` carries the findings, each with '
+    + 'the agent-facing `message` / `fix` and the `userMessage` sentence for '
+    + 'the person who published; `checked` counts the probes that ran per '
+    + 'plane. Present only when something was publishable; probes never fail '
+    + 'the publish.',
   ),
   commitId: z.string().optional().describe(
     'ADR-0067 — id of the commit this publish recorded. Absent when '
@@ -4581,9 +4736,23 @@ export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSche
  */
 export type PublishPackageDraftsRequest = z.input<typeof PublishPackageDraftsRequestSchema>;
 /**
+ * One ADR-0038 L3 runtime probe finding. The SINGLE declaration of the shape;
+ * `@objectstack/metadata-protocol` re-exports this as its `RuntimeBuildIssue`
+ * rather than declaring its own, so what the probes emit and what the batch
+ * publish response declares cannot drift apart.
+ */
+export type RuntimeBuildIssue = z.input<typeof RuntimeBuildIssueSchema>;
+/**
+ * The ADR-0038 L3 post-publish probe report — `probes` on the batch publish
+ * response. `@objectstack/metadata-protocol` re-exports this as its
+ * `BuildProbeReport`.
+ */
+export type BuildProbeReport = z.input<typeof BuildProbeReportSchema>;
+/**
  * The batch publish door's response — `POST /packages/:id/publish-drafts`
- * (#9406). `probes` is `unknown` by declaration, not by omission: the #9406
- * ruling stages it opaque until a consumer needs a field of it.
+ * (#9406). `probes` is the modeled {@link BuildProbeReport} (ruling record
+ * 6929121584): the #9406 ruling staged it opaque until a consumer needed a
+ * field of it, and the console's publish-health line reads its fields.
  */
 export type PublishPackageDraftsResponse = z.input<typeof PublishPackageDraftsResponseSchema>;
 export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;

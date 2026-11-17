@@ -2675,6 +2675,10 @@ export class AutomationServicePlugin implements Plugin {
                         ...(grants.posture ? { posture: grants.posture } : {}),
                         // [ADR-0151 D3] An AI service account runs as an agent.
                         ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
+                        // [#33661] The capabilities the user holds, read by a
+                        // dry run's admission (`requiredPermissions`) alone;
+                        // run setup does not seed them on a run.
+                        systemPermissions: grants.systemPermissions,
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });

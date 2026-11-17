@@ -78,7 +78,7 @@ import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { declaredMemberOverrideAddressOf, isAnotherHoldersCopy, servedAddressJudgment } from './protocol-meta-item-face.js';
+import { declaredMemberOverrideAddressOf, isAnotherHoldersCopy, rowHeldBaseAddressOf, servedAddressJudgment } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
@@ -223,9 +223,12 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // shipper's own member beside it. The draft layer stays at the address the
     // strict draft read takes, which this arm does not move (the plain read
     // leaves its strict draft read where it was).
+    // [#33210 (c)] …and a member only a dependent's addition holds, over a
+    // row-held base, at that base, as the plain read takes it ({@link rowHeldBaseAddressOf}).
     const declaredOverrideAt = request.packageId || judged !== undefined
         ? undefined
-        : await declaredMemberOverrideAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
+        : await declaredMemberOverrideAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member))
+            ?? await rowHeldBaseAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
     const draftPackageId = request.packageId;
     if (declaredOverrideAt !== undefined) request = { ...request, packageId: declaredOverrideAt };
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the

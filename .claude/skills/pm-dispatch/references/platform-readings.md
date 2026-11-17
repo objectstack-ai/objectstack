@@ -15,8 +15,7 @@
 - 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
 - 成功序列读伴随不读次序:`removed_from_merge_queue` 与 `merged` 同秒或数秒内到,次序实测不定。
 - 真被踢是其后无 `merged`、几分钟后 PR 仍 open;两种退出的 actor 同为 `github-merge-queue[bot]`。
-- 不在 `origin/main` 上是二义读数:在队列里等 / 没入队,两者处置相反。
-- ⇒ 落地检查恒两个读数:队列成员资格 和 `origin/main`,缺一不可。
+- 不在 `origin/main` 二义(在队等/没入队)⇒ 落地检查恒读两数:队列成员资格与 `origin/main`。
 - `origin/main` 按内容读(grep 本 PR 的产物),⛔ 不按 head sha 祖先性、不按 `merged` 布尔。
 - 队列落的是另一个提交:`git merge-base --is-ancestor <pr-head> origin/main` 对已完全合入的 PR 答 NO。
 - 同 PR 的 `list_pull_requests` 会回 `merged: false` 与 `merged_at` 并存 ⇒ 只读布尔即读成没合。
@@ -41,6 +40,7 @@
 - 本仓转 draft 同秒掉 auto-merge 仅见于未入队时,转正后重挂;已入队者 2026-08-08、09-29 照合。
 - 补救:转 draft 与卸载 auto-merge 都做,卸载单独不踢队;两手齐做未见踢队(08-08、09-28、10-24)。
 - 出队按队列 ref 阳性探针答不在队向,加未落地;ref 缺席只作旁证,⛔ 永不承载结论。
+- 中继 `pr_dequeue` 实测出队(run 43767458575,审计 6902190812):mutation 200,回读离队,仍开未合。
 - `update_pull_request` 单字段调用也发送 `draft` 位,曾把治理面 draft 发进队列 ⇒ 锁 1 已拒。
 - 请审专用路 = REST `POST /pulls/{n}/requested_reviewers`,载荷只有 reviewers/team_reviewers。
 - 它不碰 draft 位 ⇒ 请审恒走它;MCP 兜底已拒。

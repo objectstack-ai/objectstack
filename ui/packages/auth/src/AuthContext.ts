@@ -7,7 +7,7 @@
  */
 
 import { createContext } from 'react';
-import type { AuthUser, AuthClientSession, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, DelegableScope, TwoFactorChallenge, SignInTwoFactorCodeKind } from './types.js';
+import type { AuthUser, AuthClientSession, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationOneStepInput, AuthInvitationOneStepOutcome, AuthPublicConfig, SignInWithProviderOptions, DelegableScope, TwoFactorChallenge, SignInTwoFactorCodeKind } from './types.js';
 
 export interface AuthContextValue {
   /** Current authenticated user */
@@ -257,6 +257,8 @@ export interface AuthContextValue {
   getInvitationPreview: (invitationId: string) => Promise<AuthInvitationPreview | null>;
   /** Accept an invitation as the current user */
   acceptInvitation: (invitationId: string) => Promise<void>;
+  /** The one-step invitation acceptance (see `AuthClient.acceptInvitationOneStep`). */
+  acceptInvitationOneStep: (input: AuthInvitationOneStepInput) => Promise<AuthInvitationOneStepOutcome>;
   /** Reject an invitation as the current user */
   rejectInvitation: (invitationId: string) => Promise<void>;
   /** List invitations addressed to the current user */
