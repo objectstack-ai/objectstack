@@ -33,8 +33,10 @@
 // - For each class, each value-bearing activity column, each ledger snapshot
 //   column and the approval snapshot column,
 //   a matching and a non-matching filter are both refused with the engine's
-//   refusal (403, PERMISSION_DENIED, its words); so are a grouping, a search and
-//   a filter that names no parent object.
+//   refusal (403, PERMISSION_DENIED, its words); so are a grouping, a search
+//   naming such a column, and a filter that names no parent object. [#34700] A
+//   search the server widens leaves those columns out and answers a matching
+//   and a non-matching probe alike.
 // - The same reader filters the text of a parent it is served in full, as
 //   before; the control filters every column of a pinned parent, as before.
 // - The platform admin, granted the fixture's two capabilities and so served
@@ -415,12 +417,20 @@ describe('[#21154] a query over activity text or the approval snapshot, by a rea
         }
       });
 
-      it('a free-text search over the activity stream of the parent is refused, matching or not', async () => {
+      // [#34700] A search the server widens leaves the guarded columns out of
+      // this reader's set: a matching and a non-matching probe answer alike.
+      // A search that names a guarded column itself is still refused.
+      it('a free-text search over the activity stream of the parent answers a matching and a non-matching probe alike, and one naming a guarded column is refused', async () => {
+        const answers: Array<{ status: number; rows: number }> = [];
         for (const value of [STORED[c][1], NOMATCH]) {
           const a = await list(c, 'sys_activity', { object_name: OBJ }, `&$search=${encodeURIComponent(value)}`);
-          expect(a.status, a.text).toBe(403);
-          expect(a.code).toBe('PERMISSION_DENIED');
+          expect(a.status, a.text).toBe(200);
+          answers.push({ status: a.status, rows: a.rows });
+          const named = await list(c, 'sys_activity', { object_name: OBJ }, `&$search=${encodeURIComponent(value)}&$searchFields=summary`);
+          expect(named.status, named.text).toBe(403);
+          expect(named.code).toBe('PERMISSION_DENIED');
         }
+        expect(answers[0]).toEqual(answers[1]);
       });
 
       it('a matching and a non-matching filter on each ledger snapshot column are both refused, and so is a grouping by it', async () => {
