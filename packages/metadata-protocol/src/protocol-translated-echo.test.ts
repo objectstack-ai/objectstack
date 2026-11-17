@@ -222,8 +222,8 @@ describe('[#34836] a patch entry answers a slot its patch changed, and only wher
         expect(item.fields.registration_number.description).toBe('注册号说明');
     });
 
-    it('a slot the patch left alone is no patch source even where the stored row sets nothing', () => {
-        const source = row({ label: 'Tax ID' });
+    it('a slot the patch left alone is no patch source even where the stored row does not declare the field', () => {
+        const source = { name: 'crm_account', fields: { name: { type: 'text', label: 'Name' } } };
         const { item, restored } = restoreTranslatedEchoes(row({ label: 'Tax ID', description: '注册号说明' }), { source, bundle: catalog, packagedBase, patchBundles }) as any;
         expect(item.fields.registration_number.description).toBe('注册号说明');
         expect(restored).toEqual([]);
