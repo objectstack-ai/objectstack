@@ -345,7 +345,7 @@ const refusalTranslationsSchema = (noun: 'hook' | 'action') => z.record(z.string
   // entry's declared `params`; an empty string is the untranslated
   // skeleton slot `os i18n extract` writes (the declared message is served).
   message: z.string().optional().describe(
-    `Translated refusal message of a ${noun}'s declared refusal code — served whole in the caller's locale in `
+    `Translated refusal message of ${noun === 'action' ? 'an action' : 'a hook'}'s declared refusal code — served whole in the caller's locale in `
     + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
   ),
   // [#33214] A declared reason's sentence under the same code.
@@ -355,7 +355,7 @@ const refusalTranslationsSchema = (noun: 'hook' | 'action') => z.record(z.string
     aliases: { text: 'message', description: 'message' },
   }, {
     message: z.string().optional().describe(
-      `Translated sentence of a declared reason under a ${noun}'s refusal code — served in place of the declared `
+      `Translated sentence of a declared reason under ${noun === 'action' ? 'an action' : 'a hook'}'s refusal code — served in place of the declared `
       + 'reason message, its {{ }} holes filled after',
     ),
   })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),

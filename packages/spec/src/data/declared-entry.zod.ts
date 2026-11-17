@@ -116,6 +116,8 @@ export type DeclaredRefusalSubject = 'hook' | 'action';
 interface RefusalWords {
   /** `hook` / `action`. */
   noun: DeclaredRefusalSubject;
+  /** The noun with its sentence-initial article: `A hook` / `An action`. */
+  aNoun: string;
   /** The translation key of a code's message, as the describe text spells it. */
   messageKey: string;
   /** The translation key of a reason's message, as the describe text spells it. */
@@ -129,6 +131,7 @@ interface RefusalWords {
 const REFUSAL_WORDS: Record<DeclaredRefusalSubject, RefusalWords> = {
   hook: {
     noun: 'hook',
+    aNoun: 'A hook',
     messageKey: 'hooks.<hook>.refusals.<CODE>.message',
     reasonKey: 'hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message',
     thrower: 'the body',
@@ -136,6 +139,7 @@ const REFUSAL_WORDS: Record<DeclaredRefusalSubject, RefusalWords> = {
   },
   action: {
     noun: 'action',
+    aNoun: 'An action',
     messageKey:
       'objects.<object>._actions.<action>.refusals.<CODE>.message (globalActions.<action>.… for an object-less action)',
     reasonKey:
@@ -205,7 +209,7 @@ function refusalReasonSchema(w: RefusalWords) {
  */
 export function declaredRefusalEntrySchema(subject: DeclaredRefusalSubject) {
   const w = REFUSAL_WORDS[subject];
-  const rule: SentenceRule = { slot: `A ${w.noun} refusal \`message\``, holeRefused: w.holeRefused };
+  const rule: SentenceRule = { slot: `${w.aNoun} refusal \`message\``, holeRefused: w.holeRefused };
   return lazySchema(() => strictObject(
     {
       surface: `this ${w.noun} refusal`,
@@ -219,7 +223,7 @@ export function declaredRefusalEntrySchema(subject: DeclaredRefusalSubject) {
           '`code` is not a refusal key — the code is the entry\'s KEY in `refusals` '
           + `(\`refusals: { CLEAN_VERSION_REQUIRED: { message } }\`), and ${w.thrower} throws it.`,
         title:
-          `A ${w.noun} refusal has no heading — the caller reads the \`message\` alone. Write the sentence in \`message\`.`,
+          `${w.aNoun} refusal has no heading — the caller reads the \`message\` alone. Write the sentence in \`message\`.`,
       },
     },
     {

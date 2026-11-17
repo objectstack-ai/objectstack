@@ -2552,18 +2552,6 @@ function refuseUnopenableOnSuccessNavigate(
 }
 
 /**
- * [#25653, ruling record 6384657105 letter A] App-authored automation does not
- * use elevation to write the four identity-assignment objects, and an action
- * body always runs as system (`buildActionExecutionContext`, runtime). The data
- * middleware refuses the write at run time (`flow-system-identity-write-refusal.ts`,
- * plugin-security); this refuses the `script` action whose sandboxed JS (L2)
- * `body` names one — a write method on `ctx.api.object('<object>')`, called on
- * the handle or on a name the body bound it to — at every door that parses an
- * action, one issue per object at `body.source`. An expression (L1) body
- * performs no IO, and reads of the four objects stay legal, as at run time.
- * `HookSchema` carries the same check for a `runAs: 'system'` hook.
- */
-/**
  * [#34273] One entry of an action's refusal catalogue (`ActionSchema.refusals`):
  * the sentence the user reads when the action's body throws the entry's code,
  * and the status the refusal is answered with. The same entry a hook's
@@ -2620,6 +2608,18 @@ function refuseUndeclaredLiteralActionRefusalCode(
   }
 }
 
+/**
+ * [#25653, ruling record 6384657105 letter A] App-authored automation does not
+ * use elevation to write the four identity-assignment objects, and an action
+ * body always runs as system (`buildActionExecutionContext`, runtime). The data
+ * middleware refuses the write at run time (`flow-system-identity-write-refusal.ts`,
+ * plugin-security); this refuses the `script` action whose sandboxed JS (L2)
+ * `body` names one — a write method on `ctx.api.object('<object>')`, called on
+ * the handle or on a name the body bound it to — at every door that parses an
+ * action, one issue per object at `body.source`. An expression (L1) body
+ * performs no IO, and reads of the four objects stay legal, as at run time.
+ * `HookSchema` carries the same check for a `runAs: 'system'` hook.
+ */
 function refuseIdentityAssignmentBodyWrite(
   data: { type?: string; body?: { language?: string; source?: unknown } },
   ctx: z.core.$RefinementCtx,

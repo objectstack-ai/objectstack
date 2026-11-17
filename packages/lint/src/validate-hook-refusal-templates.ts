@@ -65,7 +65,7 @@ function currencyWithoutCode(holeText: string, inner: string, noun: SentenceSubj
   if (formatter !== 'currency') return undefined;
   const path = inner.slice(0, bar).trim() || 'amount';
   return (
-    `\`${holeText}\` formats in the organization's default currency, which a ${noun} sentence does not carry, so the `
+    `\`${holeText}\` formats in the organization's default currency, which ${noun === 'action' ? 'an action' : 'a hook'} sentence does not carry, so the `
     + 'sentence would be served with its braces. Name the code in the hole: '
     + `\`{{ ${path} | currency:EUR }}\`.`
   );

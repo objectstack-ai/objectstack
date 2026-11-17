@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
+import { actionRefusalTemplateIssues, hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
 import { validateStackExpressions } from './validate-expressions.js';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
 
@@ -155,5 +155,79 @@ describe('hook text templates over declared params (#34374)', () => {
     expect(finding!.severity).toBe('error');
     const control = gate('Worth {{ lead | currency:EUR }}');
     expect(control.errors.filter((e) => String(e.message).includes('currency'))).toEqual([]);
+  });
+});
+
+describe('action refusal templates over declared params (#34273)', () => {
+  const action = (refusals: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    name: 'submit_signoff',
+    label: 'Submit',
+    type: 'script',
+    body: { language: 'js', source: 'return 1;' },
+    refusals,
+    ...extra,
+  });
+  const stackWith = (message: string, extra: Record<string, unknown> = {}) => ({
+    objects: [{ name: 'crm_invoice', actions: [action(entry(message, extra))] }],
+  });
+  const actionIssues = (message: string, extra?: Record<string, unknown>) =>
+    actionRefusalTemplateIssues(stackWith(message, extra), { actions: true, objects: true });
+
+  it.each([
+    'The invoice is {{ state }}.',
+    'Over by {{ amount | number:2 }}.',
+    'Paid {{ amount | currency:EUR }}.',
+    'Plain text with no hole.',
+  ])('CONTROL: accepts %j', (message) => {
+    expect(actionIssues(message)).toEqual([]);
+  });
+
+  it.each([
+    ['an unknown formatter', 'The invoice is {{ state | shout }}.'],
+    ['logic', 'The invoice is {{ state + 1 }}.'],
+    ['an empty hole', 'The invoice is {{ }}.'],
+  ])('refuses %s as an error, naming the object, the action and the sentence', (_label, message) => {
+    const issues = actionIssues(message);
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((i) => i.severity === 'error')).toBe(true);
+    expect(issues[0]!.where).toBe("object 'crm_invoice' · action 'submit_signoff' refusals.VALIDATION_FAILED.message");
+  });
+
+  it('refuses a currency formatter with no code, in the action\'s words', () => {
+    const issues = actionIssues('Paid {{ amount | currency }}.');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain('which an action sentence does not carry');
+    expect(issues[0]!.message).toContain('{{ amount | currency:EUR }}');
+  });
+
+  it('judges each reason sentence at its own path', () => {
+    const issues = actionIssues('Fine {{ state }}.', { reasons: { closed: { message: 'Closed {{ state | shout }}.' } } });
+    expect(issues.map((i) => i.where))
+      .toEqual(["object 'crm_invoice' · action 'submit_signoff' refusals.VALIDATION_FAILED.reasons.closed.message"]);
+  });
+
+  it('judges a top-level action once, even when its object declares it too', () => {
+    const bound = { ...action(entry('{{ state | shout }}')), objectName: 'crm_invoice' };
+    const issues = actionRefusalTemplateIssues(
+      { actions: [bound], objects: [{ name: 'crm_invoice', actions: [bound] }] },
+      { actions: true, objects: true },
+    );
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.where).toBe("stack · action 'submit_signoff' refusals.VALIDATION_FAILED.message");
+  });
+
+  it('is part of the stack expression pass `objectstack validate` and `compile` run', () => {
+    const issues = validateStackExpressions(stackWith('The invoice is {{ state | shout }}.') as never);
+    expect(issues.some((i) => i.where.endsWith("action 'submit_signoff' refusals.VALIDATION_FAILED.message") && i.severity === 'error'))
+      .toBe(true);
+  });
+
+  it('refuses an `action` write at the publish gate, and passes the CONTROL', () => {
+    const gate = (message: string) =>
+      runRuntimeAuthoringRules({ type: 'action', item: action(entry(message)), context: { objects: [] } })
+        .errors.filter((e) => String(e.where ?? '').includes('refusals.'));
+    const refused = gate('Paid {{ amount | currency }}.');
+    expect(refused.some((e) => String(e.message).includes('{{ amount | currency:EUR }}')), JSON.stringify(refused)).toBe(true);
+    expect(gate('Paid {{ amount | currency:EUR }}.')).toEqual([]);
   });
 });

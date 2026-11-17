@@ -261,6 +261,9 @@ export function undeclaredHookRefusalCodeAtSave(
 /** [#34273] Which declaration a refusal catalogue sits on, as the sentences name it. */
 type RefusalSubject = 'hook' | 'action';
 
+/** The subject with its sentence-initial article: `A hook` / `An action`. */
+const capArticle = (subject: RefusalSubject): string => (subject === 'action' ? 'An action' : 'A hook');
+
 function undeclaredRefusalCodeAtSave(
   subject: RefusalSubject,
   code: string,
@@ -269,7 +272,7 @@ function undeclaredRefusalCodeAtSave(
 ): string {
   return (
     `\`${at}\` throws code '${code}', and this ${subject}'s \`refusals\` declares no such code `
-    + `(declared: ${declaredList(declared)}). A ${subject} that declares \`refusals\` refuses by code only, so the `
+    + `(declared: ${declaredList(declared)}). ${capArticle(subject)} that declares \`refusals\` refuses by code only, so the `
     + `throw is refused when the ${subject} runs. Declare it under \`refusals.${code}\` with the message the user `
     + 'reads, or throw one of the declared codes.'
   );
@@ -292,7 +295,7 @@ export const ACTION_REFUSAL_MESSAGE_HOLE_REFUSED = refusalMessageHoleRefused('ac
 
 function refusalMessageHoleRefused(subject: RefusalSubject): string {
   return (
-    `A ${subject} refusal \`message\` whose entry declares no \`params\` is plain text, and nothing fills a \`{{ }}\` hole: the `
+    `${capArticle(subject)} refusal \`message\` whose entry declares no \`params\` is plain text, and nothing fills a \`{{ }}\` hole: the `
     + 'caller would read the braces as written. Declare the name under the entry\'s `params` (`params: [\'state\']`) '
     + 'and throw it in the error\'s `params` (`{ code, params: { state } }`), or write the sentence without the hole.'
   );
@@ -338,7 +341,7 @@ function undeclaredRefusalAtRun(
   const thrown = code === undefined ? 'threw no `code`' : `threw code '${code}'`;
   return (
     `${subject} '${name}' ${thrown}, and its \`refusals\` declares no such code (declared: ${declaredList(declared)}). `
-    + `A ${subject} that declares \`refusals\` refuses by code only: throw an error whose \`code\` is one of the declared `
+    + `${capArticle(subject)} that declares \`refusals\` refuses by code only: throw an error whose \`code\` is one of the declared `
     + 'codes, or declare this one with the message the user reads.'
   );
 }
@@ -508,22 +511,13 @@ export function undeclaredHookTextAtRun(hookName: string, key: string, declared:
  */
 
 /** The save-time refusal for a code an action's source throws literally that its `refusals` does not declare. */
-export function undeclaredActionRefusalCodeAtSave(
-  code: string,
-  declared: readonly string[],
-  at: 'body.source' | 'target' = 'body.source',
-): string {
-  return undeclaredRefusalCodeAtSave('action', code, declared, at);
+export function undeclaredActionRefusalCodeAtSave(code: string, declared: readonly string[]): string {
+  return undeclaredRefusalCodeAtSave('action', code, declared, 'body.source');
 }
 
 /** The save-time refusal for a reason an action's source throws literally under a code that does not declare it. */
-export function undeclaredActionRefusalReasonAtSave(
-  code: string,
-  reason: string,
-  declared: readonly string[],
-  at: 'body.source' | 'target' = 'body.source',
-): string {
-  return undeclaredRefusalReasonAtSave('action', code, reason, declared, at);
+export function undeclaredActionRefusalReasonAtSave(code: string, reason: string, declared: readonly string[]): string {
+  return undeclaredRefusalReasonAtSave('action', code, reason, declared, 'body.source');
 }
 
 /** The run-time fault for an action's throw its catalogue cannot answer: an undeclared code, or none. */
