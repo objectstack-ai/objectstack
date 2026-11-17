@@ -57,7 +57,7 @@ import {
   toast,
   cn,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1614,7 +1614,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       exportData.forEach(record => {
         rows.push(fields.map((f: string) => escapeCsvValue(record[f])).join(','));
       });
-      downloadFile(new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' }), fileNameFor('csv'));
+      downloadFile(csvBlob(rows.join('\n')), fileNameFor('csv'));
     } else if (format === 'json') {
       const unmasked = exportData.map((record) =>
         Object.fromEntries(Object.entries(record).filter(([key]) => !isMaskedKey(key))),

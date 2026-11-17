@@ -27,6 +27,7 @@ import {
 } from '@objectstack/core';
 import { isPairOf, itemDiscriminator } from '@objectstack/metadata-core';
 import { boundObjectOf, storedItemPackageId } from '@objectstack/metadata/stored-item-package';
+import type { FlowRegistration } from '@objectstack/spec/api';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 // [#24395] The draft row's per-key provenance, read back for the strict draft read.
 import { storedDraftChanges } from './draft-changes.js';
@@ -55,6 +56,7 @@ import {
     isPackageLessRow,
     refuseUnjudgeableByNameRead,
 } from './protocol-exact-qualifier.js';
+import { readThroughMetaCompileCache } from './meta-compile-cache.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
     bundleMemberOf,
@@ -559,14 +561,24 @@ export async function judgeDroppedServiceRefusal(
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItem`; the method's docblock there is its contract. */
-export async function getMetaItem(host: Pick<ProtocolHost, 'readMetaItemFace'>, request: {
+export async function getMetaItem(host: Pick<ProtocolHost, 'engine' | 'getServicesRegistry' | 'readMetaItemFace' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader'>, request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
     }) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. Folded
     // HERE, at each face's boundary, as {@link getMetaItems} folds.
-    return host.readMetaItemFace(canonicalizeMetaRequestType(request), 'served');
+    const canonical = canonicalizeMetaRequestType(request);
+    // [#34206, ADR-0156] Through the compiled-answer cache, which answers
+    // only a read naming a bundle member type and a name, and only while
+    // every source it reads counts its own changes; otherwise, and at
+    // `OS_METADATA_COMPILE_CACHE_TTL_MS=0`, this is the uncached read.
+    return readThroughMetaCompileCache({
+        get engine() { return host.engine; },
+        getServicesRegistry: () => host.getServicesRegistry?.(),
+        liveTrailers: (type, name, item) => liveItemTrailers(host, type, name, item),
+        liveTrailerKeys: LIVE_ITEM_TRAILER_KEYS,
+    }, canonical, () => host.readMetaItemFace(canonical, 'served'));
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemForExecution`; the method's docblock there is its contract. */
@@ -577,6 +589,37 @@ export async function getMetaItemForExecution(host: Pick<ProtocolHost, 'readMeta
     }) {
     // The same #4432 fold {@link getMetaItem} applies, for the same reason.
     return host.readMetaItemFace(canonicalizeMetaRequestType(request), 'execution');
+}
+
+/** The keys {@link liveItemTrailers} answers: read live on every served read, never cached. */
+export const LIVE_ITEM_TRAILER_KEYS: readonly string[] = Object.freeze(['registration', 'disabledActions', 'cascadeDeleteObjects']);
+
+/**
+ * [#34206] What a served item read carries beside `item` that is read live,
+ * in this key order: the automation engine's verdict on a flow
+ * (`registration`, [#23316]), the packaged actions the activation ledger
+ * switches off on an object (`disabledActions`, [#27842]) and the objects a
+ * delete can cascade into (`cascadeDeleteObjects`, [#28001]). A key is
+ * present only where its reader answers, exactly as {@link readMetaItem}
+ * always spread them. `item` is the served item; it is read, never changed.
+ *
+ * ONE function for both callers: {@link readMetaItem}'s served exit and the
+ * compiled-answer cache's hit (`meta-compile-cache.ts`), so a hit carries
+ * what a miss carries, read now (ADR-0156 D3: none of these has a change
+ * counter, so none of them is cached).
+ */
+export function liveItemTrailers(
+    host: Pick<ProtocolHost, 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader'>,
+    type: string, name: string, item: unknown,
+): { registration?: FlowRegistration; disabledActions?: string[]; cascadeDeleteObjects?: string[] } {
+    const readRegistration = host.resolveFlowRegistrationReader(type);
+    const readDisabledActions = host.resolveDisabledActionsReader(type);
+    const cascadeDeleteObjects = host.resolveCascadeDeleteObjects(type, name);
+    return {
+        ...(readRegistration ? { registration: readRegistration(name) } : {}),
+        ...(readDisabledActions ? { disabledActions: readDisabledActions(item) } : {}),
+        ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
+    };
 }
 
 /** The body of `ObjectStackProtocolImplementation#readMetaItem`; the method's docblock there is its contract. */
@@ -1424,21 +1467,18 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // item this read serves. The draft returns above carry none — a
     // pending body is not what the engine holds. [#24535] Served only, as
     // the list's `registrations` are: the execution face carries none.
-    const readRegistration = !execution && decorated !== undefined && decorated !== null
-        ? host.resolveFlowRegistrationReader(request.type)
-        : undefined;
     // [#27842] …and, on an `object` read, the names in `item.actions` the
     // activation ledger switches off ({@link resolveDisabledActionsReader}),
     // beside the item on the same terms: served face only, none on the
     // draft returns above, `item` untouched.
-    const readDisabledActions = !execution && decorated !== undefined && decorated !== null
-        ? host.resolveDisabledActionsReader(request.type)
-        : undefined;
     // [#28001] …and the objects a delete of one of its records can cascade
     // into ({@link resolveCascadeDeleteObjects}), on the same terms.
-    const cascadeDeleteObjects = !execution && decorated !== undefined && decorated !== null
-        ? host.resolveCascadeDeleteObjects(request.type, request.name)
-        : undefined;
+    // [#34206] The three are read by ONE function, {@link liveItemTrailers},
+    // which the compiled-answer cache (`meta-compile-cache.ts`) also calls on
+    // every hit: they are live per call, never part of a cached answer.
+    const trailers = !execution && decorated !== undefined && decorated !== null
+        ? liveItemTrailers(host, request.type, request.name, decorated)
+        : {};
     // [#31196] …and, off the record, when the stored row it serves last
     // changed ({@link withServedRowChangedAt}), for the cached read's
     // `lastModified`.
@@ -1470,8 +1510,6 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                     ? await host.readVersionToken({ ...request, member }, 'active', packagelessBinding)
                     : null,
             }),
-        ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
-        ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
-        ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
+        ...trailers,
     }, servedRowChangedAt);
 }

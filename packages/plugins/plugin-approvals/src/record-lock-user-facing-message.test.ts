@@ -414,3 +414,99 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
     expect(thrown.message).toContain('Opportunity「Acme renewal」');
   });
 });
+
+/**
+ * [#34454] A deployment's `errors.record_locked*` override is asked with the
+ * NEGOTIATED locale, the tag the object's label in the same sentence is asked
+ * with — the way objectql's catalog callers ask (`negotiatedMessageLocale`).
+ *
+ * The `i18n` double is shaped as `FileI18nAdapter` answers, which is what makes
+ * the gap reachable: `t()` matches the locale tag EXACTLY (a `zh-CN` pack is
+ * not read for `zh`) and interpolates the `params` it is handed. Asked with the
+ * raw `zh`, the override missed and a bare-`zh` writer read the built-in zh-CN
+ * sentence around the pack's zh-CN label, the deployment's own sentence skipped.
+ *
+ * The last case is the override path's interpolation: the record's title is
+ * row content, and a title that itself contains a placeholder is printed as
+ * written, not expanded by a second pass over the service's answer.
+ */
+describe('[#34454] the record-lock override is asked with the negotiated locale', () => {
+  const OVERRIDE = '{{object}}《{{title}}》审批中，暂不可改';
+  const PACKS: Record<string, Record<string, string>> = {
+    'zh-CN': {
+      'objects.opportunity.label': '商机',
+      'errors.record_locked': OVERRIDE,
+    },
+  };
+  /** `FileI18nAdapter`-shaped: exact tag match, `{{name}}` interpolation of `params`, the key echoed on a miss. */
+  const exactMatchI18n = {
+    getLocales: () => Object.keys(PACKS),
+    t: (key: string, locale: string, params?: Record<string, unknown>) => {
+      const value = PACKS[locale]?.[key];
+      if (value === undefined) return key;
+      return params ? value.replace(/\{\{(\w+)\}\}/g, (m, k: string) => (params[k] != null ? String(params[k]) : m)) : value;
+    },
+  };
+
+  let engine: ObjectQL;
+
+  afterEach(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  /** One opportunity named `title`, held by a pending approval; the hook bound to the exact-match service. */
+  async function lockedOpportunity(title: string): Promise<string> {
+    engine = new ObjectQL();
+    engine.registerDriver(new SqlDriver({
+      client: 'better-sqlite3',
+      connection: { filename: ':memory:' },
+      useNullAsDefault: true,
+    }), true);
+    await engine.init();
+    for (const o of [OPPORTUNITY, APPROVAL_REQUEST]) {
+      engine.registry.registerObject(o as any, 'com.objectstack.test.34454');
+    }
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine);
+    const id = String((await engine.insert('opportunity', { name: title, amount: 100 })).id);
+    await engine.insert('sys_approval_request', {
+      object_name: 'opportunity', record_id: id, status: 'pending',
+      flow_run_id: 'run_1', node_config_json: NODE_CONFIG,
+    }, { context: { isSystem: true } } as any);
+    bindApprovalLockHook(engine as any, undefined, undefined, () => exactMatchI18n);
+    return id;
+  }
+
+  async function refusalIn(locale: string, id: string): Promise<any> {
+    let thrown: any = null;
+    try {
+      await engine.update('opportunity', { amount: 999 }, {
+        where: { id },
+        context: { userId: 'u_writer', positions: [], permissions: [], locale },
+      } as any);
+    } catch (e) { thrown = e; }
+    expect(thrown).not.toBeNull();
+    expect(thrown.code).toBe('RECORD_LOCKED');
+    expect(thrown.statusCode).toBe(409);
+    expect((await engine.findOne('opportunity', { where: { id } }))?.amount).toBe(100);
+    return thrown;
+  }
+
+  it('a bare `zh` writer reads the deployment\'s zh-CN override', async () => {
+    const id = await lockedOpportunity('Acme renewal');
+    const thrown = await refusalIn('zh', id);
+    expect(thrown.message).toBe('RECORD_LOCKED: 商机《Acme renewal》审批中，暂不可改');
+  });
+
+  it('CONTROL — a zh-CN writer reads the same override', async () => {
+    const id = await lockedOpportunity('Acme renewal');
+    const thrown = await refusalIn('zh-CN', id);
+    expect(thrown.message).toBe('RECORD_LOCKED: 商机《Acme renewal》审批中，暂不可改');
+  });
+
+  it('a title containing a placeholder is printed as written on the override path', async () => {
+    const id = await lockedOpportunity('Q{{object}} {{title}}');
+    const thrown = await refusalIn('zh', id);
+    expect(thrown.message).toBe('RECORD_LOCKED: 商机《Q{{object}} {{title}}》审批中，暂不可改');
+  });
+});

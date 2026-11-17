@@ -650,4 +650,29 @@ describe('operation message catalog — the record-lock refusal', () => {
     expect(renderOperationMessage({ messageKey: 'record_locked_opaque' }, { locale: 'de-DE' }))
       .toBe(BUILTIN_OPERATION_MESSAGES.en.record_locked_opaque);
   });
+
+  /**
+   * [#34454] `{{title}}` is row content. A deployment override is interpolated
+   * ONCE, so a title that itself contains a placeholder is printed as written.
+   * The translator is shaped as `FileI18nAdapter.t` answers: handed `params`, it
+   * interpolates them itself, and a second pass over its answer would expand
+   * the placeholder that arrived inside the title.
+   */
+  it('a title containing a placeholder is printed as written on the override path', () => {
+    const interpolatingTranslate = (k: string, _locale: string, params?: Record<string, unknown>) => {
+      if (k !== 'errors.record_locked') return k;
+      const template = '{{object}}《{{title}}》审批中，暂不可改';
+      return params
+        ? template.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (params[name] != null ? String(params[name]) : m))
+        : template;
+    };
+    const title = 'Q{{object}} {{title}}';
+    expect(renderOperationMessage(
+      { messageKey: 'record_locked', params: { object: '商机', title } },
+      { locale: 'zh-CN', translate: interpolatingTranslate },
+    )).toBe(`商机《${title}》审批中，暂不可改`);
+    // CONTROL — the built-in path, which was already single-pass.
+    expect(renderOperationMessage({ messageKey: 'record_locked', params: { object: '商机', title } }, { locale: 'zh-CN' }))
+      .toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].record_locked.replace('{{object}}', '商机').replace('{{title}}', () => title));
+  });
 });

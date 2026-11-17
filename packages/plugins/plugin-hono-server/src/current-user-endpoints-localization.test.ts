@@ -92,6 +92,20 @@ interface MountOptions {
      * after it fails here.
      */
     failUserRead?: boolean;
+    /**
+     * An `i18n` service (#34392): the app's declared `i18n.defaultLocale` and
+     * the locales it lists (`getLocales()`, what discovery serves as
+     * `locale.supported`). Absent = no `i18n` service registered.
+     */
+    i18n?: { defaultLocale?: string; locales?: string[] };
+    /**
+     * A `settings` service (#34392), shaped as `SettingsService` answers: the
+     * `localization.locale` value and the layer it came from. The manifest's
+     * built-in `en-US` placeholder is `source: 'default'`; a value an admin
+     * saved for the organization is `source: 'tenant'`. `throws` makes every
+     * read of it fail. Absent = no `settings` service registered.
+     */
+    settings?: { locale?: { value: string; source: string }; throws?: boolean };
 }
 
 /**
@@ -120,8 +134,10 @@ function matchesWhere(row: Row, where: Row | undefined): boolean {
     return true;
 }
 
-function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, settingTimezone, settingCurrency, authenticated = true, failUserRead = false }: MountOptions = {}) {
+function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, settingTimezone, settingCurrency, authenticated = true, failUserRead = false, i18n, settings }: MountOptions = {}) {
     const reads: Array<{ object: string; opts: any }> = [];
+    /** Every single-key `settings.get` the endpoint issued, with the scope it named. */
+    const settingsGets: Array<{ namespace: string; key: string; ctx: any }> = [];
     let sysUserReads = 0;
     /**
      * The rows each read draws from, held as a table rather than assembled per
@@ -174,6 +190,28 @@ function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, setti
         objectql: ql,
         metadata: { list: async () => [] },
     };
+    if (i18n) {
+        services.i18n = {
+            getDefaultLocale: () => i18n.defaultLocale,
+            getLocales: () => i18n.locales ?? [],
+        };
+    }
+    if (settings) {
+        const answer = (key: string) => {
+            if (settings.throws) throw new Error('settings store unavailable');
+            if (key === 'locale') return settings.locale ?? { value: 'en-US', source: 'default' };
+            return { value: undefined, source: 'default' };
+        };
+        services.settings = {
+            // The grouped read the deployment cascade issues.
+            getMany: async (_namespace: string, keys: string[]) =>
+                Object.fromEntries(keys.map((key) => [key, answer(key)])),
+            get: async (namespace: string, key: string, ctx: any) => {
+                settingsGets.push({ namespace, key, ctx });
+                return answer(key);
+            },
+        };
+    }
     const app = new Hono();
     registerCurrentUserEndpoints({
         rawApp: app,
@@ -192,7 +230,7 @@ function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, setti
         });
         return { status: res.status, body: await res.json() as any };
     };
-    return { get, reads, app };
+    return { get, reads, settingsGets, app };
 }
 
 describe('/auth/me/localization — the signed-in user\'s language, three rungs (#14788)', () => {
@@ -286,6 +324,78 @@ describe('/auth/me/localization — the signed-in user\'s language, three rungs 
         expect(body).toEqual({ authenticated: false });
         // No identity row is read for an anonymous caller.
         expect(reads.filter((r) => r.object === 'sys_user')).toEqual([]);
+    });
+});
+
+// #34392 — the ladder the maintainer ruled for a user with no personal
+// language (ruling 6915665005 on #33985, the server's half of it):
+//
+//   `sys_user.locale` → the request's language when the app lists it
+//   (`i18n.getLocales()`, discovery's `locale.supported`) → the
+//   organization's `localization.locale` when somebody SET it → the app's
+//   declared `i18n.defaultLocale` → the cascade's floor.
+//
+// Before it, the request's language answered whatever the app ships, and the
+// rung below it read the settings cascade's built-in `en-US` placeholder over
+// the app's declared default — so the organization's setting could only ever
+// answer a request that named no language, which the Console never sends.
+// Every case supplies the rungs beneath the one under test, as above.
+describe('/auth/me/localization — the organization language decides for a user with no personal language (#34392)', () => {
+    const APP = { defaultLocale: 'en', locales: ['en', 'zh-CN'] };
+    const ORG_ZH = { value: 'zh-CN', source: 'tenant' };
+
+    it('a browser language the app does not ship falls to the organization setting', async () => {
+        // The card's case: fr browser, app en + zh-CN, organization set to zh-CN.
+        const { get, settingsGets } = mount({ i18n: APP, settings: { locale: ORG_ZH } });
+        const { status, body } = await get('fr-FR,fr;q=0.9');
+        expect(status).toBe(200);
+        expect(body.locale).toBe('zh-CN');
+        // The organization's setting is read for the caller's own organization.
+        expect(settingsGets).toContainEqual({ namespace: 'localization', key: 'locale', ctx: { tenantId: ORG } });
+        // A request that names no language reaches the same rung.
+        expect((await get()).body.locale).toBe('zh-CN');
+        expect((await get('*')).body.locale).toBe('zh-CN');
+    });
+
+    it('CONTROL: a browser language the app ships still wins over the organization setting, in the app spelling', async () => {
+        const { get } = mount({ i18n: APP, settings: { locale: { value: 'ja-JP', source: 'tenant' } } });
+        expect((await get('zh-CN,zh;q=0.9')).body.locale).toBe('zh-CN');
+        // The app lists `en`; a regional tag of it is answered as the app spells it.
+        expect((await get('en-US,en;q=0.9')).body.locale).toBe('en');
+        // Read through the platform table's aliases, as the Console matches it.
+        const ja = mount({ i18n: { defaultLocale: 'en', locales: ['en', 'ja-JP'] }, settings: { locale: ORG_ZH } });
+        expect((await ja.get('ja')).body.locale).toBe('ja-JP');
+    });
+
+    it("with no organization setting, the app's declared default answers — not the settings placeholder", async () => {
+        // The manifest's `en-US` is `source: 'default'`: nobody chose it.
+        const { get } = mount({ i18n: { defaultLocale: 'zh-CN', locales: ['zh-CN'] }, settings: {} });
+        expect((await get('en-US')).body.locale).toBe('zh-CN');
+        expect((await get()).body.locale).toBe('zh-CN');
+    });
+
+    it("a personal sys_user.locale still outranks the request, the organization and the app's default", async () => {
+        const { get } = mount({ storedLocale: 'ja-JP', i18n: APP, settings: { locale: ORG_ZH } });
+        expect((await get('zh-CN')).body.locale).toBe('ja-JP');
+        expect((await get('fr')).body.locale).toBe('ja-JP');
+    });
+
+    it('a failed organization read is a courtesy lost: the cascade answers, never an error', async () => {
+        const { get } = mount({ i18n: APP, settings: { throws: true }, settingLocale: 'fr-FR' });
+        const { status, body } = await get('de-DE');
+        expect(status).toBe(200);
+        // The cascade's own fallback (the organization's row, read directly).
+        expect(body.locale).toBe('fr-FR');
+    });
+
+    it('with no i18n service the app lists nothing to match against, so the request answers as before', async () => {
+        const { get } = mount({ settings: { locale: ORG_ZH } });
+        expect((await get('fr-FR')).body.locale).toBe('fr-FR');
+        // Nothing requested: the organization setting.
+        expect((await get()).body.locale).toBe('zh-CN');
+        // Nothing set and no app default: the cascade's floor.
+        const bare = mount({ settings: {} });
+        expect((await bare.get()).body.locale).toBe('en-US');
     });
 });
 
