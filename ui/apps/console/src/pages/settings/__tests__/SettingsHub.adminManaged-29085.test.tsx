@@ -60,6 +60,7 @@ function permissionsPayload(systemPermissions: string[]): MePermissionsResponse 
     tenantId: 'org_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: {},
     fields: {},

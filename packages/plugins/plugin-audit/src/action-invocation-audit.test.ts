@@ -300,3 +300,51 @@ describe('[#27908] the action_invocation row tells an agent\'s call from a click
     expect(options).toContain(ACTION_INVOCATION_AUDIT_ACTION);
   });
 });
+
+describe('[#33694] an in-product AI call is marked on the action_invocation row by the CRUD mirror\'s rule', () => {
+  const AI_CALL: ActionInvocationAuditEvent = {
+    ...CLICK,
+    context: {
+      userId: 'usr_1',
+      tenantId: 'org_1',
+      surface: 'rest',
+      performedBy: { agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' },
+    },
+  };
+  const PERFORMER_KEYS = ['performed_by', 'on_behalf_of', 'conversation_id', 'confirmation_id'];
+  const metaOf = (row: Record<string, unknown>) => JSON.parse(String(row.metadata));
+
+  it('an AI-performed call records the agent, the person, the conversation and the confirmation', async () => {
+    const engine = await boot();
+    const writer = createActionInvocationAuditWriter({ getEngine: () => engine as any });
+
+    await writer.recordActionInvocation(AI_CALL);
+
+    const [row] = await ledgerRows(engine);
+    expect(row.user_id).toBe('usr_1');
+    expect(row.actor).toBe('usr_1');
+    expect(JSON.parse(row.metadata)).toMatchObject({
+      performed_by: 'sales_assistant',
+      on_behalf_of: 'usr_1',
+      conversation_id: 'conv_1',
+      confirmation_id: 'pend_1',
+    });
+  });
+
+  it('CONTROL: an OAuth client — alone, or beside an agent — is the performer, with no conversation or confirmation', () => {
+    for (const performedBy of [
+      { clientId: 'cli_agent', conversationId: 'conv_1', confirmationId: 'pend_1' },
+      { clientId: 'cli_agent', agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' },
+    ]) {
+      const meta = metaOf(buildActionInvocationAuditRow({ ...AI_CALL, context: { ...AI_CALL.context, performedBy } }));
+      expect(meta).toMatchObject({ performed_by: 'cli_agent', on_behalf_of: 'usr_1' });
+      expect(meta).not.toHaveProperty('conversation_id');
+      expect(meta).not.toHaveProperty('confirmation_id');
+    }
+  });
+
+  it('CONTROL: a person\'s own call carries no performer key at all', () => {
+    const meta = metaOf(buildActionInvocationAuditRow(CLICK));
+    for (const key of PERFORMER_KEYS) expect(meta).not.toHaveProperty(key);
+  });
+});
