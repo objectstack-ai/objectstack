@@ -209,7 +209,14 @@ async function getRecordOverHttp(objectName: string, recordId: string) {
 
 /** The coded envelope `get_record` answers a miss with, as both doors put it on the wire. */
 function notFoundWire(object: string, id: string) {
-  return { error: { code: 'RECORD_NOT_FOUND', message: `Record ${id} not found in ${object}`, status: 404 } };
+  // `userMessage`: the end user's sentence the producer marks (#34699). The stdio
+  // bridge passes no caller locale, so it is the English one.
+  return {
+    error: {
+      code: 'RECORD_NOT_FOUND', message: `Record ${id} not found in ${object}`, status: 404,
+      userMessage: 'This record does not exist, or you do not have access to it.',
+    },
+  };
 }
 
 describe('stdio get_record answers a missing or hidden id with the coded RECORD_NOT_FOUND / 404', () => {

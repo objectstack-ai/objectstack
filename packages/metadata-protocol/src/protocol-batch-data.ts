@@ -465,7 +465,7 @@ async function runBatchDataRows(
                     // not-found gate ahead of every hook), so a refused row
                     // reads the same whether or not its id names a record —
                     // see `assertRecordExists`.
-                    if (updated == null) await this.assertRecordExists(object, record.id);
+                    if (updated == null) await this.assertRecordExists(object, record.id, context);
                     omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                     results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                     succeeded++;
@@ -589,7 +589,7 @@ async function runBatchDataRows(
                     // that answers with the deleted row is not turned into a
                     // spurious 404.
                     const deleted = await this.engine.delete(object, { where: { id: record.id }, ...ctxOpt } as any).catch((e: unknown) => landedDespiteStaleSummary(e, atomic, object));
-                    if (deleted === false) throw recordNotFoundError(object, record.id);
+                    if (deleted === false) throw recordNotFoundError(object, record.id, context);
                     // [#19433] The SECOND half of this site, and the THIRD and
                     // last of the by-id delete doors to learn it — the
                     // single-record face (commit f9e16d856) and `deleteManyData` (#19412)
@@ -959,7 +959,7 @@ export async function runUpdateManyLoop(
                 // refusals, then its not-found gate ahead of every hook), so a
                 // refused row reads the same whether or not its id names a
                 // record — see `assertRecordExists`.
-                if (updated == null) await this.assertRecordExists(object, record.id);
+                if (updated == null) await this.assertRecordExists(object, record.id, context);
                 omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                 succeeded++;
@@ -1109,7 +1109,7 @@ export async function runDeleteManyLoop(
             const deleted = await this.engine.delete(object, { where: { id }, ...ctxOpt } as any).catch((e: unknown) => landedDespiteStaleSummary(e, atomic, object));
             // `id` is `unknown` to this helper only because the caller's
             // fail-closed `isScalarId` guard is what proves it scalar.
-            if (deleted === false) throw recordNotFoundError(object, id as string | number);
+            if (deleted === false) throw recordNotFoundError(object, id as string | number, context);
             // [#19412] The SECOND half of the same site. The paragraph above
             // fixed "no match"; this is "matched, and deliberately NOT
             // removed" — and until now `success` was still a LITERAL for

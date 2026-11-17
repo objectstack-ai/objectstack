@@ -34,6 +34,7 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/spec/data';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
 import { AuditPlugin } from './audit-plugin.js';
 import { redactActivityRows } from './activity-field-redaction.js';
@@ -249,6 +250,20 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
       }
     }
     expect((await find(SYS, { object_name: OPEN_PARENT, summary: { $contains: V.open2 } })).length).toBeGreaterThan(0);
+  });
+
+  it("[#34699] the predicate refusal carries the user's half in the caller's language; the aggregate words mark none", async () => {
+    const c = READER_CASES[0].cases[0];
+    const zh = { ...MASKED_READER, locale: 'zh-CN' } as Ctx;
+    let thrown: any = null;
+    try { await find(zh, contains(c, c.stored)); } catch (err) { thrown = err; }
+    expect([thrown?.code, thrown?.status]).toEqual(['PERMISSION_DENIED', 403]);
+    expect(firstSentence(String(thrown.message))).toBe(predicateWords([c.column]));
+    expect(thrown.userMessage).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].query_field_not_readable);
+    let aggregate403: any = null;
+    try { await grouped(zh, c); } catch (err) { aggregate403 = err; }
+    expect(firstSentence(String(aggregate403?.message))).toBe(aggregateWords([c.column]));
+    expect(aggregate403.userMessage).toBeUndefined();
   });
 
   // ── one block per class ─────────────────────────────────────────────────

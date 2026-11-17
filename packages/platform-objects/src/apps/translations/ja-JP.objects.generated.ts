@@ -263,6 +263,19 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "保留中のため再通知",
             "summary.failed": "未追加",
             rows: "行ごとの結果"
+          },
+          columns: {
+            rows: {
+              row: "行",
+              email: "メール",
+              ok: "成功",
+              alreadyPending: "保留中のため再通知",
+              "host.notified": "ホスティング組織に通知済み",
+              "host.reason": "通知しなかった理由",
+              "error.message": "追加されなかった理由",
+              notApplied: "未適用（レコードで設定してください）",
+              managerError: "上長"
+            }
           }
         }
       },
