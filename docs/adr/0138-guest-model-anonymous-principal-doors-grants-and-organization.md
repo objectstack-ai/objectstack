@@ -300,6 +300,53 @@ under class 2, ahead of the allowlist, so it is judged as this door and not as c
 infrastructure. The same ruling's Q2 B leaves the verification posture as it was: an
 invitation-link sign-up still owes the verification mail.
 
+**Amended 2026-11-16 — the one-step invitation acceptance and the OAuth client-name read, class-2-shaped doors.** Card
+[#34257](https://github.com/objectstack-ai/objectstack/issues/34257) admits one more door of class 2's shape, not a
+seventh class: `POST /api/v1/auth/organization/accept-invitation-one-step`. What admits the request: the mailbox proof
+the invitation mail carries, a capability token minted per send. The invitation id alone, which the copied link and
+the invitation row carry, admits nothing. What it runs as: after validation, the creation of the invited address's
+account (or the replacement of the password of an unverified account the rule below admits, revoking its sessions),
+the address marked verified, the invitation accepted through the vendor's own accept route, and a session for that
+account. The proof is never at rest in clear, the stored mail row never holds it, and it is bound to the invitation,
+its address and its expiry; a resend retires the old one. It is spent only by a request that passed every gate, and
+one server process serializes concurrent redemptions of it; across processes, single use is as strong as the store's
+consume. Every proof that does not admit gets one refusal that does not say which check failed. The door sets a
+password on an existing account only when it reads all of these: the address is not verified; the account's only
+sign-in account is its email and password one, or it has none; it has no second factor, enabled or enrolled; its user
+row holds no phone number, verified or not; it holds no standing grant (an API key, an OAuth client consent, an OAuth
+access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM credential or a link to an
+identity provider's directory, revoked or expired ones included); its identity source is local; and the server allows
+a local password here (not SSO-only, email and password on). Every other account answers `sign_in`, including one in a
+state no rule names and one whose reading fails, and the proof stays unspent. Every reading is taken again once the
+account's sessions are revoked and before the password is written; an account that no longer passes then answers
+`sign_in` with its sessions revoked, and the proof stays unspent. Every store this plugin mounts that is
+keyed by a user, and every column of the vendor's user model with every plugin this plugin can mount, is classified as
+a claim the judge reads or as no claim, and a test holds each classification to what is mounted. The classification
+covers what this plugin mounts and nothing another package mounts. A cloud-managed environment sets no local password,
+so there the door refuses every request that carries a proof. It carries a rate limit per client network address and
+per invitation, as ADR-0121 D6 requires. Enforced by
+`packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts#buildInvitationProofDoorPlugin`, ledgered in
+`packages/plugins/plugin-auth/src/auth-route-ledger.ts`. It is a better-auth endpoint, so it rides the `/auth`
+catch-all, which no route table lists door by door: the anonymous sweep's classification names it under class 2 as a
+door the catch-all serves, and probes it by its own path.
+
+The same amendment admits a second door of class 2's shape, added by
+[#34168](https://github.com/objectstack-ai/objectstack/issues/34168):
+`GET /api/v1/auth/oauth2/client-name`, a public read. What admits the request: a request the server
+itself signed, which names one OAuth client. What it answers: that client's display name and nothing
+else, and only for the client the signed request names. Every request with a well-formed query that is
+not served a name gets one uniform 404; a malformed query answers 400, and a caller over the rate limit
+429. It is rate-limited per client network address on the counter the invitation preview above uses, as
+ADR-0121 D6 requires. Mounted ahead of the catch-all like the preview, it is classified under class 2 by
+its route.
+
+This note states a refinement of ruling
+[`6413975861`](https://github.com/objectstack-ai/objectstack/issues/26020#issuecomment-6413975861) Q2 B, recorded
+above as "an invitation-link sign-up still owes the verification mail": a proof-carrying invitation link proves the
+mailbox, so a sign-up through it owes no verification mail, and a copied link, which carries no proof, still owes the
+verification mail, as Q2 B states. The refinement is the maintainer's to approve, on this note's Tier H hand-off;
+until that approval it binds nothing. The vendor accept route is unchanged by this note.
+
 **Outside the guest model by construction**, and not on the list:
 
 - the control-plane allowlist (`packages/core/src/security/auth-gate.ts#isAuthGateAllowlisted`:

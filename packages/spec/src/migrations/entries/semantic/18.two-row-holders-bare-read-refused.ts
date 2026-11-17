@@ -23,8 +23,9 @@ export const entry: SemanticMigration = {
   reason:
     'The read naming no package took the row saved first, so the same name answered a different package\'s item '
     + 'depending on save order, while GET /api/v1/meta/TYPE/NAME/layers already refused it naming both holders. '
-    + 'The read now judges the name\'s holders (the registry\'s holders and the packages its active stored rows '
-    + 'are bound to) and refuses two or more as the by-name read refuses two package holders. One holder is served '
+    + 'The read now judges the name\'s holders (the packages its active stored rows are bound to at the member read; '
+    + 'the registry\'s holders only help recognise a customization pair) and refuses two or more as the by-name read '
+    + 'refuses two package holders. One holder is served '
     + 'as before. There is no mechanical rewrite: which package\'s row a caller meant is a judgement about that '
     + 'caller.',
   acceptanceCriteria:
