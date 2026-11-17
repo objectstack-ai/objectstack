@@ -83,9 +83,9 @@ const PACKAGE = {
     manifest_id: 'com.acme.crm',
     display_name: 'Acme CRM',
     description: 'A CRM.',
-    latest_version: null,
+    latest_version: { id: 'ver_1', version: '1.0.0' },
   },
-  versions: [],
+  versions: [{ id: 'ver_1', version: '1.0.0' }],
 };
 
 const CLOUD_ORIGIN = 'https://cloud.example.test';
