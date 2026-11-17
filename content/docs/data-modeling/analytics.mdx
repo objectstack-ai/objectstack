@@ -51,21 +51,42 @@ export const SalesDataset = defineDataset({
   filter: { is_deleted: { $ne: true } },
 
   // Groupable axes — a base field, or a `relationship.field` path.
+  // `synonyms` are the words a person types when asking for this member.
   dimensions: [
-    { name: 'stage', field: 'stage', type: 'string' },
-    { name: 'region', field: 'account.region', type: 'string' },
-    { name: 'close_date', field: 'close_date', type: 'date', dateGranularity: 'month' },
+    { name: 'stage', field: 'stage', type: 'string', synonyms: ['pipeline stage', 'phase'] },
+    { name: 'region', field: 'account.region', type: 'string', synonyms: ['territory', 'area'] },
+    {
+      name: 'close_date', field: 'close_date', type: 'date', dateGranularity: 'month',
+      synonyms: ['close month', 'closing date'],
+    },
   ],
 
   // Aggregatable values — defined ONCE here; referenced everywhere by name.
   measures: [
-    { name: 'opp_count', aggregate: 'count' },
-    { name: 'revenue', aggregate: 'sum', field: 'amount', format: '$0,0' },
-    { name: 'won_amount', aggregate: 'sum', field: 'amount', filter: { stage: 'closed_won' } },
+    { name: 'opp_count', aggregate: 'count', synonyms: ['deals', 'opportunities', 'number of deals'] },
+    {
+      name: 'revenue', aggregate: 'sum', field: 'amount', format: '$0,0',
+      synonyms: ['sales', 'pipeline value'],
+      description: 'The total amount of every opportunity, open or closed.',
+    },
+    {
+      name: 'won_amount', aggregate: 'sum', field: 'amount', filter: { stage: 'closed_won' },
+      synonyms: ['won revenue', 'bookings'],
+      description: 'The total amount of the opportunities that closed won.',
+    },
     // Derived measure — references OTHER measures by name only (no raw fields/SQL).
-    { name: 'win_rate', derived: { op: 'ratio', of: ['won_amount', 'revenue'] }, format: '0.0%' },
+    {
+      name: 'win_rate', derived: { op: 'ratio', of: ['won_amount', 'revenue'] }, format: '0.0%',
+      synonyms: ['close rate', 'conversion rate'],
+      description: 'Won amount as a share of the total opportunity amount.',
+    },
     // Duration measure — the time between two datetime fields of each record.
-    { name: 'avg_days_to_close', aggregate: 'avg', duration: { from: 'created_at', to: 'closed_at', unit: 'days' } },
+    {
+      name: 'avg_days_to_close', aggregate: 'avg',
+      duration: { from: 'created_at', to: 'closed_at', unit: 'days' },
+      synonyms: ['sales cycle', 'time to close'],
+      description: 'The average number of days from creating an opportunity to closing it.',
+    },
   ],
 });
 ```
@@ -88,6 +109,12 @@ export default defineStack({
   be omitted) for a count. A SQL expression there is refused at parse: a
   conditional count or sum is a measure with its own `filter`, and a ratio is a
   `derived` measure.
+- **Give every member its vocabulary.** `synonyms` are the words a person
+  types, in their own language (a flat list, matched and never translated; one
+  word names one member), and `description` is a one-sentence business
+  definition. A measure or dimension with neither answers only to its own name
+  and label, so a question asked in a user's own words misses the governed
+  metric; validation and publish warn with `dataset-member-no-vocabulary`.
 - **Metric certification** — a `certified` flag that marks a measure as a
   human-blessed governance checkpoint — is a design goal of ADR-0021 but is **not
   yet implemented**; `DatasetMeasureSchema` has no `certified` field today.

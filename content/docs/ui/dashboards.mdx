@@ -223,12 +223,19 @@ export const salesDataset = defineDataset({
   object: 'opportunity',
   include: ['account'],
   dimensions: [
-    { name: 'region', field: 'account.region', type: 'string' },
-    { name: 'close_month', field: 'close_date', type: 'date', dateGranularity: 'month' },
+    { name: 'region', field: 'account.region', type: 'string', synonyms: ['territory', 'area'] },
+    {
+      name: 'close_month', field: 'close_date', type: 'date', dateGranularity: 'month',
+      synonyms: ['closing month', 'month closed'],
+    },
   ],
   measures: [
-    { name: 'revenue', field: 'amount', aggregate: 'sum' },
-    { name: 'deal_count', aggregate: 'count' },
+    {
+      name: 'revenue', field: 'amount', aggregate: 'sum',
+      synonyms: ['sales', 'pipeline value'],
+      description: 'The total amount of every opportunity, open or closed.',
+    },
+    { name: 'deal_count', aggregate: 'count', synonyms: ['deals', 'number of deals'] },
   ],
 });
 
