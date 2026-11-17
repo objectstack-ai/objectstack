@@ -24,6 +24,13 @@
  * while its column is still NULL. So the un-walled boot resolves the owner too,
  * through its own moment rather than the walled replay's.
  *
+ * The held list lives in the process, and the last leg restarts between the
+ * seed and the person's sign-up to show that a restart loses nothing: the
+ * durable holder is the seed declaration itself. An un-walled boot runs its
+ * inline seed on every start; the replay meets the same unresolved person on
+ * the row it landed on before, and holds it again. No second record of the
+ * held references is kept.
+ *
  * ## What is real
  *
  * `bootStack` (`@objectstack/verify`): an `ObjectKernel` over in-process
@@ -35,6 +42,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { OrganizationsPlugin } from './organizations-plugin.js';
 
@@ -291,5 +301,76 @@ describe('un-walled: a held seed person reference fills only the seed’s own ro
     expect((await taskNamed('Late task')).assignee).toBe(lateId);
     expect((await taskNamed('Late task, assigned meanwhile')).assignee).toBe(adminId);
     expect((await taskNamed('Guest task')).assignee).toBeNull();
+  });
+});
+
+/**
+ * A restart between the un-walled seed and the person's sign-up loses nothing.
+ * The first process holds the reference in memory and stops before the person
+ * exists. The second process boots cold over the same database file; its own
+ * inline seed replays, meets the same NULL on the same row, and holds it again,
+ * so the person's sign-up in the second process fills the row.
+ */
+describe('un-walled: a restart between the seed and the person’s sign-up still fills the seed’s person columns', () => {
+  const env = legEnv([
+    ['OS_TENANCY_POSTURE', undefined],
+    ['OS_AUTH_MEMBERSHIP_POLICY', undefined],
+  ]);
+  const RESTART_NAME = 'Restart Person';
+  const RESTART_EMAIL = 'restart.person@example.com';
+  /** Built again for each boot: a live boot holds references into its configuration. */
+  const restartApp = () => ({
+    ...APP,
+    manifest: { ...APP.manifest, id: 'com.example.seedowner.restart' },
+    data: [
+      {
+        object: TASK,
+        mode: 'upsert',
+        externalId: 'name',
+        records: [{ name: 'Restart task', assignee: RESTART_NAME, reviewer: RESTART_NAME }],
+      },
+    ],
+  });
+  const dir = mkdtempSync(join(tmpdir(), 'seed-person-restart-'));
+  const databaseFile = join(dir, 'restart.sqlite');
+  let stack: VerifyStack | undefined;
+  let firstProcess: Array<Record<string, unknown>>;
+  let afterRestart: Array<Record<string, unknown>>;
+  let afterSignUp: Array<Record<string, unknown>>;
+  let personId: string;
+
+  beforeAll(async () => {
+    env.apply();
+    const first = await bootStack(restartApp() as never, { extraPlugins: [new OrganizationsPlugin()], databaseFile });
+    const firstQl = await first.kernel.getServiceAsync<any>('objectql');
+    firstProcess = await firstQl.find(TASK, { where: {}, ...SYS });
+    await first.stop();
+
+    stack = await bootStack(restartApp() as never, { extraPlugins: [new OrganizationsPlugin()], databaseFile });
+    await stack.signIn();
+    const ql = await stack.kernel.getServiceAsync<any>('objectql');
+    afterRestart = await ql.find(TASK, { where: {}, ...SYS });
+    await stack.signUp(RESTART_EMAIL, undefined, RESTART_NAME);
+    personId = String((await ql.findOne('sys_user', { where: { email: RESTART_EMAIL }, ...SYS }))?.id ?? '');
+    afterSignUp = await ql.find(TASK, { where: {}, ...SYS });
+  }, 180_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+    env.restore();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('PREMISE: the first process seeded the row with NULL person columns, and the second booted over that same row', () => {
+    expect(firstProcess).toHaveLength(1);
+    expect(firstProcess[0]).toMatchObject({ assignee: null, reviewer: null });
+    expect(afterRestart).toHaveLength(1);
+    expect(afterRestart[0]).toMatchObject({ id: firstProcess[0].id, assignee: null, reviewer: null });
+  });
+
+  it('the person’s sign-up after the restart fills both columns on the row the first process seeded', () => {
+    expect(personId).not.toBe('');
+    expect(afterSignUp).toHaveLength(1);
+    expect(afterSignUp[0]).toMatchObject({ id: firstProcess[0].id, assignee: personId, reviewer: personId });
   });
 });
