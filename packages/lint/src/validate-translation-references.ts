@@ -2740,6 +2740,7 @@ interface ActionEntryContext {
  *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
  *   | `cancelText`                        | `confirmText` or a non-empty `params` (either dialog) | `translateAction` |
  *   | `refusals.<CODE>[.reasons.<REASON>]` | the action's `refusals` codes (and each code's `reasons`) | `resolveActionRefusal` (#34273) |
+ *   | `texts.<key>`                       | the action's `texts` keys            | `buildActionTextSurface` (#34374 PR2) |
  *
  * A dialog leaf under a DECLARED dialog is read whether or not the dialog
  * authors that leaf itself — the resolver overlays a translated `title` onto a
@@ -2772,6 +2773,39 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionSubmitText(findings, ctx);
   checkActionCancelText(findings, ctx);
   checkActionRefusals(findings, ctx);
+  checkActionTexts(findings, ctx);
+}
+
+/**
+ * [#34374 PR2] `texts.<key>` — the translations of the action's declared
+ * texts (`ActionSchema.texts`). The action body runner
+ * (`buildActionTextSurface`, `@objectstack/runtime`) reads them only for a key
+ * the action declares, so any other key is read by nothing: the bundle cannot
+ * add a text, only translate one — the hook texts' rule
+ * (`hooks.<hook>.texts.*`), in the action vocabulary.
+ */
+function checkActionTexts(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  const rawTexts = asRecord(isRec(ctx.rawAction) ? ctx.rawAction.texts : undefined);
+  if (Object.keys(rawTexts).length === 0) return;
+  const keys = new Set(Object.keys(asRecord(ctx.action.texts)));
+  for (const key of Object.keys(rawTexts)) {
+    if (keys.has(key)) continue;
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where: `${ctx.where} · text "${key}"`,
+      path: `${ctx.path}.texts.${key}`,
+      message:
+        keys.size > 0
+          ? `Translations are keyed to text "${key}", a key ${ctx.subject} does not declare under ` +
+            `\`texts\`, so nothing resolves this key.` + suggest(key, keys)
+          : `Translations are keyed to text "${key}", but ${ctx.subject} declares no \`texts\`, ` +
+            `so nothing resolves this key.`,
+      hint:
+        `Text translations are keyed by a key the action's \`texts\` declares; declare it there, ` +
+        `or drop the key.`,
+    });
+  }
 }
 
 /**
