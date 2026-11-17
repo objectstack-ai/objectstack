@@ -3090,7 +3090,6 @@ export class ObjectStackProtocolImplementation implements
     getPackagedFieldPatchBases(name: string): Array<{ packageId: string; base: unknown }> {
         return ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases(protocolHost(this), name);
     }
-
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle} in `protocol-discovery-and-bases.ts` [#33952]. */
     getPackageTranslationBundle(packageId: string): Promise<TranslationBundle | undefined> {
         return ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle(protocolHost(this), packageId);
