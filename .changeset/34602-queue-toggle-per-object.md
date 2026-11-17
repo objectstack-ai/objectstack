@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/plugin-sharing': patch
 '@objectstack/plugin-hono-server': patch
 '@objectstack/client': patch
@@ -10,7 +10,7 @@
 feat: the list toolbar offers the "In a queue" toggle only on objects that actually use queues
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 Until now the toggle appeared on every list of an object with a user owner as soon as the organization had a single queue, although on most of those objects no record ever sits in a queue, so it could only return an empty list. It now appears only on an object where a queue can hold something:
 
