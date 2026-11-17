@@ -65,6 +65,7 @@ const asA = ({ children }: { children: React.ReactNode }) => (
       userId: 'userA',
       tenantId: 't1',
       hasAnyQueue: false,
+      objectsUsingQueues: [],
       positions: [],
       permissionSets: [],
       objects: { note: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },

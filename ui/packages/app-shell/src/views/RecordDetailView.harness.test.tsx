@@ -993,6 +993,7 @@ describe('RecordDetailView.setupManagedByChip-13385', () => {
       tenantId: null,
       positions: [],
       hasAnyQueue: false,
+      objectsUsingQueues: [],
       permissionSets: [],
       ...(held === undefined ? {} : { systemPermissions: held }),
       objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },

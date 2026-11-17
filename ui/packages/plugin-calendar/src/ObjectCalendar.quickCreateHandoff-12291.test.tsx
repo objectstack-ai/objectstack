@@ -232,6 +232,7 @@ describe('objectui#12291 — an object quick-create cannot satisfy hands the day
       userId: 'u-pin',
       tenantId: null,
       hasAnyQueue: false,
+      objectsUsingQueues: [],
       positions: ['member'],
       permissionSets: ['member'],
       objects: { showcase_task: { allowCreate: false, allowRead: true, allowEdit: false, allowDelete: false } as never },
