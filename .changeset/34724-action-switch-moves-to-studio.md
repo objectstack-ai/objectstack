@@ -21,6 +21,7 @@ Before this change, the deployment's on/off switch for an installed app's action
 - On the object's Actions view in Studio, a read-only app package's vendor action carries a "Switched on / off for this deployment" switch, the flow switch's twin. A switched-off action is marked in the list. A refusal is the server's sentence, shown verbatim; a caller the deployment's posture walls off sees the switch disabled with the reason.
 - A standalone `action` item's page in Studio's "All metadata" area carries the same switch.
 - The platform's own actions (any action a kernel package ships) carry no switch anywhere. When the package list cannot be read, no switch is offered.
+- Studio's landing leads to them: an app's "N switched off" count opens the switched-off action itself (one) or the action list (several), and when that does not land on an action (several, or flows among them), the line names each switched-off action as a link to its page, three at most, then a "more" link to the list.
 
 The doors are unchanged: the read is the `sys_metadata_activation` ledger, the write is `POST /api/v1/actions/_activation/:object/:action` with body `{ enabled }`.
 

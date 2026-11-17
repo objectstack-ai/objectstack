@@ -3023,7 +3023,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.customizations.failed': '无法读取定制',
   'engine.studio.landing.customizations.pairTitle': '在 Studio 中打开定制包 {pair}',
   'engine.studio.landing.customizations.switchedOffTitle': '打开该软件包的自动化，在那里启用或停用其中的项',
-  'engine.studio.landing.customizations.switchedOffActions': '（其中动作 {count} 项）',
+  'engine.studio.landing.customizations.switchedOffActionsLead': '动作：',
+  'engine.studio.landing.customizations.switchedOffActionsMore': '另 {count} 项',
   'engine.studio.landing.customizations.switchedOffActionsTitle': '打开已停用的动作：在动作上即可重新启用',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': '不属于软件包',

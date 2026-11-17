@@ -74,6 +74,9 @@ const studioPillarPath = (packageId: string, pillar: 'data' | 'automations') =>
  * action in Studio. One action opens its own page in the "All metadata" area,
  * where the switch reads off; more than one opens that area's action list.
  */
+/** How many switched-off actions the landing line names before its "more" link (objectstack#34724). */
+const SWITCHED_OFF_ACTIONS_NAMED = 3;
+
 const switchedOffActionsPath = (packageId: string, actions: readonly string[]) => {
   const list = `/studio/${encodeURIComponent(packageId)}/metadata/action`;
   return actions.length === 1 ? `${list}/${encodeURIComponent(actions[0])}` : list;
@@ -267,11 +270,17 @@ export function BuilderLanding(): React.ReactElement {
     const linkClass = 'hover:text-foreground hover:underline';
     // objectstack#34724 — the "switched off" count leads to the items: a flow's
     // switch is in the Automations pillar, an action's on the action. When
-    // every switched-off item is an action, the count opens them; when flows
-    // are among them too, the count opens Automations and a second link the
-    // actions.
+    // every switched-off item is an action, the count opens it (one) or the
+    // action list (several); when flows are among them, the count opens
+    // Automations. Whenever the count alone does not land on the action, the
+    // line names each switched-off action as a link to its own page (the
+    // action list marks none of them), up to SWITCHED_OFF_ACTIONS_NAMED, then
+    // a "more" link to the list.
     const offActions = line.counts.switchedOffActions ?? [];
     const offOnlyActions = offActions.length > 0 && offActions.length === line.counts.switchedOff;
+    const nameActions = offActions.length > 1 || (offActions.length > 0 && !offOnlyActions);
+    const namedActions = offActions.slice(0, SWITCHED_OFF_ACTIONS_NAMED);
+    const moreActions = offActions.length - namedActions.length;
     return (
       <p data-testid="studio-landing-customizations" data-state="read" className={lineClass}>
         {pair ? (
@@ -302,18 +311,36 @@ export function BuilderLanding(): React.ReactElement {
             switchedOff: line.counts.switchedOff,
           })}
         </Link>
-        {offActions.length > 0 && !offOnlyActions && (
-          <>
-            {' '}
-            <Link
-              to={switchedOffActionsPath(baseId, offActions)}
-              title={t('engine.studio.landing.customizations.switchedOffActionsTitle', locale)}
-              data-testid="studio-landing-customizations-switched-off-actions"
-              className={linkClass}
-            >
-              {tFormat('engine.studio.landing.customizations.switchedOffActions', locale, { count: offActions.length })}
-            </Link>
-          </>
+        {nameActions && (
+          <span data-testid="studio-landing-customizations-switched-off-actions">
+            {t('engine.studio.landing.customizations.separator', locale)}
+            {t('engine.studio.landing.customizations.switchedOffActionsLead', locale)}
+            {namedActions.map((name, i) => (
+              <React.Fragment key={name}>
+                {i > 0 && t('engine.studio.landing.customizations.separator', locale)}
+                <Link
+                  to={switchedOffActionsPath(baseId, [name])}
+                  title={t('engine.studio.landing.customizations.switchedOffActionsTitle', locale)}
+                  data-testid="studio-landing-customizations-switched-off-action"
+                  className={`${linkClass} font-mono`}
+                >
+                  {name}
+                </Link>
+              </React.Fragment>
+            ))}
+            {moreActions > 0 && (
+              <>
+                {' '}
+                <Link
+                  to={switchedOffActionsPath(baseId, offActions)}
+                  data-testid="studio-landing-customizations-switched-off-actions-more"
+                  className={linkClass}
+                >
+                  {tFormat('engine.studio.landing.customizations.switchedOffActionsMore', locale, { count: moreActions })}
+                </Link>
+              </>
+            )}
+          </span>
         )}
       </p>
     );

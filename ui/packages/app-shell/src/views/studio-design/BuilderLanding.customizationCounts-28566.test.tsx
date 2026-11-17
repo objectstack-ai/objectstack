@@ -267,7 +267,7 @@ describe('Studio landing: "m switched off" leads to the switched-off actions (ob
     expect(within(line).queryByTestId('studio-landing-customizations-switched-off-actions')).not.toBeInTheDocument();
   });
 
-  it('several switched-off actions: the count opens the action list', async () => {
+  it('several switched-off actions: the count opens the action list, and the line names each one as a link to its page', async () => {
     packages.list = [SHOWCASE];
     stubWire({
       'com.example.showcase': servedOff('com.example.showcase', [
@@ -276,11 +276,43 @@ describe('Studio landing: "m switched off" leads to the switched-off actions (ob
       ]),
     });
     renderLanding();
-    const off = within(await readLine()).getByTestId('studio-landing-customizations-switched-off');
-    expect(off).toHaveAttribute('href', '/studio/com.example.showcase/metadata/action');
+    const line = await readLine();
+    expect(within(line).getByTestId('studio-landing-customizations-switched-off')).toHaveAttribute(
+      'href',
+      '/studio/com.example.showcase/metadata/action',
+    );
+    const named = within(line).getAllByTestId('studio-landing-customizations-switched-off-action');
+    expect(named.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['showcase_mark_done', '/studio/com.example.showcase/metadata/action/showcase_mark_done'],
+      ['showcase_portfolio_snapshot', '/studio/com.example.showcase/metadata/action/showcase_portfolio_snapshot'],
+    ]);
+    expect(within(line).getByTestId('studio-landing-customizations-switched-off-actions')).toHaveTextContent(
+      /^, Actions: showcase_mark_done, showcase_portfolio_snapshot$/,
+    );
+    expect(within(line).queryByTestId('studio-landing-customizations-switched-off-actions-more')).not.toBeInTheDocument();
+    fireEvent.click(named[1]);
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/studio/com.example.showcase/metadata/action/showcase_portfolio_snapshot',
+      ),
+    );
   });
 
-  it('flows and actions switched off: the count opens Automations, and a second link the actions', async () => {
+  it('more switched-off actions than the line names: the first three, then a "more" link to the list', async () => {
+    packages.list = [SHOWCASE];
+    const names = ['a_one', 'a_two', 'a_three', 'a_four', 'a_five'];
+    stubWire({ 'com.example.showcase': servedOff('com.example.showcase', names.map((name) => ({ type: 'action', name }))) });
+    renderLanding();
+    const line = await readLine();
+    expect(
+      within(line).getAllByTestId('studio-landing-customizations-switched-off-action').map((a) => a.textContent),
+    ).toEqual(['a_one', 'a_two', 'a_three']);
+    const more = within(line).getByTestId('studio-landing-customizations-switched-off-actions-more');
+    expect(more).toHaveTextContent(tFormat('engine.studio.landing.customizations.switchedOffActionsMore', 'en-US', { count: 2 }));
+    expect(more).toHaveAttribute('href', '/studio/com.example.showcase/metadata/action');
+  });
+
+  it('flows and actions switched off: the count opens Automations, and the line names the action', async () => {
     packages.list = [SHOWCASE];
     stubWire({
       'com.example.showcase': servedOff('com.example.showcase', [
@@ -294,10 +326,11 @@ describe('Studio landing: "m switched off" leads to the switched-off actions (ob
       'href',
       '/studio/com.example.showcase/automations',
     );
-    const actions = within(line).getByTestId('studio-landing-customizations-switched-off-actions');
-    expect(actions).toHaveTextContent(tFormat('engine.studio.landing.customizations.switchedOffActions', 'en-US', { count: 1 }));
-    expect(actions).toHaveAttribute('href', '/studio/com.example.showcase/metadata/action/showcase_mark_done');
-    fireEvent.click(actions);
+    const [action] = within(line).getAllByTestId('studio-landing-customizations-switched-off-action');
+    expect(action).toHaveTextContent('showcase_mark_done');
+    expect(action).toHaveAttribute('title', t('engine.studio.landing.customizations.switchedOffActionsTitle', 'en-US'));
+    expect(action).toHaveAttribute('href', '/studio/com.example.showcase/metadata/action/showcase_mark_done');
+    fireEvent.click(action);
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('/studio/com.example.showcase/metadata/action/showcase_mark_done'),
     );

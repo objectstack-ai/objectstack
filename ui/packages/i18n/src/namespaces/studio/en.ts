@@ -3427,7 +3427,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.customizations.failed': 'Couldn’t read customizations',
   'engine.studio.landing.customizations.pairTitle': 'Open the customization package {pair} in Studio',
   'engine.studio.landing.customizations.switchedOffTitle': 'Open this package’s Automations, where its items are switched on and off',
-  'engine.studio.landing.customizations.switchedOffActions': '(actions: {count})',
+  'engine.studio.landing.customizations.switchedOffActionsLead': 'Actions: ',
+  'engine.studio.landing.customizations.switchedOffActionsMore': '+{count} more',
   'engine.studio.landing.customizations.switchedOffActionsTitle': 'Open the switched-off actions: each one is switched on again on the action',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': 'Not in a package',
