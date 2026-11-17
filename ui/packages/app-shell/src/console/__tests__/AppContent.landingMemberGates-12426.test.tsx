@@ -28,6 +28,9 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// The page reaches a dynamic `@objectstack/lint` import; its first load is paid
+// here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

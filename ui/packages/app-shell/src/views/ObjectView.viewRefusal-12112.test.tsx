@@ -32,6 +32,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// The page reaches a dynamic `@objectstack/lint` import; its first load is paid
+// here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';

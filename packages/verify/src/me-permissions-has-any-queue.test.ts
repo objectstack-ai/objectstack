@@ -30,6 +30,9 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { defineStack } from '@objectstack/spec';
+// The harness loads these two inside a function body; paid here, during collection, not in a clocked window.
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
