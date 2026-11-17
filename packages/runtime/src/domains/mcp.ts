@@ -29,6 +29,7 @@ import {
     metaRequestLocale,
     translateMetaList,
     type FederationCallKind,
+    type MetaListTranslationSources,
 } from '@objectstack/rest';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
@@ -1020,6 +1021,24 @@ export function buildMcpBridge(
         return { obj: projected.object ?? obj };
     };
 
+    /**
+     * [#34872] Served objects in THIS caller's locale: the `/meta` object
+     * door's translation (`translateMetaList`, the routine `GET /meta/object`
+     * and the dataset tools below run) for this request's locale
+     * ({@link metaTranslationSources}), ⛔ never a second translation routine.
+     * Handed the objects AS THIS CALLER IS SERVED THEM ({@link servedToCaller}):
+     * the translator rewrites the text of the fields it is given and adds
+     * none, so a field the mask removed stays absent, its translated label and
+     * description with it (ADR-0106 D3/D5). Computed per request (ADR-0156).
+     * No locale, or a key the bundle does not carry, leaves the authored text;
+     * names never change.
+     */
+    const inCallerLocale = async (served: readonly any[]): Promise<any[]> => {
+        if (served.length === 0) return [...served];
+        const translated = await translateMetaList(metaTranslationSources(deps, context, getProtocol), 'object', [...served]);
+        return Array.isArray(translated) ? translated : [...served];
+    };
+
     /** {@link readServedObject}, as this caller is served it ({@link servedToCaller}). */
     const readObjectForCaller = async (name: string): Promise<any> => {
         const def: any = await readServedObject(name);
@@ -1028,7 +1047,7 @@ export function buildMcpBridge(
 
     const listObjectSummaries = async (): Promise<any[]> => {
         const objs = await readServedObjects();
-        const out: any[] = [];
+        const served: any[] = [];
         // [ADR-0106 D5(2)] Every listed object as this caller is served it,
         // so `fieldCount` counts the fields that exist for them. One object
         // that cannot be projected refuses the listing, as the `/meta`
@@ -1036,7 +1055,11 @@ export function buildMcpBridge(
         for (const listed of objs) {
             const o = await servedToCaller(listed);
             // [ruling record 6787890900] An object the caller may not read is left out.
-            if (o === undefined) continue;
+            if (o !== undefined) served.push(o);
+        }
+        const out: any[] = [];
+        // [#34872] …in the caller's locale, the page translated in one call.
+        for (const o of await inCallerLocale(served)) {
             out.push({
                 name: o.name,
                 label: o.label ?? o.name,
@@ -1121,8 +1144,11 @@ export function buildMcpBridge(
             const declared: any = await readServedObject(name);
             const def: any = declared ? await servedToCaller(declared) : declared;
             if (!def) return null;
+            // [#34872] …in the caller's locale. `declared` is read for the
+            // `readonly` verdict alone, which no translation touches.
+            const [localized] = await inCallerLocale([def]);
             // [#32435] …each field and rule carrying what a write needs.
-            return describeServedObject(def, declared);
+            return describeServedObject(localized, declared);
         },
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
@@ -1516,6 +1542,34 @@ export async function resolveMcpDatasetToolsService(
 }
 
 /**
+ * [ADR-0149 D2 · #34872] What the `/meta` translation reads for THIS request:
+ * the request's i18n service (a lookup that throws is none, and the text is
+ * then served untranslated), its protocol (an object's packaged base and a
+ * declared override's pair translations) and its locale — the
+ * `Accept-Language` / `?locale=` reading every `/meta` answer takes
+ * (`metaRequestLocale`), the i18n service's default last. One reading for the
+ * dataset tools and the object tools, so the two answer one caller in one
+ * locale.
+ */
+function metaTranslationSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    getProtocol: () => Promise<unknown>,
+): MetaListTranslationSources {
+    return {
+        resolveI18nService: async () => {
+            try {
+                return await deps.resolveService(context, 'i18n', context.environmentId);
+            } catch {
+                return undefined;
+            }
+        },
+        resolveProtocol: getProtocol,
+        requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
+    };
+}
+
+/**
  * [ADR-0149 D2] The bridge's three dataset members over the analytics
  * service's executor, bound to THIS request's principal.
  *
@@ -1543,17 +1597,7 @@ function datasetToolMembers(
         const protocol = await getProtocol();
         const items = (await actionExec.readMergedItems(protocol, 'dataset')) ?? [];
         const translated = await translateMetaList(
-            {
-                resolveI18nService: async () => {
-                    try {
-                        return await deps.resolveService(context, 'i18n', envId);
-                    } catch {
-                        return undefined;
-                    }
-                },
-                resolveProtocol: async () => protocol as any,
-                requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
-            },
+            metaTranslationSources(deps, context, async () => protocol),
             'dataset',
             items,
         );

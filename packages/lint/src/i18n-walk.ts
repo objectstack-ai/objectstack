@@ -97,12 +97,15 @@
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
+ *   objects.<name>._actions.<action>.resultDialog.columns.<path>.<column_path>
  *   objects.<name>._actions.<action>.preflight.fields.<path>
+ *   objects.<name>._actions.<action>.preflight.columns.<path>.<column_path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
  *                          / .disabledReason / .submitText (beside a non-empty `params`)
  *                          / .cancelText (beside `confirmText` or a non-empty `params`)
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* / .preflight.fields.<path>
+ *                          / .preflight.columns.<path>.<column_path>
  *                          (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
@@ -769,8 +772,9 @@ function pushActionParams(
 }
 
 /**
- * Emit `resultDialog.{title,description,acknowledge}` and
- * `resultDialog.fields.<path>` entries under an action's translation root.
+ * Emit `resultDialog.{title,description,acknowledge}`,
+ * `resultDialog.fields.<path>` and `resultDialog.columns.<path>.<column_path>`
+ * entries under an action's translation root.
  * Mirrors `ActionResultDialogTranslationSchema` in @objectstack/spec and the
  * client-side `actionResultDialog` resolver. Field entries are keyed by the
  * LITERAL result-field path (`"user.email"`) — the dot stays inside a single
@@ -850,7 +854,34 @@ function pushActionResultDialog(
       if (!field || typeof field !== 'object') continue;
       if (typeof field.path !== 'string' || field.path.length === 0) continue;
       pushEntry(out, [...base, 'fields', field.path], field.label, kind, { objectName });
+      pushAnswerTableColumns(out, base, field, kind, objectName);
     }
+  }
+}
+
+/**
+ * [#34652] Emit `columns.<path>.<column_path>` entries beside `fields` under an
+ * answer block's root (`…resultDialog` or `…preflight`) — one per labelled
+ * column of a `format: 'table'` field. Both levels are keyed by the LITERAL
+ * path (`"error.message"` is one segment), the address
+ * `ActionResultDialogTranslationSchema.columns` declares and
+ * `resolveActionResultDialog` / `resolveActionPreflight` read. A column with
+ * no `label` draws its `path` as the header and gets no key, as a field row
+ * with no `label` gets none; the format is not re-judged here — a `columns`
+ * list beside any other format is refused at parse.
+ */
+function pushAnswerTableColumns(
+  out: ExpectedEntry[],
+  blockRoot: string[],
+  field: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  if (!Array.isArray(field.columns)) return;
+  for (const column of field.columns) {
+    if (!column || typeof column !== 'object') continue;
+    if (typeof column.path !== 'string' || column.path.length === 0) continue;
+    pushEntry(out, [...blockRoot, 'columns', field.path, column.path], column.label, kind, { objectName });
   }
 }
 
@@ -876,6 +907,7 @@ function pushActionPreflight(
     if (!field || typeof field !== 'object') continue;
     if (typeof field.path !== 'string' || field.path.length === 0) continue;
     pushEntry(out, [...actionRoot, 'preflight', 'fields', field.path], field.label, kind, { objectName });
+    pushAnswerTableColumns(out, [...actionRoot, 'preflight'], field, kind, objectName);
   }
 }
 

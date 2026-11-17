@@ -3031,6 +3031,10 @@ const zh = {
       missingToken: '验证链接缺少令牌。',
       emailMissing: '缺少邮箱地址',
       resendButton: '重新发送验证邮件',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        '您的邮箱地址尚未验证。请向 {{email}} 发送一封验证邮件，然后点击邮件中的链接以验证您的账户。',
+      sendButton: '发送验证邮件',
       resending: '发送中…',
       resent: '邮件已发送！请查看收件箱',
       resentSuccess: '验证邮件已发送！',

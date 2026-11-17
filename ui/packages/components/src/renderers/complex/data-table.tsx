@@ -1374,6 +1374,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   const fieldAuthoring = useGridFieldAuthoring();
   const addColumnEnabled = !!fieldAuthoring?.onAddColumn;
   const editColumnEnabled = !!fieldAuthoring?.onEditColumn;
+  // A host that takes the header click (Studio selects the field) asks for a
+  // visible caret onto the column menu, so sort and hide stay one click away.
+  const columnMenuLabel = fieldAuthoring?.columnMenuLabel;
   // The table already implements column drag-reorder; a design host enables it by
   // providing onReorderFields (to persist the order to the object's field metadata).
   const reorderEnabled = reorderableColumns || !!fieldAuthoring?.onReorderFields;
@@ -3576,6 +3579,30 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                             className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
                           >
                             <Edit className="h-3 w-3" />
+                          </button>
+                        )}
+                        {columnMenuLabel && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              // Not the header's own click (sort, or the host's
+                              // select), and not the document listener that
+                              // closes an open menu.
+                              e.stopPropagation();
+                              const r = e.currentTarget.getBoundingClientRect();
+                              setContextMenu((open) =>
+                                open?.columnKey === col.accessorKey
+                                  ? null
+                                  : { x: r.left, y: r.bottom, columnKey: col.accessorKey },
+                              );
+                            }}
+                            title={columnMenuLabel}
+                            aria-label={columnMenuLabel}
+                            aria-expanded={contextMenu?.columnKey === col.accessorKey}
+                            data-testid={`grid-column-menu-${col.accessorKey}`}
+                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground"
+                          >
+                            <ChevronDown className="h-3 w-3" />
                           </button>
                         )}
                       </div>

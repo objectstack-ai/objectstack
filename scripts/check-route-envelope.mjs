@@ -1449,7 +1449,7 @@ const PLUGIN_ROUTE_MODULES = {
 
   // [#16569] FIRST AUDIT — swept in by the walk, verdict conformant. The module
   // rebuilds better-auth's `/organization/list-user-invitations` endpoint in place
-  // so the DECLARED `requireEmailVerificationOnInvitation` is honoured, and it
+  // so the listing's verified-address rule is plugin-auth's own, and it
   // BUILDS exactly ONE body: `return ctx.json(pendingInvitations)`. The argument
   // is an IDENTIFIER, so the counters read it as relayed — the same deliberate
   // blindness `inbound-rate-limit.ts` sits behind on surface 4 — and what it names

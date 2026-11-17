@@ -2736,6 +2736,7 @@ interface ActionEntryContext {
  *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
  *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
  *   | `preflight.fields.<path>`           | `preflight.fields[].path`            | `resolveActionPreflight`        |
+ *   | `resultDialog.columns.<path>.<col>` / `preflight.columns.<path>.<col>` | that field's `columns[].path` | `resolveActionResultDialog` / `resolveActionPreflight` |
  *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
  *   | `cancelText`                        | `confirmText` or a non-empty `params` (either dialog) | `translateAction` |
  *   | `refusals.<CODE>[.reasons.<REASON>]` | the action's `refusals` codes (and each code's `reasons`) | `resolveActionRefusal` (#34273) |
@@ -2766,6 +2767,8 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
   checkActionPreflightFields(findings, ctx);
+  checkActionAnswerTableColumns(findings, ctx, 'resultDialog');
+  checkActionAnswerTableColumns(findings, ctx, 'preflight');
   checkActionSubmitText(findings, ctx);
   checkActionCancelText(findings, ctx);
   checkActionRefusals(findings, ctx);
@@ -3257,6 +3260,78 @@ function checkActionPreflightFields(findings: TranslationRefFinding[], ctx: Acti
             `so nothing reads this label.`,
       hint: `Match the key to a declared preflight field's literal \`path\` (dots included), or drop it.`,
     });
+  }
+}
+
+/**
+ * [#34652] `resultDialog.columns.<path>.<column_path>` and
+ * `preflight.columns.<path>.<column_path>` — a table field's column header
+ * labels, keyed by the LITERAL `path` of a field the block's `fields[]`
+ * declares and then the LITERAL `path` of one of that field's `columns[]`
+ * (dots included at both levels).
+ *
+ * The resolvers map over the declared fields and, inside a field, over its
+ * declared `columns[]`, looking each header up by those two paths; a field
+ * path no row declares, a field that declares no `columns` (any format but
+ * `table`), or a column path the field's `columns[]` does not list is never
+ * read.
+ */
+function checkActionAnswerTableColumns(
+  findings: TranslationRefFinding[],
+  ctx: ActionEntryContext,
+  block: 'resultDialog' | 'preflight',
+): void {
+  const rawBlock = isRec(ctx.rawAction) ? ctx.rawAction[block] : undefined;
+  const rawColumns = asRecord(isRec(rawBlock) ? rawBlock.columns : undefined);
+  const rawFieldPaths = Object.keys(rawColumns);
+  if (rawFieldPaths.length === 0) return;
+
+  const declaredBlock = isRec(ctx.action[block]) ? ctx.action[block] : undefined;
+  const tables = new Map<string, Set<string>>();
+  for (const field of declaredBlock && Array.isArray(declaredBlock.fields) ? declaredBlock.fields : []) {
+    if (!isRec(field) || typeof field.path !== 'string' || !Array.isArray(field.columns)) continue;
+    const columnPaths = new Set<string>();
+    for (const column of field.columns) {
+      if (isRec(column) && typeof column.path === 'string') columnPaths.add(column.path);
+    }
+    tables.set(field.path, columnPaths);
+  }
+
+  const noun = block === 'resultDialog' ? 'result' : 'preflight';
+  for (const fieldPath of rawFieldPaths) {
+    const fieldMember = `${ctx.path}.${block}.columns${memberPath(fieldPath)}`;
+    const columns = tables.get(fieldPath);
+    if (!columns) {
+      findings.push({
+        severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        where: `${ctx.where} · ${noun} table "${fieldPath}"`,
+        path: fieldMember,
+        message: !declaredBlock
+          ? `Headers are keyed to ${noun} field "${fieldPath}", but ${ctx.subject} declares no ` +
+            `\`${block}\`, so nothing reads them.`
+          : `Headers are keyed to ${noun} field "${fieldPath}", but ${ctx.subject}'s \`${block}.fields\` ` +
+            `has no \`format: 'table'\` field at that path, so they are never shown.` +
+            suggest(fieldPath, tables.keys()),
+        hint:
+          `Key the headers by the literal \`path\` of a table field (dots included), or drop them.`,
+      });
+      continue;
+    }
+    for (const columnPath of Object.keys(asRecord(rawColumns[fieldPath]))) {
+      if (columns.has(columnPath)) continue;
+      findings.push({
+        severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+        rule: TRANSLATION_TARGET_UNKNOWN,
+        where: `${ctx.where} · ${noun} table "${fieldPath}" · column "${columnPath}"`,
+        path: `${fieldMember}${memberPath(columnPath)}`,
+        message:
+          `A header is keyed to column "${columnPath}" of ${noun} table "${fieldPath}", which its ` +
+          `\`columns\` does not list, so it is never shown.` +
+          suggest(columnPath, columns),
+        hint: `Match the key to a declared column's literal \`path\` (dots included), or drop it.`,
+      });
+    }
   }
 }
 

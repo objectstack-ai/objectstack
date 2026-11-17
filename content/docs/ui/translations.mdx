@@ -76,6 +76,7 @@ export default defineStack({
 | Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
 | Action labels, confirm text, success messages, disabled reasons, param dialog submit labels, confirm and param dialog dismiss labels | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
+| Column headers of a table in an action's result dialog or preflight panel | `objects.<name>._actions.<action>.resultDialog.columns.<field path>.<column path>` / `.preflight.columns.<field path>.<column path>` — a sibling of `fields`, both paths written literally, dots included |
 | Form sections | `objects.<name>._sections.<section>` |
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
@@ -160,7 +161,9 @@ is resolved by this one rule.
 `resultDialog` shown by actions like `create_user` (temporary password), 2FA
 backup codes, and OAuth client-secret rotation carries its own
 `_actions.<action>.resultDialog` slot (`title` / `description` / `acknowledge`
-and `fields` keyed by the literal result-field path, e.g. `"user.email"`).
+and `fields` keyed by the literal result-field path, e.g. `"user.email"`; a
+`format: 'table'` field's column headers sit beside `fields` under
+`columns.<field path>.<column path>`).
 `os i18n extract` emits these keys; the shipped platform dialogs ship
 en / zh-CN / ja-JP / es-ES copy. Separately, **platform notification and
 storage strings localize to the recipient's locale** — collaboration

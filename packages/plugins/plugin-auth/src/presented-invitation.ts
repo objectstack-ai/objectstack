@@ -41,6 +41,15 @@
  * An invitation id is the vendor's `generateId()` (plugin-auth configures no
  * id generator of its own): 32 characters of `[a-zA-Z0-9]` from a
  * cryptographic generator, pinned by this module's test.
+ *
+ * ## What admission by the presented id grants
+ *
+ * The account, and nothing more. The id is no proof of the invited mailbox
+ * (the accept link and a copied link both carry it), so a sign-up it admits is
+ * not bound into the deployment's organization while its address is
+ * unverified (`settleMembership`, `auth-manager-membership-admission.ts`), and
+ * it joins by accepting the invitation, which needs a verified address
+ * (`invitation-accept-verified-email.ts`).
  */
 
 import { InvitationStatus } from '@objectstack/spec/identity';
