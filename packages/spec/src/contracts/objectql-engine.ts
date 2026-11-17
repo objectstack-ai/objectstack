@@ -290,11 +290,12 @@ export type EngineFilterJudgement =
  * guarded call into a `possibly undefined` error and push code back toward the
  * `any` this contract exists to remove.
  *
- * Three members are optional by ruling, not by this default: {@link judgeFilter}
+ * Four members are optional by ruling, not by this default: {@link judgeFilter}
  * (#19995 ruling C), {@link getDisabledActions} (#27842 ruling letter B,
- * the `getFlowRegistration?` shape) and {@link getCascadeDeleteObjects}
- * (#28001, that shape again). Their callers must work with an engine
- * that lacks them, so the optional mark states that requirement in the type.
+ * the `getFlowRegistration?` shape), {@link getCascadeDeleteObjects}
+ * (#28001, that shape again) and {@link deferSummaryRecompute} (#33795,
+ * ruling 6922040858). Their callers must work with an engine that lacks
+ * them, so the optional mark states that requirement in the type.
  */
 export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
     // ── Schema access ────────────────────────────────────────────────────
@@ -646,4 +647,59 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
         baseContext?: any,
         opts?: EngineTransactionOptions,
     ): Promise<T>;
+
+    // ── Batch scope (#33795, ruling 6922040858) ──────────────────────────
+    /**
+     * Run `callback` as ONE batch for roll-up summaries: the `summary`
+     * recompute every write inside it would run after itself is recorded
+     * instead, and runs once, over every recorded row, when the callback
+     * settles, where a per-row loop pays a recompute per row. (How few
+     * statements that takes is the implementation's, not this contract's.)
+     *
+     * Shape, as the ruling settled it: a callback, entered and left by the
+     * engine as {@link transaction} is, with no begin and end pair; a nested
+     * call joins the open scope and the outermost call runs the recompute.
+     *
+     * It defers the roll-up recompute ONLY. Each write's hooks, validation,
+     * audit and realtime run where they run outside a scope. A summary field a
+     * rule reads is not deferred (ruling 6928862195). A validation rule of any
+     * object reading it one hop through a reference, a detail object's
+     * `requiredWhen` / `readonlyWhen` reading it on `parent`, a rule of the
+     * summary's own object reading it on its own row, a declared bound
+     * (`min`, `max`, `precision`, `unique`, …) or unique index on the summary,
+     * or any stored computed field of that object calculated from it (the
+     * recompute's write judges its value whatever it declares), each counts,
+     * whether it reads the
+     * summary directly, through a formula or stored computed field calculated
+     * from it, or up a chain of summaries; so does a stored computed field of
+     * any object that reads it one hop, since it stores what it read. Any of
+     * them makes the recompute of every roll-up of the child object written
+     * run after each row, so a rule's answer, and a stored value, during the
+     * batch is what one-by-one writes give. A hook or flow step that reads a
+     * parent's summary during the batch reads the value from before the
+     * batch, as it does during a multi-row insert.
+     * The scope is ambient: it covers every write made while the callback
+     * runs under the transaction the scope was opened in (or under none, when
+     * it was opened outside one), including writes a hook issues on another
+     * object (a hook's own insert, update or delete), whose roll-ups are
+     * deferred to the end too. A write under another transaction opened
+     * within the scope (a hook's own `ctx.api.transaction`, an atomic batch
+     * reached from inside a non-atomic one) recomputes at once, inside that
+     * transaction, as outside any scope: it may commit before the scope ends.
+     * A summary over a summary still recomputes in dependency order.
+     *
+     * Every way out of the callback recomputes. Resolved: the callback's
+     * result, or — when a parent cannot be recomputed after retries — the
+     * engine's stale-roll-up refusal (`ERR_SUMMARY_RECOMPUTE`) whose `written`
+     * is that result: the writes are stored, only the named summaries are
+     * stale. Rejected: the recompute runs for the writes that landed, and the
+     * callback's own error is rethrown. Opened inside a {@link transaction},
+     * the scope's recompute runs before the commit, so a caller that lets the
+     * refusal escape rolls the batch back.
+     *
+     * OPTIONAL by ruling: a caller probes
+     * `typeof engine.deferSummaryRecompute === 'function'`, and without it
+     * keeps the per-row recompute — the same values, more statements.
+     */
+    deferSummaryRecompute?<T>(callback: () => Promise<T>): Promise<T>;
 }
