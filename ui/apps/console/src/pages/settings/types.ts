@@ -176,9 +176,13 @@ export interface ResolvedSettingValue<T = unknown> {
 
 /**
  * One key's value in the RUNNING system, as the namespace's owner states it
- * (service-settings `SettingsLiveValue`). `value` is one of the key's options,
- * `null` exactly when `source` is `'none'`; `'environment'` means the runtime
- * detected it from its own boot environment, outside the namespace.
+ * (service-settings `SettingsLiveValue`). `value` is one of the key's options;
+ * `null` when `source` is `'none'`, or when `source` is `'environment'` and no
+ * option names what is in use (a transport the host hands over). Whether
+ * something is in use is read from `source`, never from a `null` value.
+ * `'settings'` always names an option; `'environment'` means the runtime
+ * detected it from its own boot environment, or its host handed it over,
+ * outside the namespace.
  */
 export interface SettingsLiveValue {
   value: string | null;
