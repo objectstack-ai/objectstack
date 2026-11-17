@@ -149,8 +149,10 @@ A built-in platform-scoped capability the auditor needs anyway, such as
   and removes it, whether or not its holder is also an organization
   administrator; a scope whose allowlist leaves it out is still refused
   `403 DELEGATION_SCOPE_VIOLATION`.
-- **An organization administrator is refused** `403 PERMISSION_DENIED`,
-  naming the set and the boundary condition it fails.
+- **An organization administrator is refused** unless a scope it holds
+  allowlists the set: `403 PERMISSION_DENIED`, naming the set and the boundary
+  condition it fails — or, when it also holds a delegated scope that leaves the
+  set out, that scope's `403 DELEGATION_SCOPE_VIOLATION`.
 - **The ceiling.** The platform administrator (`admin_full_access`) can still
   assign any set, the auditor's included. The split separates the officers
   below that ceiling; it does not bind the platform administrator.
