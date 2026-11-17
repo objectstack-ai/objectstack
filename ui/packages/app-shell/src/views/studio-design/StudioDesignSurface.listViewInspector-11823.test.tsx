@@ -175,15 +175,17 @@ describe('an object leaf\'s Properties panel edits its list view (objectui#11823
     expect(within(panel).getByTestId('list-view-filter')).toHaveTextContent('Filter');
     expect(within(panel).getByTestId('list-view-sort')).toHaveTextContent('Sort');
     // The loaded view: its two columns, and its filter summarised by field.
-    expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('title');
-    expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('status');
+    // Rows read the field label; the field name is on the row's hover title (objectstack#34796).
+    expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('Title');
+    expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('Status');
+    expect(within(panel).getByTestId('list-view-columns').querySelector('[title="status"]')).not.toBeNull();
     expect(within(panel).getByTestId('filter-builder-trigger')).toHaveTextContent('Status');
     expect(document.body.textContent).not.toContain(NO_BLOCKS);
   });
 
   it('writes an edit to the package draft as a spec-valid view item, and the canvas shows it', async () => {
     const panel = await openObjectLeaf();
-    await waitFor(() => expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('status'));
+    await waitFor(() => expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('Status'));
 
     // objectui#12693 — the row, and so its remove control, is named by the field's label.
     fireEvent.click(within(panel).getByRole('button', { name: 'Remove Status' }));
@@ -263,7 +265,7 @@ describe('an object leaf\'s Properties panel edits its list view (objectui#11823
 
   it('shows the panel read-only on a read-only package, and writes nothing', async () => {
     const panel = await openObjectLeaf(true);
-    await waitFor(() => expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('status'));
+    await waitFor(() => expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('Status'));
 
     expect(within(panel).getByTestId('list-view-read-only')).toBeInTheDocument();
     // objectui#12693 — the name the remove control would carry is the field's label.
@@ -285,7 +287,7 @@ describe('an object leaf\'s Properties panel edits its list view (objectui#11823
     });
     mockClient.save.mockRejectedValueOnce(refusal);
     const panel = await openObjectLeaf();
-    await waitFor(() => expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('status'));
+    await waitFor(() => expect(within(panel).getByTestId('list-view-columns')).toHaveTextContent('Status'));
     await addSortOnFirstField(panel);
 
     const strip = await within(panel).findByTestId('list-view-refusal', undefined, { timeout: 8000 });
