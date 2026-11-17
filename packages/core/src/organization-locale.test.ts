@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { readOrganizationLocaleSetting, resolveOrganizationLocale } from './organization-locale.js';
+import { readOrganizationLocaleSetting, readOrganizationTextLocale, resolveOrganizationLocale } from './organization-locale.js';
 
 /** A settings door answering `localization.locale` with `answer`, recording the scope it was asked in. */
 function settingsAnswering(answer: { value?: unknown; source?: string } | undefined) {
@@ -46,5 +46,43 @@ describe('resolveOrganizationLocale — the deployment-default ladder for text w
     expect(await readOrganizationLocaleSetting(settings, undefined)).toBe('fr-FR');
     expect(settings.get).toHaveBeenCalledWith('localization', 'locale', {});
     expect(await readOrganizationLocaleSetting({ get: 'not a function' }, 'org_1')).toBeUndefined();
+  });
+});
+
+describe('readOrganizationTextLocale — the one reading every writer of organization text shares (#34374)', () => {
+  const services = (entries: Record<string, unknown>) => (name: string): unknown => {
+    if (name in entries) return entries[name];
+    throw new Error(`service '${name}' not registered`);
+  };
+  const throwing = (code: string) => ({ get: vi.fn(async () => { throw Object.assign(new Error(code), { code }); }) });
+
+  it('answers the Localization setting somebody set, asked in the organization', async () => {
+    const settings = settingsAnswering({ value: 'ja-JP', source: 'tenant' });
+    expect(await readOrganizationTextLocale(services({ settings, i18n: i18nDefault('zh-CN') }), 'org_1')).toBe('ja-JP');
+    expect(settings.get).toHaveBeenCalledWith('localization', 'locale', { tenantId: 'org_1' });
+  });
+
+  it('answers the app default when no settings service is registered, or none is set', async () => {
+    expect(await readOrganizationTextLocale(services({ i18n: i18nDefault('zh-CN') }), 'org_1')).toBe('zh-CN');
+    expect(await readOrganizationTextLocale(
+      services({ settings: settingsAnswering({ value: 'en-US', source: 'default' }), i18n: i18nDefault('zh-CN') }), 'org_1',
+    )).toBe('zh-CN');
+  });
+
+  it('answers an unregistered Localization namespace or key as not set', async () => {
+    for (const code of ['SETTINGS_UNKNOWN_NAMESPACE', 'SETTINGS_UNKNOWN_KEY']) {
+      expect(await readOrganizationTextLocale(services({ settings: throwing(code), i18n: i18nDefault('zh-CN') }), 'org_1'))
+        .toBe('zh-CN');
+    }
+  });
+
+  it('rejects when the setting cannot be read for any other reason (never another language)', async () => {
+    await expect(readOrganizationTextLocale(
+      services({ settings: throwing('SETTINGS_STORE_UNAVAILABLE'), i18n: i18nDefault('zh-CN') }), 'org_1',
+    )).rejects.toThrow('SETTINGS_STORE_UNAVAILABLE');
+  });
+
+  it('answers nothing with no service lookup at all', async () => {
+    expect(await readOrganizationTextLocale(undefined, 'org_1')).toBeUndefined();
   });
 });
