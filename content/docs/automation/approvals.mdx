@@ -594,9 +594,9 @@ surface that carries the **decision actions**: approve, reject, return, reassign
 request info, delegate, remind, override.
 
 <Callout type="info">
-**Why the raw `sys_approval_request` table is not that surface.** Every decision
-action on the object is gated on the `record.viewer` flags (`can_act`, or an
-override flag), and the `viewer` block is computed and attached only
+**Why the raw `sys_approval_request` table is not that surface.** Every
+action on the object is gated on the `record.viewer` flags (`can_act`,
+`is_submitter`, or an override flag), and the `viewer` block is computed and attached only
 by the approvals REST path (`/api/v1/approvals/*`) — never by the generic data
 API a plain object view reads. Browse the table directly and you get a correct,
 completely inert list: the rows are there, the buttons are not. That inertness
@@ -990,20 +990,33 @@ authoritative: it finalizes the node even under `unanimous`/`quorum`/`per_group`
 and is audited under the admin's own id. Prefer a guaranteed-staffed fallback
 approver so the set is never empty in the first place.
 
-The override never **approves** a request its actor submitted. An
-administrator who submitted a request and holds no slot on it gets
-`403 FORBIDDEN` from `approve`, whatever the step's `excludeSubmitter` says,
-and an override `reassign` never hands a request to its submitter, whoever
-makes it (`400 VALIDATION_FAILED`). Rejecting or recalling their own request
-stays open to them. A submitter who holds a real slot on the step is
-`excludeSubmitter`'s question, not the override's.
+The override never **approves** a request its actor submitted, and is never
+the means by which they take a slot on it. Whatever the step's
+`excludeSubmitter` says:
+
+- an administrator who submitted a request and holds no slot on it gets
+  `403 FORBIDDEN` from `approve`;
+- an override `reassign` never hands a request to its submitter, whoever makes
+  it: a target naming them (their user id, or their email in any letter case)
+  or a position only they hold answers `400 VALIDATION_FAILED`;
+- when the submitter makes the override `reassign` themselves, every target
+  they could act under is refused the same way, a position they share with
+  others included.
+
+Rejecting or recalling their own request stays open to them. A different
+administrator may still reassign the request to a position the submitter shares
+with others: the submitter is then one of its holders, and whether a holder may
+approve their own request is `excludeSubmitter`'s question, as it is for any
+submitter who holds a real slot on the step.
 
 If your own request is stuck, reassign it to someone who can decide it, or
 recall it — which unlocks the record — and send the record for approval again.
 The new request resolves its approvers afresh: when they still name no one, it
 opens on the organization's administrators under `admin_rescue`, as ordinary
-approvers, and a step that sets `excludeSubmitter: true` keeps the submitter
-off that slate.
+approvers. Without `excludeSubmitter: true` on the step, a submitter who is one
+of those administrators is on that slate and may approve the request as an
+ordinary approver; a step that sets it keeps the submitter off the slate, so
+another administrator decides.
 
 The same override is the only way to decide a slot no position holder addresses
 since ADR-0090 D3 retired the pre-rename word: a request a 15.x-era release stored
@@ -1024,9 +1037,13 @@ rights. A row written before the column existed carries no value at all, which
 reads as *not recorded* rather than as *not an override*. Without it, an
 override and an ordinary approval were byte-for-byte identical. The slate's
 approvers are not told either: once the override decides the request it is no
-longer pending on them, so it leaves their queue and their view, and reading or
-deciding it answers `404 REQUEST_NOT_FOUND`, as for any request they may not
-read.
+longer pending on them, so it leaves their queue. An approver with no other read
+on it loses sight of it, and reading or deciding it answers
+`404 REQUEST_NOT_FOUND`, as for any request they may not read. One who keeps a
+read — they already acted on it (under their own id or a position slot they
+hold), they submitted it, or the object's `approvalsVisibleToReaders` lets record
+readers read its approvals and they read the record — still sees it decided, and
+a decision answers `409 INVALID_STATE`.
 </Callout>
 
 <Callout type="info">

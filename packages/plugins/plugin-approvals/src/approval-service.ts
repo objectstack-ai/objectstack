@@ -1272,6 +1272,21 @@ function overrideApprovesOwnRequest(raw: { submitter_id?: unknown }, person: str
 }
 
 /**
+ * [Maintainer ruling 2026-11-17, option B] Does `slots` hold `address`? A
+ * user id or a `type:value` literal is matched exactly, as a slate stores it;
+ * an email in any letter case, the way `resolveActor` admits a named email
+ * (`callerHasEmail`) — so a reassign check that keeps the submitter off a slot
+ * refuses every spelling of their address that the decision door would let
+ * them act under.
+ */
+function slotsName(slots: readonly string[], address: string): boolean {
+  if (slots.includes(address)) return true;
+  if (!address.includes('@')) return false;
+  const folded = address.toLowerCase();
+  return slots.some((slot) => slot.includes('@') && slot.toLowerCase() === folded);
+}
+
+/**
  * Max hops when following an OOO delegation chain (#1322 M1): A out → B, B out
  * → C, … Bounds the walk so a mis-configured chain can't loop or resolve
  * unboundedly; a cycle or self-reference also stops it early.
@@ -7391,7 +7406,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // AFTER the authorization branches above, so a caller who may not move
     // this slot learns nothing about the directory from the answer.
     await this.assertReassignTargetResolves(to, raw.organization_id ?? null);
-    await this.assertReassignTargetIsNotSubmitter(raw, to, viaOverride);
+    await this.assertReassignTargetIsNotSubmitter(raw, to, viaOverride, context);
     const now = this.clock.now().toISOString();
     // Audit first, then mutate — mirrors decideNode(), so a failed audit
     // write can never leave a moved slot without a trail.
@@ -7496,34 +7511,77 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    *
    * [Maintainer ruling 2026-11-17, option B] The same target is refused for a
    * reassign admitted ONLY through the #3424 override (`viaOverride`: the
-   * actor holds no slot), whatever `excludeSubmitter` says. The override
-   * never approves a request its actor submitted (`decideNode`), and it never
-   * hands the request's slot to its submitter either, which would make them
-   * an ordinary approver of their own request. A slot holder's own hand-off
-   * is judged by `excludeSubmitter` alone, as before.
+   * actor holds no slot), whatever `excludeSubmitter` says: the override never
+   * hands the request's slot to its submitter. And when the override actor IS
+   * the submitter, the override is never the means by which they take a slot
+   * on their own request: every target they could act under is refused — their
+   * user id, their email, and ANY position they hold, one they share with
+   * others included — since `decideNode` judges a slot they then take as an
+   * ordinary slot holder's. A reassign by a different administrator, and a slot
+   * holder's own hand-off under `excludeSubmitter`, keep the only-holder rule
+   * for a position: there the submitter is one holder among others on a slate
+   * someone else chose, which is `excludeSubmitter`'s question.
+   *
+   * An email target is compared with the submitter's in any letter case
+   * ({@link slotsName}), as `resolveActor` admits a named email
+   * ({@link ApprovalService.callerHasEmail}), so no spelling of the
+   * submitter's own address passes.
    */
-  private async assertReassignTargetIsNotSubmitter(raw: any, to: string, viaOverride: boolean): Promise<void> {
+  private async assertReassignTargetIsNotSubmitter(
+    raw: any,
+    to: string,
+    viaOverride: boolean,
+    context: ExecutionContext,
+  ): Promise<void> {
     const excludes = parseJson<{ excludeSubmitter?: unknown } | null>(raw.node_config_json, null)
       ?.excludeSubmitter === true;
     if (!excludes && !viaOverride) return;
     const submitterSlots = await this.submitterSlots(raw.submitter_id);
     if (!submitterSlots.length) return;
+    // The override actor is the submitter: the person the context vouches
+    // for, the identity `decideNode` refuses an override approval by.
+    const actorIsSubmitter = viaOverride && overrideApprovesOwnRequest(raw, recordedActor(context));
     const position = addressedPosition(to);
+    const holders = position !== undefined
+      ? await this.expandPositionUsers(position, raw.organization_id ?? null)
+      : [];
     const handsBack = position !== undefined
-      ? (await this.expandPositionUsers(position, raw.organization_id ?? null))
-        .every((holder) => submitterSlots.includes(holder))
-      : submitterSlots.includes(to);
-    if (!handsBack) return;
-    const named = position !== undefined
-      ? `the only holder of position '${position}' in this request's organization is`
-      : 'it names';
-    if (excludes) {
+      ? holders.every((holder) => slotsName(submitterSlots, holder))
+      : slotsName(submitterSlots, to);
+    if (handsBack && excludes) {
+      const named = position !== undefined
+        ? `the only holder of position '${position}' in this request's organization is`
+        : 'it names';
       throw new Error(
         `VALIDATION_FAILED: cannot reassign to '${to}' — ${named} the request's submitter, and this approval `
         + `step sets excludeSubmitter, so the submitter cannot approve it. The request and its approvers are `
         + `unchanged. Reassign to someone else.`,
       );
     }
+    if (actorIsSubmitter) {
+      // Every address the submitter acts under: the stored ones, and the
+      // `position:<p>` address of each position the context resolved for them.
+      const acting = [
+        ...submitterSlots,
+        ...actingAddresses({ userId: String(raw.submitter_id), positions: context?.positions ?? [] }),
+      ];
+      const canTake = position !== undefined
+        ? slotsName(acting, to) || holders.some((holder) => slotsName(submitterSlots, holder))
+        : slotsName(acting, to);
+      if (canTake) {
+        throw new Error(
+          `VALIDATION_FAILED: cannot reassign to '${to}' — ${position !== undefined
+            ? `the request's submitter holds position '${position}'`
+            : "it names the request's submitter"}, and a reassign the submitter makes through the administrator `
+          + `override never hands their own request to a slot they can take. The request and its approvers are `
+          + `unchanged. Reassign to someone who did not submit it.`,
+        );
+      }
+    }
+    if (!handsBack) return;
+    const named = position !== undefined
+      ? `the only holder of position '${position}' in this request's organization is`
+      : 'it names';
     throw new Error(
       `VALIDATION_FAILED: cannot reassign to '${to}' — ${named} the request's submitter, and a reassign made `
       + `through the administrator override never hands a request to the person who submitted it. The request `

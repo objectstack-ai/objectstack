@@ -307,15 +307,37 @@ describe('the override never approves its actor\'s own request', () => {
     const own = await open(ADMIN);
     for (const to of ['root', 'root@example.com']) {
       await expect(svc.reassign(own.id, { actorId: 'root', to }, ADMIN))
-        .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to '.+' — it names the request's submitter, and a reassign made through the administrator override/);
+        .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to '.+' — it names the request's submitter, and a reassign the submitter makes through the administrator override/);
     }
     // Another administrator's override may not hand it to the submitter either.
     const members = await open(SUBMITTER);
     await expect(svc.reassign(members.id, { actorId: 'root2', to: 'u1' }, OTHER_ADMIN))
-      .rejects.toThrow(/^VALIDATION_FAILED/);
+      .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'u1' — it names the request's submitter, and a reassign made through the administrator override/);
     expect((await svc.getRequest(own.id, SYS))!.pending_approvers).toEqual(['u9']);
     expect((await svc.getRequest(members.id, SYS))!.pending_approvers).toEqual(['u9']);
     expect(await actions(own.id)).toEqual(['submit']);
+  });
+
+  it('refuses an override reassign to the submitter\'s email in another letter case, where the store matches emails that way', async () => {
+    // A store whose collation folds letter case (MySQL's default) resolves a
+    // differently-cased email to the submitter's account, and the decision door
+    // admits a named email in any case: the comparison must not be narrower.
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      const email = options?.where?.email;
+      if (object === 'sys_user' && typeof email === 'string') {
+        return engine._tables['sys_user'].filter((u) => String(u.email ?? '').toLowerCase() === email.toLowerCase());
+      }
+      return find(object, options);
+    };
+    const own = await open(ADMIN);
+    await expect(svc.reassign(own.id, { actorId: 'root', to: 'ROOT@Example.COM' }, ADMIN))
+      .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'ROOT@Example.COM' — it names the request's submitter/);
+    const members = await open(SUBMITTER);
+    await expect(svc.reassign(members.id, { actorId: 'root2', to: 'U1@EXAMPLE.com' }, OTHER_ADMIN))
+      .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'U1@EXAMPLE.com' — it names the request's submitter/);
+    expect((await svc.getRequest(own.id, SYS))!.pending_approvers).toEqual(['u9']);
+    expect((await svc.getRequest(members.id, SYS))!.pending_approvers).toEqual(['u9']);
   });
 
   it('CONTROL: an administrator who did not submit the request still approves it through the override, audited', async () => {
