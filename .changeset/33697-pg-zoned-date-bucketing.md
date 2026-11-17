@@ -1,12 +1,12 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/driver-sql': patch
 '@objectstack/objectql': patch
 '@objectstack/service-analytics': patch
 ---
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added — `supports.zonedDateBucketing` is a new key a driver author can write on `DriverCapabilities` (`DriverConfig.capabilities`), recorded in `packages/spec/authorable-surface/data.json`.
 
 PostgreSQL now buckets a non-UTC reference timezone in the database (ADR-0053 Phase 2 D2 as amended). A dashboard grouped by day, week, month, quarter or year in a zone such as `Asia/Taipei` or `Europe/Berlin` no longer pulls every scoped row into the application on PostgreSQL: the bucket is computed by `to_char((col)::timestamptz AT TIME ZONE $zone, …)` with the zone bound, DST-correct, and its labels equal the in-memory ones. A `Field.date` keeps its calendar day under every zone.
 
