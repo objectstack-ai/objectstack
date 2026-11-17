@@ -456,7 +456,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // read answered `code` = the base's `fr-FR` before a restart and
         // `null` after it (404 on `/layers`), with a dependent's `en-US` row
         // stored. A named member is never answered here (its own lookups ran).
-        if (code === null && member === undefined && bareActionAnswer === undefined) {
+        // [#34248] Nor is a bare doc read's environment entry: beside two
+        // enabled holders that entry is the read's answer, and the artifact
+        // lookup's first composite is the holder registered first, which the
+        // read never serves (as for the bare action read's judged answer).
+        if (code === null && member === undefined && bareActionAnswer === undefined && bareDocEnvironmentEntry === undefined) {
             code = host.lookupArtifactItem(request.type, request.name, request.packageId) ?? null;
         }
     }
