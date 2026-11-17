@@ -4312,7 +4312,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     };
 
     type Address = 'bound' | 'global';
-    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog' | 'preflight' | 'noRefusals';
+    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog' | 'preflight' | 'noRefusals' | 'noTexts';
     /**
      * Which declared action a ghost is written under, per address. `noDialog`
      * names an action that declares no `resultDialog`: the dialog's leaves
@@ -4334,6 +4334,9 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       // [#34273] An action that declares no `refusals`, so a refusal key under
       // it is read by nothing (`coverageStack` gives the outcome hosts one).
       noRefusals: { bound: 'plain_env', global: 'mint_token' },
+      // [#34374 PR2] An action that declares no `texts`, so a text key under
+      // it is read by nothing (`coverageStack` gives the outcome hosts some).
+      noTexts: { bound: 'plain_env', global: 'mint_token' },
     };
     type Coverage =
       | { kind: 'reference-checked'; host: Host; ghost: Record<string, unknown>; suffix: string; rule: string }
@@ -4447,6 +4450,13 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         suffix: '.refusals.GHOST_CODE',
         rule: TRANSLATION_TARGET_UNKNOWN,
       },
+      texts: {
+        kind: 'reference-checked',
+        host: 'noTexts',
+        ghost: { texts: { ghost_key: { message: 'x' } } },
+        suffix: '.texts.ghost_key',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
     };
 
     // The global action needs a param with inline options for the options ghost.
@@ -4458,6 +4468,10 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       for (const name of [HOST.outcome.bound, HOST.outcome.global]) {
         (stack.actions.find((a) => a.name === name) as Record<string, unknown>).refusals = {
           NOT_READY: { message: 'Not ready.', reasons: { stale: { message: 'Stale.' } } },
+        };
+        // [#34374 PR2] …and declared texts.
+        (stack.actions.find((a) => a.name === name) as Record<string, unknown>).texts = {
+          audit_line: { message: 'Done.' },
         };
       }
       return stack;
@@ -4504,6 +4518,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
             outcomeMessages: address === 'bound' ? { archived: 'x' } : { up_to_date: 'x' },
             params: { mode: { label: 'x', helpText: 'x', placeholder: 'x', options: { soft: 'x' } } },
             refusals: { NOT_READY: { message: 'x', reasons: { stale: { message: 'x' } } } },
+            texts: { audit_line: { message: 'x' } },
           },
           [dialog]: {
             resultDialog: { title: 'x', description: 'x', acknowledge: 'x', fields: { token: 'x' }, columns: { rows: { id: 'x' } } },
@@ -5309,5 +5324,49 @@ describe('validateTranslationReferences — action refusals (#34273)', () => {
     ]);
     expect(findings[0].message).toContain('Did you mean "closed"?');
     expect(findings[1].message).toContain('declares no `reasons` under that code');
+  });
+});
+
+describe('validateTranslationReferences — action texts (#34374 PR2)', () => {
+  const texts = { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } };
+  const body = { language: 'js', source: "await ctx.text('email_subject', { subject: input.subject });" };
+  const textStack = (bundle: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_contact', label: 'Contact', fields: { name: { type: 'text', label: 'Name' } } }],
+    actions: [
+      { name: 'send_email', label: 'Send email', objectName: 'crm_contact', type: 'script', body, texts },
+      { name: 'send_digest', label: 'Send digest', type: 'script', body, texts },
+      { name: 'plain_contact', label: 'Plain', objectName: 'crm_contact', type: 'script', target: 'plainContact' },
+    ],
+    translations: [{ 'zh-CN': bundle }],
+  });
+  const ON = 'translations[0]["zh-CN"].objects.crm_contact._actions';
+  const GLOBAL = 'translations[0]["zh-CN"].globalActions';
+
+  it('CONTROL: reports nothing for declared text keys, bound and object-less', () => {
+    expect(validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { send_email: { texts: { email_subject: { message: '邮件：{{ subject }}' } } } } } },
+      globalActions: { send_digest: { texts: { email_subject: { message: '邮件：{{ subject }}' } } } },
+    }))).toEqual([]);
+  });
+
+  it('refuses a key the action does not declare, with the nearest declared key offered, at both addresses', () => {
+    const findings = validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { send_email: { texts: { email_subjct: { message: 'x' } } } } } },
+      globalActions: { send_digest: { texts: { email_subjct: { message: 'x' } } } },
+    }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', `${ON}.send_email.texts.email_subjct`],
+      [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.send_digest.texts.email_subjct`],
+    ]);
+    expect(findings[0].message).toContain('a key action "send_email" does not declare under `texts`');
+    expect(findings[0].message).toContain('Did you mean "email_subject"?');
+  });
+
+  it('refuses a text key on an action that declares no `texts`', () => {
+    const findings = validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { plain_contact: { texts: { any: { message: 'x' } } } } } },
+    }));
+    expect(findings.map((f) => f.path)).toEqual([`${ON}.plain_contact.texts.any`]);
+    expect(findings[0].message).toContain('action "plain_contact" declares no `texts`');
   });
 });

@@ -13,6 +13,7 @@
     "ui/ActionParam",
     "ui/ActionRefusal",
     "ui/ActionSession",
+    "ui/ActionText",
     "ui/ActionType",
     "ui/AddRecordConfig",
     "ui/App",

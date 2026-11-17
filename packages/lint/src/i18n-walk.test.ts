@@ -223,6 +223,39 @@ describe('collectExpectedEntries — answer table column labels', () => {
   });
 });
 
+describe('collectExpectedEntries — an action\'s declared texts (#34374 PR2)', () => {
+  const texts = { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } };
+  const body = { language: 'js', source: "await ctx.text('email_subject', { subject: input.subject });" };
+  const entries = collectExpectedEntries({
+    objects: [{
+      name: 'crm_contact',
+      fields: {},
+      actions: [{ name: 'send_email', label: 'Send email', type: 'script', body, texts }],
+    }],
+    actions: [
+      { name: 'send_digest', label: 'Send digest', type: 'script', body, texts },
+      { name: 'log_call', label: 'Log call', objectName: 'crm_contact', type: 'script', body, texts },
+    ],
+  }, { warnedGroups: new Set() });
+  const at = (path: string) => entries.find((e) => e.path.join('.') === path);
+
+  it('yields objects.<object>._actions.<action>.texts.<key>.message with the declared sentence, for an inline action', () => {
+    expect(at('objects.crm_contact._actions.send_email.texts.email_subject.message')).toMatchObject({
+      sourceValue: 'Email: {{ subject }}', source: 'action', objectName: 'crm_contact',
+    });
+  });
+
+  it('yields a top-level bound action\'s texts under its object', () => {
+    expect(at('objects.crm_contact._actions.log_call.texts.email_subject.message')?.sourceValue).toBe('Email: {{ subject }}');
+  });
+
+  it('yields an object-less action\'s texts under globalActions', () => {
+    expect(at('globalActions.send_digest.texts.email_subject.message')).toMatchObject({
+      sourceValue: 'Email: {{ subject }}', source: 'globalAction',
+    });
+  });
+});
+
 describe('collectExpectedEntries — an action\'s refusal catalogue (#34273)', () => {
   const refusals = {
     NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
