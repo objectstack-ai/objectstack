@@ -1117,10 +1117,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // when Test UI does, which a diff confined to this package never starts;
     // this half runs on every change to the render's inputs, and a change to
     // the mirror has to re-run it too.
+    //
+    // src/skill-single-source-34686.test.ts reads the published ask-data skill
+    // and pins the data loop `GET /mcp/skill` serves (the generated
+    // `ask-skill.generated.ts`, rendered by `renderSkillMarkdown`) byte-equal
+    // to it: the skill is the one source, so an edit to it alone has to re-run
+    // this suite, or the served copy drifts with the gate green. One file, not
+    // `skills/**`: nothing else under the catalog is read.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
       'ui/apps/console/src/pages/developer/objectstack-skill.ts',
+      'skills/objectstack-ask/SKILL.md',
     ],
   },
   '@objectstack/metadata': {
