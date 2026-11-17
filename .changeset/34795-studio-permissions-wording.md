@@ -17,4 +17,6 @@ Studio's permissions page now reads in the words an app builder uses, in zh-CN a
 - **The bulk buttons show on every row**, not only on the row under the pointer, as "全选 · 只读 · 清空" ("All · Read only · None"), then the CRUD set as a fourth button ("增删改查", "Read & write"). Each button writes what All / R / None / CRUD wrote before. The footnote that explained the hidden buttons is gone.
 - **An object row shows the object's label**, in the matrix and in the package's "who can see which records" overview. Its machine name is the tooltip. The record-visibility chip stays on one line now that its labels are longer.
 
+The Draft Changes publish refusal now points to "Settings → Who can see which records" (all 11 language packs), since the old "Settings → Record sharing" label no longer exists.
+
 Setup's permission-set page reads some of the same strings, so it changes too: the bulk buttons' labels, the sharing values, and the record-scope-rules, menu-visibility and system-features headings. Its layout does not change.
