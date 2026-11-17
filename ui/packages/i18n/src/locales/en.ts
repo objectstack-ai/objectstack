@@ -274,6 +274,11 @@ const en = {
     // only displace it by authoring a `description`, which makes a VISIBLE
     // subtitle appear on every form — so the fallback has to come from here.
     dialogDescriptionFallback: 'Complete the form fields, then submit or cancel.',
+    // The form section navigation (objectstack#34605): its accessible name,
+    // and the screen-reader text of a section's error count, which is drawn
+    // as a bare number beside the section name.
+    sectionNav: 'Form sections',
+    sectionNavErrors: 'Fields to fix: {{number}}',
     // The hint under a field the caller may read but not write, shown when the
     // field declares no description of its own (objectui#11071).
     deniedDescription: 'You do not have edit access to this field.',
@@ -2762,6 +2767,9 @@ const en = {
           titleGeneric: 'Edit this app',
           description:
             'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         },
       },
       clearConversation: 'Clear',
@@ -2974,6 +2982,11 @@ const en = {
         resize: 'Resize chat',
         collapse: 'Collapse chat',
         maximize: 'Open full page',
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: 'History',
+        backToChat: 'Back to chat',
+        expand: 'Expand',
+        restore: 'Restore side panel',
         open: 'Open assistant',
         // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
         planAwaitingApproval: 'A proposed plan is waiting for your approval',

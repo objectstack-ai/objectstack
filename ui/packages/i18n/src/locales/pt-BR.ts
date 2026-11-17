@@ -191,6 +191,8 @@ const pt = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Preencha os campos do formulário e depois envie ou cancele.",
+    sectionNav: "Seções do formulário",
+    sectionNavErrors: "Campos a corrigir: {{number}}",
     deniedDescription: "Você não tem permissão para editar este campo.",
     serverDefaultHint: "Definido automaticamente ao salvar.",
     requiredForAction: "Obrigatório para executar «{{action}}».",
@@ -2071,6 +2073,9 @@ const pt = {
           title: "Editando “{{app}}”",
           titleGeneric: "Editar este aplicativo",
           description: "O que você quer mudar? Eu altero este aplicativo no lugar — adicionar um campo, objeto, visão ou painel, ou ajustar o que já existe.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Pergunte sobre os dados deste app — contagens, listas e resumos — ou diga o que mudar, e eu modifico o app na hora: um campo, um objeto, uma visualização ou um painel.",
         },
       },
       clearConversation: "Limpar",
@@ -2269,6 +2274,11 @@ const pt = {
         resize: "Redimensionar a conversa",
         collapse: "Recolher a conversa",
         maximize: "Abrir como página inteira",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Histórico",
+        backToChat: "Voltar ao chat",
+        expand: "Expandir",
+        restore: "Restaurar painel lateral",
         open: "Abrir o assistente",
         planAwaitingApproval: "Um plano proposto aguarda sua aprovação",
       },

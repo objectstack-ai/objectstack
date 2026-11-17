@@ -201,6 +201,8 @@ const zhHant = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: '填寫表單欄位,然後提交或取消。',
+    sectionNav: '表單分組',
+    sectionNavErrors: '待修正欄位：{{number}}',
     deniedDescription: '您沒有此欄位的編輯權限。',
     serverDefaultHint: '儲存時自動設定。',
     requiredForAction: '執行「{{action}}」時必填。',
@@ -2287,6 +2289,9 @@ const zhHant = {
           title: '正在編輯「{{app}}」',
           titleGeneric: '編輯此應用',
           description: '想改點什麼？我會就地修改這個應用 —— 加欄位、物件、檢視或儀表盤，或調整已有內容。',
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            '問資料，或者讓我改這個應用 —— 可以問記錄的計數、列表和彙總，也可以告訴我要改什麼，我會就地修改：欄位、物件、檢視或儀表盤。',
         },
       },
       clearConversation: '清空',
@@ -2493,6 +2498,11 @@ const zhHant = {
         resize: '調整對話寬度',
         collapse: '收起對話',
         maximize: '以完整頁面開啟',
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: '歷史',
+        backToChat: '返回對話',
+        expand: '展開',
+        restore: '還原為側邊欄',
         open: '開啟助手',
         planAwaitingApproval: '有一個方案等待確認',
       },
