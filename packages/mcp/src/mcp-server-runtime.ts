@@ -24,7 +24,7 @@ import {
   type McpCallerExecutionContext,
 } from './tool-call-interceptor.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
+import { wireBridgeTools, datasetToolsServed, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
 import { isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
@@ -36,7 +36,7 @@ import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
 } from './metadata-completeness.js';
-import { DEFAULT_SERVER_VERSION } from './package-version.js';
+import { DEFAULT_SERVER_VERSION, PACKAGE_VERSION } from './package-version.js';
 import { createPlatformMcpServer } from './request-params.js';
 import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
@@ -1773,6 +1773,55 @@ const DEFAULT_HTTP_INSTRUCTIONS =
   'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
 
 /**
+ * [#34686] The selection rule between a governed metric and an object query
+ * (ADR-0149 D3), in the few lines `initialize` carries. It rides the
+ * instructions because a client reads a tool's description only after it has
+ * chosen that tool (#34659 ruling D5 = A); the full procedure stays in the
+ * tools' own descriptions and in the served skill (`DATASET_TOOL_LINES` in
+ * `skill-md.ts`), which say the same thing: an exact name, label or synonym is
+ * the only match, one measure match answers, several are a question for the
+ * user, none falls back to the object tools with the answer labelled.
+ * Sent only where both dataset tools register ({@link datasetToolsServed}).
+ */
+const DATASET_SELECTION_RULE =
+  'For a question about a business number, look for a governed metric first: call list_datasets with the '
+  + 'question\'s business words. A word matches only when it equals a member\'s name, label or synonym, never a '
+  + 'similar word. One measure match: answer with query_dataset. Several matches: ask the user which one they '
+  + 'mean; do not pick. No match: fall back to query_records / aggregate_records and say the answer is not '
+  + 'from a governed metric.';
+
+/**
+ * [#34686] The published skills package an open server points a client to
+ * (#34659 ruling D5 = A), at the version to install: this package's own
+ * version, which `@objectstack/skills` shares (both are in one `fixed` group
+ * of `.changeset/config.json`, so every release publishes both at one
+ * version). Not `config.version`: that is the operator's `serverInfo.version`
+ * override, not a package version. No line when the manifest cannot be read
+ * (`PACKAGE_VERSION` undefined), since an unversioned install takes the
+ * registry's `latest`, which may be another major's catalog.
+ */
+function skillsInstallLine(version: string | undefined): string | undefined {
+  if (!version) return undefined;
+  return `Published skills: @objectstack/skills ${version}. To give a coding agent the ObjectStack procedures, `
+    + `install that version in the project (pnpm add -D @objectstack/skills@${version}) and follow the package `
+    + 'README to sync the skills into the agent\'s skills directory.';
+}
+
+/**
+ * [#34686] The open server's own `initialize` text for one HTTP request: the
+ * default sentence, the selection rule when this request's grant registers
+ * both dataset tools, and the skills install line. Read only when neither the
+ * host (`hostInstructions`) nor the runtime's configured `instructions`
+ * answers: both are whole texts their author owns, and the configured one is
+ * the same string for every grant, so nothing is appended to either.
+ */
+function openServerInstructions(datasetRule: boolean): string {
+  return [DEFAULT_HTTP_INSTRUCTIONS, datasetRule ? DATASET_SELECTION_RULE : undefined, skillsInstallLine(PACKAGE_VERSION)]
+    .filter((part): part is string => part !== undefined)
+    .join('\n\n');
+}
+
+/**
  * [#31605] Who an HTTP request was admitted as, as the HOST resolved it — the
  * input `handleHttpRequest` projects every tool call's interceptor principal
  * from. Only the members {@link McpCallerExecutionContext} names are read.
@@ -2711,10 +2760,13 @@ export class MCPServerRuntime {
         // [#32766] Such a request reads the injection's
         // `dataOnlyInstructions` instead; without one, it gets the configured
         // or default text.
+        // [#34686] The default carries the selection rule where this request
+        // registers both dataset tools (the gate `registerDatasetTools` reads)
+        // and the skills install line; host and configured texts are unchanged.
         instructions:
           hostInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
           this.config.instructions ??
-          DEFAULT_HTTP_INSTRUCTIONS,
+          openServerInstructions(datasetToolsServed(opts.bridge, opts.toolOptions)),
       },
     );
 
