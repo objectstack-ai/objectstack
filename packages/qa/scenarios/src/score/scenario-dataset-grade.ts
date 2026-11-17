@@ -93,7 +93,7 @@ function provenanceOf(c: Call): { dataset: string; measures: string[] } | undefi
 const ASKS = /[?？]|(?:^|[.。!！\n]\s*)(?:please (?:confirm|clarify|specify|tell me|let me know)|could you (?:clarify|confirm|specify)|which (?:one|of)|请(?:确认|说明|告诉我|明确)|您是指|你是指)/i;
 
 /** Numbered-list markers (`1.`, `2)`, `3、`) at a line's start: an option list's numbering, never a figure. */
-const LIST_MARKER = /^[ \t]*(?:[-*][ \t]+)?\(?\d{1,2}[.)、][ \t]+/gm;
+const LIST_MARKER = /^[ \t]*(?:[-*][ \t]+)?\(?\d{1,2}(?:[.)][ \t]+|、[ \t]*)/gm;
 
 /** The figures a reply states, an option list's numbering left out. */
 export function statedFigures(replyText: string): number[] {

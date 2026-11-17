@@ -71,7 +71,7 @@ describe('the dataset cards load, each with every route kind', () => {
 
 /** [case, card, mutation, the refusal's path, its message]. */
 const REFUSALS: Array<[string, (typeof DATASET_CARDS)[number], (c: RawCard) => void, string, RegExp]> = [
-  ['a synonym on two members of one dataset — the platform’s own rule (ADR-0149 D1)', 'order_to_cash', (c) => measure(c, 'billing', 'open_balance').synonyms.push('billings'), 'expect.datasets[1]', /the platform refuses this dataset: .*billings/],
+  ['a synonym on two members of one dataset — the platform’s own rule (ADR-0149 D1)', 'order_to_cash', (c) => measure(c, 'billing', 'open_balance').synonyms.push('billings'), 'expect.datasets[1].measures[1].synonyms[3]', /the platform refuses this dataset: synonym "billings" of measure "open_balance" is also a synonym of measure "billed_amount"/],
   ['a dataset on an object the card does not expect', 'order_to_cash', (c) => (c.expect.datasets[0].object = 'quote'), 'expect.datasets[0].object', /`quote` is not in expect\.objects/],
   ['a sum over a field no seed row carries', 'order_to_cash', (c) => (measure(c, 'order_book', 'booked_amount').field = 'net_amount'), 'expect.datasets[0].measures[0].field', /no seed row of `sales_order` carries `net_amount`/],
   ['a sum over text', 'order_to_cash', (c) => (measure(c, 'order_book', 'booked_amount').field = 'status'), 'expect.datasets[0].measures[0].field', /holds a value that is no number/],
@@ -118,7 +118,7 @@ describe('the build prompt states every dataset name and word the Build half che
   });
 
   it('`--lang` holds a dataset question to its language like every other text a run renders', () => {
-    const c = load('order_to_cash', (x) => delete dq(x, 'dq_revenue').ask.zh).card!.card;
+    const c = load('order_to_cash', (x) => Object.assign(dq(x, 'dq_revenue'), { ask: { en: 'What is our total revenue?' }, words: ['revenue'] })).card!.card;
     expect(promptLanguageGaps(c, { lang: 'zh' }, ['ask'])).toEqual(['run.datasetQuestions[dq_revenue].ask']);
   });
 });
