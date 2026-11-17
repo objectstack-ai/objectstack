@@ -23,7 +23,7 @@ import {
   useInlineEdit,
   PredicateScopeProvider,
 } from '@object-ui/react';
-import { PageHeaderPhoneContext, type PageHeaderPhoneFace } from '../index';
+import { PageHeaderPhoneContext, type PageHeaderPhoneFace } from '../renderers/layout/page-header-phone-context';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
