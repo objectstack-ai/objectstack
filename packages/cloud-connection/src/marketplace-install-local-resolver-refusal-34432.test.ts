@@ -23,7 +23,9 @@
  * still answers 503, and a dependency cycle between two packages — an
  * undeclared throw out of the resolver until #34574 — is now the resolver's
  * declared `422 CYCLIC_ARTIFACT_PACKAGES`, answered like its siblings, never
- * the 503.
+ * the 503. [#34583] On a re-install the step also folds the installed copy;
+ * that side's refusal names the stored copy, the incoming side's names the
+ * incoming package (the last `describe`).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -61,8 +63,12 @@ const entry = (id: string, objects: Row[], dependencies?: Record<string, string>
     manifest: { id, name: id, version: '1.0.0', type: 'module', ...(dependencies ? { dependencies } : {}), objects },
 });
 
-/** A composed artifact: `packages[]` and no top-level `objects`, so every reader goes through the resolver. */
-const composed = (packages: unknown): Row => ({ id: SUITE, name: 'Suite', version: '1.0.0', type: 'app', packages });
+/**
+ * A composed artifact: `packages[]` and no top-level `objects`, so every reader goes through the resolver.
+ * [#34583] Its top-level `datasources` map (empty) is what step 2a, the datasource holder, reads instead
+ * of resolving the packages; without it 2a meets the resolver's refusal first, and 2c″ is never reached.
+ */
+const composed = (packages: unknown): Row => ({ id: SUITE, name: 'Suite', version: '1.0.0', type: 'app', datasources: {}, packages });
 const WELL_FORMED = (): Row[] => [entry(`${SUITE}.core`, [ACCOUNT]), entry(`${SUITE}.leads`, [LEAD])];
 
 function makeRawApp() {
@@ -75,13 +81,13 @@ function makeRawApp() {
     };
 }
 
-function makeC(reqBody: any) {
+function makeC(reqBody: any, params: Record<string, string> = {}) {
     return {
         req: {
             url: `http://localhost:3000${ROUTE}`,
             raw: new Request(`http://localhost:3000${ROUTE}`),
             json: async () => reqBody,
-            param: () => undefined,
+            param: (name: string) => params[name],
             header: () => undefined,
             query: () => undefined,
         },
@@ -137,6 +143,7 @@ async function boot(dir: string, driver: ReturnType<typeof fakeDriver>) {
     register.mockClear();
     return {
         install: (reqBody: Row) => rawApp.routes.get(`POST ${ROUTE}`)!(makeC(reqBody)),
+        uninstall: (manifestId: string) => rawApp.routes.get(`DELETE ${ROUTE}/:manifestId`)!(makeC(undefined, { manifestId })),
         register,
     };
 }
@@ -232,5 +239,117 @@ describe('#34432 — controls: the 503 stays the unread table\'s, and a cycle is
         expect(res.payload.error.code).toBe('CYCLIC_ARTIFACT_PACKAGES');
         expect(res.payload.error.details).toEqual({ cycle: [`${SUITE}.core`, `${SUITE}.leads`, `${SUITE}.core`] });
         expectNothingWritten(rt, driver);
+    });
+});
+
+/**
+ * [#34583] On a re-install, step 2c″ also folds the INSTALLED copy — the body
+ * the last install stored in the ledger — to compare against. When today's
+ * resolver refuses that stored copy (here, a package entry still carrying the
+ * retired bare `indexes[].unique: true`), the answer keeps the resolver's
+ * status and code but names the stored copy and the way out (uninstall it,
+ * then install), never "Package 'X' cannot be installed", which blames the
+ * incoming package. The incoming side keeps that sentence, so the two cannot
+ * swap.
+ */
+describe('#34583 — a re-install whose installed copy the resolver refuses is answered naming that copy, never the incoming package', () => {
+    const RETIRED_ACCOUNT = { ...ACCOUNT, indexes: [{ fields: ['name'], unique: true }] };
+    const REFUSED = (): Row[] => [entry(`${SUITE}.core`, [RETIRED_ACCOUNT]), entry(`${SUITE}.leads`, [LEAD])];
+    const INCOMING_SENTENCE = `Package '${SUITE}' cannot be installed:`;
+    const INSTALLED_SENTENCE = `The installed copy of package '${SUITE}', stored here by its last install, is refused by this runtime:`;
+
+    /** The ledger entry an earlier install would have written: `manifest` is the stored copy. */
+    function seedInstalledCopy(manifest: Row): void {
+        new LocalManifestSource(dir).write({
+            packageId: SUITE,
+            versionId: 'local',
+            manifestId: SUITE,
+            version: '1.0.0',
+            manifest,
+            installedAt: '2026-01-01T00:00:00.000Z',
+            installedBy: 'admin',
+            withSampleData: false,
+        });
+    }
+
+    /** Nothing registered, the stored copy left exactly as it was, and no table read. */
+    function expectStoredCopyUntouched(rt: Awaited<ReturnType<typeof boot>>, driver: ReturnType<typeof fakeDriver>, stored: Row) {
+        expect(rt.register).not.toHaveBeenCalled();
+        expect(new LocalManifestSource(dir).read(SUITE).entry?.manifest).toEqual(stored);
+        expect(driver.planDeclaredRenames).not.toHaveBeenCalled();
+        expect(driver.carryDeclaredRenames).not.toHaveBeenCalled();
+    }
+
+    it('the installed copy refused, the incoming version well-formed: the resolver\'s 422 naming the installed copy and the remedy, and nothing written', async () => {
+        const driver = fakeDriver();
+        const rt = await boot(dir, driver);
+        const stored = composed(REFUSED());
+        seedInstalledCopy(stored);
+
+        const res = await rt.install({ manifest: composed(WELL_FORMED()) });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+        expect(res.payload.error.message.startsWith(INSTALLED_SENTENCE), res.payload.error.message).toBe(true);
+        expect(res.payload.error.message).toContain(`Remove the stored copy first (uninstall '${SUITE}'), then install this version.`);
+        expect(res.payload.error.message).not.toContain(INCOMING_SENTENCE);
+        expectStoredCopyUntouched(rt, driver, stored);
+    });
+
+    it('the remedy the refusal names works: uninstalling the stored copy, then installing the same version, installs', async () => {
+        const driver = fakeDriver();
+        const rt = await boot(dir, driver);
+        seedInstalledCopy(composed(REFUSED()));
+        const refused = await rt.install({ manifest: composed(WELL_FORMED()) });
+        expect(refused.status, JSON.stringify(refused.payload)).toBe(422);
+
+        const removed = await rt.uninstall(SUITE);
+        expect(removed.status, JSON.stringify(removed.payload)).toBe(200);
+        const res = await rt.install({ manifest: composed(WELL_FORMED()) });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(new LocalManifestSource(dir).read(SUITE).entry?.manifest).toEqual(composed(WELL_FORMED()));
+    });
+
+    it('the incoming version refused over a well-formed installed copy: the resolver\'s 422 naming the incoming package, never the installed copy', async () => {
+        const driver = fakeDriver();
+        const rt = await boot(dir, driver);
+        const stored = composed(WELL_FORMED());
+        seedInstalledCopy(stored);
+
+        const res = await rt.install({ manifest: composed(REFUSED()) });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+        expect(res.payload.error.message.startsWith(INCOMING_SENTENCE), res.payload.error.message).toBe(true);
+        expect(res.payload.error.message).not.toContain('installed copy');
+        expectStoredCopyUntouched(rt, driver, stored);
+    });
+
+    it('both refused: the incoming package\'s refusal is the answer, asked first', async () => {
+        const driver = fakeDriver();
+        const rt = await boot(dir, driver);
+        const stored = composed(REFUSED());
+        seedInstalledCopy(stored);
+
+        const res = await rt.install({ manifest: composed('not-a-list') });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.error.code).toBe('INVALID_ARTIFACT_PACKAGES');
+        expect(res.payload.error.message.startsWith(INCOMING_SENTENCE), res.payload.error.message).toBe(true);
+        expectStoredCopyUntouched(rt, driver, stored);
+    });
+
+    it('CONTROL: a well-formed installed copy and a well-formed incoming version re-install, the rename plan reading the stored copy', async () => {
+        const driver = fakeDriver();
+        const rt = await boot(dir, driver);
+        seedInstalledCopy(composed(WELL_FORMED()));
+
+        const res = await rt.install({ manifest: composed(WELL_FORMED()) });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(driver.planDeclaredRenames).toHaveBeenCalledTimes(1);
     });
 });

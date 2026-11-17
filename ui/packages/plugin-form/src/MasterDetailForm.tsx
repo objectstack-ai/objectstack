@@ -49,6 +49,7 @@ import { ObjectForm } from './ObjectForm';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
 import { FormDirtyReportContext } from './formDirtyReport';
+import { MasterDetailFrameContext } from './masterDetailFrame';
 import { useFormChromeTranslation } from './formChrome';
 import {
   buildMasterDetailBatch,
@@ -1780,6 +1781,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
    * advances or empties the lines, so a saved document reads as pristine.
    */
   const reportUnsaved = useContext(FormDirtyReportContext);
+  // A host frame of fixed height (the record dialog, objectstack#34819): the
+  // body scrolls in its own box and the bar sits below it. See `masterDetailFrame`.
+  const frame = useContext(MasterDetailFrameContext);
   const [headerDirty, setHeaderDirty] = useState(false);
   const [rowEditorDirty, setRowEditorDirty] = useState(false);
   const linesDirty = useMemo(
@@ -2179,9 +2183,8 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
 
   useEffect(() => () => { if (saveGuardTimer.current) clearTimeout(saveGuardTimer.current); }, []);
 
-  return (
-    <UploadGateProvider gate={uploadGate}>
-    <div className={cn('space-y-6', className, schema.className)}>
+  const body = (
+    <>
       {/* 1) Header fields on top */}
       <div ref={formHostRef}>
         <FormDirtyReportContext.Provider value={setHeaderDirty}>
@@ -2270,6 +2273,19 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           </CardContent>
         </Card>
       )}
+    </>
+  );
+
+  return (
+    <UploadGateProvider gate={uploadGate}>
+    <div className={cn(frame ? 'flex min-h-0 flex-1 flex-col' : 'space-y-6', className, schema.className)}>
+      {frame ? (
+        <div className={cn('min-h-0 flex-1 overflow-y-auto space-y-6', frame.bodyClassName)} data-testid="md-form-body">
+          {body}
+        </div>
+      ) : (
+        body
+      )}
 
       {/* Single action bar at the bottom — suppressed when the host opts out
           (e.g. the Studio screen-preview, which must never persist).
@@ -2281,10 +2297,19 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           scroller may set `overflow`. Sticky stops at the scroller's CONTENT
           edge: the `after:` strip paints over the host's bottom padding below
           it, so lines never scroll through that gap. Owned here, not by the
-          host (ADR-0035 Decision §6: the form owns its Save). */}
+          host (ADR-0035 Decision §6: the form owns its Save).
+          In a host frame of fixed height (objectstack#34819) the bar is not
+          sticky: it is the flex row below the body's own scroller, outside
+          the scrolled content, so nothing the body holds can lift it off the
+          frame's bottom edge. */}
       {schema.showSubmit !== false && (
         <div
-          className="sticky bottom-0 z-10 border-t border-border bg-background pt-4 pb-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-6 after:bg-background"
+          className={cn(
+            'border-t border-border bg-background',
+            frame
+              ? cn('shrink-0', frame.actionsClassName)
+              : 'sticky bottom-0 z-10 pt-4 pb-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-6 after:bg-background',
+          )}
           data-testid="md-form-actions"
         >
           {/* Why Save is unavailable — above the row so it reads before the

@@ -177,7 +177,16 @@ import { reduceFilterVerdict } from '@objectstack/spec/data';
 // pass names a row's inputs with (`storedExpressionReads`, objectql), so this
 // rule and the engine cannot disagree about which spellings read a field.
 import { analyzeRelationshipTraversals } from '@objectstack/formula';
-import { stripRegions, ownRegionKeys, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
+import {
+  stripRegions,
+  ownRegionKeys,
+  REGION_SLOTS,
+  MAX_REGION_DEPTH,
+  walkFlowNodes,
+  flowNodeLabel,
+  flowDisplayLabel,
+} from './flow-walk.js';
+import type { UserTextParams } from './finding-user-text.js';
 import { objectsAsServed, recordsOf } from './object-graph.js';
 
 export interface FlowLintFinding {
@@ -197,9 +206,35 @@ export interface FlowLintFinding {
    * rejects the same stack (#3782).
    */
   severity?: 'error' | 'warning';
+  /**
+   * The finding's document path (`flows[0].nodes[2]`), when the rule placed it
+   * on a node. Absent, the runtime gate's row spells the path as `where`, as
+   * every finding here did before; present, a draft's `_diagnostics` entry
+   * resolves onto that node, so the flow designer's Problems row selects it.
+   */
+  path?: string;
+  /**
+   * The names the finding's USER sentence interpolates, set only at push sites
+   * whose rule has an entry in `lint-flow-patterns.user-text.ts`; see
+   * `AuthoringFinding.userTextParams`. The builder-facing sentence names the
+   * flow and its nodes by their labels; `where`, `message` and `hint` keep the
+   * machine names for `os validate`, logs and AI authors.
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
+
+/**
+ * Where a flow's nodes sit, for the findings that name one in a user sentence
+ * and place it by path: the flow's display label, and each node's label and
+ * document path, keyed by the node RECORD (the graph walk and the document walk
+ * hand out the same objects). Built once per flow by {@link lintFlowPatterns}.
+ */
+interface FlowNodeSites {
+  flowLabel: string;
+  nodes: WeakMap<object, { label: string; path: string }>;
+}
 
 /** Extract the raw predicate source from a `condition` (string or Expression envelope). */
 function conditionSource(raw: unknown): string {
@@ -1219,6 +1254,7 @@ function scanBranchRouting(
   nodes: AnyRec[],
   edges: AnyRec[],
   findings: FlowLintFinding[],
+  sites?: FlowNodeSites,
 ): void {
   const outEdgesBySource = new Map<string, AnyRec[]>();
   for (const e of edges) {
@@ -1310,6 +1346,27 @@ function scanBranchRouting(
     if (!nid) continue;
     const outs = outEdgesBySource.get(nid) ?? [];
     if (outs.length === 0) continue;
+    // The user sentence's names and the node's path (#34818): the builder
+    // reads the decision and its successors by their labels.
+    const site = sites?.nodes.get(node);
+    const labelOfId = (id: unknown): string => {
+      const target = nodes.find((n) => n.id === id);
+      return target ? (sites?.nodes.get(target)?.label ?? flowNodeLabel(target, 0)) : String(id);
+    };
+    const userSite = (shape: 'none' | 'mixed', targets: readonly AnyRec[]) => ({
+      ...(site ? { path: site.path } : {}),
+      ...(sites
+        ? {
+            userTextParams: {
+              flow: sites.flowLabel,
+              node: site?.label ?? nid,
+              shape,
+              // One label per line: each locale's sentence quotes and joins them.
+              targets: targets.map((e) => labelOfId(e.target)).join('\n'),
+            },
+          }
+        : {}),
+    });
 
     const cfg = (node.config ?? {}) as AnyRec;
     const declaredLabels = new Set(
@@ -1424,6 +1481,7 @@ function scanBranchRouting(
             `Gate the branches: a \`condition\` per out-edge plus \`isDefault: true\` on the fallback, or a ` +
             `\`config.conditions[]\` whose \`label\` matches an out-edge's.`,
           rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+          ...userSite('none', outs),
         });
       }
       // Either way no out-edge is gated, so the mixed-branch check below — an
@@ -1447,6 +1505,7 @@ function scanBranchRouting(
           `Mark the fallback \`isDefault: true\` so it is taken only when no sibling condition matched ` +
           `(BPMN default flow), or give it its own \`condition\`.`,
         rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+        ...userSite('mixed', ungated),
       });
     }
   }
@@ -2281,8 +2340,19 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
   // Built once per stack, read by (f') below for every `multi` update.
   const storedInputs = storedInputsByObject(stack);
+  const flowList: readonly unknown[] = Array.isArray(stack.flows) ? stack.flows : [];
   for (const flow of recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
+    // [#34818] Labels and document paths for the findings that carry a user
+    // sentence. A flow that is not an array member (a keyed map) has no
+    // `flows[N]` path, so its findings keep `where` as their path.
+    const flowIndex = flowList.indexOf(flow);
+    const sites: FlowNodeSites = { flowLabel: flowDisplayLabel(flow, Math.max(flowIndex, 0)), nodes: new WeakMap() };
+    if (flowIndex >= 0) {
+      walkFlowNodes(flow, `flows[${flowIndex}]`).forEach(({ node, path }, i) => {
+        sites.nodes.set(node, { label: flowNodeLabel(node, i), path });
+      });
+    }
     // `Array.isArray` proves the LIST, never its MEMBERS. A YAML `nodes:` item
     // left empty deserialises to `null`, and `nodes.find(n => n.type === …)`
     // four lines down dereferenced it (#16751). Read through `recordsOf` — the
@@ -2570,7 +2640,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       // (e) #4414 — a decision that declares a branch it cannot route: an
       //     unclaimable branch label, an unconditional sibling that runs anyway,
       //     or a self-contradictory / duplicated `isDefault` marker.
-      scanBranchRouting(at, graphNodes, graphEdges, findings);
+      scanBranchRouting(at, graphNodes, graphEdges, findings, sites);
 
       // (f) #5482 — a `multi: true` write with nothing bounding it: the declared
       //     whole-object delete/update. Scanned per graph like the rest, which is

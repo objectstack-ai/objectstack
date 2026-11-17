@@ -247,3 +247,90 @@ describe("[#20726] pin 3 — the switch the refusal names works: a customer flow
         expect(await store.list()).toEqual([]);
     });
 });
+
+// [ADR-0126 §7.2] The switch moves only the LEDGER bit; a packaged flow's
+// `status` is the author's, and `isFlowEnabled` composes the two. Switching ON
+// a flow whose status disarms it used to write `active: true`, resolve, and
+// leave the flow off — so the door answered `{enabled: true}` for a flow that
+// never ran. Pinned off the door's outputs: the envelope, the ledger rows, the
+// `/_status` row, the trigger and the `execute()` answer.
+describe('[ADR-0126 §7.2] switching ON a packaged flow its own status disarms is refused, and nothing half-flips', () => {
+    for (const status of ['obsolete', 'invalid'] as const) {
+        it(`status '${status}', no ledger row — RESOURCE_CONFLICT / 409 naming the status; nothing written, nothing moved`, async () => {
+            const { engine, store, records } = engineWithLedger();
+            engine.registerFlow('shipped_flow', packaged('shipped_flow', { status }));
+            const setActive = vi.spyOn(store, 'setActive');
+            const before = stateOf(engine, 'shipped_flow');
+            expect(before).toMatchObject({ enabled: false, bound: false, status });
+
+            const refusal = await refusalOf(engine.toggleFlow('shipped_flow', true));
+
+            expect(refusal.code).toBe('RESOURCE_CONFLICT');
+            expect(refusal.status).toBe(409);
+            // The named subject: the status that keeps it off.
+            expect(refusal.message).toContain(`'${status}'`);
+
+            expect(setActive).not.toHaveBeenCalled();
+            expect(await store.list()).toEqual([]);
+            expect(stateOf(engine, 'shipped_flow')).toEqual(before);
+            expect(records.isBound('shipped_flow')).toBe(false);
+            expect((await engine.execute('shipped_flow')).code).toBe('FLOW_DISABLED');
+        });
+    }
+
+    it('a flow held off BOTH ways (ledger row and status) is refused too, and its row stays as it was', async () => {
+        const { engine, store } = engineWithLedger();
+        engine.registerFlow('shipped_flow', packaged('shipped_flow'));
+        await engine.toggleFlow('shipped_flow', false);
+        engine.registerFlow('shipped_flow', packaged('shipped_flow', { status: 'obsolete' }));
+        const before = stateOf(engine, 'shipped_flow');
+
+        const refusal = await refusalOf(engine.toggleFlow('shipped_flow', true));
+
+        expect(refusal.code).toBe('RESOURCE_CONFLICT');
+        expect(refusal.status).toBe(409);
+        expect(await store.list()).toEqual([{ name: 'shipped_flow', packageId: 'crm', active: false }]);
+        expect(stateOf(engine, 'shipped_flow')).toEqual(before);
+    });
+
+    it('switching such a flow OFF is not refused: the row records the choice, and it still holds once the definition ships active', async () => {
+        const { engine, store, records } = engineWithLedger();
+        engine.registerFlow('shipped_flow', packaged('shipped_flow', { status: 'obsolete' }));
+
+        await expect(engine.toggleFlow('shipped_flow', false)).resolves.toBeUndefined();
+
+        expect(await store.list()).toEqual([{ name: 'shipped_flow', packageId: 'crm', active: false }]);
+        engine.registerFlow('shipped_flow', packaged('shipped_flow', { status: 'active' }));
+        expect(stateOf(engine, 'shipped_flow')).toMatchObject({ enabled: false, bound: false });
+        expect(records.isBound('shipped_flow')).toBe(false);
+    });
+
+    it("the step the refusal names completes: published 'active', the same switch arms it", async () => {
+        const { engine, store, records } = engineWithLedger();
+        engine.registerFlow('shipped_flow', packaged('shipped_flow', { status: 'obsolete' }));
+        await refusalOf(engine.toggleFlow('shipped_flow', true));
+
+        engine.registerFlow('shipped_flow', packaged('shipped_flow', { status: 'active' }));
+        await engine.toggleFlow('shipped_flow', true);
+
+        expect(await store.list()).toEqual([{ name: 'shipped_flow', packageId: 'crm', active: true }]);
+        expect(stateOf(engine, 'shipped_flow')).toMatchObject({ enabled: true, bound: true });
+        expect(records.isBound('shipped_flow')).toBe(true);
+    });
+
+    for (const status of ['active', 'draft'] as const) {
+        it(`CONTROL — status '${status}' toggles off and on as before`, async () => {
+            const { engine, store, records } = engineWithLedger();
+            engine.registerFlow('shipped_flow', packaged('shipped_flow', { status }));
+
+            await engine.toggleFlow('shipped_flow', false);
+            expect(await store.list()).toEqual([{ name: 'shipped_flow', packageId: 'crm', active: false }]);
+            expect(stateOf(engine, 'shipped_flow')).toMatchObject({ enabled: false, bound: false });
+
+            await engine.toggleFlow('shipped_flow', true);
+            expect(await store.list()).toEqual([{ name: 'shipped_flow', packageId: 'crm', active: true }]);
+            expect(stateOf(engine, 'shipped_flow')).toMatchObject({ enabled: true, bound: true });
+            expect(records.isBound('shipped_flow')).toBe(true);
+        });
+    }
+});

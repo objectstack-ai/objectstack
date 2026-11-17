@@ -31,7 +31,12 @@
  *             a blank host of its own → seed → the Run half, and nothing else:
  *             no authoring turn, no score, no iterate. Two ask models run this
  *             way on one build are graded on the same app, so a difference in
- *             their answers is theirs, not the build's.
+ *             their answers is theirs, not the build's. Ask mode edits nothing,
+ *             so when the unmanaged door refuses the build
+ *             `UNMANAGED_INSTALL_UNCOPYABLE` (it carries an item no environment
+ *             row can hold, such as a `capability`) it installs the same build
+ *             managed instead, and records which mode it ran on
+ *             (`ModeRun.template.installMode`); no other refusal falls back.
  *
  * Names: the app is always in the card's own namespace, `demo` + its code
  * (`democrm`). Scratch mode scaffolds the project under that name; template
@@ -53,6 +58,7 @@ import {
   askNamesTarget,
   flowRefusalOf,
   gradeCardAnswer,
+  gradeCardDatasetQuestion,
   gradeCardInjection,
   gradeConfirmedWrite,
   buildDeniesWrite,
@@ -66,13 +72,14 @@ import {
   type CheckResult,
   type ConfirmedWriteGrade,
   type ConfirmedWriteObservation,
+  type DatasetGrade,
   type OperationGrade,
   type OperationObservation,
   type PersonaRunGrade,
   type ProbeObservation,
   type ScenarioArtifactScore,
 } from '../score/index.js';
-import type { AppHarness, PersonaAccount } from './app.js';
+import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
@@ -80,6 +87,7 @@ import type { CommandResult } from './project.js';
 import {
   buildPrompt,
   confirmPrompt,
+  datasetQuestionPrompt,
   iteratePrompt,
   operationPrompt,
   personaHandles,
@@ -285,6 +293,27 @@ export interface QuestionResult {
   error?: string;
 }
 
+/**
+ * One ask of a dataset question (`run.datasetQuestions`), graded on the route
+ * its answer took (`gradeCardDatasetQuestion`: `metric-selected`,
+ * `asked-back` or `fallback-labelled`). Asked as the admin, like a question
+ * that lists no persona, and as many times as `--ask-repeats` says.
+ */
+export interface DatasetQuestionResult {
+  question: string;
+  /** Which ask of the turn this is, counted from 1, when the run asked each question turn more than once. */
+  repeat?: number;
+  /**
+   * Why this ask measures nothing: it was replayed and the recording holds no
+   * turn for it ({@link datasetQuestionNotRecorded}), or the replay was not
+   * faithful. Never a fail.
+   */
+  notMeasured?: string;
+  grade?: DatasetGrade;
+  turn?: TurnSummary;
+  error?: string;
+}
+
 export interface OperationResult {
   operation: string;
   persona: string;
@@ -375,6 +404,14 @@ export interface RowRestore {
   freshCopy?: string[];
 }
 
+/**
+ * Why a replayed dataset question is not measured: the recording holds no turn
+ * for it. Dataset questions came later than most recordings, so a recording
+ * made before its card declared them holds none, and a replay of it has asked
+ * the agent nothing; nothing was graded, so nothing failed.
+ */
+const datasetQuestionNotRecorded = 'the recording holds no turn for this dataset question (it was made before the card declared it, or the run stopped short of it), so it was not replayed';
+
 /** Why a replayed operation's confirmed write is not measured: its recording was made before the runner sent a confirmation turn. */
 export const confirmationNotRecorded = 'the recording holds no confirmation turn for this operation, so the confirmed write was not replayed';
 
@@ -409,6 +446,11 @@ export interface RunHalf {
     secondPass?: Record<string, number>;
   };
   questions: QuestionResult[];
+  /**
+   * The card's dataset questions, each ask graded on its route; absent when
+   * the card declares none, so a card without them keeps its record's bytes.
+   */
+  datasetQuestions?: DatasetQuestionResult[];
   operations: OperationResult[];
   /**
    * The card's guardrails graded over the half's turns as a whole: today
@@ -439,11 +481,50 @@ export interface ModeRun {
   /**
    * The verified build template and ask modes installed: where it came from
    * (`supplied template`, or `this run’s from-scratch build`) and how the
-   * unmanaged install door answered.
+   * install door answered the install the mode ran on ({@link InstalledBuild}).
    */
-  template?: { source: string; install: { ok: boolean; status: number; code?: string; message?: string }; installModesSupplied: boolean };
+  template?: InstalledBuild;
   skipped?: string;
   findings: string[];
+}
+
+/** A refused install, as the door answered it. */
+export interface InstallAnswer {
+  ok: boolean;
+  status: number;
+  code?: string;
+  message?: string;
+}
+
+/**
+ * The install a template or ask mode ran on. `install` is how the door
+ * answered the install that decided the mode (`installMode`), and
+ * `installModesSupplied` whether the runner added `installModes` to that
+ * install's manifest ({@link installableManifest}). `installMode` is absent on
+ * a record from before it was written (those installed unmanaged).
+ * `unmanagedRefusal` is present only when ask mode fell back: the unmanaged
+ * door refused the build `UNMANAGED_INSTALL_UNCOPYABLE` ({@link fallsBackToManaged}),
+ * and the build was then installed managed.
+ */
+export interface InstalledBuild {
+  source: string;
+  install: InstallAnswer;
+  installModesSupplied: boolean;
+  installMode?: 'unmanaged' | 'managed';
+  unmanagedRefusal?: InstallAnswer & { code: string };
+}
+
+/**
+ * Whether an unmanaged install's refusal is the one ask mode falls back to a
+ * managed install on: `UNMANAGED_INSTALL_UNCOPYABLE`, the build carries an
+ * item an unmanaged copy cannot write as an environment row (`capability` is
+ * runtime-uncreatable), so the door refuses the copy whole and names the
+ * managed install. Every other refusal is a finding, as before. The code is
+ * the platform's (`@objectstack/metadata-protocol` stamps it); the runner only
+ * compares against it.
+ */
+export function fallsBackToManaged(refusal: Pick<HttpAnswer, 'ok' | 'code'>): boolean {
+  return !refusal.ok && refusal.code === 'UNMANAGED_INSTALL_UNCOPYABLE';
 }
 
 export interface CardRun {
@@ -928,8 +1009,15 @@ function personaOfUser(userId: string | null, accounts: readonly PersonaAccount[
   return userId === adminId ? 'admin' : userId;
 }
 
-/** A stack's flat manifest for the unmanaged install door: the artifact's manifest plus its collections. */
-export function installableManifest(artifact: unknown): { manifest: Record<string, unknown>; installModesSupplied: boolean } {
+/**
+ * A stack's flat manifest for the install door: the artifact's manifest plus
+ * its collections. For an unmanaged install (the default) a build that does
+ * not list `unmanaged` in its `installModes` gets `installModes:
+ * ['unmanaged']` added (`installModesSupplied`); for a managed install nothing
+ * is added, so the door reads the build's own `installModes` (absent means
+ * managed).
+ */
+export function installableManifest(artifact: unknown, mode: 'unmanaged' | 'managed' = 'unmanaged'): { manifest: Record<string, unknown>; installModesSupplied: boolean } {
   const a = (artifact ?? {}) as Record<string, unknown>;
   const head = (typeof a.manifest === 'object' && a.manifest !== null ? a.manifest : {}) as Record<string, unknown>;
   const manifest: Record<string, unknown> = { ...head };
@@ -938,6 +1026,7 @@ export function installableManifest(artifact: unknown): { manifest: Record<strin
     if (Array.isArray(v) && v.length === 0) continue;
     manifest[k] = v;
   }
+  if (mode === 'managed') return { manifest, installModesSupplied: false };
   const declared = Array.isArray(head.installModes) && head.installModes.includes('unmanaged');
   if (!declared) manifest.installModes = ['unmanaged'];
   return { manifest, installModesSupplied: !declared };
@@ -1455,6 +1544,27 @@ export async function runHalf(
       }
     }
 
+    // Dataset questions read too, so they run before any operation writes; as the admin, who reads every row.
+    for (const q of card.run.datasetQuestions ?? []) {
+      half.datasetQuestions ??= [];
+      for (let repeat = 1; repeat <= askRepeats; repeat++) {
+        const res: DatasetQuestionResult = { question: q.id, ...(askRepeats > 1 ? { repeat } : {}) };
+        try {
+          const turn = await driver.ask({ ...ref, step: q.id, ...(repeat > 1 ? { repeat } : {}), prompt: datasetQuestionPrompt(card, q.id, choice), ...doorOf(null) });
+          turns.push({ step: q.id, turn });
+          res.turn = summarize(turn);
+          res.grade = gradeCardDatasetQuestion(scenario, q.id, turn);
+        } catch (e) {
+          if (e instanceof MissingRecordingError) res.notMeasured = datasetQuestionNotRecorded;
+          else if (e instanceof ReplayNotFaithfulError) {
+            res.turn = summarize(e.turn);
+            res.notMeasured = replayNotFaithful(e);
+          } else res.error = errText(e);
+        }
+        half.datasetQuestions.push(res);
+      }
+    }
+
     for (const op of card.run.operations) {
       const res: OperationResult = { operation: op.id, persona: op.actingAs };
       const notMeasured = dependence.operation(op);
@@ -1673,6 +1783,11 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
 }
 
+/** The door's answer as the record keeps it: the message cut to 500 characters. */
+function installAnswerOf(a: HttpAnswer): InstallAnswer {
+  return { ok: a.ok, status: a.status, ...(a.code ? { code: a.code } : {}), ...(a.message ? { message: a.message.slice(0, 500) } : {}) };
+}
+
 /** A verified build to install, and where it came from (`ModeRun.template.source`). */
 interface VerifiedBuild {
   artifact: unknown;
@@ -1688,9 +1803,15 @@ interface VerifiedBuild {
  * installed, and the mode is skipped with the reason, when there is no
  * verified build or it declares another namespace than the card's; a refused
  * install is a finding, recorded and never worked around, and `use` is not
- * called. `fresh` boots another blank host from the same directory and installs
- * the same build into it, the same way ({@link FreshCopy}); a refused install
- * there is that copy's failure.
+ * called. The one exception is `managedFallback` (ask mode, which edits
+ * nothing): the unmanaged refusal {@link fallsBackToManaged} names installs
+ * the same build, unchanged, through the managed door instead, and the record
+ * names both (`installMode: 'managed'`, `unmanagedRefusal`). Template mode
+ * never falls back: its agent edits the installed copy, which only an
+ * unmanaged install makes the environment's own. `fresh` boots another blank
+ * host from the same directory and installs the same build into it, the same
+ * way — in the mode the run's own install landed in ({@link FreshCopy}); a
+ * refused install there is that copy's failure.
  */
 async function withInstalledBuild(
   original: LoadedScenario,
@@ -1698,6 +1819,7 @@ async function withInstalledBuild(
   mode: ModeRun,
   verified: VerifiedBuild | undefined,
   use: (app: AppHarness, installed: { dir: string; url: string; collections: string[]; baseline: Record<string, unknown[]>; fresh: FreshCopy }) => Promise<void>,
+  options: { managedFallback?: boolean } = {},
 ): Promise<void> {
   // The installed copy keeps the TEMPLATE's namespace, which must be the card's own.
   const ns = scenarioNamespace(original.card);
@@ -1723,21 +1845,44 @@ async function withInstalledBuild(
     // What the environment serves before the copy lands — the platform's own items (`setup`, `admin_full_access`, …) and the host's — is not the app.
     const baseline = await app.metadataAsArtifact(collections);
     const install = await app.installUnmanaged(manifest);
-    mode.template = {
-      source: verified.source,
-      install: { ok: install.ok, status: install.status, ...(install.code ? { code: install.code } : {}), ...(install.message ? { message: install.message.slice(0, 500) } : {}) },
-      installModesSupplied,
+    mode.template = { source: verified.source, install: installAnswerOf(install), installModesSupplied, installMode: 'unmanaged' };
+    // What the run's own install landed as: the fresh copy installs the same way.
+    let landed: { manifest: Record<string, unknown>; install: (a: AppHarness, m: Record<string, unknown>) => Promise<HttpAnswer>; mode: 'unmanaged' | 'managed' } = {
+      manifest,
+      install: (a, m) => a.installUnmanaged(m),
+      mode: 'unmanaged',
     };
     if (!install.ok) {
-      mode.findings.push(`unmanaged install refused: ${install.status} ${install.code ?? ''} ${install.message ?? ''}`.trim());
-      return;
+      const refusal = `unmanaged install refused: ${install.status} ${install.code ?? ''} ${install.message ?? ''}`.trim();
+      const installManaged = app.installManaged?.bind(app);
+      const fallsBack = options.managedFallback === true && fallsBackToManaged(install);
+      if (!fallsBack || installManaged === undefined) {
+        mode.findings.push(fallsBack ? `${refusal} (this app harness has no managed install door to fall back to)` : refusal);
+        return;
+      }
+      // Ask mode edits nothing: the same build, unchanged, installed managed (the door's own prescription).
+      const managed = installableManifest(verified.artifact, 'managed');
+      const again = await installManaged(managed.manifest);
+      mode.template = {
+        source: verified.source,
+        install: installAnswerOf(again),
+        installModesSupplied: managed.installModesSupplied,
+        installMode: 'managed',
+        unmanagedRefusal: { ...installAnswerOf(install), code: install.code! },
+      };
+      if (!again.ok) {
+        mode.findings.push(`${refusal}; the managed install of the same build was refused too: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
+        return;
+      }
+      mode.findings.push(`unmanaged install refused ${install.code} (${install.status}): installed the same build managed instead`);
+      landed = { manifest: managed.manifest, install: (a, m) => a.installManaged!(m), mode: 'managed' };
     }
     const fresh: FreshCopy = async () => {
       const copy = await freshBoot(ops, dir)();
       try {
         await copy.app.signInAdmin();
-        const again = await copy.app.installUnmanaged(manifest);
-        if (!again.ok) throw new Error(`unmanaged install refused: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
+        const again = await landed.install(copy.app, landed.manifest);
+        if (!again.ok) throw new Error(`${landed.mode} install refused: ${again.status} ${again.code ?? ''} ${again.message ?? ''}`.trim());
         return copy;
       } catch (e) {
         await copy.release();
@@ -1775,7 +1920,10 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
 
 /**
  * Ask mode: the verified build template mode installs, installed the same way
- * ({@link withInstalledBuild}), then the Run half on it — seed, personas, every
+ * ({@link withInstalledBuild}) — or managed, when the unmanaged door refuses it
+ * `UNMANAGED_INSTALL_UNCOPYABLE` ({@link fallsBackToManaged};
+ * `ModeRun.template.installMode` says which) —
+ * then the Run half on it — seed, personas, every
  * question (`askRepeats` times) and every operation — and nothing else. The
  * driver is never asked to author: there is no build half, no score and no
  * iterate, and the record names the build's source (`ModeRun.template`). Its
@@ -1788,9 +1936,16 @@ async function askMode(original: LoadedScenario, driver: AgentDriver, ops: Proje
   const scenario = namespacedScenario(original);
   const labels = citationLabels(original);
   const mode: ModeRun = { mode: 'ask', findings: [] };
-  await withInstalledBuild(original, ops, mode, verified, async (app, { fresh }) => {
-    mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh);
-  });
+  await withInstalledBuild(
+    original,
+    ops,
+    mode,
+    verified,
+    async (app, { fresh }) => {
+      mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh);
+    },
+    { managedFallback: true },
+  );
   return mode;
 }
 

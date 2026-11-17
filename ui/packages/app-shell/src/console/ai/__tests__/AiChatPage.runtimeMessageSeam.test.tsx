@@ -97,7 +97,7 @@ vi.mock('../../../providers/AdapterProvider', async (importOriginal) => {
 vi.mock('../ConversationsSidebar', () => ({
   ConversationsSidebar: () => <div data-testid="sidebar" />,
 }));
-vi.mock('../LiveCanvas', () => ({ LiveCanvas: () => <div data-testid="live-canvas" /> }));
+
 
 import { AiChatPage, deriveBoundPackageId } from '../AiChatPage';
 

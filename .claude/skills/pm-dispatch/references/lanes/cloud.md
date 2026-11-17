@@ -25,4 +25,4 @@
 - 发版板(窗内升 `priority:p0`)在 cloud 仓的生产者是本车道(`seat-post-protocol.md` 发版板节)。
 - CI 分钟三条入派发令与 Go 词(维护者令):① `pr_ready` 前容器跑类型检查与受影响测试,命令
   与结果入报告;② ready 后的修改并一次 push;合 main 照 cloud `AGENTS.md` 第 7 条(先于通用纪律);
-  ③ `ci:full` 只给 pin 轮次(`.objectstack-sha` 变)与改 `.github/workflows/**` 的 PR,余走受影响档。
+  ③ `ci:full` 只给 pin 轮次、改 `.github/workflows/**` 与改仓根文件的 PR(cloud `AGENTS.md` 第 7 条)。

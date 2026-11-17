@@ -58,8 +58,9 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 // A read-only base's customization read (ADR-0146 D3) is not under test here:
 // it stays pending, so no request leaves the file.
-vi.mock('./packageCustomizations-io', () => ({
-  fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
+vi.mock('./packageCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./packageCustomizations-io')>()),
+  fetchPackageCustomizations: vi.fn(() => new Promise<never>(() => {})),
 }));
 
 // The package-less flow count the landing draws (objectstack#34715) is not under
@@ -127,6 +128,7 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     await screen.findByText('Recently viewed');
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
       'Installed apps',
+      'Customizations in this environment',
       'Your own apps',
       'Recently viewed',
       'Outside any app',

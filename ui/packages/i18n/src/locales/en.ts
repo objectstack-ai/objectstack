@@ -2632,6 +2632,16 @@ const en = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+        publishFromBar_one: '{{count}} unpublished change. Publish it from the draft bar at the top.',
+        publishFromBar_other: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+        showDraftToPublish: '{{count}} unpublished changes. Show the draft to review and publish them.',
+        showDraftToPublish_one: '{{count}} unpublished change. Show the draft to review and publish it.',
+        showDraftToPublish_other: '{{count}} unpublished changes. Show the draft to review and publish them.',
+        showDraft: 'Show draft',
+        receipt: 'Published. Your changes are live.',
+        dismissReceipt: 'Dismiss',
         count: '{{count}} change(s) are not published yet — users cannot see them.',
         publish: 'Publish',
         published: 'All pending changes are live.',
@@ -2873,7 +2883,7 @@ const en = {
       changesApplied: 'Applied',
       changesDrafted: 'Saved as draft',
       changesFailed: 'Not applied',
-      discussing: 'Discussing: {{target}}',
+      discussing: 'Viewing: {{target}}',
       // Wording is load-bearing: this is SENT to the agent and must satisfy the
       // cloud confirm gate's English clause `apply (this|the) change`
       // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
@@ -3865,7 +3875,7 @@ const en = {
     aiAssistant: 'AI Assistant',
     designInStudio: 'Design in Studio',
     editApp: 'Edit app',
-    openAppInStudio: 'Open app in Studio',
+    openAppInStudio: 'Open {{app}} in Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4158,6 +4168,10 @@ const en = {
       pendingHere: 'Draft preview · {{count}} unpublished changes on this page',
       pendingHere_one: 'Draft preview · {{count}} unpublished change on this page',
       pendingHere_other: 'Draft preview · {{count}} unpublished changes on this page',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
+      pendingInApp_one: 'Draft preview · {{count}} unpublished change in this app. Nothing here is live until you publish.',
+      pendingInApp_other: 'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
       // Magic-moment hint: a freshly-built draft renders empty (dashboards at 0,
       // lists "Nothing here yet") because seed/sample rows only load on publish.
       // Say so plainly so an empty preview never reads as a broken build.
@@ -4184,7 +4198,7 @@ const en = {
       detailNone: 'No differences detected — the draft matches the published version.',
       fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Includes changes drafted by the AI copilot',
+      draftedByCopilot: 'Includes changes drafted by the AI assistant',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
       draftedByMcp: 'Includes changes drafted by an MCP client',
       detailChangedKeys: 'Also changed:',
@@ -4298,6 +4312,7 @@ const en = {
       securityBlockTitle_one: 'Publishing will be refused — {{count}} item needs a decision first',
       securityBlockTitle_other: 'Publishing will be refused — {{count}} items need a decision first',
       securityBlockWhere: 'Fix it on the object under Settings → Record sharing, then publish again.',
+      flowChecksTitle: 'Before you publish — the publish check will report these',
       // The pre-publish security rows, by the rule id of the finding (DraftChangesPanel `SECURITY_RULE_TEXT`).
       securityRule: {
         owdUnset: 'No record-sharing baseline (sharingModel) is declared. The runtime falls back to private, but the baseline must be an authored decision.',
@@ -4309,6 +4324,8 @@ const en = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'This app is not published yet. It works, but only builders can see it. Publish to make it visible to your users.',
       message: 'Unpublished app — fully functional, but only builders can see it. Publish to make it visible to your users.',
       publish: 'Publish',
       publishing: 'Publishing…',

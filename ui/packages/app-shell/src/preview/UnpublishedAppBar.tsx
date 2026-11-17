@@ -39,6 +39,13 @@
  * Sibling of DraftPreviewBar (the ADR-0037 draft-overlay watermark): that bar
  * owns mutation preview (`?preview=draft`); this one owns the materialize
  * regime. In preview mode this bar yields — the draft bar already narrates.
+ *
+ * objectstack#34610 — a new app the AI builds is materialized (ADR-0045), so
+ * while the drawer builds it the main area shows the real app and this bar is
+ * the screen's one Publish (the chat draws none). Its sentence says the app is
+ * not published yet, the card's 「这个应用还没发布过」, as the draft bar's
+ * says how many unpublished changes a published app has; a publish here tells
+ * the chat, which shows a receipt.
  */
 
 import { useState } from 'react';
@@ -48,6 +55,7 @@ import { toast } from 'sonner';
 import { Button } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { emitPublishReceipt } from '../assistant/assistantBus.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { CommitTimeline } from './CommitTimeline.js';
 import { usePreviewDrafts } from './PreviewModeContext.js';
@@ -86,7 +94,15 @@ export function UnpublishedAppBar() {
       // Whatever `hidden` the app carries rides through the spread UNTOUCHED:
       // publishing an app must not silently rewrite the author's navigation
       // choice, which is the exact regression objectstack#4829 was filed for.
-      const res = await fetch(`/api/v1/meta/app/${encodeURIComponent(routeApp)}`, {
+      //
+      // objectstack#34610 — saved under the app's own NAME. The route segment
+      // is the app's package id (ADR-0048) for every app the AI builds, and
+      // the meta door refuses an app saved under a key its `name` disagrees
+      // with, so a write keyed by the segment never published the app.
+      const appKey = typeof (app as { name?: unknown }).name === 'string' && (app as { name: string }).name
+        ? (app as { name: string }).name
+        : routeApp;
+      const res = await fetch(`/api/v1/meta/app/${encodeURIComponent(appKey)}`, {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -102,6 +118,7 @@ export function UnpublishedAppBar() {
         }),
       );
       refresh?.();
+      emitPublishReceipt({ packageId });
     } catch (e) {
       toast.error(
         `${t('preview.unpublishedBar.publishFailed', { defaultValue: 'Publish failed' })}: ${(e as Error).message}`,
@@ -119,9 +136,9 @@ export function UnpublishedAppBar() {
       >
         <EyeOff className="h-4 w-4 shrink-0" />
         <p className="min-w-0 flex-1 truncate">
-          {t('preview.unpublishedBar.message', {
+          {t('preview.unpublishedBar.notPublishedYet', {
             defaultValue:
-              'Unpublished app — fully functional, but only builders can see it. Publish to make it visible to your users.',
+              'This app is not published yet. It works, but only builders can see it. Publish to make it visible to your users.',
           })}
         </p>
         {packageId ? (

@@ -62,6 +62,56 @@ export const LookupExpectationSchema = z.strictObject({
   to: MachineNameSchema,
 });
 
+// ── The datasets a card's build declares (ADR-0149) ──
+//
+// A card that measures how an agent answers through the governed semantic
+// layer declares the datasets its build must carry: each dataset's base
+// object, its measures and dimensions, and each member's business vocabulary
+// (`synonyms`, `description`, ADR-0149 D1). The loader holds every declaration
+// to the platform's own dataset schema (`DatasetSchema` of
+// `@objectstack/spec/ui`), so a card can never ask a build for a dataset the
+// platform would refuse, and the build prompt states each one by name.
+
+/** A dataset member's business words (ADR-0149 D1): matched by the dataset tools, never rendered. */
+const SynonymsSchema = z.array(z.string().min(1)).min(1);
+
+/** One or two sentences of business definition, never an instruction to a model (ADR-0149 M1). */
+const MemberDescriptionSchema = z.string().min(1);
+
+export const DatasetDimensionExpectationSchema = z.strictObject({
+  name: MachineNameSchema,
+  label: z.string().min(1),
+  /** The base object's field the dimension groups by; a seed field of that object. */
+  field: MachineNameSchema,
+  synonyms: SynonymsSchema.optional(),
+  description: MemberDescriptionSchema.optional(),
+});
+
+/** The aggregates a card's measure may declare: the ones its truth evaluator computes too. */
+export const DATASET_MEASURE_AGGREGATES = ['count', 'sum', 'avg', 'min', 'max'] as const;
+
+export const DatasetMeasureExpectationSchema = z.strictObject({
+  name: MachineNameSchema,
+  label: z.string().min(1),
+  aggregate: z.enum(DATASET_MEASURE_AGGREGATES),
+  /** The base object's number field aggregated; absent only for `count`. */
+  field: MachineNameSchema.optional(),
+  synonyms: SynonymsSchema.optional(),
+  description: MemberDescriptionSchema.optional(),
+});
+
+export const DatasetExpectationSchema = z.strictObject({
+  name: MachineNameSchema,
+  label: z.string().min(1),
+  /** What the dataset as a whole covers: the text an agent picks a dataset by (ADR-0149 D1). */
+  description: z.string().min(1),
+  /** The base object, one of `expect.objects`. */
+  object: MachineNameSchema,
+  measures: z.array(DatasetMeasureExpectationSchema).min(1),
+  dimensions: z.array(DatasetDimensionExpectationSchema).optional(),
+});
+export type DatasetExpectation = z.infer<typeof DatasetExpectationSchema>;
+
 export const ExpectSchema = z.strictObject({
   objects: z.array(MachineNameSchema).min(1),
   minFieldsPerObject: z.number().int().min(1).optional(),
@@ -69,6 +119,8 @@ export const ExpectSchema = z.strictObject({
   lookups: z.array(LookupExpectationSchema).optional(),
   dashboards: z.array(MachineNameSchema).optional(),
   appNavTargets: z.array(MachineNameSchema).optional(),
+  /** The datasets the build declares, with their members' vocabulary (above). */
+  datasets: z.array(DatasetExpectationSchema).min(1).optional(),
 });
 export type ScenarioExpect = z.infer<typeof ExpectSchema>;
 
@@ -254,6 +306,50 @@ export const QuestionSchema = z.strictObject({
   /** Also compute the truth AS each of these personas (their row scope and hidden fields applied). */
   personas: z.array(MachineNameSchema).min(1).optional(),
 });
+
+// ── Dataset questions: how the answer was reached (ADR-0149 D3) ──
+//
+// A dataset question is graded on the route its answer took, never on a
+// figure: the selection rule of ADR-0149 D3 decides what the right route is,
+// from the word the question turns on and the vocabulary the card's datasets
+// declare. The kinds borrow cloud's ask-accuracy business-term categories
+// (ADR-0149 D5), not its fixture.
+//
+//   - `metric_selected`: the word matches exactly one measure (D3 rule 2);
+//     the answer comes through `query_dataset` with that dataset and measure.
+//   - `asked_back`: the word matches two members (`ambiguous`, D3 rule 3), or
+//     none while it is close to one (`near_miss`: a substring or a stem, which
+//     D3 rule 1 says is no hit and may only be offered back); the answer asks
+//     which reading is meant, names every candidate and states no figure.
+//   - `fallback_labelled`: the word matches nothing and no dataset covers the
+//     object (D3 rule 4, M2 ruled A); the answer comes from an object query
+//     and says it is not from a governed metric.
+
+/** A measure of one of the card's datasets. */
+export const DatasetMemberRefSchema = z.strictObject({ dataset: MachineNameSchema, measure: MachineNameSchema });
+
+export const DATASET_QUESTION_KINDS = ['metric_selected', 'asked_back', 'fallback_labelled'] as const;
+export type DatasetQuestionKind = (typeof DATASET_QUESTION_KINDS)[number];
+
+export const DatasetExpectedRouteSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('metric_selected'), dataset: MachineNameSchema, measure: MachineNameSchema }),
+  z.strictObject({ kind: z.literal('asked_back'), reason: z.enum(['ambiguous', 'near_miss']), candidates: z.array(DatasetMemberRefSchema).min(1) }),
+  z.strictObject({ kind: z.literal('fallback_labelled'), object: MachineNameSchema }),
+]);
+export type DatasetExpectedRoute = z.infer<typeof DatasetExpectedRouteSchema>;
+
+export const DatasetQuestionSchema = z.strictObject({
+  id: MachineNameSchema,
+  ask: LocalizedTextSchema,
+  /**
+   * The business word (or words, one per language) the ask turns on, as the
+   * ask writes it; the loader finds each in the ask and judges the route
+   * `expect` declares against what the word matches.
+   */
+  words: z.array(z.string().min(1)).min(1),
+  expect: DatasetExpectedRouteSchema,
+});
+export type DatasetQuestion = z.infer<typeof DatasetQuestionSchema>;
 
 export const FieldRefSchema = z.strictObject({
   object: MachineNameSchema,
@@ -602,6 +698,12 @@ export const ScenarioCardSchema = z.strictObject({
     /** Why the card runs fewer than 8 questions or 4 operations; required then. */
     countsReason: z.string().min(1).optional(),
     agentActions: z.array(AgentActionSchema).min(3).optional(),
+    /**
+     * Questions graded on the route the answer took through the card's
+     * datasets (above); asked as the admin, after the questions and before
+     * any operation writes. Needs `expect.datasets`.
+     */
+    datasetQuestions: z.array(DatasetQuestionSchema).min(1).optional(),
   }),
   iterate: IterateSchema,
 });

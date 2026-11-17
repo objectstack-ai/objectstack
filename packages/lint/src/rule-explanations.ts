@@ -700,6 +700,37 @@ const DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 // ── Security posture (`validate-security-posture.ts`) ──────────────────────
 
+const DATASET_MEMBER_NO_VOCABULARY_EXPLANATION: RuleExplanation = {
+  rule: 'dataset-member-no-vocabulary',
+  covers: 'what a member with no synonyms and no description loses',
+  paragraphs: [
+    'A dataset member (a measure or a dimension) carries its business vocabulary in two optional keys: ' +
+      '`synonyms`, the words a person types for it in a question, and `description`, one or two sentences ' +
+      'saying what it is in business terms. When an assistant is asked a business question it matches the ' +
+      'words of the question against each member\'s `name`, `label` and `synonyms`, and reads the ' +
+      '`description` to choose between members and to explain the number it returns.',
+    'A member that declares neither answers only to its own name and label. A person who asks for ' +
+      '"revenue" where the measure is labelled "Total Amount", or who asks in another language, matches ' +
+      'nothing, and the assistant falls back to a plain object query: a number no dataset governs, for a ' +
+      'metric this dataset does govern. Every check stays green and every dashboard still draws, so nothing ' +
+      'else reports the loss.',
+    'Reported once per member that has neither key. A `synonyms` list with at least one non-blank word, or a ' +
+      'non-blank `description` (a string, or an inline locale map with one non-blank value), is enough to ' +
+      'silence it; writing both is the complete form.',
+    'To fix it, write the words a person types, in the language your users ask in. Synonyms are matched and ' +
+      'never translated, so every language goes in the one list (`synonyms: [\'revenue\', \'sales\', \'营收\']`), ' +
+      'and a list is not keyed by locale. Write the `description` as a plain business definition, what the ' +
+      'number counts and what it leaves out, never as an instruction to a model; it is display text and is ' +
+      'translated like `label`.',
+    'One word names one member: within a dataset a synonym may not equal another member\'s name, label or ' +
+      'synonym, compared with case, width, spacing, `_` and `-` folded, and the dataset schema refuses one ' +
+      'that does. Give the shared word to the member people most often mean by it.',
+    'The rule is advisory and stays a warning, at `os validate`, `os build`, `os lint` and on the save ' +
+      'response of the metadata publish door. A dataset that only feeds charts, and that nobody asks ' +
+      'questions of, loses nothing by leaving both keys out.',
+  ],
+};
+
 const SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION: RuleExplanation = {
   rule: 'security-controlled-by-parent-ambiguous-relation',
   covers: 'why a controlled_by_parent object takes exactly one master',
@@ -1045,6 +1076,14 @@ const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
       'holders, declare `readable: true` on it in the sets they hold. A set that holds Modify All on the ' +
       'parent must drop that bit first, because Modify All makes the entry inert. If the set may see ' +
       'the child data, grant the read on the child instead.',
+    'If the pair is meant, say so on the set: `fields: { \'<object>.<summary>\': { readable: true, ' +
+      'rollupSourceUnreadableReason: \'<why holders of this set read the total>\' } }`. That one finding, ' +
+      'for this set and this column, is then reported as a note that quotes the reason, so `--strict` passes ' +
+      'and a reviewer still sees the pair and why it stands. Another set reading the same column, another ' +
+      'column of the same set and the row-scope note are judged as before. The runtime does not read the key, ' +
+      'but the entry that carries it is an ordinary declaring entry and votes `readable: true` in the field ' +
+      'merge: on a set that had no entry for the column, adding one restores the column for holders whose ' +
+      'other sets mask it. A blank reason, or a reason beside `readable: false`, is refused.',
   ],
 };
 
@@ -6209,6 +6248,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [DATASET_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FIELD_UNKNOWN_EXPLANATION,
   [DATASET_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DATASET_FIELD_NOT_INCLUDED_EXPLANATION,
   [DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION,
+  [DATASET_MEMBER_NO_VOCABULARY_EXPLANATION.rule]: DATASET_MEMBER_NO_VOCABULARY_EXPLANATION,
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,

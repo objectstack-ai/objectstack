@@ -31,7 +31,7 @@ import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
-import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, confirmationTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
+import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, CONFIRMATION_WORDS, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -2397,7 +2397,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(run.modes.map((m) => m.mode)).toEqual(['scratch', 'ask']);
     const ask = run.modes[1]!;
     expect(ask.skipped).toBeUndefined();
-    expect(ask.template).toEqual({ source: 'this run’s from-scratch build', install: { ok: true, status: 200 }, installModesSupplied: true });
+    expect(ask.template).toEqual({ source: 'this run’s from-scratch build', install: { ok: true, status: 200 }, installModesSupplied: true, installMode: 'unmanaged' });
     expect(ask.build).toBeUndefined();
     expect(ask.iterate).toBeUndefined();
     expect(ask.findings).toEqual([]);
@@ -2614,6 +2614,140 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     const rows = (run: CardRun, driver: AgentDriver) => (runRecord(meta(driver), run).results as Array<{ id: string }>).filter((r) => !r.id.includes('.ask.'));
     expect(JSON.stringify(rows(withAsk, b.driver))).toBe(JSON.stringify(rows(without, a.driver)));
     expect(JSON.stringify(cardScorecard(withAsk).modes.slice(0, 2))).toBe(JSON.stringify(cardScorecard(without).modes));
+  });
+});
+
+// ── Ask mode's managed fallback ─────────────────────────────────────────────
+
+describe('runCard — ask mode installs a build the unmanaged door refuses UNMANAGED_INSTALL_UNCOPYABLE managed instead, and records the mode (#34687)', () => {
+  const CARD = 'crm_account_with_contacts';
+  const UNCOPYABLE: HttpAnswer = {
+    ok: false,
+    status: 422,
+    body: {},
+    code: 'UNMANAGED_INSTALL_UNCOPYABLE',
+    message: "Package 'com.example.democrm' cannot be installed unmanaged: `capabilities` — 1 'capability' item(s). Install it managed instead.",
+  };
+
+  /** A host whose unmanaged door answers `unmanaged`, and whose managed door installs and answers `managed`. */
+  class TwoDoors extends FakeApp {
+    unmanagedCalls: Array<Record<string, unknown>> = [];
+    managedCalls: Array<Record<string, unknown>> = [];
+    managedAnswer: HttpAnswer = { ok: true, status: 200, body: {} };
+    constructor(private readonly unmanaged: HttpAnswer) {
+      super();
+    }
+    override async installUnmanaged(manifest: Record<string, unknown>) {
+      this.unmanagedCalls.push(manifest);
+      if (this.unmanaged.ok) this.installed = manifest;
+      return this.unmanaged;
+    }
+    async installManaged(manifest: Record<string, unknown>) {
+      this.managedCalls.push(manifest);
+      if (this.managedAnswer.ok) this.installed = manifest;
+      return this.managedAnswer;
+    }
+  }
+
+  it('the refusal falls back to a managed install of the same build, unchanged; the Run half runs; the record names the mode and the refusal; every fresh copy installs managed too', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new TwoDoors(UNCOPYABLE) });
+    const build = { ...artifact(), capabilities: [{ name: 'democrm_bulk_reassign' }] };
+    const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: build });
+    const ask = run.modes[0]!;
+    expect(ask.template).toEqual({
+      source: 'supplied template',
+      install: { ok: true, status: 200 },
+      installModesSupplied: false,
+      installMode: 'managed',
+      unmanagedRefusal: { ok: false, status: 422, code: 'UNMANAGED_INSTALL_UNCOPYABLE', message: UNCOPYABLE.message },
+    });
+    expect(ask.findings).toEqual(['unmanaged install refused UNMANAGED_INSTALL_UNCOPYABLE (422): installed the same build managed instead']);
+    // The question and operation turns ran on the managed install.
+    expect(ask.run).toBeDefined();
+    expect(ask.run!.questions.length).toBeGreaterThan(0);
+    expect(ask.run!.operations.length).toBeGreaterThan(0);
+    expect(driver.seen.some((k) => k.startsWith(`${CARD}/ask/run/`))).toBe(true);
+    // Nothing stripped: the managed body is the unmanaged one minus only the `installModes` the runner adds for the copy.
+    const host = apps[0]!;
+    expect(host.unmanagedCalls).toHaveLength(1);
+    expect(host.managedCalls).toHaveLength(1);
+    const { installModes, ...copyBody } = host.unmanagedCalls[0]!;
+    expect(installModes).toEqual(['unmanaged']);
+    expect(host.managedCalls[0]).toEqual(copyBody);
+    expect(host.managedCalls[0]!.capabilities).toEqual([{ name: 'democrm_bulk_reassign' }]);
+    // A fresh copy is installed the way the run's own install landed: managed, never the refused door again.
+    const copies = apps.slice(1);
+    expect(copies.length).toBeGreaterThan(0);
+    for (const copy of copies) {
+      expect(copy.unmanagedCalls).toEqual([]);
+      expect(copy.managedCalls).toEqual([copyBody]);
+    }
+    expect(renderScorecard(cardScorecard(run))).toContain('- ask finding: unmanaged install refused UNMANAGED_INSTALL_UNCOPYABLE (422): installed the same build managed instead');
+  });
+
+  it('a different 4xx from the unmanaged door does not fall back: the refusal stays the finding and no turn runs', async () => {
+    for (const refusal of [
+      { ok: false, status: 422, body: {}, code: 'INSTALL_MODE_NOT_PERMITTED', message: 'the package does not permit unmanaged' },
+      { ok: false, status: 409, body: {}, code: 'UNMANAGED_INSTALL_WALLED_POSTURE', message: 'the deployment walls organizations' },
+      { ok: false, status: 400, body: {}, code: 'PLUGIN_MANIFEST_INVALID', message: 'Invalid manifest payload.' },
+    ] satisfies HttpAnswer[]) {
+      const { scenario, ops, driver, apps } = setup({ app: () => new TwoDoors(refusal) });
+      const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+      const ask = run.modes[0]!;
+      expect(apps.every((a) => a.managedCalls.length === 0)).toBe(true);
+      expect(ask.template).toEqual({
+        source: 'supplied template',
+        install: { ok: false, status: refusal.status, code: refusal.code, message: refusal.message },
+        installModesSupplied: true,
+        installMode: 'unmanaged',
+      });
+      expect(ask.findings).toEqual([`unmanaged install refused: ${refusal.status} ${refusal.code} ${refusal.message}`]);
+      expect(ask.run).toBeUndefined();
+      expect(driver.seen).toEqual([]);
+    }
+  });
+
+  it('an unmanaged install the door accepts records `unmanaged`, and the managed door is never called', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new TwoDoors({ ok: true, status: 200, body: {} }) });
+    const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    const ask = run.modes[0]!;
+    expect(ask.template).toEqual({ source: 'supplied template', install: { ok: true, status: 200 }, installModesSupplied: true, installMode: 'unmanaged' });
+    expect(ask.findings).toEqual([]);
+    expect(ask.run).toBeDefined();
+    expect(apps.every((a) => a.managedCalls.length === 0)).toBe(true);
+    expect(apps.every((a) => a.unmanagedCalls.length === 1)).toBe(true);
+  });
+
+  it('template mode stays unmanaged: the same refusal is its finding, its iterate never runs, and the managed door is never called', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new TwoDoors(UNCOPYABLE) });
+    const run = await runCard(scenario, driver, ops, { modes: ['template'], admin: ADMIN, templateArtifact: artifact() });
+    const template = run.modes[0]!;
+    expect(apps.every((a) => a.managedCalls.length === 0)).toBe(true);
+    expect(template.template).toMatchObject({ install: { ok: false, status: 422, code: 'UNMANAGED_INSTALL_UNCOPYABLE' }, installMode: 'unmanaged' });
+    expect(template.template!.unmanagedRefusal).toBeUndefined();
+    expect(template.findings).toEqual([`unmanaged install refused: 422 UNMANAGED_INSTALL_UNCOPYABLE ${UNCOPYABLE.message}`]);
+    expect(template.iterate).toBeUndefined();
+    expect(driver.seen).toEqual([]);
+  });
+
+  it('a managed install refused too is the finding, naming both answers; a harness with no managed door keeps the refusal and says so', async () => {
+    class BothRefuse extends TwoDoors {
+      override managedAnswer: HttpAnswer = { ok: false, status: 422, body: {}, code: 'VALIDATION_ERROR', message: 'a hook with no body' };
+    }
+    const both = setup({ app: () => new BothRefuse(UNCOPYABLE) });
+    const r = await runCard(both.scenario, both.driver, both.ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    expect(r.modes[0]!.template).toMatchObject({ install: { ok: false, status: 422, code: 'VALIDATION_ERROR' }, installMode: 'managed', unmanagedRefusal: { code: 'UNMANAGED_INSTALL_UNCOPYABLE' } });
+    expect(r.modes[0]!.findings).toEqual([`unmanaged install refused: 422 UNMANAGED_INSTALL_UNCOPYABLE ${UNCOPYABLE.message}; the managed install of the same build was refused too: 422 VALIDATION_ERROR a hook with no body`]);
+    expect(r.modes[0]!.run).toBeUndefined();
+
+    class UnmanagedOnly extends FakeApp {
+      override installAnswer = UNCOPYABLE;
+    }
+    const bare = setup({ app: () => new UnmanagedOnly() });
+    const b = await runCard(bare.scenario, bare.driver, bare.ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    expect(b.modes[0]!.template).toMatchObject({ installMode: 'unmanaged', install: { code: 'UNMANAGED_INSTALL_UNCOPYABLE' } });
+    expect(b.modes[0]!.findings).toEqual([`unmanaged install refused: 422 UNMANAGED_INSTALL_UNCOPYABLE ${UNCOPYABLE.message} (this app harness has no managed install door to fall back to)`]);
+    expect(b.modes[0]!.run).toBeUndefined();
   });
 });
 
@@ -3296,5 +3430,134 @@ describe('rowDrift / derivedFields — how far rows have moved from the seeded s
     expect(derivedFields(built)).toEqual(new Map([['o', new Set(['total', 'label', 'no'])]]));
     expect(derivedFields(undefined)).toEqual(new Map());
     expect(derivedFields({ objects: 'not a list' })).toEqual(new Map());
+  });
+});
+
+// ── Dataset questions (`run.datasetQuestions`, ADR-0149): asked after the questions, graded on their route ──
+
+/** The crm card with one dataset on `account` and two dataset questions: an exact hit, and a fallback on `contact`. */
+function withDatasets(): LoadedScenario {
+  const scenario = load();
+  const card = scenario.card;
+  return {
+    ...scenario,
+    card: {
+      ...card,
+      expect: {
+        ...card.expect,
+        datasets: [
+          {
+            name: 'accounts',
+            label: 'Accounts',
+            description: 'Customer accounts and their headcount.',
+            object: 'account',
+            measures: [{ name: 'headcount', label: 'Headcount', aggregate: 'sum', field: 'employees', synonyms: ['staff'], description: 'Employees across the accounts.' }],
+          },
+        ],
+      },
+      run: {
+        ...card.run,
+        datasetQuestions: [
+          { id: 'dq_staff', ask: { en: 'How many staff do our accounts have?' }, words: ['staff'], expect: { kind: 'metric_selected', dataset: 'accounts', measure: 'headcount' } },
+          { id: 'dq_contacts', ask: { en: 'How many contacts do we have?' }, words: ['contacts'], expect: { kind: 'fallback_labelled', object: 'contact' } },
+        ],
+      },
+    },
+  };
+}
+
+/** Answers each dataset question by the route it declares; every other turn goes to the scripted agent. */
+class DatasetRoutes implements AgentDriver {
+  constructor(private readonly inner: AgentDriver) {}
+  info(): DriverInfo {
+    return this.inner.info();
+  }
+  author(task: AuthorTask) {
+    return this.inner.author(task);
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    if (task.step === 'dq_staff') {
+      return turn('180 staff.\nSource: Headcount (Accounts)', [
+        { name: 'query_dataset', rawName: 'mcp__app__query_dataset', input: { datasetName: 'accounts', selection: { measures: ['headcount'] } }, output: JSON.stringify({ rows: [{ headcount: 180 }], provenance: { kind: 'dataset', dataset: { name: 'accounts', label: 'Accounts' }, measures: [{ name: 'headcount', label: 'Headcount' }] } }) },
+      ]);
+    }
+    if (task.step === 'dq_contacts') {
+      return turn('5 contacts (an object query: no governed metric covers contacts).', [{ name: 'aggregate_records', rawName: 'mcp__app__aggregate_records', input: { objectName: `${NS}_contact` }, output: '{"value":5}' }]);
+    }
+    return this.inner.ask(task);
+  }
+}
+
+describe('runCard — dataset questions', () => {
+  it('asked as the admin after every question and before any operation, each ask graded on its route, `--ask-repeats` honoured, and a Run · datasets row', async () => {
+    const { ops, driver } = setup({ scenario: withDatasets() });
+    const run = await runCard(withDatasets(), new DatasetRoutes(driver), ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact(), askRepeats: 2 });
+    const half = run.modes[0]!.run!;
+    expect(half.datasetQuestions!.map((q) => [q.question, q.repeat, q.grade?.grader, q.grade?.pass])).toEqual([
+      ['dq_staff', 1, 'metric-selected', true],
+      ['dq_staff', 2, 'metric-selected', true],
+      ['dq_contacts', 1, 'fallback-labelled', true],
+      ['dq_contacts', 2, 'fallback-labelled', true],
+    ]);
+    // The scripted agent saw every question first and every operation after; the dataset turns sit between, under their own keys.
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.datasets).toEqual({ passed: 4, total: 4, notMeasured: 0, byGrader: { 'metric-selected': { passed: 2, total: 2 }, 'fallback-labelled': { passed: 2, total: 2 } } });
+    expect(renderScorecard(sc)).toContain('| Run · datasets | 4/4 (metric-selected 2/2 · fallback-labelled 2/2) |');
+    // Dataset turns are persona turns of the half: counted in Run · model with the rest.
+    const questionTurns = sc.modes[0]!.first.ask!.total + sc.modes[0]!.first.ask!.notMeasured;
+    expect(Object.values(sc.modes[0]!.first.models!.served).reduce((a, n) => a + n, 0)).toBeGreaterThan(questionTurns);
+    const record = runRecord({ run: 'r', date: '2026-11-17', packages: PUBLISHED, driver: driver.info(), runner: 'scenario-runner', evidenceDir: '/tmp' }, run) as { results: Array<{ id: string; verdict: string }> };
+    expect(record.results.find((r) => r.id.endsWith('.ask.run-datasets'))).toMatchObject({ verdict: 'pass' });
+  });
+
+  it('the order of turns: questions, then dataset questions, then operations', async () => {
+    const { ops, driver } = setup({ scenario: withDatasets() });
+    const seen: string[] = [];
+    const tracking = new DatasetRoutes(driver);
+    const ask = tracking.ask.bind(tracking);
+    tracking.ask = async (task) => {
+      seen.push(task.step);
+      return ask(task);
+    };
+    await runCard(withDatasets(), tracking, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    const scenario = withDatasets();
+    const at = (id: string) => seen.indexOf(id);
+    const lastQuestion = Math.max(...scenario.card.run.questions.map((q) => seen.lastIndexOf(q.id)));
+    const firstOperation = Math.min(...scenario.card.run.operations.map((o) => at(o.id)).filter((i) => i >= 0));
+    expect(lastQuestion).toBeLessThan(at('dq_staff'));
+    expect(at('dq_contacts')).toBeLessThan(firstOperation);
+  });
+
+  it('a card without dataset questions keeps its record’s shape: no `datasetQuestions` on the half, no datasets tally, no `run-datasets` result', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    expect('datasetQuestions' in run.modes[0]!.run!).toBe(false);
+    const sc = cardScorecard(run);
+    expect('datasets' in sc.modes[0]!.first).toBe(false);
+    expect(renderScorecard(sc)).not.toContain('datasets');
+    const record = runRecord({ run: 'r', date: '2026-11-17', packages: PUBLISHED, driver: driver.info(), runner: 'scenario-runner', evidenceDir: '/tmp' }, run) as { results: Array<{ id: string }> };
+    expect(record.results.map((r) => r.id.split('.').pop())).toEqual(['build', 'run-ask', 'run-operations', 'iterate-build', 'iterate-run-ask', 'iterate-run-operations']);
+  });
+});
+
+describe('runHalf — a replay of a recording made before the card declared dataset questions', () => {
+  it('each dataset question it holds no turn for is not measured, never an error or a fail; the questions it holds replay as recorded', async () => {
+    const { scenario, ops, driver: scripted } = setup();
+    const live = new RecordingDriver(scripted);
+    const run = await runCard(scenario, live, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(Object.keys(live.recording.turns).filter((k) => k.includes('/dq_'))).toEqual([]);
+
+    const replay = new RecordedDriver(JSON.parse(JSON.stringify(live.recording)) as Recording);
+    const ref = { card: scenario.card.id, mode: 'scratch', phase: 'run' } as const;
+    const half = await runHalf(namespacedScenario(withDatasets()), new FakeApp(), replay, ref, citationLabels(withDatasets()));
+    expect(half.datasetQuestions!.map((q) => q.question)).toEqual(['dq_staff', 'dq_contacts']);
+    for (const q of half.datasetQuestions!) {
+      expect(typeof q.notMeasured).toBe('string');
+      expect(q.error).toBeUndefined();
+      expect(q.grade).toBeUndefined();
+    }
+    expect(datasetTally(half)).toEqual({ passed: 0, total: 0, notMeasured: 2, byGrader: {} });
+    const graded = (qs: QuestionResult[]) => qs.map((q) => ({ question: q.question, persona: q.persona, grade: q.grade }));
+    expect(graded(half.questions)).toEqual(graded(run.modes[0]!.run!.questions));
   });
 });
