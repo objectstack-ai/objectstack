@@ -67,7 +67,7 @@
  *
  * ## What satisfies it — an AUTHORIZED approval, on ANY commit
  *
- * The predicate has three dated layers; the LATEST one is the one enforced,
+ * The predicate has four dated layers; the LATEST one is the one enforced,
  * and each earlier layer still contributes the half that was not superseded.
  *
  * #8161 ruled the original predicate — 「门禁改成只要求「APPROVED review 存在」」/
@@ -79,7 +79,8 @@
  *
  * 2026-08-27 NARROWED it. The maintainer asked, verbatim: 「需要我人工审查的，如果
  * 我真的审查了，并且点了批准，也不能合并吗？还是要等我 bypass吗」 — and ruled the
- * authorized set, verbatim: 「os-zhuang hotlong 批准算数」. ⭐ THAT HALF STANDS,
+ * authorized set, verbatim: 「os-zhuang hotlong 批准算数」. ⭐ THAT HALF STANDS
+ * as a mechanism — its MEMBERSHIP is 2026-11-17's (below), not this one's —
  * and it is this predicate's whole identity control: only an account in
  * `GOVERNED_APPROVERS` (the single source — protocol text references the
  * constant, never copies the names) can satisfy this leg. What that ruling ALSO
@@ -96,8 +97,8 @@
  * holds a latest-decisive review that is APPROVED — on ANY commit, with
  * `commit_id` unread by the decision. This ruling supersedes the sha-pin half
  * of the 2026-08-27 predicate and NOTHING else: the approver set of that ruling
- * (「os-zhuang hotlong 批准算数」) stands, DISMISSED and superseded approvals
- * still never count, an unauthorized APPROVED still never counts, and an empty
+ * (「os-zhuang hotlong 批准算数」) stands — its membership since narrowed by
+ * 2026-11-17 — DISMISSED and superseded approvals still never count, an unauthorized APPROVED still never counts, and an empty
  * or unreadable review list still fails closed. review → Approve → done: the
  * queue merges, and the direct merge stays the fallback path.
  *
@@ -116,6 +117,19 @@
  * optional: an unreadable head is no longer a refusal (a read that decides
  * nothing may not block a landing), and ⛔ nothing may re-derive a refusal from
  * that printed reading without a new ruling.
+ *
+ * 2026-11-17 NARROWED THE SET. The maintainer, in the triage session (card
+ * #34626), verbatim and untranslated:
+ *
+ *   > hotlong 从批准账户中去掉，只保留 os-zhuang
+ *
+ * So `GOVERNED_APPROVERS` is `os-zhuang` alone. This supersedes the MEMBERSHIP
+ * of the 2026-08-27 set (「os-zhuang hotlong 批准算数」, kept above as history)
+ * and nothing else: the mechanism, the any-commit reading of 2026-09-04 and the
+ * 2026-10-26 enqueue leg all stand, now read against the one account. An
+ * APPROVED review by `hotlong` alone no longer satisfies either leg. The reason
+ * is the account rule that an approver account never runs a seat: `hotlong`
+ * runs seats, so it leaves the set.
  *
  * #11704's retraction still bounds the design: attribution from the GitHub
  * actor field is not a reading, so this guard stays keyed on the DIFF'S PATHS
@@ -150,8 +164,10 @@
  *   > 也就是说推送到我的手机上，以前都是需要我点一下核准，然后再点合并，以后我可以直接点合并是吗
  *   > 大部分我还是希望入队，但是我想省掉 Approve
  *
- * and the logins behind that click: 「os-zhuang 或 hotlong」 — both already in
- * `GOVERNED_APPROVERS`, which stays the single source and does not grow. So the
+ * and the logins behind that click: 「os-zhuang 或 hotlong」 — both then in
+ * `GOVERNED_APPROVERS`, which stays the single source and does not grow; since
+ * 2026-11-17 (「hotlong 从批准账户中去掉，只保留 os-zhuang」) only `os-zhuang`'s
+ * click counts, `hotlong`'s half of that quotation being history. So the
  * `merge_group` leg passes a governed pull request iff EITHER an authorized
  * account holds a latest-decisive APPROVED review (the 2026-09-04 predicate
  * above, unchanged and read FIRST) OR the account that put this entry in the
@@ -772,14 +788,16 @@ export const EVENT_MERGE_GROUP = 'merge_group';
 export const EVENT_PULL_REQUEST = 'pull_request';
 
 /**
- * The ONLY accounts whose APPROVED review satisfies the `merge_group` leg
- * (2026-08-27, verbatim: 「os-zhuang hotlong 批准算数」). ⭐ Single source, the
+ * The ONLY accounts whose APPROVED review satisfies the `merge_group` leg:
+ * 2026-11-17, verbatim: 「hotlong 从批准账户中去掉，只保留 os-zhuang」 (triage
+ * session, card #34626). It supersedes the membership of 2026-08-27
+ * (「os-zhuang hotlong 批准算数」), kept here as history. ⭐ Single source, the
  * `CONTRACT_REVIEW_TIER` pattern: protocol text references this constant and
  * never copies the names; changing the set is a one-line maintainer decision
  * here, nowhere else. The self-test pins the membership to the ruling, and the
  * refusal/cleared renderings derive their named accounts from this array.
  */
-export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang', 'hotlong']);
+export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang']);
 
 // ── the CODEOWNERS mirror — the platform half of "both approvers are asked" ─
 
@@ -1953,7 +1971,7 @@ export function renderGuardVerdict(verdict) {
       '  ✅  CLEARED — every governed pull request in this merge group carries an APPROVED review by an',
       `      authorized approver (GOVERNED_APPROVERS: ${GOVERNED_APPROVERS.join(', ')}), on ANY commit — the`,
       '      2026-09-04 ruled predicate (「只需要有人工批准记录就行，不需要卡最新的提交。」), which supersedes',
-      "      the sha pin of 2026-08-27 while that ruling's approver set (「os-zhuang hotlong 批准算数」) stands.",
+      "      the sha pin of 2026-08-27; the approver set is 2026-11-17's (「hotlong 从批准账户中去掉，只保留 os-zhuang」).",
       '      A dismissed, superseded or unauthorized approval still never counts. ⚖️ Accepted cost, stated where',
       '      it is paid: a push made after an approval was NOT re-reviewed here. ⛔ An agent seat never submits',
       '      an approving review on a governed-surface PR, under any account. The post-merge audit',
@@ -2002,8 +2020,8 @@ export function renderGuardVerdict(verdict) {
     '           2026-09-13, verbatim 「C. approve 后不管后续改动都由席位落地:」), 「席位落地 = 过落地前',
     '           检、清标、ready、auto-merge,踢出/变基同法。」 The approval does NOT have to sit on the current',
     '           head sha, and a later push does not expire it (2026-09-04: 「只需要有人工批准记录就行，不需',
-    '           要卡最新的提交。」); the authorized set is still the 2026-08-27 one (「os-zhuang hotlong 批准',
-    '           算数」). ⛔ An agent seat never submits that approval, under any account — the post-merge audit',
+    '           要卡最新的提交。」); the authorized set is the 2026-11-17 one (「hotlong 从批准账户中去掉，只保',
+    '           留 os-zhuang」). ⛔ An agent seat never submits that approval, under any account — the post-merge audit',
     '           reads the approver too. Or the maintainer\'s own "Merge when ready" from an account in',
     '           GOVERNED_APPROVERS: that enqueue IS the review (2026-10-26, 「大部分我还是希望入队，但是我想省掉',
     '           Approve」), and the entry it makes clears here with no APPROVED review — ⛔ no seat enqueues or',
@@ -3831,7 +3849,7 @@ export async function selfTest() {
 
   // ── the approval predicate ────────────────────────────────────────────────
   battery('the approval predicate');
-  assert('an-approval-is-an-approval', approvalVerdict(approved('hotlong')).state === 'approved');
+  assert('an-approval-is-an-approval', approvalVerdict(approved('os-zhuang')).state === 'approved');
   assert('no-reviews-at-all-is-unapproved', approvalVerdict([]).state === 'unapproved');
   assert('a-COMMENTED-review-is-not-an-approval', approvalVerdict([{ state: 'COMMENTED', user: { login: 'a' } }]).state === 'unapproved');
   // ⭐ The fail-open direction a naive `.some(r => r.state === 'APPROVED')`
@@ -3865,12 +3883,25 @@ export async function selfTest() {
   //
   // 「只需要有人工批准记录就行，不需要卡最新的提交。」 — an authorized
   // latest-decisive APPROVED review satisfies this leg on ANY commit. The
-  // approver set is still 2026-08-27's (「os-zhuang hotlong 批准算数」) and the
-  // constant IS the single source, so the membership pin iterates it and the
-  // membership assertion pins it to the ruling: a silent edit to the set fails
-  // here, and nothing else in the repo restates the names as data.
+  // approver set is 2026-11-17's (「hotlong 从批准账户中去掉，只保留 os-zhuang」),
+  // which superseded the membership of 2026-08-27 (「os-zhuang hotlong 批准算数」),
+  // and the constant IS the single source, so the membership pin iterates it and
+  // the membership assertion pins it to the ruling: a silent edit to the set
+  // fails here, and nothing else in the repo restates the names as data. The
+  // one login spelled below is the account that ruling REMOVED, pinned as the
+  // negative case: an approval or an enqueue by it alone no longer counts.
+  const RETIRED_APPROVER = 'hotlong';
   battery('the 2026-09-04 unpinned predicate (the queue leg\'s)');
-  assert('the-authorized-set-is-exactly-the-ruled-two-accounts', GOVERNED_APPROVERS.join() === 'os-zhuang,hotlong');
+  assert('the-authorized-set-is-exactly-the-ruled-one-account-2026-11-17', GOVERNED_APPROVERS.join() === 'os-zhuang');
+  assert('⛔ the-account-removed-2026-11-17-is-not-in-the-authorized-set', !GOVERNED_APPROVERS.includes(RETIRED_APPROVER));
+  {
+    const retired = authorizedApprovalVerdict([approvedAt(RETIRED_APPROVER, HEAD)], HEAD);
+    assert(
+      '⛔ a-head-approved-ONLY-by-the-removed-account-reads-UNAPPROVED-2026-11-17',
+      retired.state === 'unapproved' && retired.approvers.length === 0 && retired.unauthorizedApprovers.join() === RETIRED_APPROVER,
+      JSON.stringify(retired),
+    );
+  }
   for (const login of GOVERNED_APPROVERS) {
     assert(`an-authorized-approval-on-the-current-head-passes: ${login}`, authorizedApprovalVerdict([approvedAt(login, HEAD)], HEAD).state === 'approved');
   }
@@ -3894,13 +3925,13 @@ export async function selfTest() {
   );
   assert(
     'a-DISMISSED-authorized-approval-never-counts',
-    authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[1], HEAD), { state: 'DISMISSED', user: { login: GOVERNED_APPROVERS[1] }, commit_id: HEAD }], HEAD)
+    authorizedApprovalVerdict([approvedAt(GOVERNED_APPROVERS[0], HEAD), { state: 'DISMISSED', user: { login: GOVERNED_APPROVERS[0] }, commit_id: HEAD }], HEAD)
       .state === 'unapproved',
   );
   assert('no-reviews-at-all-is-unapproved-under-this-predicate-too', authorizedApprovalVerdict([], HEAD).state === 'unapproved');
   assert(
     'an-unauthorized-approval-does-not-mask-an-authorized-one-on-an-older-commit',
-    authorizedApprovalVerdict([approvedAt('not-authorized', HEAD), approvedAt(GOVERNED_APPROVERS[1], OLD)], HEAD).approvers.join() === GOVERNED_APPROVERS[1],
+    authorizedApprovalVerdict([approvedAt('not-authorized', HEAD), approvedAt(GOVERNED_APPROVERS[0], OLD)], HEAD).approvers.join() === GOVERNED_APPROVERS[0],
   );
   assert(
     'a-COMMENTED-review-by-an-authorized-account-is-not-an-approval',
@@ -5018,7 +5049,7 @@ export async function selfTest() {
   );
   const noApproval = await liftRun([]);
   const unauthorized = await liftRun([approvedAt('not-authorized', PR20125_SHA)]);
-  const dismissed = await liftRun([approvedAt('hotlong', PR20125_SHA), { state: 'DISMISSED', user: { login: 'hotlong' }, commit_id: PR20125_SHA }]);
+  const dismissed = await liftRun([approvedAt('os-zhuang', PR20125_SHA), { state: 'DISMISSED', user: { login: 'os-zhuang' }, commit_id: PR20125_SHA }]);
   const superseded = await liftRun([approvedAt('os-zhuang', OLD), { state: 'CHANGES_REQUESTED', user: { login: 'os-zhuang' }, commit_id: PR20125_SHA }]);
   assert(
     '⛔ no-approval-an-UNAUTHORIZED-one-a-DISMISSED-one-and-a-SUPERSEDED-one-each-still-REFUSE-on-exit-8-as-today',
@@ -5071,10 +5102,10 @@ export async function selfTest() {
   );
   assert(
     '⭐ sizeReading-has-FOUR-states-and-lifted-is-over-the-line-never-within',
-    sizeReading(1, sizePair(LINE, 1), REPO, authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'lifted' &&
-      sizeReading(1, sizePair(LINE, 0), REPO, authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'within' &&
+    sizeReading(1, sizePair(LINE, 1), REPO, authorizedApprovalVerdict([approvedAt('os-zhuang', HEAD)], HEAD)).state === 'lifted' &&
+      sizeReading(1, sizePair(LINE, 0), REPO, authorizedApprovalVerdict([approvedAt('os-zhuang', HEAD)], HEAD)).state === 'within' &&
       sizeReading(1, sizePair(LINE, 1), REPO, authorizedApprovalVerdict([], HEAD)).state === 'oversized' &&
-      sizeReading(1, null, REPO, authorizedApprovalVerdict([approvedAt('hotlong', HEAD)], HEAD)).state === 'unreadable',
+      sizeReading(1, null, REPO, authorizedApprovalVerdict([approvedAt('os-zhuang', HEAD)], HEAD)).state === 'unreadable',
   );
   assert(
     '⭐ the-authorized-verdict-carries-approvals-login-and-commit-the-generic-one-does-NOT-so-only-the-verdict-that-asked-WHO-can-lift',
@@ -5835,7 +5866,7 @@ export async function selfTest() {
     repo: REPO,
     event: EVENT_MERGE_GROUP,
     rows: [row(71, [REF_A])],
-    fetchReviews: async () => [approvedAt(GOVERNED_APPROVERS[1], REF_HEAD)],
+    fetchReviews: async () => [approvedAt(GOVERNED_APPROVERS[0], REF_HEAD)],
     fetchPull: async () => REF_HEAD,
     fetchComments: async () => { throw new Error('the thread must not be read when an approval already satisfies the entry'); },
     loadRecognisers: async () => { throw new Error('the recognisers must not be loaded when an approval already satisfies the entry'); },
@@ -6138,7 +6169,8 @@ export async function selfTest() {
   for (const login of GOVERNED_APPROVERS) {
     assert(`an-enqueue-by-an-authorized-account-is-AUTHORIZED: ${login}`, authorizedEnqueueVerdict(enqueuerFromTimeline([added(login)])).state === 'authorized');
   }
-  assert('the-NEWEST-add-is-the-one-read', enqueuerFromTimeline([added(SEAT), removed(), added(GOVERNED_APPROVERS[1], '2026-10-26T16:00:00Z')]).login === GOVERNED_APPROVERS[1]);
+  assert('the-NEWEST-add-is-the-one-read', enqueuerFromTimeline([added(SEAT), removed(), added(GOVERNED_APPROVERS[0], '2026-10-26T16:00:00Z')]).login === GOVERNED_APPROVERS[0]);
+  assert('⛔ an-enqueue-by-the-account-removed-2026-11-17-is-UNAUTHORIZED', authorizedEnqueueVerdict(enqueuerFromTimeline([added(RETIRED_APPROVER)])).state === 'unauthorized');
   const staleAdd = authorizedEnqueueVerdict(enqueuerFromTimeline([added(GOVERNED_APPROVERS[0]), removed()]));
   assert('⛔ a-newest-queue-event-that-is-a-REMOVAL-is-UNDETERMINED-an-earlier-authorized-add-is-never-carried-onto-a-re-entry', staleAdd.state === 'undetermined' && /not recorded there yet/.test(staleAdd.reason), JSON.stringify(staleAdd));
   assert('⛔ no-add-event-a-non-list-and-an-actorless-add-are-all-UNDETERMINED',
@@ -6167,10 +6199,10 @@ export async function selfTest() {
     bySeat.exitCode === EXIT_REFUSED_UNAPPROVED && bySeatText.includes('NO authorized APPROVED review on this pull request') &&
       bySeatText.includes(`enqueued by ${SEAT}, outside GOVERNED_APPROVERS`), bySeatText);
   // Card fixture 3: a seat enqueue with an authorized APPROVED review — today's leg, and the timeline is never read.
-  const seatApproved = await enqueueRun(async () => [approvedAt(GOVERNED_APPROVERS[1], OLD)], noTimeline);
+  const seatApproved = await enqueueRun(async () => [approvedAt(GOVERNED_APPROVERS[0], OLD)], noTimeline);
   assert('FIXTURE-3 a-seat-enqueue-with-an-authorized-approval-PASSES-on-the-REVIEW-leg-and-never-reads-the-timeline',
     seatApproved.exitCode === EXIT_CLEAR && satisfiedBy(seatApproved.entries[0]) === 'review' && seatApproved.entries[0].enqueue === undefined && seatApproved.apiCalls === 2 &&
-      renderGuardVerdict(seatApproved).includes(`authorized APPROVED review, by: ${GOVERNED_APPROVERS[1]}`), renderGuardVerdict(seatApproved));
+      renderGuardVerdict(seatApproved).includes(`authorized APPROVED review, by: ${GOVERNED_APPROVERS[0]}`), renderGuardVerdict(seatApproved));
   // Card fixture 4: the enqueuer cannot be read and there is no review.
   const unreadEnqueuer = await enqueueRun(async () => [], async () => { throw new Error('HTTP 502'); });
   const unreadEnqueuerText = renderGuardVerdict(unreadEnqueuer);
@@ -6186,7 +6218,7 @@ export async function selfTest() {
   const enqueuePrLeg = await enqueueRun(async () => [], noTimeline, AGENTS_ROW, EVENT_PULL_REQUEST);
   assert('the-pull_request-leg-reads-NO-timeline-and-carries-NO-enqueue-key', enqueuePrLeg.exitCode === EXIT_CLEAR && enqueuePrLeg.entries[0].enqueue === undefined && !/enqueuer|ENQUEUE leg/.test(renderGuardVerdict(enqueuePrLeg)));
   assert('a-CLEAR-diff-reads-no-timeline-either', (await enqueueRun(noTimeline, noTimeline, [row(1, ['packages/core/src/x.ts'])])).apiCalls === 0);
-  const tierSEnqueued = await enqueueRun(async () => [], timelineOf([added(GOVERNED_APPROVERS[1])]), [row(7, ['.claude/agents/os-dev.md'])], EVENT_MERGE_GROUP, {
+  const tierSEnqueued = await enqueueRun(async () => [], timelineOf([added(GOVERNED_APPROVERS[0])]), [row(7, ['.claude/agents/os-dev.md'])], EVENT_MERGE_GROUP, {
     fetchComments: async () => { throw new Error('no record thread is read once the maintainer\'s enqueue satisfied the entry'); },
     loadRecognisers: async () => { throw new Error('the recognisers must not be loaded once the maintainer\'s enqueue satisfied the entry'); },
   });
@@ -6205,7 +6237,7 @@ export async function selfTest() {
   assert('⛔ an-oversized-PR-a-SEAT-enqueued-is-still-REFUSED-on-8-and-says-why', bigSeat.exitCode === EXIT_REFUSED_OVERSIZED && renderSizeVerdict(bigSeat).includes(`enqueued by ${SEAT}, outside GOVERNED_APPROVERS`), renderSizeVerdict(bigSeat));
   // main()'s own wiring, reproduced: the governed leg's enqueue reading rides into the size leg and is NOT read twice.
   let timelineReads = 0;
-  const countedTimeline = async () => { timelineReads += 1; return [added(GOVERNED_APPROVERS[1])]; };
+  const countedTimeline = async () => { timelineReads += 1; return [added(GOVERNED_APPROVERS[0])]; };
   const bigGovernedRows = [row(26066, ['AGENTS.md'])];
   const bigGoverned = await runGuard({ repo: REPO, event: EVENT_MERGE_GROUP, rows: bigGovernedRows, fetchReviews: async () => [], fetchPull: async () => pull(HEAD, { size: BIG }), fetchTimeline: countedTimeline });
   const bigGovernedSize = await runSizeGuard({
@@ -6254,7 +6286,7 @@ export async function selfTest() {
     const full = (extra = '') => `# mirrors GOVERNED_APPROVERS\n${live.tierHPatterns.map((p) => `${p} ${owners}`).join('\n')}\n${extra}`;
     assert('a-fixture-carrying-exactly-the-Tier-H-rows-with-every-owner-passes', codeownersMirrorVerdict({ text: full() }).ok);
     // The root ADR row carries the low-risk arm since #33539 and has no line; the ui/ ADR row is the Tier H ADR row here.
-    const one = codeownersMirrorVerdict({ text: full().replace(`/ui/docs/adr/ ${owners}`, `/ui/docs/adr/ @${GOVERNED_APPROVERS[1]}`) });
+    const one = codeownersMirrorVerdict({ text: full().replace(`/ui/docs/adr/ ${owners}`, `/ui/docs/adr/ @${RETIRED_APPROVER}`) });
     assert('⛔ one-approver-on-the-adr-row-is-a-problem-naming-the-row-and-the-missing-account', !one.ok && one.problems.length === 1 && one.problems[0].includes('`/ui/docs/adr/`') && one.problems[0].includes(`@${GOVERNED_APPROVERS[0]}`), one.problems.join(' | '));
     const missing = codeownersMirrorVerdict({ text: full().split('\n').filter((l) => !l.startsWith('/AGENTS.md')).join('\n') });
     assert('⛔ a-Tier-H-row-with-no-arm-and-no-line-is-a-problem-naming-the-row', !missing.ok && missing.problems.length === 1 && missing.problems[0].includes('`agents-md`'), missing.problems.join(' | '));
@@ -6265,8 +6297,8 @@ export async function selfTest() {
     assert('⛔ the-arm-is-per-repository-a-sibling-copy-it-does-not-reach-still-owes-the-skills-line', sibling.tierHPatterns.includes('/skills/') && sibling.armPatterns.length === 0 && !sibling.ok && sibling.problems.some((p) => p.includes('`skills-catalog`')), sibling.problems.join(' | '));
     const tierS = codeownersMirrorVerdict({ text: full(`/.claude/ ${owners}\n`) });
     assert('⛔ routing-the-Tier-S-row-is-a-problem-a-seat-record-landing-summons-nobody', !tierS.ok && tierS.problems.length === 1 && tierS.problems[0].includes('`claude-tree`'), tierS.problems.join(' | '));
-    const enforcer = codeownersMirrorVerdict({ text: full(`/.github/CODEOWNERS @${GOVERNED_APPROVERS[1]}\n`) });
-    assert('⛔ an-enforcement-chain-row-routed-to-a-subset-is-a-problem', !enforcer.ok && enforcer.problems.length === 1 && enforcer.problems[0].includes('enforcement-chain'), enforcer.problems.join(' | '));
+    const enforcer = codeownersMirrorVerdict({ text: full(`/.github/CODEOWNERS @${RETIRED_APPROVER}\n`) });
+    assert('⛔ an-enforcement-chain-row-routed-to-another-owner-set-is-a-problem', !enforcer.ok && enforcer.problems.length === 1 && enforcer.problems[0].includes('enforcement-chain'), enforcer.problems.join(' | '));
     const silent = codeownersMirrorVerdict({ text: full().replace('# mirrors GOVERNED_APPROVERS\n', '') });
     assert('⛔ a-file-that-never-names-the-constant-is-a-problem', !silent.ok && silent.problems.length === 1 && silent.problems[0].includes('GOVERNED_APPROVERS'), silent.problems.join(' | '));
     const other = codeownersMirrorVerdict({ text: onDisk, approvers: ['someone-else'] });
