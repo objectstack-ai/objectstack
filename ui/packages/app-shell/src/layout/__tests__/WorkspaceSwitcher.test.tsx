@@ -152,3 +152,39 @@ describe('WorkspaceSwitcherMenu — renders nothing', () => {
     expect(screen.getByTestId('header-switch-organization')).toBeInTheDocument();
   });
 });
+
+describe('WorkspaceSwitcherMenu — phone width: inline rows, no submenu', () => {
+  // A submenu opens beside the avatar menu; at phone width the menu already
+  // spans the screen, so a submenu would open off the screen. Below the phone
+  // breakpoint the rows render inline under a label instead.
+  const realWidth = window.innerWidth;
+  const setWidth = (w: number) =>
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: w });
+  afterEach(() => setWidth(realWidth));
+
+  it('at 375 px: no sub-trigger; the label and every row render inline, and a row still switches', async () => {
+    setWidth(375);
+    render(<WorkspaceSwitcherMenu isGroupPosture={false} />);
+    expect(screen.queryByTestId('header-switch-organization')).not.toBeInTheDocument();
+    expect(screen.getByTestId('header-switch-organization-label')).toHaveTextContent('Switch organization');
+    const group = screen.getByTestId('workspace-switcher-menu');
+    for (const org of ORGS) expect(group).toContainElement(screen.getByTestId(`workspace-switcher-org-${org.id}`));
+
+    fireEvent.click(screen.getByTestId('workspace-switcher-org-org_b'));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    expect(authState.switchOrganization).toHaveBeenCalledWith('org_b');
+  });
+
+  it('at 375 px under group posture: the working-organization hint stays', () => {
+    setWidth(375);
+    render(<WorkspaceSwitcherMenu isGroupPosture />);
+    expect(screen.getByTestId('workspace-switcher-group-hint')).toBeInTheDocument();
+  });
+
+  it('control: at 1024 px the submenu trigger renders and the inline label does not', () => {
+    setWidth(1024);
+    render(<WorkspaceSwitcherMenu isGroupPosture={false} />);
+    expect(screen.getByTestId('header-switch-organization')).toBeInTheDocument();
+    expect(screen.queryByTestId('header-switch-organization-label')).not.toBeInTheDocument();
+  });
+});

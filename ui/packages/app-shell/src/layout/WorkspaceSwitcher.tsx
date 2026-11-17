@@ -18,6 +18,11 @@
  * that write-context switcher to stay reachable in group posture; the avatar
  * menu is where it is reached.
  *
+ * Below the phone breakpoint (`usePhoneViewport`) the rows render inline in the
+ * avatar menu under a "Switch organization" label instead of in a submenu: a
+ * submenu opens beside the menu, and at phone width the menu already spans the
+ * screen, so neither side has room and the rows would open off the screen.
+ *
  * Switching does a full-page reload to the console root so the active-org
  * context refreshes app-wide, mirroring OrganizationsPage.
  *
@@ -38,8 +43,10 @@ import type { AuthOrganization } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { nativeHostCan, nativeShowConnectionSwitcher, useNativeHost } from '@object-ui/mobile';
 import {
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -47,6 +54,7 @@ import {
 import { ArrowLeftRight, Check, ChevronsUpDown } from 'lucide-react';
 import { resolveRootUrl } from '../console/organizations/resolveHomeUrl.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { OrgBadge } from './OrgBadge.js';
 
 /** The top bar's mobile-shell button; nothing in a plain browser. */
@@ -82,11 +90,12 @@ export function WorkspaceSwitcher() {
   );
 }
 
-/** The avatar menu's "Switch organization" submenu. Render it inside a `DropdownMenuContent`. */
+/** The avatar menu's "Switch organization" submenu (inline rows on a phone). Render it inside a `DropdownMenuContent`. */
 export function WorkspaceSwitcherMenu({ isGroupPosture }: { isGroupPosture: boolean }) {
   const { t } = useObjectTranslation();
   const { organizations, activeOrganization, switchOrganization } = useAuth();
   const nativeSwitcher = nativeHostCan(useNativeHost(), 'showConnectionSwitcher');
+  const phone = usePhoneViewport();
 
   // The shell's button in the top bar replaces the web switcher there.
   if (nativeSwitcher) return null;
@@ -117,40 +126,65 @@ export function WorkspaceSwitcherMenu({ isGroupPosture }: { isGroupPosture: bool
     });
   };
 
+  const groupHint = isGroupPosture ? (
+    <>
+      <DropdownMenuLabel className="text-xs text-muted-foreground">
+        {t('organization.switcher.groupLabel', { defaultValue: 'Working organization' })}
+      </DropdownMenuLabel>
+      <p
+        className="px-2 pb-1.5 text-xs font-normal leading-snug text-muted-foreground"
+        data-testid="workspace-switcher-group-hint"
+      >
+        {t('organization.switcher.groupHint', {
+          defaultValue: 'New records are created here. Views show data from all your organizations.',
+        })}
+      </p>
+    </>
+  ) : null;
+  const rows = orgList.map((org) => (
+    <DropdownMenuItem
+      key={org.id}
+      onClick={() => handleSwitch(org)}
+      className="cursor-pointer gap-2"
+      data-testid={`workspace-switcher-org-${org.id}`}
+    >
+      <OrgBadge name={org.name} />
+      <span className="flex-1 truncate">{org.name}</span>
+      {org.id === current.id && <Check className="h-4 w-4 shrink-0" />}
+    </DropdownMenuItem>
+  ));
+  const label = t('organization.switcher.label', { defaultValue: 'Switch organization' });
+
+  // Phone: inline rows under a label — a submenu has no side with room there.
+  if (phone) {
+    return (
+      <>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup data-testid="workspace-switcher-menu">
+          <DropdownMenuLabel
+            className="flex items-center text-xs font-medium text-muted-foreground"
+            data-testid="header-switch-organization-label"
+          >
+            <ArrowLeftRight className="mr-2 h-3.5 w-3.5" />
+            {label}
+          </DropdownMenuLabel>
+          {groupHint}
+          {rows}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+      </>
+    );
+  }
+
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger className="cursor-pointer" data-testid="header-switch-organization">
         <ArrowLeftRight className="mr-2 h-4 w-4" />
-        {t('organization.switcher.label', { defaultValue: 'Switch organization' })}
+        {label}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-60" data-testid="workspace-switcher-menu">
-        {isGroupPosture && (
-          <>
-            <DropdownMenuLabel className="text-xs text-muted-foreground">
-              {t('organization.switcher.groupLabel', { defaultValue: 'Working organization' })}
-            </DropdownMenuLabel>
-            <p
-              className="px-2 pb-1.5 text-xs font-normal leading-snug text-muted-foreground"
-              data-testid="workspace-switcher-group-hint"
-            >
-              {t('organization.switcher.groupHint', {
-                defaultValue: 'New records are created here. Views show data from all your organizations.',
-              })}
-            </p>
-          </>
-        )}
-        {orgList.map((org) => (
-          <DropdownMenuItem
-            key={org.id}
-            onClick={() => handleSwitch(org)}
-            className="cursor-pointer gap-2"
-            data-testid={`workspace-switcher-org-${org.id}`}
-          >
-            <OrgBadge name={org.name} />
-            <span className="flex-1 truncate">{org.name}</span>
-            {org.id === current.id && <Check className="h-4 w-4 shrink-0" />}
-          </DropdownMenuItem>
-        ))}
+        {groupHint}
+        {rows}
       </DropdownMenuSubContent>
     </DropdownMenuSub>
   );
