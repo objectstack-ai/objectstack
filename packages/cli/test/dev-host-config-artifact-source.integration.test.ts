@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 65 — five real boots in one beforeAll (two `os dev` legs on a host config, three CONTROL boots) plus one compile; slowest local reading 50.80 s (shared box, under the verify lock) x 1.25, rounded up
+// test-budget: 70 — spawns the real producer once per single-cause fixture: five real boots in one beforeAll (two `os dev` legs on a host config, three CONTROL boots) plus one compile; slowest local reading 50.80 s (shared box, under the verify lock) x 1.25, rounded up
 
 /**
  * #31761 — on `os dev` over a HOST config, the boot serves ONE copy of the

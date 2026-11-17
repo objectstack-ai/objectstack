@@ -130,6 +130,11 @@ import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-
 export interface McpObjectSummary {
   name: string;
   label?: string;
+  /**
+   * [#34721] The object's authored `description`, present only where one is
+   * authored: what a client reads to pick the object for a question.
+   */
+  description?: string;
   fieldCount?: number;
 }
 
@@ -2564,7 +2569,8 @@ export function registerObjectTools(
       note('list_objects'),
       {
         description:
-          'List the data objects (tables) available in this app. Returns each object\'s name, label and field count.',
+          'List the data objects (tables) available in this app. Returns each object\'s name, label, description '
+          + '(where the author wrote one) and field count.',
         inputSchema: strictToolInput({ surface: 'this list_objects call' }, {}),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
@@ -2622,7 +2628,8 @@ export function registerObjectTools(
       note('describe_object'),
       {
         description:
-          'Get the schema of a data object as you may read it, with what a write needs. Each field: name, type, label, '
+          'Get the schema of a data object as you may read it, with what a write needs: its name, label and description '
+          + '(where the author wrote one). Each field: name, type, label, description (where written), '
           + 'required, readonly (a write never sets it: declared read-only, or a value the platform computes, such as a '
           + 'formula, an autonumber or a field with an expression; leave it out of a write), system (a platform-injected '
           + 'column), options (value + label; send the value) on a field that offers a fixed set, and defaultValue when '
