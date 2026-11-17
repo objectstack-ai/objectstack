@@ -2693,7 +2693,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
       getMessaging: () => ({ emit: async (e: any) => { emits.push(e); return {}; } }),
     });
     await fire('afterInsert', { ...aComment(), session: { organizationId: 'org-1', userId: 'user-1' } });
-    expect(emits.filter((e) => (e.topic === 'collab.mention' && !e.channels))).toEqual([]);
+    expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
   });
 
   it('emits no @mention notification when the recipient gate fails', async () => {
@@ -2706,7 +2706,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
       },
     });
     await fire('afterInsert', { ...aComment(), session: { organizationId: 'org-1', userId: 'user-1' } });
-    expect(emits.filter((e) => (e.topic === 'collab.mention' && !e.channels))).toEqual([]);
+    expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
   });
 
   it('emits only to the recipients the gate admits, with the record as the gate\'s input', async () => {
@@ -2733,6 +2733,10 @@ describe('audit writers — the writer reads the session key the engine emits (#
       },
     ]);
     expect(emits.filter((e) => (e.topic === 'collab.mention' && !e.channels)).map((e) => e.audience)).toEqual([['user-2']]);
+    // [#34729] The e-mail emit carries the same preview outside the platform: the same admitted audience.
+    expect(emits.filter((e) => e.topic === 'collab.mention' && e.channels).map((e) => [e.audience, e.channels])).toEqual([
+      [['user-2'], ['email']],
+    ]);
   });
 });
 

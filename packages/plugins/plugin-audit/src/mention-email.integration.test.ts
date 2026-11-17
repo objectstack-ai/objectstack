@@ -45,6 +45,10 @@ const ORIGIN = 'https://app.example.test';
 const ALICE = 'u_alice';
 const CAROL = 'u_carol';
 const DAVE = 'u_dave';
+/** A mentioned person who reads in Simplified Chinese (`sys_user.locale`). */
+const MEI = 'u_mei';
+/** Each rig user's `sys_user.locale`, which the writer's title and the e-mail template both follow. */
+const LOCALES: Record<string, string> = { [ALICE]: 'en', [CAROL]: 'en', [DAVE]: 'en', [MEI]: 'zh-CN' };
 /** A moment in the middle of a window, so a burst within a minute stays in it. */
 const WINDOW_START = Math.ceil(Date.UTC(2026, 10, 17, 9, 0) / MENTION_EMAIL_WINDOW_MS) * MENTION_EMAIL_WINDOW_MS;
 const IN_WINDOW = WINDOW_START + 3 * 60_000;
@@ -133,13 +137,13 @@ async function boot(): Promise<Rig> {
   installAuditWriters(engine as any, HARNESS_PACKAGE, {
     getMessaging: () => messaging,
     getI18n: () => i18n as any,
-    getLocale: async () => 'en',
+    getLocale: async (_tenantId, userId) => (userId ? LOCALES[userId] : undefined) ?? 'en',
     admitMentionRecipients: async ({ mentions }) => [...mentions],
     getConsoleUrl: (path) => `${ORIGIN}/_console${path}`,
   });
 
-  for (const [id, name] of [[ALICE, 'Alice'], [CAROL, 'Carol'], [DAVE, 'Dave']]) {
-    await engine.insert('sys_user', { id, name, email: `${id}@example.com`, locale: 'en' }, { context: SYSTEM });
+  for (const [id, name] of [[ALICE, 'Alice'], [CAROL, 'Carol'], [DAVE, 'Dave'], [MEI, 'Mei']]) {
+    await engine.insert('sys_user', { id, name, email: `${id}@example.com`, locale: LOCALES[id] }, { context: SYSTEM });
   }
   await engine.insert(TASK, { id: 't1', title: 'Launch plan' }, { context: SYSTEM });
 
@@ -195,6 +199,17 @@ describe('an @mention reaches the mentioned person by e-mail as well as the inbo
     );
     // The author is never notified, on either channel.
     expect(byChannel(rows, ALICE)).toEqual([]);
+  });
+
+  it('[#34729] a zh-CN reader gets the zh-CN subject and link line', async () => {
+    rig = await boot();
+    await mention(rig.engine, [MEI], '请看一下发布计划');
+
+    const rows = await drained(rig.engine);
+    expect(byChannel(rows, MEI)).toEqual(['email:success', 'inbox:success']);
+    expect(rig.sent).toHaveLength(1);
+    expect(rig.sent[0]).toMatchObject({ to: `${MEI}@example.com`, subject: 'Alice 提到了你' });
+    expect(rig.sent[0].text).toBe(`请看一下发布计划\n\n查看评论：${ORIGIN}/_console/${TASK}/t1`);
   });
 
   it('muted: a person whose collab.mention e-mail preference is off gets the inbox notice only', async () => {
