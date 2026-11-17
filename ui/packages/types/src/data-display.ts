@@ -843,6 +843,12 @@ export interface TableColumn {
    * Unlike {@link TableColumn.masked}, it withholds nothing else: copy, CSV
    * export, inline edit, search and sort are unchanged.
    *
+   * In an `editable` table, a column with no explicit `width` whose cells
+   * edit (`editable` is not `false`) is drawn at least 168px wide, the width
+   * `GridField` gives a lookup column, because its editor is the record
+   * picker: sized from the short names it draws, the picker had no room to
+   * show one. An explicit `width` is drawn as written.
+   *
    * Written by `ObjectGrid` from the column's field type, because the table
    * cannot tell a reference from text: `type` has no reference member
    * (objectui#13377).
