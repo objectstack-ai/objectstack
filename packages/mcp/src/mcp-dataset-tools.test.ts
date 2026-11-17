@@ -10,12 +10,14 @@
  * bridge's definitions carry, never a copy in this package; the arguments reach
  * the bridge as sent, with the tool's page cap beside them; an undeclared key is
  * refused before the bridge is asked, in the spec's words; a refusal the bridge
- * throws comes back as the coded tool error.
+ * throws comes back as the coded tool error; `list_datasets.candidates` comes
+ * back exactly as the executor answered it (#34763).
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   LIST_DATASETS_TOOL_NAME,
+  ListDatasetsOutputSchema,
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
   QUERY_DATASET_TOOL_NAME,
@@ -367,5 +369,77 @@ describe('[ADR-0149 D2] dataset tools on MCP — the spec refusal is kept whole'
     expect(text).toContain('`zzUndeclaredProbeKey`');
     expect(text).toContain(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE);
     expect(bridge.calls.filter((c) => c[0] === 'listDatasets')).toEqual([]);
+  });
+});
+
+/**
+ * [#34763, ADR-0149 D3 amendment note] `list_datasets.candidates` reaches an
+ * MCP client exactly as the executor answered it. The members offered for a
+ * term that matched nothing are chosen by the service-analytics executor
+ * (`findDatasetTermCandidates`, pinned there); the MCP tool layer holds no copy
+ * of that rule and must neither drop the key, reorder its entries nor add one.
+ */
+describe('[#34763] list_datasets candidates pass through MCP unchanged', () => {
+  const WITH_CANDIDATES: ListDatasetsOutput = {
+    datasets: [
+      {
+        name: 'showcase_invoice_metrics',
+        label: 'Invoice Metrics',
+        object: 'showcase_invoice',
+        dimensions: [{ name: 'status', label: 'Status', type: 'string' }],
+        measures: [
+          { name: 'invoice_count', label: 'Invoices', aggregate: 'count' },
+          { name: 'paid_count', label: 'Paid Invoices', aggregate: 'count' },
+        ],
+        matches: [],
+      },
+    ],
+    candidates: [
+      { term: 'invoice', dataset: 'showcase_invoice_metrics', member: 'measures.invoice_count' },
+      { term: 'invoice', dataset: 'showcase_invoice_metrics', member: 'measures.paid_count' },
+    ],
+  };
+  const WITHOUT_CANDIDATES: ListDatasetsOutput = {
+    datasets: [{
+      ...WITH_CANDIDATES.datasets[0],
+      matches: [{ term: 'invoices', member: 'measures.invoice_count', matchedOn: 'label' }],
+    }],
+  };
+
+  function bridgeAnswering(answer: ListDatasetsOutput) {
+    const bridge = makeBridge();
+    bridge.listDatasets = async (input) => {
+      bridge.calls.push(['listDatasets', input]);
+      return answer;
+    };
+    return bridge;
+  }
+
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+  });
+
+  it('the fixtures are answers the spec accepts', () => {
+    expect(ListDatasetsOutputSchema.safeParse(WITH_CANDIDATES).success).toBe(true);
+    expect(ListDatasetsOutputSchema.safeParse(WITHOUT_CANDIDATES).success).toBe(true);
+  });
+
+  it('passes the executor\'s candidates through unchanged: same entries, same order, nothing added', async () => {
+    const bridge = bridgeAnswering(WITH_CANDIDATES);
+    const json = await callTool(runtime, bridge, LIST_DATASETS_TOOL_NAME, { terms: ['invoice'] });
+    expect(json.result?.isError).toBeFalsy();
+    const answer = JSON.parse(json.result!.content[0].text) as ListDatasetsOutput;
+    expect(answer).toEqual(WITH_CANDIDATES);
+    expect(answer.candidates).toEqual(WITH_CANDIDATES.candidates);
+    expect(bridge.calls.filter((c) => c[0] === 'listDatasets')).toEqual([['listDatasets', { terms: ['invoice'] }]]);
+  });
+
+  it('an answer without candidates comes back without the key', async () => {
+    const json = await callTool(runtime, bridgeAnswering(WITHOUT_CANDIDATES), LIST_DATASETS_TOOL_NAME, { terms: ['invoices'] });
+    expect(json.result?.isError).toBeFalsy();
+    const answer = JSON.parse(json.result!.content[0].text) as ListDatasetsOutput;
+    expect(answer).toEqual(WITHOUT_CANDIDATES);
+    expect('candidates' in answer).toBe(false);
   });
 });
