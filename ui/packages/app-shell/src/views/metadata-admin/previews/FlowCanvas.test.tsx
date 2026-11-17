@@ -721,9 +721,9 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     expect(screen.getByText('经理审核')).toBeInTheDocument();
     expect(screen.getByTestId('flow-selection-source').textContent).toContain('Manager review');
     // A decision node has no key: authored title, no source line.
-    expect(flowSelectionHeading(DRAFT, { kind: 'node', id: 'big' }, undefined, t)).toEqual(
-      expect.objectContaining({ title: 'Over 1M?', source: undefined }),
-    );
+    const decision = flowSelectionHeading(DRAFT, { kind: 'node', id: 'big' }, undefined, t);
+    expect(decision.title).toBe('Over 1M?');
+    expect(decision).not.toHaveProperty('source');
     // No translations: exactly as before.
     expect(flowSelectionHeading(DRAFT, { kind: 'node', id: 'manager_review' })).not.toHaveProperty('source');
     expect(flowSelectionHeading(DRAFT, { kind: 'node', id: 'manager_review' }).title).toBe('Manager review');
