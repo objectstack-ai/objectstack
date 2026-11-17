@@ -27,11 +27,15 @@
  * `@better-auth/scim` keeps the user row (it tombstones the SCIM source) and
  * hands the host the user's aggregate state with no active source left, so the
  * same inactive branch of the reconcile callback runs. A create with
- * `active: false`, a tombstone re-link that arrives inactive, and a write to a
- * user who is already banned (by an earlier SCIM pass or by an administrator)
- * are inactive calls too, and each one runs this removal. So does the
+ * `active: false`, a tombstone re-link that arrives inactive, a connection
+ * decommission pass that removes the user's last active source, and any later
+ * SCIM write while the directory holds the user inactive are inactive calls
+ * too, and each one runs this removal. The trigger is the directory's state,
+ * never the ban column: a user an administrator banned is reached only when
+ * the directory holds that user inactive as well, and a write the directory
+ * makes for an active user removes nothing, banned or not. The
  * `active: true` call that lifts the directory's own ban (a PATCH, a PUT, or a
- * re-link of the same user through its tombstone).
+ * re-link of the same user through its tombstone) runs it as well.
  *
  * ## What this module writes
  *
@@ -96,10 +100,22 @@
  * the reason `AuthManager#reconcileScimUserLifecycle` gives: the identity
  * provider is the authority for the user it deprovisions.
  *
+ * Each delete carries `authSystemWriteContext()`: on a SCIM request that is
+ * the connection as a service principal (`svc:scim:CONNECTION_ID`), the same
+ * attribution as the other writers on this path. No audit row follows it:
+ * `sys_account` is on the audit mirror's skip list (`plugin-audit`,
+ * `audit-writers.ts`), with the session tables, so no credential row reaches
+ * the audit log.
+ *
  * ## The outcome is counted, and never silent
  *
- * This never throws. A read or a delete that did not land is counted
- * (`complete: false`, `failed`), and the caller reports it once at `error`. On
+ * This never throws. `complete` is a measured zero, not the absence of an
+ * error: once it has deleted anything, the removal reads the user's
+ * local-password rows again and reports `complete` only when none is left, so
+ * a delete that answers without removing its row is caught. A row the read
+ * returns without an id counts as one that could not be removed. A read or a
+ * delete that did not land is counted (`complete: false`, `failed`), and the
+ * caller reports it once at `error`. On
  * a deactivation the account is disabled and the SCIM request succeeds, so
  * nothing looks wrong while the user still holds a local password; the next
  * inactive write runs the removal again, and the re-activation lifts the ban
@@ -126,15 +142,16 @@ export interface ScimDeactivationPasswordRemovalEngine {
   delete?(object: string, query?: unknown): Promise<unknown>;
 }
 
-/** What the removal did. Counts are rows really deleted. */
+/** What the removal did. `complete` is the measured result; the counts say how it got there. */
 export interface ScimDeactivationPasswordRemovalOutcome {
-  /** Local-password rows deleted. */
+  /** Local-password rows whose delete answered without an error. */
   removed: number;
   /** Rows the removal meant to delete and could not. */
   failed: number;
   /**
-   * `true` only when the user is left with no local-password row. `false`
-   * whenever a read or a delete did not land, more rows exist than were
+   * `true` only when the user is left with no local-password row, measured by
+   * a read. `false` whenever a read or a delete did not land, a row could not
+   * be addressed by id, a re-read still finds a row, more rows exist than were
    * scanned, or the engine offers no read or delete surface at all: a removal
    * that cannot be measured is never reported as complete.
    */
@@ -175,7 +192,10 @@ export async function removeDirectoryDeactivatedLocalPassword(
     );
     if (rows.length > maxScan) incomplete = true;
     for (const row of rows.slice(0, maxScan)) {
-      if (!row.id) continue;
+      if (!row.id) {
+        outcome.failed += 1;
+        continue;
+      }
       try {
         await engine.delete(SystemObjectName.ACCOUNT, {
           where: { id: String(row.id) },
@@ -185,6 +205,17 @@ export async function removeDirectoryDeactivatedLocalPassword(
       } catch {
         outcome.failed += 1;
       }
+    }
+    // A measured zero: what the deletes left behind, read back.
+    if (!incomplete && outcome.failed === 0 && outcome.removed > 0) {
+      const left = rowsOf(
+        await engine.find(
+          SystemObjectName.ACCOUNT,
+          { where: { user_id: userId, provider_id: LOCAL_PASSWORD_PROVIDER_ID }, fields: ['id'], limit: 1 },
+          { context: SYSTEM_CTX },
+        ),
+      );
+      if (left.length > 0) incomplete = true;
     }
   } catch {
     incomplete = true;
@@ -205,9 +236,9 @@ export function scimDeactivationPasswordRemovalIncompleteMessage(
 ): string {
   return (
     `[auth] SCIM deactivation of user '${userId}': local password removal INCOMPLETE — ${outcome.removed} `
-    + `credential row(s) removed, ${outcome.failed} delete(s) refused, or a read did not finish or more rows `
-    + 'exist than were scanned. The account is disabled and the SCIM request succeeds, so nothing looks wrong, '
-    + 'but the user still holds a local password. '
+    + `credential row(s) removed, ${outcome.failed} row(s) not removed, or a read did not finish, `
+    + 'a re-read still found a row, or more rows exist than were scanned. The account is disabled and the SCIM '
+    + 'request succeeds, so nothing looks wrong, but the user still holds a local password. '
     + `Remedy: delete the user's remaining sys_account rows with provider_id 'credential' (user_id '${userId}') `
     + 'in the system context, and check delete access on sys_account; the next SCIM write that leaves the user '
     + "inactive runs this removal again, and a re-activation lifts the directory's ban only once it has completed."
@@ -225,10 +256,10 @@ export function scimReactivationPasswordRemovalIncompleteMessage(
 ): string {
   return (
     `[auth] SCIM re-activation of user '${userId}' REFUSED: local password removal INCOMPLETE — ${outcome.removed} `
-    + `credential row(s) removed, ${outcome.failed} delete(s) refused, or a read did not finish or more rows `
-    + "exist than were scanned. A re-activation by the directory restores access through SSO only, so the "
-    + "directory's ban is lifted only once the user holds no local password: the SCIM request fails, nothing it "
-    + 'wrote is kept, and the user stays deactivated. '
+    + `credential row(s) removed, ${outcome.failed} row(s) not removed, or a read did not finish, `
+    + 'a re-read still found a row, or more rows exist than were scanned. A re-activation by the directory '
+    + "restores access through SSO only, so the directory's ban is lifted only once the user holds no local "
+    + 'password: the SCIM request fails, nothing it wrote is kept, and the user stays deactivated. '
     + `Remedy: delete the user's remaining sys_account rows with provider_id 'credential' (user_id '${userId}') `
     + "in the system context, and check delete access on sys_account; the directory's retry of the re-activation "
     + 'runs this removal again.'

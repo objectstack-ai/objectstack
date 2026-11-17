@@ -5037,7 +5037,8 @@ export class AuthManager {
     //    the create back, and the IdP retries; no SCIM user is created
     //    unmarked. Only a re-activation that lifts the directory's ban writes
     //    before it: the local-password removal, which fails closed too.
-    //  - inactive (a deactivation, a DELETE, a create with `active: false`):
+    //  - inactive (a deactivation, a DELETE, a create with `active: false`, a
+    //    connection decommission that leaves the user no active source):
     //    the deprovision write goes FIRST and the mark after it is best-effort,
     //    so a refused mark can never leave a deprovisioned account enabled. A
     //    refusal is logged and swallowed; the boot backfill and the next active
