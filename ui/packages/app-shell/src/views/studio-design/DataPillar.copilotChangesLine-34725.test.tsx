@@ -157,6 +157,33 @@ describe('the AI assistant’s drafts on the Data canvas (objectstack#34725)', (
     window.confirm = original;
   });
 
+  it('a discard that fails names each item by its label; the server’s words stay under Details', async () => {
+    serveDraft(AI_TWO);
+    discardDrafts.mockResolvedValueOnce({
+      success: false,
+      failedCount: 2,
+      failed: [
+        { type: 'object', name: 'showcase_task', error: 'E_LOCKED: row held by txn 42' },
+        { type: 'view', name: 'showcase_task_grid', error: 'E_GONE' },
+      ],
+      discarded: [],
+    } as never);
+    const original = window.confirm;
+    window.confirm = vi.fn(() => true);
+    renderPillar();
+    fireEvent.click(await screen.findByTestId('studio-copilot-changes-discard'));
+    const message = await screen.findByTestId('studio-refusal-message');
+    expect(message).toHaveTextContent(
+      tFormat('engine.studio.copilotChanges.discardFailed', 'en-US', {
+        items: ['Task', 'showcase_task_grid'].join(L('engine.studio.copilotChanges.itemSeparator')),
+      }),
+    );
+    expect(message.textContent).not.toContain('E_LOCKED');
+    expect(message.textContent).not.toContain('object/');
+    expect(screen.getByTestId('studio-refusal-detail')).toHaveTextContent('object/showcase_task: E_LOCKED: row held by txn 42');
+    window.confirm = original;
+  });
+
   it('the copilot’s chip reads the object’s label and the view on screen', async () => {
     const onSurfaceLabelChange = vi.fn();
     renderPillar({ onSurfaceLabelChange });

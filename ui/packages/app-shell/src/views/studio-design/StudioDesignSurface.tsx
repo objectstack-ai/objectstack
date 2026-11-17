@@ -6753,8 +6753,17 @@ export function DataPillar({
     try {
       const result = await adapter.getClient().packages.discardDrafts(packageId);
       if (!result.success || result.failedCount > 0) {
-        const reasons = result.failed.map((f) => `${f.type}/${f.name}: ${f.error}`).join('; ');
-        setError({ message: tFormat('engine.studio.copilotChanges.discardFailed', locale, { reasons }) });
+        // The sentence names each item as the rail does (its label, else its
+        // name); the server's own words stay behind Details, never in it.
+        const labelOf = (f: { type: string; name: string }) =>
+          (f.type === 'object' && objects.find((o) => o.type === 'object' && o.name === f.name)?.label) || f.name;
+        const items = [...new Set(result.failed.map(labelOf))].join(
+          t('engine.studio.copilotChanges.itemSeparator', locale),
+        );
+        setError({
+          message: tFormat('engine.studio.copilotChanges.discardFailed', locale, { items }),
+          detail: result.failed.map((f) => `${f.type}/${f.name}: ${f.error}`).join('\n') || undefined,
+        });
       }
     } catch (e) {
       setError(plainRefusal(e));
@@ -6763,7 +6772,7 @@ export function DataPillar({
       reloadObjDraft();
       emitMetadataRefresh();
     }
-  }, [adapter, locale, packageId, reloadObjDraft]);
+  }, [adapter, locale, objects, packageId, reloadObjDraft]);
   useHeldEditReport(onHeldEditChange, objHeld?.clause ?? null);
   // objectstack#27511 — opening another object replaces the one buffer the
   // open object's edits live in, and the autosave's timer sends nothing once
