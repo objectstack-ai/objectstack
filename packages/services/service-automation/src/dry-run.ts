@@ -233,7 +233,8 @@ type DataEngineLike = Record<string, unknown> & {
  *
  *  - Writes are simulated ("Writes: simulated, never made"): `insert`,
  *    `update` and `delete` write nothing, record the write on the node's step,
- *    and lay it over the run's own view of the rows.
+ *    and lay it over the run's own view of the rows. An update or a delete
+ *    targets exactly the rows the engine's own dispatch picks.
  *  - A read that names an id answers the run's view: a created row holds only
  *    the fields the flow set, an updated row is the live row with the
  *    simulated fields laid over it, a deleted row is nothing.
@@ -280,12 +281,27 @@ export function dryRunDataEngine(real: unknown, security: () => unknown): unknow
         return patch ? { ...row, ...project(patch, query.fields) } : row;
     };
 
-    const targets = async (object: string, where: unknown, context: unknown): Promise<string[]> => {
-        const id = namedId(where);
-        if (id !== undefined) {
+    /**
+     * The rows a write targets: exactly the engine dispatch's own answer
+     * (`resolveEngineUpdateDispatch` / `resolveEngineDeleteDispatch`), so
+     * `recordIds` is "the rows the write targets" on every arm. `by-id` is
+     * the one id the dispatch picked, wherever it came from (`where.id`, or
+     * an update's `data.id`), when the named user can read it; `multi` is
+     * the rows the filter matches in the named user's scope; `reject`
+     * targets no row and reads none.
+     */
+    const targets = async (
+        object: string,
+        dispatch: { readonly kind: 'by-id'; readonly id: unknown } | { readonly kind: 'multi' } | { readonly kind: 'reject' },
+        where: unknown,
+        context: unknown,
+    ): Promise<string[]> => {
+        if (dispatch.kind === 'reject') return [];
+        if (dispatch.kind === 'by-id') {
+            const id = String(dispatch.id);
             if (state.deleted.get(object)?.has(id)) return [];
             if (state.created.get(object)?.has(id)) return [id];
-            const row = live?.findOne ? await live.findOne(object, { where: { id }, fields: ['id'], context }) : null;
+            const row = live?.findOne ? await live.findOne(object, { where: { id: dispatch.id }, fields: ['id'], context }) : null;
             return isPlainObject(row) ? [id] : [];
         }
         const rows = live?.find ? await live.find(object, { where, fields: ['id'], context }) : [];
@@ -314,11 +330,13 @@ export function dryRunDataEngine(real: unknown, security: () => unknown): unknow
         async update(object: string, data: unknown, options?: { where?: unknown; context?: unknown }) {
             const values = isPlainObject(data) ? { ...data } : {};
             // The engine's own dispatch decision, asked as the live update
-            // asks it: a call naming neither one row nor `multi` is refused
-            // with the engine's own error, after the permission gate and
-            // before any row is read, so it targets no row.
+            // asks it, and its targets read off that answer: one row by id
+            // (from `where.id` or the values' own `id`), the filter's rows
+            // under `multi`, and none on a reject — a call naming neither one
+            // row nor `multi` is refused with the engine's own error, after
+            // the permission gate and before any row is read.
             const dispatch = resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, options as EngineUpdateDispatchInput | undefined);
-            const ids = dispatch.kind === 'reject' ? [] : await targets(object, options?.where, options?.context);
+            const ids = await targets(object, dispatch, options?.where, options?.context);
             const permission = await judge('update', object, options?.context, data);
             record({ operation: 'update', object, recordIds: ids, values, permission });
             if (permission === 'refused') throw writeRefusedError('update', object);
@@ -333,9 +351,10 @@ export function dryRunDataEngine(real: unknown, security: () => unknown): unknow
             return ids.length;
         },
         async delete(object: string, options?: { where?: unknown; context?: unknown }) {
-            // As `update`: the engine's own dispatch decision, and its own error.
+            // As `update`: the engine's own dispatch decision, its targets,
+            // and its own error. A delete's by-id arm reads `where.id` only.
             const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
-            const ids = dispatch.kind === 'reject' ? [] : await targets(object, options?.where, options?.context);
+            const ids = await targets(object, dispatch, options?.where, options?.context);
             record({ operation: 'delete', object, recordIds: ids, permission: 'not_judged' });
             if (dispatch.kind === 'reject') throw new Error(dispatch.message);
             let gone = state.deleted.get(object);

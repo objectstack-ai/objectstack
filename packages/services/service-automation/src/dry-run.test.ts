@@ -82,8 +82,14 @@ function harness(opts: {
     bundles?: Record<string, Record<string, unknown>>;
     /** The grants read fails (the resolver throws). */
     grantsFail?: boolean;
+    /** The grants resolver answers nothing (`null`). */
+    grantsNone?: boolean;
+    /** No grants resolver is wired at all. */
+    noGrantsResolver?: boolean;
+    /** The live `deal` rows, when not the one default row. */
+    rows?: Record<string, Record<string, unknown>>;
 } = {}): Harness {
-    const { data, calls } = liveData();
+    const { data, calls } = liveData(opts.rows);
     const writeChecks: Harness['writeChecks'] = [];
     const security = opts.canWrite
         ? {
@@ -123,7 +129,7 @@ function harness(opts: {
         } as any),
         async execute() { h.approvalCalls++; return { success: true, suspend: true }; },
     });
-    engine.setUserGrantsResolver(async () => opts.grantsFail ? Promise.reject(new Error('grants store unreachable')) : ({
+    if (!opts.noGrantsResolver) engine.setUserGrantsResolver(async () => opts.grantsFail ? Promise.reject(new Error('grants store unreachable')) : opts.grantsNone ? null as never : ({
         positions: [],
         permissions: [],
         accessible_org_ids: ['org_1'],
@@ -320,8 +326,12 @@ describe('dryRun — admission (the by-name start rules, ruling B for runAs syst
         expect(result.steps).toEqual([]);
     });
 
-    it('refuses a runAs system definition when the named user\'s grants cannot be read (the account rule fails closed)', async () => {
-        const h = harness({ grantsFail: true });
+    it.each([
+        ['the read fails (the resolver throws)', { grantsFail: true }],
+        ['the resolver answers nothing', { grantsNone: true }],
+        ['no resolver is wired', { noGrantsResolver: true }],
+    ] as const)('refuses a runAs system definition when the named user\'s grants cannot be read: %s (the account rule fails closed)', async (_arm, unread) => {
+        const h = harness(unread);
         const result = await h.engine.dryRun(gated({ type: 'schedule', runAs: 'system' }), { userId: 'usr_maker' });
         expect(result.status).toBe('refused');
         expect(result.steps).toEqual([]);
@@ -544,5 +554,43 @@ describe('dryRun — a predicate write the engine refuses without multi', () => 
 
         expect(result.status).toBe('completed');
         expect(result.steps.find((s) => s.nodeId === 'up')).toMatchObject({ kind: 'write', operation: 'update', recordIds: ['d1'] });
+    });
+});
+
+describe('dryRun — a write targets exactly the rows the engine dispatch names', () => {
+    const rows = () => ({ d1: { id: 'd1', stage: 'open', amount: 10 }, d2: { id: 'd2', stage: 'open', amount: 20 } });
+    const readBoth = [
+        { id: 'r1', type: 'get_record', label: 'Read d1', config: { objectName: 'deal', filter: { id: 'd1' }, outputVariable: 'one' } },
+        { id: 'r2', type: 'get_record', label: 'Read d2', config: { objectName: 'deal', filter: { id: 'd2' }, outputVariable: 'two' } },
+        { id: 'as', type: 'assignment', label: 'Keep', config: { assignments: { seen: { dialect: 'cel', source: 'one.stage + "/" + two.stage' } } } },
+    ];
+
+    it('an update whose fields name the id, with no filter, targets that one row and lays its values over it alone', async () => {
+        const h = harness({ canWrite: () => true, rows: rows() });
+        const result = await h.engine.dryRun(flow([
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'up', type: 'update_record', label: 'Update', config: { objectName: 'deal', fields: { id: 'd2', stage: 'won' } } },
+            ...readBoth,
+            { id: 'end', type: 'end', label: 'End' },
+        ], chain('start', 'up', 'r1', 'r2', 'as', 'end')), { userId: 'usr_maker' });
+
+        expect(result.status).toBe('completed');
+        expect(writes(h)).toEqual([]);
+        expect(result.steps.find((s) => s.nodeId === 'up')).toMatchObject({ kind: 'write', operation: 'update', recordIds: ['d2'] });
+        expect(result.steps.find((s) => s.nodeId === 'as')).toMatchObject({ kind: 'assignment', values: { seen: 'open/won' } });
+    });
+
+    it('CONTROL — the same update declaring multi with no filter targets every row the named user can read', async () => {
+        const h = harness({ canWrite: () => true, rows: rows() });
+        const result = await h.engine.dryRun(flow([
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'up', type: 'update_record', label: 'Update', config: { objectName: 'deal', fields: { stage: 'won' }, multi: true } },
+            ...readBoth,
+            { id: 'end', type: 'end', label: 'End' },
+        ], chain('start', 'up', 'r1', 'r2', 'as', 'end')), { userId: 'usr_maker' });
+
+        expect(result.status).toBe('completed');
+        expect(result.steps.find((s) => s.nodeId === 'up')).toMatchObject({ kind: 'write', operation: 'update', recordIds: ['d1', 'd2'] });
+        expect(result.steps.find((s) => s.nodeId === 'as')).toMatchObject({ kind: 'assignment', values: { seen: 'won/won' } });
     });
 });
