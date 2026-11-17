@@ -149,13 +149,6 @@ window*) where the record unlocks and the submitter reworks it, and an explicit
 *resubmit* re-enters the approval node over a **declared back-edge**, opening
 round N+1 with a fresh approver slate.
 
-```
-approval ──approve──▶ …
-         ──reject───▶ …
-         ──revise───▶ approval_revise (record unlocked, submitter edits)
-                        └──resubmit──[type:'back']──▶ approval   (round N+1)
-```
-
 Three pieces author it:
 
 1. **`revise` out-edge** — a third branch label alongside `approve` / `reject`,
@@ -382,14 +375,17 @@ Object-hook `ctx` is a different vocabulary — see **objectstack-data**
 
 These are wired on the **graph**, not in node config:
 
-- **Conditional step** — put a `decision` node before the Approval node, or a
-  `condition` on the edge entering it.
 - **On approve / on reject** — wire downstream nodes (`update_record`,
   `http`, a `notify` node, …) to the `approve` / `reject` out-edge.
+- **A write on that branch that may be refused** (a record hook, a validation
+  rule, a permission) — draw a `fault` edge from that step to a handler
+  (SKILL.md § Failure routing): the refusal takes it and the decision answers
+  normally. Without one, `POST …/approve` (or `/reject`) answers
+  `500 RESUME_FAILED`: the decision stands (`finalized: true`), the run is
+  stranded, and the body carries `innerRefusal` (`{ code, message }`) and the
+  hook's declared `userMessage`, the sentence to show the approver.
 - **Roll back on reject** — route the `reject` edge as a **back-edge** to an
   earlier node so the submitter can revise.
-- **Send back for revision (ADR-0044)** — see *Send-back for revision* above.
-- **Hard reject** — route the `reject` edge to an `end` node.
 
 ### Approval Best Practices
 
