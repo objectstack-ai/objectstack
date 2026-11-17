@@ -78,7 +78,12 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   write goes through it is the run's to observe (ruling A on #31999 item 9, carried to the Build
   side). An `applied` write stays measured against the grant, whatever actions the build adds.
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
-  `pending_confirmation`; a fact the observation does not carry fails. The operation the
+  `pending_confirmation`; a fact the observation does not carry fails. An `applied` state
+  entry may be an aggregate over every row its `where` matches: `sum` (`state:LABEL.sum(amount)`,
+  the rows' total; a row reading no number fails it) and `each` (`state:LABEL.each(field)`, every
+  row holds the value); no row matched fails `->rows`, never a vacuous pass. A `where` key may
+  be a relation path through `expect.lookups` (`claim.trip`): the runner reads the objects it
+  hops to after the turn (`relationObjects` in `runner/observe.ts`). The operation the
   card's `write_validation` guardrail names is graded in two halves: the agent half (its write
   was refused with the declared code, or it wrote nothing and its reply declines the write or
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of

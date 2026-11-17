@@ -929,8 +929,17 @@ function checkCard(
       if (st.id !== undefined && !(ids.get(st.object)?.has(st.id) ?? false)) {
         refuse([...sat, 'id'], `no seeded \`${st.object}\` row has id \`${st.id}\` (a created row is matched by \`where\`)`);
       }
-      for (const key of ['where', 'values'] as const) {
+      // A `where` key may be a relation path through declared lookups
+      // (`claim.trip`); the checked fields are the object's own.
+      for (const field of Object.keys(st.where ?? {})) checkPath(st.object, field, [...sat, 'where', field]);
+      for (const key of ['values', 'sum', 'each'] as const) {
         for (const field of Object.keys(st[key] ?? {})) checkField(st.object, field, [...sat, key, field]);
+      }
+      // A summed field must hold numbers: one seed row of the object carrying a
+      // non-number there would make the sum unreadable in every run.
+      for (const field of Object.keys(st.sum ?? {})) {
+        const bad = (seed[st.object] ?? []).find((r) => r[field] !== undefined && r[field] !== null && typeof r[field] !== 'number');
+        if (bad !== undefined) refuse([...sat, 'sum', field], `\`${st.object}.${field}\` holds ${JSON.stringify(bad[field])} on seed row \`${bad.id}\`, not a number to sum`);
       }
     });
   });
