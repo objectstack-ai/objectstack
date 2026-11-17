@@ -344,6 +344,15 @@ the rollback. Keep the objects a `before*` hook
 writes on the default datasource; on MongoDB, run it as a replica set, which
 any unit needs.
 
+On PostgreSQL a statement that fails at the database aborts the whole unit
+(`25P02`, "current transaction is aborted"), and the unit takes no savepoint
+around a hook's `ctx.api` write. A `before*` hook whose `ctx.api` statement
+fails there therefore refuses the write it belongs to, even when the hook body
+catches the error, `onError: 'log'` swallows it, or its `retryPolicy` re-runs
+it. Check the condition before writing, or make that write from an `after*`
+hook with `async: true` (not yet measured on PostgreSQL; tracked in
+[#34563](https://github.com/objectstack-ai/objectstack/issues/34563)).
+
 <Callout type="info">
 For a blocking hook this is a deliberate, ruled semantics ([#7477](https://github.com/objectstack-ai/objectstack/issues/7477)),
 not an implementation detail awaiting a fix. Deferring a blocking `after*` to
