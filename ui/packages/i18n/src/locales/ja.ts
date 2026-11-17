@@ -583,6 +583,7 @@ const ja = {
         "このビューはグループ化されていますが、データソースが queryGroupHeaders を実装していないため、グループの件数を数えられません。レコードを表示するにはグループ化を解除してください。",
       needsWholeRows:
         "グループ化にはすべてのレコードが必要ですが、このグリッドにはその一部のページしか渡されていないため、グループの件数を数えられません。すべてのレコードを渡すか、queryGroupHeaders を実装したデータソースからグリッドに読み込ませてください。",
+      draftOnly: "{{fields}} ではグループ化されていません：公開するまで下書きにのみ存在します。",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

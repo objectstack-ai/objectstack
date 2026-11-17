@@ -566,6 +566,7 @@ const zhHant = {
         '此檢視已分組，但其資料來源未實現 queryGroupHeaders，因此無法統計分組。移除分組即可顯示記錄。',
       needsWholeRows:
         '分組需要全部記錄，但此表格只收到其中一頁，因此無法統計分組。請傳入全部記錄，或讓表格從實現了 queryGroupHeaders 的資料來源獲取記錄。',
+      draftOnly: '未按 {{fields}} 分組：它僅存在於草稿中，釋出後才生效。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

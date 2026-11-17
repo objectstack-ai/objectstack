@@ -583,6 +583,7 @@ const ko = {
         "이 뷰는 그룹화되어 있지만 데이터 소스가 queryGroupHeaders를 구현하지 않아 그룹 개수를 셀 수 없습니다. 레코드를 표시하려면 그룹화를 제거하세요.",
       needsWholeRows:
         "그룹화에는 모든 레코드가 필요하지만 이 그리드에는 한 페이지만 전달되어 그룹 개수를 셀 수 없습니다. 모든 레코드를 전달하거나 queryGroupHeaders를 구현하는 데이터 소스에서 그리드가 불러오도록 하세요.",
+      draftOnly: "{{fields}}(으)로 그룹화되지 않았습니다: 게시할 때까지 초안에만 존재합니다.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

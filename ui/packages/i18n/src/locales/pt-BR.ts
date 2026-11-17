@@ -593,6 +593,7 @@ const pt = {
         "Esta visão está agrupada, mas sua fonte de dados não implementa queryGroupHeaders, portanto os grupos não podem ser contados. Remova o agrupamento para mostrar os registros.",
       needsWholeRows:
         "O agrupamento precisa de todos os registros, mas esta grade recebeu apenas uma página deles, portanto os grupos não podem ser contados. Entregue todos os registros ou deixe a grade buscá-los em uma fonte de dados que implemente queryGroupHeaders.",
+      draftOnly: "Não agrupado por {{fields}}: existe apenas no rascunho até você publicar.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
