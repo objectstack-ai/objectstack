@@ -864,10 +864,8 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
     // row as on `main`, in both save orders, before and after a reboot. FROM
     // (head b959edb979, arm unguarded): the read naming no member, `/published`,
     // `/layers` and the execution face answered 404 before a reboot, and the
-    // plain read and the execution face served A's `fr-FR` after it. No
-    // shipped CONTROL is pinned: with A shipping only `fr-FR`, the read naming
-    // no member serves A's `fr-FR`, and `/published` and `/layers` move across
-    // a reboot (200 then 404), so there is no one shipped answer to align with.
+    // plain read and the execution face served A's `fr-FR` after it. The
+    // shipped mirror is pinned below (cell 1).
     it.each([
         { order: 'A saved first', saved: [A, D] },
         { order: 'D saved first', saved: [D, A] },
@@ -934,10 +932,14 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
                 executedNamed: (await protocol.getMetaItemForExecution({ type: 'email_template', name: 'shipfrmail', member: 'en-US' }))?.item?.subject ?? null,
             };
         };
-        // The CONTROL, read on this boot before D's row is stored.
+        // The CONTROL, read on this boot before D's row is stored. [#34682]
+        // Naming no member is naming `en-US`, which A does not ship: every
+        // door answers as `?member=en-US` does. FROM (`main` d947a93cf8): the
+        // plain read and `/layers` served A's `fr-FR` (200) and the execution
+        // read returned it.
         const control = {
-            read: [200, 'base fr'], named: [404, 'RESOURCE_NOT_FOUND'], layers: [200, ['base fr', null]], layersNamed: [404, 'RESOURCE_NOT_FOUND'],
-            published: [404, 'RESOURCE_NOT_FOUND'], executed: 'base fr', executedNamed: null,
+            read: [404, 'RESOURCE_NOT_FOUND'], named: [404, 'RESOURCE_NOT_FOUND'], layers: [404, 'RESOURCE_NOT_FOUND'], layersNamed: [404, 'RESOURCE_NOT_FOUND'],
+            published: [404, 'RESOURCE_NOT_FOUND'], executed: null, executedNamed: null,
         };
         const own = async (b: Booted, leg: string) => {
             const r = await get(b.kernel, '/meta/email_template/shipfrmail', { member: 'en-US', package: D });
