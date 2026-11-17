@@ -6819,3 +6819,66 @@ describe('validateStackExpressions — flow value envelopes take the date-text f
     }
   });
 });
+
+/**
+ * [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` decides its
+ * requirement on the write, and a predicate the server cannot evaluate counts
+ * as SHOWN — the field keeps the unconditional `required` it had before. Two
+ * shapes the author can see at build time leave the field required where the
+ * form hides it, so both are WARNINGS (never refusals): a read through a
+ * reference field, and `storage.notNull` beside the pair. The roots the server
+ * cannot bind are already refused for every field `visibleWhen`
+ * (`FIELD_RULE_BOUND_ROOTS`), so no second warning is drawn for them.
+ * `packages/objectql/src/engine-required-when-shown.test.ts` pins the runtime.
+ */
+describe('a `required` field\'s `visibleWhen` the server cannot use to lift the requirement (ADR-0113 D1)', () => {
+  const account = {
+    name: 'rws_account',
+    label: 'Account',
+    fields: { name: { type: 'text', label: 'Name' }, tier: { type: 'text', label: 'Tier' } },
+  };
+  const order = (fields: Record<string, unknown>) => ({
+    name: 'rws_order',
+    label: 'Order',
+    fields: {
+      account: { type: 'lookup', label: 'Account', reference: 'rws_account' },
+      status: { type: 'text', label: 'Status' },
+      ...fields,
+    },
+  });
+  const run = (...objects: Array<Record<string, unknown>>) =>
+    validateStackExpressions(specValid({ objects: [account, ...objects] }));
+  const at = (issues: ReturnType<typeof run>, where: string) => issues.filter((i) => i.where === where);
+  const WHERE = "object 'rws_order' · field 'po_number' visibleWhen";
+
+  it('warns on a read through a reference, naming the counts-as-shown consequence', () => {
+    const issues = at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.account.tier == 'enterprise'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message.startsWith('`visibleWhen` reads `tier` through `record.account`, a `lookup` field')).toBe(true);
+    expect(issues[0].message).toContain('counts as SHOWN (ADR-0113 D1)');
+  });
+
+  it('draws nothing for the same read on a field that is not required — display only', () => {
+    expect(at(run(order({
+      po_number: { type: 'text', label: 'PO', visibleWhen: "record.account.tier == 'enterprise'" },
+    })), WHERE)).toEqual([]);
+  });
+
+  it('draws nothing for a required field whose predicate reads its own columns', () => {
+    expect(at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, visibleWhen: "record.status == 'sent'" },
+    })), WHERE)).toEqual([]);
+  });
+
+  it('warns on `storage.notNull` beside `required` + `visibleWhen` — and the parse still accepts it', () => {
+    const issues = at(run(order({
+      po_number: { type: 'text', label: 'PO', required: true, storage: { notNull: true }, visibleWhen: "record.status == 'sent'" },
+    })), WHERE);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+    expect(issues[0].message).toContain('`storage.notNull: true`');
+  });
+});

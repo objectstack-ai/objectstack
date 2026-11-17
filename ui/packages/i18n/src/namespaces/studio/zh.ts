@@ -497,6 +497,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.requiredWhen': '必填条件',
   'designer.field.conditionalRulesHint':
     '表达式为真时字段相应地变为可见 / 只读 / 必填。用 record.<字段> 引用当前记录，previous.<字段> 引用最近保存的值，parent.<字段>（主从明细行）引用表头记录。',
+  'designer.field.requiredVisibleWhenReference':
+    '该字段为必填，服务器每次保存时按这条可见条件判断是否必填。条件经由引用字段 {fields} 读取关联记录，服务器在这里无法读取，因此按「显示」处理：所有记录（包括此条件隐藏该字段的记录）都仍要求填写。请改为读取本对象自己的字段。',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '已选 {n} 项',
   'designer.canvas.bulkMoveTo': '移至分组',

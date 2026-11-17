@@ -580,6 +580,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.requiredWhen': 'Required when',
   'designer.field.conditionalRulesHint':
     'While a predicate is true the field becomes visible / read-only / required. Reference the live record as record.<field>, the last saved values as previous.<field>, and (in master-detail line items) the header record as parent.<field>.',
+  'designer.field.requiredVisibleWhenReference':
+    'This field is required, and the server decides that from this condition on every save. The condition reads through {fields}, a reference the server cannot follow here, so it counts the field as shown: it stays required on every record, including the ones this condition hides it on. Read a field of this object instead.',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '{n} selected',
   'designer.canvas.bulkMoveTo': 'Move to section',

@@ -1,6 +1,7 @@
 # ADR-0113: `required` is a write-time contract — the column constraint becomes its own, explicitly-authored axis
 
 **Status**: Accepted (2026-07-30) — Q1/Q2/Q3 adjudicated same day (uniform semantics; `storage.notNull` spelling; the non-regression invariant unifies `required` and `requiredWhen`). **P0 implemented**: spec knob + parse-seam exclusivity, record-validator null-out rejection, rule-validator non-regression, driver DDL + drift rewired, `field-required-notnull-explicit` conversion. P1 (Console required-marker from the write contract) and P2 (criteria_json flip) follow.
+**Amended (2026-11-17)** — D1 and D5: a field that declares `required: true` together with its own `visibleWhen` is required **when shown** (maintainer ruling A on #34905, recorded in comment 6956761249). See [Amendment — required when shown](#amendment-2026-11-17--required-when-shown).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently inert metadata), the #3896/#3929 sharing-criteria case study, `driver-sql/schema-drift.ts` (the drift classifier whose `destructive` class this ADR exists to route around)
 **Consumers**: `@objectstack/spec` (`FieldSchema`), `@objectstack/objectql` (`validation/record-validator.ts`), `@objectstack/driver-sql` (`sql-driver.ts` column DDL, `schema-drift.ts`), `@objectstack/lint`, objectui form renderers (the required marker)
@@ -127,6 +128,13 @@ already violated. That write was a no-op carrying a false claim; rejecting it
 costs nothing and needs no prior fetch. (`requiredWhen` evaluates against the
 prior record it already fetches, so it applies the exact rule.)
 
+> **Amended (2026-11-17).** "`required` is the degenerate always-true-condition
+> case" now holds for a `required` field with no `visibleWhen`. A field that
+> declares both takes its own `visibleWhen` as the condition, exactly as
+> `requiredWhen` takes its predicate — see
+> [Amendment — required when shown](#amendment-2026-11-17--required-when-shown).
+> The over-approximation above stays for the unconditional knob.
+
 ### D2 — the column constraint becomes explicit
 
 A new field-level storage property owns the DDL:
@@ -164,6 +172,12 @@ removing the last reason for the objectui#2962-style mirror hints.
 `required: true` has exactly ONE meaning at any point in time — the write
 contract — and the transition is carried by rewriting old sources, not by the
 loader guessing:
+
+> **Amended (2026-11-17).** It is still one meaning, read off the source alone:
+> the write contract, conditioned on the field's own `visibleWhen` when the
+> source declares one. Both keys sit in the same field definition, so nothing
+> here depends on history or the physical column, which is what this decision
+> rules out. See [Amendment — required when shown](#amendment-2026-11-17--required-when-shown).
 
 - **The `field-required-notnull-explicit` conversion** (D2 table, protocol-17
   step) stamps `storage: { notNull: true }` onto every `required: true` field
@@ -244,3 +258,80 @@ validator tightenings ride the major).
   "adopting" `required`'s asymmetry, both are corollaries of the one
   non-regression invariant. The knobs stay one family with one temporal
   semantics; no divergence window ever exists.
+
+## Amendment (2026-11-17) — required when shown
+
+**Ruling.** Maintainer ruling A on #34905 (2026-11-17 18:10Z, recorded in issue
+comment 6956761249): 「A 显示时必填+切换校验」 — hidden means not required, and a
+write that shows the field without filling it is refused.
+
+**Why.** A field that is `required` and hidden by its `visibleWhen` was enforced
+on every save. In Studio an administrator adds such a field to an object in a
+few clicks, and from then on every record outside the condition refuses every
+write, including an edit of an unrelated field, naming a field nobody can see or
+fill. The form already drops the marker and the client check for a hidden field
+(D4), and it writes `null` into a field its `visibleWhen` hides (clear-on-hide),
+which the server then refused. The server is the side that decides (ADR-0124
+D1), so it now judges the requirement the way the form shows it.
+
+**The rule.** For a field with `required: true` and its own `visibleWhen`
+(`evaluateRequiredWhenShown`, `packages/objectql/src/validation/rule-validator.ts`):
+
+1. **Hidden** — the predicate is cleanly FALSE on the merged record (stored row
+   with the write over it): the requirement does not apply to this write. *Widening.*
+2. **Shown** — cleanly TRUE: D1's non-regression invariant with the predicate as
+   the condition, judged against the prior record the engine now reads for such
+   a field. A write that reveals the field empty is refused; a row already shown
+   and empty rests under unrelated edits, and an explicit `null` onto it is
+   accepted (the exact rule, as `requiredWhen` has). *Narrowing:* a write that
+   moves a record into the condition without filling the field was accepted
+   before this amendment and is refused now — on a flow, a bulk update (one such
+   row refuses the batch), an import or an API PATCH alike.
+3. **Fault** — the predicate cannot be evaluated: it **counts as shown**, and the
+   field takes exactly the unconditional rule above (an insert must provide it,
+   an update may not clear it). The write is not refused for the fault itself:
+   this is not ADR-0137 D2's field-rule arm, because the fault costs only the
+   waiver, and the fallback is the behaviour every app had before. The fault is
+   logged at `warn`, naming the field and the fault (ADR-0137 D4).
+
+**Scope of the predicate.** `record`, `previous`, the acting user as
+`current_user` (and its ADR-0068 aliases, with the permission map the option
+gate reads) and `parent` where the write resolves a header. Binding the user
+makes the requirement depend on who writes, which is what "required when shown"
+means for a role-gated field; a system write with no acting user takes the fault
+arm. `features`, `app` and `page` are never bound on the server.
+
+**Author-time fence (narrowed from the ruling's item 4).** The ruling asked for a
+warning on `required` + `visibleWhen` reading roots the server cannot bind. That
+half already exists at a stronger level: `@objectstack/lint` refuses every root
+but `record`, `previous` and `parent` in any field `visibleWhen`
+(`FIELD_RULE_BOUND_ROOTS`), at `objectstack validate`, at the object save door
+and in Studio's predicate editor, so those roots reach the server only from
+older stored metadata, which the fault arm covers. What is added are two
+**warnings**, never refusals, since the field keeps the requirement it had:
+a `required` field's `visibleWhen` that reads through a reference field (never
+hydrated at the field level, so it always faults), and `required` + `visibleWhen`
++ `storage.notNull` (the column refuses the null the waiver admits). The latter
+is not a parse refusal like the Q1 rider, because the protocol-17
+`field-required-notnull-explicit` conversion stamped `storage.notNull` onto every
+older `required` field; for those fields this amendment changes nothing on create.
+
+**Not in scope.** Only the object field's own `visibleWhen`. A field group's
+`visibleWhen`, a form view's field or section predicate, a hidden tab and static
+`hidden` are not read: the validator does not consume view metadata (ruled on
+#13252; Studio's gated-section fence covers the section case at authoring).
+
+**Which server answer is canonical.** Three server sites answer "required, but
+hidden". For the **record write contract** this rule is canonical; it is the
+only one that judges an object field. The other two judge their own surface's
+declarations before the engine sees the write, and keep their directions:
+a flow screen's `required` field (`screen-input-contract.ts`) treats an
+unevaluable predicate as not asked, because a screen field is input to a flow,
+not a record column; the public form route (`form-routes.ts`) does not add a
+form-view entry that has a `visibleWhen` to its own required list. A record
+either of them writes is then judged by this rule.
+
+**Other readers left as they are.** The import template, the action parameter
+schema and the MCP field descriptions still describe such a field as required.
+ADR-0124 D4 allows a client hint stricter than the server, so they are listed
+here rather than changed.
