@@ -15,6 +15,8 @@
  *   menu is drawn into the element the host names in its own title bar.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';

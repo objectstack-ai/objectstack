@@ -18,6 +18,8 @@
  * `StudioDesignSurface.automationsReadOnly-11124.test.tsx`.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';

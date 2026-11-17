@@ -33,6 +33,9 @@
  * two read) — the membership-tier flag and the raw CEL editor's label.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, act } from '@testing-library/react';

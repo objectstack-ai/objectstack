@@ -10,6 +10,8 @@
  * shallowly, as `FlowNodeInspector.renameExprRefs-11838.test.tsx` drives it.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
