@@ -450,3 +450,41 @@ describe('sectionEntryName', () => {
     expect(sectionEntryName(null)).toBeUndefined();
   });
 });
+
+// objectstack#34807 — the shared object-schema mapping the modal and drawer
+// flat paths and every section body resolve through: the console's draft
+// preview marker `_draftOnly` (underscore-private, never an authoring key)
+// lands on `disabled`.
+describe('a `_draftOnly` field maps to a disabled FormField (objectstack#34807)', () => {
+  const draftCtx = {
+    objectSchema: {
+      name: 'tracker_task',
+      fields: {
+        title: { type: 'text', label: 'Title' },
+        priority: { type: 'text', label: 'Priority', _draftOnly: true },
+      },
+    },
+    objectName: 'tracker_task',
+    fieldLabel: (_obj: string, _name: string, fallback?: string) => fallback || _name,
+  };
+
+  it('the marked field is disabled', () => {
+    expect(normalizeSectionField('priority', draftCtx)!.disabled).toBe(true);
+  });
+
+  it('CONTROL: an unmarked field is not', () => {
+    expect(normalizeSectionField('title', draftCtx)!.disabled).toBeFalsy();
+  });
+
+  it('a form view restating `required: true` does not make the marked field required; it stays disabled', () => {
+    const f = normalizeSectionField({ field: 'priority', required: true } as never, draftCtx)!;
+    expect(f.required).toBe(false);
+    expect(f.disabled).toBe(true);
+  });
+
+  it('CONTROL: the same view entry over an unmarked field still makes it required', () => {
+    const f = normalizeSectionField({ field: 'title', required: true } as never, draftCtx)!;
+    expect(f.required).toBe(true);
+    expect(f.disabled).toBeFalsy();
+  });
+});

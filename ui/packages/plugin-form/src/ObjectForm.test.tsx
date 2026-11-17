@@ -343,3 +343,38 @@ describe('ObjectForm Integration', () => {
         expect(screen.getByText('Lines')).toBeTruthy();
     });
 });
+
+// objectstack#34807 — the console's draft preview marks a field only the draft
+// declares `_draftOnly: true` (an underscore-private convention with
+// `@object-ui/app-shell`, never an authoring key). The form draws it, disabled.
+describe('ObjectForm draws a `_draftOnly` field disabled (objectstack#34807)', () => {
+    const renderCreate = (priority: Record<string, unknown>) => {
+        const ds: any = {
+            getObjectSchema: vi.fn().mockResolvedValue({
+                name: 'tracker_task',
+                fields: { title: { type: 'text', label: 'Title' }, priority },
+            }),
+            create: vi.fn(),
+        };
+        render(
+            <ObjectForm
+                schema={{ type: 'object-form', objectName: 'tracker_task', mode: 'create', fields: ['title', 'priority'] }}
+                dataSource={ds}
+            />,
+        );
+    };
+    const input = (name: string) => document.querySelector(`input[name="${name}"]`) as HTMLInputElement | null;
+
+    it('a marked field is drawn, and disabled', async () => {
+        renderCreate({ type: 'text', label: 'Priority', _draftOnly: true });
+        await waitFor(() => expect(screen.getByText('Priority')).toBeTruthy());
+        expect(input('priority')?.disabled).toBe(true);
+        expect(input('title')?.disabled).toBe(false);
+    });
+
+    it('CONTROL: the same field without the marker is editable', async () => {
+        renderCreate({ type: 'text', label: 'Priority' });
+        await waitFor(() => expect(screen.getByText('Priority')).toBeTruthy());
+        expect(input('priority')?.disabled).toBe(false);
+    });
+});

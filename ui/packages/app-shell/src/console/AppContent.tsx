@@ -23,6 +23,7 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import { BUNDLE_MISS, useBundledReads } from '../providers/bundledReads.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
+import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
 import {
   ExpressionProvider,
@@ -361,6 +362,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // worse answer than the literal it replaced.
   const homePath = useHomePath();
   const previewDrafts = usePreviewDrafts();
+  // objectstack#34807 — the global New/Edit modal reads its object definition
+  // through the draft overlay under preview (a field only the draft declares is
+  // drawn disabled and left out of every write); outside preview this is
+  // `dataSource` itself.
+  const formDataSource = usePreviewFormDataSource(dataSource);
   const { t, language } = useObjectTranslation();
   const { objectLabel, objectPluralLabel } = useObjectLabel();
 
@@ -1794,7 +1800,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   },
                 ),
               }}
-              dataSource={dataSource}
+              dataSource={formDataSource ?? undefined}
             />
           )}
       </ConsoleLayout>
