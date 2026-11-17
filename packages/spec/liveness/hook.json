@@ -145,9 +145,9 @@
         },
         "params": {
           "status": "live",
-          "verifiedAt": "2026-11-16",
+          "verifiedAt": "2026-11-17",
           "evidenceScope": "in-repo",
-          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#fillHookTemplateParams (fills the picked sentence's `{{ NAME }}` holes from the call's `params` through the formula template engine, the declared names alone in scope); packages/runtime/src/sandbox/hook-text.ts#buildHookTextSurface (fills an entry that declares `params`; one that declares none stays plain text)",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#renderHookTemplate (fills the picked sentence's `{{ NAME }}` holes from the call's `params` through the formula template engine, the declared names alone in scope); packages/runtime/src/sandbox/hook-text.ts#buildHookTextSurface (fills an entry that declares `params`; one that declares none stays plain text)",
           "producer": "packages/spec/src/data/hook.zod.ts#HookTextSchema (judges the message's holes against the declared names at save)"
         }
       },

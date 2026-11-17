@@ -95,7 +95,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **message** | `string` | ✅ | The sentence the hook writes into a record — in the source locale, translated whole through hooks.`<hook>`.texts.`<key>`.message in the organization's language when the hook asks for it (ctx.text). With no params every `{{ }}` hole is refused; with params a hole is a path over one of them with an optional known formatter |
-| **params** | `string[]` | optional | The names this text may fill: a `{{ NAME }}` or `{{ NAME \| formatter }}` hole renders the value the hook passes in ctx.text(KEY, `{ NAME: value }`). A hole over any other name, logic, an unknown formatter and an empty hole are refused. Absent: the sentence is plain text and a `{{ }}` hole is refused |
+| **params** | `string[]` | optional | The names this text may fill: a `{{ NAME }}` or `{{ NAME \| formatter }}` hole renders the value the hook passes in ctx.text(KEY, `{ NAME: value }`). A hole over any other name is refused at parse; a hole holding logic, an unknown formatter, an empty hole and a currency formatter with no code are refused where the text is compiled (os validate, compile, the publish gate). Absent: the sentence is plain text and a `{{ }}` hole is refused |
 
 
 ---
@@ -216,7 +216,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **message** | `string` | ✅ | The sentence the hook writes into a record — in the source locale, translated whole through hooks.`<hook>`.texts.`<key>`.message in the organization's language when the hook asks for it (ctx.text). With no params every `{{ }}` hole is refused; with params a hole is a path over one of them with an optional known formatter |
-| **params** | `string[]` | optional | The names this text may fill: a `{{ NAME }}` or `{{ NAME \| formatter }}` hole renders the value the hook passes in ctx.text(KEY, `{ NAME: value }`). A hole over any other name, logic, an unknown formatter and an empty hole are refused. Absent: the sentence is plain text and a `{{ }}` hole is refused |
+| **params** | `string[]` | optional | The names this text may fill: a `{{ NAME }}` or `{{ NAME \| formatter }}` hole renders the value the hook passes in ctx.text(KEY, `{ NAME: value }`). A hole over any other name is refused at parse; a hole holding logic, an unknown formatter, an empty hole and a currency formatter with no code are refused where the text is compiled (os validate, compile, the publish gate). Absent: the sentence is plain text and a `{{ }}` hole is refused |
 
 
 ---
