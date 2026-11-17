@@ -396,6 +396,30 @@ describe('Studio landing: "m switched off" leads to the switched-off actions (ob
     ]);
   });
 
+  it('the "Customizations in this environment" panel row of an action its object holds opens that object\'s Actions view too', async () => {
+    packages.list = [SHOWCASE];
+    stubWire(
+      {
+        'com.example.showcase': servedOff('com.example.showcase', [
+          { type: 'action', name: 'showcase_embedded_probe' },
+          { type: 'action', name: 'showcase_portfolio_snapshot' },
+        ]),
+      },
+      { 'com.example.showcase': [TASK_OBJECT] },
+    );
+    renderLanding();
+    await readLine();
+    const rows = await waitFor(() => {
+      const found = screen.getAllByTestId('studio-landing-env-customization');
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    expect(rows.map((r) => r.querySelector('a')?.getAttribute('href'))).toEqual([
+      embeddedPath,
+      '/studio/com.example.showcase/metadata/action/showcase_portfolio_snapshot',
+    ]);
+  });
+
   it('no object list read when nothing switched off is an action', async () => {
     packages.list = [SHOWCASE];
     const { requested } = stubWire({ 'com.example.showcase': servedOff('com.example.showcase', [{ type: 'flow', name: 'showcase_nightly' }]) });

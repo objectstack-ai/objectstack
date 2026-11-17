@@ -236,7 +236,7 @@ export function BuilderLanding(): React.ReactElement {
   const customizationReads = React.useMemo(() => {
     const out: Record<string, AppCustomizationRead> = {};
     for (const [id, line] of Object.entries(customizationLines)) {
-      out[id] = line.kind === 'read' ? { kind: 'read', read: line.read } : line;
+      out[id] = line.kind === 'read' ? { kind: 'read', read: line.read, actionObjects: line.actionObjects } : line;
     }
     return out;
   }, [customizationLines]);

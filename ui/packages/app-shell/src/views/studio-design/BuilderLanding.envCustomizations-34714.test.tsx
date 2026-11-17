@@ -329,6 +329,28 @@ describe('the panel’s rows and labels (objectstack#34714)', () => {
     ]);
   });
 
+  it('a switched-off action opens where it is switched: its object\'s Actions view when an object holds it, else its own page (objectstack#34724)', () => {
+    const read = {
+      overrides: [],
+      extensions: [],
+      switchedOff: [
+        { type: 'action', name: 'clone_opportunity' },
+        { type: 'action', name: 'export_all' },
+      ],
+    };
+    const hrefs = (objects?: Record<string, string>) =>
+      customizationRowsOf(HOTCRM, read, objects).map((r) => [r.name, r.href]);
+    expect(hrefs({ clone_opportunity: 'opportunity' })).toEqual([
+      ['clone_opportunity', '/studio/app.objectstack.hotcrm/data?surface=object%3Aopportunity&action=clone_opportunity'],
+      ['export_all', '/studio/app.objectstack.hotcrm/metadata/action/export_all'],
+    ]);
+    // With no object read (none made, or it failed), every action opens its own page.
+    expect(hrefs()).toEqual([
+      ['clone_opportunity', '/studio/app.objectstack.hotcrm/metadata/action/clone_opportunity'],
+      ['export_all', '/studio/app.objectstack.hotcrm/metadata/action/export_all'],
+    ]);
+  });
+
   it('labels come from the app’s own list of each type with rows, a field’s from its object; a failed list keeps the names', async () => {
     const { loadCustomizationLabels: real } = await vi.importActual<typeof import('./landingCustomizations-io')>(
       './landingCustomizations-io',
