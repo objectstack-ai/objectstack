@@ -10,7 +10,7 @@ feat(hooks): a hook writes the sentences it declares in the organization's langu
 
 Clause-②: no
 Metadata-protocol: added
-Skills-docs: follow-up owed — skills/objectstack-automation/SKILL.md (a hook's `texts` and `ctx.text`), skills/objectstack-i18n/SKILL.md (the `hooks.<hook>.texts.<key>.message` key and the organization-language rule)
+Skills-docs: follow-up #34546
 
 A hook can now declare the sentences it writes into records for people to read, and ask for one by key: `texts: { follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] } }`, then `await ctx.text('follow_up_subject', { lead })`. The answer is in the organization's language, because everyone in the organization reads the record: the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person whose save fired the hook. The translation `hooks.<hook>.texts.<key>.message` is picked first, then its `{{ }}` holes are filled from `params`.
 

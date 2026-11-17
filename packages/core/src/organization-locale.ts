@@ -166,6 +166,21 @@ function treatUnregisteredLocaleSettingAsUnset(settings: unknown): unknown {
  * caller bound is still found), with an unregistered Localization setting
  * answered as not set. `undefined`: no rung answered, write the authored text.
  * A settings read that throws rejects.
+ *
+ * NOT a second reading of the setting: rung 1 here IS
+ * {@link readOrganizationLocaleSetting}, reached through
+ * {@link resolveOrganizationLocale}. What this adds over that reader, for a
+ * writer only, and why the seed loader keeps calling that reader bare:
+ *
+ *  | the setting answers…                         | `readOrganizationLocaleSetting` | this                  |
+ *  | set (`source !== 'default'`)                 | the value                       | the value             |
+ *  | the `source: 'default'` placeholder          | `undefined`                     | the app default       |
+ *  | no settings service                          | `undefined`                     | the app default       |
+ *  | `SETTINGS_UNKNOWN_NAMESPACE` / `…_KEY`       | rejects                         | the app default       |
+ *  | any other throw                              | rejects                         | rejects               |
+ *
+ * — rung 2 (the app's declared `i18n.defaultLocale`), an unregistered setting
+ * read as not set, and both services looked up at question time by name.
  */
 export async function readOrganizationTextLocale(
   getService: ((name: string) => unknown) | undefined,
