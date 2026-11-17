@@ -1004,7 +1004,9 @@ const FLOW_NODE_CONFIG: Record<string, FlowConfigField[]> = {
   // nodes wired to its `approve` / `reject` out-edges).
   approval: [
     cfg('approvers', 'Approvers', 'objectList', {
-      help: 'Who may act on this step. Wire the node’s out-edges with labels "approve" and "reject".',
+      // objectstack#34818 — the designer inserts the node with its `approve`
+      // and `reject` out-edges, and Problems names one that goes missing.
+      help: 'Who may act on this step. The node comes with an "approve" and a "reject" connection; keep both, or the Problems tab reports the missing one.',
       columns: [
         {
           key: 'type',
@@ -1508,14 +1510,19 @@ function withUnmappedDeclaredKeys(
   return out;
 }
 
-/** Overlay a column's zh label / option labels (English is the fallback). */
+/** Overlay a column's zh label / help / option labels (English is the fallback). */
 function localizeColumn(
   col: FlowConfigColumn,
-  cz: { label?: string; opts?: Record<string, string> } | undefined,
+  cz: { label?: string; help?: string; placeholder?: string; opts?: Record<string, string> } | undefined,
 ): FlowConfigColumn {
   if (!cz) return col;
   const out: FlowConfigColumn = { ...col };
   if (cz.label) out.label = cz.label;
+  // objectstack#34818 — the served column help (the spec's description).
+  if (cz.help) out.help = cz.help;
+  // objectstack#34818 — only a column the zh table names a placeholder for:
+  // a prose hint, never an example literal.
+  if (col.placeholder && cz.placeholder) out.placeholder = cz.placeholder;
   if (col.options && cz.opts) {
     out.options = col.options.map((o) => ({ ...o, label: cz.opts![o.value] ?? o.label }));
   }
@@ -1533,6 +1540,7 @@ function localizeField(rawType: string, canonicalType: string, field: FlowConfig
   if (z.label) out.label = z.label;
   if (z.help) out.help = z.help;
   if (field.unsetNotice && z.unsetNotice) out.unsetNotice = z.unsetNotice;
+  if (field.placeholder && z.placeholder) out.placeholder = z.placeholder;
   if (field.options && z.opts) {
     out.options = field.options.map((o) => ({ ...o, label: z.opts![o.value] ?? o.label }));
   }

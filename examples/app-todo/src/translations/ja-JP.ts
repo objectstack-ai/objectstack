@@ -100,6 +100,29 @@ export const jaJP: TranslationData = {
     todo_completed_tasks: { label: '完了済みタスク', description: '作業時間の記録付きの完了済みタスク' },
     todo_time_tracking: { label: '作業時間レポート', description: '見積時間と実績時間の分析' },
   },
+  // The task dataset's business definitions (ADR-0149 D1), shown to whoever
+  // asks a question of it and handed to the assistant to choose a member by.
+  // `synonyms` are not here: they are matched in every language at once from
+  // the dataset's one authored list.
+  datasets: {
+    todo_task_metrics: {
+      dimensions: {
+        status: { description: 'タスクのライフサイクル上の状態：未着手、進行中、待機中、完了、延期のいずれか。' },
+        priority: { description: 'タスクの緊急度：低、通常、高、緊急のいずれか。' },
+        category: { description: 'タスクが属する生活の領域：個人、仕事、買い物、健康、財務、その他のいずれか。' },
+        owner: { description: 'タスクが割り当てられている人。結果には名前で表示されます。' },
+        due_date: { description: 'タスクの期日。この日を過ぎても完了していないタスクは期限超過になります。' },
+        completed_date: {
+          description: 'タスクが完了にされた日時で、自動的に記録されます。未完了のタスクでは空で、完了したタスクを再開すると消去されます。',
+        },
+      },
+      measures: {
+        task_count: { description: 'タスクの件数。ステータスを問わず、完了済みや延期のタスクも数えます。' },
+        est_hours: { description: '各タスクの「見積時間」に入力された予定時間の合計。見積のないタスクは加算されません。' },
+        actual_hours: { description: '各タスクに実際にかかった時間の合計で、「実績時間」の入力値によります。時間が未入力のタスクは加算されません。' },
+      },
+    },
+  },
   // The quick-add wizard: the flow's name in the runner header and completion
   // toast, each screen's heading and each field label.
   flows: {

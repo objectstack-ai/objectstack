@@ -2553,7 +2553,7 @@ const ko = {
       expandToPage: "전체 페이지로 열기",
       openAsPage: "전체 페이지로 열기",
       objectNotFound: "객체를 찾을 수 없음",
-      objectNotFoundDescription: "객체 \"{{objectName}}\"이(가) 현재 구성에 존재하지 않습니다.",
+      objectNotFoundDescription: "객체 \"{{objectName}}\"이(가) 존재하지 않거나 액세스 권한이 없습니다.",
       objectNotFoundHint: "앱 탐색 설정을 확인하거나 사이드바에서 다른 객체를 선택하세요.",
       objectPackageDisabled: "객체 \"{{objectName}}\"이(가) 속한 패키지가 비활성화되어 있어 제공되지 않습니다.",
       filterOrGroupNotEditable: "이 필터에는 다른 조건과 함께 OR 그룹이 있어 필터 편집기에서 표시할 수 없으므로 여기서는 읽기 전용입니다. 뷰에는 계속 적용됩니다.",
@@ -3420,7 +3420,6 @@ const ko = {
   },
   empty: {
     objectNotFound: "오브젝트를 찾을 수 없습니다",
-    objectNotFoundDescription: "\"{{name}}\" 오브젝트 정의가 없습니다. 구성을 확인하거나 뒤로 이동하세요.",
     interfacePageSourceMissing: "이 인터페이스 페이지는 \"{{name}}\"을(를) 참조하지만 사용할 수 없습니다.",
     pageNotFound: "페이지를 찾을 수 없습니다",
     pageNotFoundDescription: "\"{{name}}\" 페이지를 찾을 수 없습니다. 삭제되거나 이름이 변경되었을 수 있습니다.",

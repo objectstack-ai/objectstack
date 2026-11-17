@@ -3117,7 +3117,7 @@ const en = {
         unauthorizedHint: 'Holds no permission set beyond the baseline every signed-in member has. Give them a permission set or a position.',
       },
       objectNotFound: 'Object Not Found',
-      objectNotFoundDescription: 'The object "{{objectName}}" does not exist in the current configuration.',
+      objectNotFoundDescription: 'The object "{{objectName}}" does not exist, or you do not have access to it.',
       objectNotFoundHint: 'Check your app navigation settings or select a different object from the sidebar.',
       objectPackageDisabled: 'The object "{{objectName}}" belongs to a package that is disabled, so it is not being served.',
       filterOrGroupNotEditable: 'This filter has an OR group beside other conditions, which the filter editor cannot show, so it is read-only here. The view still applies it.',
@@ -4105,7 +4105,6 @@ const en = {
   },
   empty: {
     objectNotFound: 'Object Not Found',
-    objectNotFoundDescription: 'Object "{{name}}" definition missing. Check your configuration or navigate back to select a valid object.',
     interfacePageSourceMissing: 'This interface page references "{{name}}", which is not available.',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',

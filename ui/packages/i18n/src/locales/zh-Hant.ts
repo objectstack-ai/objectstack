@@ -2646,7 +2646,7 @@ const zhHant = {
       expandToPage: '整頁開啟',
       openAsPage: '整頁開啟',
       objectNotFound: '未找到物件',
-      objectNotFoundDescription: '物件"{{objectName}}"在當前配置中不存在。',
+      objectNotFoundDescription: '物件"{{objectName}}"不存在，或者您無權訪問它。',
       objectNotFoundHint: '請檢查您的應用導航設定或從側邊欄選擇其他物件。',
       objectPackageDisabled: '物件“{{objectName}}”所屬的軟體包已被停用，因此當前不提供該物件。',
       filterOrGroupNotEditable: '該篩選條件在其他條件之外還含有一個「或」分組，篩選編輯器無法顯示這種結構，因此此處只讀。檢視仍會應用它。',
@@ -3502,7 +3502,6 @@ const zhHant = {
   },
   empty: {
     objectNotFound: '未找到物件',
-    objectNotFoundDescription: '物件 “{{name}}” 的定義不存在。請檢查配置或返回選擇有效的物件。',
     interfacePageSourceMissing: '此介面頁引用了 “{{name}}”，但該來源不可用。',
     recordNotFound: '未找到記錄',
     recordNotFoundDescription: '您查詢的記錄不存在、已被刪除，或您沒有訪問權限。',
