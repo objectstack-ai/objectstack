@@ -33,6 +33,8 @@ import { describe, it, expect, vi } from 'vitest';
 // INSIDE objectql, and the package re-exporting it is this one.
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { describeTurnedOffPackagedItem } from '@objectstack/types';
+import { READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
+import { ACTION_KERNEL_PACKAGE_SCOPES } from './engine-actions.js';
 
 import { ObjectQL } from './engine.js';
 import {
@@ -433,6 +435,12 @@ describe('ObjectQL engine — the projection the dispatch doors consult', () => 
         // A row naming no package, or a package not installed, is not judged a platform one.
         await engine.setActionActive({ name: 'env_action', active: false });
         expect(engine.describeDisabledAction('env_action')).toBe(describeTurnedOffPackagedItem('action'));
+    });
+
+    it('the kernel scope list the sentence reads is the one the package doors read', () => {
+        // Spelled locally because `./core` must not import metadata-protocol;
+        // a test may, and holds the two equal.
+        expect([...ACTION_KERNEL_PACKAGE_SCOPES].sort()).toEqual([...READ_ONLY_PACKAGE_SCOPES].sort());
     });
 
     it('setActionActive flips the row and the projection together, in that order', async () => {

@@ -46,7 +46,6 @@ export function FlowLedgerSwitch({
   onToggle,
   hint: hintText,
   testId = 'auto-ledger-switch',
-  label,
 }: {
   /** The ledger flag. */
   checked: boolean;
@@ -68,11 +67,6 @@ export function FlowLedgerSwitch({
   hint?: string;
   /** objectstack#34724 — the action switch's own test id; the flow's by default. */
   testId?: string;
-  /**
-   * objectstack#34724 — an accessible name of its own, where one view draws a
-   * switch per item. Absent, the visible word names it, as on the flow header.
-   */
-  label?: string;
 }): React.ReactElement {
   const hintId = React.useId();
   const reasonId = React.useId();
@@ -88,7 +82,6 @@ export function FlowLedgerSwitch({
       aria-checked={checked}
       data-testid={testId}
       data-reading={reading}
-      aria-label={label}
       onClick={() => {
         if (!busy) onToggle();
       }}

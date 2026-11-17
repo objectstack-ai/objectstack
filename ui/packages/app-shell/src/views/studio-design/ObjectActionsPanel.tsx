@@ -219,7 +219,8 @@ export function ObjectActionsPanel({
   // objectstack#34724 — the ledger switch of a read-only package's vendor
   // actions. The package is the route's: on a read-only package's object the
   // vendor actions are that package's own. A writable package's actions are
-  // the draft's, switched by editing them, so nothing is read there.
+  // the draft's: the console draws no ledger switch there (the card's item 1
+  // offers it on a read-only app's vendor actions only), so nothing is read.
   const routePackage = useParams<{ packageId?: string }>().packageId ?? null;
   const ledgerPackage =
     disabled && routePackage && !isStudioOrgScope(routePackage) ? routePackage : null;

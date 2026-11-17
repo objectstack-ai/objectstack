@@ -3261,7 +3261,10 @@ function MetadataResourceEditPageImpl({
               </div>
             )}
             {hostReadOnly && !createMode && type === 'action' && areaHost?.packageId && (
-              <ActionItemLedgerSwitch packageId={areaHost.packageId} name={name} draft={draft} locale={locale} />
+              // The package that ships the item when the read names it, the
+              // area's otherwise: an app's area can show an item another
+              // package ships, and a kernel-shipped one gets no switch.
+              <ActionItemLedgerSwitch packageId={layered?.packageId ?? areaHost.packageId} name={name} draft={draft} locale={locale} />
             )}
             {readOnly && !hostReadOnly && !isLocked && !canAuthor && !walledDeciding && !declarationOnly && (
               <div

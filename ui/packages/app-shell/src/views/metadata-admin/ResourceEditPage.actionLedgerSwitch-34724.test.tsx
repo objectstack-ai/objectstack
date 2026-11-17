@@ -18,7 +18,7 @@ import * as React from 'react';
 // (`check:test-source-alias`).
 import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHost';
 
@@ -154,6 +154,20 @@ describe("a standalone action's item page carries the ledger switch (objectstack
     openItem(hostOf(KERNEL));
     await screen.findByTestId('package-readonly-banner');
     await waitFor(() => expect(vi.mocked(fetchPackages)).toHaveBeenCalled());
+    for (let i = 0; i < 5; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('sys_metadata_activation'))).toHaveLength(0);
+    expect(screen.queryByTestId('action-ledger-switch')).toBeNull();
+  });
+
+  it('an app area showing an item a kernel package ships judges the item\'s package: no switch', async () => {
+    layered = { ...layered, packageId: KERNEL };
+    openItem(hostOf(APP));
+    await screen.findByTestId('package-readonly-banner');
+    await waitFor(() => expect(vi.mocked(fetchPackages)).toHaveBeenCalled());
+    // Let the package verdict and any ledger read settle before reading absence.
+    for (let i = 0; i < 5; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const ledgerReads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('sys_metadata_activation'));
+    expect(ledgerReads).toHaveLength(0);
     expect(screen.queryByTestId('action-ledger-switch')).toBeNull();
   });
 

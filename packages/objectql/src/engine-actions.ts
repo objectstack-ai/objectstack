@@ -144,16 +144,17 @@ export interface ActionsHost {
  * The manifest scopes of a kernel package: the platform's own (`system`) and
  * the control plane's (`cloud`). The same list as `@objectstack/metadata-protocol`'s
  * `READ_ONLY_PACKAGE_SCOPES` and `@objectstack/metadata-core`'s
- * `KERNEL_PACKAGE_SCOPES`; spelled here because this module is inside the
+ * `KERNEL_PACKAGE_SCOPES`, held equal to the first by a pin in
+ * `action-activation.test.ts`; spelled here because this module is inside the
  * `./core` closure, which must not import metadata-protocol (ADR-0076 D2,
  * `core-boundary.ratchet.test.ts`), and metadata-core does not export it.
  */
-const KERNEL_PACKAGE_SCOPES: readonly string[] = ['system', 'cloud'];
+export const ACTION_KERNEL_PACKAGE_SCOPES: readonly string[] = ['system', 'cloud'];
 
 /** Is `manifest` a kernel package's — scope `system` or `cloud`? */
 function isKernelPackageScope(manifest: unknown): boolean {
   const scope = (manifest as { scope?: unknown } | null | undefined)?.scope;
-  return typeof scope === 'string' && KERNEL_PACKAGE_SCOPES.includes(scope);
+  return typeof scope === 'string' && ACTION_KERNEL_PACKAGE_SCOPES.includes(scope);
 }
 
 /** The bodies of the "Action system and packaged-action activation" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
