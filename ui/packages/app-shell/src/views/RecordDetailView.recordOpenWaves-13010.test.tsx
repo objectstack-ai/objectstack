@@ -692,8 +692,8 @@ describe('the timeline, comments, attachments and user list wait for their panel
 
   // The synthesized page has no discussion footer any more (#27055), and no
   // tab strip at any width since objectstack#27524: its one stream is the 动态
-  // panel, the first panel of the right column — on screen at open in every
-  // tier, so the feed is read at open, like an authored page opened on its
+  // panel, the last panel of the right column (objectstack#34590) — drawn at
+  // open in every tier, so the feed is read at open, like an authored page opened on its
   // Activity tab. A page with tabs still waits for its tab (above).
   // objectstack#28470 — asked with the page, not beside it; the mention list
   // waits for the composer's focus.

@@ -4993,9 +4993,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const drawnHighlightFields = drawnHighlightFieldsOf(renderedPage);
 
   // objectstack#26678 / objectstack#27524 — the page as its tier lays it out:
-  // the record header, then the details and the right column (动态, then the
-  // related panels), read off `renderedPage` itself so they hold exactly the
-  // blocks the tab strip would (pruning included). `null` for an authored
+  // the record header, then the details and the right column (the related
+  // panels, then 动态 last — objectstack#34590), read off `renderedPage`
+  // itself so they hold exactly the blocks the tab strip would (pruning
+  // included). `null` for an authored
   // page and for a page whose strip the partition cannot read, which is drawn
   // as written, tabs and all.
   const pageColumns = pageColumnsEligible ? buildDefaultPageColumns(renderedPage) : null;
