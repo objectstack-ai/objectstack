@@ -313,12 +313,14 @@ export function relationGroupDriverRefusal(
   driver: { readonly name?: unknown; readonly supports?: unknown } | undefined,
 ): Error | undefined {
   if (driverCompilesReadableIdsLeaf(driver)) return undefined;
-  const relation = Array.isArray(request.relations) ? request.relations[0] : undefined;
+  const relations: readonly RelationGroupBy[] = Array.isArray(request.relations) ? request.relations : [];
+  const relation: RelationGroupBy | undefined = relations[0];
   const field = typeof relation?.field === 'string' ? relation.field : 'the relation field';
   const target = typeof relation?.object === 'string' ? relation.object : 'the related object';
-  const attrs = Array.isArray(relation?.attrs)
-    ? relation.attrs.map((a) => a?.attr).filter((a): a is string => typeof a === 'string')
-    : [];
+  const declared: readonly RelationGroupAttribute[] = Array.isArray(relation?.attrs) ? relation.attrs : [];
+  const attrs = declared
+    .map((entry: RelationGroupAttribute | undefined) => entry?.attr)
+    .filter((attr: unknown): attr is string => typeof attr === 'string');
   const what = attrs.length > 0 ? attrs.map((a) => `'${a}'`).join(', ') : 'its attributes';
   const err = new Error(
     `aggregate('${object}'): grouping by ${what} of '${target}' through '${object}.${field}' cannot run on `
