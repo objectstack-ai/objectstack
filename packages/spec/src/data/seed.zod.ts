@@ -28,7 +28,7 @@ import {
 const SEED_MODE_RETIRED_FIX =
   'Declare the rows\' identity instead: keep the default `mode: \'ignore\'` (or `\'upsert\'`) and set '
   + '`externalId` to the field that names a row, to a list of fields when no single field does (a junction '
-  + 'table\'s `[\'team\', \'project\']`, listing only fields every load can fill), or to `\'id\'` when the '
+  + 'table\'s `[\'team\', \'project\']`), or to `\'id\'` when the '
   + 'records carry their own ids.';
 
 /**

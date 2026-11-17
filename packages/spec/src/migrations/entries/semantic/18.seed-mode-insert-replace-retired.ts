@@ -15,8 +15,7 @@ export const entry: SemanticMigration = {
   replacement:
     'Keep the default `mode: \'ignore\'` (or declare `\'upsert\'` for reference data the package keeps current) and '
     + 'set `externalId` to the field that names a row, to a list of fields when no single field does (a junction '
-    + 'table\'s `[\'team\', \'project\']`; list only fields every load can fill, since a reference the first '
-    + 'load leaves empty makes each later load miss that row), or to `\'id\'` when the records carry their own ids',
+    + 'table\'s `[\'team\', \'project\']`), or to `\'id\'` when the records carry their own ids',
   reason:
     'A seed is replayed, not applied once: on every single-tenant boot, every package install or upgrade, every '
     + 'publish. `insert` matched no existing row, so every replay inserted each record again, and `replace` did the '

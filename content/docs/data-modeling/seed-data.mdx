@@ -156,10 +156,10 @@ To convert a dataset, declare which field identifies a row, then drop the mode
 1. **A field names the row** (a code, a slug, an email): set `externalId` to it.
 2. **No single field does** (a join table, a line item under a parent): set
    `externalId` to the list of fields that together identify a row, for example
-   `['team', 'project']`. Reference fields are matched by their resolved ids, so
-   list only fields every load can fill: a reference the first load has to leave
-   empty (a person who has not signed up yet) makes each later load miss that row
-   and insert another. See
+   `['team', 'project']`. Reference fields are matched by their resolved ids. A
+   reference the first load has to leave empty (a person who has not signed up
+   yet) still belongs in the key: each later load finds that row again by the
+   key as authored, and the load that can resolve the person fills it in. See
    [Composite natural key](#composite-externalid--join--junction-tables).
 3. **The records carry their own ids**: set `externalId: 'id'`.
 
