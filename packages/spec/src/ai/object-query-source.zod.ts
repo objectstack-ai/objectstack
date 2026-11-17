@@ -24,6 +24,12 @@ import { AggregationFunction } from '../data/query.zod';
  *
  * Only the shape is spec. The producer is the cloud AI service's
  * `resultSourceBlock()`; a reader is the console chat's answer-source block.
+ * `scope` is one of two values, both required to be stated: the producer
+ * judges it per call from `ISecurityService.getReadFilter(object, ctx)`
+ * under the read's own context (`visible_to_you` when a row restriction
+ * applied, the organization wall included; `all_records` only when that call
+ * resolved to `undefined`; `visible_to_you` whenever the producer obtains no
+ * answer), and the reader states an access line for `visible_to_you` only.
  *
  * Every optional key is LEFT OUT when it does not apply, never sent as
  * `null`: a `null` is refused. The object is a plain object, so a key a newer
@@ -41,9 +47,20 @@ export const ObjectQuerySourceSchema = lazySchema(() => z.object({
     'The caller\'s `where`, in the `$` query dialect, exactly as the engine accepted it: machine names only, '
     + 'no field labels, date placeholders such as `{today}` as written. Absent when no condition applied',
   ),
-  scope: z.literal('visible_to_you').describe(
-    'The row scope the figures cover: only the records the caller may read, after sharing and row-level '
-    + 'narrowing. Always present; this is its only value',
+  scope: z.enum(['visible_to_you', 'all_records']).describe(
+    'The row scope the figures cover, judged by the producer per call from '
+    + '`ISecurityService.getReadFilter(object, ctx)` for this caller and `object`, under the same context the '
+    + 'read ran under. `visible_to_you`: a row restriction applied, so the figures cover only the records the '
+    + 'caller may read. The organization wall is a row restriction: under the `isolated` and `group` tenancy '
+    + 'postures `getReadFilter` answers an `organization_id` predicate on every object that carries the column, '
+    + 'for every caller but a platform admin whose object\'s posture lets them cross the wall, so an organization '
+    + 'owner there reads `visible_to_you`. `all_records`: stated only when that call RESOLVED to `undefined`, so '
+    + 'no row restriction applied; for a caller no row rule or sharing narrows, that is the `single` posture, an '
+    + 'object outside tenancy, a platform admin crossing the wall, or a system context. An absent security '
+    + 'service, an absent `getReadFilter`, a call that throws or rejects, or a call made under any other context '
+    + 'than the read\'s own states `visible_to_you`. A restriction applied is the fact stated, not a count of rows '
+    + 'excluded. The value speaks for `object` only, not for the objects behind `related` lookup paths. Always '
+    + 'present, one of these two values',
   ),
   groupBy: z.array(z.string()).optional().describe('The field names the figures were grouped by, in order'),
   aggregations: z.array(z.object({

@@ -612,7 +612,29 @@ export const CEILINGS = new Map([
   // status to a flow door: +37 bytes, no further restatement left to cut).
   // Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27443 / 4)
-  ['skills/objectstack-automation/SKILL.md', 6861],
+  // 6861 -> 6903 (2026-11-16, card #34434, the skills follow-up of #34062):
+  // silently-wrong item 1 teaches the third `create_record` / `update_record`
+  // `fields` form, the text envelope `{ dialect: 'template', source }`: written
+  // in the organization's language (Localization setting, else the app's
+  // `i18n.defaultLocale`), never the run starter's; untranslated, the authored
+  // text; an unreadable setting fails the node; a bare string stays a literal.
+  // Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068, letter B). PAID DOWN FIRST — three restatements cut, each keeping
+  // its other home: the CEL callout's "Contract, stdlib, legacy → CEL table:
+  // objectstack-formula" (the frontmatter description's "load
+  // objectstack-formula alongside"); the Trigger Configuration lead-in naming
+  // the flow's `label` / `type` / `nodes` / `edges` (references/examples-flows.md's
+  // whole flows); item 3's `// pure — the default` function row (the same item's
+  // "A flow `function` is a PURE compute step"). The state-introspection route
+  // after the State Machines pointer is NOT a cut: packages/rest's
+  // meta-state-route-doc-spelling test pins this file as one of its teaching
+  // sites. Arithmetic in priced bytes (stamp line excluded), against `main`'s
+  // 27431 (headroom 3): the diff's added lines carry 441 bytes and its removed
+  // lines 261 (a trimmed line counted on both sides), net +180, so the LANDED
+  // priced text is 27611 bytes -> ceil(27611 / 4) = 6903; the ceiling moves +42,
+  // the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27611 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6903],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -662,7 +684,23 @@ export const CEILINGS = new Map([
   // raise path is the standing 2026-10-27 ruling, verbatim and untranslated:
   // 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
   ['skills/objectstack-data/SKILL.md', 6665],
-  ['skills/objectstack-formula/SKILL.md', 5997], //     -53 (was 6055), then -5 A2′ (was 6002)
+  // 5997 -> 6008 (the formula skills follow-ups of PRs #34443 and #34447): the
+  // `label(record.f)` row teaches a multi-select (`multiple: true`) reading each
+  // selected label in stored order, joined with `, `, and the built-ins line
+  // teaches that `timestamp()` over a `date` field is refused (`date-text-call`)
+  // and that a date shifts with `isoDate(addDays(record.d, n))`. Raise path the
+  // standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST — three restatements cut, each keeping its other
+  // home (listed in the PR body): the `has()` paragraph's null-check sentence
+  // (the cheat-sheet `Null check` row), the template section's
+  // `shared/expression.zod.ts` sentence (Core contract and See also), and the
+  // translation-table note's per-matched-row clause (§5's table). Arithmetic in
+  // priced bytes (stamp line excluded), against `main`'s 23952 (headroom 9): the
+  // text adds 321, the cuts remove 243, so the LANDED priced text is 24030
+  // bytes -> ceil(24030 / 4) = 6008; the ceiling moves +11, the measured
+  // remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24030 / 4)
+  ['skills/objectstack-formula/SKILL.md', 6008], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
   // The largest of the five and the frame the other four are read under: what an
@@ -930,7 +968,22 @@ export const CEILINGS = new Map([
   // zero headroom, ceiling +141, pinned AT the measurement. Standing ruling (2026-10-27,
   // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
   // ruling record 6513306068; seat widening record 6784270263.
-  ['skills/objectstack-data/rules/field-types.md', 3349],
+  // 3349 -> 3553 (#34201, 2026-11-16): § Lookup teaches the `lookupFilters`
+  // `{ $record: 'path' }` reference (a field of the record being edited, or one lookup
+  // hop), its six operators, the record-form-only resolution, the dropped entry on an
+  // empty value, `orEmpty: true`, and why a `$record` field is not also listed in
+  // `dependsOn`; the section's one example becomes a `price_book` lookup. +994 bytes.
+  // PAID DOWN FIRST by five same-file restatement cuts, 179 bytes (41 + 51 + 24 + 43 +
+  // 20): the `secret` row's "recommended type for credentials" (home: the `password`
+  // row, "Prefer `secret` for credentials"); the `autonumber` row's token-and-scope
+  // parenthetical, cut to a pointer, and its second `format` example (home: § Autonumber,
+  // the token table and the scope paragraph); rule 3's "Size it for readability, not as
+  // a ceiling" (home: the same rule's heading); the token table's "(minimum width)"
+  // (home: rule 3). `wc -c` = 14210 bytes -> ceil(14210 / 4) = 3553 tokens, zero
+  // headroom, ceiling +204, pinned AT the measurement. Standing ruling (2026-10-27,
+  // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
+  // ruling record 6513306068.
+  ['skills/objectstack-data/rules/field-types.md', 3553],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
   // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌

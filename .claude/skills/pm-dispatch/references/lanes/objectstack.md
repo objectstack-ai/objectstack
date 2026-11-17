@@ -12,7 +12,7 @@
 
 ## 范围
 
-- 本仓全部可认领卡,跨各 `domain:*`;`domain:*` 只定文件归属与串行(SKILL.md 域车道)。
+- 本仓全部可认领卡,跨各 `domain:*`;`domain:*` 只定文件归属(SKILL.md 域车道)。
 - 不认领:涉 cloud 整卡归 `repo:cloud` 席;安全公告归 `security` 席;他仓卡归各仓车道。
 - 域车道席照常运作;area-lease.md 认领前重读行的「他区」在本车道读作他席或他区。
 - 跨车道卡的留道、L1/L2 审核与通知照 area-lease.md 区内规则,⛔ 本文不另抄。

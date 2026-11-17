@@ -1,6 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { authIdentityObjects } from './manifest.js';
 import {
   createObjectQLAdapter,
   createObjectQLAdapterFactory,
@@ -751,5 +757,145 @@ describe('an unbounded ssoProvider read reads every row (the 100-row factory def
       ['sys_user', 100],
       ['sys_sso_provider', 151],
     ]);
+  });
+});
+
+describe('a single-use auth value is redeemed at most once, even across processes sharing a database', () => {
+  // Each "process" is its own ObjectQL engine with its own SQL driver
+  // connection, both opened on ONE SQLite file, and its own factory-wrapped
+  // adapter: nothing in memory is shared between the two, only the database.
+  const VERIFICATION = 'sys_verification';
+  type Adapter = {
+    create(a: { model: string; data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+    consumeOne(a: { model: string; where: Array<Record<string, unknown>> }): Promise<Record<string, unknown> | null>;
+  };
+  /** A pause point: every caller waits until `parties` callers have arrived. */
+  type Gate = () => Promise<void>;
+  const gate = (parties: number): Gate => {
+    let arrived = 0;
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => { open = resolve; });
+    return async () => {
+      if (++arrived === parties) open();
+      await opened;
+    };
+  };
+
+  const dirs: string[] = [];
+  const engines: ObjectQL[] = [];
+  afterEach(async () => {
+    while (engines.length) {
+      try { await engines.pop()!.destroy(); } catch { /* noop */ }
+    }
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+
+  /**
+   * One replica over `file`. `atRead` runs once, after its adapter's first
+   * read of a verification row; `atDelete` before each of its driver's
+   * verification deletes. Both default to no pause.
+   */
+  const replica = async (
+    file: string,
+    pauses: { atRead?: () => Promise<void>; atDelete?: () => Promise<void> } = {},
+  ): Promise<{ adapter: Adapter; driver: SqlDriver }> => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
+    const engine = new ObjectQL();
+    engines.push(engine);
+    engine.registerDriver(driver, true);
+    await engine.init();
+    for (const object of authIdentityObjects) engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
+    await engine.syncSchemas();
+
+    const driverDelete = driver.delete.bind(driver);
+    driver.delete = (async (object: string, id: string | number, options?: unknown) => {
+      if (object === VERIFICATION) await pauses.atDelete?.();
+      return driverDelete(object, id, options as never);
+    }) as typeof driver.delete;
+
+    let read = false;
+    const seen = new Proxy(engine, {
+      get(target, prop) {
+        const member = Reflect.get(target, prop, target);
+        if (prop !== 'findOne') return typeof member === 'function' ? member.bind(target) : member;
+        return async (object: string, ...rest: unknown[]) => {
+          const row = await (member as (...a: unknown[]) => Promise<unknown>).call(target, object, ...rest);
+          if (object === VERIFICATION && !read) {
+            read = true;
+            await pauses.atRead?.();
+          }
+          return row;
+        };
+      },
+    });
+    const adapter = (createObjectQLAdapterFactory(seen as unknown as IDataEngine) as unknown as (o: unknown) => Adapter)({});
+    return { adapter, driver };
+  };
+
+  const sharedFile = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-auth-single-use-'));
+    dirs.push(dir);
+    return join(dir, 'auth.db');
+  };
+
+  const issue = (adapter: Adapter, identifier: string) =>
+    adapter.create({
+      model: 'verification',
+      data: { identifier, value: `value-of-${identifier}`, expiresAt: new Date(Date.now() + 5 * 60_000) },
+    });
+
+  const redeem = (adapter: Adapter, id: unknown) =>
+    adapter.consumeOne({ model: 'verification', where: [{ field: 'id', value: id, operator: 'eq', connector: 'AND' }] });
+
+  const stored = async (driver: SqlDriver, identifier: string) =>
+    (await driver.find(VERIFICATION, { object: VERIFICATION, where: { identifier } } as never)) as unknown[];
+
+  it('of two concurrent redemptions on two engines over one database, exactly one receives the value', async () => {
+    const file = sharedFile();
+    const atRead = gate(2);
+    const atDelete = gate(2);
+    const a = await replica(file, { atRead, atDelete });
+    const b = await replica(file, { atRead, atDelete });
+    const row = await issue(a.adapter, 'race-both-paused');
+
+    const answers = await Promise.all([redeem(a.adapter, row.id), redeem(b.adapter, row.id)]);
+
+    expect(answers.filter((r) => r !== null), 'redemptions that received the value').toHaveLength(1);
+    expect(answers.filter((r) => r === null), 'redemptions answered null').toHaveLength(1);
+    expect(answers.find((r) => r !== null)).toMatchObject({ id: row.id, value: 'value-of-race-both-paused' });
+    expect(await stored(a.driver, 'race-both-paused')).toHaveLength(0);
+  });
+
+  it('a redemption of a value already redeemed elsewhere receives null', async () => {
+    const file = sharedFile();
+    const bothRead = gate(2);
+    let aDone!: Promise<unknown>;
+    const a = await replica(file, { atRead: bothRead });
+    const b = await replica(file, { atRead: async () => { await bothRead(); await aDone; } });
+    const row = await issue(a.adapter, 'race-late-delete');
+
+    aDone = redeem(a.adapter, row.id);
+    const [first, second] = await Promise.all([aDone, redeem(b.adapter, row.id)]);
+
+    expect(first).toMatchObject({ id: row.id, value: 'value-of-race-late-delete' });
+    expect(second).toBeNull();
+    expect(await stored(b.driver, 'race-late-delete')).toHaveLength(0);
+  });
+
+  it('a single redemption receives the value and removes it', async () => {
+    const { adapter, driver } = await replica(sharedFile());
+    const row = await issue(adapter, 'single');
+
+    expect(await redeem(adapter, row.id)).toMatchObject({ id: row.id, identifier: 'single', value: 'value-of-single' });
+    expect(await stored(driver, 'single')).toHaveLength(0);
+    expect(await redeem(adapter, row.id), 'the same value a second time').toBeNull();
+  });
+
+  it('redeeming a value that does not exist receives null and removes nothing', async () => {
+    const { adapter, driver } = await replica(sharedFile());
+    await issue(adapter, 'bystander');
+
+    expect(await redeem(adapter, 'no-such-value')).toBeNull();
+    expect(await stored(driver, 'bystander')).toHaveLength(1);
   });
 });

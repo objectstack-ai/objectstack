@@ -475,6 +475,39 @@ function isDeclaredRegisterRefusal(err: unknown): boolean {
 }
 
 /**
+ * [#34407, #34432] The answer to a package body the artifact resolver refuses
+ * before any write (`resolveStackCollection` → `resolveArtifactPackageEntries`:
+ * `INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`,
+ * `DUPLICATE_ARTIFACT_PACKAGE`, each an ADR-0112 envelope with its declared
+ * `status: 422`): that refusal's own declared status and code, the resolver's
+ * sentence, and that nothing was written. The one reader of such a refusal on
+ * this door's pre-write steps — the D5e gate (2b) and the declared renames
+ * (2c″) both read the bodies through the resolver, so the same bytes are
+ * answered the same way whichever step reads them first.
+ *
+ * `undefined` for a throw that declares no status below 500 — an undeclared
+ * throw (the resolver's own dependency-cycle error among them) or a declared
+ * 5xx: the caller rethrows it, never relabels it.
+ */
+function declaredRefusalAnswer(
+    manifestId: string,
+    err: unknown,
+): { status: number; body: { success: false; error: { code: string; message: string } } } | undefined {
+    const refusal = resolveThrownHttpError(err);
+    if (refusal.declaredStatus === undefined || refusal.status >= 500) return undefined;
+    return {
+        status: refusal.status,
+        body: {
+            success: false,
+            error: {
+                code: refusal.code,
+                message: `Package '${manifestId}' cannot be installed: ${String((err as any)?.message ?? err)} Nothing was installed or written.`,
+            },
+        },
+    };
+}
+
+/**
  * [#21490] The one `protocol` verb this plugin calls: the runner of the
  * uninstall cleanups domain plugins register through
  * `registerUninstallCleanup` — the same registry, through the same runner,
@@ -1977,6 +2010,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *     install-time rows (or the user's own data) are still present, and
      *     re-upserting would silently revert user edits on every boot.
      *
+     * [#34405] The load honours the landed-key record (`sys_seed_landed_key`),
+     * as the runtime's boot seed does: a seed row whose key landed in this
+     * organization before and whose row is gone was removed by a person, and is
+     * withheld (counted in `skipped`), not inserted again. A database that lost
+     * its rows and the record with them is healed whole. A heal that landed
+     * no rows but skipped some, with no error, is reported at `info` and
+     * recorded with its real `skipped`, never as an `emptyInstall`. The split
+     * reads the loader's `skipped`, which also counts an `update` row with no
+     * match, so a heal whose only skips are those records settled too. Only a
+     * load that landed nothing otherwise (nothing skipped, or an error) is the
+     * empty install the boot banner escalates.
+     *
      * `converted` is the entry's manifest as rehydrate converted it — the one the
      * package registered — so the heal seeds what registered, not the raw
      * ledger bytes.
@@ -2018,7 +2063,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             // [#30281] No user starts a boot heal: the setting, then this
             // package's declared default locale.
-            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
+            // [#34405] Honouring the landed-key record, as the runtime's boot
+            // seed does: a new database holds no record and is healed whole,
+            // while seed rows a person deleted from every seeded object stay
+            // deleted.
+            const summary = await this.runInlineSeed(ctx, datasets, 'honour', undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
             const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
             if (landed > 0) {
                 entry.withSampleData = true;
@@ -2037,6 +2086,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     rejected: summary.errors ?? 0,
                     droppedRefs: summary.droppedRefs ?? 0,
                     healed: true,
+                });
+            } else if ((summary.skipped ?? 0) > 0 && (summary.errors ?? 0) === 0) {
+                // [#34405] Rows skipped and none landed, no error: a seed a
+                // person emptied is withheld by the landed-key record and stays
+                // empty on every restart. `skipped` also counts an `update` row
+                // with no match, so a heal whose only skips are those lands here
+                // too. A settled seed, not a failed one, so no `emptyInstall`.
+                ctx.logger?.info?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows: ${summary.skipped} seed row(s) skipped, none in error (a row withheld by the landed-key record, or an update-mode row with no match); the package's sample-data reseed brings withheld rows back`);
+                await this.recordSeedSummary(ctx, {
+                    source: entry.manifestId,
+                    marketplace: true,
+                    inserted: 0,
+                    updated: 0,
+                    skipped: summary.skipped,
+                    rejected: 0,
+                    droppedRefs: summary.droppedRefs ?? 0,
                 });
             } else {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows${summary.errorSample ? ` — first error: ${summary.errorSample}` : ''}`);
@@ -2258,7 +2323,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const empty = () => ({ inserted: 0, updated: 0, skipped: 0, errors: [] as any[] });
         // [#30281] `options.userId` is the organization's founder when the
         // org-scoping middleware knows one — the AppPlugin replayer's shape.
-        return async (organizationId: string, options?: { userId?: string }) => {
+        // [#34405] `options.reseed` is the deliberate re-seed the AppPlugin
+        // replayer takes too: every missing row, whatever the landed-key record
+        // says. Every other replay honours that record.
+        return async (organizationId: string, options?: { userId?: string; reseed?: boolean }) => {
             if (!organizationId) return empty();
             const datasetsNow = this.readSharedSeedDatasets(ctx);
             if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) return empty();
@@ -2284,7 +2352,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // [#30324] The founder owns the rows: the organization's first
             // admin, the one person this door is handed. With none, the rows
             // keep no owner, as before.
-            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId }, {
+            const s = await this.runInlineSeed(ctx, datasetsNow, options?.reseed === true ? 'reseed' : 'honour', organizationId, { userId: options?.userId }, {
                 userId: options?.userId ?? null,
                 door: 'per-organization seed replay',
                 none: `the replay of organization ${organizationId} names no founder`,
@@ -3088,20 +3156,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     `packages` the resolver refuses (ADR-0112 `code` + its declared
         //     4xx status, the refusal the `manifest` service raises on the same
         //     bytes) is answered here, before anything is written — never
-        //     thrown out of the door. An undeclared throw stays a throw.
+        //     thrown out of the door ({@link declaredRefusalAnswer}). An
+        //     undeclared throw stays a throw.
         let gate: ReturnType<MarketplaceInstallLocalPlugin['evaluateGlobalUniqueGate']>;
         try {
             gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
-        } catch (err: any) {
-            const refusal = resolveThrownHttpError(err);
-            if (refusal.declaredStatus === undefined || refusal.status >= 500) throw err;
-            return c.json({
-                success: false,
-                error: {
-                    code: refusal.code,
-                    message: `Package '${manifestId}' cannot be installed: ${String(err?.message ?? err)} Nothing was installed or written.`,
-                },
-            }, refusal.status);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
         }
         if (gate.blocked) {
             ctx.logger?.warn?.(
@@ -3169,7 +3232,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      the physical table by the driver's own rule
         //      ({@link evaluateDeclaredRenames}); a declaration it cannot
         //      honour is refused `422 VALIDATION_ERROR`, naming the field, the
-        //      old key and the reason. Asked before 2c′, so a refusal no token
+        //      old key and the reason; [#34432] a body the artifact resolver
+        //      refuses is answered with that refusal's own status and code, as
+        //      at 2b, and only a table that could not be read answers 503.
+        //      Asked before 2c′, so a refusal no token
         //      answers is never preceded by a 409 asking for one. The carry
         //      itself runs right before step 3, the last moment the running
         //      version still serves the old key.
@@ -3455,6 +3521,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // the database (e.g. a reinstall/upgrade over live sample data) — the
         // install carries sample data either way. Leaving the flag false here
         // is what made older ledgers claim "no sample data" over a seeded DB.
+        // [#34405] A row the landed-key record keeps out (a person deleted it)
+        // is in `skipped` too; the listing reads the rows, not this flag.
         const seededRows = (seededSummary.seeded.inserted ?? 0) + (seededSummary.seeded.updated ?? 0) + (seededSummary.seeded.skipped ?? 0);
         if (seededSummary.seeded.mode === 'inline' && seededRows > 0) {
             entry.withSampleData = true;
@@ -4529,6 +4597,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * - **A refusal**: `422 VALIDATION_ERROR` (this door's body refusal),
      *   each in `details.refusals` with its object, field, old key(s) and
      *   reason. No token answers it: the package must change.
+     * - **A body the artifact resolver refuses** (a composed artifact whose
+     *   `packages` is not a list, or one of whose entries the entry contract
+     *   refuses): that refusal's own declared status and code
+     *   ({@link declaredRefusalAnswer}, step 2b's reader), before any table is
+     *   read. An undeclared throw out of the resolver is rethrown, never
+     *   relabelled.
      * - **A reading that failed** (the table could not be read): `503
      *   SERVICE_UNAVAILABLE`, never taken for "nothing to carry".
      * - Otherwise the tables to carry, which step 2f carries.
@@ -4538,7 +4612,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         converted: unknown,
         installed: unknown,
-    ): Promise<{ refusal?: { body: Record<string, unknown>; status: 422 | 503 }; tables: InstallRenameTable[] }> => {
+    ): Promise<{ refusal?: { body: Record<string, unknown>; status: number }; tables: InstallRenameTable[] }> => {
+        // [#34432] The bodies the plan reads, resolved FIRST through the fold
+        // the plan reads them by ({@link packageUpgradeSideOf}: the
+        // `resolveStackCollection` reads of `objects`, `objectExtensions` and
+        // `data`), so a body the resolver refuses is told apart from a table
+        // that could not be read: the resolver is deterministic over the same
+        // bytes, so the plan below never meets its refusal, and what the plan
+        // throws is answered as the table read's. Without this, the
+        // resolver's 422 was answered as the 503 below and its author was told
+        // to retry once the database answers.
+        try {
+            packageUpgradeSideOf(converted);
+            if (installed !== null && installed !== undefined) packageUpgradeSideOf(installed);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return { tables: [], refusal: refused };
+        }
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
             plan = await planDeclaredRenames(ctx, manifestId, converted, installed);
@@ -5584,7 +5675,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             organizationId = resolved;
         }
         try {
-            const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+            const s = await this.runInlineSeed(ctx, datasets, door === 'reseed' ? 'reseed' : 'honour', organizationId, {
                 ...(userId ? { userId } : {}),
                 app,
             }, {
@@ -7355,7 +7446,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     if (!multiTenant || organizationId) {
                         // [#30281] The installing (or reseeding) user and this
                         // package's own declared default locale.
-                        const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+                        // [#34405] The reseed re-seeds; the install and the
+                        // upgrade honour the landed-key record.
+                        const s = await this.runInlineSeed(ctx, datasets, opts.door === 'reseed' ? 'reseed' : 'honour', organizationId, {
                             userId: opts.userId,
                             app: manifest,
                         }, {
@@ -7468,10 +7561,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * A, maintainer, 2026-11-05: the install paths
      * pick datasets by locale). Nothing answers ⇒ no locale, and every dataset
      * loads as before. A dataset without `locale` loads whatever it answers.
+     *
+     * [#34405, #31021] `landedKeys` is the loader's own option, passed by every
+     * caller, never defaulted: each load keeps the record of which seed rows
+     * landed in the organization it seeds (`sys_seed_landed_key`). `'honour'`
+     * — the install, the upgrade, the restart heal, the per-organization
+     * replay and an unmanaged copy's first load — does not insert again a
+     * recorded row that is now gone, because a person removed it; a key never
+     * recorded still lands, so a row an upgrade adds is inserted. `'reseed'` —
+     * the sample-data reseed and the replayer's `{ reseed: true }` — is the
+     * deliberate re-seed: it inserts every missing row and records it again.
+     * A row the record keeps out is counted in `skipped`.
      */
     private runInlineSeed = async (
         ctx: PluginContext,
         datasets: any[],
+        landedKeys: 'honour' | 'reseed',
         organizationId?: string,
         localeFrom: { userId?: string; app?: unknown } = {},
         owner: SeedOwnerOfLoad = { userId: null, door: 'seed', none: 'no person named' },
@@ -7492,7 +7597,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             appDefaultLocale: appDefaultSeedLocale(localeFrom.app),
         });
         ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
-        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger, { landedKeys });
         const request = (SeedLoaderRequestSchema as any).parse({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
