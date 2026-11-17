@@ -149,6 +149,7 @@ import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
 import {
+  authoredDescription,
   describeServedObject,
   metaItemsArray,
   readObjectWithDeclaration,
@@ -285,6 +286,7 @@ export type StoredHashDigest = (plain: string) => Promise<string>;
 interface ObjectDef {
   name: string;
   label?: string;
+  description?: string;
   fields?: Record<string, { type?: string; label?: string; required?: boolean }>;
   enable?: Record<string, unknown>;
 }
@@ -1164,9 +1166,11 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // [#25138] The protocol's merged listing ({@link readMergedObjects}),
       // [ADR-0106] as the principal is served it, so `fieldCount` counts the
       // fields that exist for them ({@link callerObjectView}).
+      // [#34721] …and the object's authored `description`, as the HTTP twin serves it.
       return ((await servedView.listObjects()) as ObjectDef[]).map((o) => ({
         name: o.name,
         label: o.label ?? o.name,
+        ...authoredDescription(o),
         fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
       }));
     },

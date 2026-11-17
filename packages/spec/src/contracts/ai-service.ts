@@ -517,6 +517,10 @@ export interface ActionConfirmationRequiredDetails {
  *    - Elicited `accept`: the call dispatches as any admitted call does,
  *      exactly once, under the caller's permissions. The confirmation covers
  *      that one call: nothing is stored, and the next call is asked again.
+ *      For a `resume_run` call the accept is bound to the screen the run was
+ *      parked on when the person was asked: when the run has moved on to
+ *      another screen meanwhile, the resume is refused `409
+ *      RESOURCE_CONFLICT`, nothing resumes, and the run stays where it is.
  *    - Elicited `decline`: the person said no. Refused, reason `declined`;
  *      nothing runs. The caller does not retry unless the person asks again.
  *    - Elicited `cancel`: the person dismissed the question without choosing.
@@ -533,7 +537,10 @@ export interface ActionConfirmationRequiredDetails {
  *      carries its run ({@link ActionConfirmationHandOff.run}): approving it
  *      resumes THAT parked run with the values the call carried, as the
  *      approver, who must be the run's owner as today; it never starts a new
- *      run of the flow.
+ *      run of the flow. The approval is bound to the screen the run was
+ *      parked on when the call was handed off (the run's `screenNodeId`):
+ *      when the host passes that screen back and the run has moved on to
+ *      another one, the resume is refused and the run stays where it is.
  *    - Handed off, then rejected in the app: nothing runs.
  *    The approve and reject doors of the pending-confirmation service take a
  *    person's signed-in session to the app and nothing else. They refuse an
@@ -721,6 +728,17 @@ export interface ActionConfirmationHandOff {
         runId: string;
         /** The screen's field values the call carried. */
         values: Record<string, unknown>;
+        /**
+         * The screen the run was parked on when the call was handed off: its
+         * `nodeId` (`ScreenSpec.nodeId`, `./automation-service`), the screen
+         * `values` were given for. Absent when the engine named no node for
+         * it. A host that stores it and passes it back on approval
+         * (`ActionResumeRequest.screenNodeId`, `@objectstack/runtime`) binds
+         * the approval to that screen: a run that has moved on to another
+         * screen (a wizard the person advanced in the app, or a second
+         * approval of the same call) is refused, and nothing resumes.
+         */
+        screenNodeId?: string;
     };
 }
 
@@ -777,11 +795,13 @@ export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
  * true })` resumes the run a handed-off `resume_run` carries
  * ({@link ActionConfirmationHandOff.run}) as that person, asking every
  * `resume_run` gate again: a run no longer paused, or one another person
- * started, is refused. That is the only replay it refuses: a wizard the first
- * approval moved on to its next screen is still paused under the same run id,
- * and a second call with the same hand-off resumes it again with the values
- * given. Deciding a pending item once, and voiding an item whose run has
- * moved on, are the host's.
+ * started, is refused. A wizard the first approval moved on to its next
+ * screen is still paused under the same run id, so the host passes back the
+ * screen the call was handed off on (`run.screenNodeId`, as `screenNodeId`):
+ * a run no longer on that screen is refused, `409 RESOURCE_CONFLICT`, and
+ * stays where it is. Without it, a second call with the same hand-off
+ * resumes whatever screen the run is on with the values given. Deciding a
+ * pending item once is the host's.
  *
  * A host may build it over its own pending-action store; the
  * `held` outcome of {@link IAIService.approvePendingAction} is the existing

@@ -679,12 +679,18 @@ export function AppHeader({
   //
   // #27356 row 12 — a read-only package's app is not left with no way in: the
   // same gate answers it with the `view` posture, and this bar and the app
-  // switcher draw a browse entry (an eye, 「Open app in Studio」) where a
+  // switcher draw a browse entry (an eye, 「Open {app} in Studio」) where a
   // writable package's app gets the pencil. The posture is the gate's, read
   // once; the console's own apps and an unread list still draw neither.
   const studioEntry = useStudioEntryGate(
     isApp ? appStudioRoutePath(currentApp, true, { type: routeType, name: pathParts[3] }) : null,
   );
+  // ADR-0146 D5 — the read-only entry's words: 「Open {app} in Studio」, the
+  // app switcher's row text, named for the app the bar is in.
+  const viewInStudioText = t('topbar.openAppInStudio', {
+    defaultValue: 'Open {{app}} in Studio',
+    app: currentApp ? appLabel(currentApp) : (appName ?? ''),
+  });
 
   // The crumbs drawn after the app pill from `sm` up: a report or `system/*`
   // route's.
@@ -1123,19 +1129,25 @@ export function AppHeader({
             </Button>
           )}
           {/* #27356 row 12 — a read-only package's app: the same slot, an eye
-              that opens it in Studio's browse-only posture. */}
+              that opens it in Studio's browse-only posture. ADR-0146 D5 — it
+              draws WITH its text, 「Open {app} in Studio」, so a look is not
+              mistaken for the pencil's edit. The name truncates inside a
+              capped width, and below `sm` the button is not drawn at all
+              (objectstack#29075: the app switcher's Studio row carries it). */}
           {studioEntry?.posture === 'view' && (
             <Button
               variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 max-sm:hidden shrink-0"
+              size="sm"
+              className="h-8 max-md:h-11 max-sm:hidden shrink-0 gap-1.5 px-2 max-w-[14rem]"
               asChild
               data-testid="app-view-in-studio-button"
-              aria-label={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
-              title={t('topbar.openAppInStudio', { defaultValue: 'Open app in Studio' })}
+              title={viewInStudioText}
             >
               <Link to={studioEntry.path}>
-                <Eye className="h-4 w-4" />
+                <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span data-slot="view-in-studio-text" className="truncate text-xs font-medium">
+                  {viewInStudioText}
+                </span>
               </Link>
             </Button>
           )}
