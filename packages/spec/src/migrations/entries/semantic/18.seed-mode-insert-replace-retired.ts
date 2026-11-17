@@ -25,7 +25,7 @@ export const entry: SemanticMigration = {
     + 'refused and the one row stayed NULL. Both values are now refused where a seed is parsed, with the '
     + 'prescription. A dataset already stored with either value is refused loudly by the loads that replay stored '
     + 'seeds (the boot seed, the per-organization replay, the dev hot reload, a package install or upgrade): that '
-    + 'dataset writes nothing and the load logs its prescription at error, and every other dataset loads. There is no '
+    + 'dataset writes nothing, the load result fails with its prescription and the boot log names it, and every other dataset loads. There is no '
     + 'mechanical rewrite, because a keyed mode needs the field that identifies a row, and only the author knows it. '
     + 'Rows earlier replays duplicated are data, not metadata, and are left as they are',
   acceptanceCriteria:

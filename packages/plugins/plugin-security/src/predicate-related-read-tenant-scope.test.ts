@@ -209,7 +209,7 @@ async function observe(
     .insert(object, { name: 'probe', [ref]: line }, { context: caller } as never)
     .then(() => null, (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }));
   const preview = await h.engine.validate(
-    object, { name: 'probe', [ref]: line }, { mode: 'ignore', context: caller } as never,
+    object, { name: 'probe', [ref]: line }, { mode: 'insert', context: caller } as never,
   );
   // Given a posture, the by-id UPDATE door too: a seeded row the caller may edit, repointed at `line`.
   let update: unknown;
