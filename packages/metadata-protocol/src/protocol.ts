@@ -5361,7 +5361,6 @@ export class ObjectStackProtocolImplementation implements
      */
     private assertRecordExists(object: string, id: string, caller?: UserMessageCaller | null): Promise<void> {
         // [#25467 cut 4] The body moved to `protocol-record-reads.ts` (see `RecordReadHost`).
-        // [#34699] `caller` is the row's write context: the language of the refusal's `userMessage`.
         const host: ThisParameterType<typeof assertRecordExists> = {
             probeRecord: (...a) => this.probeRecord(...a),
         };
