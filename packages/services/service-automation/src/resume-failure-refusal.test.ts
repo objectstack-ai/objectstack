@@ -98,7 +98,7 @@ function boot(refusal: () => unknown) {
 }
 
 async function strandThroughChild(engine: AutomationEngine) {
-    const started = await engine.execute('parent_flow', {} as AutomationContext);
+    const started = await engine.execute('parent_flow', { userId: 'rep' } as AutomationContext);
     expect(started.status).toBe('paused');
     const parentRunId = started.runId!;
     const childRunId = engine.listSuspendedRuns().find(r => r.flowName === 'child_flow')!.runId;
@@ -116,12 +116,13 @@ describe('#34638 — a subflow parent strand carries the refusal the parent met'
             innerRefusal: { code: 'VALIDATION_FAILED', message: HOOK_DIAGNOSTIC },
             userMessage: USER_TEXT,
         });
-        expect(typeof strand?.error).toBe('string');
+        expect(strand?.error, 'the strand is the hook refusal, not another failure').toContain(HOOK_DIAGNOSTIC);
     });
 
     it('CONTROL — a parent that strands on a fault: neither member, absent rather than empty', async () => {
         const { parentRunId, strand } = await strandThroughChild(boot(fault));
         expect(strand).toMatchObject({ runId: parentRunId, repairable: true });
+        expect(strand?.error, 'the strand is the fault, not another failure').toContain('ECONNREFUSED');
         expect(Object.keys(strand ?? {}).sort()).toEqual(['error', 'repairable', 'runId']);
     });
 });

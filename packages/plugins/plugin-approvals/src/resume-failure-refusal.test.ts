@@ -258,8 +258,10 @@ describe('#34638 — resumeFailure tells the hook refusal that stranded the run'
   });
 
   describe('CONTROL — a strand that met no refusal carries neither member', () => {
-    const neitherMember = (report: unknown) => {
+    const neitherMember = (answer: { resumeFailure?: unknown; resumeError?: string }) => {
+      const report = answer.resumeFailure;
       expect(report, 'the strand is still told').toBeDefined();
+      expect(answer.resumeError, 'and it is the fault, not some other failure').toContain('ECONNREFUSED');
       expect(Object.keys(report as object).sort(), 'absent, not empty').toEqual(['code', 'repairable', 'runId', 'status']);
     };
 
@@ -268,7 +270,7 @@ describe('#34638 — resumeFailure tells the hook refusal that stranded the run'
       const { req } = await park(env, 'plan_direct');
       const answer = await env.service.recall(req.id, { actorId: 'rep' }, SYSTEM_CTX);
       expect(answer.resumeFailure).toMatchObject({ code: 'RESUME_FAILED', runId: req.flow_run_id, status: 'stranded', repairable: true });
-      neitherMember(answer.resumeFailure);
+      neitherMember(answer);
     });
 
     it('a subflow parent that strands on a fault, through the decision door', async () => {
@@ -276,7 +278,7 @@ describe('#34638 — resumeFailure tells the hook refusal that stranded the run'
       const { req, startedRunId: parentRunId } = await park(env, 'plan_parent');
       const answer = await env.service.decide(req.id, { decision: 'approve', actorId: 'director' }, SYSTEM_CTX);
       expect(answer.resumeFailure).toMatchObject({ code: 'RESUME_FAILED', runId: parentRunId, status: 'stranded', repairable: true });
-      neitherMember(answer.resumeFailure);
+      neitherMember(answer);
     });
 
     it('a subflow parent that strands on a fault, through the recall door', async () => {
@@ -284,7 +286,7 @@ describe('#34638 — resumeFailure tells the hook refusal that stranded the run'
       const { req, startedRunId: parentRunId } = await park(env, 'plan_parent');
       const answer = await env.service.recall(req.id, { actorId: 'rep' }, SYSTEM_CTX);
       expect(answer.resumeFailure).toMatchObject({ code: 'RESUME_FAILED', runId: parentRunId, status: 'stranded', repairable: true });
-      neitherMember(answer.resumeFailure);
+      neitherMember(answer);
     });
   });
 });
