@@ -565,7 +565,7 @@ export async function validate(
         // [#22183] The option values an import kept for this write — the
         // preview admits exactly what the write would.
         keptOptionValues: options?.context?.keptOptionValues,
-      });
+      }, 'deferred'); // [ADR-0113 D1, as amended] as the write: `evaluateValidationRules` below judges it
       // [ADR-0144 D8 rule 4] The write's blank-code refusal, at the write's
       // step and on the write's image: the insert row as stored, or the stored
       // row with the patch over it (`judgedViews`, the by-id update's

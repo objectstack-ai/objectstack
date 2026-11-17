@@ -1345,7 +1345,9 @@ export class InsertFacet {
             // `ReadonlyValueScope` (record-validator.ts).
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
-            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+            // [ADR-0113 D1, as amended] `'deferred'`: a field required only when shown
+            // is judged by `evaluateValidationRules` below, against its visibility.
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues }, 'deferred');
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             // [ADR-0144 D2, amended] A child amount's code is its parent's, laid on a copy of the row.

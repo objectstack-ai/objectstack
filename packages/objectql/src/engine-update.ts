@@ -55,7 +55,7 @@ import { homeAmountsTouched, planHomeAmounts, projectHomeAmounts, settleBulkHome
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { stripSearchCompanion } from './search-companion.js';
 import { declaredOptionLabels } from './formula-option-labels.js';
-import { ValidationError, coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFields, normalizeNumericStringValues, validateRecord, validateRecordInScope } from './validation/record-validator.js';
+import { ValidationError, coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFields, normalizeNumericStringValues, validateRecordInScope } from './validation/record-validator.js';
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, hasReadonlyWhenInPayload, needsPriorRecord, stripReadonlyFields, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti } from './validation/rule-validator.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
@@ -1161,7 +1161,10 @@ export class UpdateFacet {
            // this write.
            const judgeStrippedPayload = (payload: Record<string, unknown>): void => {
                normalizeMultiValueFields(updateSchema, payload, 'skip');
-               validateRecord(updateSchema, payload, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+               // [ADR-0113 D1, as amended] `'deferred'`: a clear of a field
+               // required only when shown is judged by `evaluateValidationRules`
+               // (both branches below), against its visibility and the prior row.
+               validateRecordInScope(updateSchema, payload, 'update', 'skip', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues }, 'deferred');
            };
            // [#19887] A `readonlyWhen` predicate's `record` is the payload the
            // write STORES, so it reads each multi-valued field in its stored
