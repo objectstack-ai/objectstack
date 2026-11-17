@@ -52,7 +52,7 @@
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { ConcurrentUpdateError, MalformedVersionTokenError, canonicalVersionInstant } from './protocol.js';
-import { recordNotFoundError } from '@objectstack/core';
+import { recordNotFoundError, type UserMessageCaller } from '@objectstack/core';
 import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { canServeApiOperation, resolveSearchFieldResolution } from '@objectstack/spec/data';
@@ -199,9 +199,10 @@ export function omitInternalWriteFields(
 /** The body of `ObjectStackProtocolImplementation#assertRecordExists`; the method's docblock there is its contract. */
 export async function assertRecordExists(
     this: Pick<RecordReadHost, 'probeRecord'>,
-    object: string, id: string): Promise<void> {
+    object: string, id: string, caller?: UserMessageCaller | null): Promise<void> {
     const current = await this.probeRecord(object, id);
-    if (!current) throw recordNotFoundError(object, id);
+    // [#34699] `caller` decides only the language of the refusal's `userMessage`.
+    if (!current) throw recordNotFoundError(object, id, caller);
 }
 
 /** The body of `ObjectStackProtocolImplementation#assertVersionOf`; the method's docblock there is its contract. */

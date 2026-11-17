@@ -900,7 +900,7 @@ export class ProtocolDataCrudFacet {
                 ),
             };
         }
-        throw recordNotFoundError(request.object, request.id);
+        throw recordNotFoundError(request.object, request.id, request.context);
     }
 
     /** The body of `ObjectStackProtocolImplementation#cloneData`; the method's docblock there is its contract. */
@@ -944,7 +944,7 @@ export class ProtocolDataCrudFacet {
             request.object,
             { where: { id: request.id }, ...ctxOpt },
         );
-        if (!source) throw recordNotFoundError(request.object, request.id);
+        if (!source) throw recordNotFoundError(request.object, request.id, ctx);
 
         // Copy the source, then strip the columns the engine owns so the insert
         // path re-derives them rather than carrying the source's values over.
