@@ -5336,6 +5336,8 @@ export function InterfacesPillar({
                 selection={navSel}
                 onSelectionChange={(s) => setNavSel(s ? { kind: s.kind, id: s.id } : null)}
                 onRenamePendingChange={setNavRenamePending}
+                // objectstack#34796 — each entry's kind in the words the navigation list uses.
+                kindLabel={(item) => navKindName({ type: item.type, viewName: typeof item.viewName === 'string' ? item.viewName : undefined }, locale)}
               />
             ) : navTree.length === 0 && !(appStatus === 'ready' && placesAnyNav(navPlacement)) ? (
               <p className="px-2 py-3 text-[11px] text-muted-foreground">
@@ -8229,6 +8231,9 @@ export function AutomationsPillar({
     dialog: flowConflictDialog,
   } = useDraftSaveGuard(client, reloadFlowDraft);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
+  // The aside header's slot for the hosted inspector's header actions (the
+  // flow node's "···" menu), so they sit in the title bar (`InspectorShellHost`).
+  const [configHeaderSlot, setConfigHeaderSlot] = React.useState<HTMLElement | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
@@ -9730,6 +9735,7 @@ export function AutomationsPillar({
               title={heading?.title}
               onClose={selection ? () => setSelection(null) : undefined}
               closeLabel={t('engine.studio.deselect', locale)}
+              actions={heading ? <span ref={setConfigHeaderSlot} data-testid="auto-config-header-actions" className="flex shrink-0 items-center" /> : undefined}
               // objectui#12453 — a read-only package saves no draft: no footer.
               // objectstack#28570 — a customized flow saves into the pair.
               footer={
@@ -9744,7 +9750,9 @@ export function AutomationsPillar({
               bodyClassName={heading ? 'p-0' : undefined}
             >
               {heading ? (
-                <InspectorShellHostProvider value={{ onSelectionChange: setSelection }}>{configBodyEl}</InspectorShellHostProvider>
+                <InspectorShellHostProvider value={{ onSelectionChange: setSelection, headerActionsTarget: configHeaderSlot }}>
+                  {configBodyEl}
+                </InspectorShellHostProvider>
               ) : (
                 configBodyEl
               )}

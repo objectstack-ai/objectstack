@@ -725,15 +725,15 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.kv.empty': 'No entries yet.',
   // objectui#7588 — the per-value text / expression toggle on a `value`-role
   // map (the assignment node's `assignments`); see `flow-value-envelope.ts`.
-  'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
-  'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
+  'engine.inspector.flowNode.kv.asExpression': 'Write as a formula',
+  'engine.inspector.flowNode.kv.expressionPlaceholder': 'Formula, e.g. joinNonEmpty(…)',
   'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
   // objectstack#33838 — a connector Input key the action does not declare: the run refuses it.
   'engine.inspector.flowNode.kv.undeclaredKey': 'The action does not declare this input, so the run refuses it. Remove it, or pick an action that declares it.',
   // objectstack#27834 — the Update Records filter's "Triggering record" target.
   'engine.inspector.flowNode.triggeringRecord.use': 'Update the triggering record',
-  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the {object} record that started this flow.',
-  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the {object} record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the “{object}” record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the “{object}” record that started this flow.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
@@ -745,6 +745,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.help.learnMore': 'Learn more',
   'engine.inspector.flowNode.help.showLess': 'Show less',
   'engine.inspector.flowNode.remove': 'Remove node',
+  // objectstack#34796 — the node panel's header menu and its collapsed section for the node id.
+  'engine.inspector.flowNode.moreActions': 'More actions',
+  'engine.inspector.flowNode.developerInfo': 'Developer info',
   // App nav inspector
   'engine.inspector.appNav.kind': 'Nav Item',
   'engine.inspector.appNav.close': 'Close nav item',
@@ -1581,7 +1584,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.reference.managerPlaceholder': 'Resolved automatically',
   'engine.inspector.reference.managerHint': "Resolved at runtime from the submitter's manager — no value needed.",
   'engine.inspector.reference.queueHint': "The queue's machine name. Its members when the step opens are the approvers; an empty queue adds nobody.",
-  'engine.inspector.reference.fieldsOf': 'Fields of {object}.',
+  'engine.inspector.reference.fieldsOf': 'Fields of “{object}”.',
   'engine.inspector.reference.setTriggerObject': 'Set the flow’s trigger object (on the Start node) to list fields.',
   'engine.inspector.reference.actionsOf': 'Actions of {connector}.',
   'engine.inspector.reference.chooseConnector': 'Choose a Connector above to list its actions.',
@@ -1598,7 +1601,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.recipients.placeholder.user': 'Pick a user',
   'engine.inspector.recipients.placeholder.team': 'Pick a team',
   'engine.inspector.recipients.placeholder.email': 'name@example.com',
-  'engine.inspector.recipients.placeholder.expression': 'CEL, e.g. ownerId',
+  'engine.inspector.recipients.placeholder.expression': 'Formula, e.g. ownerId',
   'engine.inspector.recipients.placeholder.custom': 'Saved as typed, e.g. role:admin',
   'engine.inspector.recipients.add': 'Add recipient',
   'engine.inspector.recipients.remove': 'Remove recipient',
@@ -2191,7 +2194,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.tab.advanced': 'Advanced',
   'engine.studio.data.nameLabel': 'Object name',
   'engine.studio.data.idLabel': 'Identifier',
-  'engine.studio.auto.nameLabel': 'Flow name',
+  'engine.studio.auto.nameLabel': 'Automation name',
   'engine.studio.auto.idLabel': 'Identifier',
   'engine.studio.access.nameLabel': 'Name',
   'engine.studio.access.idLabel': 'Identifier',
@@ -4468,8 +4471,7 @@ const STUDIO_EN: Record<string, string> = {
   // qualified name (`{view}` below is the panel's title, the same string).
   // objectstack#30046 — the header's title names the object before it.
   'engine.studio.inspector.listView.defaultView': 'Default view',
-  'engine.studio.inspector.listView.notCreated':
-    'There is no list view “{view}” yet. Your first change here creates it in this package\'s draft.',
+  'engine.studio.inspector.listView.notCreated': 'Changes save as a draft first.',
   'engine.studio.inspector.listView.readOnly': 'This package is read-only: the list view is shown here, not edited.',
   'engine.studio.inspector.listView.notList': '“{view}” is not a list view, so it is not edited here.',
   'engine.studio.inspector.listView.filter': 'Filter',

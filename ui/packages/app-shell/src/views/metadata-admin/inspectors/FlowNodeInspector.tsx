@@ -10,6 +10,11 @@
  *                   `draft.nodes[i]`; nested nodes rebuild the container's
  *                   `config.<region>.nodes[i]` with explicit spreads.
  *
+ * The panel leads with what the author named the node (its label); the node's
+ * id — the handle edges and expressions use — sits in a "Developer info"
+ * section that starts collapsed, and "Remove node" lives in the header's "···"
+ * menu rather than a footer button.
+ *
  * Both share the SAME schema-driven form. Beyond id / label / type, each node
  * type exposes a set of typed form fields (see
  * `flow-node-config`, or the engine-published configSchema) that edit scalar
@@ -20,16 +25,22 @@
  */
 
 import * as React from 'react';
-import { Plus } from 'lucide-react';
+import { MoreHorizontal, Plus, Trash2 } from 'lucide-react';
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
-import { Input, Label } from '@object-ui/components';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+  Label,
+} from '@object-ui/components';
 import type { MetadataInspectorProps } from '../inspector-registry.js';
 import { t, tFormat } from '../i18n.js';
 import {
   InspectorShell,
   InspectorTextField,
   InspectorSelectField,
-  InspectorRemoveButton,
   InspectorEmptyState,
   InspectorReadOnlyReason,
 } from './_shared.js';
@@ -676,8 +687,8 @@ export function FlowNodeInspector({
   // objectui#11838 — and it is refused, writing nothing, while a boundary
   // event's host or an expression root still names the node: a removal has no
   // new id for those to follow. `nodeRemovalRefusal` is the one rule the
-  // canvas's Delete key applies too; the refusal names each site under the
-  // button, and the node stays selected.
+  // canvas's Delete key applies too; the refusal names each site at the top of
+  // the panel, and the node stays selected. Neither path asks to confirm.
   const removalSites = removeRefusedId === node.id ? nodeRemovalRefusal(draft as Record<string, unknown>, node.id) : null;
   const remove = () => {
     if (nodeRemovalRefusal(draft as Record<string, unknown>, node.id)) {
@@ -778,19 +789,40 @@ export function FlowNodeInspector({
       title={node.label || node.id}
       onClose={onClearSelection}
       closeLabel={t('engine.inspector.flowNode.close', locale)}
-      footer={
+      headerActions={
         nested ? undefined : (
-          <div className="space-y-1.5">
-            {removalSites && (
-              <p className="text-[11px] leading-snug text-destructive" role="alert">
-                {describeNodeRemovalRefusal(node.id, removalSites, locale)}
-              </p>
-            )}
-            <InspectorRemoveButton label={t('engine.inspector.flowNode.remove', locale)} onClick={remove} disabled={readOnly} />
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                data-testid="flow-node-more"
+                aria-label={t('engine.inspector.flowNode.moreActions', locale)}
+                title={t('engine.inspector.flowNode.moreActions', locale)}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem
+                data-testid="flow-node-remove"
+                disabled={readOnly}
+                onSelect={remove}
+                className="gap-2 text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t('engine.inspector.flowNode.remove', locale)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )
       }
     >
+      {removalSites && (
+        <p className="text-[11px] leading-snug text-destructive" role="alert" data-testid="flow-node-remove-refused">
+          {describeNodeRemovalRefusal(node.id, removalSites, locale)}
+        </p>
+      )}
       {nested && (
         <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground" aria-label={t('engine.inspector.flowNode.nestedLocation', locale)}>
           <span className="max-w-[45%] truncate font-medium">{loc?.container ? flowNodeDisplayName(loc.container, locale) : null}</span>
@@ -805,16 +837,6 @@ export function FlowNodeInspector({
           <span aria-hidden>›</span>
           <span className="max-w-[45%] truncate font-medium text-foreground">{flowNodeDisplayName(node, locale)}</span>
         </div>
-      )}
-      <FlowNodeIdField
-        label={t('engine.inspector.flowNode.id', locale)}
-        id={node.id}
-        refusalOf={idRefusal}
-        onRename={rename}
-        disabled={readOnly || nested}
-      />
-      {nested && (
-        <p className="-mt-1 text-[11px] leading-snug text-muted-foreground">{t('engine.inspector.flowNode.nestedIdHint', locale)}</p>
       )}
       <InspectorTextField label={t('engine.inspector.flowNode.label', locale)} value={node.label ?? ''} onCommit={(v) => patchNode({ label: v })} disabled={readOnly} />
       <InspectorSelectField
@@ -921,6 +943,26 @@ export function FlowNodeInspector({
       })}
 
       {isScreen && <ScreenPreview node={node} variables={screenVars} className="mt-1" locale={locale} />}
+
+      {/* The node's id is a handle, not a name: it stays reachable for renaming
+          but out of the way until the author opens it. */}
+      <details className="group rounded border bg-muted/20" data-testid="flow-node-developer-info">
+        <summary className="cursor-pointer select-none px-2 py-1.5 text-xs font-medium text-muted-foreground">
+          {t('engine.inspector.flowNode.developerInfo', locale)}
+        </summary>
+        <div className="space-y-1 border-t p-2">
+          <FlowNodeIdField
+            label={t('engine.inspector.flowNode.id', locale)}
+            id={node.id}
+            refusalOf={idRefusal}
+            onRename={rename}
+            disabled={readOnly || nested}
+          />
+          {nested && (
+            <p className="text-[11px] leading-snug text-muted-foreground">{t('engine.inspector.flowNode.nestedIdHint', locale)}</p>
+          )}
+        </div>
+      </details>
 
       {hasExtras || advReveal ? (
         <details

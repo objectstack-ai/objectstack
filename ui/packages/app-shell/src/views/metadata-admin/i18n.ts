@@ -253,7 +253,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     objectName: { label: '对象', help: '其记录变更会启动此流程的对象。' },
     condition: {
       label: '进入条件',
-      help: 'CEL 表达式 —— 仅当其为 true 时流程才运行(相对时间扫描时对每条匹配记录做门控)。留空则每次事件都运行。',
+      help: '公式 —— 仅当其为 true 时流程才运行(相对时间扫描时对每条匹配记录做门控)。留空则每次事件都运行。',
     },
     'schedule.expression': {
       label: 'Cron 表达式',
@@ -292,25 +292,25 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
   decision: {
     conditions: {
       label: '分支',
-      help: '每个分支包含标签、CEL 表达式和目标节点。表达式为 “true” 的分支即默认 / else 路径。选择目标会接线该分支的出边(创建或更新),清空则断开该边。',
-      cols: { label: { label: '标签' }, expression: { label: '表达式' }, target: { label: '目标节点' } },
+      help: '每个分支包含标签、公式和目标节点。公式为 “true” 的分支即默认 / else 路径。选择目标会接线该分支的出边(创建或更新),清空则断开该边。',
+      cols: { label: { label: '标签' }, expression: { label: '公式' }, target: { label: '目标节点' } },
     },
-    condition: { label: '单一条件', help: '旧的单分支条件(CEL)。建议使用上方“分支”;每条边的条件也可写在出边上。' },
+    condition: { label: '单一条件', help: '旧的单分支条件(公式)。建议使用上方“分支”;每条边的条件也可写在出边上。' },
   },
   assignment: {
-    assignments: { label: '赋值', help: '设置变量:每个键为一个变量,值为表达式或字面量。' },
+    assignments: { label: '赋值', help: '设置变量:每个键为一个变量,值为公式或字面量。' },
   },
   loop: {
     collection: {
       label: '集合',
-      help: '要遍历的列表:求值为列表的 CEL 表达式(如 leadList),或以 JSON 数组写出的各项。没有循环体区域的循环改为读取列表变量的裸名称。',
+      help: '要遍历的列表:求值为列表的 公式(如 leadList),或以 JSON 数组写出的各项。没有循环体区域的循环改为读取列表变量的裸名称。',
     },
     iteratorVariable: { label: '当前项变量', help: '存放当前项的循环变量。' },
     indexVariable: { label: '索引变量', help: '存放当前索引的可选循环变量。' },
     maxIterations: { label: '最大迭代次数' },
   },
   map: {
-    collection: { label: '集合', help: '要逐项处理的列表:求值为列表的 CEL 表达式(如 items),或以 JSON 数组写出的各项。' },
+    collection: { label: '集合', help: '要逐项处理的列表:求值为列表的 公式(如 items),或以 JSON 数组写出的各项。' },
     flowName: { label: '每项子流程', help: '为每一项运行的子流程 —— 它可以暂停(如审批)。' },
     iteratorVariable: { label: '当前项变量' },
     itemObject: { label: '项对象', help: '当项为记录时,它们所属的对象(将每项暴露为子流程的记录)。' },
@@ -323,16 +323,20 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
   },
   update_record: {
     objectName: { label: '对象' },
-    filter: { label: '筛选', help: '标识待更新记录的字段 / 值对。每个值是字面量,或 CEL 表达式(如 id → 以表达式写的 recordId)。' },
+    filter: { label: '筛选', help: '标识待更新记录的字段 / 值对。每个值是字面量,或公式(如 id 一栏用公式指向触发记录)。' },
     fields: { label: '字段值', help: '要写入的字段值。' },
+    multi: {
+      label: '更新所有匹配的记录',
+      help: '声明批量更新:更新筛选匹配到的每一条记录。关闭(默认)时,筛选必须按 id 指向一条记录 —— 没有开启这一项的按条件更新会被数据引擎拒绝。',
+    },
   },
   delete_record: {
     objectName: { label: '对象' },
-    filter: { label: '筛选', help: '标识待删除记录的字段 / 值对。每个值是字面量,或 CEL 表达式。' },
+    filter: { label: '筛选', help: '标识待删除记录的字段 / 值对。每个值是字面量,或 公式。' },
   },
   get_record: {
     objectName: { label: '对象' },
-    filter: { label: '筛选', help: '待匹配的字段 / 值对(如 status → active)。每个值是字面量,或 CEL 表达式。像 {"$ne": null} 这样的运算符值会被保留。' },
+    filter: { label: '筛选', help: '待匹配的字段 / 值对(如 status → active)。每个值是字面量,或 公式。像 {"$ne": null} 这样的运算符值会被保留。' },
     limit: { label: '数量上限' },
     outputVariable: { label: '输出变量' },
   },
@@ -340,7 +344,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     method: { label: '方法' },
     url: { label: 'URL', help: '请求 URL。会渲染 {{ }} 占位。' },
     headers: { label: '请求头', help: '请求头(如 Authorization、Content-Type)。每个值都会渲染 {{ }} 占位。' },
-    body: { label: '请求体', help: '请求负载:按原样发送的 JSON,或求值为负载的 CEL 表达式。' },
+    body: { label: '请求体', help: '请求负载:按原样发送的 JSON,或求值为负载的 公式。' },
     // objectui#11968 — no `outputVariable` overlay: the `http` contract declares
     // no such key, so neither form offers a field for it.
     durable: { label: '持久化(异步)', help: '通过持久化队列即发即忘(异步投递)。' },
@@ -354,7 +358,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
       opts: { invoke_function: '调用函数', email: '邮件', slack: 'Slack' },
     },
     function: { label: '函数', help: '要调用的已注册函数 —— 经 defineStack({ functions }) 声明。优先于动作类型。' },
-    inputs: { label: '输入', help: '传给函数的值。每个值是字面量,或按流程变量求值的 CEL 表达式。' },
+    inputs: { label: '输入', help: '传给函数的值。每个值是字面量,或按流程变量求值的 公式。' },
     outputVariable: { label: '输出变量', help: '绑定函数返回值的流程变量,供后续步骤使用。' },
     template: { label: '模板', help: '消息模板 id。' },
     recipients: { label: '收件人', help: '每行一个收件人(用户 id、字段引用或地址)。' },
@@ -386,7 +390,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     objectName: { label: '对象表单', help: '渲染该对象完整的新建 / 编辑表单(含主从),而非扁平字段列表。' },
     idVariable: { label: '保存记录变量', help: '仅对象表单:绑定到已保存记录 id 的变量,供后续步骤使用。' },
     mode: { label: '表单模式', help: '仅对象表单。', opts: { create: '新建', edit: '编辑' } },
-    defaults: { label: '表单默认值', help: '仅对象表单:预填值。每个值是字面量,或 CEL 表达式(如 account → 以表达式写的 account_id)。' },
+    defaults: { label: '表单默认值', help: '仅对象表单:预填值。每个值是字面量,或 公式(如 account → 以公式写的 account_id)。' },
   },
   approval: {
     approvers: {
@@ -451,7 +455,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
   },
   subflow: {
     flowName: { label: '流程' },
-    input: { label: '输入映射', help: '传给子流程输入变量的值。每个值是字面量,或在本流程中求值的 CEL 表达式。' },
+    input: { label: '输入映射', help: '传给子流程输入变量的值。每个值是字面量,或在本流程中求值的 公式。' },
     outputVariable: { label: '输出变量' },
     timeoutMs: { label: '超时(毫秒)' },
   },
@@ -480,7 +484,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     topic: { label: '主题', help: '事件主题(默认 "notify")。' },
     severity: { label: '级别', help: 'info | warning | critical' },
     sourceObject: { label: '来源对象', help: '通知所关联记录的对象名。' },
-    sourceId: { label: '来源记录', help: '通知链接到的记录 id(需配合来源对象):以文本写出的 id,或 CEL 表达式(如 record.id)。' },
+    sourceId: { label: '来源记录', help: '通知链接到的记录 id(需配合来源对象):以文本写出的 id,或 公式(如 record.id)。' },
     actorId: { label: '触发用户', help: '引发该事件的用户 id。' },
     // objectui#11968 — keyed `actionUrl`, the key the contract declares and both
     // forms now write; the `url` spelling is the converted alias.
@@ -495,7 +499,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     },
     templateData: {
       label: '模板数据',
-      help: '填入模板 {{变量}} 占位的值：每个值是字面量，或每次运行时求值的 CEL 表达式。只能与邮件模板一起使用。',
+      help: '填入模板 {{变量}} 占位的值：每个值是字面量，或每次运行时求值的 公式。只能与邮件模板一起使用。',
     },
   },
   // The engine-published `save_notice` descriptor's one field.

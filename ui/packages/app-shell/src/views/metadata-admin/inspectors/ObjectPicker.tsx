@@ -152,6 +152,20 @@ export function useObjectCatalog() {
 }
 
 /**
+ * An object's label as the picker's catalog reads it, else the name itself —
+ * for sentences that name an object (the flow node panel's "Fields of …"),
+ * which read as the author's label and keep the machine name out of the text.
+ * A name the catalog does not know (an expression, a name not served) is
+ * returned as it is.
+ */
+export function useObjectDisplayName(name: string | undefined): string {
+  const catalog = useObjectCatalog();
+  if (!name) return '';
+  if (catalog.status !== 'loaded') return name;
+  return catalog.data.find((e) => e.name === name)?.label ?? name;
+}
+
+/**
  * The package the author is editing in: Studio's `/studio/:packageId/...`
  * route, else the `?package=` an editor URL carries (ADR-0048), where `all` is
  * the list's "every package" scope and names none.
@@ -219,6 +233,12 @@ export interface ObjectPickerProps {
    * be resolved and the typed text is committed as before.
    */
   objectsOnly?: boolean;
+  /**
+   * Keep the machine name off the panel: at rest the label alone shows, and
+   * the name rides on the input's hover title instead of the secondary line
+   * beneath it. Off by default; the flow node panel turns it on.
+   */
+  nameOnHover?: boolean;
 }
 
 export function ObjectPicker({
@@ -230,6 +250,7 @@ export function ObjectPicker({
   placeholder,
   locale: localeProp,
   objectsOnly = false,
+  nameOnHover = false,
 }: ObjectPickerProps) {
   const contextLocale = useMetadataLocale();
   const locale = localeProp ?? contextLocale;
@@ -437,7 +458,8 @@ export function ObjectPicker({
           aria-expanded={open}
           aria-controls={open ? listId : undefined}
           aria-activedescendant={open && activeRow ? activeRow.id : undefined}
-          aria-describedby={restingLabel ? nameLineId : undefined}
+          aria-describedby={restingLabel && !nameOnHover ? nameLineId : undefined}
+          title={restingLabel && nameOnHover ? value : undefined}
           autoComplete="off"
           spellCheck={false}
           value={shown}
@@ -623,7 +645,7 @@ export function ObjectPicker({
           </div>
         )}
       </div>
-      {restingLabel && (
+      {restingLabel && !nameOnHover && (
         <p id={nameLineId} data-object-name-line="" className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
           {value}
         </p>
