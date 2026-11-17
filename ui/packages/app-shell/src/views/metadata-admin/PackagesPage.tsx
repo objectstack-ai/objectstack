@@ -560,7 +560,7 @@ function InstalledAppUpdateCell({ rowId, read }: { rowId: string; read: UpdateRe
     <Link
       to={target.href}
       onClick={(e) => e.stopPropagation()}
-      className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+      className="inline-flex items-center gap-2 whitespace-nowrap text-sm font-medium text-primary hover:underline"
       data-testid={`pkg-update-${rowId}`}
     >
       {namespace.status === 'ready' ? (
@@ -2157,14 +2157,16 @@ export function PackagesPage() {
                               {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                             </Button>
                           ) : null}
-                          <span>{p?.manifest.name || rowId}</span>
-                          {!module && modules.length > 0 && (
-                            <span className="text-xs font-normal text-muted-foreground">
-                              {modules.length === 1
-                                ? tFormat('engine.packages.installedApps.modulesOne', locale, { count: modules.length })
-                                : tFormat('engine.packages.installedApps.modules', locale, { count: modules.length })}
-                            </span>
-                          )}
+                          <div className="flex min-w-0 flex-col">
+                            <span>{p?.manifest.name || rowId}</span>
+                            {!module && modules.length > 0 && (
+                              <span className="text-xs font-normal text-muted-foreground">
+                                {modules.length === 1
+                                  ? tFormat('engine.packages.installedApps.modulesOne', locale, { count: modules.length })
+                                  : tFormat('engine.packages.installedApps.modules', locale, { count: modules.length })}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>{p?.manifest.version || install?.version || '—'}</TableCell>
