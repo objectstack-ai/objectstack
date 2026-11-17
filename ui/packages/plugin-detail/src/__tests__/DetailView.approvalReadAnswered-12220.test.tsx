@@ -58,6 +58,7 @@ function renderBand(providerProps: {
   locked?: boolean;
   approvalPending?: boolean;
   approvalReadAnswered?: boolean;
+  canEdit?: boolean;
 }) {
   return render(
     <InlineEditProvider canEdit={false} {...providerProps}>
@@ -99,7 +100,7 @@ describe('DetailView – the band follows an answered approvals read (objectui#1
   });
 
   it('control (objectui#2902): an answered `lockRecord: false` request reads editable over a `pending` column', () => {
-    renderBand({ locked: false, approvalPending: true, approvalReadAnswered: true });
+    renderBand({ locked: false, approvalPending: true, approvalReadAnswered: true, canEdit: true });
     expect(screen.getByText('In approval · editable')).toBeInTheDocument();
     expect(screen.queryByText('Locked for approval')).not.toBeInTheDocument();
   });

@@ -195,6 +195,18 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/plugins/plugin-audit/src/audit-writers.ts', call: 'servesSummaryTitleTarget(objectName' },
     pin: 'packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts',
   },
+  'packages/plugins/plugin-audit/src/activity-field-redaction.ts': {
+    kind: 'executes',
+    read:
+      "the activity timeline's read redaction, serving per reader the referenced records' titles the mirror's " +
+      '`resolveLookupTitles` wrote (`referenceTitlesPerRead` judges each reader against the title field and the object ' +
+      'of every reference a text names)',
+    decidedIn: 'packages/plugins/plugin-audit/src/audit-writers.ts',
+    also:
+      'reads no record of the target and no title: `referenceTargetOf` names the object whose title field and read ' +
+      'admission a reader is judged against; the title was read at write time, only from a target whose exposure ' +
+      'serves `get` (`servesSummaryTitleTarget`). Pinned in `activity-field-redaction.test.ts`',
+  },
   // The engine's relation group join: an analytics cross-object dimension as one `LEFT JOIN … GROUP BY`.
   'packages/objectql/src/relation-group-join.ts': {
     kind: 'decided',
