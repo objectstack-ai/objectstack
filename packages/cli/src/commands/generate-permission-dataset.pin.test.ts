@@ -132,8 +132,46 @@ describe('the dataset scaffold is a dataset over the bound object', () => {
 
   it('declares a record count, grouped by the record\'s title field', async () => {
     const dataset = await loadScaffold('dataset', TARGET);
-    expect(dataset.measures).toEqual([{ name: 'record_count', label: 'Records', aggregate: 'count' }]);
-    expect(dataset.dimensions).toEqual([{ name: TARGET.displayField, field: TARGET.displayField }]);
+    // Each member carries one synonym seeded from a label the stack holds (the
+    // object's label on the count; the title-cased field name where the binding
+    // carries no field label), so the scaffold draws no
+    // `dataset-member-no-vocabulary` advisory.
+    expect(dataset.measures).toEqual([
+      { name: 'record_count', label: 'Records', aggregate: 'count', synonyms: ['Account'] },
+    ]);
+    expect(dataset.dimensions).toEqual([
+      { name: TARGET.displayField, field: TARGET.displayField, synonyms: ['Name'] },
+    ]);
+  });
+
+  it('seeds the synonyms from the labels as written, in whatever language they are in', async () => {
+    const dataset = await loadScaffold('dataset', {
+      name: 'pin_invoice',
+      label: '发票',
+      pluralLabel: '发票',
+      fields: ['invoice_no', 'amount'],
+      displayField: 'invoice_no',
+      displayFieldLabel: '发票号',
+    });
+    expect(DatasetSchema.safeParse(dataset).success).toBe(true);
+    expect((dataset.measures as Array<{ synonyms?: string[] }>)[0].synonyms).toEqual(['发票']);
+    expect((dataset.dimensions as Array<{ synonyms?: string[] }>)[0].synonyms).toEqual(['发票号']);
+  });
+
+  it.each<[string, ScaffoldObjectBinding, string, string]>([
+    // The title field is labelled like the object: one word may name one member.
+    ['a field labelled like the object', { name: 'pin_tag', label: 'Tag', fields: ['name'], displayField: 'name', displayFieldLabel: 'Tag' }, 'Tag', 'Records'],
+    // The title field is labelled like the count's own label.
+    ['a field labelled "Records"', { name: 'pin_log', label: 'Log', fields: ['title'], displayField: 'title', displayFieldLabel: 'Records' }, 'Title', 'Log'],
+    // The title field is NAMED like the count's label, and its label is too.
+    ['a field named `records`', { name: 'pin_batch', label: 'Batch', fields: ['records'], displayField: 'records' }, 'Batch Records', 'Batch'],
+    // A label the schema would refuse as a synonym (over 60 characters) is passed over.
+    ['an over-long field label', { name: 'pin_note', label: 'Note', fields: ['name'], displayField: 'name', displayFieldLabel: 'x'.repeat(61) }, 'Name', 'Note'],
+  ])('%s still gets a dataset that parses, one word per member', async (_case, object, dimension, measure) => {
+    const dataset = await loadScaffold('dataset', object);
+    expect(DatasetSchema.safeParse(dataset).error?.issues ?? []).toEqual([]);
+    expect((dataset.dimensions as Array<{ synonyms?: string[] }>)[0].synonyms).toEqual([dimension]);
+    expect((dataset.measures as Array<{ synonyms?: string[] }>)[0].synonyms).toEqual([measure]);
   });
 
   it('an object with no title field gets no dimension, and the dataset still parses', async () => {
