@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import type { AIRouteCredentialKind } from '@objectstack/spec/contracts';
+
 /**
  * Which kind of credential admitted a request's caller: the one reading the
  * dispatcher's environment-membership gate and the api-action forward both
@@ -10,8 +12,12 @@
  *   endpoint alone, and an in-process forward of it carries them too);
  * - else what the identity step's admission recorded: `api_key` or `session`;
  * - `undefined` when it recorded nothing (an anonymous caller).
+ *
+ * The three values are the spec's {@link AIRouteCredentialKind}, the one
+ * vocabulary an AI route's `req.user.credential` carries too (#34184), so a
+ * gate here and a door there cannot spell a credential two ways.
  */
-export type AdmittingCredentialKind = 'session' | 'api_key' | 'oauth';
+export type AdmittingCredentialKind = AIRouteCredentialKind;
 
 /** The two request facts {@link admittingCredentialKind} reads. */
 export interface AdmittingCredentialFacts {

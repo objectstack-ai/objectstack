@@ -12,6 +12,8 @@
     "AIRequestOptions (interface)",
     "AIRequestOptionsWithTools (type)",
     "AIResult (interface)",
+    "AIRouteCredentialKind (type)",
+    "AIRouteUser (interface)",
     "AIStreamEvent (type)",
     "AIToolCall (type)",
     "AIToolDefinition (interface)",
