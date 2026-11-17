@@ -5,7 +5,7 @@
 
 feat(console): the approvals inbox's pending queue steps from request to request, and opens the next request after a decision
 
-Clause-②: no
+Clause-②: yes (widening) — two new `approvalsInbox` keys in the `@object-ui/i18n` locale packs (`openNextAfterDecision`, `queueDone`; `TranslationKeys` grows); nothing removed or renamed
 Metadata-protocol: none
 
 From the Approvals Inbox's "My pending" tab, a request now opens with the queue as the list shows it, filtered and sorted:
