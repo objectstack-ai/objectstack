@@ -350,18 +350,18 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
   decision: {
     conditions: {
       label: '分支',
-      help: '每个分支包含标签、CEL 表达式和目标节点。表达式为 “true” 的分支即默认 / else 路径。选择目标会接线该分支的出边(创建或更新),清空则断开该边。',
+      help: '每个分支包含标签、公式和目标节点。公式为 “true” 的分支即默认 / else 路径。选择目标会接线该分支的出边(创建或更新),清空则断开该边。',
       cols: {
         label: {
           label: '标签',
           help: '分支的标签;成立的分支沿同名标签的出边继续(都不成立时走标为默认、或标签为 default 的出边)。',
           placeholder: '如 有商机',
         },
-        expression: { label: '表达式', help: '决定是否走这个分支的 CEL 条件(不加 {{ }})。' },
+        expression: { label: '公式', help: '决定是否走这个分支的公式(不加 {{ }})。' },
         target: { label: '目标节点', placeholder: '下一个节点' },
       },
     },
-    condition: { label: '单一条件', help: '旧的单分支条件(CEL)。建议使用上方“分支”;每条边的条件也可写在出边上。' },
+    condition: { label: '单一条件', help: '旧的单分支条件(公式)。建议使用上方“分支”;每条边的条件也可写在出边上。' },
     // objectstack#34818 — was English in the zh panel.
     mode: {
       label: '分支方式',
