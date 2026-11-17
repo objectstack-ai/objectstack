@@ -97,7 +97,7 @@ export interface PhoneAppNavBarProps {
   resolveTargetLabel?: NavTargetLabelResolver;
   resolveTargetIcon?: NavTargetIconResolver;
   locale?: string;
-  t: (key: string, options?: any) => string;
+  t: (key: string, options?: Record<string, unknown>) => string;
   /** Whether the full menu is open, so 「More」 reads as the current cell. */
   menuOpen: boolean;
   /** Opens the full menu (the drawer). */
@@ -149,7 +149,6 @@ export function PhoneAppNavBar({
           const className = cn(CELL_CLASS, active ? 'text-primary' : 'text-muted-foreground');
           const content = (
             <>
-              {/* eslint-disable-next-line react-hooks/static-components -- resolveIcon returns a stable icon component from a static registry, not a component created during render */}
               <Icon className="h-5 w-5 shrink-0" aria-hidden />
               <span className="max-w-full truncate">{label}</span>
             </>
@@ -198,7 +197,7 @@ export interface PhoneMenuStarProps {
   /** The entry is pinned (it is offered to the bottom bar). */
   pinned: boolean;
   onToggle: () => void;
-  t: (key: string, options?: any) => string;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }
 
 /**

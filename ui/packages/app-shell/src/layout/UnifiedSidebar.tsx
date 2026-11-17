@@ -522,9 +522,13 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
       : readableAppNavigation ?? [];
   // The full menu's search: ephemeral, cleared whenever the drawer closes.
   const [menuQuery, setMenuQuery] = React.useState('');
-  React.useEffect(() => {
+  const [menuQueryOpen, setMenuQueryOpen] = React.useState(openMobile);
+  if (menuQueryOpen !== openMobile) {
+    // Adjusted while rendering, on the drawer's open state changing (React's
+    // "adjusting state when a prop changes"), not in an effect.
+    setMenuQueryOpen(openMobile);
     if (!openMobile) setMenuQuery('');
-  }, [openMobile]);
+  }
   const renderPhoneMenuStar = (item: NavigationItem, row: NavItemActionContext) => (
     <PhoneMenuStar
       label={row.label}
