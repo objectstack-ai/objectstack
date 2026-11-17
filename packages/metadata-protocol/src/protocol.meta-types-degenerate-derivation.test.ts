@@ -386,9 +386,11 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // holders the security plugin moves to the renamed position at boot.
     // [#34167] `skill` 16 → 17: `mcpPrompt`, the owner's opt-out of MCP
     // prompt projection for a skill written for the in-product agents only.
+    // [#34374] `hook` 23 → 24: the declared texts, `texts`, a hook's
+    // sentences written into records in the organization's language.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 24, app: 24, dashboard: 21, dataset: 17, field: 83, flow: 23,
-        hook: 23, object: 50, page: 28, position: 14, report: 24, skill: 17, tool: 14,
+        hook: 24, object: 50, page: 28, position: 14, report: 24, skill: 17, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

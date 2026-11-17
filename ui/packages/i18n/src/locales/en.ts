@@ -2313,6 +2313,10 @@ const en = {
       launcherLabel: 'App launcher',
       menuLabel: 'App navigation',
       menuEmpty: 'This app has no navigation entries you can open.',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: 'App menu bar',
+      searchMenu: 'Search menu',
+      phoneBarHint: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
       // objectui#12427 — the ⋯ menu a sidebar entry shows on hover (`SidebarItemMenu`).
       itemMenu: 'More actions for {{name}}',
       openInNewTab: 'Open in new tab',
@@ -4662,6 +4666,8 @@ const en = {
     viewApprovals: 'View approvals',
     noPendingApprovals: 'No pending approvals',
     openApprovalsInbox: 'Open Approvals Inbox',
+    needsYou: 'Needs your action',
+    viewApprovalDetails: 'View details',
     // Bell-badge breakdown (objectstack-ai/objectstack#7233): the badge sums unread notification topics
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
@@ -5302,6 +5308,13 @@ const en = {
     openNextAfterDecision: 'Open next after deciding',
     queueDone: 'No more pending requests in this list.',
     snapshotAsSubmitted: 'As submitted',
+    snapshotChanged: 'Changed',
+    snapshotCurrentValue: 'Current value',
+    snapshotOpenRecord: 'Open record',
+    snapshotCurrentUnreadable: 'The current record cannot be read, so changes made after submission are not marked.',
+    snapshotChildCurrent: 'Current rows: the submission does not keep child rows.',
+    progressTitle: 'Approval progress',
+    attachmentsTitle: 'Attachments',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',
