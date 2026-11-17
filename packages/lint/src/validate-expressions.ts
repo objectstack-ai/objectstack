@@ -117,7 +117,7 @@ import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // [#24814] An action's copy — `confirmText`, `successMessage`, `errorMessage` —
 // is a `template` slot too, judged in its own module by the same judge.
 import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
-import { hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
+import { actionRefusalTemplateIssues, hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -4714,6 +4714,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // pages' action rows off an object write. Errors since #25680, a holeless
   // `${…}` sentence included since #25709.
   issues.push(...actionCopyTemplateIssues(stack, { actions: !objectWrite, objects: true, pages: !objectWrite }));
+  // [#34273] An action refusal sentence over declared `params` — the hook
+  // refusal's compile half, on the same collections the copy pass reads.
+  issues.push(...actionRefusalTemplateIssues(stack, { actions: !objectWrite, objects: true }));
 
   return issues;
 }

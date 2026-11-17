@@ -132,6 +132,7 @@ describe('the Build half checks each declared dataset on a built artifact', () =
       datasets: [
         { name: 'trip_plan', object: 'demotravel_trip_request', measures: [member('estimated_spend', ['estimated cost', 'trip cost', 'travel spend', '差旅花费', '预计费用']), member('trip_days', ['Days On The Road', '出差天数'])], dimensions: [member('trip_status', ['request_status'])] },
         { name: 'reimbursement', object: 'demotravel_expense_claim', measures: [member('claimed_amount', ['expense claims', 'travel spend', '差旅花费', '报销金额']), member('claim_count', ['number of claims', '报销单数'])], dimensions: [member('claim_status', [])] },
+        { name: 'claim_lines', object: 'demotravel_claim_line', measures: [member('line_amount', ['line total', '明细金额'])], dimensions: [member('expense_type', ['费用类型'])] },
       ],
     };
     mutate(a);
@@ -149,6 +150,9 @@ describe('the Build half checks each declared dataset on a built artifact', () =
       'dataset-measure:reimbursement.claimed_amount',
       'dataset-measure:reimbursement.claim_count',
       'dataset-dimension:reimbursement.claim_status',
+      'dataset:claim_lines',
+      'dataset-measure:claim_lines.line_amount',
+      'dataset-dimension:claim_lines.expense_type',
     ]);
     expect(checks.every((c) => c.pass)).toBe(true);
   });
@@ -159,6 +163,6 @@ describe('the Build half checks each declared dataset on a built artifact', () =
     expect(fails((a) => delete a.datasets[0].measures[0].description)).toEqual([['dataset-measure:trip_plan.estimated_spend', 'no description']]);
     expect(fails((a) => a.datasets[0].dimensions.pop())).toEqual([['dataset-dimension:trip_plan.trip_status', 'missing']]);
     expect(fails((a) => (a.datasets[0].object = 'demotravel_employee'))).toEqual([['dataset:trip_plan', 'on demotravel_employee, not demotravel_trip_request']]);
-    expect(fails((a) => a.datasets.pop()).map(([c]) => c)).toEqual(['dataset:reimbursement', 'dataset-measure:reimbursement.claimed_amount', 'dataset-measure:reimbursement.claim_count', 'dataset-dimension:reimbursement.claim_status']);
+    expect(fails((a) => a.datasets.pop()).map(([c]) => c)).toEqual(['dataset:claim_lines', 'dataset-measure:claim_lines.line_amount', 'dataset-dimension:claim_lines.expense_type']);
   });
 });

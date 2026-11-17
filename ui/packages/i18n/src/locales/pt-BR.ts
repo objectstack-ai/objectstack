@@ -2615,7 +2615,7 @@ const pt = {
       expandToPage: "Abrir como página inteira",
       openAsPage: "Abrir como página inteira",
       objectNotFound: "Objeto não encontrado",
-      objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe na configuração atual.",
+      objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe ou você não tem acesso a ele.",
       objectNotFoundHint: "Verifique as configurações de navegação do seu aplicativo ou selecione um objeto diferente na barra lateral.",
       objectPackageDisabled: "O objeto \"{{objectName}}\" pertence a um pacote desativado e, por isso, não está sendo servido.",
       filterOrGroupNotEditable: "Este filtro tem um grupo OU ao lado de outras condições, que o editor de filtros não consegue exibir, por isso aqui é somente leitura. A visão continua aplicando o filtro.",
@@ -3491,7 +3491,6 @@ const pt = {
   },
   empty: {
     objectNotFound: "Objeto não encontrado",
-    objectNotFoundDescription: "A definição do objeto \"{{name}}\" está ausente. Verifique sua configuração ou navegue de volta.",
     interfacePageSourceMissing: "Esta página de interface faz referência a \"{{name}}\", que não está disponível.",
     pageNotFound: "Página não encontrada",
     pageNotFoundDescription: "A página \"{{name}}\" não foi encontrada. Ela pode ter sido removida ou renomeada.",

@@ -39,6 +39,8 @@
     "ActionParamParsed": "src/ui/action.zod.ts#ActionParamParsed (type)",
     "ActionParamSchema": "src/ui/action.zod.ts#ActionParamSchema (const)",
     "ActionParsed": "src/ui/action.zod.ts#ActionParsed (type)",
+    "ActionRefusal": "src/ui/action.zod.ts#ActionRefusal (type)",
+    "ActionRefusalSchema": "src/ui/action.zod.ts#ActionRefusalSchema (const)",
     "ActionSchema": "src/ui/action.zod.ts#ActionSchema (const)",
     "ActionSession": "src/ui/action-params.zod.ts#ActionSession (type)",
     "ActionSessionSchema": "src/ui/action-params.zod.ts#ActionSessionSchema (const)",

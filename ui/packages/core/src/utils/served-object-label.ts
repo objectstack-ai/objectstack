@@ -77,8 +77,7 @@ export function servedObjectPluralLabel(
  * drawn as given, since the server already translated it; the bundle's
  * `objectLabel` under the object's name only when the definition carries
  * none, with `fallback` as the bundle's own last resort. Every record-scoped
- * surface reads it — the record page, its form, drawer and preview card, and
- * the packaged-actions table's object column.
+ * surface reads it — the record page, its form, drawer and preview card.
  */
 export function servedObjectLabel(
   objectDef: { name: string; label?: unknown },

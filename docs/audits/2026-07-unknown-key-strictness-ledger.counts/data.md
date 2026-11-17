@@ -34,6 +34,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `analytics.zod.ts` | 6 |
 | `data-engine.zod.ts` | 6 |
 | `datasource.zod.ts` | 6 |
+| `declared-entry.zod.ts` | 3 |
 | `driver-nosql.zod.ts` | 10 |
 | `driver-sql.zod.ts` | 2 |
 | `driver.zod.ts` | 9 |
@@ -51,7 +52,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `filter.zod.ts` | 13 |
 | `hook-body-doors.zod.ts` | 4 |
 | `hook-body.zod.ts` | 2 |
-| `hook.zod.ts` | 10 |
+| `hook.zod.ts` | 7 |
 | `mapping.zod.ts` | 8 |
 | `object.zod.ts` | 26 |
 | `picklist.zod.ts` | 3 |
@@ -80,7 +81,7 @@ over it is here.
 | `external-catalog.zod.ts` | 4 | 4 |
 | `field.zod.ts` | 1 | 16 |
 | `filter.zod.ts` | 11 | 13 |
-| `hook.zod.ts` | 5 | 10 |
+| `hook.zod.ts` | 5 | 7 |
 | `query.zod.ts` | 3 | 5 |
 | `recycle-bin.zod.ts` | 4 | 4 |
 | `seed-loader.zod.ts` | 12 | 12 |

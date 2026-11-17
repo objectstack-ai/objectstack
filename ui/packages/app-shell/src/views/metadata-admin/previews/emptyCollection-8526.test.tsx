@@ -34,6 +34,9 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// Paid at collection, not inside a clocked case (check:test-source-alias):
+// the source under test loads `@objectstack/lint` lazily.
+import '@objectstack/lint';
 import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
 
 // `ScreenPreview` reads both providers at its top level (`useAdapter()` /
@@ -282,7 +285,9 @@ describe('EmailTemplatePreview — a template with no placeholders', () => {
 // ───────────────────────────── FlowPreview ─────────────────────────────
 
 describe('FlowPreview — the variables rail with no declared variables', () => {
-  const SENTENCE = 'No variables declared.';
+  // objectstack#34818 — the sentence says what variables are for.
+  const SENTENCE =
+    'No variables yet. A variable holds a value the steps read as {{ name }}. Mark it Input to take it from whoever starts the flow, or Output to hand it back when the flow ends.';
   const FLOW = {
     name: 'ping_flow',
     nodes: [
