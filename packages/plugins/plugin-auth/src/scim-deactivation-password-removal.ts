@@ -120,7 +120,12 @@
  * nothing looks wrong while the user still holds a local password; the next
  * inactive write runs the removal again, and the re-activation lifts the ban
  * only once it completes. On a re-activation the caller fails the request
- * instead. A failure the driver turns into an aborted transaction fails the
+ * instead. The removal considers at most 100 rows of one user per call: a
+ * deactivation keeps what it deleted, so later inactive writes converge, but a
+ * failed re-activation rolls its deletes back, so above that number a
+ * re-activation stays refused until the rows the message names are removed
+ * by hand (a user holds one local password in practice).
+ * A failure the driver turns into an aborted transaction fails the
  * SCIM write with it, as for the other writers on this path: that is the
  * database, not this removal.
  */

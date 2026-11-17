@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: a pooled real better-sqlite3 engine and a fresh AuthManager per case, each case's SCIM provision, ban, re-activation, last-administrator and sign-in sequence its subject; a LOCAL reading, taken because no CI reading of the 52-case file could be read where it was measured (the Test Core shard log of a PR run holds it past the readable tail): 9.1 s, the slowest of four local runs of this file alone (vitest tests time, shared box), x 1.25, rounded up; the last CI reading, 10.3 s at 38 cases (scheduled run 41237094739), gives the same budget
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a pooled real better-sqlite3 engine and a fresh AuthManager per case, each case's SCIM provision, ban, re-activation, last-administrator and sign-in sequence its subject; a LOCAL reading, taken because no CI reading of the 53-case file could be read where it was measured (the Test Core shard log of a PR run holds it past the readable tail): 8.55 s, the slowest of four local runs of this file alone (vitest tests time, shared box), x 1.25, rounded up; the last CI reading, 10.3 s at 38 cases (scheduled run 41237094739), gives the same budget
 
 /**
  * [#14360] SCIM `active: false` disables the account again — end to end,
@@ -87,8 +87,8 @@
  *      cannot be written on a deactivation is reported once at `error`, and
  *      one that cannot be written on a re-activation fails it, the user
  *      staying deactivated; a removal is complete only on a re-read that
- *      finds no local password; and each delete is the SCIM connection's
- *      write. Since the removal, the faces above that drive
+ *      finds no local password, a row read without an id counting as not
+ *      removed; and each delete is the SCIM connection's write. Since the removal, the faces above that drive
  *      the vendor's ban refusal through a password sign-in set the password
  *      again after the deactivation, as an administrator would.
  */
@@ -1932,6 +1932,50 @@ describe('a directory deactivation removes the user\'s local password, and a re-
     expect((await setActive(h, wes.scimId, true)).status).toBe(200);
     expect(isBanned(await userRow(h, wes.email))).toBe(false);
     expect(await localPasswordRows(h, wes.userId)).toBe(0);
+  }, 60_000);
+
+  it('(k) a local-password row read without an id counts as not removed: the deactivation reports it, and the re-activation waits for it', async () => {
+    const h = await boot();
+    const ida = await provision(h, 'ida');
+    await attachPassword(h, ida);
+    const real = h.engine;
+    // Reads of the account table answer their rows without the id column.
+    const idless = new Proxy(real, {
+      get(target, prop, receiver) {
+        if (prop === 'find') {
+          return async (object: string, query?: unknown, options?: unknown) => {
+            const rows = await target.find(object, query as never, options as never);
+            if (object !== 'sys_account' || !Array.isArray(rows)) return rows;
+            return rows.map((row) => {
+              const { id: _id, ...rest } = row as Record<string, unknown>;
+              return rest;
+            });
+          };
+        }
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(idless as never);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect((await setActive(h, ida.scimId, false)).status).toBe(200);
+      expect(isBanned(await userRow(h, ida.email))).toBe(true);
+      const back = await setActive(h, ida.scimId, true);
+      expect(back.status, `expected the re-activation to fail: ${await back.clone().text()}`).toBeGreaterThanOrEqual(500);
+      const lines = errors.mock.calls.map((c) => String(c[0]));
+      expect(lines.filter((m) => m.includes(REMOVAL_INCOMPLETE) && !m.includes(REACTIVATION_REMOVAL_INCOMPLETE))).toHaveLength(1);
+      expect(lines.filter((m) => m.includes(REACTIVATION_REMOVAL_INCOMPLETE))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+    expect(isBanned(await userRow(h, ida.email))).toBe(true);
+    expect(await localPasswordRows(h, ida.userId)).toBe(1);
+
+    vi.mocked(h.manager.getDataEngine).mockReturnValue(real as never);
+    expect((await setActive(h, ida.scimId, true)).status).toBe(200);
+    expect(isBanned(await userRow(h, ida.email))).toBe(false);
+    expect(await localPasswordRows(h, ida.userId)).toBe(0);
   }, 60_000);
 });
 
