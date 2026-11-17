@@ -31,6 +31,7 @@ import {
   type InternalFieldResolvingEngine,
 } from './internal-field-readback.js';
 import { decodeOrganizationMetadataOnRead } from './organization-metadata-decode.js';
+import { endResetTokensOnCredentialWrite, type ResetTokenCache } from './credential-change-ends-reset-tokens.js';
 
 /**
  * Mapping from better-auth model names to ObjectStack protocol object names.
@@ -888,6 +889,15 @@ export function createObjectQLAdapterFactory(
   // the callback directly, and a driver without `beginTransaction` follows
   // the engine's ADR-0119 D1 warn-once degrade.
   let wrappedAdapter: unknown = null;
+  // The host's `secondaryStorage`, read off the options better-auth builds
+  // this adapter with (below): a credential write ends the reset tokens'
+  // cache entries with their rows (`credential-change-ends-reset-tokens.ts`).
+  let resetTokenCache: ResetTokenCache | undefined;
+  const endResetTokens = (objectName: string, payload: unknown, targets: readonly unknown[]) =>
+    endResetTokensOnCredentialWrite(dataEngine as never, objectName, payload, targets, {
+      cache: resetTokenCache,
+      internalFieldEngine,
+    });
   const engineWithTx = rawDataEngine as unknown as {
     transaction?<T>(
       cb: (trxCtx: unknown, info: unknown) => Promise<T>,
@@ -953,6 +963,9 @@ export function createObjectQLAdapterFactory(
         // other object, unidentifiable pair, no existing row — and then this is a
         // plain insert, byte for byte as before. See `adopt-membership.ts` for
         // why the seam is here and what adoption does to the role.
+        // A password set on an account the user did not hold ends the user's
+        // other reset tokens first (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, row, [row]);
         const adopted = await adoptExistingMembership(dataEngine as any, objectName, row);
         const result = adopted ?? (await dataEngine.insert(objectName, row));
         if (factoryOptions.onRecordCreated && result && typeof result === 'object') {
@@ -1132,6 +1145,9 @@ export function createObjectQLAdapterFactory(
           record as Record<string, unknown>,
           patch as Record<string, unknown>,
         );
+        // A password change ends the account holder's other reset tokens
+        // before it lands (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, patch, [record]);
         const result = await dataEngine.update(objectName, { ...patch, id: record.id });
         // [#16231] The payload carries the resolved `id` and no `where`, so
         // the engine dispatches `by-id` and answers the record or `null`. The
@@ -1169,6 +1185,10 @@ export function createObjectQLAdapterFactory(
         liftClientSecretForWrite(objectName, patch);
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
         restoreUserInfoEndpointOnWrite(objectName, patch);
+        // `internalAdapter.updatePassword` is this door: the password change
+        // ends each targeted holder's other reset tokens before any row lands
+        // (`credential-change-ends-reset-tokens.ts`).
+        await endResetTokens(objectName, patch, records);
         for (const record of records) {
           // [#17440] Same rule on the bulk door — a re-point smuggled through
           // `updateMany` is the same re-point.
@@ -1286,6 +1306,8 @@ export function createObjectQLAdapterFactory(
   return (options: Parameters<typeof factory>[0]) => {
     const adapter = readEverySsoProviderRowWhenUnbounded(factory(options));
     wrappedAdapter = adapter;
+    const cache = (options as { secondaryStorage?: unknown } | undefined)?.secondaryStorage as ResetTokenCache | undefined;
+    resetTokenCache = cache && typeof cache.delete === 'function' ? cache : undefined;
     return adapter;
   };
 }
