@@ -118,6 +118,9 @@ A hook body sees the same server-stamped write provenance an in-process handler 
 | `ctx.provenance.flowRunId` | The write comes from an automation flow's data node; the value is that flow run's id. |
 | `ctx.provenance.attributedUserId` | The write is authorized as the system and credited to a real person (for example, the admin behind an identity-adapter call). |
 | `ctx.provenance.performedByClientId` | An AI client acting through the MCP OAuth door performed the write on behalf of the user in `ctx.session.userId`. |
+| `ctx.provenance.performedByAgentId` | The in-product AI agent performed the write for the signed-in person in `ctx.session.userId`, whose write it runs as; the value is the agent's name. |
+| `ctx.provenance.performedByConversationId` | Set beside `performedByAgentId`: the AI conversation the write was performed in. |
+| `ctx.provenance.performedByConfirmationId` | Set beside `performedByAgentId` when the person confirmed the call first: the id of the pending item their approval decided. Absent when the write needed no confirmation. |
 
 Each member is a string or absent, and `ctx.provenance` itself is **absent** when none applies — a plain REST write carries no provenance — so read it as `ctx.provenance?.flowRunId`. That is the guard that tells a flow's write apart from a user writing the same fields by hand, which matters most for a flow that runs `runAs: 'user'`: there `ctx.user`, `ctx.session` and `ctx.input` are identical for both writes.
 
