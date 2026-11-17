@@ -23,18 +23,18 @@
     },
     {
       "id": 3,
-      "prompt": "The user asks: \"What was revenue last month?\" `list_datasets({ terms: ['revenue', 'last month'] })` answers three datasets, each with `matches: []`. Their measures include Won Revenue (dataset Sales: \"Amount of opportunities closed as won\"), Annual Revenue (dataset Accounts: \"Sum of each account's stated yearly revenue\") and Planned Revenue (dataset Targets: \"Revenue target set for the period\"); no measure has the synonym `revenue`. What is your reply?",
-      "expected_output": "Nothing matches, and the word is a loose form of several listed measures: the catalogue already in hand lists Won Revenue, Annual Revenue and Planned Revenue, whose labels contain it. A similar word is not a match, so no measure is selected. The reply is a question and nothing else, such as \"Which revenue do you mean?\", listing each candidate by its label, its dataset's label and its description (Won Revenue, in Sales; Annual Revenue, in Accounts; Planned Revenue, in Targets). It does not pick one and computes nothing: no figure, and no tool call until the user answers.",
+      "prompt": "The user asks: \"What was revenue last month?\" `list_datasets({ terms: ['revenue', 'last month'] })` answers three datasets, each with `matches: []`: `sales` (label Sales) lists the measure `won_revenue`, labelled Won Revenue and described as \"Amount of opportunities closed as won\"; `accounts` (label Accounts) lists `annual_revenue`, labelled Annual Revenue, \"Sum of each account's stated yearly revenue\"; `targets` (label Targets) lists `planned_revenue`, labelled Planned Revenue, \"Revenue target set for the period\". The answer also carries `candidates: [{ term: 'revenue', dataset: 'sales', member: 'measures.won_revenue' }, { term: 'revenue', dataset: 'accounts', member: 'measures.annual_revenue' }, { term: 'revenue', dataset: 'targets', member: 'measures.planned_revenue' }]`. What is your reply?",
+      "expected_output": "The word matches nothing, and `candidates` lists three members for it. A candidate is not a match, so no measure is selected. The reply is a question and nothing else, such as \"Which revenue do you mean?\", listing each candidate by its label, its dataset's label and its description, read from the dataset entries the candidates point to (Won Revenue, in Sales: amount of opportunities closed as won; Annual Revenue, in Accounts: sum of each account's stated yearly revenue; Planned Revenue, in Targets: revenue target set for the period). It shows labels, not the measures' machine names. It does not pick one and computes nothing: no figure, and no tool call until the user answers.",
       "files": [],
       "assertions": {
         "must_contain": ["Won Revenue", "Annual Revenue", "Planned Revenue", "Sales", "Accounts", "Targets", "?"],
-        "must_not_contain": ["query_dataset", "aggregate_records", "非指标口径"]
+        "must_not_contain": ["query_dataset", "aggregate_records", "非指标口径", "won_revenue", "annual_revenue", "planned_revenue"]
       }
     },
     {
       "id": 4,
-      "prompt": "The user asks: \"How many open support tickets do we have per priority?\" `list_datasets({ terms: ['open support tickets', 'priority'] })` answers two sales datasets with `matches: []`; none of their measures is about tickets. `list_objects` shows an object `support_ticket`. What do you do, and how does the answer open?",
-      "expected_output": "Nothing matches and no listed measure is a reading of the word, so this is the fallback. Calls `describe_object({ objectName: 'support_ticket' })` and reads the fields before filtering: `status` and `priority` carry `options`, so the filter uses the option's `value`, never its label. Calls `aggregate_records` once with a count grouped by `priority` and a `where` on the open status value, instead of paging `query_records` and adding rows up. Opens the answer with one line saying, in the user's language, that the figure is not from a governed metric, computed from the Support Ticket object's status and priority fields, then shows the counts by priority label and states the filter in words.",
+      "prompt": "The user asks: \"How many open support tickets do we have per priority?\" `list_datasets({ terms: ['open support tickets', 'priority'] })` answers two sales datasets with `matches: []` and no `candidates`; none of their measures is about tickets. `list_objects` shows an object `support_ticket`. What do you do, and how does the answer open?",
+      "expected_output": "The word for the thing measured has no match and no candidates, so this is the fallback. Calls `describe_object({ objectName: 'support_ticket' })` and reads the fields before filtering: `status` and `priority` carry `options`, so the filter uses the option's `value`, never its label. Calls `aggregate_records` once with a count grouped by `priority` and a `where` on the open status value, instead of paging `query_records` and adding rows up. Opens the answer with one line saying, in the user's language, that the figure is not from a governed metric, computed from the Support Ticket object's status and priority fields, then shows the counts by priority label and states the filter in words.",
       "files": [],
       "assertions": {
         "must_contain": ["describe_object", "aggregate_records", "priority"],
@@ -43,7 +43,7 @@
     },
     {
       "id": 5,
-      "prompt": "The user asks: \"Which of this week's shipments are over the carrier's weight limit?\" `list_datasets` has no match and no measure about shipments. `describe_object({ objectName: 'shipment' })` lists `name`, `carrier`, `status`, `shipped_at` and `destination`; no object has a field for weight or for a carrier's limit. What is your reply?",
+      "prompt": "The user asks: \"Which of this week's shipments are over the carrier's weight limit?\" `list_datasets` has no match, no `candidates` and no measure about shipments. `describe_object({ objectName: 'shipment' })` lists `name`, `carrier`, `status`, `shipped_at` and `destination`; no object has a field for weight or for a carrier's limit. What is your reply?",
       "expected_output": "The data cannot answer. Says the data it can read does not record it and names what is missing: a shipment's weight, and each carrier's limit. Offers the computation if the user supplies those values. It fills the gap with no figure of its own and draws no conclusion from one, so it names no shipment as over or under the limit. Any figure it does add (such as how many shipments went out this week) comes from a tool answer in this conversation.",
       "files": [],
       "assertions": {
@@ -53,8 +53,8 @@
     },
     {
       "id": 6,
-      "prompt": "用户问:「我们的毛利率是多少?」 `list_datasets({ terms: ['毛利率'] })` answers one dataset, `finance_summary` (label 财务汇总), with `membersWithheld: true`, `matches: []` and two listed measures, 营业收入 and 费用合计. What is your reply?",
-      "expected_output": "`membersWithheld: true` on 财务汇总 means it has members (measures or groupings) this user may not read, and the metric asked for may be among them, so the reply says exactly that, in Chinese and naming the dataset by its label, as in 「财务汇总里有您无权查看的指标或分组，毛利率可能是其中之一」. It never tells the user the metric is absent, and it shows the user no raw flag name. Nothing matched and the two listed measures (营业收入, 费用合计) are not readings of 毛利率, so no measure is selected and no governed figure is given; if it goes on to compute anything from the object tools, that answer opens with the 非指标口径 line.",
+      "prompt": "用户问:「我们的毛利率是多少?」 `list_datasets({ terms: ['毛利率'] })` answers one dataset, `finance_summary` (label 财务汇总), with `membersWithheld: true`, `matches: []` and two listed measures, 营业收入 and 费用合计; the answer has no `candidates`. What is your reply?",
+      "expected_output": "`membersWithheld: true` on 财务汇总 means it has members (measures or groupings) this user may not read, and the metric asked for may be among them, so the reply says exactly that, in Chinese and naming the dataset by its label, as in 「财务汇总里有您无权查看的指标或分组，毛利率可能是其中之一」. It never tells the user the metric is absent, and it shows the user no raw flag name. 毛利率 has no match and no candidates, so no measure is selected, neither listed measure (营业收入, 费用合计) is offered as a reading of it, and no governed figure is given; if it goes on to compute anything from the object tools, that answer opens with the 非指标口径 line.",
       "files": [],
       "assertions": {
         "must_contain": ["财务汇总", "毛利率"],
@@ -69,6 +69,26 @@
       "assertions": {
         "must_contain": ["query_dataset", "营收", "赢单率", "销售分析"],
         "must_not_contain": ["aggregate_records", "非指标口径"]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "The user asks: \"What is our churn this quarter?\" `list_datasets({ terms: ['churn', 'this quarter'] })` answers one dataset, `subscriptions` (label Subscriptions), with `matches: []`; its measures are `churn_rate`, labelled Churn Rate and described as \"Share of subscriptions cancelled in the period\", and `active_count`, labelled Active Subscriptions. The answer also carries `candidates: [{ term: 'churn', dataset: 'subscriptions', member: 'measures.churn_rate' }]`. What is your reply?",
+      "expected_output": "The word matches nothing, and `candidates` lists one member for it. One candidate is still not a match, so it is not picked and nothing is computed. The reply is a question and nothing else, asking whether that candidate is the one meant, such as \"Do you mean Churn Rate (in Subscriptions: share of subscriptions cancelled in the period)?\", naming the candidate's label, its dataset's label and its description, not its machine name. It gives no figure, makes no tool call until the user answers, and does not fall back to the object tools either: the fallback is for a word with no candidates.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["Churn Rate", "Subscriptions", "?"],
+        "must_not_contain": ["query_dataset", "aggregate_records", "churn_rate"]
+      }
+    },
+    {
+      "id": 9,
+      "prompt": "用户问:「上个月的营业额是多少?」 `list_datasets({ terms: ['营业额', '上个月'] })` answers one dataset, `sales_analysis` (label 销售分析, `object: 'opportunity'`), with `matches: []` and two measures, 赢单金额 and 赢单数; the answer has no `candidates`. `list_objects` shows `opportunity`. What do you do, and how does the answer open?",
+      "expected_output": "营业额 has no match and no candidates, so this is the fallback: it asks nothing, and it does not treat 赢单金额 as a match because the word looks close. Calls `describe_object({ objectName: 'opportunity' })` and reads the fields before filtering, then `aggregate_records` once for the sum over last month. Opens the answer, in Chinese, with one line saying it is not from a governed metric (非指标口径) and names the object and fields it computed from. Because `opportunity` is the `object` of the listed dataset 销售分析, it adds one line naming that dataset and its measures (赢单金额, 赢单数), so the user can ask for the governed figure, and it states the month it filtered to in words.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["describe_object", "aggregate_records", "非指标口径", "销售分析", "赢单金额"],
+        "must_not_contain": ["query_dataset", "provenance"]
       }
     }
   ]

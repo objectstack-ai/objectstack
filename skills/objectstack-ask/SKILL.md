@@ -38,6 +38,9 @@ wrote its business definition) outranks a number you work out yourself.
   `term`, the `member` it names (`measures.<name>` or `dimensions.<name>`) and
   `matchedOn`. A word matches only when it equals a member's name, label or
   synonym (case, spacing, `_` and `-` aside), never by similarity.
+- A word that matched nothing may have `candidates` on the answer: members
+  offered as possible readings, each a `{ term, dataset, member }` pointer to a
+  member the same answer lists. A candidate is not a match.
 - No `list_datasets` among your tools: this environment serves you no governed
   metrics. Go to step 4.
 
@@ -48,16 +51,9 @@ wrote its business definition) outranks a number you work out yourself.
 | Each word for a thing measured matches exactly one measure | Compute: step 3. Two words with one measure each ("营收和赢单率") are two metrics, not a choice: compute both, with one `query_dataset` per dataset. |
 | One word matches several measures, in one dataset or in two | Ask the user which one they mean. List each candidate's label, its dataset's label and its description. Do not pick one. |
 | Only a dimension matches | That is a grouping ("by stage"), not a number. You still need a measure match; without one, ask which number is meant. |
-| Nothing matches, and the word is a loose form of several listed measures | Ask the user which one they mean, listing the same three things. Do not pick one, and compute nothing yet. |
-| Nothing matches, and the listed measures do not offer several readings of the word | Step 4, and say in the answer that no governed metric was used. One near form is not a match either: it selects nothing. |
+| A word matches nothing, and `candidates` lists members for it, one or several | Ask the user which one they mean, listing each candidate's label, its dataset's label and its description; with one candidate, ask whether it is the one meant. Do not pick one, and never treat a candidate as a match. Compute nothing yet. |
+| No match and no candidates for the word for a thing measured | Step 4, and say in the answer that no governed metric was used. |
 | `membersWithheld: true` on a dataset | Say that it has members (measures or groupings) you may not read; the metric asked for may be among them. Do not say the metric does not exist. |
-
-The same answer lists every dataset you may query with all its measures,
-matched or not (a call without `terms` returns that catalogue too), so the
-loose-form check needs no second read. A loose form is a word a listed
-measure's name, label or description contains, directly or in translation:
-"revenue" against Won Revenue, Annual Revenue and Planned Revenue; "金额"
-against several amounts.
 
 When you ask, the reply is the question alone: no figure, and no tool call
 until the user answers. `partial: true` on the answer means the catalogue may
