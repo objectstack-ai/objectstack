@@ -5228,11 +5228,13 @@ export const SECURITY_SERVICE_SOURCE_SLOT: unique symbol = Symbol.for('objectsta
 const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondition');
 
 /**
- * The `set_null` delete walk's own channel for the reference it clears, on the
- * `update` it issues to clear it (`cascadeDeleteRelations`): `{ object, id,
- * field }` of the holder row and lookup. `update()` hands the read-only strips
- * that one key, at the value the walk wrote, as engine-owned referential
- * integrity rather than a caller write ({@link ReferentialClearOption}).
+ * The engine's own channel for a referential write to one lookup on one row,
+ * on the `update` it issues: `{ object, id, field }` of the holder row and
+ * lookup. Two writers, both engine-owned referential integrity and never a
+ * caller write: the `set_null` delete walk's clear (`cascadeDeleteRelations`)
+ * and the recycle-bin restore's re-link of that clear and its undo (ADR-0148
+ * D2, `recycle-bin/restore.ts`). `update()` hands the read-only strips that one
+ * key, at the value the write received ({@link ReferentialClearOption}).
  *
  * A module-private symbol, the shape of {@link WRITE_PRECONDITION_OPTION}, and
  * for the same reason: no options object a door builds, no hook's `ctx.api`
@@ -5244,7 +5246,7 @@ const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondit
  */
 const REFERENTIAL_CLEAR_OPTION: unique symbol = Symbol('objectql.referentialClear');
 
-/** What the walk puts under {@link REFERENTIAL_CLEAR_OPTION}: the holder row and the lookup it clears. */
+/** What the delete walk or the restore puts under {@link REFERENTIAL_CLEAR_OPTION}: the holder row and the lookup it writes. */
 interface ReferentialClearOption {
   readonly object: string;
   readonly id: string;

@@ -987,7 +987,8 @@ interface ReadonlyWhenStripOptions {
  * The one key an UPDATE's read-only strips leave to the engine's referential
  * integrity: the lookup the `set_null` delete walk is clearing on this row, at
  * the value the walk wrote — `null`, or on a `multiple: true` lookup the member
- * list without the deleted id.
+ * list without the deleted id — or the lookup the recycle-bin restore re-links
+ * (ADR-0148 D2), at the value it writes back, and that re-link's undo.
  *
  * Deleting a record makes the engine clear every optional lookup pointing at
  * it. That UPDATE runs under the CALLER's context (never `isSystem`, whose
@@ -996,10 +997,14 @@ interface ReadonlyWhenStripOptions {
  * forged it: the delete answered 200, the strip logged that the value was
  * DROPPED, and every holder kept the deleted row's id.
  *
+ * Without the restore half, a readonly reference the delete cleared stayed
+ * null after a restore — the re-link runs under the caller's context too —
+ * while the restore counted it as re-linked.
+ *
  * Narrow on three sides, each pinned in `engine-set-null-readonly-lookup-clear.test.ts`:
- *  - only `update()` builds it, and only from the walk's module-private option
+ *  - only `update()` builds it, and only from the engine's module-private option
  *    (`REFERENTIAL_CLEAR_OPTION` in `engine-top-level.ts`) on the by-id write
- *    of the row the walk named — never from the context, so a caller carrying
+ *    of the row the delete walk or the restore named — never from the context, so a caller carrying
  *    the operation-private `__referentialFieldClear` marker gains nothing;
  *  - only `field`: every other read-only key in the same payload is stripped,
  *    logged, reported and refused under `strictReadonlyWrites` as before;

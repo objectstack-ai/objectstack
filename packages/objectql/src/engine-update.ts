@@ -279,13 +279,15 @@ export class UpdateFacet {
        ...((opCtx.data ?? {}) as Record<string, unknown>),
      };
 
-     // The `set_null` delete walk's clear of a reference (`cascadeDeleteRelations`):
-     // the one key the read-only strips below leave to the engine, at the value
-     // this write received — see `ReferentialClearExemption`. Read off the
-     // walk's module-private option only, never off the context: a caller (or
+     // The engine's referential write to one lookup — the `set_null` delete
+     // walk's clear (`cascadeDeleteRelations`) or the recycle-bin restore's
+     // re-link and its undo (ADR-0148 D2): the one key the read-only strips
+     // below leave to the engine, at the value this write received — see
+     // `ReferentialClearExemption`. Read off the engine's module-private option
+     // only, never off the context: a caller (or
      // a hook's `ctx.api` write, which inherits the cleanup context) carrying
      // `__referentialFieldClear` gets nothing here. And only on the by-id write
-     // of the row and field the walk named, so the option forwarded into any
+     // of the row and field the writer named, so the option forwarded into any
      // other write exempts nothing there.
      const referentialClearOption = (options as Record<symbol, unknown> | undefined)?.[REFERENTIAL_CLEAR_OPTION] as
        ReferentialClearOption | undefined;
