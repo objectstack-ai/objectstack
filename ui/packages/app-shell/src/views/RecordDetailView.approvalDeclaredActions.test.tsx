@@ -361,6 +361,20 @@ function renderRecordPage() {
 
 const decisionButton = (name: string) => screen.queryByTestId(`declared-action-${name}`);
 
+/**
+ * objectstack#34361 (ruling A) — the approver's band keeps the two decisions
+ * as buttons and folds every other lever into one menu, so those levers are
+ * read from the open menu.
+ */
+async function openDecisionMenu() {
+  const trigger = await screen.findByTestId('declared-actions-decision-menu');
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  return screen.findByRole('menu');
+}
+
+/** The approver's levers that the band folds behind its menu. */
+const APPROVER_FOLDED = ['approval_reassign', 'approval_send_back', 'approval_request_info'];
+
 beforeEach(() => {
   cleanup();
   authFetchSpy.mockClear();
@@ -377,8 +391,14 @@ describe('record page decision actions — a GROUP approver (objectui#3055)', ()
     renderRecordPage();
 
     await waitFor(() => expect(decisionButton('approval_approve')).toBeTruthy());
+    expect(decisionButton('approval_approve')?.tagName).toBe('BUTTON');
+    expect(decisionButton('approval_reject')?.tagName).toBe('BUTTON');
+    await openDecisionMenu();
     for (const name of APPROVER_DECISIONS) {
       expect(decisionButton(name), `${name} must be offered to a pending approver`).toBeTruthy();
+    }
+    for (const name of APPROVER_FOLDED) {
+      expect(decisionButton(name)?.getAttribute('role'), `${name} sits in the band's menu`).toBe('menuitem');
     }
   });
 
@@ -386,7 +406,8 @@ describe('record page decision actions — a GROUP approver (objectui#3055)', ()
     stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
     renderRecordPage();
 
-    await waitFor(() => expect(decisionButton('approval_reassign')).toBeTruthy());
+    await openDecisionMenu();
+    expect(decisionButton('approval_reassign')).toBeTruthy();
     expect(decisionButton('approval_send_back')).toBeTruthy();
     expect(decisionButton('approval_request_info')).toBeTruthy();
   });
@@ -416,6 +437,7 @@ describe('record page decision actions — a GROUP approver (objectui#3055)', ()
   it('dispatches the decision on the REQUEST, not on the business record it is opened on', async () => {
     stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
     renderRecordPage();
+    await openDecisionMenu();
     await waitFor(() => expect(decisionButton('approval_send_back')).toBeTruthy());
     authFetchSpy.mockClear();
 
@@ -437,6 +459,7 @@ describe('record page decision actions — a GROUP approver (objectui#3055)', ()
   it('sends a declared decision output as its `outputs.<key>` param, for the door to fold', async () => {
     stubApprovalsApi(pendingRequest({ can_act: true, is_submitter: false, can_override: false }));
     renderRecordPage();
+    await openDecisionMenu();
     await waitFor(() => expect(decisionButton('approval_send_back')).toBeTruthy());
     authFetchSpy.mockClear();
 
