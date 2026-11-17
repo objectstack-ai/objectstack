@@ -2,8 +2,8 @@
   "number": 34425,
   "kind": "issue",
   "title": "seed: on a walled boot the default-organization bootstrap replays the seed before the owner's sys_member, so a seeded Field.user column stores NULL",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "lease:o1-C",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T16:57:51Z",
-  "updated_at": "2026-11-16T19:45:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T21:22:50Z",
+  "closed_at": "2026-11-16T21:21:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34425",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ① a product defect with a named location and a reproduction. Sibling of #34038 on a second entry point: the default-organization bootstrap. #34038 covers the organization-create replay.\n\n`reach:` measured once through the boot path, by area o1-E's dev while verifying PR #34415 (dev report 6923080865 on #34038, PR head `e2f88e49`, not changed by this finding). Setup: a walled boot (`bootStack`, posture `isolated`, `OrganizationsPlugin` installed).\n\n## What happens\n\n- `ensure-default-organization.ts` (around line 590) inserts the default organization as SYSTEM, with no owner. So Middleware B replays the seed at once, before the platform owner's `sys_member` row exists.\n- Timeline in the dev's run:\n  - The organization is created at 16:54:20.482Z.\n  - At .512Z and .515Z the seed's two person references, a `Field.user` column and `owner_id`, are refused as `UNRESOLVED` (not a member of organization).\n  - The owner's `sys_member` row lands at .517Z.\n  - `claimSeedOwnership` then restores `owner_id` only.\n- Result: the seeded `Field.user` column is stored as NULL on the default organization of a walled boot.\n\n## Expected\n\nEvery person reference in the seed resolves, exactly as on an un-walled boot: the replay runs after the owner's membership exists, or it resolves user references against the owner being bound. This is the same expectation #34038 sets for the organization-create replay.\n\n## Who acts\n\nThe next p1 seed/organizations work in seat `repo:objectstack#1`, area o1-E, which holds #34038 and its PR #34415. PR #34415's acceptance notes name this card as out of its scope, because #34415 fixes the organization-create path only.\n\n## Duplicate check\n\n- `is:issue claimSeedOwnership`: 23 hits.\n- `is:issue \"default organization\" seed replay owner`: 89 hits.\n\nThe only open match is #34038, which is the other entry point. Closed #21486, #23354 and #26825 concern the ownership claim itself, not the replay order."

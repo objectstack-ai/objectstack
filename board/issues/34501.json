@@ -1,0 +1,36 @@
+{
+  "number": 34501,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): area-lease asks its L1 thread by thread message, mailboxes only across accounts or projects",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T23:09:33Z",
+  "updated_at": "2026-11-17T00:42:30Z",
+  "closed_at": "2026-11-17T00:42:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T00:42:28Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34501",
+  "body": "Fixes #34487\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`area-lease.md` 的 L1 线程定义处新增一行:向 L1 线程请审或 delta 一律发线程消息,信箱只留跨账号或跨项目;同文件并掉一条复述行付账,行数不变(71/71)。\n- 为什么改:维护者裁定同项目内用线程沟通(「但是用信箱沟通没有的 theads 快和省心」),该规则只写进了 `lanes/l2-review.md`,而 `area-lease.md` 写明那份席规不及 L1 线程,照字面读的席位会去敲信箱。\n- 风险与回滚:只改技能文本一行,无代码、无发布面;回滚即 revert 本 PR。\n- 先看:`.claude/skills/pm-dispatch/references/area-lease.md` 第 14 行(新行)与被并入的原「L1 审核只取…」行。\n- 两分钟验证:运行 `node scripts/pm/check-skill-line-ratchet.mjs`,预期 area-lease.md 为 71 行(上限 71)且退出 0。\n- 需要你做的:无:`.claude/**` 属 Tier S,席位凭 L2 契约审核记录落地。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/area-lease.md`, one line moved, net 0 lines:\n\n- **Added** at the L1 thread definition (new line 14, right under the `L1-a` / `L1-b` line): `- 请 L1 审或 delta 发线程消息,只取区在 PR 评论宣布的定稿绿 head;信箱只留跨账号或跨项目。` (120 bytes, at the cap.) A review or delta request to an L1 thread goes by thread message; mailboxes stay for traffic across accounts or projects.\n- **Removed** from 区内规则: `- L1 审核只取区在 PR 评论宣布定稿的绿 head;修后只 delta。` Its unique half (L1 takes only the green head the area announced final in a PR comment) moves into the new line; its other halves restate SKILL.md 审核两级 (`在定稿绿 head 读 ACCEPT,修后读 delta`).\n\n`SKILL.md` is untouched. Its line 51 (`L2 规则不及 L1`) no longer sends an L1 reader away from the rule, because the rule now lives in the file that defines the L1 threads, not only in `lanes/l2-review.md`. The four files PR #34485 edits are untouched.\n\n## Why\n\nPR #34485 put the maintainer's in-project rule (「但是用信箱沟通没有的 theads 快和省心」, recorded on #34474) into `lanes/l2-review.md`. `area-lease.md` line 13 says that file's seat rules do not reach an L1 thread, so a seat reading the text to the letter knocked a mailbox for its L1 review. This carries should-fix S2 of contract record 6931499577.\n\n## Tests\n\nSkills text only: no package, no test file, nothing published. No unit test or ablation applies.\n\n## Acceptance notes\n\n- The new line has no subject on purpose: it binds whoever asks an L1 thread (an area, or the seat), and keeps the old line's \"only the announced green head\" rule.\n- Built on `origin/main` at `495a79c7b3` (holds PR #34482). PR #34485 was still open when this branch was cut; the two diffs share no file.\n\n## Verification\n\nAll readings at head `bdb2fb25dd`, tree `objectstack-ai/objectstack`.\n\n<details><summary>Line ratchet: exit 0</summary>\n\n```text\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/area-lease.md: widest table row is 0 bytes (pin 0; headroom 0).\n✓ check-skill-line-ratchet: .claude/skills/pm-dispatch/references/area-lease.md is 71 lines (ceiling 71; headroom 0).\n```\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 18), each exit captured before any pipe: all exit 0</summary>\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0\npnpm check:adr-anchors :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\n```\n</details>\n\n<details><summary>--ran reconciliation: exit 0</summary>\n\n```text\nRun reconciliation — 18 derived, 18 run, 0 NOT-MEASURED, 0 UNRUN.\n✓ dispatch-gates --ran: 18 derived famil(ies) accounted for — 18 run, 0 NOT-MEASURED (a DERIVED zero — all 18 recorded an exit code and none of them is 3).\n```\n</details>\n\nFamilies CI runs outside the derived list are read from this PR's check-runs, not re-run locally.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (n/a: no schema touched)\n- [x] 2. Every name I added uses the casing for its kind. (n/a: no names added)\n- [x] 3. No formatter ran. `pnpm lint` is CI-owned; this diff touches no file it lints.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (n/a)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done (`pnpm lint` as in item 3).\n\nSigned: repo:objectstack#1 · os-project-manager · session_01FEkQ5kgF3mo9f7LXuv5hac\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5kgF3mo9f7LXuv5hac)_\n<!-- signed: repo:objectstack#1 · os-project-manager · session_01FEkQ5kgF3mo9f7LXuv5hac -->\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 34499,
+  "kind": "pull_request",
+  "title": "docs(skills): teach the record write's text envelope and its organization-language key",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T23:08:02Z",
+  "updated_at": "2026-11-17T02:11:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34499",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9QtbmWARfNoXczSYr8gtC8v)_\n\nFixes #34434\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：两份对外技能补上已落地的行为（#34438）：`objectstack-automation` 教流程 `create_record` / `update_record` 的字段值可以写成文本信封 `{ dialect: 'template', source }`，按组织语言写入；`objectstack-i18n` 写出它的译文键 `flows.FLOW.records.NODE_ID.fields.FIELD`。\n- **为什么改**：AI 作者只读 `skills/**`。不教的话，中文组织的应用（hotcrm 的工单升级）会继续写英文裸字符串，平台原样存进记录，没人告诉作者有标记文本的写法。\n- **风险与回滚**：只改技能文本，不改运行时。automation 文件的 token 天花板按实测从 6861 抬到 6903（+42），先删了三处别处已有的重复句来付账。回滚 = revert 本 PR。\n- **先看**：`skills/objectstack-automation/SKILL.md`（Valid-but-silently-wrong 第 1 条新增的六行，以及被删的三处）；`scripts/check-skills-token-ratchet.mjs`（automation 行的抬升与算式）；`skills/objectstack-i18n/SKILL.md`（flows 深层键那一段）。\n- **两分钟验证**：`node scripts/check-skills-token-ratchet.mjs`，预期 automation 显示 `6903 / 6903`、i18n 显示 `6219 / 6333`，整体通过。\n- **需要你做的**：受治理面（`skills/**`），等你批准后由席位落地。\n\n## What changes\n\n- **`skills/objectstack-automation/SKILL.md`**, Valid-but-silently-wrong item 1: after the text-slot paragraph, a `create_record` / `update_record` `fields` value takes a third form, the text envelope `{ dialect: 'template', source }`, for a sentence people read. Its `source` is a text slot (the paragraph above it: `{{ }}` holes, a single-brace token refused). It is written in the organization's language (the Localization setting if set, else the app's `i18n.defaultLocale`; the key lives in objectstack-i18n), never the run starter's; untranslated, the authored text is written; an unreadable setting fails the node. A bare string stays a literal and is never translated. Each clause was read against what #34438 landed: `FlowRecordFieldValueSchema` (`packages/spec/src/automation/builtin-node-config.zod.ts`), `resolveFieldValues` (`packages/services/service-automation/src/builtin/crud-nodes.ts`), `resolveOrganizationLocale` (`packages/core/src/organization-locale.ts`) and `content/docs/automation/flows.mdx` § \"Text a record keeps\".\n- **`skills/objectstack-i18n/SKILL.md`**, the paragraph naming the keys that sit deeper than their group's `label`: it now names three, adding `flows.{flow}.records.{node_id}.fields.{field}` for a field marked with the text envelope, picked in the organization's language, never the run starter's; `os i18n extract --no-objects-only` scaffolds all three (the walker branch in `packages/lint/src/i18n-walk.ts`, pinned by `packages/cli/test/i18n-flow-record-text-coverage.test.ts`). The coverage check reads the same walker, so no new wording was needed for it.\n- **Paid down first** in `objectstack-automation/SKILL.md` (restatements with another home):\n  1. The CEL callout's \"Contract, stdlib, legacy → CEL table: **objectstack-formula**.\" Survives in the same file's frontmatter description: \"CEL expressions in flow conditions / edge guards: load objectstack-formula alongside.\"\n  2. The Trigger Configuration lead-in \"A flow around it also owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires:\". Survives in `references/examples-flows.md`, whose flows show every top-level key.\n  3. Item 3's `'helpdesk.aiTriageStub': … // pure — the default` row of the `functions` example. Survives in the same item: \"A flow `function` is a PURE compute step\"; the `billing.sync` row that declares `effect: 'writes'` stays.\n- **`scripts/check-skills-token-ratchet.mjs`**: the `objectstack-automation/SKILL.md` row moves 6861 → 6903, the measured remainder after the cuts, pinned at the measurement, with the byte arithmetic in the row comment. Raise path: the standing maintainer ruling 「A:先削重复,余额按实测提高」 (2026-10-27, ruling record 6513306068, letter B). The `objectstack-i18n` row is unchanged (headroom 187 → 114). The state-introspection route after the State Machines pointer was cut at first and is restored: `packages/rest/src/meta-state-route-doc-spelling.test.ts` (`test:repo`) pins this file as one of the route's teaching sites, and Test Core shard 2/8 went red on it at 7101d3cb.\n- **`.changeset/34434-skills-flow-record-text.md`**: `'@objectstack/skills': patch`.\n\nNot in scope: hooks and actions (#34374). No eval case was added (the claim allows at most one per skill; none was needed to carry the teaching, and each would cost tokens in a priced file).\n\n## Line and token readings (`skills/**`)\n\n| File | Lines before → after | Tokens before → after (ceiling) |\n|:--|:--|:--|\n| `skills/objectstack-automation/SKILL.md` | 460 → 462 (+2) | 6858 → 6903 (6861 → 6903) |\n| `skills/objectstack-i18n/SKILL.md` | 530 → 533 (+3) | 6146 → 6219 (6333) |\n| All `skills/*/SKILL.md` | 4599 → 4604 (+5) | 59380 → 59498 (+118) |\n\nLine budget from the claim: net +3 lines on each of the two files; both are within it. Tokens are the ratchet's `ceil(priced bytes / 4)`, read from `node scripts/check-skills-token-ratchet.mjs` before (origin/main 24b6ae55) and after.\n\n## Tests\n\nNone changed or added: the diff is skill text, a ratchet row and a changeset. `pnpm --filter @objectstack/rest exec vitest run --project repo` at 0085ff5a: 5 files, 300 passed, 23 skipped (it reads this skill).\n\n## Verification\n\nGate results at the final head are in the os-dev report on #34434 and in this PR's check runs.\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmSXPDB46NVRepWVrL3 -->\n"
+}

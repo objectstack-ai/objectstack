@@ -1,0 +1,37 @@
+{
+  "number": 34518,
+  "kind": "pull_request",
+  "title": "fix(cli): os start leaves no process of its group behind on SIGTERM",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T23:51:11Z",
+  "updated_at": "2026-11-17T00:42:33Z",
+  "closed_at": "2026-11-17T00:42:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T00:42:30Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34518",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9D7K4emLL9dNcp4rQPn22Dw)_\n\nFixes #34337\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** `objectstack start` 收到 SIGTERM 退出时，它的进程组里不再残留进程。`serve` 载入 `objectstack.config.ts` 后立即关掉打包器 esbuild 的常驻服务进程。\n- **为什么改：** 这个 esbuild 服务进程要等 `serve` 退出后才走，所以 `start` 退出那一刻它还在。容器运行时、systemd、多副本演练这类监管者读到「已停」时，组里其实还有进程。\n- **风险与回滚：** 低。只在 `serve` 用配置文件启动时，于启动阶段多一次 esbuild `stop()`;之后再有 esbuild 调用会自动重开服务。回滚即撤本 PR。\n- **先看：** `packages/cli/src/utils/config.ts`(`stopConfigBundler` 与原因)、`packages/cli/src/commands/serve.ts`(唯一调用点)、`packages/cli/test/start-sigterm-process-group.integration.test.ts`;`scripts/check-cli-test-child-env.mjs` 的名单因新测试加一项(21→22)。\n- **两分钟验证：** `pnpm --filter @objectstack/cli build && cd packages/cli && npx vitest run --project integration test/start-sigterm-process-group.integration.test.ts`,预期 1 passed。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n`os start` already forwards SIGTERM to its `serve` child and exits with the child's code once the child has exited (`ServeRestartCoordinator`, #21114). The process the card's drill found alive is the child of `serve`, not `serve` itself.\n\nOn a config project, `serve` bundles `objectstack.config.ts` through `bundle-require`, which runs esbuild's async API. esbuild serves that API from a long-lived `esbuild --service` child process, and that child leaves only when it reads end-of-file on its stdin, a moment after its parent has exited. So when `start` exited, the bundler service was still in its process group.\n\n`serve` now calls esbuild's `stop()` right after the config module loads (`stopConfigBundler` in `utils/config.ts`, one call site in `commands/serve.ts`). The service exits at boot while `serve` is alive to reap it, so the group a SIGTERM later finds is `start` and `serve` only. Boots with `--artifact`/`--artifact-fallback` or `--prebuilt` never start the bundler and skip the call. `bundle-require` takes esbuild as a peer dependency, so it runs the copy this package declares, which is the instance stopped.\n\nThe premise was re-measured on `origin/main` e8cba8fe before the change (built entry, SIGTERM to the `start` pid alone):\n\n| Shape | `start` exit | group members alive at the exit | 2 s later |\n|:--|:--|:--|:--|\n| config project, before | code 0 at +66 ms | 1: `[esbuild]` (child of `serve`, reparented) | 0 |\n| config project, after (3 runs) | code 0 at +84 / +62 / +74 ms | 0 | 0 |\n| `--artifact` project, before | code 0 at +62 ms | 0 | 0 |\n\n## Tests\n\n- New `packages/cli/test/start-sigterm-process-group.integration.test.ts` (integration tier: spawns the built `bin/run.js`). It boots `start` on a `defineStack` config project in its own process group, checks that the probe sees `start` and `serve` in the group (positive control), sends SIGTERM to the `start` pid alone, and reads `kill(-pgid, 0)` in the exit handler: it must answer ESRCH, and the exit code must be 0 (the child's).\n- Ablation: with the `stopConfigBundler()` call removed and the CLI rebuilt (`grep -c stopConfigBundler dist/commands/serve.js` = 0), the pin is red: `expected [ '8309  8270 [esbuild] <defunct>' ] to deeply equal []` and `kill(-pgid, 0) still found a member of the start process group at its exit`. Restored and rebuilt: 1 passed.\n- The source entry (`bin/run-dev.js` under tsx) is not used by the pin: tsx's own esbuild service is a child of the `start` parent there and would be read as this defect.\n\nNo existing test was changed. One gate's census changed with it: `scripts/check-cli-test-child-env.mjs` pins the exact set of test files that spawn the built entrypoint, and the new pin joins that set (twenty-one files become twenty-two), with an entry saying why it spawns the built entry. The gate's self-test and scan both pass at the head.\n\n## Acceptance notes\n\n- Card item 3 (document the behaviour if intended) does not apply: the behaviour was not intended and is fixed.\n\n## Verification\n\nGate readings are in the os-dev report on the card.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRfW5u1LRmhWwaYHRp\n"
+}

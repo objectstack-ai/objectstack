@@ -1,0 +1,31 @@
+{
+  "number": 34515,
+  "kind": "issue",
+  "title": "Host resume seam: a second resume of the same hand-off after a wizard advanced hands the first screen's values to the current screen as the approver (bind an approval to its screen)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T23:42:21Z",
+  "updated_at": "2026-11-16T23:45:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34515",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: a contract gap found while landing #34386. It is the out-of-scope finding of the L2 contract review on PR #34492 (record 6932783796), and area `o2-D` asked for the card. Dedupe: `dispatchActionResume paused run screen`, `hand-off resume same run id second screen`. A seat runs these before triage.\n\n## 维护者速读\n\n- 现象：宿主续跑接口 `dispatchActionResume` 只拒绝已经离开 paused 状态的 run。一个多屏向导被第一次批准推到下一屏后，状态仍是 paused、run id 不变。这时同一个 hand-off 如果再被续跑一次，第一屏的值会以批准人的身份交给当前屏。会再续跑一次的情形有三种：一次重试的批准;agent 连调两次 `resume_run` 时的第二个待办;用户已在应用里往前推进之后才批下来的待办。\n- 为什么要裁：结构性修法是把每次批准绑定到具体的那一屏，这要改已裁定的契约形状(#33689、#33690)。\n- 需要你做的：本卡先由席位写选项与四维分析，再挂 `needs-user-decision`;在那之前 ⛔ 不派发。\n\n## What was measured\n\n- Source: the L2 contract-review record 6932783796 on PR #34492 (head 9c404cd8). PR #34492 only rewords the prose to describe this truthfully. It does not change the structure.\n- Folded here: N2 from the same record. The enforced-set comment in `action-execution.ts` does not mention the host resume gate.\n\n## Governing text\n\n#33689, #33690 (the ruled hand-off and resume contract shape); `dispatchActionResume` / `ActionResumeRequest` as #34386 lands them.\n\n## Next\n\nThe seat writes the options (bind each approval to a screen or step id, versus refuse any second resume of the same hand-off, versus keep and document) with the four-axis analysis, and then moves this card to `needs-user-decision`.\n"
+}

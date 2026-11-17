@@ -1,0 +1,32 @@
+{
+  "number": 34581,
+  "kind": "pull_request",
+  "title": "test(organizations): a restart between the un-walled seed and the person's sign-up still fills the seed's person columns",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:14:55Z",
+  "updated_at": "2026-11-17T02:16:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34581",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9J4L3bvmRRFrdqMXF1CMHSi)_\n\nFixes #34542\n\nClause-②: no\nMetadata-protocol: none\n\nThe claim recorded `Clause-②: yes (widening)`; the diff is test-only, so both lines are corrected to what it measures. The card's premise did not hold on `origin/main` (1e4656d01): no contract change is made.\n\n## 维护者速读\n\n- 改了什么：只加了一个测试。在未开组织隔离墙的安装里，种子写完、被引用的人还没注册时重启一次，再让这个人注册，断言种子行上的人员列被补上。\n- 为什么改：卡上担心待补引用只在进程内存里，重启就丢。实测不会丢：未开墙的启动每次都重放内联种子，第二个进程的重放在同一行上又遇到同一个没解析的人，重新挂起，注册时照样补上。持久的持有者就是种子声明本身，所以没有改 seed-settlement 契约，也没有加第二份记录。\n- 风险与回滚：不改任何产品代码，无风险;回滚即 revert。\n- 先看：packages/plugins/organizations/src/default-organization-seed-owner.wall.test.ts 末尾新加的 describe(两次启动共用一个 SQLite 文件)。\n- 两分钟验证：pnpm --filter @objectstack/organizations exec vitest run src/default-organization-seed-owner.wall.test.ts,预期 7 个用例全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/plugins/organizations/src/default-organization-seed-owner.wall.test.ts`: a new top-level `describe` in the existing harness file. It boots the un-walled app over a SQLite file (`bootStack({ databaseFile })`), reads the seeded row with NULL `assignee` / `reviewer`, stops the kernel before the named person exists, boots a second kernel cold over the same file, signs the person up, and asserts both columns now name the person on the row the first process seeded (same row id). The file header gains one paragraph saying what the leg shows.\n\nNo product file changes. The held-reference list stays where #34516 put it (`SeedLoaderService`, held by `AppPlugin`), and it needs no persisted copy: the inline seed of an un-walled boot runs on every start (`AppPlugin` runs it unless the wall is up or `skipSeedData` is set), reference resolution runs before the write decision, and a row matched on replay still reports its landed id (`noteLanded` on the `skip` / `update` paths), so pass 2 holds the same reference again in the new process.\n\n## Tests\n\n- New: the restart leg above, 2 cases (a PREMISE case and the fill case).\n- No existing test was changed.\n\n## Acceptance notes\n\n- Premise check on `origin/main` 1e4656d01, before any edit, with the same two-boot probe: `mode: 'upsert'` dataset, columns filled after the restart; `mode: 'ignore'` dataset, filled too.\n- Negative control (the probe can fail): the second boot mounting the same app with no datasets leaves both columns NULL after the person signs up (`AssertionError … to match object`, 1 failed). The fill depends on the restart's own replay, which is what the pin holds.\n- The card's second Done-when line (\"one holder, the persisted record\") assumed a persisted seed-settlement record. `seed-settlement` is an in-process probe (`ISeedSettlementService`); nothing persisted carries that name. With the replay already re-deriving the hold, a persisted copy would be a second holder of what the seed declaration already says.\n- What still cannot fill after a restart: a reference whose dataset is no longer declared on the restarted boot (the negative control). That is the seed no longer naming the person, not a lost hold.\n\n## Verification\n\n<details><summary>Test file at 8f3e7e4d07 (after merging origin/main)</summary>\n\n```\npnpm --filter @objectstack/organizations exec vitest run --maxWorkers=2 src/default-organization-seed-owner.wall.test.ts\n      Tests  7 passed (7)\nos-verify-lock: VERDICT command-exit 0\n```\n\n</details>\n\n<details><summary>Typecheck at 399d9b7d (the merge brought no change to this package)</summary>\n\n```\npnpm --filter @objectstack/organizations typecheck\nos-verify-lock: VERDICT command-exit 0\n```\n\n</details>\n\n<details><summary>Derived gate set</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derives 53 families for this diff. All 53 ran at 399d9b7d and answered exit 0; `--ran` reconciles 53 run, 0 NOT-MEASURED. Two first answered exit 3 (shallow clone; no full build) and were re-run after `git fetch --unshallow` and `pnpm build`. The same 53 are re-run on the merged head; the dev report on the card carries that reading.\n\n</details>\n"
+}

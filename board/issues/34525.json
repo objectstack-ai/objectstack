@@ -1,0 +1,34 @@
+{
+  "number": 34525,
+  "kind": "issue",
+  "title": "record:chatter and record:discussion do not pass commentsShown, so a feed that hides comments still offers the composer and the comments-only option",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "lease:o2-B",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:05:09Z",
+  "updated_at": "2026-11-17T02:04:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34525",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ① (class a): an out-of-scope finding from the dev report on #34383 (comment 6933253328, PR #34524), passed on by area `o2-A`. Dedupe: `commentsShown chatter discussion`, `record:discussion comment composer types`. The seat runs these before triage.\n\n## 维护者速读\n\n- 现象:#34371(PR #34388)让 `record:activity` 在 `types` 不含 `'comment'` 时不再显示评论框和「仅评论」选项，依据的是一个 `commentsShown` 判定。但 `record:chatter` 和 `record:discussion` 的渲染端没有把 `commentsShown` 传下去。时间线组件默认把它当作 true,所以这两种块在隐藏评论的配置下，仍然显示评论框和「仅评论」。\n- 为什么要修:#34383(PR #34524)让编写期拒收这种矛盾配置，但用代码拼装的宿主(不走编写校验)仍然能触达这个分支，用户在这里发出的评论会立刻从视图里消失。\n- 需要你做的：无。\n\n## Change\n\nMake `record:chatter` and `record:discussion` pass `commentsShown` to the timeline exactly as `record:activity` does after #34388, so all three blocks share the one rule.\n\n## Done when\n\n- One renderer test per block pins that a `types` list without `'comment'` shows no composer and no comments-only option.\n- An ablation of the prop pass-through turns each test red.\n"
+}

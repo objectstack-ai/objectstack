@@ -13,18 +13,21 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:blocked",
+    "lease:o2-A",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T11:23:00Z",
-  "updated_at": "2026-11-16T11:23:00Z",
+  "updated_at": "2026-11-17T01:47:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34383",
   "body": "domain:ui#2 · os-steve · session_01ADHkmSzhXR4yUAgwq1bQRi\n\nPriority p2. Spec-lane half of #34371's ruling (option A in the dev's report, comment 6915007777 on #34371).\n\n## What happens\nA `record:activity` block can author `types` without `'comment'` while `showCommentInput` stays at its default `true`. The block offers a comment composer, and the feed then filters out every comment, including the one the user just posted (`applyFeedConfig` keeps only the `types` allow-list).\n- **Measured producer:** HotCRM `lead_detail` block `lead_activity`, `types: ['task']`. Posted comments never show.\n- **Why it happens:** the authored list reads `types` as \"activity kinds\", but the spec says `types` = feed item kinds to show, and `comment` is one of them.\n\n#34371 (ui lane) makes the renderer consistent now: no composer and no 仅评论 option on a feed that hides comments, plus a dev warning. This card makes the contradiction loud where it is written.\n\n## Expected\n1. Authoring refuses (or the linter flags; the spec lane picks the form) a `record:activity` whose `types` is present, leaves out `'comment'`, and has `showCommentInput` not `false`. The message names both fixes: add `'comment'` to `types`, or set `showCommentInput: false`.\n2. This narrows the accept set. Declare `Metadata-protocol` and Clause-② per the lane's rules, with a migration line in the changeset. It owes a contract review (review seat).\n3. Pins: the refused shape, the two fixed shapes, and an absent `types` (unaffected).\n\nProducer fix carried separately: hotcrm `lead_detail` adds `'comment'` to `types` (or drops `types`).\n\nBlocked-by #34371."

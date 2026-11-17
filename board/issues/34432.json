@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "lease:o2-D",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T17:13:59Z",
-  "updated_at": "2026-11-16T17:49:25Z",
+  "updated_at": "2026-11-17T02:21:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34432",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pHNFS9mn8hS13iGyL\n\nFound by the #34407 dev (os-dev-report 6923380737, `out_of_scope_findings`), filed by area o1-B on the `repo:objectstack#1` seat's route. Ungraded: triage gives first touch.\n\n**Business reason.** A package author whose composed bundle is malformed needs a refusal that names the fault. Today install-local tells them the database is unavailable and to retry. Retrying never helps, and they look in the wrong place.\n\n**Today.**\n- Step 2c″ `evaluateDeclaredRenames` turns an artifact-resolver refusal into the unreadable-table 503.\n- `reach:` measured through the real `POST /api/v1/marketplace/install-local` route handler in a vitest harness, posture `single`, on base `857941dbe8` and still present at PR #34428's head `c98999cb`. A composed body the resolver refuses (`packages: 'not-a-list'`, or a package entry carrying a retired bare `indexes[].unique: true`) answers 503 `SERVICE_UNAVAILABLE` with \"Installing ... is stopped: the tables its declared rename(s) carry could not be read (...) ... Retry once the database answers.\"\n- PR #34428 (#34407) answers the same refusal with its declared 4xx at its own step-2b call site (422 `INVALID_ARTIFACT_PACKAGES`, isolated posture), so the two steps disagree on the same input.\n\n**Target.**\n- [ ] Step 2c″ answers a resolver refusal with that refusal's declared status and code (422 `INVALID_ARTIFACT_PACKAGES` / `INVALID_ARTIFACT_PACKAGE_ENTRY`), writes nothing, and keeps the 503 only for a table that really could not be read.\n- [ ] An undeclared throw is rethrown, not relabelled.\n- [ ] Pins through the install route: both refused shapes answer 422 with the resolver's code; a real unreadable-table case still answers 503.\n\n**Dedupe.** Searches over open and closed issues: \"install-local 503 declared renames\", \"evaluateDeclaredRenames\", \"INVALID_ARTIFACT_PACKAGE_ENTRY install-local\". Hits: #34407 (a different step), #31801 (closed, exposes the rename planner), #33922 (namespace parsing, a different refusal). None covers this answer."

@@ -1,0 +1,31 @@
+{
+  "number": 34467,
+  "kind": "issue",
+  "title": "cloud: in-app build (L1 graph-lint) findings carry a producer-written customer sentence (userMessage), parked per #32984 Q1 B",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "priority:p2",
+    "repo:cloud",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T21:01:07Z",
+  "updated_at": "2026-11-16T21:01:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34467",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ③ maintainer-directed. Ruling Q1 B 「B 出问题的一方写客户句」 on #32984 (record 6929121584), parameter 5: the cloud half is parked. ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** 云端搭建检查(cloud `service-ai-studio` 的 L1 graph-lint)给出的问题，也要像平台发布检查一样，带一句由产生方按用户语言写的客户句(可选字段 `userMessage`)。\n- **为什么暂缓：** 你说过「应用内搭建 cloud 端不着急改」。在它落地之前，草稿问题区继续显示通用句，技术详情折叠。\n- **前置：** 平台一半(#32984 Q1 的框架 PR)先合并，字段名和含义以它为准。\n\n## Done when\n\n- Every cloud L1 graph-lint finding the console shows carries an optional `userMessage` in the request's language (request locale, then the workspace default, then `en`), with the same field name and meaning as the platform's `RuntimeBuildIssue.userMessage`. The console's draft-issues block renders it, and a finding without one keeps the generic sentence.\n\nDedupe words: graph-lint userMessage, cloud build finding customer sentence, service-ai-studio issue language."
+}

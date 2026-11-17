@@ -1,0 +1,37 @@
+{
+  "number": 34486,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a page printed in the dark theme prints on a white sheet, margins included",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T22:36:16Z",
+  "updated_at": "2026-11-16T23:32:39Z",
+  "closed_at": "2026-11-16T23:32:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-16T23:32:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34486",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9HX3N1i43Q5LVKguRj7XC1c)_\n\nFixes #34446\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：控制台在深色主题下打印（打开“背景图形”）时，纸面一律是白的：打印页四周 12 mm 页边不再是深色边框，列表打印也不再是深色纸上的黑字。屏幕上的深色主题不变。\n- 为什么改：深色主题的 `color-scheme: dark` 让浏览器把纸面底色画成深灰 rgb(18, 18, 18)；打印规则把所有盒子设成透明，于是露出的底色就印了出来。在跑着的控制台里实测复现：打印页四周深色边框，列表整张深色。\n- 风险与回滚：只加了一条 `@media print` 里的规则（深色时纸面用浅色配色），屏幕不受影响；浅色主题打印不变（对照实测仍是白边）。回滚即还原本 PR。\n- 先看：`ui/packages/app-shell/src/styles.css` 打印块第 7 条规则；`ui/e2e/print-dark-theme-paper-34446.spec.ts`。\n- 两分钟验证：控制台切到深色主题，打开任一发票记录或发票列表，Ctrl+P，勾选“背景图形”，预期预览四周页边是白的、列表纸面是白的。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nThe card names `ui/packages/components/src/renderers/layout/page-print.ts` as the place to fix. Measured against `origin/main`, that sheet is not the source: it is mounted only for a page that declares `print`, while the dark sheet appears whenever the Console prints in the dark theme. The source is the Console-wide print block in `ui/packages/app-shell/src/styles.css`, which owns the 12 mm `@page` margin and the dark-theme print rule.\n\n**Mechanism.** The theme's `.dark { color-scheme: dark }` (`@object-ui/components` `index.css`) also darkens the canvas, the colour the browser paints under a transparent root. On paper that canvas fills the whole sheet. Chromium draws it as one rectangle the size of the sheet in `rgb(18, 18, 18)`, margin band included. Rule 6 of the app-shell print block makes every box transparent in the dark theme, so the canvas also shows through the content of any page that is not a print page. A print page paints its own white (`:has([data-print-page])`, from #34228), so there only the margin band stays dark.\n\n**Fix.** Rule 7 of the same print block: `.dark { color-scheme: light; }`, inside `@media print`. On paper the canvas is then white, and Chromium paints no sheet rectangle at all, the same as the light theme. The screen keeps its dark scheme.\n\n## Tests\n\n- New `ui/e2e/print-dark-theme-paper-34446.spec.ts` (Playwright, Chromium only, the CI E2E project). It uses the Console's production CSS read from `apps/console/dist`, a bare document with `class=\"dark\"` or `class=\"light\"` on the root, and `page.pdf({ printBackground: true })`. It reads the PDF content stream for the rectangle that covers the whole sheet, so no rasteriser is needed on the runner.\n  - Dark theme: no non-white sheet fill; the root's colour scheme is `light` on paper and stays `dark` on screen.\n  - Light theme (control): no non-white sheet fill.\n  - Reader control: a page with `color-scheme: dark` and no Console CSS reads back the `.0706 .0706 .0706` sheet fill, so the reader cannot pass for the wrong reason.\n- `ui/packages/app-shell/src/__tests__/print-stylesheet-4462.test.ts`: one case added. It checks that the print block carries the rule, and that no `color-scheme: light` sits outside the print block. No existing assertion changed.\n\n## Acceptance notes\n\n- **Acceptance 1, reproduced in a running Console.** Showcase app on its own port (`objectstack dev --ui --seed-admin`), Console built from this tree at base `0e2e4f56`, signed in as the seeded admin, theme set through the Console's own theme key. Then Playwright `emulateMedia({ media: 'print' })`, `page.pdf({ printBackground: true, preferCSSPageSize: true })`, page 1 rasterised with `pdftoppm` at 72 dpi. Readings are in Verification below.\n- Light theme, unchanged by this PR: with background graphics on, a list prints its body on the app's light grey (`rgb(246, 246, 249)`), with white margins. That is the screen background printed because background graphics were asked for, not the dark-canvas mechanism, so it is left alone and not filed.\n- The serial card #34427 (same print area) is not touched.\n\n## Verification\n\n<details><summary>Running Console, before (base build) and after (this branch's build)</summary>\n\n| route, theme | margin band before | margin band after | sheet centre before | sheet centre after |\n|:---|:---|:---|:---|:---|\n| invoice record print page, dark | rgb(18, 18, 18) | rgb(255, 255, 255) | rgb(255, 255, 255) | rgb(255, 255, 255) |\n| invoice list, dark | rgb(18, 18, 18) | rgb(255, 255, 255) | rgb(18, 18, 18) | rgb(255, 255, 255) |\n| invoice record print page, light (control) | rgb(255, 255, 255) | rgb(255, 255, 255) | rgb(255, 255, 255) | rgb(255, 255, 255) |\n| invoice list, light (control) | rgb(255, 255, 255) | rgb(255, 255, 255) | rgb(246, 246, 249) | rgb(246, 246, 249) |\n\nThe root's computed `color-scheme` on paper is `dark` before and `light` after in the dark theme.\n\n</details>\n\n<details><summary>The e2e spec, red on the base build and green on the fix</summary>\n\n- Console build from the base (fix absent): `pnpm --dir ui exec playwright test e2e/print-dark-theme-paper-34446.spec.ts --project=chromium` gives 1 failed, 2 passed. The dark case receives the sheet fill `[\".0706 .0706 .0706\"]` where `[]` is expected. The light control and the reader control pass.\n- Console rebuilt with the fix (`pnpm console:build`, lock `VERDICT command-exit 0`): 3 passed.\n- `pnpm --dir ui exec vitest run packages/app-shell/src/__tests__/print-stylesheet-4462.test.ts`: 30 passed. `pnpm --dir ui run type-check:e2e`: exit 0.\n\n</details>\n\n<details><summary>Derived gates at b1993d3e</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 38 families from the 4 changed paths. All 38 ran locally and exited 0, among them `pnpm --dir ui exec vitest run scripts/` (171 files passed, 2 skipped), `pnpm check:test-source-alias`, `pnpm check:published-files` and `pnpm check:type-check-debt`. `--ran` reconciliation: 38 derived, 38 run, 0 NOT-MEASURED.\n- The e2e spec and the app-shell test ran at `11f386db`. `b1993d3e` only merges `origin/main` (no conflict, none of its files touches print or app-shell styles), so they were not re-run there; CI's `Build & E2E UI` and `Test UI` cover the final head.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRtzSY59gQRnUshAJv)_\n"
+}

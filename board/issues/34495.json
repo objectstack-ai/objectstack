@@ -1,0 +1,37 @@
+{
+  "number": 34495,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): a registered audit seam that fails to resolve stops the sealer instead of falling back",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T22:59:46Z",
+  "updated_at": "2026-11-17T00:42:30Z",
+  "closed_at": "2026-11-17T00:42:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T00:42:28Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34495",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi96xkbCcbB1nF3xM9vBtrWwE)_\n\nFixes #34280\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 审计封存器每轮取宿主的签名服务、导出服务和集群服务时，分清三种情况：没注册就用本机兜底（和以前一样）；注册了能取到就用；注册了却取不到（比如 KMS 客户端起不来）就这一轮不封存，并报一条 error 点名哪个服务。\n- **为什么改：** 以前「取不到」被当成「没注册」，于是悄悄改用本机密钥签名、悄悄不导出、悄悄不加集群锁，没有任何日志；客户以为是 KMS 签的，其实不是。另外用工厂方式注册的签名服务以前根本取不到，也被悄悄忽略。\n- **风险与回滚：** 只影响注册了这三个服务的宿主；配置坏掉的宿主从「悄悄降级」变成「停止封存并报错」，配置正常的宿主无变化。回滚即还原本 PR。\n- **先看：** `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` 的 `resolveSeams`；`packages/plugins/plugin-audit/src/audit-plugin.ts` 末尾的 `hostSeamResolver`。\n- **两分钟验证：** `cd packages/plugins/plugin-audit && npx vitest run src/audit-seal/audit-seal-host-seam-resolve-34280.integration.test.ts`，预期 5 条全绿。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- `audit-seal/sealer.ts`: a pass resolves its three host seams (`audit.checkpointSigner`, `audit.checkpointSink`, `cluster`) once, at its start, in `resolveSeams()`. A getter that answers `undefined` means \"not registered\" and keeps its stand-in (local signer, no export, in-process lock). A getter that throws means \"registered and not resolvable\": the pass seals nothing and reports at `error`, naming the slot and the fallback it refused, once per `REPORT_REPEAT_MS` while it lasts (the sealer's existing `report()` discipline). The resolved sink and cluster are handed to the lock and the object passes; the lock no longer absorbs a throwing cluster getter, and delivery no longer re-resolves the sink per checkpoint. A sink whose `deliver()` fails is still only a warning, unchanged. The getters may now return a promise; `AuditSealer` is not exported from the package root.\n- `audit-plugin.ts`: `startSealer` resolves each seam with `hostSeamResolver`, which uses the kernel's async accessor and absorbs only the branded \"never registered\" rejection (`isServiceNotRegisteredError`, `@objectstack/core`), the pattern `service-automation` already uses for `tenancy`. Every other rejection propagates. The async accessor also builds a factory-registered seam, which the sync accessor refused with \"is async\" and the old helper read as absent. A host with no async accessor (`LiteKernel`, no factories) keeps the sync accessor, where \"not registered\" is the only fault.\n\n## Tests\n\nNew `src/audit-seal/audit-seal-host-seam-resolve-34280.integration.test.ts`, on a real `ObjectKernel` with ObjectQL over SQLite (wasm):\n\n1. No host signer: one checkpoint, signed under the local key (its fingerprint is the only `sys_audit_signing_key` row); no error.\n2. Host signer registered as a factory that throws: `runPass()` → 0, no checkpoint, no local key created, exactly one error naming `audit.checkpointSigner` and \"does not sign with the local key\"; a second pass adds no second line.\n3. Host signer that resolves, as an instance and as a factory: the checkpoint carries the host key id and verifies under the host public key; no local key created.\n4. Sink factory that throws: nothing sealed, one error naming `audit.checkpointSink`; a resolving sink factory is handed the checkpoint.\n5. Cluster factory that throws: nothing sealed, one error naming `cluster`.\n\nAblation (fix reverted, test kept): cases 2–5 red (`expected 1 to be +0` for 2/4/5; case 3's factory leg signs under the local key), case 1 green.\n\nNo existing test changed. `plugin-audit`: 100 files / 1659 tests green; `pnpm typecheck` (incl. `check:test-typecheck`) green.\n\n## Acceptance notes\n\n- **Narrowing declaration (the card asks the dev to measure it):** `Clause-②: no`. No key, config value or service shape a host writes is refused; what changes is the reaction to a registration that already fails. A host whose signer, sink or cluster registration threw used to seal silently with the local key or without its lock and now seals nothing until it is fixed, which is the card's rule. A working host sees no change. The changeset says this in its last paragraph.\n- **Same-family site, not changed here (out of the claimed file surface):** `packages/cli/src/utils/audit-redaction-seal.ts` resolves `audit.checkpointSigner` / `audit.checkpointSink` with the same catch-all helper, so a CLI redaction run with a failing host signer falls back to the local signer in `amendment-writer.ts`. Handed to the seat for a follow-up card.\n- \"Logged once\": the line repeats at most once per `REPORT_REPEAT_MS` while the fault lasts, as every other sealer fault does; the test pins that a second pass inside the window adds no line.\n\n## Verification\n\nGates per `node scripts/pm/dispatch-gates.mjs --commands` after the last commit: see the `os-dev-report` comment on #34280.\n"
+}

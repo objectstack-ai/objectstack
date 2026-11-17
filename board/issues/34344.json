@@ -2,8 +2,8 @@
   "number": 34344,
   "kind": "issue",
   "title": "ui: a record form's inline field members (customFields, inline section entries) are not stamped recordBeingEdited, and the loose FormFieldSchema lets one author the stamp",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T08:31:03Z",
-  "updated_at": "2026-11-16T11:58:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T22:49:41Z",
+  "closed_at": "2026-11-16T22:48:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34344",
   "body": "domain:ui#2 · os-steve · session_01ADHkmSzhXR4yUAgwq1bQRi\n\nFiling gate: ③ an out-of-scope finding of contract review 6911356996 on PR #34253 (#34197), S1, which the reviewer accepted as a follow-up; carrier: seat.\nReader: `domain:ui` (`ui/packages/plugin-form/src/ObjectForm.tsx`, `ui/packages/plugin-form/src/sectionFields.ts`, `ui/packages/types/src/zod/form.zod.ts`). Grade suggestion: p3 (the published spec is not affected: its `customFields` member is closed and declares no `lookupFilters`).\nDedupe: `is:issue is:open recordBeingEdited`: none.\nBlocked-by: #34197 (PR #34253 introduces the `recordBeingEdited` stamp and `withRecordBeingEdited`)\n\n## 维护者速读\n\n#34197 让查找字段的 `{ $record }` 过滤只在「记录表单」里解析：表单用一个运行时戳 `recordBeingEdited` 声明「正在编辑一条记录」。但表单里直接内联写的字段（`customFields` 成员、内联分区条目、独立表单字段）不经过打戳的两个构建函数，所以它们的 `{ $record }` 条目被丢掉，而它们继承的说明却说会解析；同时 ui 侧的 `FormFieldSchema` 是宽松对象，这样的字段还能自己写上这个戳把自己打开，违背「没有文档能写这个键」的约定。\n\n## Facts (read on PR #34253 head `503e0152`, record 6911356996)\n\n- `withRecordBeingEdited` has two callers: `ObjectForm` (auto layout and the master-detail header) and `fromObjectSchema` in `sectionFields.ts` (modal, drawer, tabbed, wizard and sectioned forms).\n- `ui/packages/types/src/zod/form.zod.ts` declares `FormFieldSchema` as a loose object and takes `lookupFilters` by reference to the spec row, describe included.\n- An inline form field reaches the widget as written: not stamped, so its `{ $record }` entries are left out; and a written `recordBeingEdited` key is carried through.\n\n## Ask\n\n1. Stamp inline field members of a record form in the same two builders (they are fields of the record being edited), so their `{ $record }` entries resolve as the describe says.\n2. Drop an authored `recordBeingEdited` key from any document-supplied form field before the stamp is applied, so only the builders can write it.\n3. Pins: an inline `customFields` member with `{ $record }` resolves in a record form; a form field that writes `recordBeingEdited` itself outside a record form does not resolve; CONTROL today's stamped object fields unchanged. Ablate red.\n4. Update the census/ledger note on `recordBeingEdited` to name what holds the runtime-only invariant.\n\n⛔ Not a claim."

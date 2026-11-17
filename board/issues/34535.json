@@ -1,0 +1,31 @@
+{
+  "number": 34535,
+  "kind": "issue",
+  "title": "plugin-auth: admin import-users does not join created users to the importing admin's current organization in multi-org mode",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:15:39Z",
+  "updated_at": "2026-11-17T00:27:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34535",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: class a, from the final report 6933432108 of card #33113 (PR #34531), passed on by area `o2-D`. Dedupe: `import-users organization`, `joinCurrentOrganization import`.\n\n## 维护者速读\n\n- 现象：多组织模式下，管理员在控制台单个新建用户时，新用户会加入管理员当前所在的组织;用 `POST /api/v1/auth/admin/import-users` 批量导入的用户不会。\n- 后果：导入的用户不在这个组织里。导入文件带 `positions` 列时，每一行都会被成员资格校验拒绝(`VALIDATION_FAILED`,`user_id` `reference_not_found`)。\n- 需要你做的：无。\n\n## Evidence (re-check commands)\n\n- `grep -n \"joinCurrentOrganization\" packages/plugins/plugin-auth/src/admin-user-endpoints.ts`: create-user joins the current organization.\n- `grep -n \"joinCurrentOrganization\\|createUser\" packages/plugins/plugin-auth/src/admin-import-users.ts`: import-users only calls `authApi.createUser` (no join).\n- `reconcile-membership.ts` returns `none` in multi mode, so nothing joins the user later.\n\n## Change\n\nMake import-users go through the same membership step create-user uses, as one shared helper and not a second copy. Pin it with a multi-org test: an imported user is a member of the importing admin's current organization, and a `positions` row on it validates.\n\n## Done when\n\nThe pin test passes in multi mode, and single-org mode behaviour is unchanged.\n"
+}

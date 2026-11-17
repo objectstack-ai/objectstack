@@ -1,0 +1,36 @@
+{
+  "number": 34488,
+  "kind": "pull_request",
+  "title": "fix(console-ai): a message sent while an image or PDF uploads waits behind the turn that carries it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T22:40:55Z",
+  "updated_at": "2026-11-17T00:23:15Z",
+  "closed_at": "2026-11-17T00:23:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T00:23:13Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34488",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9R6fQuMSzSrRW2oowG4K2kQ)_\n\nFixes #34462\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：控制台「问 AI」聊天里，带图片或 PDF 的那条消息要等上传完才发出；现在上传期间又发的消息会排在它后面，按用户发送的顺序到达 agent；上传期间输入框显示忙碌，新打的字会像回复进行中那样排队。\n- 为什么改：以前不带附件的消息立刻发出，带附件的要等几秒上传，后发的一句会先到 agent，agent 在看到文件之前就先回答了（#34459 引入）。\n- 风险与回滚：只动 `AiChatPage.tsx` 的发送路径和传给对话面板的 `isLoading`；上传期间面板显示「思考中」、计划卡按钮暂时锁住，上传结束（成功或失败）即恢复。回滚即 revert 本 PR。\n- 先看：`ui/packages/app-shell/src/console/ai/AiChatPage.tsx` 的 `doSend` / `prepareTurn`（发送链与忙碌计数）；同文件 `ChatbotEnhanced` 的 `isLoading={isLoading || preparingTurn}`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/console/ai/__tests__/AiChatPage.sendOrderWhileUploading-34462.test.tsx`，预期 3 个用例全部通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`ui/packages/app-shell/src/console/ai/AiChatPage.tsx`, the console AI chat's send path:\n\n- **Turns go out in the order sent.** `doSend` used to call `sendMessage` at once for a turn with no attachment, but only after `uploadChatAttachments` (or the spreadsheet parse) settled for a turn with one. A turn sent in between overtook it. Now every turn that has attachments, or that is sent while an earlier turn is still being prepared, joins a send chain (`sendChainRef`): its attachments are read at once (two turns' uploads overlap), and its `sendMessage` waits for the turn ahead of it. A turn with no attachment and nothing ahead of it still sends synchronously, exactly as before.\n- **Busy while a turn is prepared.** A counter of turns being prepared drives `preparingTurn`, which is folded into the `isLoading` the page hands `ChatbotEnhanced`. The composer already queues a message typed during a running reply (#32984: shown above the composer, sent when the turn ends), so a message typed during an upload now queues there too and is sent after the uploading turn and its reply. The page's own `isLoading` (canvas refresh, package binding, the Stop handler) is unchanged.\n- **Failure releases it.** The counter is decremented in a `finally`, so an upload failure (named in the turn as not read, as before) or any other failure in preparing a turn releases the busy state; a failing turn does not hold the chain either.\n- The attachment reading (spreadsheet brief, uploads, notes) moved unchanged from `doSend` / `sendNonSheetAttachments` into one `prepareTurn`; `onSent` is told the same text as before (the sheet brief, not the file notes).\n\n## Tests\n\nNew `ui/packages/app-shell/src/console/ai/__tests__/AiChatPage.sendOrderWhileUploading-34462.test.tsx`, on the same real subjects as the #32749 test (real `ChatPane` send path, real `useChatConversation`, real `useObjectChat` transport, `fetch` stub capturing the chat POSTs, a recorder for `ChatbotEnhanced`, an upload adapter the test settles by hand):\n\n1. a turn sent while an earlier turn's photo is still uploading is not POSTed until the upload settles, and then goes out after that turn; the composer's `isLoading` is true during the upload and false after;\n2. an upload that fails releases the busy state, and the turn still sends naming the file as not read;\n3. CONTROL: a turn with no attachment sends at once and uploads nothing.\n\n<details><summary>Runs (head 53a363bc, before the main merge, which touched no file here)</summary>\n\n```\nvitest run …sendOrderWhileUploading-34462.test.tsx …attachmentsUpload-32749.test.tsx\n  Tests  8 passed (8) · VERDICT command-exit 0\nvitest run packages/app-shell/src/console/ai/\n  Test Files  56 passed (56) · Tests  360 passed (360) · VERDICT command-exit 0\n```\n\n</details>\n\n<details><summary>Ablations (mutation on disk, file restored after)</summary>\n\n```\nA1  drop `await ahead;` (the send no longer waits for the turn ahead)\n    × a turn sent during a slow upload reaches the agent after the turn carrying the upload\n      AssertionError: expected 2 to be 1\n    Tests  1 failed | 2 passed (3)\nA2  isLoading={isLoading || preparingTurn} -> isLoading={isLoading}\n    × a turn sent during a slow upload …   AssertionError: expected false to be true\n    × an upload that fails releases the busy state …   AssertionError: expected false to be true\n    Tests  2 failed | 1 passed (3)\n```\n\nThe CONTROL stays green under both, as it should.\n\n</details>\n\n## Acceptance notes\n\n- During an upload the pane's `isLoading` is true, so `ChatbotEnhanced` shows its thinking row, locks the plan card's actions and draws the submit button as Stop. The page passes `onStop` only for a real reply, so Stop does nothing while a turn uploads (cancelling an upload is not in this card). Locking the plan actions is wanted: a plan click is a send too, and would otherwise overtake the uploading turn the same way.\n- A send that reaches the page directly (a suggestion click, a plan action) while a turn is being prepared waits in the page's chain and is handed to `sendMessage` right after that turn, not after its reply; typed messages go through the composer's queue and wait for the reply. Both arrive in the order sent, which is the card's acceptance.\n- #34461 (the attachment notes follow the conversation's language) edits the same `prepareTurn` code and is claimed after this PR lands (serial, same function).\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --ran`: reconciled on the final head; the file is at `/mnt/project-files/objectstack-seat2/34462-gates-ran.txt` and the reading is posted with the final-head comment.\n- CI runs the rest (Lint UI, Type Check UI, Test UI, Build & E2E UI and the repo gates); its result is read at the final head.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSYe73LCZ6WxGFvcko\n"
+}

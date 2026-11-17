@@ -1,0 +1,33 @@
+{
+  "number": 34569,
+  "kind": "pull_request",
+  "title": "fix(cli): an os migrate audit-* run stops when a registered host signer or sink fails to resolve",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T01:27:49Z",
+  "updated_at": "2026-11-17T01:58:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34569",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi96xkbCcbB1nF3xM9vBtrWwE)_\n\nFixes #34519\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** `os migrate audit-*` 四个改写命令在改写已封存的行之前要先签一份修订；签名时取宿主的签名服务和导出服务。现在和封存器（#34280）一样分三种情况：没注册就用本机钥（不变）；注册了能取到就用；注册了却取不到就整次运行报错退出，不改任何行。\n- **为什么改：** 以前「取不到」被当成「没注册」，修订会悄悄改用本机钥签名，导出也悄悄丢掉；工厂方式注册的签名器也取不到。这和 #34280 修掉的封存器问题同一形状。\n- **风险与回滚：** 只影响注册了签名器或导出服务、且注册已经坏掉的宿主：从悄悄降级变成报错退出（exit 1）。配置正常的宿主无变化。回滚即还原本 PR。\n- **先看：** `packages/cli/src/utils/audit-redaction-seal.ts` 末尾的 `hostSeam`；四个命令里 `await redaction.seal(...)` 一行。\n- **两分钟验证：** `cd packages/cli && npx vitest run src/utils/audit-redaction-seal.host-seam-34519.test.ts`，预期 4 条全绿。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- `packages/cli/src/utils/audit-redaction-seal.ts`: `RedactionSealRun.seal()` is now async and resolves `audit.checkpointSigner` and `audit.checkpointSink` through `hostSeam()`: the kernel's `getServiceAsync`, absorbing only the branded \"never registered\" rejection (`isServiceNotRegisteredError`, `@objectstack/core`); every other rejection becomes `Audit redaction seal: the '<slot>' service is registered but could not be resolved (<cause>) — no sealed row is amended or rewritten; the run does not <fallback> in place of a service the host registered. …`, with the cause attached. A kernel with no async accessor keeps the sync read, where \"not registered\" is the only fault. This is the rule and the wording of PR #34495 (the sealer, #34280).\n- The four commands (`audit-key-material`, `audit-mail-bodies`, `audit-metadata-bodies`, `audit-side-copies`): `const seal = await redaction.seal(stack.kernel, engine);`. The call already sat inside the try whose catch prints the error (or the `--json` error object) and exits 1, before `underAuditSealLock`, so a rejection stops the run before any row is amended or rewritten.\n- `content/docs/deployment/cli.mdx` (Sealed audit rows): one paragraph says who signs the amendments (the host signer when registered, the local key when none) and that a signer or sink registered but not resolvable stops the run with exit 1, never falling back to the local key.\n\n## Tests\n\n- New `src/utils/audit-redaction-seal.host-seam-34519.test.ts` (real `ObjectKernel` service registry; the crypto composition is stubbed to \"no provider\", which a run survives):\n  1. nothing registered: `signer` and `sink` are `undefined`, so the amendment writer signs with the local key, as before;\n  2. a signer factory that throws: `seal()` rejects with the slot name, the cause and \"does not sign with the local key\";\n  3. a sink factory that throws: `seal()` rejects naming `audit.checkpointSink`;\n  4. a signer that resolves, as an instance and as a factory, is handed over.\n- `audit-redaction-seal.contract.test.ts`: one new pin per command: `seal()` is awaited exactly once, before the `underAuditSealLock(` hold.\n- Ablation (fix reverted, tests kept): 7 red (cases 2–4 and the four await pins), case 1 green.\n- The new test imports `@objectstack/service-settings` at module top, as `check:test-source-alias` asks (the util's static reach names it through the mocked `one-shot-settings.js`).\n- No existing assertion changed. `packages/cli`: `pnpm typecheck` (incl. `check:test-typecheck`) green; `src/commands/migrate/` + the new file: 75 files, 606 passed / 8 skipped.\n\n## Acceptance notes\n\n- The card names the signer; the sink rides the same helper and the same rule, as in PR #34495, so it is covered here too.\n- `Clause-②: no`: no key, flag or config value an operator writes is refused; a run on a host whose signer or sink registration already fails now exits 1 instead of amending under the local key.\n\n## Verification\n\nGates per `node scripts/pm/dispatch-gates.mjs --commands` after the last commit: see the `os-dev-report` comment on #34519.\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRPxhTmqbUbMrqygh4 -->\n"
+}

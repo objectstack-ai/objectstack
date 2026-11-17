@@ -1,0 +1,36 @@
+{
+  "number": 34510,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): the L2 seat runs at the default tier and reviews each head through a fresh at-tier sub-agent",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T23:21:28Z",
+  "updated_at": "2026-11-17T00:42:32Z",
+  "closed_at": "2026-11-17T00:42:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T00:42:30Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34510",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9Uz4VDfxYaHN9rbUTRT9Tke)_\n\nFixes #34502\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** pm-dispatch 两个参考文件的文字：L2 审核席本身跑默认档，每个送审 head 起一个全新的只读子代理跑契约审核档；席位在自己会话里直接审会被档位校验拒掉，这一点写在证据规则那一行。\n- **为什么改：** 旧文本写「坐席者 = 能达契约审核档的账号的会话」，今天照这个读法开了 fable 审核席，它自己的转录被 `verify-review-tier.mjs` 拒了，而且最贵。您 23:08Z 同意「重开一条 opus 审核席」并要求立卡更新。\n- **风险与回滚：** 只改 `.claude/**` 文字，不动代码、不发布；两个文件行数都不变（棘轮余量 0 前后一致）。回滚即 revert。\n- **先看：** `references/lanes/l2-review.md` 座位节第 6、7 行；`references/contract-review.md` 第 36–38 行。\n- **两分钟验证：** `node scripts/pm/check-skill-line-ratchet.mjs`，预期退出 0，两文件 22/22、63/63。\n- **需要你做的：** 无（按路径读档；只碰 `.claude/**`，预期 Tier S，达档 L2 PASS 后由席位落地）。\n\n## What changes\n\nSkills text only, under `.claude/skills/pm-dispatch/references/`:\n\n- `lanes/l2-review.md` § 座位:\n  - The seat line no longer says the seat session is one that reaches `CONTRACT_REVIEW_TIER`. It says the seating account can reach that tier, and the seat session itself runs at the default tier.\n  - The effort line says: one fresh read-only sub-agent per submitted head runs the at-tier review, and the seat never reviews at tier in-seat, pointing at `../contract-review.md` for the evidence rule.\n- `contract-review.md`, the `--tier-evidence` lines (36–38): the session-transcript condition now names card threads only, and one clause names the seat trap at its home: a seat calls `Skill` at seating, so its own transcript never meets the condition. The sub-agent output file stays the evidence, as before. The path and shape of the session transcript are left to the header of `scripts/pm/verify-review-tier.mjs`, which already documents them; this text points at the verifier and does not copy it.\n\n## Line budget\n\nBoth files sit at ratchet headroom 0 and stay there (22/22, 63/63). Net added lines: 0 in each file. Every edited line is at or under 120 bytes.\n\nCuts that paid for the new words inside lines 36–38 of `contract-review.md`, each with its surviving home:\n\n- `node scripts/pm/record-recognisers.mjs --template` → `record-recognisers.mjs --template`: the same file already names the script bare at line 45 (`record-recognisers.mjs --brief-template`) and line 46 (`--template`).\n- `~/.claude/projects/*/<id>.jsonl` → 「本会话转录」: the path lives in the header of `scripts/pm/verify-review-tier.mjs` (the \"transcript it reads\" section), which line 38 names.\n- 「卡线程或席内 L2」 → 「卡线程」: the in-seat case is now stated outright on line 38 instead of as a branch of the condition.\n\n## The open point, measured\n\nThe card's open point was whether a `CONTRACT_REVIEW_TIER` sub-agent started from a seat at the default tier is served exactly at that tier. The project's L2 seat measured it on its first run (2026-11-16 23:16Z): the sub-agent's output file passed `verify-review-tier.mjs`, every turn at the tier. `premise_still_valid` stays true.\n\n## Tests\n\nNo code changed, so no test suite applies. No changeset: the diff is `.claude/**` only and publishes nothing; `skip-changeset` rides the create.\n\n## Verification\n\n`dispatch-gates --commands`, then `--ran`, on head a407b4dad6 (a merge of main after #34485, no rebase): 19 derived, 19 run, all exit 0. The derived set is the same 19 as on b049be86c6.\n\n```\n✓ dispatch-gates --ran: 19 derived famil(ies) accounted for — 19 run, 0 NOT-MEASURED (a DERIVED zero — all 19 recorded an exit code and none of them is 3).\n```\n\n<details><summary>Merge resolution: lanes/l2-review.md (the only conflict; contract-review.md auto-merged)</summary>\n\n#34485 deleted the legacy-spelling line that sat between this PR's two edited lines. Its deletion stands, its routing section is kept as main wrote it, and this PR's two seat lines are kept as written. The PR's delta against main is unchanged: the same 2 files, +5 / -5.\n\n```\n## 座位\n- 席位 `l2-review#N`,一席一座位贴;坐席账号能达 `CONTRACT_REVIEW_TIER`,席会话本身跑默认档。\n- effort `high`;每送审 head 起一个全新只读子代理达档审,⛔ 席内达档审(`../contract-review.md`)。\n- 每席开一个 `pm:mailbox` PR(`mailbox-open.mjs --seat l2-review#N`);签名、坐席与收班同他席。\n```\n</details>\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmSXPDB46NVRepWVrL3 -->\n"
+}

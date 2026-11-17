@@ -1,0 +1,36 @@
+{
+  "number": 34491,
+  "kind": "pull_request",
+  "title": "test(plugin-security): count cascade audit deletes on the fixture objects only",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T22:47:08Z",
+  "updated_at": "2026-11-17T00:02:48Z",
+  "closed_at": "2026-11-17T00:02:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T00:02:45Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34491",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9QP7ADonGVcADHtcKYo4CJg)_\n\nFixes #34413\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：plugin-security 的级联删除对等测试里，统计「审计账本删除行」的辅助函数只数三个测试夹具对象的行，不再只按 id 前缀过滤。只改这一个测试文件，产品代码不动。\n- 为什么改：账本里还有被撤销的共享记录的删除行，它们的 id 是随机生成的 16 位串；碰巧以 `h1` 开头时会被当成被删的子记录，case 4 随机变红，拖累无关 PR 的 Test Core 和合并队列。\n- 风险与回滚：只收窄测试的观察面；夹具对象的 id 全由测试自己写，断言强度不变。回滚即 revert 本 PR。\n- 先看:`packages/plugins/plugin-security/src/cascade-delete-security-parity.test.ts` 的 `auditedDeletes` 辅助函数(约第 211–226 行)。\n- 两分钟验证:`pnpm --filter @objectstack/plugin-security exec vitest run src/cascade-delete-security-parity.test.ts`,预期 8 条全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`auditedDeletes(prefix)` in `cascade-delete-security-parity.test.ts` now keeps only the audit ledger's `delete` rows whose `object_name` is one of the three fixture objects, then applies the prefix. Every fixture id is written by the test itself.\n\n## Why\n\nThe ledger also holds a `delete` row for each record share that plugin-sharing revokes when a line is deleted. Those rows carry the share's generated id (`nanoid(16)`, alphabet `A-Za-z0-9_-`). Case 4 revokes three shares, so each run had about a 3 in 4,096 chance that one share id started with `h1` and was counted as a deleted child.\n\nMeasured at `origin/main` 0e2e4f568, full file run, case 4: the audit ledger's `delete` rows include one `sys_record_share` row per revoked share, each with a generated id (for example `Mu8d39m7etn1dYeX`). Another run's share id was `4iL3UarT_0SnMA4D` (note the underscore). So a prefix with an underscore would not have been enough; the filter is on the object instead.\n\n**Same-file review of the other prefix filters** (the order asked for each to be checked):\n\n| Site | Reads | Can a generated id reach it? | Changed |\n|:--|:--|:--|:--|\n| `stored(prefix)`, line 207 | rows of the three fixture objects | No: every fixture row is inserted with an id the test writes | No |\n| `auditedDeletes(prefix)`, line 218 | `sys_audit_log` delete rows | **Yes**: revoked shares' ledger rows | **Yes** |\n| `sharedRecords(prefix)`, line 230 | `sys_record_share.record_id` | No: `record_id` is a line id the test writes | No |\n| case 4 `count(phase)`, line 383 | the object-less hook log `seen` | No: the recording hook already drops every object outside the fixture three. Measured: all 12 entries in case 4 are fixture ids; the 3 share deletes the hook also receives are dropped | No |\n\n## Tests\n\n<details><summary>Deterministic reproduction: a share id starting with h1</summary>\n\nOne leg each side of the fix, through `scripts/ablation-replace.mjs`: the first of case 4's three shares is inserted with the explicit id `h1PROBEcollision` (16 characters, the shape of a generated id that starts with `h1`); the other two keep generated ids. Restored after each leg (`git diff HEAD` empty, blob equal to HEAD).\n\n- Before the fix (`0e2e4f568`): `Tests 1 failed | 7 passed (8)`. The failing face is `auditedDeletes`, which received the extra `\"h1PROBEcollision\"`.\n- After the fix (`2cebbd4e1`): `Tests 8 passed (8)`.\n\n</details>\n\n<details><summary>Package suite</summary>\n\nAt `2cebbd4e1`, under the shared verify lock (`VERDICT command-exit 0`):\n\n- `pnpm --filter @objectstack/plugin-security test`: `Test Files 274 passed (274)`, `Tests 6849 passed | 45 skipped (6894)`.\n- `pnpm --filter @objectstack/plugin-security typecheck`: exit 0 (its `check:test-typecheck` step compiles the test files through `tsconfig.test.json`).\n\n</details>\n\n## Acceptance notes\n\n- The card names the object-less hook count (`s.id.startsWith('h1')`) as the site. On current `main` that count cannot see a generated id, as the table shows, and the deterministic reproduction reds `auditedDeletes` only. The ledger helper is the site this PR fixes. The CI log that recorded the extra key was not re-read here.\n- Test-only change: `skip-changeset`. Nothing under any package's published `files` changes.\n\n## Verification\n\n<details><summary>Derived gates: 54 of 54 exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derives 54 commands for this one-path change set. Each ran at `2cebbd4e1` with stdin from `/dev/null` and its exit captured before any pipe.\n\n- 51 exit 0 on the first run.\n- 3 exit 3 (`PREREQUISITE NOT MET`), then exit 0 after their prerequisite: `check-plugin-teardown-shape.mjs --self-test` after `git fetch --unshallow origin main`; `check:dual-build-cjs-loads` and `check:i18n` after `pnpm --filter './packages/**' build` (lock VERDICT command-exit 0).\n- Merge of `origin/main` at `843a675558`: no conflict, the change set is still this one file, and the derived list is byte-identical. At that head the parity file reads `Tests 8 passed (8)`. The 54 gates are re-running at that head, and the result goes in the card report.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPU5CJAVmqhAdNPYrB)_\n"
+}

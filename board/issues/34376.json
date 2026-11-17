@@ -2,8 +2,8 @@
   "number": 34376,
   "kind": "issue",
   "title": "pm-dispatch: the L2 seat is the fallback for lanes that cannot reach the contract-review tier, not the default reviewer of a timed-out head",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:skills",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T10:30:42Z",
-  "updated_at": "2026-11-16T12:10:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T22:49:39Z",
+  "closed_at": "2026-11-16T22:48:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34376",
   "body": "review#1 · os-mickey · session_01ASNY8Ywba8ySbMdWvra2vS\n\nFiling gate: ③ maintainer-directed task (a pm rule change the maintainer named).\n\n## The maintainer's direction (verbatim, review#1 session chat, 2026-11-16 ≈09:50Z; asked again and confirmed \"file it now\")\n\n> 那你搞错了，review 席位应该只负责 L2 级别的审核，L1 级别的审核用 opus,开发者自己可以处理。\n> L2 级别的审核 用 Fable，有的席位可能fable不够，才需要开单独的 review 席位\n\n## What the rules say today, and where they disagree with it\n\n- `references/contract-review.md` 送审路由 already matches the direction: a lane that can take `CONTRACT_REVIEW_TIER` reviews itself; only when it cannot does it write a `Contract-review-handoff:` line and knock an L2 seat.\n- The same file's take triggers do not: `(b) 现 head 已等满一轮(约 60 分钟)` makes an owed head with no record and no claim the L2 seat's FIRST (\"L2 席先接,车道次之\"), whether or not the lane can reach the tier and whether or not it handed off.\n- `references/lanes/l2-review.md` 路由: 「欠审表 `check-owed-reviews.mjs` 先给 L2 席;车道只在无 L2 席在座或 (b) 后再一轮无认领才接」 — the L2 seat is the default taker.\n- `scripts/pm/check-owed-reviews.mjs` `takerOf` implements that: a (b) row prints `take: an L2 seat (…) first`, and a declaration-face row (`TIER_DEFAULT`, owed by `Clause-②: yes` alone) is routed to the L2 seat the same way, although contract-review.md says that face is the lane seat's L2 record (「仅凭 `Clause-②: yes` 申报而欠 ⇒ `TIER_DEFAULT`,由车道席位作 L2 记录」).\n\nMeasured on this shift (review#1, 2026-11-16 07:17Z–10:10Z): of 18 L2 records, 3 were true fallbacks (a hand-off or a seat bar); the rest were (b)-timeout rows the lanes could have reviewed themselves, and one was a declaration-face record at `TIER_DEFAULT`.\n\n## The change asked\n\n1. `contract-review.md`: the L2 seat takes a head only on (a) — a hand-off line naming it, or a `Request: contract-review` knock — plus the deltas of its own records and a head every other L2-capable seat is barred from. (b) and (c) stay with the lane, which reviews at the tier itself or writes the hand-off.\n2. `lanes/l2-review.md` 路由: replace 「欠审表先给 L2 席…」 with the fallback rule above.\n3. `scripts/pm/check-owed-reviews.mjs` `takerOf`: a (b)/(c) row names the lane seat; the L2 seat appears only on (a), on a bar, or on its own delta. A declaration-face row never names an L2 seat. Self-test cases move with it.\n4. State once, where the two levels are defined (SKILL.md 〈审核两级〉 owns the wording; ⛔ no restatement elsewhere), that L1 and `TIER_DEFAULT` reviews are the lane's, never the L2 seat's.\n\n## Reader\n\nThe domain:skills lane seat, at dispatch (rule text under `.claude/**` is governed; `scripts/pm/**` is the same lane). Until it lands, review#1 already follows the direction: its patrol takes only hand-offs, knocks, its own deltas and barred heads.\n\n## Duplicate check\n\n- `repo:objectstack-ai/objectstack is:issue l2-review route in:title,body` — 0 hits.\n- `repo:objectstack-ai/objectstack is:issue \"check-owed-reviews\" takerOf` — 0 hits."

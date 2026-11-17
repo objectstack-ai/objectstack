@@ -1,0 +1,33 @@
+{
+  "number": 34533,
+  "kind": "issue",
+  "title": "objectql cascade delete: the predicate arm's read-door query for a batch runs twice and outside the cascade's transaction tag",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:14:39Z",
+  "updated_at": "2026-11-17T00:20:38Z",
+  "closed_at": "2026-11-17T00:20:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34533",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: an out-of-scope observation from PR #34507 (card #33699), Acceptance notes \"Observation, not filed\", passed on by area `o2-F` after L1 record 6933320701 asked for a disposition. Dedupe: `read-door cascade`, `predicate arm transaction`.\n\n## 维护者速读\n\n- 现象：级联删除里，谓词删除臂对一批行做读门判定的那条查询(形如 `select id from <child> where id in (...) and opportunity in (...)`)在一次级联里跑了两次，而且没有带上同一次级联其它语句都带的事务标签。\n- 为什么要看：在事务外读，可能读到事务内还看不到、或已经看不到的行，判定和随后的删除不在同一个快照上。目前没有复现出错误答案。\n- 需要你做的：无。\n\n## Observation\n\nCaptured with `node packages/qa/dogfood/bench/sql-perf/bench.mjs --scale 100000 --only cascade_delete_opportunity --sql-log --cascade-deletes 5` on the PR #34507 branch (SQLite and PostgreSQL 16). In one warm delete the predicate arm's read-door statement appears twice, and its log line lacks the transaction tag the cascade's other statements carry.\n\n## Open questions for the first grading\n\n1. Is the second run a duplicate (one is dead work) or two different judges that happen to share a shape?\n2. Does the statement run on the root connection rather than the cascade's transaction handle? If so, under PostgreSQL READ COMMITTED it sees other sessions' commits but not this transaction's own uncommitted writes. Is that a wrong-answer path?\n\n## Done when\n\nGraded: either a defect card with a reproduction (the statement runs outside the transaction and a test shows a wrong judgement), or closed not planned with the reading that shows it is harmless.\n"
+}

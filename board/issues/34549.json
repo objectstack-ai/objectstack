@@ -1,0 +1,31 @@
+{
+  "number": 34549,
+  "kind": "issue",
+  "title": "review follow-ups of PR #34517",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:28:39Z",
+  "updated_at": "2026-11-17T00:35:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34549",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate: L1/L2 follow-ups, one card per PR (the `review follow-ups of PR #N` exception). Source: L2 contract-review record 6933706748 on PR #34517 (card #34373), items N2 and N3. Dedupe: `review follow-ups of PR #34517`, `lockRows dialect`.\n\nSuggested-grade: p2 · `domain:server` · `pm:blocked`, Blocked-by #34373 (the bit lands first)\n\n## 维护者速读\n\n- 现象:#34373 给驱动加了 `lockRows` 能力位。TSDoc 把 MySQL 和 SQL Server 上的行为写成了事实，驱动在所有方言(含 Oracle)都声明了这个位，但实测过的只有 PostgreSQL 和 SQLite。Turso 远端模式没有事务，却继承了 `lockRows: true`。\n- 为什么要修：声明了没实测的能力，AI 和调用方会照着用;Oracle 上带行数限制的加锁读很可能被数据库拒绝。经引擎走不会出错，直接调用才会碰到。\n- 需要你做的：无。\n\n## Items\n\n- [ ] N2: measure the `lockRows` read on MySQL, SQL Server and Oracle (the `findOne()` case on Oracle included). Name the measured dialects in the bit's TSDoc, as the `aggregationFilter` precedent does. A dialect that refuses turns the bit off for that dialect, with a pin.\n- [ ] N3 (lands in the Turso driver's own repository, not this one): the remote transport declares `lockRows: false`, by the precedent the `SqlDriver.supports` literal sets for `transactionsUnsupported` and `aggregationFilter`. The seat that holds that repository carries it; this item is ticked when its PR merges.\n\n## Done when\n\nEach dialect cell is measured or the bit is off for it, and the TSDoc names only measured dialects.\n\nBlocked-by: #34373\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 34498,
+  "kind": "pull_request",
+  "title": "docs(permissions): under record sharing a predicate write is bounded by the write scope",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T23:03:10Z",
+  "updated_at": "2026-11-16T23:45:04Z",
+  "closed_at": "2026-11-16T23:45:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-16T23:45:01Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34498",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9D7K4emLL9dNcp4rQPn22Dw)_\n\nFixes #34219\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 只改三处权限文档：在启用记录共享时，批量（`multi: true`）更新或删除只写调用者按共享**可写**的行;只读共享的行即使应用的 update 放宽规则放行，批量写也不碰它、不报错，按 id 单独写才行。\n- **为什么改：** 文档原来说批量写能放宽到「调用者能读到的行」,与 #34033 之后引擎的实际行为不符，按文档写规则的作者会以为批量写改到了只读共享的行。\n- **风险与回滚：** 无行为变化，纯文档。回滚即撤本 PR。\n- **先看：** `content/docs/permissions/rls.mdx` 新增段;`permissions-matrix.mdx` 性能提示里加的一句;`releases/v17/17-2.mdx` 迁移表第一行的补句。\n- **两分钟验证：** 打开 `/docs/permissions/rls`,在「A write widener never reaches a row the caller cannot read」段后能看到「Under record sharing, a predicate write is bounded by the write scope」。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\n- `content/docs/permissions/rls.mdx`: a new paragraph after the write-widener floor. With record sharing composed, a predicate (`multi: true`) `update` / `delete` on a `private` object writes only the rows the caller may write: owner depth and queue, plus edit shares for an update (a share never grants delete, ADR-0111 D3). A row held only through a read share, which an app `update` widener admits, is left as it was and the write answers no error. Addressing it by id alone writes it. A scalar `id` beside other keys under `multi: true`, and a falsy `id`, run as predicate writes and meet the same bound (the two shapes PR #34033 moved, per its BREAKING note).\n- `content/docs/permissions/permissions-matrix.mdx`: the predicate-write sentence in the performance tip gains the same bound and remedy.\n- `content/docs/releases/v17/17-2.mdx`: the migration row that prescribes `multi: true` for `{ where: { id, …other } }` now says that, under record sharing, that form is a predicate write bounded by the write scope, and points at the by-id remedy.\n\nSources for every sentence: PR #34033's BREAKING text and its measured table (`update { id, stage: 'open' }` on a read-shared row admitted only by the app RLS widener: base 1 row written, head no error, 0 rows; `{ where: { id } }`: written), ADR-0111 D3, and contract record 6904564182 (M1).\n\n## Tests\n\nDocs only. No test changed.\n\n## Acceptance notes\n\n- None.\n\n## Verification\n\nDerived gates (`dispatch-gates --commands`) are listed in the os-dev report on the card.\n"
+}

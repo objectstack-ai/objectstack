@@ -1,0 +1,39 @@
+{
+  "number": 34502,
+  "kind": "issue",
+  "title": "pm-dispatch L2: the review seat runs at the default tier and reviews through one fresh at-tier sub-agent per head; an in-seat review fails verify-review-tier",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "lease:o2-S",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T23:09:47Z",
+  "updated_at": "2026-11-17T00:42:32Z",
+  "closed_at": "2026-11-17T00:42:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34502",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ③: maintainer-directed. On 2026-11-16 the maintainer wrote, verbatim: 「同意 重开一条 opus 审核席，关掉现在这条 fable 席」, then 「然后立卡更新 skills」. The first sentence answered the evaluation by the project's fable L2 seat, which recommended \"an opus seat that starts one fable read-only review sub-agent per submitted head\".\n\n## 维护者速读\n\n- 要做的：在 pm-dispatch 的 L2 审核规则里写明两件事。第一，审核席本身不需要跑契约审核档(fable)，每个送审 head 起一个全新的只读审核子代理跑这一档，并以它的输出文件作为档位证据。第二，席位在自己的会话里直接审，会被档位校验拒掉，因为项目席的会话一开席就会调技能、发线程消息。\n- 为什么：现行文本让人以为审核席本身得是契约审核档。今天本项目照这个读法开了一个 fable 审核席，实测它自己的转录被 `verify-review-tier.mjs` 拒了，而这个 fable 席同时是最贵的组合。\n- 需要你做的：无(Tier H 文本 PR 落地时照常审批)。\n\n## What was measured\n\nReadings are from the project's L2 seat threads on 2026-11-16, 22:44Z–22:53Z.\n\n1. `scripts/pm/verify-review-tier.mjs` judges the transcript of the run that did the review, not the model of the seat that posts the record. Its `SUB_AGENT_TOOLS` (`Agent`, `Task`, `Workflow`, `SendMessage`) and `SUB_AGENT_TOOL_SHAPES` (`^Skill$`, and connector tools whose names start with `send`/`message`/`start`/`fire`/…) refuse any transcript whose assistant turns call one of them (`handsWorkToAnotherAgent`).\n2. A project seat calls `Skill` (pm-dispatch) at seating and sends thread messages as routine. So a seat that reviews in-seat cannot pass `post-stamped.mjs --tier-evidence` with its own transcript, whatever model serves it. The fable seat measured exactly this refusal on its own transcript.\n3. The verifier's own header names the passing road: \"the review's own sub-agent file, or reviews in a fresh agent\".\n4. Cost, as the fable seat reported it:\n   - A fable seat reviewing in-seat re-reads a context that had already reached about 143k tokens, and the cost grows with every PR.\n   - A fresh fable thread per review starts at about 60–100k tokens and needs a thread opened and closed each time.\n   - An opus seat plus one fresh fable sub-agent per head spends fable only on the review itself.\n5. Not yet measured: whether a fable sub-agent started from a non-fable seat lands exactly at the review tier. If it does not, the verifier refuses the write, and the worst case is one wasted run.\n\n## Change\n\n- `.claude/skills/pm-dispatch/references/lanes/l2-review.md`:\n  - Line 6 says 「坐席者 = 能达 `CONTRACT_REVIEW_TIER` 的账号的会话」. State that the seat session runs at the default tier, and that every at-tier review runs in a fresh read-only sub-agent at `CONTRACT_REVIEW_TIER`, one per submitted head.\n  - That sub-agent's output file is the `--tier-evidence`.\n- `.claude/skills/pm-dispatch/references/contract-review.md`, where it sends the reader to the tier evidence: one line saying that a seat's own transcript fails `verify-review-tier.mjs` as soon as it holds a `Skill` call or a thread or agent message, so a project seat never reviews in-seat at tier.\n- Pay for the added lines under the line ratchet (cut restatements first). Each pointer goes to the verifier's header and is not copied.\n\n## Done when\n\n- A reader of `l2-review.md` alone opens an L2 seat on the default tier and reviews through one fresh sub-agent per head.\n- The in-seat trap is named once, at its home, and the other file points to it.\n- If the first real run measures the unmeasured point above as false, the PR stops with `premise_still_valid: false` and does not reword around it.\n\nDedupe words: `L2 seat model tier`, `verify-review-tier in-seat`, `review sub-agent per head`, `fable seat transcript refused`.\n"
+}

@@ -2,8 +2,8 @@
   "number": 33699,
   "kind": "issue",
   "title": "engine: cascade delete runs one id read + one set-based DELETE/UPDATE per relation instead of a full engine write per dependent (epic #33631 R7)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,25 @@
     "area:data",
     "domain:server",
     "enhancement",
-    "lease:A4",
-    "pm:queue",
+    "lease:o2-F",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T06:45:15Z",
-  "updated_at": "2026-11-16T07:27:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T01:54:30Z",
+  "closed_at": "2026-11-17T01:54:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 14,
+  "comments": 17,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33699",
   "body": "domain:server#5 · os-elon-musk · session_016WV4cztR1A2CZoxSZyuoGP\n\nFiling gate: ④ child of epic #33631 (SQL performance). Item R7 of the M0 ranked list (#33633): https://github.com/objectstack-ai/objectstack/issues/33631#issuecomment-6889544281 (corrected 6889939163). Maintainer's pick (seat decision card, 2026-11-15T06:44Z): 「R1 R7 R12 各一张+测量卡」.\n\n## Today\n\nCascade delete is one full engine `delete`/`update` per dependent (`engine-cascade-planning.ts` ~1085–1171), each with its hooks, recycle-bin capture and probes: **155 statements** to delete one opportunity with 10 line items (~15 per child), p50 121–237 ms, linear in children.\n\n## Target\n\nPer relation: one id read + one `DELETE … WHERE fk = ?` (or `UPDATE … SET fk = NULL`) + one batched recycle-bin capture, when the child has no per-row hooks. Children with per-row hooks keep today's path. Not yet measured as SQL: the batched capture shape comes first.\n\n## Business reason\n\nDeleting a parent with many children (an order with hundreds of lines) is linear in statements and slow today.\n\n## Reader\n\ndomain:server#5 area A4 (engine) with A3 (trash / recycle bin); next account; size M–L.\n\n## Epic rules\n\n- Name the SQL shape produced and give before/after on the M0 bench (`packages/qa/dogfood/bench/sql-perf`, PR #33662).\n- Security never regresses: read scope and tenant wall stay in the pushed-down statement, with a parity test against today's path.\n- A non-SQL driver keeps an in-process path it already has or refuses with a stable code (epic #33631 rules; #33626 rulings).\n"

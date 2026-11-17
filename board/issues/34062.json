@@ -2,8 +2,8 @@
   "number": 34062,
   "kind": "issue",
   "title": "flow: a record-change or schedule flow cannot write stored text in the org's language (no effective-locale read in value slots, 18.5.0)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T17:33:54Z",
-  "updated_at": "2026-11-16T18:08:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T22:17:34Z",
+  "closed_at": "2026-11-16T21:47:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34062",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nRuled: 6913660232 · letter B · 2026-11-16T10:19Z\n\n**Downstream need (hotcrm#2494, p1 under the zh-CN rule).** A record-change or schedule flow that writes user-visible text into a record cannot write it in the organization's language. In a zh-CN org, HotCRM's case escalation flow stores `escalation_reason = 'Auto-escalated: critical priority'` in English on every critical case, and the SLA monitor does the same. Nothing on 18.5.0 lets the app do better without hard-coding one language.\n\n**Measured on @objectstack 18.5.0, 2026-11-15** (hotcrm PSA thread, real engine via bootStack, artifact `i18n.defaultLocale: 'zh-CN'`, four throwaway autolaunched `runAs: 'system'` flows, each run with no user and with a user plus `context.locale: 'zh-CN'`):\n\n1. **CEL value slots have no locale.** `current_user.locale` → `value expression failed to evaluate as CEL: No such key: locale`. `current_user` carries `id`, `positions` and `organizationId` only, and the scope claims `{vars, current_user}` only (`FLOW_SCOPE_CLAIMED_IDENTIFIERS`). No locale or organization root exists.\n2. **The run locale reaches only text slots, never record values.** `renderFlowTextSlot` picks `flows.*` translations in the run's locale for end-node refusals, terminal messages and screen copy. It never translates `update_record` / `create_record` field values. A record-change or schedule run carries no locale anyway (the engine doc says so).\n3. **The deployment default is not readable.** On a zh-CN boot, `get_record sys_setting {namespace:'localization', key:'locale'}` returns `null`, because the build-time `i18n.defaultLocale` lives in the settings cascade's default layer, not in a row.\n4. A raw `get_record` on `sys_setting` returns `'zh-CN'` only after a tenant `localization.locale` has been written through the settings service. That read skips the cascade (tenant → platform → build-time default) and still misses case 3. hotcrm did not use it: it would be a workaround.\n\n**Ask (either shape closes it):**\n- **A.** A flow value slot can read the org's *effective* locale (settings `localization.locale` resolved through the cascade, falling back to `i18n.defaultLocale`). One example is a CEL root such as `org.locale`, so an app can pick from a per-locale map.\n- **B.** `update_record` / `create_record` string values can be translatable text slots that resolve `flows.*` keys in the org's effective locale when no run locale exists.\n\nEither way: the effective-locale resolution matches what the console uses for the org, it is documented on the flow value-slot page, and a test boots a zh-CN default and reads `zh-CN` in a record-change run with no user.\n\n**Who it reaches:** every zh-CN (and ja-JP, es-ES) tenant of any app whose flows write stored text. In HotCRM the known stored literals are:\n- `case-escalation.flow.ts:113` and `case-sla-monitor.flow.ts:195` (`escalation_reason`)\n- hook-side task subjects in `case.hook.ts:541` and `lead.hook.ts:446`\n- the `log_meeting` prefix in `activity-actions.ts:445`\n\nHooks are a sibling question, for whether `ctx` should expose the same effective locale. Answer it in the same design if cheap.\n\nProbe log: in the hotcrm project files (`case-escalation-2494/probe-18.5.0.txt`). No duplicate found (searched open issues for flow+locale, locale+CEL, current_user.locale).\n"

@@ -1,0 +1,35 @@
+{
+  "number": 34561,
+  "kind": "issue",
+  "title": "ci: the \"Fetch this commit's history and the base branch\" step times out (8 to 20 min) on main pushes and merge groups, four times on 2026-11-16/17",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "lease:o2-H",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:47:35Z",
+  "updated_at": "2026-11-17T01:58:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34561",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a measured CI defect, seen four times in about five hours. It is not a test failure, so no queue-flake anchor files it.\n\n## What happens\n\nThe step \"Fetch this commit's history and the base branch\" times out before any test runs, and the shard then publishes no attestation, so the whole leg goes red:\n\n| when (UTC) | run | where | timeout |\n|---|---|---|---|\n| 2026-11-16 19:33 | push CI `6a7403ba` | Test Core 7/8 | 20 min |\n| 2026-11-16 20:04 | merge group pr-34447 | Test Core 5/8 | 20 min |\n| 2026-11-16 22:00 | merge group pr-34381 | Test UI 4/16 | 14 min |\n| 2026-11-17 00:02 | merge group pr-34511 | Plan Test Core shards | 8 min |\n\nEach time the next run on the same tree was green. Every hit on a merge group ejects that PR and costs everything queued behind it a rebuild.\n\n## Why it matters\n\nThis is fleet throughput and CI spend. It is a fleet-efficiency card under the maintainer's 2026-11-16 rule (addendum 7 on #6015), so p2.\n\n## Ask\n\nFind why the fetch stalls: depth, the size of the base-branch fetch, or the runner's network. Make the step bounded and retried (for example a shallower fetch with one retry) before it can fail a leg. ⛔ Do not mark the leg optional."
+}

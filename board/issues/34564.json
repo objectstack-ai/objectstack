@@ -1,0 +1,35 @@
+{
+  "number": 34564,
+  "kind": "pull_request",
+  "title": "test(plugin-grid): the date-column face pin reads one frozen instant, so a run across midnight stays green",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:57:58Z",
+  "updated_at": "2026-11-17T01:54:31Z",
+  "closed_at": "2026-11-17T01:54:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T01:54:28Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34564",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9D7K4emLL9dNcp4rQPn22Dw)_\n\nFixes #34543\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 只改一个测试文件：表格日期列的测试在整个文件里冻结 `Date`,所有行和单元格读到的都是同一个「今天」。\n- **为什么改：** 测试数据在收集时按「今天」生成，单元格渲染时又读一次「今天」。跑过 UTC 零点时，存成「后天」的那一行会被读成「明天」,Test UI 分片偶发变红(PR #34496 的运行 43981736011 实测过)。\n- **风险与回滚：** 不碰产品代码，也不放松任何断言。只假造 `Date`,`waitFor` 和 React 用的计时器仍是真的。回滚就是 revert 本 PR。\n- **先看：** `ui/packages/plugin-grid/src/__tests__/ObjectGrid.dateColumnOneFace-25884.test.tsx` 第 59 到 67 行。\n- **两分钟验证：** `(cd ui && pnpm exec vitest run packages/plugin-grid/src/__tests__/ObjectGrid.dateColumnOneFace-25884.test.tsx)`,预期 4 个用例全部通过。\n- **需要你做的：** 不需要。本 PR 只改测试，由区线程审核后合入。\n\n## What changes\n\n`ObjectGrid.dateColumnOneFace-25884.test.tsx` builds its rows at collection from \"today\" (`storedDay(offset)`), and each cell reads \"today\" again when it renders. A run that crosses 00:00 UTC between the two reads a row stored as +2 days as \"Tomorrow\". The file now freezes `Date` once, at module top, before the rows are built: `vi.useFakeTimers({ toFake: ['Date'] })` and `vi.setSystemTime('2026-06-15T23:59:59.900Z')`, the worst instant (a tenth of a second before midnight). `afterAll` restores real timers. Only `Date` is faked; the timers `waitFor` and React use stay real. No assertion changed and no source file moved, so no changeset (`skip-changeset`).\n\n## Tests\n\n- The fixed file, three runs in a row: 4 of 4 pass each time.\n- Forced crossing, a one-off and not kept: `vi.setSystemTime('2026-06-16T00:00:00.100Z')` placed before case D's render turns the file red with `expected 'Overdue 4d' to be 'Overdue 3d'`. That is the same class as the CI failure (`expected 'Tomorrow' to be 'In 2 days'`, PR #34496 run 43981736011, Test UI 9/16 at 00:04Z). The file was restored after, `git diff` empty.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 27 families for this diff. All 27 exited 0, each with `< /dev/null` and its exit code captured before any pipe. `--ran` reconciliation: `27 derived famil(ies) accounted for — 27 run, 0 NOT-MEASURED`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRfW5u1LRmhWwaYHRp\n"
+}

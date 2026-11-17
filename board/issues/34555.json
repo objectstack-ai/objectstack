@@ -1,0 +1,30 @@
+{
+  "number": 34555,
+  "kind": "issue",
+  "title": "spec: flow dry-run follow-ups from #34477 (canWriteObject on ISecurityService; unread-grants refusal sentence)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:36:17Z",
+  "updated_at": "2026-11-17T00:49:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34555",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\n## What\n\nTwo contract follow-ups from PR #34477 (#33661, the flow dry-run write-permission contract). Neither is built there.\n\n1. **Option B:** declare `canWriteObject` as an optional member of `ISecurityService`. Today plugin-security serves it as served-not-declared, and #34477 follows the published `FlowDryRunWritePermission` text as written (option A). Choosing B is a spec contract change, and it rewrites one `FlowDryRunWritePermission` sentence.\n2. **Unread-grants refusal sentence:** add one contract sentence naming the message a dry run returns when it refuses because the named user's grants cannot be read (review#2 N4, L1-b N1). The dry run currently carries its own message, because the contract names none for that case.\n\n## Notes\n\n- Both items are contract text and need a contract review. Item 1 may need the maintainer's word under ruling 6917953931, which requires a contract change to have review and his approval before the implementation lands.\n- This card is not claimed by seat repo:objectstack#1, which is winding down. Triage grades it."
+}

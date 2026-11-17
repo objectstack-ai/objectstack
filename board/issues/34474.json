@@ -1,0 +1,35 @@
+{
+  "number": 34474,
+  "kind": "issue",
+  "title": "pm-dispatch: the coordinator opens another review seat itself when L2 reviews back up, without asking the maintainer",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T21:38:36Z",
+  "updated_at": "2026-11-17T00:48:16Z",
+  "closed_at": "2026-11-16T23:45:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34474",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ③ maintainer-directed. Leehom, 2026-11-16T21:37:11Z, in the project chat: 「你应该自主决定增加审核席位啊，是技能的问题嘛」. Earlier the same day, at 11:24Z, he opened review#2 with 「再开一个审核席，你可以自主决定」. ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** 审核(L2 契约复审)排队积压时，项目协调者应该自己再开一个审核席，不用先问你。今天 review#1、review#2 都排满了，协调者却等你开口才开 review#3。\n- **改哪里：** pm-dispatch 技能的 `references/coordinator.md`(协调者开席位线程那一节)，以及 `references/lanes/l2-review.md` 里说多个审核席怎么分工的地方。只改 `.claude/**` 文字，不改代码。\n- **建议：** p2(你点名的规则卡)。可以和 #34424(大卡单开卡线程)一起落。\n\n## Where (origin/main)\n\n- `.claude/skills/pm-dispatch/references/coordinator.md` §2 (threads and slots) says how many card threads the coordinator opens, but nothing about review seats. So a coordinator reading it asks the maintainer before opening another one.\n- `references/lanes/l2-review.md`: independence is per session (ruling 6917060639), so several review seats under one account are allowed. The doc names no trigger for adding one.\n\n## Done when\n\n- `coordinator.md` states the trigger and the act. When L2 reviews back up, the coordinator opens another review seat thread itself, without asking the maintainer, and says so in the project chat afterwards. A backup means: a ready head waits more than about 30 minutes for its L2 record, or more than about 3 heads are queued per seated reviewer. The new seat takes the next free `review#N` post, opens its mailbox, and splits rows with the seated reviewers by claim, as review#2 did on 2026-11-16.\n- It also states the stop. When the queue drains, the coordinator signs the extra seat off (no idle seats). The account usage-wall rule (stop opening new threads near the wall) still applies.\n- `l2-review.md` names the split-by-claim rule for N seats in one line.\n- Skills ratchet and `.claude` lint gates stay green. Landing is Tier S (`.claude/**`) after an at-tier review.\n\nDedupe words: open review seat without asking, review queue backlog coordinator, add L2 reviewer seat autonomously."
+}

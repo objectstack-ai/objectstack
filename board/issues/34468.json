@@ -1,0 +1,31 @@
+{
+  "number": 34468,
+  "kind": "issue",
+  "title": "cloud: changes_proposed rows carry the label the agent chose for a new object or field (parked per #32984 Q2 B)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "priority:p2",
+    "repo:cloud",
+    "status:parked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T21:02:02Z",
+  "updated_at": "2026-11-16T21:02:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34468",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ③ maintainer-directed. Ruling Q2 B 「B 加标签并把格式写进契约」 on #32984 (record 6929142905), parameter 2. Parked per 「应用内搭建 cloud 端不着急改」. ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** AI 搭建的修改确认卡上，即将新建的字段现在只显示机器名。云端 agent 发出的 `changes_proposed` 每一行要带上它为对象或字段选定的显示名(label)。\n- **配套：** 平台的契约卡(把变更行的格式写进 spec,写错会被拒绝)要先读到这里真实发出的行，所以那张卡等这张卡。\n- **暂缓：** 按你的话，云端不着急改。\n\n## Done when\n\n- Every `changes_proposed` row that creates an object or a field carries the label the agent chose. A reading of the keys and verbs cloud really sends today is posted on this card, so the spec card can be written from it.\n\nDedupe words: changes_proposed label, confirmation card new field name, agent row label."
+}

@@ -2,8 +2,8 @@
   "number": 33941,
   "kind": "issue",
   "title": "pm-dispatch: replace \"hot file, one writer\" with a claim-time and pre-push merge-tree overlap check (hot-file card A)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,25 @@
   "labels": [
     "documentation",
     "domain:server",
-    "pm:queue",
+    "lease:o2-S",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:43:57Z",
-  "updated_at": "2026-11-15T14:52:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T00:53:02Z",
+  "closed_at": "2026-11-17T00:53:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33941",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFiling gate ③: maintainer-directed. On 2026-11-15 the maintainer chose 「今天改规则,并立全部 6 张卡」 on the hot-file serialization decision card (consequence as shown: 取消 protocol.ts 独占、关闭 #25467 和 #24586;卡 A 到 F 交各车道立卡,大 PR 和上限门禁仍逐个等您批准). Measurements: the hot-file analysis report (project artifact), re-runnable on request. Cross-lane rule (2026-11-15): no live seat in the owning lane, so `domain:server` seat 5 files and builds it; the owning lane is notified.\n\n## Card A (owning lane: skills; script: devx)\n\nReplace the \"hot file, one writer\" rule with an overlap check.\n\n1. A dependency-free script (scripts/pm/) that, for a branch, runs `git merge-tree --write-tree --name-only` against each open PR head sharing a file and against origin/main, and lists conflicting files. Exit codes: 0 no textual overlap, 1 overlap (lists files), 2 usage.\n2. `.claude/skills/pm-dispatch/references/area-lease.md`: run it before a claim and before a push; queue only on a real textual overlap. Add: a card in the same series may start on the previous card's branch; new tests go in a new file named by card, never appended to a shared test file.\n3. Relates to #33907 (PR #33938): build after it lands, same file.\n\nDone when: the script has a self-test with a real two-branch conflict and a no-conflict case, and area-lease.md names it. Line-ceiling raises, if any, are ruled raises citing this card."

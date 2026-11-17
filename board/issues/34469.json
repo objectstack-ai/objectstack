@@ -1,0 +1,30 @@
+{
+  "number": 34469,
+  "kind": "issue",
+  "title": "spec: declare the changes_proposed row envelope (with an optional label) and read it in the console confirmation card (#32984 Q2 B)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T21:02:34Z",
+  "updated_at": "2026-11-16T21:02:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34469",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ③ maintainer-directed. Ruling Q2 B 「B 加标签并把格式写进契约」 on #32984 (record 6929142905), parameters 2 and 3. ⛔ Not a claim.\n\nBlocked-by: #34468\n\n## 维护者速读\n\n- **是什么：** 把 AI 搭建发出的 `changes_proposed` 变更行格式写进平台契约(spec),控制台按这个声明读行；格式写错会被拒绝。\n- **为什么等：** 声明必须照云端真实发出的行来写，不能只看控制台的读取代码，所以等 #34468 贴出实测读数。\n- **规模：** 一个 spec PR,Clause-② yes(加宽),落地前要做契约复审。\n\n## Done when\n\n- `changes_proposed` rows have a declared schema in `packages/spec`, following the shape of `packages/spec/src/ai/build-progress.zod.ts`, written from the reading posted on #34468. The row label is optional, and a malformed row is refused. The console's confirmation card reads the row through that declaration and shows the label when one is present, otherwise the machine name.\n- PR declares `Clause-②: yes (widening)`; contract review PASS before landing.\n\nDedupe words: changes_proposed schema spec, build-progress envelope declare, confirmation card row contract."
+}

@@ -1,0 +1,31 @@
+{
+  "number": 34578,
+  "kind": "issue",
+  "title": "List the new service-ai-studio tool ask_which in PLATFORM_TOOLS_BY_PACKAGE and give it a chatbot.tool label in every locale",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:08:21Z",
+  "updated_at": "2026-11-17T02:08:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34578",
+  "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: asked by the card thread of objectstack-ai/cloud#4773 (p1), settled by the seat (land the cloud side now, with a named debt that removes itself on the next pin bump). Same shape as #34270 and #34368.\n\n## What happens\n\nThe cloud package `service-ai-studio` adds an ask-only tool, `ask_which`: when a data question has 2–3 plausible readings, the in-app ask agent returns them to the user as a question and ends the turn instead of guessing one reading. The framework does not know the name yet:\n\n- `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` (the spec's platform tool-name registry, pinned by `packages/spec/src/system/constants/platform-tool-names.test.ts`) does not list it.\n- `ui/packages/i18n/src/locales/*.ts` has no `chatbot.tool.ask_which`, so `humanizeToolName` in `ui/packages/plugin-chatbot` falls back to the English \"Ask which\" as the chat step's title, even in a Chinese chat.\n\n## Expected\n\n1. `ask_which` is in `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']`.\n2. Every locale pack has `chatbot.tool.ask_which`, worded like its neighbours (for example zh-Hans 「确认问题含义」, en \"Clarify the question\").\n3. The registry's own test and the locale-completeness check stay green. The cloud side's AHEAD_OF_REGISTRY entry for this name (`platform-tool-names-conformance`) is deleted on the pin bump that carries this.\n\nNot blocking: the cloud side lands with the named AHEAD entry."
+}

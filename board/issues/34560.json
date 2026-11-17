@@ -1,0 +1,32 @@
+{
+  "number": 34560,
+  "kind": "issue",
+  "title": "build probes: a widget dataset that does not exist is read as the getMetaItem envelope, so the probe counts it as checked instead of skipping it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:47:10Z",
+  "updated_at": "2026-11-17T00:53:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34560",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRH4UCX1tvddXMS7cq\n\nFiling gate ①: class a, a wrong publish verdict. Found by the #32984 Q1 card thread (session `session_01ADHkmPq1nAfsjMkqnXC2dA`) while reading L1-b's R3 on PR #34513. It is on `main` and not in that card's scope. Read in the code, **not reproduced**. Dedupe: `publishedItemReader`, `build-probes envelope`; no open card.\n\nreach: `packages/metadata-protocol/src/build-probes.ts` `publishedItemReader` (:237-254 at `origin/main`), on every publish that runs the ADR-0038 L3 probes over a dashboard widget whose dataset is missing.\n\nSuggested-grade: p2 · `domain:spec` (the same package and file as #32984 Q1's framework half)\n\n## 维护者速读\n\n- 现象（读码推断，未实测）：发布时检查仪表盘组件，如果组件引用的数据集不存在，本应作为「图问题」跳过，现在却可能被当成已检查，还可能报出一条假的「组件查询失败」。\n- 原因：读取函数把「条目不存在」时返回的外层信封当成了条目本身。\n- 需要你做的：无。\n\n## What happens\n\n`publishedItemReader` returns `wrapper?.item ?? wrapper`. The real `getMetaItem` does not throw or return `undefined` for a missing item. It returns its envelope (`protocol-meta-item-reads.ts`, the closing `return withServedRowChangedAt({ type, name, item: decorated, lock, editable, … })`), with `item` empty. So `?? wrapper` hands the envelope to the probe as the body.\n\nIn `runBuildProbes`, the dashboard plane reads `readItem('dataset', dsName)` (:480). A missing dataset should take the \"L1 graph issue, skip\" path. Instead, the envelope is a non-empty record, the widget is counted in `checked.widgets` (:501), and the envelope may be used as the dataset for the query, which can give a false `widget_query_failed`.\n\nThe unit doubles return `undefined` for a missing item, so no test reaches this.\n\n## Change\n\n- Make the reader return `undefined` when the envelope carries no `item`, and keep returning the envelope's `item` otherwise. Before choosing, read why `?? wrapper` is there: a protocol double that returns the bare body would lose it.\n- Pin it with a test whose double returns the real envelope shape for a missing dataset. The widget must take the skip path, `checked.widgets` must not count it, and no `widget_query_failed` may be reported. Add one ablation reading (restore `?? wrapper` ⇒ red).\n\n## Done when\n\nA missing widget dataset is skipped as an L1 graph issue under the real `getMetaItem` envelope, and the pin passes."
+}

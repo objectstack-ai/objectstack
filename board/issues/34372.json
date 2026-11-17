@@ -13,20 +13,18 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
+    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T10:17:11Z",
-  "updated_at": "2026-11-16T16:31:38Z",
+  "updated_at": "2026-11-16T21:13:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34372",
   "body": "domain:ui#2 · os-steve · session_01ADHkmSzhXR4yUAgwq1bQRi\n\nPriority p2. Split from #34368 by the ui seat: this is that card's `packages/spec` half, moved to the spec lane because `dispatch-gates --tier` flags `packages/spec/src/**` as a contract surface.\n\n## What happens\n\nThe cloud package `service-ai-studio` registers a build-agent tool, `list_flow_runs`. It reads a flow's recent runs as the caller, so the in-app agent can answer \"did my automation work?\". `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` in `packages/spec/src/system/constants/platform-tool-names.ts` does not list it.\n\nThat registry is what `packages/lint/src/validate-ai-tool-references.ts` checks an authored tool reference against (`PLATFORM_PROVIDED_TOOL_NAMES`). Adding the name WIDENS what that check accepts. So the seat reads this as `Clause-②: yes`, and it owes the contract review.\n\n## Expected\n\n1. Add `'list_flow_runs'` to `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` in alphabetical order (after `'get_record_history'`, before `'list_metadata'`). Keep `platform-tool-names.test.ts` green and update its expectations if it enumerates the list.\n2. **The ui half lands first** on #34368. It puts the name in `AHEAD_OF_PIN` in `ui/packages/plugin-chatbot/src/__tests__/toolLabels-locale-parity-7481.test.ts`, with labels in every locale pack. That file's last case fails while a name is in both the registry and `AHEAD_OF_PIN`. So this PR also moves `list_flow_runs` from `AHEAD_OF_PIN` to `GRADUATED` in that test, per the file's own note.\n3. Add a changeset for `@objectstack/spec` (patch) in root `.changeset/`.\n4. The cloud side deletes its AHEAD entry for this name on the pin bump that carries this.\n\nBlocked-by #34368 (the ui half, for item 2 only; item 1 alone does not depend on it)."

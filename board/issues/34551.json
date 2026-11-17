@@ -1,0 +1,36 @@
+{
+  "number": 34551,
+  "kind": "pull_request",
+  "title": "fix(console-ai): the attachment notes added to a user's turn follow the conversation's language",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:30:14Z",
+  "updated_at": "2026-11-17T01:54:30Z",
+  "closed_at": "2026-11-17T01:54:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T01:54:28Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34551",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9R6fQuMSzSrRW2oowG4K2kQ)_\n\nFixes #34461\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：控制台「问 AI」聊天里，页面替用户在消息末尾加的附件说明（表格摘要、「已作为文件发送」、「超过 10 MB / 类型不支持 / 上传失败，内容未读取」）现在跟随对话语言：用中文写的这一轮是中文，其它语言是英文；只发文件不打字时，跟随这段对话之前的语言。\n- 为什么改：以前这些说明一律是中文，用英文聊天的用户会在自己的消息里看到中文，agent 也收到中文，可能被带着切换成中文回答。\n- 风险与回滚：只动控制台聊天的发送文本；没有新增语言包键（说明文字放在 `outboundAgentText.ts` 里，和其它发给 agent 的文本同一个规则）。回滚即 revert 本 PR。\n- 先看：`ui/packages/app-shell/src/console/ai/outboundAgentText.ts` 新增的说明表与 `resolveAttachmentNoteText`；`AiChatPage.tsx` 的 `prepareTurn` 里决定语言的一行 `const zh = …`；`chatAttachments.ts` 的 `chatAttachmentNotes`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/console/ai/__tests__/AiChatPage.attachmentNotesLanguage-34461.test.tsx`，预期 4 个用例全部通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **`outboundAgentText.ts`**: a second table beside the gate texts, `ATTACHMENT_NOTE_TEXT`, with a Chinese and an English form of each attachment note (spreadsheet brief, headers line, sample line, parse failure, sheets over the two-per-turn limit, files sent, over the cap, unsupported type, upload failed), read through `resolveAttachmentNoteText(conversationIsZh, key, vars)`, and `joinAttachmentNames` (`、` in Chinese, `, ` in English). The Chinese wording is byte-identical to the literals it replaces. No locale-pack key is added: the notes are outbound text like the gate texts, and a pack key is published surface that no pack reader needs here.\n- **`chatAttachments.ts`**: `chatAttachmentNotes(outcome, conversationIsZh)` builds its lines from that table.\n- **`AiChatPage.tsx` `prepareTurn`**: the spreadsheet brief comes from the same table, and the turn's language is decided once: the turn's own words decide it (`isConversationZh` on the turn, the same probe the page's outbound text reads, so the notes match what the thread's language will be once the turn is in it); a turn with files and no words takes the thread's language so far (the same probe over the thread's messages, read through a ref so the send callbacks keep their identity). The page's `convZh` keeps one reader, the outbound-text resolver, as the `console-namespace-3546` pin in `packages/i18n` requires (the first head read it through a ref, and that pin went red; fixed in 2daa63fe).\n\n## Tests\n\nNew `ui/packages/app-shell/src/console/ai/__tests__/AiChatPage.attachmentNotesLanguage-34461.test.tsx` (real `ChatPane` send path, `useChatConversation` and `useObjectChat` transport; the pinned value is the user message's text in the chat POST):\n\n1. an English turn with a spreadsheet, an uploaded image and an over-cap image: the brief, headers, sample, sent line and over-cap line are English, and the turn holds no Chinese character;\n2. the same three files in a Chinese turn: all of them Chinese, none English;\n3. a turn with an image and no words, after a Chinese turn: Chinese;\n4. CONTROL: a turn with no attachment is sent exactly as typed.\n\nTests changed because their expected text changes (each sends English words, so its notes are now English):\n- `AiChatPage.attachmentsUpload-32749.test.tsx`: the five assertions on the Chinese notes and brief now read the English forms; the header says why.\n- `AiChatPage.sendOrderWhileUploading-34462.test.tsx`: the upload-failed assertion reads the English form.\n\n<details><summary>Runs (head 2daa63fe)</summary>\n\n```\nvitest run …attachmentNotesLanguage-34461 …attachmentsUpload-32749 …sendOrderWhileUploading-34462 …outboundAgentText.test.ts\n  Tests  43 passed (43) · VERDICT command-exit 0   (6be60bcd)\nvitest run packages/app-shell/src/console/ai/\n  Test Files  58 passed (58) · Tests  373 passed (373) · VERDICT command-exit 0   (6be60bcd)\nvitest run packages/i18n/src/__tests__/ …attachmentNotesLanguage-34461\n  Test Files  103 passed (103) · Tests  1898 passed | 13 skipped · VERDICT command-exit 0   (2daa63fe)\npnpm --filter @object-ui/app-shell run type-check   VERDICT command-exit 0   (2daa63fe)\n```\n\n</details>\n\n<details><summary>Ablations (mutation on disk, file restored after)</summary>\n\n```\nA1  const zh = false;   × a Chinese turn …   × a turn with files and no words …        Tests 2 failed | 2 passed (4)\nA2  const zh = true;    × an English turn …                                            Tests 1 failed | 3 passed (4)\nA3  no-words branch reads `false` instead of the thread's language (re-run on 2daa63fe)\n                        × a turn with files and no words takes the language …          Tests 1 failed | 3 passed (4)\n```\n\nThe CONTROL stays green under all three.\n\n</details>\n\n## Acceptance notes\n\n- The card's acceptance names the conversation-language resolver (`outboundAgentText.ts`): the notes are resolved there, but from their own table rather than the `en` / `zh` packs the gate texts read, so no pack key is added (`Clause-②: no`). The gate texts stay pack-backed because the packs also render them; nothing renders these notes.\n- The spreadsheet brief is read by the model (cloud#797's solution-design skill). No reader of its Chinese markers exists in this repository; the cloud agent's prompt is not readable from here, so whether it keys on the literal `[附件表格` prefix is unverified. A Chinese turn still sends that exact prefix.\n- A turn's language is its own words' (CJK ⇒ Chinese, else English), the same probe `convZh` uses; a short English reply in a Chinese thread therefore gets English notes, as the thread's language would read after it.\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --ran` on 2daa63fe: 39 derived, 39 run, 0 NOT-MEASURED, every one exit 0.\n- CI runs the rest (Lint UI, Type Check UI, Test UI, Build & E2E UI and the repo gates); its result is read at the final head.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSYe73LCZ6WxGFvcko\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmSYe73LCZ6WxGFvcko -->\n"
+}

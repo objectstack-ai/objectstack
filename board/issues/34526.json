@@ -1,0 +1,34 @@
+{
+  "number": 34526,
+  "kind": "pull_request",
+  "title": "feat(pm): install the MCP content-write deny roster into user-scope settings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:05:41Z",
+  "updated_at": "2026-11-17T01:19:06Z",
+  "closed_at": "2026-11-17T01:19:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T01:19:04Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34526",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBAMzwfxqLkoXjRZa1P9tubG)_\n\nRefs #25583\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:新增 `scripts/pm/install-settings-deny-roster.mjs`,把 17 个 MCP GitHub 内容写工具的 deny 名单写进用户级 `~/.claude/settings.json`(名单从现有门禁 `check-settings-deny-roster.mjs` 导入,不复制),自测接进 `check:pm-settings-deny-roster`。\n- **为什么改**:项目线程会话从不读取仓库 `.claude/settings.json`(平台设计如此),写身份锁 1 缺席;实测用户级文件会被读取且会话中途写入即时生效,17 个写工具当场从工具列表消失。\n- **风险与回滚**:只新增一个不发布的脚本加一行 CI 别名;安装器只追加 deny、从不删除,读不懂的文件不动。回滚即 revert 本 PR。\n- **先看**:`scripts/pm/install-settings-deny-roster.mjs` 的 `mergeDenyRoster` 与 `install`;`package.json` 第 102 行。\n- **两分钟验证**:`node scripts/pm/install-settings-deny-roster.mjs --settings /tmp/x.json && node scripts/pm/check-settings-deny-roster.mjs --settings /tmp/x.json`,两条都应 exit 0。\n- **需要你做的**:合并后给项目加一个带 setup script 的云环境,脚本一行见下方 Verification(本 PR 不关卡,环境那一半仍归维护者)。\n\n## What changes\n\n- `scripts/pm/install-settings-deny-roster.mjs` (new): merges `CONTENT_WRITE_TOOLS`, imported from `scripts/pm/check-settings-deny-roster.mjs`, into the user-scope settings file (`~/.claude/settings.json`, or `--settings PATH`). It creates the file and its folder when absent, keeps every other key and every existing deny entry, appends only the missing roster tools, writes nothing when the file already holds them (bytes and mtime unchanged), writes atomically, refuses (exit 3, nothing written) a file it cannot parse or whose `permissions`/`deny` has the wrong shape, and judges the on-disk result with the gate's own `verdict`. Exit codes match the gate's. `--dry-run` reports without writing. It spells no roster tool name; its self-test asserts that.\n- `package.json`: `check:pm-settings-deny-roster` (already run by `Lint & Repo Gates`) also runs the installer's `--self-test` (36 cases, six pinned batteries plus the verdict handshake).\n\nWhy the repo half is a user-scope installer rather than a hook: the platform documents that a project thread applies none of a repository's `.claude/settings.json` permission rules, hooks or `env`, with one repository or several. So no repo file reaches the session by itself; the user scope is the only settings layer the session reads that the environment's setup script can write.\n\n## Tests\n\n- `node scripts/pm/install-settings-deny-roster.mjs --self-test`: 36 cases pass.\n- `pnpm check:pm-settings-deny-roster`: gate self-test 36 pass, gate 17 = 17, installer self-test 36 pass, exit 0.\n- Live, in this project thread: `node scripts/pm/install-settings-deny-roster.mjs` then `node scripts/pm/check-settings-deny-roster.mjs --settings ~/.claude/settings.json`, both exit 0.\n\n## Acceptance notes\n\n- Deliberately not done: registering the repo's PreToolUse guards and SessionStart hook in the user-scope file. They are also absent in project threads (measured below), but the card is lock 1 only, and hooks in user scope need absolute repo paths. Left to the seat.\n- `package.json` is outside the claim's declared file surface (`scripts/pm/**`); it is the one alias line that makes CI run the new self-test.\n- The card's `Maintainer-action:` line needs a new wording (proposed in the hand-off comment): the done-when no longer depends on the repository being cloned before the setup script runs.\n\n## Verification\n\n<details><summary>Measurement table: the three triage questions, re-measured 2026-11-16 in a project thread (session_01WGufzfgjqr3ubfqP8Wc51p, objectstack origin/main 9e6fee19)</summary>\n\n| Question | Reading |\n| --- | --- |\n| Session layout | transcripts under `/root/.claude/projects/-home-claude/`; repo at `/home/claude/objectstack`; `CLAUDE_PROJECT_DIR` unset |\n| Settings files present | `/root/.claude/` and `/home/claude/.claude/` each hold `launcher-settings.json` (identical; allow `Skill`, deny only on launcher files; hooks PostToolUse, Stop, UserPromptSubmit) and no `settings.json` |\n| 1. Is the repo `.claude/settings.json` read? | No. All 17 roster tools were offered in the tool listing. |\n| 2. Do the repo hooks run? | No. The tree-enum guard's own blocked shape (working-tree loop plus `git show origin/main:`) ran unblocked, exit 0; the same command piped to the hook directly: exit 2. No SessionStart pointer appeared. |\n| 3. Can a hook deny the tools? | Moot (no repo hook runs). |\n| User scope written mid-session | Wrote the 17-entry roster to `/root/.claude/settings.json` at 16:42:43Z. The next tool listing dropped exactly those 17 tools; `issue_read` (control) stayed. User scope is read and reloaded live. |\n| Setup-script line, tested | Sparse clone of this branch plus `HOME=TMP node .../install-settings-deny-roster.mjs`: 5 s, 43 MB, created the file; gate on it exit 0. |\n\n</details>\n\nProposed setup-script line (after merge, cloud environment of the project):\n\n```bash\ngit clone -q --depth 1 --filter=blob:none --sparse https://github.com/objectstack-ai/objectstack /opt/os-deny-roster && git -C /opt/os-deny-roster sparse-checkout set scripts/pm && node /opt/os-deny-roster/scripts/pm/install-settings-deny-roster.mjs\n```\n\nIt does not depend on where or whether the session's own clone exists when the setup script runs. A thread on the current built-in environment can close the lock for itself by running `node scripts/pm/install-settings-deny-roster.mjs` as its first step.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzfgjqr3ubfqP8Wc51p\n"
+}

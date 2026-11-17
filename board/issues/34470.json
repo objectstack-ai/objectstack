@@ -1,0 +1,36 @@
+{
+  "number": 34470,
+  "kind": "pull_request",
+  "title": "fix(plugin-form): a record form stamps its inline members for { $record }; only an issued stamp counts",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T21:12:44Z",
+  "updated_at": "2026-11-16T22:48:40Z",
+  "closed_at": "2026-11-16T22:48:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-16T22:48:37Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34470",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi977MndqKa2mZmEsLATSU6xr)_\n\nFixes #34344\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：记录表单里所有画出来的字段，统一在 `gateFormFields` 这一步打上「正在编辑这条记录」的戳。包括按对象生成的字段、`customFields` 成员和内联分区条目，五种布局都经过这一步。所以内联成员的 `{ $record }` 过滤也能解析了。同时，查找控件只认 `withRecordBeingEdited` 签发的戳（模块私有的 WeakSet）。文档里当作数据写进去的 `recordBeingEdited` 不算数，记录表单在打戳前也会先把它删掉。\n- **为什么改**：这是 #34197 契约复审的 S1 跟进。以前只有两个构建函数打戳，内联成员没有戳，它们的 `{ $record }` 条目被丢掉，和 describe 说的不一致。另外 ui 侧宽松的 `FormFieldSchema` 允许字段自己写上这个键，把自己「打开」。\n- **风险与回滚**：只改 plugin-form 和 fields 两个包。对象字段、字面量过滤和 `dependsOn` 的查询不变。回滚即 revert 本 PR。\n- **先看**：`ui/packages/plugin-form/src/recordFormStamp.ts`、`fieldWriteGate.ts` 的 `gateFormFields`、`ui/packages/fields/src/widgets/lookupRecordReference.ts` 的 `ISSUED_STAMPS`。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- New `recordFormStamp.ts` → `stampRecordFormFields`. On each drawn field, and on the object-field metadata it carries under `field`, it drops an authored `recordBeingEdited` and applies `withRecordBeingEdited`. It returns the same object when nothing changes.\n- `gateFormFields` (the one step ObjectForm, DrawerForm, ModalForm, TabbedForm and WizardForm draw their fields through) calls it first, after the `customFields` merge and the section expansion. The two earlier stamp sites (`ObjectForm.tsx` SimpleObjectForm, `sectionFields.ts` `fromObjectSchema`) no longer stamp.\n- `lookupRecordReference.ts`: `withRecordBeingEdited` freezes the stamp and records it in a module-private `WeakSet`. `readRecordBeingEdited` honours only an issued stamp, so a value parsed from JSON is never one. Spreads of the def keep the same stamp object.\n- The census ledger row for `recordBeingEdited` now names both guards. Changeset: `@object-ui/fields`, `@object-ui/plugin-form` patch.\n\n## Tests\n\n`ui/packages/plugin-form/src/__tests__/lookupRecordHop-34197.test.tsx` gains the #34344 pins:\n- an inline `customFields` member resolves `{ $record }` in a record form;\n- an inline section entry does the same;\n- a data-written `recordBeingEdited` opts nothing in;\n- an authored key is dropped before the stamp;\n- the brand survives the form pipeline on the auto and sectioned layouts.\n\n#34197's own pins are unchanged.\n\n## Verification\n\n- **Final head `6ce11853`** (origin/main merged twice, no overlap with this diff):\n  - Pins: `lookupRecordHop-34197`, `form-field-channel-census-12130`, `LookupField.recordReference-34197`, `ActionParamDialog.recordReference-34197`, `bulkActionDialogRecordReference-34197`: Test Files 5 passed (5), Tests 62 passed (62).\n  - `type-check` of `@object-ui/plugin-form` and `@object-ui/fields` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0.\n  - `dispatch-gates --commands`: 39 families, each run, all exit 0; `--ran`: 39 derived, 39 run, 0 NOT-MEASURED, 0 UNRUN.\n- **Head `3a0135d0`:** the whole `plugin-form` package plus the census and the four record-reference pins: Test Files 237 passed (237), Tests 2644 passed, 1 skipped.\n- **Ablations** (`scripts/ablation-replace.mjs`; the ui suite aliases `@object-ui/*` to `src`, so no rebuild; each restored to the HEAD blob):\n  - A1, the gate stamp removed: 7 red, the 3 new inline pins and all 4 of #34197's ObjectForm and ModalForm pins. The gate is now the only stamp site.\n  - A2, the issued-stamp check removed: the standalone-form pin red.\n  - A3, the strip removed: the strip unit pin red.\n- **Forced test edit:** none. The new pins pass `initialData` to the `customFields` forms, because such a form opens on the caller's record and skips the read (existing behaviour, untouched).\n- **Seat review:** the diff was read in full. `gateFormFields` callers are exactly the five record-form layouts. Action params and bulk dialogs do not call it, so they stay unstamped.\n- Report: card #34344, comment 6930542425.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n<!-- signed: domain:ui#2 · os-steve · session_01ADHkmSzhXR4yUAgwq1bQRi -->"
+}

@@ -2,8 +2,8 @@
   "number": 34446,
   "kind": "issue",
   "title": "print: in the dark theme with background graphics on, the @page margin band prints dark (color-scheme: dark canvas has no print colour)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T18:28:29Z",
-  "updated_at": "2026-11-16T18:50:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-16T23:40:25Z",
+  "closed_at": "2026-11-16T23:32:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34446",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ① a user-visible defect with a named cause. Found while reviewing PR #34422 (#34228, print layout). It is present both before and after that PR (heads `cfcba539` and `98f29438`), so it is not introduced by it.\n\n`reach:` measured in a scratch harness with the console's compiled CSS in Chromium (dev report 6925134613, the R3 item under #34228). It has NOT yet been reproduced with Ctrl+P in a running console. The first acceptance item does that.\n\n## What happens\n\nWith the console in the dark theme and \"Background graphics\" turned on in the print dialog, the 12 mm `@page` margin band prints dark, rgb(18, 18, 18). The cause: `.dark { color-scheme: dark }` turns the root canvas dark, and no print rule colours the page-margin area. The printed record content itself is unaffected, with black text on white.\n\n## Expected\n\nA printed page has a white margin whatever theme the console is in, like the content area that #34228 already prints on white.\n\n## Acceptance\n\n1. Reproduce it in a running console: dark theme, Ctrl+P, background graphics on.\n2. Fix it in the print stylesheet, for example `color-scheme: light` and a white canvas under `@media print`. Pin it with the same harness, plus a light-theme control.\n\nDuplicate check: `is:issue is:open print dark theme margin` found no match."

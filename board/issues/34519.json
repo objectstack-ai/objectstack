@@ -1,0 +1,34 @@
+{
+  "number": 34519,
+  "kind": "issue",
+  "title": "cli audit-redaction-seal: service() swallows every getService error, so a host signer that fails to resolve silently falls back to the local key (same family as #34280)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "lease:o2-I",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T23:51:33Z",
+  "updated_at": "2026-11-17T01:54:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34519",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: a same-family finding reported by area `o2-I` while landing #34280 (PR #34495). It is outside that claim's file surface. Dedupe: `audit-redaction-seal service getService swallow`, `cli seal signer fallback local key`. The seat runs these before triage.\n\n## 维护者速读\n\n- 现象：CLI 的 `packages/cli/src/utils/audit-redaction-seal.ts` 里，`service()` 吞掉 `getService` 抛出的所有异常。所以 CLI 做赎回时，如果宿主的签名器解析失败，会静默退回本机的签名钥，而不是响亮报错。\n- 为什么要修：这和 #34280 修的运行时问题是同一形状，那张卡修的是宿主检查点签名器解析失败时的静默回退。CLI 这一路没修，两处的行为就不一致。\n- 需要你做的：无。\n\n## Change\n\nApply #34280's rule to the CLI path. When the host registers a signer and resolving it throws, the CLI fails loudly with the resolution error. Fall back to the local key only when no host signer is registered at all. Mirror the wording and the error shape that PR #34495 lands, once that PR merges.\n\n## Done when\n\n- A test pins both cases:\n  - A host signer that throws on resolve fails the CLI command.\n  - With no host signer registered, the CLI still seals with the local key.\n- An ablation of the new branch turns the first case red.\n\nBlocked-by: #34280\n"
+}

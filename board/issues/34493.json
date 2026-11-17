@@ -1,0 +1,35 @@
+{
+  "number": 34493,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit): an activity summary names a referenced record by a title the writer may read, else by its id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T22:54:43Z",
+  "updated_at": "2026-11-17T00:42:30Z",
+  "closed_at": "2026-11-17T00:42:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T00:42:28Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34493",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9CEjuTu4HVEtNH1742UngyH)_\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：活动动态摘要里提到被引用的记录时（跟踪的查找字段变更、里程碑句子里的 `{token}`），记录名称按写入者自己的读取范围取得；写入者读不到该记录或其名称字段时，摘要写记录 id。\n- 为什么改：加固规则——活动摘要只用写入者本人可读的名称来指称被引用记录，否则用 id；与同一活动行的记录标签用同一读取范围。\n- 风险与回滚：只影响此后写入的活动行，已写入的行不变；有权读取的写入者和系统写入的摘要与之前相同；读取次数不变。回滚即 revert 本 PR，无数据迁移。\n- 先看：`packages/plugins/plugin-audit/src/audit-writers.ts`（两个摘要分支调用 `resolveLookupTitles` 的两处，以及该函数 \"Whose read it is\" 一节）；`packages/plugins/plugin-audit/src/activity-summary-title-writer-scope.test.ts`。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-audit exec vitest run src/activity-summary-title-writer-scope.test.ts`，预期 1 个文件、11 个用例全部通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nHardening rule: **an activity summary names a referenced record by a title the writer may read, else by its id.**\n\n`sys_activity.summary` names a referenced record in two branches: the tracked-change diff (`Vault: A → B`) and a fired milestone's `{token}` (`Escalated to {vault}`). Both take the title from `resolveLookupTitles` in `audit-writers.ts`. Both now hand it the hook's own `api`, the writer's scope. The row's record label already reads there, so every title an activity row writes follows one rule.\n\n- A record the writer may not read keeps its stored id: the object refuses the writer, or the writer's row scope leaves the record out.\n- A record the writer may read without its title column keeps its stored id.\n- The rule holds per id. One change can title the side the writer may read and keep the id of the side it may not.\n- A writer who may read the target, and every system write, gets the same summary as before.\n- No read is added. It is still one `id: { $in }` read per distinct target object, and only when a tracked reference moved or a fired milestone names one.\n\nThe resolver's docblock now states the rule for every caller. Rows already written keep the summary they were written with.\n\n## Tests\n\nNew file `src/activity-summary-title-writer-scope.test.ts` (11 cases) runs a bare engine with the real `installAuditWriters`. The restrictions are engine middleware on the target object: a refused read, a row left out by row scope, and a row served without its title column. For each branch it pins the three restricted writers, a writer who may read and a system write. The tracked branch also pins the per-id case. The cases assert the stored sentence and the stored summary code that the read side composes from.\n\n<details><summary>Red first: the new file against the base source</summary>\n\nAt `origin/main` `bf76922925`, before the fix:\n\n```\n Test Files  1 failed (1)\n      Tests  7 failed | 4 passed (11)\n```\n\nThe 4 that pass are the controls (a writer who may read, and a system write, in each branch).\n</details>\n\n<details><summary>Ablations via scripts/ablation-replace.mjs, each restored to the HEAD blob with an empty git diff HEAD</summary>\n\n| Mutation | Red |\n|---|---|\n| M1: the tracked-change branch's call takes its base-source argument again | 4 (the three restricted writers and the per-id case) |\n| M2: the milestone branch's call takes its base-source argument again | 3 (the three restricted writers) |\n\nEach logged `ok mutation landed: anchor 1 -> 0` and `ok restored: blob == HEAD (b8e96db505a1) and git diff HEAD is empty`.\n</details>\n\n<details><summary>Package suite and typecheck at 7c093c01 (after merging origin/main)</summary>\n\nClosure rebuilt after the merge (`turbo run build --filter=@objectstack/plugin-audit...`, 16/16 tasks), `@objectstack/spec check:generated` reports all 14 generated artifacts up to date. Under `scripts/pm/os-verify-lock.sh`:\n\n```\npnpm --filter @objectstack/plugin-audit test && pnpm --filter @objectstack/plugin-audit typecheck\n Test Files  100 passed (100)\n      Tests  1665 passed (1665)\ncheck:test-typecheck: OK — @objectstack/plugin-audit's test layer compiles\nos-verify-lock: VERDICT command-exit 0\n```\n</details>\n\n## Acceptance notes\n\n- **Scope.** Only the two summary branches change. The record label already read its title in the writer's scope.\n- **`referenceNameVisible`.** A lookup that declares it follows the same rule in the summary as in the record label. Whether that key should widen what activity rows name is a question raised with the owning seat. This PR does not decide it.\n- **Already-written rows** keep the summary they were written with. Snapshots are not rewritten.\n- **Test placement.** The summary branches have no shared harness file (each audit suite carries its own), so the pins are a new file named for the rule.\n\n## Verification\n\nLocal gate subset: the `scripts/pm/dispatch-gates.mjs --commands` list derived at `7c093c01` (72 commands). 70 answered exit 0, one of them after its pinned fixture commit was fetched into this shallow clone. `check:dual-build-cjs-loads` refused locally (PREREQUISITE NOT MET: it reads every package's build output), and so did `check:i18n` (it needs the CLI build closure). Both are NOT MEASURED here. CI runs both in `Lint & Repo Gates`, and CI runs the full farm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRiaNzHVY81pCjZrpv)_\n\n<!-- signed: security#1 · os-steve · session_01ADHkmRiaNzHVY81pCjZrpv -->\n"
+}

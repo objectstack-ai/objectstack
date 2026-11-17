@@ -1,7 +1,7 @@
 {
   "number": 33115,
   "kind": "issue",
-  "title": "[PM seat] review — 🟢 os-mickey",
+  "title": "[PM seat] review — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-mickey"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-13T14:23:05Z",
-  "updated_at": "2026-11-16T07:23:34Z",
+  "updated_at": "2026-11-16T22:00:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33115",
-  "body": "review#1 · os-mickey · session_01ASNY8Ywba8ySbMdWvra2vS\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/l2-review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**. Posture and round ledger live in the session.\n\n## Current PM — 🟢 os-mickey\n\n- **Holder:** `os-mickey` · `session_01ASNY8Ywba8ySbMdWvra2vS`, seated 2026-11-16T07:17Z on the maintainer's summons (`/pm-dispatch review`). Previous holder `os-elon-musk` (`session_016WV4cy7hQ5MvQ83ByNZ8ZH`) signed off 2026-11-15T13:30Z with nothing in hand.\n- **Mailbox:** #34329. **Patrol:** `trig_014DpWvGKBh16RFcKD9k97yX` (hourly, self-bound).\n- Sibling L2 seat: `review#2` (#33258). Takes owed contract reviews per `check-owed-reviews.mjs`; ⛔ never a PR this account dispatched or implemented.\n\n## Hand-over ledger\n\n- Inherited: none.\n- ⛔ Never the Version Packages PR.\n\n## Hot-file serial queue\n\n- None: this seat writes no code.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n"
+  "body": "review#1 · os-mickey · session_01ASNY8Ywba8ySbMdWvra2vS\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/l2-review.md` and `references/contract-review.md` (⛔ not copied here). This is **`review` seat 1**.\n\n## Current PM — ⏳ vacant\n\n- **Last holder:** `os-mickey` · `session_01ASNY8Ywba8ySbMdWvra2vS`, seated 2026-11-16T07:17Z, signed off 2026-11-16T22:05Z on the maintainer's word (当前任务处理完就下班). `check-handover.mjs` exit 0: no unreleased claim.\n- **Mailbox:** #34329 closed at sign-off. **Patrol:** `trig_014DpWvGKBh16RFcKD9k97yX` deleted.\n- Online sibling L2 seats: `review#2` (mailbox #34385), `l2-review#3` (mailbox #34476).\n- Successor: `/pm-dispatch review`, read this post first, open a fresh mailbox.\n\n## Hand-over ledger\n\n- **In flight:** none. No claim, no review running.\n- **Deltas owed on this seat's records:** they go to an online sibling L2 seat.\n  - #34333: FAIL 6930270729 at `3c499592`. M4 is open. The next lane head needs a delta. Tier H.\n  - #34449: PASS 6927238180 plus closure 6927381955. S1 is carried by #34454.\n  - #34429: PASS 6929557791 at `31c96c55`. Ruled A, 6929076086.\n  - #34438: PASS 6928983917. Landed on main.\n  - #34316: PASS plus closure 6929151654 under ruling 6929091056.\n  - #34267: PASS 6930642328 at `df7593e7`. Landing.\n- **Waiting on the maintainer:** these were raised in chat and are not on a card unless named.\n  - The rules-review decision points for card #34376.\n  - Whether #34421's ruling-time contract review needs an independent L2 seat.\n  - Whether #34449's record should read `Security-touching: no`.\n  - Security-class mechanisms behind #34333 M4, given to the maintainer in chat only. Both security seats are vacant, so they go to triage (ruling 6929091056 seat card B).\n- **Standing rulings this seat applied:**\n  - 6929091056 A: while both security seats are vacant, a security-class should-fix (not a must-fix) is carried once filed as a private draft advisory.\n  - 6917060639: independence is per session.\n- ⛔ Never the Version Packages PR.\n\n## Hot-file serial queue\n\n- None: this seat writes no code.\n\n## Notes\n\n- Write path: the relay. ⛔ No GitHub MCP writes.\n- Shift total: 58 contract-review records (40 PASS, 18 FAIL).\n"
 }

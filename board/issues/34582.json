@@ -1,0 +1,35 @@
+{
+  "number": 34582,
+  "kind": "pull_request",
+  "title": "fix(ci): a stalled history fetch is killed and retried, not left to the step's wall",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "dependencies",
+    "domain:devx",
+    "size/m",
+    "skip-changeset",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:15:23Z",
+  "updated_at": "2026-11-17T02:18:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34582",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9R6fQuMSzSrRW2oowG4K2kQ)_\n\nFixes #34561\n\nGoverned: `.github/workflows/ci.yml`, `.github/workflows/lint.yml` (Tier H). **改根 ci.yml，需维护者同意。**\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：CI 里「Fetch this commit's history and the base branch」这一步（`test-plan`、`test`、`type-check-ui`、`test-ui-plan`、`test-ui` 五个 job 各一份）合成一个脚本 `scripts/ci/fetch-history.sh`。每次 `git fetch` 都带进度输出、单独一个进程组；一次尝试 60 秒没有任何输出，就连同 `git-remote-https` 一起杀掉，进入下一次重试。还在动的拉取（哪怕很慢）不会被打断。\n- 为什么改：2026-11-16/17 五小时内四次步骤超时（push `6a7403ba` Test Core 7/8，队列 pr-34447 Test Core 5/8、pr-34381 Test UI 4/16、pr-34511 Plan Test Core shards）。能找到的三份日志一样：第 1 次 fetch 一直没输出，直到 8/14/20 分钟的步骤预算把它杀掉，原来的三次重试一次都没轮上；同一 run 的兄弟分片拉同样的历史只用 47–96 秒。所以不是深度或体量，是传输卡死而没人发现。\n- 风险与回滚：没有调大任何超时，五个步骤的预算不变；拉取的内容（HEAD 全部祖先 + main，PR 进别的分支时再加那个分支，不拉 tag）不变。回滚即 revert 本 PR。\n- 先看：`scripts/ci/fetch-history.sh` 的 `fetch_once`（看门狗 + 进程组杀）；`ci.yml` 五处步骤现在都只剩 `run: bash scripts/ci/fetch-history.sh`。\n- 两分钟验证：`pnpm check:fetch-history`，预期 46 项 PASS（约 40 秒，离线）。\n- 需要你做的：**同意改根 ci.yml**，并按 Tier H 审批。\n\n## What changes\n\n- **`scripts/ci/fetch-history.sh`** (new): the step's body, once. Same refspecs, same `--unshallow` of HEAD's sha, same three attempts and 15 s / 30 s sleeps, same `::error::` and `History:` lines. New: `git fetch --progress` into a log, started under `setsid` so git and its `git-remote-https` helper share a process group of their own; a watchdog ends an attempt after 60 s in which the log did not grow (`kill -TERM` then `-KILL` to the group), prints the attempt's last progress line per phase (so the next stall names where it stopped), warns, and lets the loop retry. The 60 s is silence, not elapsed time: a healthy fetch writes at least once a second (enumerating, counting, compressing, then receiving with its byte rate).\n- **`.github/workflows/ci.yml`**: the five inline copies become `run: bash scripts/ci/fetch-history.sh`; budgets (8 / 20 / 20 / 14 / 14) untouched. The `test` job's comment, which sizes the budgets, now says why the body is shared and bounded; the three \"verbatim but for its budget\" notes say \"the same script with its own budget\".\n- **`scripts/ci/fetch-history.selftest.sh`** (new) + `check:fetch-history` + a `History fetch self-test` step in lint.yml's `lint-ci-engine` job, next to the Test Core package-selection self-test.\n\n## Evidence\n\n<details><summary>The three failed logs (attempt 1 silent until the budget; orphan helper reaped)</summary>\n\n```\njob 133708987651  merge group pr-34511  Plan Test Core shards\n  00:04:02  Run refspecs=…   (attempt 1: git fetch --no-tags --unshallow origin ea1edf97… +refs/heads/main:…)\n  00:12:15  ##[error]The action 'Fetch this commit's history and the base branch' has timed out after 8 minutes.\n            Terminate orphan process: pid (2206) (git-remote-https)\njob 133645669009  merge group pr-34381  Test UI (4/16)\n  22:02:27 → 22:16:40  timed out after 14 minutes; orphan git, git, git-remote-https\njob 133557664420  push 6a7403ba  Test Core (7/8)\n  19:35:18 → 19:55:31  timed out (20 min); orphan git, git, git-remote-https\nSibling shards' successful fetch step, same runs (s): 47 48 48 49 53 61 63 63 96 (push) · 49 50 50 51 53 53 57 57 60 61 62 65 66 67 67 67 96 (pr-34381)\n```\nThe pr-34447 run is past the run listings I read; the card's table reports the same signature.\n</details>\n\n<details><summary>Rehearsal against a real smart-HTTP server that stalls (git http-backend behind a node proxy; 400-commit, 6.8 MiB upstream; depth-1 clone first, like the checkout)</summary>\n\n```\nold step body, pack stalls after 2,000,000 bytes, step budget 120 s:\n  exit 124 after 120 s, still shallow (1 commit) — the production signature\nnew script, same stall, production bound (60 s):\n  Attempt 1 … Receiving objects:  50% (574/1148)\n  ::warning::git fetch wrote nothing for 60s after 12356 byte(s) of output, so it was killed with its process group (#34561).\n  Attempt 2 … Receiving objects: 100% (1148/1148), 6.84 MiB | 30.60 MiB/s, done.\n  exit 0 after 80 s, unshallowed (400 commits), no orphan helper\nnew script, server never answers the pack request (5 s bound): killed after 0 bytes, attempt 2 green\nnew script, slow but moving (146 KiB/s, 49 s, 5 s bound): one attempt, never cut\n```\n</details>\n\n## Tests\n\n`bash scripts/ci/fetch-history.selftest.sh` — a stub `git` plays `fetch` per attempt and hands everything else (and every healthy fetch) to the real git against a throwaway file:// upstream: healthy (args, unshallow, no tags, History line), PR into another branch / into main, full clone (no `--unshallow`), silent hang then ok, hang after progress then ok (prints the stalled phase), slow-but-moving (never cut), three fast failures (red, named), three hangs (red inside three bounds, not at the wall); every hang checks the stub's child process is gone (the group kill). The last section pins the five ci.yml call sites and that no inline loop is left. 46 checks.\n\n<details><summary>Ablations (script mutated on disk, restored after)</summary>\n\n```\nA1  kill the pid, not the group      × hang-then-ok / progress-then-hang / hang3 left no child process   3 FAILED\nA2  no stall bound (the old loop)    × hang-then-ok names the stall · hang3 warns three times · hang3 is bounded   3 FAILED\n```\n</details>\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --ran`: the 67 derived gates are running on c216805f; their reading is written here when they finish.\n- CI runs the rest; its result is read at the final head.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSYe73LCZ6WxGFvcko\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmSYe73LCZ6WxGFvcko -->\n"
+}

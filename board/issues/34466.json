@@ -1,0 +1,33 @@
+{
+  "number": 34466,
+  "kind": "issue",
+  "title": "objectql: a multi-row insert does not accumulate earlier rows into a parent summary that a field-level parent. predicate reads",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:o2-E",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-16T20:51:14Z",
+  "updated_at": "2026-11-17T02:04:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34466",
+  "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ① prior dev report. Found in #25579's dev report 6442152067 and restated by the #33795 decision thread (ruling record 6928862195). ⛔ Not a claim. Not re-measured today.\n\n## 维护者速读\n\n- **是什么：** 一次插入多行时，字段级的 `parent.` 条件如果读父记录的汇总字段，不会把同批前面几行的影响算进去，和逐条插入的结果不同。\n- **影响：** 与 #25579「批量等于逐条」的裁决不一致；只影响用 `parent.<汇总字段>` 写条件的字段规则。今天的应用里没找到这样的规则。\n- **建议：** p2。\n\n## Where\n\n- The multi-row insert path evaluates a field-level `parent.` predicate against the parent as it was before the batch. Rows earlier in the same batch do not accumulate into the parent's summary, so they are not visible to later rows' predicates. #25579's dev report 6442152067 records it.\n\n## Done when\n\n- A multi-row insert under one parent answers a field-level `parent.<summary>` predicate the same way as inserting the rows one by one, pinned with a two-row case plus a CONTROL predicate that reads a non-summary parent field. Or, if the predicate analysis cannot name the field it reads (the #33795 decision thread's caveat), write the limit into the docs with this card as the record.\n\nDedupe words: createMany parent predicate summary, multi-row insert parent roll-up accumulate, field-level parent predicate batch."
+}

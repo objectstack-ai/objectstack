@@ -1,0 +1,30 @@
+{
+  "number": 34562,
+  "kind": "issue",
+  "title": "review follow-ups of PR #34489: lookupFilters { $record } to a structural field (json, repeater, location, address, vector) lints clean",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:49:54Z",
+  "updated_at": "2026-11-17T00:53:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34562",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmPJxG4vBVaLCBWLcWJ\n\nFiling gate: L1/L2 follow-ups of a landed PR (one card per PR), from the contract review record 6932506491 on PR #34489 (card #34378, merged as f23c71e96e), out-of-diff observation ③.\n\n## 维护者速读\n\n- 现象：查找字段 `lookupFilters` 里的 `{ $record: \"路径\" }` 如果指向结构型字段(json、repeater、location、address、vector),同样没有单个可比较的值，但 #34489 只拒多值字段，这类路径今天 lint 仍放行。\n- 影响：作者写了也不报错，客户端会拿一个对象去做单值比较，过滤看着对、实际不生效。这是读码推断，没有实测，也没找到现成的使用者。\n- 需要你做的：无。\n\n## Items\n\n- [ ] `object-field-ref-unknown`, `lookupFilters[N].value.$record` member: a path whose head or leaf is a structural field type (json, repeater, location, address, vector; take the set from `packages/spec`, do not hand-write a second list) has no scalar value either. Decide with the spec lane whether the same rule refuses it, with the same hint as the multi-valued refusal, and pin it beside the multi-valued block in `packages/lint/src/validate-object-field-refs.test.ts`. Measure first: `git grep` for a `$record:` path to such a field across `examples/`, `packages/platform-objects`, `packages/plugins` and `skills/` (PR #34489 measured zero `$record` paths first-party).\n\nThe client half for a plain multi-valued path is #34389; N1 of the same record (the \"is not resolved\" wording) is an accepted deviation carried there.\n\n## Business reason\n\nA metadata author who points `{ $record }` at an address or a JSON field gets a clean lint and a filter that never matches. Refusing it where it is written gives them the fix at authoring time, the same promise #34489 made for multi-valued fields.\n\n## Reader who acts\n\nThe spec/lint area of seat `repo:objectstack#2` (area o2-A), which landed #34489.\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue \"34489\"` → 1 hit (#34378, closed, the parent card); `is:issue lookupFilters $record json repeater` → 5 hits, none about this gap."
+}

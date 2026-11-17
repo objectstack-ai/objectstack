@@ -1,0 +1,35 @@
+{
+  "number": 34527,
+  "kind": "issue",
+  "title": "pm-dispatch: align execution-duties, SKILL.md and the seat-post and seat-lifecycle hot-file queues with #33941's merge-tree rule (one answer for same-file work)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "lease:o2-S",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:05:53Z",
+  "updated_at": "2026-11-17T01:22:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34527",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: an out-of-scope finding from the L2 contract-review record on PR #34512 (#33941, record 6933258205), passed on by area `o2-S`. Dedupe: `same-file serial default`, `hot-file serial queue wording`. No open sibling card was found among the hot-file cards (#33942–#33949).\n\n## 维护者速读\n\n- 现象:#33941 把「同一个热文件只许一个写者」换成认领时和推送前各做一次 merge-tree 检查，规则写进了 `area-lease.md`。但 pm-dispatch 还有几处仍写着「同文件串行是默认」:`references/execution-duties.md` 第 32–35 行、`SKILL.md` 第 127 行附近，以及 `seat-post-protocol.md` 和 `seat-lifecycle.md` 里的热文件串行队。同一个问题现在有两套答案。\n- 为什么要修：席位读到哪一处，就按哪一处做;两套答案会让同一种情形在不同席位得到不同处理。\n- 需要你做的：无(Tier H 文本 PR 落地时照常审批)。\n\n## Change\n\nAfter PR #34512 merges, align the listed passages to the rule it lands. Each passage points to that rule's single home in `area-lease.md` and does not restate it. Pay for the lines under the line ratchet.\n\n## Done when\n\n`git grep -n` over `.claude/skills/pm-dispatch/` for the old default (\"same file → serial\" and its Chinese wording) leaves only the pointer lines, and the PR body lists each hit before and after.\n\nBlocked-by: #33941\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 34543,
+  "kind": "issue",
+  "title": "test: ObjectGrid.dateColumnOneFace-25884 case D goes red across UTC midnight (fixture and render each read \"today\")",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T00:22:41Z",
+  "updated_at": "2026-11-17T02:02:00Z",
+  "closed_at": "2026-11-17T01:54:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34543",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: a flake with a named cause, reported by area `o2-G` from PR #34496 (run 43981736011, Test UI shard 9/16, red at 00:04Z; the same head passed 4/4 locally). The card thread noted it on the PR (6933606293). Dedupe: `dateColumnOneFace`; no open card.\n\n## 维护者速读\n\n- 现象:`ui/packages/plugin-grid/src/__tests__/ObjectGrid.dateColumnOneFace-25884.test.tsx` 的用例「D: object-schema default columns」在跨 UTC 午夜时会红。造数据时取一次「今天」,单元格渲染相对时间时又取一次，跨过午夜后 +2 天读成了 +1 天(期望 `In 2 days`,得到 `Tomorrow`)。\n- 为什么要修：这是测试自己的时间缺陷，不是产品缺陷;它会让无关 PR 在合并队列里随机变红。\n- 需要你做的：无。\n\n## Change\n\nFreeze the clock for the test (fake timers set once, before the fixture is built), so the fixture and the render read the same instant. Check the file's other cases for the same double read and fix them in the same change.\n\n## Done when\n\nThe case passes with the system time set to 23:59:59.900 UTC before the fixture is built.\n"
+}
