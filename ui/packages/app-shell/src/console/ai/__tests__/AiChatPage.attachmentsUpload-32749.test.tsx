@@ -29,6 +29,9 @@
  *    the file that did upload;
  *  - a spreadsheet beside an image: the sheet is parsed, the image uploaded,
  *    and one turn carries both.
+ *
+ * The turns here are typed in English, so their attachment notes are English
+ * (objectstack#34461: the notes follow the conversation's language).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -249,8 +252,8 @@ describe('AiChatPage — image and PDF attachments ride the turn as stored file 
       },
     ]);
     expect(turn.text).toContain('Fill a claim from these');
-    expect(turn.text).toContain('receipt.png、invoice.pdf');
-    expect(turn.text).not.toContain('未读取');
+    expect(turn.text).toContain('receipt.png, invoice.pdf');
+    expect(turn.text).not.toContain('not read');
     expect(parseSpreadsheetFile).not.toHaveBeenCalled();
   });
 
@@ -260,7 +263,7 @@ describe('AiChatPage — image and PDF attachments ride the turn as stored file 
     expect(parseSpreadsheetFile).toHaveBeenCalledTimes(1);
     expect(state.uploads).toEqual([]);
     expect(turn.files).toEqual([]);
-    expect(turn.text).toContain('[附件表格 claims.csv');
+    expect(turn.text).toContain('[Attached spreadsheet claims.csv');
   });
 
   it('names an over-cap image and an unsupported type as not read, and uploads neither', async () => {
@@ -271,8 +274,8 @@ describe('AiChatPage — image and PDF attachments ride the turn as stored file 
 
     expect(state.uploads).toEqual([]);
     expect(turn.files).toEqual([]);
-    expect(turn.text).toMatch(/超过 10 MB 上限,未上传,内容未读取:huge\.jpg/);
-    expect(turn.text).toMatch(/类型暂不支持读取,未上传,内容未读取:notes\.docx/);
+    expect(turn.text).toMatch(/over the 10 MB cap, were not uploaded, and their content was not read: huge\.jpg/);
+    expect(turn.text).toMatch(/cannot be read yet, were not uploaded, and their content was not read: notes\.docx/);
   });
 
   it('names a failed upload as not read, and still sends the turn with the file that did upload', async () => {
@@ -280,7 +283,7 @@ describe('AiChatPage — image and PDF attachments ride the turn as stored file 
 
     expect(state.uploads).toEqual(['broken.png', 'ok.png']);
     expect(turn.files.map((p) => p.providerMetadata?.objectstack?.fileId)).toEqual(['file-ok.png']);
-    expect(turn.text).toMatch(/上传失败,内容未读取:broken\.png/);
+    expect(turn.text).toMatch(/failed to upload, and their content was not read: broken\.png/);
   });
 
   it('parses a spreadsheet and uploads an image attached beside it, in one turn', async () => {
@@ -289,6 +292,6 @@ describe('AiChatPage — image and PDF attachments ride the turn as stored file 
     expect(parseSpreadsheetFile).toHaveBeenCalledTimes(1);
     expect(state.uploads).toEqual(['receipt.jpg']);
     expect(turn.files.map((p) => p.providerMetadata?.objectstack?.fileId)).toEqual(['file-receipt.jpg']);
-    expect(turn.text).toContain('[附件表格 claims.csv');
+    expect(turn.text).toContain('[Attached spreadsheet claims.csv');
   });
 });
