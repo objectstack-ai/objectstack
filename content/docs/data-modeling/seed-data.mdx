@@ -339,6 +339,54 @@ dataset wrote: both sets stay resident and queryable, because the switch is
 additive and not a migration. Clearing the market you left behind is the
 operator's job — to switch locales cleanly, start from a fresh database.
 
+### A Fallback Set — `fallback: true`
+
+A locale that no dataset of an object names gets **none** of that object's
+locale-scoped rows. Where the seed is functional rather than decorative — the
+standard price book that quotes fall back to — an organization on `ja-JP` would
+end up with no price book at all when you ship only a `zh-CN` and an `en` set.
+Mark one set `fallback: true` and it also loads for every locale no other set
+of the object names:
+
+```typescript
+defineSeed(PriceBook, {
+  locale: ['zh-CN'],
+  records: [{ name: '标准价格表' }],
+});
+
+defineSeed(PriceBook, {
+  locale: ['en', 'en-US'],
+  fallback: true,          // also loads for ja-JP, es-ES, … — any locale no PriceBook set names
+  records: [{ name: 'Standard' }],
+});
+```
+
+| Resolved locale | `PriceBook` rows loaded |
+|:---|:---|
+| `zh-CN` | the `zh-CN` set |
+| `en`, `en-US` | the `en` set (its own locales) |
+| `ja-JP`, `es-ES`, … | the `en` set, as the fallback |
+| none (package apply, draft publish, an unresolved install) | both sets, with the usual warning |
+
+The rules:
+
+- **The fallback set lists its own locales.** `fallback: true` on a dataset with
+  no `locale` is refused when the seed is parsed: an unscoped dataset already
+  loads for every locale, so it cannot also be the set that loads only when no
+  other set matches. Write the locales the set is in and keep the marker.
+- **A set with no `locale` does not count as a match.** It is locale-neutral: it
+  loads beside whichever set is chosen, and the fallback still fills in.
+- **Matching is per object**, case-insensitive and otherwise exact, as above. A
+  `ja-JP` set of some *other* object does not stop the price book's fallback.
+- **`env` is applied first.** A set `env` scoped out of the load neither matches
+  nor falls back.
+- **At most one fallback set per object in a load.** Two sets of one object both
+  marked `fallback: true` refuse the whole seed load — no row is written — and
+  the load's error names the object.
+
+The loader logs, at info, each fallback set it loaded and the locale it filled
+in for. Datasets without the marker load exactly as before.
+
 <Callout type="info">
   **Where the loading locale comes from.** On the normal boot path your stack
   supplies it: the runtime reads your app's `i18n.defaultLocale` and passes it to
@@ -801,7 +849,9 @@ When the same records need different display strings per language, author both
 datasets and scope each with `locale`. Selecting between them in application
 code instead bakes the choice into your build output, so shipping another
 market means another build. Neither approach removes what the market you left
-behind already wrote — see [Locale Scoping](#locale-scoping).
+behind already wrote — see [Locale Scoping](#locale-scoping). Mark one set
+`fallback: true` so a market you did not author still gets functional rows —
+see [A Fallback Set](#a-fallback-set--fallback-true).
 
 ### Leave `mode` unset for data the customer owns
 
@@ -842,6 +892,7 @@ function defineSeed<
     columns?: { [field: string]: { applyOn?: 'create' | 'always' } }; // per-column write policy; default: 'always'
     env?: Array<'prod' | 'dev' | 'test'>;  // default: ['prod','dev','test']
     locale?: string[];                      // BCP-47 tags; omitted = every locale
+    fallback?: true;                        // also load for a locale no other set of the object names (needs locale)
     dependsOn?: string[];                   // objects this dataset loads after (see "Load Order")
     records: Array<SeedRecord<TObj['fields']>>;  // declared fields + injectable system columns
   }
