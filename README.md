@@ -1,5 +1,7 @@
 # ObjectStack
 
+**English** · [简体中文](./README.zh-CN.md)
+
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)
 [![Docs](https://img.shields.io/badge/docs-objectstack.ai-0a0a0a.svg)](https://objectstack.ai/docs)
@@ -14,6 +16,9 @@
 > 本体即软件。
 
 `Executable` · `AI-writable` · `Agent-operable` · `You own it` · Apache-2.0
+
+The bundled reference CRM ([`examples/app-crm`](./examples/app-crm)) is 30 files / 2,189 lines of TypeScript ≈ 22k tokens, and fits whole in an agent's context window.
+<sub>Count it: `find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l` · at commit `e61af972`, tests excluded, tokens estimated at ~4 characters per token · [the full count](#why-there-is-less-to-write)</sub>
 
 <p align="center">
   <img src="docs/screenshots/readme-demo.gif" alt="A 30-second recording of a real run of the showcase example app, in three beats. One: the Team object's typed definition, then pnpm dev:showcase booting it on a fresh database, then the Console listing two teams. Two: an agent's MCP tools/call create_record request to /api/v1/mcp with the dev admin's API key, the real response carrying the new Data Guild record, then the Console showing that row and its record page saying Created by Dev Admin. Three: the same call sent with a read-only Auditor key, refused with isError true and a permission message, then the Console still showing three rows. It closes on: The ontology is the software. Executable, AI-writable, Agent-operable, You own it.">
@@ -40,6 +45,7 @@ here instead of keeping its own copy.
 | I want to… | Run | Then |
 | :--- | :--- | :--- |
 | Build a new app with an agent | `npm create objectstack@latest my-app && cd my-app && npx os dev --ui` | Open `http://localhost:3000/_console/`. The walkthrough is [Try it in five minutes](#try-it-in-five-minutes). |
+| Connect a database that already runs | In a project, declare it: `defineDatasource({ …, schemaMode: 'external' })`, then bind objects to its tables | The database is federated, not copied: queried live, never sent DDL, and read-only by default — writes need an explicit opt-in on both the datasource and the object ([External datasources](https://objectstack.ai/docs/data-modeling/external-datasources)). |
 | Run the platform with no project yet | `npm i -g @objectstack/cli && os start` | Open `http://localhost:3000/_console/`. With no artifact to load, `os start` boots an empty kernel and you install apps from the Console marketplace ([`os start`](https://objectstack.ai/docs/deployment/cli#os-start)). |
 | Run a compiled app in the official image | `docker run -p 8080:8080 -v "$PWD/dist/objectstack.json:/srv/app/objectstack.json:ro" -e OS_DATABASE_URL -e OS_AUTH_SECRET -e OS_SECRET_KEY ghcr.io/objectstack-ai/objectstack:latest` | Export the three variables first. `latest` is for trying it; pin an exact `X.Y.Z` tag in production ([image README](./docker/README.md)). |
 | Ship a scaffolded app with Postgres | `docker build -t my-app . && docker compose up -d` | Run it inside the scaffolded project ([Ship it](#ship-it)). |
@@ -82,13 +88,62 @@ actually read.
 </p>
 <p align="center"><sub>Prefer clicking? Studio authors the same metadata visually — same artifacts, same gate.</sub></p>
 
+## Why there is less to write
+
+The agent writes the definition and none of the plumbing under it. The same
+kind of product, a CRM, at three sizes:
+
+| | Files | Lines | ≈ Tokens |
+| :--- | ---: | ---: | ---: |
+| A traditional hand-written CRM codebase — a typical order of magnitude, not a measurement | thousands | hundreds of thousands | millions |
+| [HotCRM](https://github.com/objectstack-ai/hotcrm) sales module — the sales part of the full open-source CRM: 11 objects, 21 flow files, 4 dashboards; language packs and seed data not counted | 159 | 28,456 | ≈ 360k |
+| The reference CRM ([`examples/app-crm`](./examples/app-crm)) — six objects, views, a dashboard, a lead-conversion flow, permission sets, actions, translations | 30 | 2,189 | ≈ 22k |
+
+```bash
+# In this repository: the reference CRM
+find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | wc -l               # 30 files
+find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -l   # 2,189 lines
+find examples/app-crm/src -name '*.ts' -not -name '*.test.ts' | xargs cat | wc -c   # 87,005 bytes ≈ 22k tokens
+
+# In a clone of objectstack-ai/hotcrm: the sales module, without language packs and seed data
+find src/sales -name '*.ts' -not -name '*.test.ts' -not -path '*/translations/*' -not -path '*/data/*' | wc -l               # 159 files
+find src/sales -name '*.ts' -not -name '*.test.ts' -not -path '*/translations/*' -not -path '*/data/*' | xargs cat | wc -l   # 28,456 lines
+find src/sales -name '*.ts' -not -name '*.test.ts' -not -path '*/translations/*' -not -path '*/data/*' | xargs cat | wc -c   # 1,446,608 bytes ≈ 360k tokens
+```
+
+The two measured rows count non-test `.ts` files, with tokens estimated at ~4
+characters per token (`wc -c` ÷ 4): this repository at commit `e61af972`, HotCRM
+at its commit `94f8d04`. The HotCRM row is its sales module only (`src/sales`),
+leaving out the language packs in `src/sales/translations` and the seed data in
+`src/sales/data` — with them the module is 204 files / 40,868 lines — and not
+counting HotCRM's other modules: service, marketing, revenue, order to cash,
+expenses and project delivery. The reference CRM's count includes its
+translations and seed data. Both keep changing, so run the commands for today's
+numbers. The reference CRM takes about 11% of a 200k-token context window; the
+HotCRM sales module is larger than that and fits in a 1M-token window.
+
+Decisions — objects, relations, permissions, flows — stay in the ontology,
+because only you can make them. Plumbing — tables, the CRUD API, list and detail
+pages, permission checks, audit writes — is derived by the runtime, so nobody
+writes it. This is a claim about size, not speed: there is no public,
+reproducible build-time benchmark yet, so this README states no multiple.
+[How Many Tokens Is a Business App?](https://www.objectos.ai/en/blog/business-app-in-16k-tokens/)
+makes the argument at length; its figures were measured at earlier commits and
+differ from the ones above.
+
 ## What we mean by ontology
 
 Your app's definition — objects and fields, relations, actions, permissions,
 flows, and agent and tool definitions — is a **business ontology**: open,
 versioned, and yours, not code scattered across a framework. It is executable,
 not a knowledge-representation ontology (no inheritance, no axioms, no reasoner),
-and it is not a semantic layer over your existing systems. The full account is
+and it is not a semantic layer over your existing systems: a semantic layer
+describes a business that runs somewhere else, and this definition is what runs.
+Systems that already run can still be connected into it as
+[external datasources](https://objectstack.ai/docs/data-modeling/external-datasources):
+their tables become objects in the ontology, read-only by default, with writes
+an explicit opt-in on both the datasource and the object. Federation is early.
+The full account is
 [Business Ontology](https://objectstack.ai/docs/concepts/ontology);
 [How it compares](https://objectstack.ai/docs/concepts/compare) sets ObjectStack
 beside knowledge ontologies, semantic layers, metadata platforms, and AI code
@@ -184,15 +239,26 @@ objects, views, a dashboard, a lead-conversion flow, permission sets, actions,
 translations — is small enough for an agent to load end-to-end, reason about
 every dependency, and refactor across data, API, UI, and permissions in one
 change. It can answer *"what breaks if I change this?"* instead of grepping and
-hoping. The whole app is 1,873 lines of TypeScript (`examples/app-crm/src`,
-tests excluded, at commit `95294be3`).
+hoping. The whole app is 30 files and 2,189 lines of TypeScript, about 22k
+tokens (`examples/app-crm/src`, tests excluded, at commit `e61af972`;
+[count it yourself](#why-there-is-less-to-write)).
 
 ## You own it
 
 **Everything needed to run an app is in this repository** — protocol,
 microkernel, SDK, CLI, the production runtime and Console, permissions, audit,
-and MCP — single sign-on (OIDC / SAML) included, free. ObjectOS Cloud and
-Enterprise add hosting, Build & Ask, and support.
+and MCP — single sign-on (OIDC / SAML) included, free. That is ObjectOS
+Community, one of three editions:
+
+| Edition | How you get it | What it adds |
+| :--- | :--- | :--- |
+| **ObjectOS Community** | This repository — self-hosted, free, Apache-2.0 | The baseline: everything above. AI reaches the app over MCP, with your own agent and model |
+| **ObjectOS Cloud** | Hosted for you | In-product Build & Ask |
+| **ObjectOS Enterprise** | Self-managed on your own infrastructure, licensed | In-product AI, AI governance, org-hierarchy record visibility, customer-managed keys for secrets, support |
+
+[Compare editions](https://docs.objectos.ai/docs/editions/compare) has the
+row-by-row matrix.
+
 This repository is Apache-2.0, except `ui/` (the Console and `@object-ui/*`), which is MIT — both permissive
 ([LICENSING.md](./LICENSING.md)). The definition lives in your repository as
 ordinary TypeScript, versioned in your VCS and reviewable as a diff — not a
