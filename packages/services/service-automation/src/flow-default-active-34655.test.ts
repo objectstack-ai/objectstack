@@ -343,6 +343,50 @@ describe('#34655 — `defaultActive` is refused on a flow authored in the enviro
     });
 });
 
+describe('#34655 (L2 S3) — a name two packages hold keeps the key: the check asks whether ANY package holds it', () => {
+    /** Each name's loader sets, as the plugin's reader answers them (one owner by name; each package's own question). */
+    function bootCoHeld(loaderSets: Record<string, readonly string[]>) {
+        const booted = boot();
+        booted.engine.setPackagedFlowSource((name, packageId) => {
+            const holders = loaderSets[name] ?? [];
+            if (packageId !== undefined) return holders.includes(packageId) ? packageId : undefined;
+            return holders.length === 1 ? holders[0] : undefined;
+        });
+        return booted;
+    }
+    /** Package `packageId`'s own body of `name`, armed in its own slot as precedence arms a co-held name. */
+    const ship = (engine: AutomationEngine, packageId: string, name: string, extra: Record<string, unknown> = {}) =>
+        engine.registerFlow(name, packagedFlow(name, { _packageId: packageId, ...extra }), { source: 'package', packageId, holder: packageId });
+
+    it('both holders, a re-sync and a third holder register with the key, true and false', () => {
+        const { engine } = bootCoHeld({ co_held: ['crm', 'erp', 'hr'] });
+        expect(engine.packagedFlowOwner('co_held'), 'control: the bare name has no ONE owner').toBeUndefined();
+        expect(() => ship(engine, 'crm', 'co_held', { defaultActive: false })).not.toThrow();
+        expect(() => ship(engine, 'erp', 'co_held', { defaultActive: true })).not.toThrow();
+        // The `metadata:reloaded` re-sync / a hot upgrade re-registers a holder's body.
+        expect(() => ship(engine, 'crm', 'co_held', { defaultActive: false, version: 2 })).not.toThrow();
+        expect(() => ship(engine, 'hr', 'co_held', { defaultActive: false })).not.toThrow();
+        expect(engine.getFlowRuntimeStates().filter((s) => s.name === 'co_held')).toHaveLength(3);
+    });
+
+    it('a dry run and the stored pass agree: no refusal for a co-held name', async () => {
+        const { engine } = bootCoHeld({ co_held: ['crm', 'erp'] });
+        ship(engine, 'crm', 'co_held', { defaultActive: false });
+        ship(engine, 'erp', 'co_held');
+        const body = packagedFlow('co_held', { _packageId: 'erp', defaultActive: true });
+        expect(engine.canonicalizeStoredFlow('co_held', body).todos).toEqual([]);
+        const dry = await engine.dryRun(body, { userId: 'usr_maker' }).then(() => undefined, (e: Error) => e.message);
+        expect(dry ?? '').not.toContain('declares defaultActive');
+    });
+
+    it('CONTROL: the refusal still stands when no package holds the name, whatever package the body names itself as', () => {
+        const { engine } = bootCoHeld({ co_held: ['crm', 'erp'] });
+        const forged = packagedFlow('loose_flow', { _packageId: 'crm', defaultActive: false });
+        expect(() => engine.registerFlow('loose_flow', forged)).toThrow(/^Flow 'loose_flow' declares defaultActive/);
+        expect(engine.canonicalizeStoredFlow('loose_flow', forged).todos.map((t) => t.path)).toEqual(['flows[0].defaultActive']);
+    });
+});
+
 describe('#34655 (seat ruling on S2) — a declared `.custom` override does not move the package\'s default', () => {
     /** The pair's declared override, as the boot pull arms it in the base's place. */
     const OVERRIDE = { source: 'override', packageId: 'crm.custom' } as const;
@@ -381,6 +425,25 @@ describe('#34655 (seat ruling on S2) — a declared `.custom` override does not 
         const { engine, isBound } = bootWithLoaderDefaults({});
         engine.registerFlow('draft_contract', packagedFlow('draft_contract', { defaultActive: false }), PULL);
         expect(isBound('draft_contract')).toBe(false);
+    });
+
+    it('(L2 N9) the loader\'s set is asked once per armed body, not on every enablement read', async () => {
+        const { engine } = boot();
+        const reader = vi.fn((name: string, packageId: string) => (packageId === 'crm' && name === 'draft_contract' ? false : undefined));
+        engine.setPackagedFlowDefaultSource(reader);
+        engine.registerFlow('draft_contract', packagedFlow('draft_contract', { description: 'customized' }), OVERRIDE);
+        const asked = reader.mock.calls.length;
+        expect(asked).toBe(1);
+        for (let i = 0; i < 5; i++) {
+            expect(stateOf(engine, 'draft_contract')).toMatchObject({ enabled: false });
+            expect((await engine.execute('draft_contract')).code).toBe('FLOW_DISABLED');
+        }
+        expect(reader).toHaveBeenCalledTimes(asked);
+        // A re-registration (the re-sync after an upgrade) asks again, once.
+        reader.mockImplementation(() => undefined);
+        engine.registerFlow('draft_contract', packagedFlow('draft_contract', { description: 'customized', version: 2 }), OVERRIDE);
+        expect(stateOf(engine, 'draft_contract')).toMatchObject({ enabled: true });
+        expect(reader).toHaveBeenCalledTimes(asked + 1);
     });
 });
 

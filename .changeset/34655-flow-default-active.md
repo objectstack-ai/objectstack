@@ -21,4 +21,8 @@ Only a flow a package ships has the packaged-flow switch, so:
 - `POST /api/v1/automation/:name/clone` drops `defaultActive` from the copy, which is written switched off by its own `status` as before;
 - an unmanaged install copies `defaultActive: false` as `status: 'obsolete'` (unless the status already disarms the flow) and drops the key, so the copy arrives switched off.
 
+A name two packages ship is a package's flow too: each holder's body registers with the key, on every re-sync and upgrade, and the refusal above is only for a name no package ships.
+
+For hosts that compose the engine themselves, `AutomationEngine.setPackagedFlowDefaultSource(source)` and its `PackagedFlowDefaultSource` type are new public API. The automation plugin attaches the reader (it asks the metadata protocol for the package's own body); it is how the engine reads the package's default while a declared `.custom` override is armed in the package's place, and it is asked once per registration, not on every enablement read. An engine composed without a reader reads the default only off an armed package body, so while an override is armed a flow its package ships off runs (fail-open): such an engine cannot see the package's body, and treating an unknown default as on keeps the behaviour every packaged flow had before this release instead of switching off a flow no package was seen to declare off.
+
 ADR-0126 §4 carries an amendment note: "absence of a row means the packaged default" now reads the default a packaged flow declares; the ledger's shape is unchanged.

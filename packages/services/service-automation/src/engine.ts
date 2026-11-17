@@ -3137,6 +3137,15 @@ export class AutomationEngine implements IAutomationService {
     /** [#34655] The reader over the loader's bodies' defaults — see {@link setPackagedFlowDefaultSource}. */
     private packagedFlowDefaultSource?: PackagedFlowDefaultSource;
     /**
+     * [#34655, L2 N9] What {@link packagedFlowDefaultSource} answered for an
+     * armed body, asked once per registration: keyed by the body
+     * {@link registerFlow} armed, so every re-registration (the
+     * `metadata:reloaded` re-sync after an upgrade re-registers the winner)
+     * asks again, and {@link isFlowEnabled} never reads the loader's set.
+     * Replaced whenever either reader is attached.
+     */
+    private packagedFlowDefaults = new WeakMap<FlowParsed, { readonly value: boolean | undefined }>();
+    /**
      * [ADR-0150 D3] The reader that answers which item a bare flow name means
      * for a caller — see {@link setFlowNameResolver}. `undefined` until a host
      * attaches one; with none, the engine's own flow map is the only holder it
@@ -6132,6 +6141,7 @@ export class AutomationEngine implements IAutomationService {
      */
     setPackagedFlowSource(source: PackagedFlowSource | undefined): void {
         this.packagedFlowSource = source;
+        this.packagedFlowDefaults = new WeakMap();
     }
 
     /**
@@ -6145,6 +6155,7 @@ export class AutomationEngine implements IAutomationService {
      */
     setPackagedFlowDefaultSource(source: PackagedFlowDefaultSource | undefined): void {
         this.packagedFlowDefaultSource = source;
+        this.packagedFlowDefaults = new WeakMap();
     }
 
     /**
@@ -6288,9 +6299,9 @@ export class AutomationEngine implements IAutomationService {
      * has no such switch: its switch is its own `status`, so the key could
      * only be a declaration the engine does not honour.
      *
-     * A flow is packaged when the loader's set holds its name
-     * ({@link packagedFlowOwner}, the question the toggle door asks); every
-     * other flow is the environment's. Judged by NAME, never by the arm a
+     * A flow is packaged when any package's loader set holds its name
+     * ({@link isShippedFlowName}: the loader's own answer, a name two
+     * packages hold included); every other flow is the environment's. Judged by NAME, never by the arm a
      * registration names, because it is one of the {@link registrationChecks}
      * (#23317): {@link registerFlow} throws it, {@link dryRun} refuses a draft
      * for it, and the stored pass ({@link canonicalizeStoredFlow}) lists a
@@ -6306,7 +6317,7 @@ export class AutomationEngine implements IAutomationService {
      * to arm it, and the stored pass names it.
      */
     private refuseUnpackagedDefaultActive(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
-        if (flow.defaultActive === undefined || this.isPackagedFlow(flowName)) return undefined;
+        if (flow.defaultActive === undefined || this.isShippedFlowName(flowName, flow)) return undefined;
         const why =
             `'${flowName}' declares defaultActive, which is the default of the switch an administrator turns a ` +
             `PACKAGED flow on and off with, and '${flowName}' was authored in this deployment, not shipped by a ` +
@@ -6316,6 +6327,27 @@ export class AutomationEngine implements IAutomationService {
             message: `Flow ${why}`,
             sites: [{ path: 'flows[0].defaultActive', from: JSON.stringify(flow.defaultActive), detail: `the flow ${why}` }],
         };
+    }
+
+    /**
+     * [#34655, L2 S3] Does ANY package's loader set hold a flow `name`? The
+     * question {@link refuseUnpackagedDefaultActive} asks — not "is there ONE
+     * owner": {@link packagedFlowOwner} answers none for a bare name two
+     * packages hold (ADR-0150 D4), and a package's body re-registered under
+     * such a name (a re-sync, a hot upgrade, a third holder arriving) is
+     * still a package's. Every answer is the loader's own, asked per package
+     * ({@link packagedFlowSlotOwner}) of each package that may hold it: the
+     * packages whose slots hold the name now, and the package the body names
+     * itself as (`_packageId`). The stamp is only which package to ASK; a
+     * stamp naming a package that ships no such flow answers no.
+     */
+    private isShippedFlowName(name: string, flow: FlowParsed): boolean {
+        if (this.isPackagedFlow(name)) return true;
+        const bare = this.flowSlots.slot(name)?.name ?? name;
+        const stamped = (flow as { _packageId?: unknown })._packageId;
+        const candidates = new Set<string>(typeof stamped === 'string' && stamped !== '' ? [stamped] : []);
+        for (const slot of this.flowSlots.slotsOf(bare)) if (slot.packageId !== null) candidates.add(slot.packageId);
+        return [...candidates].some((packageId) => this.packagedFlowSlotOwner(bare, packageId) !== undefined);
     }
 
     /**
@@ -6330,14 +6362,22 @@ export class AutomationEngine implements IAutomationService {
      * writes `false` does not switch off a flow its package ships on. The
      * administrator's switch (the activation ledger) decides either way.
      * With no reader attached, only an armed loader's body answers.
+     *
+     * [L2 N9] The reader's answer is asked once per armed body
+     * ({@link packagedFlowDefaults}), not on every {@link isFlowEnabled}.
      */
     private packagedFlowDefault(key: string): boolean | undefined {
         const armed = this.flows.get(key);
         if (!armed) return undefined;
         if (this.flowArms.get(armed)?.source === 'package') return armed.defaultActive;
+        const source = this.packagedFlowDefaultSource;
+        if (source === undefined) return undefined;
+        const asked = this.packagedFlowDefaults.get(armed);
+        if (asked !== undefined) return asked.value;
         const owner = this.packagedFlowOwner(key);
-        if (owner === undefined) return undefined;
-        return this.packagedFlowDefaultSource?.(this.flowSlots.slot(key)?.name ?? key, owner);
+        const value = owner === undefined ? undefined : source(this.flowSlots.slot(key)?.name ?? key, owner);
+        this.packagedFlowDefaults.set(armed, { value });
+        return value;
     }
 
     /**

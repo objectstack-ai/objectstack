@@ -1197,11 +1197,10 @@ export const FlowSchema = lazySchema(() => strictObject(
    * administrator may turn on as `status: 'active', defaultActive: false`.
    *
    * Only a flow a package ships has that switch. A flow authored in the
-   * environment is switched by its `status`, so registering one that
-   * declares `defaultActive` is refused (and a dry run of one, and the stored
-   * pass lists a stored one); a clone of a packaged flow drops
-   * the key, and an unmanaged install copies `defaultActive: false` as
-   * `status: 'obsolete'`.
+   * environment is switched by its `status`: registering one that declares
+   * `defaultActive` is refused, a dry run of one is refused, and the stored
+   * pass lists a stored one. A clone of a packaged flow drops the key, and an
+   * unmanaged install copies `defaultActive: false` as `status: 'obsolete'`.
    */
   defaultActive: z.boolean().optional().describe('Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator\'s choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author\'s switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key.'),
 
