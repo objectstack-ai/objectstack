@@ -3236,6 +3236,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.createDraft': 'Save as draft',
   'engine.studio.saveDraft': 'Save draft',
   'engine.studio.autoSaving': 'Saving…',
+  // objectstack#34818 — the flow header's landed-autosave mark, its spoken form, and the one toast left (a failed save).
+  'engine.studio.autoSaved': 'Saved',
+  'engine.studio.flowSavedNamed': 'Flow "{item}" saved',
+  'engine.studio.flowSaveFailed': 'The draft of "{item}" was not saved',
   // Standard create-dialog field labels (shared by object / app / flow / permission).
   'engine.studio.app.nameLabel': 'App name',
   'engine.studio.app.idLabel': 'Identifier',

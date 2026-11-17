@@ -8634,10 +8634,14 @@ export function AutomationsPillar({
 
   // objectui#5813 — local dirty flag: auto-save arms only after a real edit.
   const [autoDirty, setAutoDirty] = React.useState(false);
+  // objectstack#34818 — the flow whose last autosave landed with nothing edited
+  // since: its header row says 已保存 in place of a toast. The next edit clears it.
+  const [flowSavedFor, setFlowSavedFor] = React.useState<string | null>(null);
   const onPatch = React.useCallback(
     (patch: Record<string, unknown>) => {
       setDraft((d) => ({ ...d, ...patch }));
       setAutoDirty(true);
+      setFlowSavedFor(null);
     },
     [],
   );
@@ -8645,6 +8649,12 @@ export function AutomationsPillar({
     if (!current) return;
     setSaving('draft');
     setError(null);
+    // objectstack#34818 — a landed autosave raises no toast (the header says
+    // 已保存); a failed one does, once per flow, beside its refusal strip.
+    const announceFailed = () =>
+      toast.error(tFormat('engine.studio.flowSaveFailed', locale, { item: current.label || current.name }), {
+        id: `studio-draft-failed:flow:${current.name}`,
+      });
     try {
       // objectstack#28570 — a read-only base's flow is saved into the pair the
       // ensure door answers, under its own name, declaring the override. A
@@ -8658,11 +8668,13 @@ export function AutomationsPillar({
           pair = await pairForFlow(custom, current.name);
         } catch (e) {
           setError(plainRefusal(e));
+          announceFailed();
           return;
         }
         const declared = overrideDraftBody(draft, custom.base, custom.basedOn);
         if (declared === null) {
           setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          announceFailed();
           return;
         }
         // The buffer was read at another package (the base, before its pair
@@ -8690,13 +8702,19 @@ export function AutomationsPillar({
       // objectstack#26858 — the stored draft carries its own verdict now.
       rereadFlowVerdict(current.name, target.packageId);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
-      if (sent.unmoved()) setAutoDirty(false);
-      // objectstack#28984 — named as the rail names the flow.
-      announceDraftSaved({ type: 'flow', name: current.name }, current.label, locale);
+      // objectstack#34818 — and only then does the header say 已保存: an edit
+      // made in flight is not saved yet. The header row names the flow, which
+      // is what ruling 6545938831 ② on #28345 asks of write feedback, so the
+      // flow pillar raises no "Draft of X saved" toast (seat ruling 6954475081).
+      if (sent.unmoved()) {
+        setAutoDirty(false);
+        setFlowSavedFor(current.name);
+      }
       onDraftSaved?.({ type: 'flow', name: current.name });
     } catch (e) {
       // objectui#11785 — read against `draft`, the body this save sent.
       setError(flowSaveRefusal(e, draft, locale));
+      announceFailed();
     } finally {
       setSaving(false);
     }
@@ -9508,6 +9526,21 @@ export function AutomationsPillar({
                   <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" data-testid="auto-autosaving">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t('engine.studio.autoSaving', locale)}
+                  </span>
+                )}
+                {/* objectstack#34818 — the landed autosave, said in the flow's own
+                    title row instead of a toast; read aloud with the flow's name. */}
+                {saving !== 'draft' && current && flowSavedFor === current.name && (
+                  <span
+                    role="status"
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
+                    data-testid="auto-autosaved"
+                  >
+                    <Check className="h-3 w-3" aria-hidden="true" />
+                    <span aria-hidden="true">{t('engine.studio.autoSaved', locale)}</span>
+                    <span className="sr-only">
+                      {tFormat('engine.studio.flowSavedNamed', locale, { item: current.label || current.name })}
+                    </span>
                   </span>
                 )}
                 {/* objectstack#28570 — Customize unlocks the flow's editors; nothing is saved until an edit. */}
