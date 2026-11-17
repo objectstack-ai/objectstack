@@ -139,6 +139,10 @@ vi.mock('../../../layout/ActivityObjectLabel', () => ({ ActivityObjectLabel: () 
 // like every other source this page reads.
 vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
+// The page reaches `capabilityLint`'s dynamic `@objectstack/lint` import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 
 /** Enough apps that the strip folds the rest behind "More". */
