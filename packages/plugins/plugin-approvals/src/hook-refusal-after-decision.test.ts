@@ -77,9 +77,6 @@ function makeFakeEngine(refuseUpdateOf: string, refusal: () => unknown) {
       const page = typeof opts.limit === 'number' ? out.slice(start, start + opts.limit) : out.slice(start);
       return page.map(r => ({ ...r }));
     },
-    async findOne(object: string, opts: any = {}) {
-      return (await this.find(object, { ...opts, limit: 1 }))[0] ?? null;
-    },
     async insert(object: string, data: any) { rows(object).push({ ...data }); return { ...data }; },
     async update(object: string, data: any, options?: any) {
       const dispatch = assertEngineUpdateDispatch(data, options);

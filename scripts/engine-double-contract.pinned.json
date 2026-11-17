@@ -3562,6 +3562,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/hook-refusal-after-decision.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/hook-refusal-after-decision.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
       "verb": "delete",
       "pinned": 1

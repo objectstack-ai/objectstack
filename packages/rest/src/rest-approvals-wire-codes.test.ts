@@ -56,6 +56,10 @@ import { strandedDecisionFailure } from '@objectstack/types';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 // `.js` on purpose — NodeNext resolution requires the extension (#7248).
 import { RestServer } from './rest-server.js';
+// The rest server's routes load `@objectstack/objectql` lazily, inside a
+// handler; paying that load here, at collection, keeps it out of the first
+// case's `testTimeout` window (check:test-source-alias).
+import '@objectstack/objectql';
 
 const REQ = '/api/v1/approvals/requests/:id';
 
