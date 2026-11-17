@@ -61,6 +61,9 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ErrorCode } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/lint';
 
 const SCHEMA = {
     name: 'leave_request',

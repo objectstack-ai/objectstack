@@ -69,6 +69,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/lint';
 
 const SCHEMA = {
     name: 'leave_request',

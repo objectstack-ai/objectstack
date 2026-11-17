@@ -26,6 +26,9 @@ import { RestServer } from './rest-server.js';
 import { RECORD_FIELD_ACCESS_PARAMS } from './data-action-routes.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
 import { recordNotFoundError } from '@objectstack/core';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/objectql';
 
 const TASK = {
     name: 'task',
