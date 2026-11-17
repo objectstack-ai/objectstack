@@ -697,3 +697,50 @@ the directory you run from. For anything more, write a wrapper script.
 **WorkBuddy** (checked 2026-11-07): Tencent's WorkBuddy is a desktop app; no headless mode with structured output
 and an MCP client was found for it, so it is not wired here. A tool that has both rides `--driver external:` with a
 wrapper, with no change to the runner.
+
+## Running the published skills' eval cases — `skill-evals`
+
+Every published skill bundle carries eval cases (`skills/BUNDLE/evals/*.json`: a `prompt`, an `expected_output` and
+`assertions.must_contain` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
+once with the bundle installed and once without, and grades each answer by the case's own tokens. It runs from this
+checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
+the skill authors' and the runner never edits them.
+
+```bash
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+claude auth status                                              # oauth_token
+pnpm install && pnpm --filter '@objectstack/scenarios^...' build   # the runner reads its dependencies' dist/
+pnpm --filter @objectstack/scenarios skill-evals --dry-run      # the plan and the argv; no login read, no model call
+pnpm --filter @objectstack/scenarios skill-evals                # every case × 2 arms
+pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --repeats 3   # a touched skill
+pnpm --filter @objectstack/scenarios skill-evals --skills-from 18.5.0   # a published @objectstack/skills version's bundles and cases
+pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's own fixtures; no model call
+```
+
+- **Login**: the scenario runner's guard, imported from `src/runner/driver.ts`. A round refuses to start while
+  `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set, or when `claude auth status` reports no login or an API-key
+  login. Every turn is spawned without those two variables. Never an API-billed key.
+- **The arms**: each turn is one `claude -p` in a fresh temporary directory. The prompt goes on stdin. The two arms
+  differ only in the bundle. The with-skill arm copies it into `.claude/skills/BUNDLE/` without its `evals/`, so the
+  turn cannot read the assertions it is graded on. The no-skill arm's directory is empty. Both arms take the same
+  flags: `--setting-sources project` (the user's own skills, plugins and hooks stay out),
+  `--tools Read,Glob,Grep,Skill`, no MCP server (`--strict-mcp-config` over an empty config) and
+  `--no-session-persistence`. A read outside the directory needs a permission no turn is given, and `-p` denies it.
+  The skills built into Claude Code are present in both arms.
+- **Grading**: the answer is the result line's text, the reply a user reads. It passes when every `must_contain` token
+  is in it and no `must_not_contain` token is. Tokens match as literal, case-sensitive substrings, and no model judges
+  an answer. A turn whose init line shows the wrong arm is `invalid`: the with-skill arm does not list the bundle, or
+  the no-skill arm lists one. A turn with no answer is `error`: the process failed or timed out, or the result line is
+  not `success` (`error_max_turns` included). Both kinds are counted and named, and neither is in a denominator.
+- **Records**: by default the round goes to `docs/qa/platform-checklist/runs/skill-evals/ROUND/` (git-ignored), or to
+  `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, the answer, the skills listed
+  and launched, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
+  scope and the full per-case scores on both arms) and `summary.md`. The summary has one row per bundle (each arm's
+  pass rate, the with-skill failing cases, and the cases where the no-skill arm scored at least as high) and then
+  every case. `summary.github.md` is the same text with angle brackets spelled `(lt)` / `(gt)` for a GitHub body.
+- **Quota**: every turn reports the subscription's rate-limit window. The round stops scheduling turns once a window
+  reports `rejected` or a utilization at or above `--max-utilization` (default 0.9). The turns not run are recorded
+  as not run, and the command exits 3.
+- **Cost and time**: the CLI's cost figure is notional under a subscription login, and nothing is billed per token.
+  A whole round (209 cases × 2 arms, `--concurrency 4`, Claude Code 2.1.326) took ROUND_MIN min in a Claude Code
+  cloud container and reported ROUND_COST USD notional. Turns take ROUND_TURN s each.

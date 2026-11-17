@@ -168,6 +168,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     return r.failed === 0 ? 0 : 1;
   }
 
+  // The login guard first: a live round refuses an API-billed configuration before it reads or packs anything.
+  const pf = args.dryRun ? undefined : preflight(args.bin, process.env, undefined, args.effort);
   const source = resolveSkillsSource(args.skillsFrom, repo);
   try {
     const catalog = loadSkillEvalCatalog(source.root);
@@ -190,7 +192,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       return 0;
     }
 
-    const pf = preflight(args.bin, process.env, undefined, args.effort);
+    if (!pf) throw new Error('unreachable: a live round has passed its preflight');
     const startedAt = new Date();
     const roundId = `${startedAt.toISOString().slice(0, 19).replace(/[:T]/g, '-')}-skill-evals`;
     const outDir = resolve(args.out ?? join(repo, 'docs', 'qa', 'platform-checklist', 'runs', 'skill-evals', roundId));
