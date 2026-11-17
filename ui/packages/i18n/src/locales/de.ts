@@ -2949,6 +2949,10 @@ const de = {
       missingToken: "Im Bestätigungslink fehlt ein Token.",
       emailMissing: "E-Mail-Adresse fehlt",
       resendButton: "Bestätigungs-E-Mail erneut senden",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Ihre E-Mail-Adresse ist noch nicht bestätigt. Senden Sie einen Bestätigungslink an {{email}} und klicken Sie dann auf den Link, um Ihr Konto zu bestätigen.",
+      sendButton: "Bestätigungs-E-Mail senden",
       resending: "Sende…",
       resent: "E-Mail gesendet! Überprüfen Sie Ihren Posteingang",
       resentSuccess: "Bestätigungs-E-Mail gesendet!",
