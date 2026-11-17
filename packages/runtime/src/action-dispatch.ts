@@ -1048,6 +1048,15 @@ export interface ActionResumeRequest extends AIActionConfirmation {
     runId: string;
     /** The screen's field values the handed-off call carried (`ActionConfirmationHandOff.run.values`). */
     values?: Record<string, unknown>;
+    /**
+     * [#34515] The screen the handed-off call was given on
+     * (`ActionConfirmationHandOff.run.screenNodeId`), which binds the approval
+     * to it: a run no longer paused on that screen (a wizard that moved on,
+     * by an earlier approval of the same call or in the app) is refused
+     * `409 RESOURCE_CONFLICT` and stays where it is. Omitted, the run's
+     * current screen is resumed, whichever it is.
+     */
+    screenNodeId?: string;
 }
 
 /**
