@@ -963,7 +963,18 @@ export class EmailService implements IEmailService {
     return this.sendInternal(input, false);
   }
 
-  private async sendInternal(input: SendEmailInput, allowQueue: boolean): Promise<SendEmailResult> {
+  /**
+   * `delivered`, when given, holds the faces the recipient receives in place
+   * of the stored row's (`SendTemplateInput.deliverOnlyData`): the row is written
+   * from `input`, the transport is handed `delivered`, and the send is inline,
+   * because the queue delivers from the row.
+   */
+  private async sendInternal(
+    input: SendEmailInput,
+    allowQueue: boolean,
+    delivered?: RenderTemplateResult,
+  ): Promise<SendEmailResult> {
+    if (delivered) allowQueue = false;
     let normalized: NormalizedEmailMessage;
     try {
       assertIdentityMailCarriesNoOrganization(input);
@@ -1141,7 +1152,10 @@ export class EmailService implements IEmailService {
       // failed, or queue mode is off for this send): the in-memory message is
       // still whole, so the mail goes out — and the content still has to be
       // reclaimed afterwards, which is why the keys travel with the delivery.
-      return await this.deliverNormalized(id, normalized, undefined, storageKeys, object);
+      const outgoing: NormalizedEmailMessage = delivered
+        ? { ...normalized, subject: delivered.subject, html: delivered.html, text: delivered.text }
+        : normalized;
+      return await this.deliverNormalized(id, outgoing, undefined, storageKeys, object);
     } finally {
       // Release EXACTLY what was reserved above — the one id, and only here.
       // Here and not earlier: the reservation has to outlive the whole body,
@@ -1837,6 +1851,13 @@ export class EmailService implements IEmailService {
   async sendTemplate(input: SendTemplateInput): Promise<SendEmailResult> {
     const { row, rendered } = await this.resolveAndRenderTemplate(input);
     const { subject, html, text } = rendered;
+    // Deliver-only values reach the recipient and never the stored row: the
+    // row is written from the faces rendered above, from `data` alone, and the
+    // transport gets the faces rendered from `data` overlaid with them.
+    const deliverOnlyData = input.deliverOnlyData;
+    const delivered = deliverOnlyData && Object.keys(deliverOnlyData).length > 0
+      ? (await this.resolveAndRenderTemplate({ ...input, data: { ...(input.data || {}), ...deliverOnlyData } })).rendered
+      : undefined;
 
     const from: EmailAddress | undefined = input.from
       ?? (row.from_address
@@ -1866,6 +1887,6 @@ export class EmailService implements IEmailService {
       // `sys_identity_email`. `send()` refuses the two together.
       ...(input.identityMail ? { identityMail: true } : {}),
     };
-    return this.send(sendInput);
+    return delivered ? this.sendInternal(sendInput, false, delivered) : this.send(sendInput);
   }
 }
