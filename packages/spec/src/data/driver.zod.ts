@@ -358,7 +358,9 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * (no bit, a name the runtime cannot resolve, an offset such as `+08:00`,
    * an abbreviation that resolves to itself such as `EST5EDT`) keeps the
    * in-memory aggregate (`applyInMemoryAggregation`), which answers it as it
-   * always has. The raw string never reaches a driver.
+   * always has. The raw string never reaches a driver. Which spelling
+   * resolves to what is the runtime's tz data (the examples are as Node 22
+   * resolves them); the rule is the resolution, not the list.
    *
    * What a driver that declares it owes: its buckets equal the in-memory
    * buckets (`bucketDateKey` in `@objectstack/core`) for that zone, on both

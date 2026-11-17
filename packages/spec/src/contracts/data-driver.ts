@@ -66,7 +66,10 @@ export type DriverQuery = Omit<QueryAST, 'object'>;
  * which is the bucket a driver answers when the key is absent. A driver that
  * reads it buckets an instant column on that zone's calendar, DST-correct,
  * keeps a `Field.date` on its own calendar day, and refuses a zone it cannot
- * bucket rather than reading it as UTC.
+ * bucket rather than reading it as UTC. A driver that does NOT declare the bit
+ * is never sent the key by the engine; handed one by a direct caller, it
+ * refuses the zone the same way (driver-sql: `NOT_IMPLEMENTED` / 501) rather
+ * than answering the UTC bucket.
  *
  * Kept off {@link DriverQuery} on purpose: `find()` / `count()` take that type
  * and no zone means anything to them, so a key they would silently drop is not

@@ -218,7 +218,9 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    *
    * [#33697] With `timezone` (a resolved IANA area/location name), the zoned
    * expression a driver declaring `supports.zonedDateBucketing` groups by, or
-   * `undefined` where the driver buckets no zone.
+   * `undefined` where the driver buckets no zone. An implementer that does not
+   * bucket the zone it is asked for answers `undefined`, never its UTC
+   * expression: the echo would print a statement grouped on the wrong calendar.
    */
   dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): string | undefined;
   /**

@@ -510,7 +510,9 @@ export const EngineAggregateOptionsSchema = lazySchema(() => BaseEngineOptionsSc
    * the RESOLVED area/location name (`CST` goes down as `America/Chicago`),
    * and in memory otherwise — and always in memory for a string the runtime
    * cannot resolve or that resolves to no area/location name (`+08:00`,
-   * `EST5EDT`). Both paths answer the same buckets (D2 as amended).
+   * `EST5EDT`). Both paths answer the same buckets (D2 as amended). The
+   * spellings are examples as Node 22 resolves them; the rule is the
+   * runtime's resolution.
    */
   timezone: z.string().optional(),
   /**
