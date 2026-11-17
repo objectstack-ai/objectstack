@@ -69,6 +69,7 @@ import {
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
 import { handoffMarkQuery, useHandoffRedirect, verificationCallbackURL } from './handoffRedirect';
+import { VERIFICATION_SENT_PARAM } from './verifyEmailPromptQuery';
 // Was a second module-private copy of LoginPage's helper; both now share one
 // implementation — objectui#4181. Behaviour here is unchanged.
 import { withConsoleBase } from '../../utils/consoleBase';
@@ -423,6 +424,8 @@ export function RegisterPage() {
           const sp = new URLSearchParams();
           sp.set('email', email);
           if (redirect) sp.set('redirect', redirect);
+          // The sign-up has sent the verification mail (objectstack#34706).
+          sp.set(VERIFICATION_SENT_PARAM, '1');
           navigate(`/verify-email-prompt?${sp.toString()}${handoffMarkQuery(redirect)}`, { replace: true });
         }}
         labels={{

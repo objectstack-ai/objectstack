@@ -2951,6 +2951,10 @@ const ja = {
       missingToken: "確認リンクにトークンがありません。",
       emailMissing: "メールアドレスがありません",
       resendButton: "確認メールを再送信",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "メールアドレスはまだ確認されていません。{{email}} に確認リンクを送信し、リンクをクリックしてアカウントを確認してください。",
+      sendButton: "確認メールを送信",
       resending: "送信中…",
       resent: "メールが送信されました！受信箱を確認してください",
       resentSuccess: "確認メールが送信されました！",

@@ -293,6 +293,28 @@ invitation redirect is an
 affordance, not an authorization: the server still refuses a non-invitee's
 sign-up.
 
+### Hosting the invitation pages: declare `/verify-email-prompt`
+
+While a deployment delivers mail, the server refuses to let an account whose
+address is not verified accept an invitation
+(`EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`). Two
+surfaces of this package answer that refusal by navigating to the
+verification-mail screen at `/verify-email-prompt`, a route this package does
+not mount:
+
+- `DefaultAcceptInvitationPage` (`/accept-invitation/:invitationId`), with
+  `redirect` set to the accept page itself;
+- the console's `type: 'api'` action handlers (`useConsoleActionRuntime` and
+  `RecordDetailView`), when the invitation inbox's `accept_invitation` action
+  is refused, with `redirect` set to the accept page for that invitation.
+
+A host that mounts either one declares `/verify-email-prompt` too, or the
+person is sent to a route that does not exist. The route reads two query keys,
+each absent when unknown: `email`, the account's address, and `redirect`, the
+basename-stripped router path the verification mail's link returns to. Nothing
+has been sent when either surface arrives there, so the screen offers to send
+the link. `apps/console` mounts its own `VerifyEmailPromptPage` there.
+
 ## Unsaved edits
 
 A page that keeps edits in component state registers them while it holds them,

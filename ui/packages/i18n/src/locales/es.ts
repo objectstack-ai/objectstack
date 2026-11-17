@@ -3021,6 +3021,10 @@ const es = {
       missingToken: "Falta un token en el enlace de verificación.",
       emailMissing: "Falta la dirección de correo",
       resendButton: "Reenviar correo de verificación",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Su correo aún no está verificado. Envíe un enlace de verificación a {{email}} y luego haga clic en el enlace para verificar su cuenta.",
+      sendButton: "Enviar correo de verificación",
       resending: "Enviando…",
       resent: "¡Correo enviado! Revise su bandeja de entrada",
       resentSuccess: "¡Correo de verificación enviado!",

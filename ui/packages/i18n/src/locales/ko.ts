@@ -2949,6 +2949,10 @@ const ko = {
       missingToken: "확인 링크에 토큰이 없습니다.",
       emailMissing: "이메일 주소 누락",
       resendButton: "확인 이메일 다시 보내기",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "이메일 주소가 아직 확인되지 않았습니다. {{email}}(으)로 확인 링크를 보낸 후 링크를 클릭하여 계정을 확인하세요.",
+      sendButton: "확인 이메일 보내기",
       resending: "전송 중…",
       resent: "이메일이 전송되었습니다! 받은 편지함을 확인하세요",
       resentSuccess: "확인 이메일이 전송되었습니다!",

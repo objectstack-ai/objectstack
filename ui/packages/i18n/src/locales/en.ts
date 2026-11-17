@@ -3565,6 +3565,10 @@ const en = {
       missingToken: 'Verification link is missing a token.',
       emailMissing: 'Email address is missing',
       resendButton: 'Resend verification email',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        'Your email address has not been verified yet. Send a verification link to {{email}}, then click the link to verify your account.',
+      sendButton: 'Send verification email',
       resending: 'Sending…',
       resent: 'Email sent! Check your inbox',
       resentSuccess: 'Verification email sent!',
