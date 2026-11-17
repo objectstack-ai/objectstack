@@ -836,6 +836,20 @@ for you.
   would open a second approval request.
 </Callout>
 
+<Callout type="warn">
+  **A refusal on the step after the decision.** Say the `approve` branch
+  updates the record and that record's `beforeUpdate` hook refuses the write
+  (a declared refusal, a validation rule, a permission). With no `fault` edge
+  on that step, `POST …/approve` answers **500 `RESUME_FAILED`**. The decision
+  still stands (`finalized: true`), the run is stranded (`runId`, and
+  `repairable` says whether an operator can re-arm it), and the body also
+  carries the refusal: `innerRefusal` (`{ code, message }`) and the hook's
+  `userMessage`, the sentence to show the approver. Draw a `fault` edge from
+  that step to a handler, for example one that sends the record back to its
+  owner, and the engine routes the refusal there instead: the decision answers
+  normally and the run finishes without an administrator.
+</Callout>
+
 </Steps>
 
 ### Beyond approve/reject — the full decision surface

@@ -888,6 +888,17 @@ export interface ApprovalDecisionResult {
    * declares — a caller holding only the status code reads a bare 500 as "the
    * decision did not happen", and the row IS terminal.
    *
+   * When the run stranded because the step after the decision was REFUSED —
+   * a record hook's declared refusal, a validation rule, a permission — the
+   * same body also carries that refusal (#34579): `innerRefusal`
+   * (`{ code, message }`, the engine's `AutomationResult.innerRefusal`,
+   * ruling B′ on #24914) and the refusal's marked `userMessage`, the text an
+   * approver can read. Both are absent when the run met no refusal (a fault),
+   * and neither moves the status code or the four facts. A flow author who
+   * wants such a refusal handled rather than stranded draws a `fault` edge
+   * from that step: the engine routes the refusal down it like any run-time
+   * failure, and the decision then answers normally.
+   *
    * ⛔ They are not members of this result and must never be added to it:
    * they ride the ERROR, so declaring them here would declare a success shape
    * that never carries them. ⛔ Nor are they {@link resumeFailure}, which
