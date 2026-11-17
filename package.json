@@ -34,6 +34,7 @@
     "check:app-nav-i18n": "pnpm --filter @objectstack/cli run check:app-nav-i18n",
     "check:nul-bytes": "node scripts/check-nul-bytes.mjs --self-test && node scripts/check-nul-bytes.mjs",
     "check:gitlink-declared": "node scripts/check-gitlink-declared.mjs --self-test && node scripts/check-gitlink-declared.mjs",
+    "check:module-name-case": "node scripts/check-module-name-case.mjs --self-test && node scripts/check-module-name-case.mjs",
     "check:entry-guard": "node scripts/check-entry-guard.mjs --self-test && node scripts/check-entry-guard.mjs",
     "check:parse-guard": "node scripts/check-parse-guard.mjs --self-test && node scripts/check-parse-guard.mjs",
     "check:bash32-floor": "node scripts/check-bash32-floor.mjs --self-test && node scripts/check-bash32-floor.mjs",

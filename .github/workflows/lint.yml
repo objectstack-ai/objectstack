@@ -744,6 +744,12 @@ jobs:
         continue-on-error: true
         run: pnpm check:gitlink-declared
 
+      # Rationale: `scripts/check-module-name-case.mjs` header (#34705).
+      - name: No two names in one folder differ only in letter case
+        id: no-two-names-in-one-folder-differ-only-in-letter-case
+        continue-on-error: true
+        run: pnpm check:module-name-case
+
       # The first three of these are the shared modules the two `scripts/**`
       # routing gates DELEGATE their design arguments to (#10608) — the parse
       # guard below, and the entry guard in `lint-scoped-slot-corpus` since
