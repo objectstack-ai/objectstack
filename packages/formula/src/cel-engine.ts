@@ -1460,10 +1460,15 @@ function registerDateTextAnswersOnString(env: Environment): void {
  *    answer, so the expression faults and the field reads null;
  *  - `type` — the expression checks clean, and `type` is the CEL type it
  *    computes (`google.protobuf.Duration` for `today() - record.start_date`).
+ * `root` is set on the flattened record-root pass (`recordRootTypes`, #34662)
+ * when `field` is named by its `record.<field>` / `previous.<field>` read.
  */
 export type DateTextVerdict =
-  | { readonly kind: 'fault'; readonly operator: string; readonly operands: string; readonly field: string | null }
-  | { readonly kind: 'type'; readonly type: string; readonly field: string | null };
+  | {
+      readonly kind: 'fault'; readonly operator: string; readonly operands: string; readonly field: string | null;
+      readonly root?: 'record' | 'previous';
+    }
+  | { readonly kind: 'type'; readonly type: string; readonly field: string | null; readonly root?: 'record' | 'previous' };
 
 /**
  * #28944 — type-check `source` with every `date`/`datetime` field declared as
@@ -1485,29 +1490,63 @@ export type DateTextVerdict =
  * Returns `null` when the source does not parse, or the check faults on
  * anything other than arithmetic with a date field's text — that is another
  * check's to report, and this one never guesses.
+ *
+ * [#34662] `recordRootTypes` (flattened scope only) types a flow condition's
+ * `record.<field>` / `previous.<field>` reads as well, the record-root pass
+ * {@link firstTypeMismatch} runs for the text/boolean mismatch: the field is
+ * then named by its root read (`root`) wherever one is spelled member-wise.
  */
 export function firstDateTextVerdict(
   source: string,
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened' = 'record',
+  recordRootTypes?: Readonly<Record<string, FieldCelType>>,
 ): DateTextVerdict | null {
   if (typeof source !== 'string' || !source.trim()) return null;
+  const rootTypes = scope === 'flattened' ? recordRootTypes : undefined;
   try {
-    const env = buildTypedEnv(fieldCelTypes, scope, 'date-text');
+    const env = buildTypedEnv(fieldCelTypes, scope, 'date-text', rootTypes);
     const result = env.parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
       | { valid?: boolean; type?: unknown; error?: { message?: string } }
       | undefined;
     if (!result) return null;
-    const field = offendingField(source, fieldCelTypes, 'timestamp', scope);
+    const read = rootTypes ? offendingRecordRead(source, rootTypes, 'timestamp') : null;
+    const named = read
+      ? { field: read.field, root: read.root }
+      : { field: offendingField(source, fieldCelTypes, 'timestamp', scope) };
     if (result.valid !== false) {
-      return typeof result.type === 'string' ? { kind: 'type', type: result.type, field } : null;
+      return typeof result.type === 'string' ? { kind: 'type', type: result.type, ...named } : null;
     }
     const m = UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
     if (!m || !ARITH_OPS.has(m[2]) || (m[1] !== DATE_TEXT_CEL_TYPE && m[3] !== DATE_TEXT_CEL_TYPE)) return null;
-    return { kind: 'fault', operator: m[2], operands: `${m[1]} ${m[2]} ${m[3]}`, field };
+    return { kind: 'fault', operator: m[2], operands: `${m[1]} ${m[2]} ${m[3]}`, ...named };
   } catch {
     // A parse/other fault is the syntax checker's job (celEngine.compile).
     return null;
+  }
+}
+
+/**
+ * [#34662] Whether the Timestamp typing of a flattened condition's
+ * `record.<field>` / `previous.<field>` reads (every bare name `dyn`) faults an
+ * operator overload — `record.due_date + 1`. Such a shape is the Timestamp
+ * typing's family (`date-arithmetic`), never the date-text check's, so the
+ * record-root date-text pass stands down on it, as a flow value envelope's
+ * does. `false` when the source does not parse.
+ */
+export function recordRootReadsFaultTimestampTyping(
+  source: string,
+  recordRootTypes: Readonly<Record<string, FieldCelType>>,
+): boolean {
+  if (typeof source !== 'string' || !source.trim()) return false;
+  try {
+    const result = buildTypedEnv({}, 'flattened', 'timestamp', recordRootTypes)
+      .parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
+      | { valid?: boolean; error?: { message?: string } }
+      | undefined;
+    return result?.valid === false && UNSOUND_OVERLOAD_RE.test(result.error?.message ?? '');
+  } catch {
+    return false;
   }
 }
 
@@ -1572,24 +1611,39 @@ export interface DateTextCall {
  * wrap the field for, so the rewrite is `date(<field>)` in place of the call,
  * and `shift` carries the whole-day shift the stdlib teaches,
  * `isoDate(addDays(<field>, N))`, which reads the date text as it is.
+ *
+ * [#34662] `recordRootTypes` (flattened scope only): a flow condition's
+ * `record.<field>` / `previous.<field>` reads are typed with these, as
+ * {@link firstDateTextVerdict}'s record-root pass types them, and a root read
+ * qualifies by them alone (an `input.<field>` read then does not qualify: a
+ * flow does not bind `input` to the row the types describe). Absent, every
+ * reference is judged by `fieldCelTypes`, exactly as before.
  */
 export function firstDateTextCall(
   source: string,
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened' = 'record',
   dateOnlyFields: ReadonlySet<string> = new Set(),
+  recordRootTypes?: Readonly<Record<string, FieldCelType>>,
 ): DateTextCall | null {
   if (typeof source !== 'string' || !source.trim()) return null;
-  const dateFields: Record<string, FieldCelType> = {};
-  let any = false;
-  for (const [name, t] of Object.entries(fieldCelTypes)) {
-    dateFields[name] = t === 'timestamp' ? 'timestamp' : 'dyn';
-    any ||= t === 'timestamp';
-  }
+  const textTyping = (types: Readonly<Record<string, FieldCelType>>): Record<string, FieldCelType> =>
+    Object.fromEntries(Object.entries(types).map(([name, t]) => [name, t === 'timestamp' ? 'timestamp' : 'dyn']));
+  const dateFields = textTyping(fieldCelTypes);
+  const rootDateFields = scope === 'flattened' && recordRootTypes ? textTyping(recordRootTypes) : undefined;
+  /** The date-text typing a reference is judged by: its root's, on the record-root pass. */
+  const typingOf = (written: string): Record<string, FieldCelType> | undefined => {
+    if (!rootDateFields) return dateFields;
+    const root = written.includes('.') ? written.slice(0, written.indexOf('.')) : undefined;
+    return root === undefined ? dateFields : root === 'record' || root === 'previous' ? rootDateFields : undefined;
+  };
+  const isDate = (name: string, types: Record<string, FieldCelType> | undefined): boolean =>
+    types?.[name] === 'timestamp';
+  const any = [dateFields, rootDateFields].some((types) => types && Object.values(types).includes('timestamp'));
   if (!any) return null;
-  const anyDateOnly = [...dateOnlyFields].some((name) => dateFields[name] === 'timestamp');
+  const anyDateOnly = [...dateOnlyFields].some((name) => isDate(name, dateFields) || isDate(name, rootDateFields));
   try {
-    const env = buildTypedEnv(dateFields, scope, 'text');
+    const env = buildTypedEnv(dateFields, scope, 'text', rootDateFields);
     const parsed = env.parse(rewriteNullableTernary(rewriteIndexedHas(source)));
     // The whole expression checking clean is the common case: nothing to find,
     // unless a date-only field can reach `timestamp()`, which checks clean.
@@ -1605,7 +1659,7 @@ export function firstDateTextCall(
     };
     const dateRef = (node: unknown): string | null => {
       const ref = typedFieldRef(node, scope);
-      return ref && dateFields[ref.name] === 'timestamp' ? ref.written : null;
+      return ref && isDate(ref.name, typingOf(ref.written)) ? ref.written : null;
     };
     let verdict: DateTextCall | null = null;
     const visit = (v: unknown): void => {
@@ -1622,7 +1676,7 @@ export function firstDateTextCall(
       // [#34363] `timestamp(<date-only field>)`: clean on the text, faults on it.
       if (v.op === 'call' && Array.isArray(args) && args[0] === 'timestamp' && operands?.length === 1) {
         const ref = typedFieldRef(operands[0], scope);
-        if (ref && dateFields[ref.name] === 'timestamp' && dateOnlyFields.has(ref.name)) {
+        if (ref && isDate(ref.name, typingOf(ref.written)) && dateOnlyFields.has(ref.name)) {
           const rewrite = wrapInDate(operands[0] as CelNode);
           if (checkOf(rewrite) === true) {
             verdict = {
