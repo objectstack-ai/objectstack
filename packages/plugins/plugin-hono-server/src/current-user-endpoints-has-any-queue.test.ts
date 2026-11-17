@@ -72,13 +72,28 @@ type QueueSlot =
     | { kind: 'answers'; value: boolean }
     | { kind: 'throws' };
 
+/** [#34602] What the service's `objectsUsingQueues` does: answer a list, throw, or not exist. */
+type ObjectsSlot = { kind: 'answers'; value: unknown } | { kind: 'throws' } | { kind: 'no-method' };
+
 function mount(
     queue: QueueSlot,
-    { security = true, signedIn = true, mergeThrows = false }: { security?: boolean; signedIn?: boolean; mergeThrows?: boolean } = {},
+    {
+        security = true, signedIn = true, mergeThrows = false,
+        objects = {}, objectsUsingQueues: objectsSlot = { kind: 'answers', value: [] },
+    }: {
+        security?: boolean; signedIn?: boolean; mergeThrows?: boolean;
+        /** The member set's object grants, merged by the real `buildEffectiveObjectPermissions`. */
+        objects?: Record<string, Row>;
+        objectsUsingQueues?: ObjectsSlot;
+    } = {},
 ) {
     const hasAnyQueue = vi.fn(async (_organizationId: string | null) => {
         if (queue.kind === 'throws') throw new Error('sys_queue read failed');
         return queue.kind === 'answers' ? queue.value : false;
+    });
+    const objectsUsingQueues = vi.fn(async (_organizationId: string | null): Promise<unknown> => {
+        if (objectsSlot.kind === 'throws') throw new Error('crm_case read failed');
+        return objectsSlot.kind === 'answers' ? objectsSlot.value : [];
     });
     const services: Record<string, unknown> = {
         auth: {
@@ -97,11 +112,13 @@ function mount(
                 // The one input `buildEffectiveObjectPermissions` documents it
                 // throws on: it lands the handler in its outer catch.
                 ? [{ name: 'member_default', objects: { x: null } }]
-                : [{ name: 'member_default', systemPermissions: [], objects: {}, fields: {} }]),
+                : [{ name: 'member_default', systemPermissions: [], objects, fields: {} }]),
         };
     }
     if (queue.kind === 'no-method') services[OWNERSHIP_QUEUE_SERVICE] = { queuesOf: async () => [] };
-    else if (queue.kind !== 'absent') services[OWNERSHIP_QUEUE_SERVICE] = { hasAnyQueue };
+    else if (queue.kind !== 'absent') {
+        services[OWNERSHIP_QUEUE_SERVICE] = objectsSlot.kind === 'no-method' ? { hasAnyQueue } : { hasAnyQueue, objectsUsingQueues };
+    }
     const warn = vi.fn();
     const app = new Hono();
     registerCurrentUserEndpoints({
@@ -114,7 +131,7 @@ function mount(
             },
         },
     });
-    return { app, warn, hasAnyQueue };
+    return { app, warn, hasAnyQueue, objectsUsingQueues };
 }
 
 /**
@@ -195,6 +212,79 @@ describe('[#28508] /auth/me/permissions carries hasAnyQueue from the ownership-q
         const body = await read(mount({ kind: 'answers', value: true }).app);
         expect(typeof body.hasAnyQueue).toBe('boolean');
         const queueish = Object.keys(body).filter((k) => /queue/i.test(k));
-        expect(queueish).toEqual(['hasAnyQueue']);
+        // [#34602] `objectsUsingQueues` names objects, never a queue.
+        expect(queueish).toEqual(['hasAnyQueue', 'objectsUsingQueues']);
+    });
+});
+
+// [#34602] `objectsUsingQueues`: the objects on which the "in a queue" filter can
+// find something (a record sits in a queue now, or an active assignment rule
+// routes the object into one). The service's answer, for the caller's
+// organization, asked only when `hasAnyQueue` is true, and narrowed on the full
+// body to the objects the caller may read. The service's own union is pinned in
+// plugin-sharing's `ownership-queue.test.ts`.
+describe('[#34602] /auth/me/permissions carries objectsUsingQueues, narrowed to readable objects', () => {
+    const READABLE = { crm_case: { allowRead: true }, crm_lead: { allowRead: true }, crm_secret: { allowRead: false } };
+
+    it('the service\'s answer for the caller\'s organization is carried, minus the objects the caller may not read', async () => {
+        const { app, objectsUsingQueues } = mount(
+            { kind: 'answers', value: true },
+            { objects: READABLE, objectsUsingQueues: { kind: 'answers', value: ['crm_secret', 'crm_case', 'crm_unknown'] } },
+        );
+        const body = await read(app);
+        expect(body.objectsUsingQueues).toEqual(['crm_case']);
+        expect(objectsUsingQueues).toHaveBeenCalledTimes(1);
+        expect(objectsUsingQueues).toHaveBeenCalledWith(ACTIVE_ORG);
+    });
+
+    it('with no queue at all the service is not asked: an organization without queues pays no read for it', async () => {
+        const { app, objectsUsingQueues } = mount(
+            { kind: 'answers', value: false },
+            { objects: READABLE, objectsUsingQueues: { kind: 'answers', value: ['crm_case'] } },
+        );
+        const body = await read(app);
+        expect(body.objectsUsingQueues).toEqual([]);
+        expect(objectsUsingQueues).not.toHaveBeenCalled();
+    });
+
+    it('no service, or a service without the method, answers []', async () => {
+        expect((await read(mount({ kind: 'absent' }, { objects: READABLE }).app)).objectsUsingQueues).toEqual([]);
+        const noMethod = await read(mount({ kind: 'answers', value: true }, { objects: READABLE, objectsUsingQueues: { kind: 'no-method' } }).app);
+        expect(noMethod.objectsUsingQueues).toEqual([]);
+        expect(noMethod.hasAnyQueue).toBe(true);
+    });
+
+    it('a service that throws answers [] and logs, and the body still answers in full', async () => {
+        const { app, warn } = mount({ kind: 'answers', value: true }, { objects: READABLE, objectsUsingQueues: { kind: 'throws' } });
+        const body = await read(app);
+        expect(body.objectsUsingQueues).toEqual([]);
+        expect(body.hasAnyQueue).toBe(true);
+        expect(body.permissionSets).toEqual(['member_default']);
+        const lines = warn.mock.calls.map(([line]) => line);
+        expect(lines).toContain('[hono] /auth/me/permissions: objectsUsingQueues could not be resolved — answering []');
+        expect(lines).not.toContain('[hono] /auth/me/permissions failed');
+    });
+
+    it('an answer that is not a list of names is carried as [] — the strict contract never sees a stray value', async () => {
+        const body = await read(mount({ kind: 'answers', value: true }, { objects: READABLE, objectsUsingQueues: { kind: 'answers', value: 'crm_case' } }).app);
+        expect(body.objectsUsingQueues).toEqual([]);
+    });
+
+    it('the degraded branch (no SecurityPlugin) carries the answer unnarrowed: it serves no object grant to narrow by', async () => {
+        const body = await read(mount(
+            { kind: 'answers', value: true },
+            { security: false, objectsUsingQueues: { kind: 'answers', value: ['crm_lead', 'crm_case'] } },
+        ).app);
+        expect(body.objectsUsingQueues).toEqual(['crm_case', 'crm_lead']);
+        expect('systemPermissions' in body).toBe(false);
+    });
+
+    it('the closed body of the outer catch carries []', async () => {
+        const body = await read(mount(
+            { kind: 'answers', value: true },
+            { mergeThrows: true, objectsUsingQueues: { kind: 'answers', value: ['crm_case'] } },
+        ).app);
+        expect(body.objectsUsingQueues).toEqual([]);
+        expect(body.systemPermissions).toEqual([]);
     });
 });

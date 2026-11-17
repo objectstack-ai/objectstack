@@ -130,6 +130,7 @@ const payload = (systemPermissions?: string[]): MePermissionsAuthenticatedRespon
     tenantId: 'acme',
     positions: ['everyone'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member_default'],
     ...(systemPermissions ? { systemPermissions } : {}),
     objects: {},

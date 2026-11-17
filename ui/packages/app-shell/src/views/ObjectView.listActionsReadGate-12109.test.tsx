@@ -108,6 +108,7 @@ function answerFor(opportunityRead: boolean): MePermissionsAuthenticatedResponse
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['service_agent'],
     systemPermissions: [],
     objects: { [OBJECT_NAME]: { allowRead: opportunityRead, allowEdit: true } },

@@ -121,6 +121,7 @@ const PERMISSIONS: MePermissionsAuthenticatedResponse = {
   tenantId: null,
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: ['studio_user'],
   systemPermissions: ['studio.access'],
   objects: { [OBJECT_NAME]: { allowRead: true, allowEdit: true } },

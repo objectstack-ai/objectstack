@@ -136,6 +136,7 @@ function permissionsDenying(...unreadable: string[]): MePermissionsAuthenticated
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: {
       '*': { allowRead: true },

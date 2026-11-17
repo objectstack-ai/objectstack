@@ -387,6 +387,7 @@ describe('ListView.emptyStateAccess-25898', () => {
     userId: USER,
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: ['member'],
     permissionSets: ['member'],
     objects: { [OBJECT]: bits },

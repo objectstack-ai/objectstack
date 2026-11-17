@@ -141,6 +141,7 @@ const EVERYTHING_READABLE = {
   tenantId: null,
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: [],
   objects: { '*': { allowRead: true } },
   fields: {},
