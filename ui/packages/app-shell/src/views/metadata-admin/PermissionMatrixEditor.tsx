@@ -1493,12 +1493,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // draws (the object grant), so the click changes only the box it lands on.
       const cur = fieldRuleSeed(fields[key], drawnObjectPerm(prev, objectName));
       const next: FieldPerm = { ...cur, [action]: value };
-      // Cascade: !readable implies !editable — and no row condition: the spec
-      // refuses `when` beside `readable: false` (objectstack#25866), so Read
-      // off clears the condition instead of authoring the refused shape.
+      // Cascade: !readable implies !editable — and no row condition and no
+      // roll-up acknowledgement: the spec refuses `when` (objectstack#25866)
+      // and `rollupSourceUnreadableReason` beside `readable: false`, so Read
+      // off clears both instead of authoring the refused shape.
       if (action === 'readable' && !value) {
         next.editable = false;
         delete next.when;
+        delete next.rollupSourceUnreadableReason;
       }
       // Cascade: editable implies readable.
       if (action === 'editable' && value) next.readable = true;

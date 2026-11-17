@@ -123,9 +123,11 @@ OS_AUTH_SIGNUP_ENABLED=false
 OS_AUTH_GOOGLE_ENABLED=true
 
 # Optional: what a new user joins (ADR-0093 D1). `auto` (default) binds every
-# new user to the default organization (except, under the `invite_only`
-# audience posture, a sign-up admitted by the invitation it presents whose
-# address is unverified: it joins by accepting); `invite-only` grants membership only
+# new user to the default organization (except a sign-up admitted by its
+# invitation alone whose address is unverified: under the `invite_only`
+# audience posture, one admitted by the invitation it presents; under
+# `email_domain`, one off the allowlist that an invitation addressed to it
+# admitted. It joins by accepting); `invite-only` grants membership only
 # through an explicit act — creating a workspace, accepting an invitation, an
 # admin adding them, or SSO just-in-time provisioning.
 # Also configurable in Setup → Authentication → Membership.
