@@ -1,5 +1,6 @@
 ---
 '@objectstack/plugin-auth': patch
+'@objectstack/verify': patch
 '@object-ui/app-shell': patch
 '@object-ui/console': patch
 ---
@@ -22,5 +23,7 @@ Skills-docs: none — no skill under `skills/**` teaches accepting an organizati
 Unchanged: the invitation mail's own link, which carries a proof of the mailbox and accepts in one step (`POST /api/v1/auth/organization/accept-invitation-one-step`); a verified account, which accepts, declines and lists its invitations as before; the first account of a deployment, accounts an administrator creates and accounts a boot command provisions, which are bound as before; sending, resending and cancelling invitations.
 
 The Console's accept-invitation page answers a refused accept or decline with the verification-mail screen for the account's address, whose link brings the person back to answer the invitation.
+
+`@objectstack/verify`: a booted stack's `signUp` mints its fixture member through the operator door (the ticket the stack's own auth manager stages for that address), so the account is bound at creation as before; a stack whose auth service offers no such door falls back to the invitation lane.
 
 What to do: an invitee completes the verification mail (`POST /api/v1/auth/send-verification-email`, then the link it carries) before answering, or opens the invitation mail's own link. On a deployment with no live mail transport, a platform administrator creates the account (`POST /api/v1/auth/admin/create-user`) or attaches an account that already exists with the member list's **Add Member** action, which is open to platform administrators only and attaches existing accounts only.
