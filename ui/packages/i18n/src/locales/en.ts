@@ -5307,6 +5307,13 @@ const en = {
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
     submittedByYou: 'You submitted this',
+    // The approver band's status line and menu on a record under approval
+    // (objectstack#34361): the task, the step number on the served route,
+    // the submitter by name, and the menu holding every non-decision lever.
+    awaitingYourDecision: 'Awaiting your approval',
+    stepNumber: 'Step {{n}}',
+    submittedByName: 'Submitted by {{name}}',
+    moreDecisionActions: 'More approval actions',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',
