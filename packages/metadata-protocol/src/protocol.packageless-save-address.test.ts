@@ -579,6 +579,40 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
             expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
         });
 
+        it('P on `invoice` and a package-unbound row on `invoice` (P\'s customization), no draft stored: the DRAFT save on `task` is refused 409, since its publish would rewrite that row, and nothing is written (FROM: the environment\'s draft written, and its publish moved that row onto `task`)', async () => {
+            const { protocol, rows, seedRow, metadataWrites } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            seedRow({ type: 'action', name: NAME, package_id: null, metadata: JSON.stringify(action(NAME, 'custom', 'invoice')), checksum: 'sha-custom' });
+            const before = metadataWrites().length;
+
+            const err = await refusalOf(() => protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' }));
+
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(String(err.message)).toContain(`'${WRITABLE}'`);
+            expect(metadataWrites()).toHaveLength(before);
+            expect(rows('action', NAME, 'draft')).toEqual([]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'invoice', 'custom']]);
+        });
+
+        it('the environment\'s draft on `task` stored beside P\'s customization row on `invoice`: the per-item publish naming no package is refused 409, and the row and the draft stay (FROM: that row rewritten onto `task`)', async () => {
+            const { protocol, rows, seedRow, metadataWrites } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+            seedRow({ type: 'action', name: NAME, package_id: null, metadata: JSON.stringify(action(NAME, 'custom', 'invoice')), checksum: 'sha-custom' });
+            const before = metadataWrites().length;
+
+            const err = await refusalOf(() => protocol.publishMetaItem({ type: 'action', name: NAME }));
+
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(String(err.message)).toContain(`Cannot publish action '${NAME}'`);
+            expect(String(err.message)).toContain(`'${WRITABLE}'`);
+            expect(metadataWrites()).toHaveLength(before);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'invoice', 'custom']]);
+        });
+
         it('the environment\'s own row on `task`: a package-less save on `product` rewrites it onto `product` (one row per name, as for a name no package holds); P\'s row is untouched', async () => {
             const { protocol, rows } = makeProtocol();
             await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
