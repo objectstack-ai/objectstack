@@ -32,6 +32,12 @@
  *  7. A queue the body names parks the row as step 3.5 parks a trusted
  *     writer's (ADR-0142 D3): `owner_id` supplied empty beside the queue stays
  *     unset; an absent owner is stamped and the queue is the row's home queue.
+ *  8. An object a declared assignment rule routes (ADR-0142 D5): the rule
+ *     routes on this rig (a system insert and a flow run's insert go to the
+ *     rule's user), the invoker's direct create is stamped and not routed, and
+ *     an action body's insert is owned exactly as that direct create is. The
+ *     seam routes only a row whose owner and queue are both still empty, and a
+ *     body has no spelling that asks it to route.
  *
  * ## The rig
  *
@@ -63,6 +69,8 @@ const SYS = { context: { isSystem: true } } as never;
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
 
 const NOTE = 'abo_note';
+/** A private object a declared assignment rule routes (ADR-0142 D5): every unowned, queue-less insert to {@link LEAD}. */
+const TICKET = 'abo_ticket';
 const ORG = 'org_abo';
 /** The invoker: a non-admin member who creates, reads and edits the rows it owns. */
 const ME = 'usr_abo_invoker';
@@ -71,10 +79,15 @@ const OTHER = 'usr_abo_other';
 /** The agent principal acting for {@link DELEGATOR} (ADR-0090 D10). */
 const AGENT = 'usr_abo_agent';
 const DELEGATOR = 'usr_abo_delegator';
+/** The user the declared assignment rule hands every routed ticket to: an active member of {@link ORG}. */
+const LEAD = 'usr_abo_lead';
 
 const WRITER_SET = PermissionSetSchema.parse({
   name: 'abo_writer',
-  objects: { [NOTE]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+  objects: {
+    [NOTE]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    [TICKET]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+  },
 });
 const SETS = [MEMBER_DEFAULT, WRITER_SET];
 
@@ -129,14 +142,29 @@ beforeAll(async () => {
           name: { name: 'name', type: 'text' },
         },
       },
+      {
+        name: TICKET,
+        label: 'Ticket',
+        sharingModel: 'private',
+        tenancy: { enabled: false },
+        fields: {
+          id: { name: 'id', type: 'text', primaryKey: true },
+          name: { name: 'name', type: 'text' },
+        },
+      },
+    ],
+    assignmentRules: [
+      { name: 'abo_ticket_intake', object: TICKET, active: true, entries: [{ name: 'all', assignTo: { type: 'user', value: LEAD } }] },
     ],
   } as never);
   await engine.syncSchemas();
-  await engine.insert('sys_user', [ME, OTHER, AGENT, DELEGATOR].map((id) => ({ id, name: id, email: `${id}@abo.test` })), SYS);
+  await engine.insert('sys_user', [ME, OTHER, AGENT, DELEGATOR, LEAD].map((id) => ({ id, name: id, email: `${id}@abo.test` })), SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'ABO', slug: 'abo' }], SYS);
   // The delegator's current membership (ADR-0093 D8.1: a delegation needs it)
   // and its stored grant of the writer set, so a direct create on its behalf
   // lands — the control the delegated body insert is compared with.
+  // The rule's target is a member of the organization the rows land in.
+  await engine.insert('sys_member', [{ id: 'mem_abo_lead', user_id: LEAD, organization_id: ORG, role: 'member' }], SYS);
   await engine.insert('sys_member', [{ id: 'mem_abo_delegator', user_id: DELEGATOR, organization_id: ORG, role: 'member' }], SYS);
   await (engine as any).getDriver('sys_user_permission_set').create('sys_user_permission_set', {
     id: 'ups_abo_delegator', user_id: DELEGATOR, permission_set: WRITER_SET.name, organization_id: ORG,
@@ -339,5 +367,53 @@ describe('a queue the body names (ADR-0142 D3)', () => {
     const row = await stored(id);
     expect(row?.queue).toBe('abo_intake');
     expect(row?.owner_id).toBe(ME);
+  });
+});
+
+describe('an object an assignment rule routes (ADR-0142 D5): owned like a direct create, so the rule routes neither', () => {
+  const bodyInsertTicket = (context: object, data: Row) =>
+    (engine as any).createContext(context).object(TICKET).insert(data);
+  const storedTicket = async (id: string): Promise<Row | null> =>
+    ((await engine.findOne(TICKET, { where: { id }, context: { isSystem: true } } as never)) ?? null) as Row | null;
+
+  it('the rule does route on this rig: an unowned, queue-less system insert goes to the rule’s user (the control)', async () => {
+    const id = nextId('routed_system');
+    await engine.insert(TICKET, { id, name: 'system intake' }, { context: { isSystem: true, tenantId: ORG } } as never);
+
+    expect((await storedTicket(id))?.owner_id).toBe(LEAD);
+  });
+
+  it('a flow run’s unowned insert is still routed (unchanged) — the route an action body’s insert took before', async () => {
+    const id = nextId('routed_flow');
+    await bodyInsertTicket({ ...INVOKER, isSystem: true, flowRunId: 'run_abo_routed' }, { id, name: 'flow intake' });
+
+    expect((await storedTicket(id))?.owner_id).toBe(LEAD);
+  });
+
+  it('the invoker’s direct create is stamped with the invoker and not routed', async () => {
+    const id = nextId('direct_ticket');
+    await engine.insert(TICKET, { id, name: 'direct' }, { context: { ...INVOKER } } as never);
+
+    const row = await storedTicket(id);
+    expect(row?.owner_id).toBe(ME);
+    expect(row?.queue ?? null).toBeNull();
+  });
+
+  it('an action body’s insert is owned exactly as that direct create is: the invoker’s, not routed', async () => {
+    const id = nextId('body_ticket');
+    await bodyInsertTicket(actionBody(INVOKER), { id, name: 'filed by the action' });
+
+    const row = await storedTicket(id);
+    expect(row?.owner_id).toBe(ME);
+    expect(row?.queue ?? null).toBeNull();
+    const seen = (await engine.findOne(TICKET, { where: { id }, context: { ...INVOKER } } as never)) as Row | null;
+    expect(seen?.id).toBe(id);
+  });
+
+  it('an owner the body supplies empty is stamped too: a body has no spelling that asks the rule to route', async () => {
+    const id = nextId('body_ticket_null');
+    await bodyInsertTicket(actionBody(INVOKER), { id, name: 'null owner', owner_id: null });
+
+    expect((await storedTicket(id))?.owner_id).toBe(ME);
   });
 });
