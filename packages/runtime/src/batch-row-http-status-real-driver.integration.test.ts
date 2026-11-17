@@ -261,6 +261,7 @@ describe('[#8570] a batch row carries the status its producer DECLARED — real 
         const res: any = await protocol.deleteManyData({ object: 'hs_task', ids: ['ghost'] });
         expect(res.results[0].errors[0]).toEqual({
             code: 'RECORD_NOT_FOUND', message: 'Record ghost not found in hs_task', httpStatus: 404,
+            userMessage: 'This record does not exist, or you do not have access to it.',
         });
     });
 });

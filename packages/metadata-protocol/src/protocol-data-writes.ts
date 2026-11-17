@@ -234,7 +234,7 @@ export async function updateData(host: Pick<ProtocolHost, 'assertObjectRegistere
     // {@link probeRecord}. ObjectQL refuses a row that is not there
     // itself, so this reads only on a `null` readback.
     if (result == null && !(await host.probeRecord(request.object, request.id))) {
-        throw recordNotFoundError(request.object, request.id);
+        throw recordNotFoundError(request.object, request.id, request.context);
     }
     // [#7823] The PATCH 200 body is the surface #7728's fourth measurement
     // caught: a client revoking a `sys_api_key` (apiMethods keeps `update`
@@ -286,7 +286,7 @@ export async function deleteData(host: Pick<ProtocolHost, 'assertObjectRegistere
     // an `undefined` from an off-contract implementation — is not a
     // POSITIVE not-found signal, and inventing a 404 out of it would break
     // deletes against third-party drivers rather than report honestly.
-    if (deleted === false) throw recordNotFoundError(request.object, request.id);
+    if (deleted === false) throw recordNotFoundError(request.object, request.id, request.context);
     // The same measurement, one outcome over: `success` was still a
     // LITERAL for every answer that was not the contract's `false`, so a
     // row that MATCHED and was deliberately NOT removed reported a

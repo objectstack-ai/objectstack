@@ -1,6 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { DatasetTermMatch, DatasetTermMatchedOn } from '@objectstack/spec/ai';
+import {
+  LIST_DATASETS_MAX_CANDIDATES_PER_TERM,
+  type DatasetTermCandidate,
+  type DatasetTermMatch,
+  type DatasetTermMatchedOn,
+} from '@objectstack/spec/ai';
 import { normalizeDatasetTerm } from '@objectstack/spec/ui';
 
 /**
@@ -19,6 +24,10 @@ import { normalizeDatasetTerm } from '@objectstack/spec/ui';
  * query labelled 「非指标口径」, a dimension hit alone is no answer) are the
  * caller's: the tool descriptions state them, and `matches` is the input they
  * decide on. This function decides nothing beyond "which words are equal".
+ *
+ * {@link findDatasetTermCandidates} is the D3 amendment note's half (behind
+ * `list_datasets.candidates`): for a term with no hit anywhere, the members
+ * offered for a clarifying question. It never changes what a hit is.
  */
 
 /** A member's match targets, as the dataset declares them. */
@@ -76,4 +85,102 @@ export function matchDatasetTerms(
     }
   }
   return matches;
+}
+
+/**
+ * A listed dataset as {@link findDatasetTermCandidates} reads it: its name and
+ * the members the caller was ADMITTED to see, in the order its catalogue entry
+ * lists them.
+ */
+export interface CandidateDataset {
+  readonly name: string;
+  readonly dimensions: readonly MatchableMember[];
+  readonly measures: readonly MatchableMember[];
+}
+
+/**
+ * The shortest word, in code points after normalization, that takes part in a
+ * near comparison, on either side. One code point (`a`, `营`) is contained in
+ * too many words to say anything about any of them.
+ */
+export const DATASET_TERM_NEAR_MIN_CODE_POINTS = 2;
+
+const codePoints = (s: string): number => [...s].length;
+
+/** Every match target a member carries: its name, each label locale, each string synonym. */
+function targetsOf(member: MatchableMember): string[] {
+  return [
+    member.name,
+    ...labelTargets(member.label),
+    ...(member.synonyms ?? []).filter((s): s is string => typeof s === 'string'),
+  ];
+}
+
+/**
+ * Whether `member` is NEAR `normalizedTerm`: after the one normalization, one
+ * of its match targets contains the term, or the term contains the target,
+ * both at least {@link DATASET_TERM_NEAR_MIN_CODE_POINTS} code points long.
+ * `金额` is near `合同金额` and `合同金额` is near `金额`. No edit distance, stem or
+ * embedding: a containment test is a string comparison a unit test can pin
+ * (ADR-0149 D3), and every consumer gets the same answer.
+ */
+function isNear(normalizedTerm: string, member: MatchableMember): boolean {
+  for (const target of targetsOf(member)) {
+    const t = normalizeDatasetTerm(target);
+    if (codePoints(t) < DATASET_TERM_NEAR_MIN_CODE_POINTS) continue;
+    if (t.includes(normalizedTerm) || normalizedTerm.includes(t)) return true;
+  }
+  return false;
+}
+
+/**
+ * [ADR-0149 D3, amendment note] The members `list_datasets` offers as possible
+ * readings of each term that matched nothing: `ListDatasetsOutputSchema`'s
+ * `candidates`, to its shape, order and cap.
+ *
+ * - Only over the members given, which are the members the caller was
+ *   admitted to see in the datasets the caller may query: a withheld member,
+ *   an `internal`-field member or an unadmitted dataset is never passed in,
+ *   so it is never offered and every pointer names a member the same answer
+ *   lists.
+ * - Only for a term with NO hit in any dataset given, judged by the same
+ *   equality {@link matchDatasetTerms} reports as `matches`: a candidate is
+ *   never a hit, and a term with a hit anywhere has no candidate.
+ * - Near is {@link isNear}: containment either way after normalization, both
+ *   sides at least two code points.
+ * - Order is the listing order, never a ranking: terms as sent (a term sent
+ *   twice is offered once), then datasets as given, then each dataset's
+ *   measures before its dimensions (a dimension alone is no answer, D3 rule
+ *   5), each in the order given. At most
+ *   `LIST_DATASETS_MAX_CANDIDATES_PER_TERM` per term, the first in that order;
+ *   nothing marks the cut.
+ *
+ * An empty array when there is nothing to offer: the caller omits the key.
+ */
+export function findDatasetTermCandidates(
+  terms: readonly string[],
+  datasets: readonly CandidateDataset[],
+): DatasetTermCandidate[] {
+  const candidates: DatasetTermCandidate[] = [];
+  const seen = new Set<string>();
+  for (const term of terms) {
+    if (seen.has(term)) continue;
+    seen.add(term);
+    const normalized = normalizeDatasetTerm(term);
+    if (codePoints(normalized) < DATASET_TERM_NEAR_MIN_CODE_POINTS) continue;
+    const hit = datasets.some((d) =>
+      [...d.dimensions, ...d.measures].some((m) => matchedOn(normalized, m) !== undefined));
+    if (hit) continue;
+    let offered = 0;
+    scan: for (const dataset of datasets) {
+      for (const [kind, list] of [['measures', dataset.measures], ['dimensions', dataset.dimensions]] as const) {
+        for (const member of list) {
+          if (!isNear(normalized, member)) continue;
+          candidates.push({ term, dataset: dataset.name, member: `${kind}.${member.name}` });
+          if (++offered >= LIST_DATASETS_MAX_CANDIDATES_PER_TERM) break scan;
+        }
+      }
+    }
+  }
+  return candidates;
 }

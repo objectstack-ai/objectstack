@@ -386,11 +386,13 @@ import {
 import {
   FlowMetaPills,
   FlowPreviewChromeProvider,
+  FlowSelectionTitle,
   flowSelectionHeading,
   type FlowPreviewSection,
   type FlowProblemTally,
 } from '../metadata-admin/previews/FlowPreview.js';
 import { InspectorShellHostProvider } from '../metadata-admin/inspectors/_shared.js';
+import { useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
 import type { FlowRegistration } from '@objectstack/spec/api';
 import {
   navEntryLabelText,
@@ -1938,6 +1940,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onDirtyChange={setPillarDirty}
+                packageLabel={pkgEntry?.id === packageId ? pkgEntry.name : undefined}
               />
             ) : (
               // objectui#11203 / objectui#11232 — keyed by package. A package
@@ -8287,6 +8290,8 @@ export function AutomationsPillar({
     dialog: flowConflictDialog,
   } = useDraftSaveGuard(client, reloadFlowDraft);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
+  // The package's translations of the flow label and its approval-step labels (flow-label-translations.tsx).
+  const flowLabels = useFlowLabelTranslations(current?.name ?? '');
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
@@ -9483,7 +9488,7 @@ export function AutomationsPillar({
               </button>
             }
             icon={current ? Workflow : undefined}
-            title={current ? current.label || current.name : t('engine.studio.auto.heading', locale)}
+            title={current ? flowLabels?.flowLabel || current.label || current.name : t('engine.studio.auto.heading', locale)}
             titleProps={
               current
                 ? { 'data-testid': 'auto-canvas-caption', title: `${t('designer.field.apiName', locale)}: ${current.name}` }
@@ -9779,13 +9784,13 @@ export function AutomationsPillar({
           // draws none of its own (`InspectorShellHostProvider`). With nothing
           // selected the aside keeps its "Configuration" eyebrow.
           const heading =
-            selection && inspector && current && flowLoaded ? flowSelectionHeading(draft, selection, locale) : null;
+            selection && inspector && current && flowLoaded ? flowSelectionHeading(draft, selection, locale, flowLabels) : null;
           const aside = (
             <StudioInspector
               testId="auto-config-aside"
               className={inSlot ? 'w-full flex-1 border-l-0' : undefined}
               eyebrow={heading?.eyebrow ?? t('engine.studio.auto.config', locale)}
-              title={heading?.title}
+              title={heading && <FlowSelectionTitle heading={heading} locale={locale} />}
               onClose={selection ? () => setSelection(null) : undefined}
               closeLabel={t('engine.studio.deselect', locale)}
               // objectui#12453 — a read-only package saves no draft: no footer.
@@ -10029,6 +10034,7 @@ export function AccessPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onDirtyChange,
+  packageLabel,
 }: {
   packageId: string;
   publishNonce?: number;
@@ -10043,6 +10049,8 @@ export function AccessPillar({
    * beforeunload). Reports `false` when the pillar unmounts, same contract as
    * PermissionMatrixEditPage's own onDirtyChange. */
   onDirtyChange?: (dirty: boolean) => void;
+  /** objectstack#34795 — the open app's name: the open set's title reads "app · set". */
+  packageLabel?: string;
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -10775,23 +10783,27 @@ export function AccessPillar({
                 if (isMobile) setRailOpen(false);
               }}
               icon={<Shield className="h-4 w-4 shrink-0 text-muted-foreground" />}
-              // objectui#12456 — two-line rows (label, then the api name in
-              // mono) at 36 px: the one height the shared rail lets differ.
-              className="h-9"
               trailing={
                 <>
                   <RailCustomizationMark row={{ type: 'permission', ...p }} marks={railMarks} locale={locale} />
                   {p.isDefault ? (
-                    <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60">default</span>
+                    <span className="text-[10px] text-muted-foreground/70">{t('perm.badge.default', locale)}</span>
                   ) : null}
                 </>
               }
             >
-              {/* objectui#11862 — the set's label first, its machine name as
-                  secondary text. A set listed from its draft header alone
-                  has no label in hand (the header carries none), so its
-                  name is the text, as before. */}
-              <StudioNameLabel label={p.label} name={p.name} />
+              {/* objectui#11862 — the set's label. objectstack#34795: the
+                  machine name is no longer drawn as secondary text; it is the
+                  row's tooltip. A set listed from its draft header alone has
+                  no label in hand (the header carries none), so its name is
+                  the text, as before. */}
+              <span
+                className="flex min-w-0 flex-1"
+                title={p.label.trim() && p.label !== p.name ? p.name : undefined}
+                data-testid={`access-rail-set-${p.name}`}
+              >
+                <StudioNameLabel label={p.label.trim() ? p.label : p.name} />
+              </span>
             </StudioRailRow>
           ))}
         </StudioRail>
@@ -10843,6 +10855,7 @@ export function AccessPillar({
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,
+                appLabel: packageLabel || undefined,
                 onCloneSourceRead,
                 leading: accessRailToggleEl,
                 chips: currentAddedIn ? (
