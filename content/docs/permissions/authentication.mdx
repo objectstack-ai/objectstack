@@ -1286,12 +1286,12 @@ every row through better-auth so the accounts are login-capable:
   created. The import only adds positions; it never removes one a user holds.
   Permission sets come with the position (a position carries its sets); a
   direct grant stays a Setup step.
-- A file that names positions is refused whole, with nothing created, when
-  its positions cannot be judged: `501 NOT_IMPLEMENTED` when the server
-  cannot assign positions during an import, and `403 PERMISSION_DENIED` when
-  your own access cannot be resolved. Both are decided before any row is
-  written, on a dry run too. A dry run never assigns positions, and reports
-  `summary.positions` as zeros.
+- When a file's positions cannot be judged at all, the users are still
+  created and only the positions are refused: every named position is
+  reported `refused` on its row, with code `NOT_IMPLEMENTED` when the server
+  cannot assign positions during an import, or `PERMISSION_DENIED` when your
+  own access cannot be resolved. A dry run never assigns positions, and
+  reports `summary.positions` as zeros.
 - Synchronous only, at most 500 rows per request (password hashing is
   CPU-bound); split larger files into batches. Imports are not undoable.
 
