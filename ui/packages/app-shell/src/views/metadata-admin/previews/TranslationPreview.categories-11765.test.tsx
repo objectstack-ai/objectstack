@@ -27,6 +27,12 @@ import * as React from 'react';
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, cleanup, screen } from '@testing-library/react';
 import { TranslationDataSchema } from '@objectstack/spec/system';
+// `validateMetadataDraft` reaches dynamic `@objectstack/formula`, `@objectstack/lint`
+// and `@object-ui/core` imports; their first load is paid here, at collection,
+// never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@object-ui/core';
 
 import { validateMetadataDraft } from '../clientValidation';
 import { t, tFormat } from '../i18n';
