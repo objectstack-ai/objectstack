@@ -21,6 +21,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -135,7 +139,7 @@ function openFacet(title: string) {
  * through the real facet editors — the card's reproduction, minus the browser.
  */
 async function authorEveryFacet() {
-  openFacet('Row-Level Security');
+  openFacet('Record Scope Rules');
   fireEvent.click(await screen.findByRole('button', { name: /Add policy/ }));
   fireEvent.change(await screen.findByPlaceholderText('Policy name'), {
     target: { value: 'qa_st2_rls' },
@@ -145,7 +149,7 @@ async function authorEveryFacet() {
   });
   fireEvent.change(screen.getByPlaceholderText(USING_PLACEHOLDER), { target: { value: USING } });
 
-  openFacet('Tab Visibility');
+  openFacet('Menu Visibility');
   // The visibility picker is the shared Select (objectui#11865): open it and pick, as a user does.
   fireEvent.keyDown(await screen.findByTestId('tab-visibility-a_account'), { key: 'ArrowDown' });
   fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: 'Hidden' }));

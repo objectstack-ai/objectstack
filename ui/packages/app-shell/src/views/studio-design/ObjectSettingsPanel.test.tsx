@@ -69,7 +69,7 @@ describe('ObjectSettingsPanel — record sharing (OWD)', () => {
     expect(desc.textContent).toMatch(/security-owd-unset/);
     // The runtime fallback is still stated — it is what makes `private` the
     // safe pick — but as context, not as an all-clear.
-    expect(desc.textContent).toMatch(/Private/);
+    expect(desc.textContent).toMatch(/Only the owner can see/);
     // Styled as a problem.
     expect(desc.className).toMatch(/amber/);
   });

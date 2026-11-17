@@ -20,6 +20,10 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -161,7 +165,7 @@ describe('the bulk buttons leave Export as it is (objectstack#26885)', () => {
     });
   });
 
-  for (const label of ['R', 'CRUD', 'All']) {
+  for (const label of ['Read only', 'Read & write', 'All']) {
     it(`"${label}" keeps a granted Export ticked`, async () => {
       const server = await renderSet({ crm_case: { allowRead: true, allowExport: true } });
       fireEvent.click(bulk(label));

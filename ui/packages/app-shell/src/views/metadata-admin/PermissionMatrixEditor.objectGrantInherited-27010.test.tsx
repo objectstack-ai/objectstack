@@ -14,6 +14,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -257,7 +261,7 @@ describe('every object-row control writes only what the admin sees change (objec
   it('the R shortcut on an inherited row merges from the `*` entry; None writes an empty entry of its own', async () => {
     const server = await renderSet({ '*': { ...CRUD, allowExport: true } });
     const projectRow = rowOf('a_project');
-    fireEvent.click(within(projectRow).getByRole('button', { name: 'R' }));
+    fireEvent.click(within(projectRow).getByRole('button', { name: 'Read only' }));
     const taskRow = rowOf('a_task');
     fireEvent.click(within(taskRow).getByRole('button', { name: 'None' }));
     // On screen: a_task now draws its own empty entry, nothing checked.

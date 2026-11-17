@@ -27,6 +27,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -224,7 +226,7 @@ const objectListReads = () =>
     .map((r) => new URL(r, 'http://localhost').searchParams.get('package'));
 
 async function copyOpen(): Promise<void> {
-  await waitFor(() => expect(within(header()).getByText('My contributor')).toBeInTheDocument(), { timeout: 8000 });
+  await waitFor(() => expect(within(header()).getByText(/(^|· )My contributor$/)).toBeInTheDocument(), { timeout: 8000 });
   await waitFor(() => expect(within(matrix()).getByText('Showcase account')).toBeInTheDocument(), { timeout: 8000 });
 }
 
@@ -269,7 +271,7 @@ describe('a "New similar" copy in the pair shows the grants it holds on the base
 describe('CONTROL: the base’s own set (objectstack#29674)', () => {
   it('lists the base’s objects, reads no pair object list, and keeps the base’s note', async () => {
     renderAccess(BASE_SET.name);
-    await waitFor(() => expect(within(header()).getByText('Contributor')).toBeInTheDocument(), { timeout: 8000 });
+    await waitFor(() => expect(within(header()).getByText(/(^|· )Contributor$/)).toBeInTheDocument(), { timeout: 8000 });
     await waitFor(() => expect(within(matrix()).getByText('Showcase account')).toBeInTheDocument(), { timeout: 8000 });
     await waitFor(() => expect(header()).toHaveTextContent(countsText(8, 3)));
     expect(objectListReads().filter((p) => p === PAIR)).toEqual([]);
@@ -307,14 +309,14 @@ describe('the header’s provenance chip follows the rail’s mark (objectstack#
   it('a set created in the pair: Custom in the header, Added in the rail', async () => {
     srv.pairDrafts.set(`permission/${CREATED}`, { name: CREATED, label: 'Pair auditor', objects: {}, fields: {} });
     renderAccess(CREATED);
-    await waitFor(() => expect(within(header()).getAllByText(CREATED).length).toBeGreaterThan(0), { timeout: 8000 });
+    await waitFor(() => expect(within(header()).getAllByTitle(CREATED).length).toBeGreaterThan(0), { timeout: 8000 });
     await waitFor(() => expect(railMarkOf(CREATED)).toBe('added'), { timeout: 8000 });
     expect(chip()).toHaveTextContent(t('perm.badge.custom', 'en'));
   });
 
   it('CONTROL: the base’s own set reads Package, and its rail row carries no mark', async () => {
     renderAccess(BASE_SET.name);
-    await waitFor(() => expect(within(header()).getByText('Contributor')).toBeInTheDocument(), { timeout: 8000 });
+    await waitFor(() => expect(within(header()).getByText(/(^|· )Contributor$/)).toBeInTheDocument(), { timeout: 8000 });
     // The read has answered: the copy's row is marked, the base set's is not.
     await waitFor(() => expect(railMarkOf('My contributor')).toBe('added'), { timeout: 8000 });
     expect(railMarkOf('Contributor')).toBeNull();

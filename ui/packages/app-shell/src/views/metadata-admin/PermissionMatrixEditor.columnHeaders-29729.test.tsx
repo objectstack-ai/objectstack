@@ -24,6 +24,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
@@ -144,6 +148,6 @@ describe("Setup's sharing-model chip reads through the catalogue (objectstack#29
 
   it('CONTROL — en keeps "OWD {value}"', async () => {
     mount('en', 'setup');
-    expect(await screen.findByText('OWD Private (default)')).toBeInTheDocument();
+    expect(await screen.findByText('OWD Only the owner can see (default)')).toBeInTheDocument();
   });
 });

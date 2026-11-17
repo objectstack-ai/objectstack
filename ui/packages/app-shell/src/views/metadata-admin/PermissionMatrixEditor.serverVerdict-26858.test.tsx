@@ -15,6 +15,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -96,7 +100,7 @@ async function openPackageDoor(server: Server) {
     </MemoryRouter>,
   );
   await screen.findByText('a_account');
-  fireEvent.click(screen.getByRole('button', { name: /Row-Level Security/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Record Scope Rules/ }));
 }
 
 const policy = (using: string) => ({

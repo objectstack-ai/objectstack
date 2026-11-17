@@ -21,6 +21,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -158,7 +160,7 @@ async function renderPillarOnSetA() {
 const inSetHeader = () => within(screen.getByTestId('access-item-header'));
 // The header is re-queried on each retry: the pillar's own header stands in
 // while no set is open, and the set's header replaces it once the page loads.
-const findInSetHeader = (text: string) => waitFor(() => inSetHeader().getByText(text));
+const findInSetHeader = (name: string) => waitFor(() => inSetHeader().getByTitle(name));
 
 /** Flip a cell in the open matrix so the editor reports dirty. */
 function dirtyTheMatrix() {
@@ -179,7 +181,7 @@ describe('AccessPillar — unsaved matrix edits guard', () => {
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     // Still on set A, and the edit survived (row "None" left Read unchecked —
     // a remount would have reloaded allowRead: true).
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     const row = screen.getByText('a_account').closest('tr')!;
     expect(within(row).getByRole('checkbox', { name: 'a_account Read' })).not.toBeChecked();
 
