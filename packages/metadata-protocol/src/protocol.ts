@@ -266,6 +266,8 @@ import type { ImportUnmanagedPackageAnswer } from './protocol-package-install.js
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
+    draftPublishJudgement,
+    type DraftPublishJudgement,
     draftPublishVerdict,
     refuseRestoredBodyTheSaveDoorRefuses,
     restoredBodyDerivation,
@@ -1235,6 +1237,7 @@ export class ObjectStackProtocolImplementation implements
             diffMetaItem: (...a) => protocol.diffMetaItem(...a),
             disabledActionsOf: (...a) => protocol.disabledActionsOf(...a),
             discardDraftInItsScope: (...a) => protocol.discardDraftInItsScope(...a),
+            draftPublishJudgement: (...a) => protocol.draftPublishJudgement(...a),
             draftPublishVerdict: (...a) => protocol.draftPublishVerdict(...a),
             dropObjectStorage: (...a) => protocol.dropObjectStorage(...a),
             dropStorageRemainingRowsRefusal: (...a) => ObjectStackProtocolImplementation.dropStorageRemainingRowsRefusal(...a),
@@ -1262,6 +1265,8 @@ export class ObjectStackProtocolImplementation implements
             getMetaItem: (...a) => protocol.getMetaItem(...a),
             getMetaItems: (...a) => protocol.getMetaItems(...a),
             getOverlayRepo: (...a) => protocol.getOverlayRepo(...a),
+            getPackageTranslationBundle: (...a) => protocol.getPackageTranslationBundle(...a),
+            getPackagedFieldPatchBases: (...a) => protocol.getPackagedFieldPatchBases(...a),
             getPackagedObjectBase: (...a) => protocol.getPackagedObjectBase(...a),
             get getServicesRegistry() { return protocol.getServicesRegistry; },
             governServedObject: (...a) => protocol.governServedObject(...a),
@@ -1904,9 +1909,22 @@ export class ObjectStackProtocolImplementation implements
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
     }): Promise<RuntimeAuthoringIssue[]> {
+        return draftPublishVerdict.call(this.draftVerdictHost(), draft);
+    }
+
+    /** [#34818] The same judgement with the gate's advisories beside its refusal (see `draftPublishJudgement`). */
+    private draftPublishJudgement(draft: {
+        type: string; name: string; body: unknown; packageId: string | null;
+        userTextLocales?: readonly (string | undefined)[];
+    }): Promise<DraftPublishJudgement> {
+        return draftPublishJudgement.call(this.draftVerdictHost(), draft);
+    }
+
+    /** The host both draft verdict bodies read: the promotion's own collaborators. */
+    private draftVerdictHost(): ThisParameterType<typeof draftPublishJudgement> {
         const readAuthoringChannel = () => this.authoringChannel;
         const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof draftPublishVerdict> = {
+        const host: ThisParameterType<typeof draftPublishJudgement> = {
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
             collectBatchPendingDeclarations: (...a) => this.collectBatchPendingDeclarations(...a),
@@ -1922,7 +1940,7 @@ export class ObjectStackProtocolImplementation implements
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
-        return draftPublishVerdict.call(host, draft);
+        return host;
     }
 
     /**
@@ -3068,6 +3086,15 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getPairTranslationBundle(protocolHost(this), basePackageId);
     }
 
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases} in `protocol-discovery-and-bases.ts` [#33952]. */
+    getPackagedFieldPatchBases(name: string): Array<{ packageId: string; base: unknown }> {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases(protocolHost(this), name);
+    }
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle} in `protocol-discovery-and-bases.ts` [#33952]. */
+    getPackageTranslationBundle(packageId: string): Promise<TranslationBundle | undefined> {
+        return ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle(protocolHost(this), packageId);
+    }
+
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.packagedArtifactBase} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
     private packagedArtifactBase(type: PackagedArtifactBaseType, name: string): unknown {
         // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
@@ -4103,6 +4130,8 @@ export class ObjectStackProtocolImplementation implements
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItem(protocolHost(this), request);
@@ -4156,7 +4185,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readMetaItemFace(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
-        member?: string,
+        member?: string, userTextLocales?: readonly string[],
     }, face: 'served' | 'execution') {
         // [#25467 cut 31] The body moved to `protocol-meta-item-face.ts` (see `MetaItemFaceHost`).
         const readEngine = () => this.engine;
@@ -4195,7 +4224,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
-        member?: string,
+        member?: string, userTextLocales?: readonly string[],
     }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return readMetaItem(protocolHost(this), request, opts);

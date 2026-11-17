@@ -977,3 +977,80 @@ describe('ObjectFieldInspector — stored expression editor (objectstack#32576)'
     await waitFor(() => expect(onBlocking).toHaveBeenLastCalledWith(0), { timeout: 3000 });
   });
 });
+
+describe('ObjectFieldInspector — label first, API name under Developer info, delete behind ⋯ (objectstack#34794)', () => {
+  it('the label is the first input; the API name is in a Developer info section that opens collapsed', async () => {
+    renderField({ title: { type: 'text', label: 'Meeting' } }, 'title');
+    // The first input in document order, so the first one an author meets.
+    const inputs = Array.from(document.querySelectorAll('input, textarea'));
+    expect(inputs[0]).toBe(screen.getByTestId('field-label-input'));
+    expect(screen.getByTestId('field-apiname-input')).not.toBeVisible();
+    const toggle = screen.getByTestId('field-developer-toggle');
+    expect(toggle).toHaveTextContent(t('designer.field.section.developer', 'en-US'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('field-apiname-input')).toBeVisible();
+    expect(screen.getByTestId('field-apiname-input')).toHaveValue('title');
+  });
+
+  it('renaming from the opened section still renames, and a taken name is still refused', async () => {
+    const { onPatch } = renderField(
+      { title: { type: 'text', label: 'Meeting' }, place: { type: 'text', label: 'Place' } },
+      'title',
+    );
+    await userEvent.click(screen.getByTestId('field-developer-toggle'));
+    const box = screen.getByTestId('field-apiname-input');
+    fireEvent.change(box, { target: { value: 'meeting_name' } });
+    expect(Object.keys(onPatch.mock.calls.at(-1)![0].fields)).toEqual(['meeting_name', 'place']);
+    fireEvent.change(box, { target: { value: 'place' } });
+    expect(screen.getByTestId('field-apiname-refusal')).toBeInTheDocument();
+  });
+
+  it('no Remove button in the panel; Delete is in the header ⋯ menu and asks first — Cancel keeps the field, Delete removes it', async () => {
+    const onClearSelection = vi.fn();
+    const { onPatch } = renderField(
+      { title: { type: 'text', label: 'Meeting' }, place: { type: 'text', label: 'Place' } },
+      'place',
+      { onClearSelection },
+    );
+    const removeName = `Remove “Place”`;
+    expect(screen.queryByRole('button', { name: removeName })).not.toBeInTheDocument();
+
+    const more = screen.getByTestId('field-more-menu');
+    await userEvent.click(more);
+    await userEvent.click(await screen.findByRole('menuitem', { name: removeName }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Delete the field “Place”?');
+    await userEvent.click(within(dialog).getByTestId('field-remove-confirm-cancel'));
+    expect(onPatch).not.toHaveBeenCalled();
+    expect(onClearSelection).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId('field-more-menu'));
+    await userEvent.click(await screen.findByRole('menuitem', { name: removeName }));
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('field-remove-confirm-action'));
+    expect(Object.keys(onPatch.mock.calls.at(-1)![0].fields)).toEqual(['title']);
+    expect(onClearSelection).toHaveBeenCalled();
+  });
+
+  it('a read-only inspector draws the ⋯ menu disabled; an external object offers no Delete at all', () => {
+    renderField({ title: { type: 'text', label: 'Meeting' } }, 'title', { readOnly: true });
+    expect(screen.getByTestId('field-more-menu')).toBeDisabled();
+    cleanup();
+
+    render(
+      <ObjectFieldInspector
+        type="object"
+        name="remote_account"
+        draft={{ name: 'remote_account', external: {}, fields: { title: { type: 'text', label: 'Meeting' } } }}
+        selection={{ kind: 'field', id: 'title' }}
+        onPatch={vi.fn()}
+        onClearSelection={vi.fn()}
+        readOnly={false}
+        locale={'en-US'}
+      />,
+    );
+    expect(screen.getByTestId('field-label-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('field-more-menu')).not.toBeInTheDocument();
+  });
+});

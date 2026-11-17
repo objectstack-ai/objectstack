@@ -2403,7 +2403,7 @@ const zh = {
       changesApplied: '已生效',
       changesDrafted: '已暂存为草稿',
       changesFailed: '未生效',
-      discussing: '正在讨论：{{target}}',
+      discussing: '正在看：{{target}}',
       changesConfirmMessage: '确认修改，应用你刚才提议的改动。',
       changeVerb: {
         createObject: '新建对象',
@@ -3031,6 +3031,10 @@ const zh = {
       missingToken: '验证链接缺少令牌。',
       emailMissing: '缺少邮箱地址',
       resendButton: '重新发送验证邮件',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        '您的邮箱地址尚未验证。请向 {{email}} 发送一封验证邮件，然后点击邮件中的链接以验证您的账户。',
+      sendButton: '发送验证邮件',
       resending: '发送中…',
       resent: '邮件已发送！请查看收件箱',
       resentSuccess: '验证邮件已发送！',
@@ -3587,7 +3591,7 @@ const zh = {
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
       fieldOrderChanged: '字段顺序已变更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: '包含由 AI 副驾起草的更改',
+      draftedByCopilot: '包含由 AI 助手起草的更改',
       draftedByMcpClient: '包含由 MCP 客户端「{{client}}」起草的更改',
       draftedByMcp: '包含由 MCP 客户端起草的更改',
       detailChangedKeys: '其他变更：',
@@ -3696,6 +3700,7 @@ const zh = {
       securityBlockTitle_one: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_other: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockWhere: '请在对象的“设置 → 记录共享模型”中修改后重新发布。',
+      flowChecksTitle: '发布前请先看 —— 发布检查会提出以下几点',
       securityRule: {
         owdUnset: '未声明记录共享模型（sharingModel）。运行时会按 private 处理，但这个基线必须是明确做出的决定。',
         owdAlias: '记录共享模型（sharingModel）不是规范取值，运行时会按 private 处理此对象。',

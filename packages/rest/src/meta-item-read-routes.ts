@@ -102,7 +102,7 @@
  * not move.
  */
 
-import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
+import { rethrowAuthzStoreUnavailable, userTextLocalesOf } from '@objectstack/core';
 // [ADR-0106 / #3682] Metadata-plane FLS — the item read's half of it; see
 // `rest-server.ts`' import of the same module for why the normalizer lives in
 // `@objectstack/metadata-core`.
@@ -1085,6 +1085,12 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             ...(previewDrafts ? { previewDrafts: true } : {}),
                             // [#22877] The member, read once above.
                             ...memberSelector,
+                            // [#34818] A draft read folds the publish's
+                            // advisories into `_diagnostics.warnings` in their
+                            // user sentence: the request's locale, then the
+                            // workspace default, read off the resolved
+                            // context, never the query.
+                            ...(isDraftRead ? { userTextLocales: userTextLocalesOf(readCtx) } : {}),
                         };
                         // [ruling 6917064203 on #34398] The read gate answers
                         // before the `not-held-by-qualifier` refusal names any

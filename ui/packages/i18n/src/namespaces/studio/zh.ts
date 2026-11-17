@@ -292,6 +292,10 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.missing': '该字段已不在草稿中。',
   'designer.field.remove': '删除“{label}”',
   'designer.field.section.basic': '基础',
+  'designer.field.section.developer': '开发者信息',
+  'designer.field.section.developerHint': '内部名在接口与公式里引用，日常改字段用不到。',
+  'designer.field.removeConfirmTitle': '删除字段“{label}”？',
+  'designer.field.removeConfirmBody': '字段会从这个对象的草稿中移除，发布后生效。',
   'designer.field.section.advanced': '高级',
   'designer.field.section.options': '{type} 选项',
   'designer.field.section.computed': '计算值',
@@ -1231,6 +1235,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowEdge.labelHint': '例如 approve / reject',
   'engine.inspector.flowEdge.condition': '条件',
   'engine.inspector.flowEdge.conditionHint': 'CEL 表达式 —— 为真时走此连线',
+  'engine.inspector.flowEdge.conditionRows': '按字段填写',
+  'engine.inspector.flowEdge.conditionFormula': '公式',
+  'engine.inspector.flowEdge.conditionAdd': '+ 添加条件…',
+  'engine.inspector.flowEdge.conditionRowRefused': '有一行无法写成这条连线的条件，因此没有保存。请修改这一行，或切换到「公式」。',
+  'engine.inspector.flowEdge.conditionTooComplex': '这个条件超出了按字段填写能表示的范围，请继续用公式编辑。',
   'engine.inspector.flowEdge.isDefault': '默认分支（else）',
   'engine.inspector.flowEdge.hint': '当此连线的分支标签被选中、或其条件成立时，引擎会走这条连线。其余都不匹配时走默认分支。',
   'engine.inspector.flowEdge.remove': '删除连线',
@@ -2275,6 +2284,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.addFieldApiNameNotDerived': '标签里没有可用来生成 API 名称的英文字母，请手动填写（小写字母、数字和下划线）。',
   'engine.studio.data.addFieldApiNameTaken': '已有字段名为 {name}，请填写其他 API 名称。',
   'engine.studio.data.editFieldProps': '编辑字段属性',
+  'engine.studio.data.columnMenu': '排序与隐藏',
   'engine.studio.data.draftObjectTitle': '未发布的新对象',
   'engine.studio.data.draftObjectHint':
     '「记录」网格查询真实数据,而这个对象发布前还没有数据表。请先在「表单 · 布局」里设计字段与分组,然后点顶栏「发布」— 发布后这里就是它的实时数据网格。',
@@ -2937,8 +2947,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.desktopHint': 'Studio 专为桌面屏幕设计。',
   'engine.studio.notFound.package': '未找到包。本部署没有安装 ID 为“{id}”的包，因此无处可构建。',
   'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面、权限或全部元数据。',
-  'engine.studio.aiCopilot': 'AI 副驾',
-  // objectui#12725 — Studio 右栏：属性或 AI 副驾二选一。
+  'engine.studio.aiCopilot': 'AI 助手',
+  // objectui#12725 — Studio 右栏：属性或 AI 助手二选一。
   'engine.studio.slot.label': '右栏',
   'engine.studio.slot.switchHint': '⌘.（Ctrl+.）切换',
   'engine.studio.slot.collapse': '收起右栏',
@@ -2947,6 +2957,17 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.slot.planPending': '方案待确认',
   'engine.studio.slot.pendingCount': '{count} 项待确认',
   'engine.studio.slot.openFullPage': '在完整页面中打开',
+  // objectstack#34725 — 右栏标题栏的「历史」按钮与拖宽手柄。
+  'engine.studio.slot.history': '历史',
+  'engine.studio.slot.resize': '调整右栏宽度',
+  // objectstack#34725 — 画布上方那条提示：AI 助手的草稿改动落在画布上时出现。
+  'engine.studio.copilotChanges.lineOne': 'AI 刚改了 {count} 处',
+  'engine.studio.copilotChanges.line': 'AI 刚改了 {count} 处',
+  'engine.studio.copilotChanges.view': '查看',
+  'engine.studio.copilotChanges.discardAll': '放弃全部未发布改动',
+  'engine.studio.copilotChanges.discardConfirm': '放弃本包的全部未发布改动（包括你自己的）？此操作不可撤销。',
+  'engine.studio.copilotChanges.discardFailed': '有改动未能放弃：{items}。',
+  'engine.studio.copilotChanges.itemSeparator': '、',
   'engine.studio.pillar.data': '数据',
   'engine.studio.pillar.automations': '自动化',
   'engine.studio.pillar.interfaces': '界面',
@@ -3217,8 +3238,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.draftMark.sourceJustNow': '由 {agent}刚刚作为草稿加入',
   'engine.studio.draftMark.sourceItems': '{items} {count} 项由 {agent}在 {when}作为草稿加入',
   'engine.studio.draftMark.sourceItemsJustNow': '{items} {count} 项由 {agent}刚刚作为草稿加入',
-  // objectstack#27176 — 谁起草的:AI 副驾,或经 MCP 构建入口的智能体。
-  'engine.studio.draftMark.agent.copilot': 'AI 副驾',
+  // objectstack#27176 — 谁起草的:AI 助手,或经 MCP 构建入口的智能体。
+  'engine.studio.draftMark.agent.copilot': 'AI 助手',
   'engine.studio.draftMark.agent.mcp': 'MCP 客户端',
   'engine.studio.draftMark.agent.mcpClient': 'MCP 客户端「{client}」',
   'engine.studio.draftMark.item': '「{label}」',
@@ -3628,6 +3649,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowCanvas.edge.backEdge': '{source} ↩ {target}（回边）',
   'engine.flowCanvas.summary.branches': '{count} 个分支',
   'engine.flowCanvas.summary.approversOne': '{count} 位审批人',
+  'engine.flowCanvas.approvedEnd': '已通过',
+  'engine.flowCanvas.rejectedEnd': '已驳回',
   'engine.flowCanvas.summary.approversOther': '{count} 位审批人',
   'engine.flowCanvas.summary.unanimous': '全员',
   'engine.flowCanvas.summary.code': '代码',
@@ -3929,6 +3952,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowProblems.sourceExpression': '表达式',
   // objectui#11772 — one extra copy of a connection (see the en row).
   'engine.flowProblems.repeatedEdge': '连线 “{sourceName}”（{source}）→ “{targetName}”（{target}）重复;流程会为每一条副本各运行一次 “{targetName}”。请删除这条副本。',
+  'engine.flowProblems.approvalMissingOutcome': '审批「{name}」没有「{outcome}」出边，做出这个决定后流程无处可走。请从它连出一条连线，并把审批分支设为「{outcome}」。',
   // objectui#11905 — a refused connection (see the en rows).
   'engine.flowProblems.connectRefused.missingSource': '无法连线：此流程中没有节点 “{source}”。',
   'engine.flowProblems.connectRefused.missingTarget': '无法连线：此流程中没有节点 “{target}”。',

@@ -2174,7 +2174,7 @@ const ko = {
       changesApplied: "적용됨",
       changesDrafted: "초안으로 저장됨",
       changesFailed: "적용되지 않음",
-      discussing: "논의 중: {{target}}",
+      discussing: "보는 중: {{target}}",
       changeVerb: {
         createObject: "객체 생성",
         addField: "필드 추가",
@@ -2949,6 +2949,10 @@ const ko = {
       missingToken: "확인 링크에 토큰이 없습니다.",
       emailMissing: "이메일 주소 누락",
       resendButton: "확인 이메일 다시 보내기",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "이메일 주소가 아직 확인되지 않았습니다. {{email}}(으)로 확인 링크를 보낸 후 링크를 클릭하여 계정을 확인하세요.",
+      sendButton: "확인 이메일 보내기",
       resending: "전송 중…",
       resent: "이메일이 전송되었습니다! 받은 편지함을 확인하세요",
       resentSuccess: "확인 이메일이 전송되었습니다!",
@@ -4606,7 +4610,7 @@ const ko = {
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
       fieldOrderChanged: '필드 순서가 변경됨',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI 코파일럿이 초안으로 작성한 변경 사항 포함',
+      draftedByCopilot: 'AI 어시스턴트가 초안으로 작성한 변경 사항 포함',
       draftedByMcpClient: 'MCP 클라이언트 “{{client}}”이(가) 초안으로 작성한 변경 사항 포함',
       draftedByMcp: 'MCP 클라이언트가 초안으로 작성한 변경 사항 포함',
       detailChangedKeys: '기타 변경:',
@@ -4715,6 +4719,7 @@ const ko = {
       securityBlockTitle_one: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_other: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockWhere: '객체의 설정 → 레코드 공유에서 수정한 후 다시 게시하세요.',
+      flowChecksTitle: '게시하기 전에 확인하세요 — 게시 검사에서 다음 사항을 알립니다',
       securityRule: {
         owdUnset: '레코드 공유 기준(sharingModel)이 선언되지 않았습니다. 런타임은 private로 처리하지만 기준은 명시적으로 결정해야 합니다.',
         owdAlias: '레코드 공유 기준(sharingModel)이 정식 값이 아니므로 런타임은 이 개체를 private로 처리합니다.',

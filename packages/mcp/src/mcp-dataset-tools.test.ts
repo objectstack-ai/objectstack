@@ -26,7 +26,7 @@ import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '@objectstack/spec/shared';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { hasDatasetTools, type McpDataBridge } from './mcp-http-tools.js';
 import { createStdioDataBridge, type StdioDatasetToolsService } from './stdio-data-bridge.js';
-import { renderSkillMarkdown } from './skill-md.js';
+import { ASK_SECTION_HEADING, renderSkillMarkdown } from './skill-md.js';
 
 const DATASET_TOOLS = [LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME].sort();
 
@@ -273,23 +273,22 @@ describe('[ADR-0149 D2] dataset tools on MCP — calls', () => {
 });
 
 describe('[ADR-0149 D3] the SKILL.md teaches the selection rule where the pair registers', () => {
-  it('renders both tools and the rule for a host whose bridge carries them', () => {
+  it('renders both tools and the ask-data data loop for a host whose bridge carries them', () => {
     const md = renderSkillMarkdown({ datasetTools: true });
     for (const name of DATASET_TOOLS) expect(md).toContain(`**${name}(`);
-    expect(md).toContain('Choosing between a metric and an object query');
+    expect(md).toContain(`\n${ASK_SECTION_HEADING}\n`);
   });
 
-  it('renders the rule for a question the data cannot answer beside the selection rule', () => {
+  // [#34686] The data loop's words (the selection rule, the fallback, and a
+  // question the data cannot answer) are the published ask-data skill's, and
+  // skill-single-source-34686.test.ts pins the served section byte-equal to
+  // it. What stays here is where the section sits and when it is absent.
+  it('renders the data loop after the tool entries, and not without the pair', () => {
     const md = renderSkillMarkdown({ datasetTools: true });
-    const rule = md.indexOf('**When the data cannot answer.**');
-    expect(rule).toBeGreaterThan(md.indexOf('Choosing between a metric and an object query'));
-    const text = md.slice(rule, md.indexOf('\n- ', rule) === -1 ? undefined : md.indexOf('\n- ', rule));
-    expect(text).toContain('say the data you can read does not record it');
-    expect(text).toContain('offer the computation');
-    expect(text).toContain('Never fill the gap with an assumed value');
-    expect(text).toContain('nor draw a conclusion from one');
-    expect(text).toContain('Any figure you add comes from a tool answer; cite it.');
-    expect(renderSkillMarkdown({})).not.toContain('When the data cannot answer');
+    const section = md.indexOf(`\n${ASK_SECTION_HEADING}\n`);
+    expect(section).toBeGreaterThan(md.indexOf('**query_dataset('));
+    expect(section).toBeLessThan(md.indexOf('\n## Conventions & gotchas'));
+    expect(renderSkillMarkdown({})).not.toContain(ASK_SECTION_HEADING);
   });
 
   it('renders them for a data:read grant, and not without one or without the pair', () => {
