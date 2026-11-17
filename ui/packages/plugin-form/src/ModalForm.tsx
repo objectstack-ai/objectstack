@@ -34,6 +34,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
   toast,
+  FormSectionNavContext,
 } from '@object-ui/components';
 import { Loader2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
@@ -85,6 +86,7 @@ import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
 import { useInitialFieldFocus } from './initialFieldFocus';
+import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
 import { FormDirtyReportContext } from './formDirtyReport';
 
 // Localized strings for the unsaved-changes guard and, since objectui#11039,
@@ -366,6 +368,11 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // Upload-in-flight gate (objectui#10166): Save is refused, disabled and
   // EXPLAINED while a file/image widget below is still uploading.
   const uploadGate = useUploadGate();
+  // The section navigation between the header and the scrolling body
+  // (objectstack#34605): the form reports its visible sections, the dialog
+  // draws them where they stay in view while the body scrolls.
+  const sectionNav = useFormSectionNav();
+  const drawsSectionNav = (sectionNav.items?.length ?? 0) >= 2;
   const previewMode = usePreviewMode();
   const perms = usePermissions();
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
@@ -1328,7 +1335,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
         className={cn(sizeClass, 'flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden p-0', className, schema.className)}
       >
         {(schema.title || schema.description) && (
-          <DialogHeader className="shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 pb-2 border-b">
+          <DialogHeader className={cn('shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 pb-2', !drawsSectionNav && 'border-b')}>
             {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
             {schema.description ? (
               <DialogDescription>{schema.description}</DialogDescription>
@@ -1340,6 +1347,8 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           </DialogHeader>
         )}
 
+        <FormSectionNavContext.Provider value={sectionNav.sink}>
+        <FormSectionNav items={sectionNav.items} className="shrink-0 px-2 sm:px-4" />
         <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
           {/* Every upload widget below reports into this scope, however deep —
               a section, a tab, a subform row (objectui#10166). */}
@@ -1352,6 +1361,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
             </Suspense>
           </UploadGateProvider>
         </div>
+        </FormSectionNavContext.Provider>
 
         {/* Sticky footer — always visible action buttons */}
         {hasFooter && (
