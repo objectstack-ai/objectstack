@@ -543,7 +543,7 @@ async function admitResolvedAction(
         : await actionExec.attributeActionHandler(ql, {
             action: actionDef, objectName, candidates, obj: actionSchema,
             readServiceActions: async () => {
-                const meta: any = await deps.resolveService(requestContext, 'metadata', wiring.envId);
+                const meta = await deps.resolveService(requestContext, 'metadata', wiring.envId);
                 return typeof meta?.loadMany === 'function' ? ((await meta.loadMany('action')) ?? []) : undefined;
             },
         });
