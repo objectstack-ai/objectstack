@@ -393,6 +393,13 @@ export class SqlDriver implements IDataDriver {
       // collation's, as for this datasource's `where` (the latitude the bit's
       // TSDoc in `data/driver.zod.ts` states, measured dialects named there).
       aggregationFilter: true,
+      // `find()` honours `DriverOptions.lockRows` inside a transaction (see
+      // `lockRowsIfAsked` in `sql-driver-crud.ts`): `FOR UPDATE` / `UPDLOCK`,
+      // and on SQLite the single-connection pool and the database lock. A
+      // subclass whose transport takes no transaction handle (TursoDriver's
+      // remote mode, `transactionsUnsupported`) is never sent the key: the
+      // engine sends it only inside a transaction.
+      lockRows: true,
     };
   }
 

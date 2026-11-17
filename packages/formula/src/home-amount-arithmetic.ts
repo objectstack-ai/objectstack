@@ -27,11 +27,26 @@ export interface ScaledDecimal {
 const DECIMAL_SPELLING = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/;
 
 /**
+ * The exponent of the smallest number, `Number.MIN_VALUE` (`5e-324`): a zero
+ * written with an exponent below it reads as plain zero.
+ */
+const SMALLEST_NUMBER_EXPONENT = -324;
+
+/**
  * The exact decimal a stored or written number spells, or `undefined` when it
  * spells none. A JavaScript number is read through its shortest round-trip
  * spelling (`String(0.1389)` is `'0.1389'`), which is the decimal the writer
  * wrote; a string (a driver answering an exact-decimal column as text) is read
- * as written. Exponent spellings are accepted.
+ * as written. Exponent spellings are accepted. A bigint is its own digits.
+ *
+ * Decimal text is judged against the number range before it is scaled, the
+ * way the same value is judged as a number: text whose number is not finite
+ * spells none, as a non-finite number does (`'1e400'`, like `1e400`), and text
+ * whose number is zero is zero, as that number is (`'1e-400'`, like `1e-400`).
+ * A zero is never scaled by its exponent, and one written with an exponent
+ * below the smallest number's is plain zero. Inside the range every digit is
+ * kept exactly, so the work is bounded by the length of the text, whatever
+ * its exponent says.
  */
 export function toScaledDecimal(value: unknown): ScaledDecimal | undefined {
   let text: string;
@@ -49,8 +64,18 @@ export function toScaledDecimal(value: unknown): ScaledDecimal | undefined {
   if (!m) return undefined;
   const [, sign, int = '', frac = '', exp] = m;
   if (int === '' && frac === '') return undefined;
-  let digits = BigInt(`${int}${frac}` || '0');
-  let scale = frac.length - (exp === undefined ? 0 : Number(exp));
+  // A long exponent reads ±Infinity, which every comparison below handles.
+  const exponent = exp === undefined ? 0 : Number(exp);
+  if (!/[1-9]/.test(int) && !/[1-9]/.test(frac)) {
+    return { digits: 0n, scale: exponent < SMALLEST_NUMBER_EXPONENT ? 0 : Math.max(0, frac.length - exponent) };
+  }
+  if (typeof value === 'string') {
+    const number = Number(text);
+    if (!Number.isFinite(number)) return undefined;
+    if (number === 0) return { digits: 0n, scale: 0 };
+  }
+  let digits = BigInt(`${int}${frac}`);
+  let scale = frac.length - exponent;
   if (scale < 0) {
     digits *= 10n ** BigInt(-scale);
     scale = 0;
@@ -76,7 +101,8 @@ function divideRoundHalfAwayFromZero(numerator: bigint, denominator: bigint): bi
 /**
  * `amount ÷ rate`, rounded once, half away from zero, to `places` decimals —
  * parameter 3 as arithmetic. Both operands are exact; so is every
- * intermediate.
+ * intermediate, so the work grows with the operands' scales — which
+ * {@link toScaledDecimal} bounds by the length of the text it read.
  */
 export function divideToPlaces(amount: ScaledDecimal, rate: ScaledDecimal, places: number): ScaledDecimal {
   // (a / 10^as) / (r / 10^rs) × 10^places = a × 10^(rs + places) / (r × 10^as)

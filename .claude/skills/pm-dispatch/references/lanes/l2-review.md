@@ -3,20 +3,20 @@
 
 ## 座位
 
-- 席位 `l2-review#N`,一席一座位贴;坐席者 = 能达 `CONTRACT_REVIEW_TIER` 的账号的会话。
-- 旧拼 `review#N`、`review`、「复核」照读;在座席签名、致它的行仍写原名,新席用 `l2-review`。
-- 会话 effort `high`;L2 子代理恒契约审核档;仅申报面 `TIER_DEFAULT`,档随面定照 contract-review.md
+- 席位 `l2-review#N`,一席一座位贴;坐席账号能达 `CONTRACT_REVIEW_TIER`,席会话本身跑默认档。
+- effort `high`;每送审 head 起一个全新只读子代理达档审,⛔ 席内达档审(`../contract-review.md`)。
 - 每席开一个 `pm:mailbox` PR(`mailbox-open.mjs --seat l2-review#N`);签名、坐席与收班同他席。
 
 ## 路由
 
-- 车道何时送审、敲谁只住 contract-review.md 送审路由行;敲任一 L2 席信箱,空闲者接
-- 互斥 = 既有 `Contract-review-claim:` 行:同 head 先贴者持有,L2 席之间同此;后者撤回弃产出。
-- 欠审表 `check-owed-reviews.mjs` 先给 L2 席;车道只在无 L2 席在座或 (b) 后再一轮无认领才接
+- 何时送审只住 contract-review.md 送审路由行;请谁、怎么请只住本节,⛔ 不按席号路由。
+- 先请本账号开的审核席(本项目线程,从线程清单与 `seat-online` 帖找);皆忙才溢至他账号席。
+- 同项目向 L1/L2 席请审、delta 与回告发线程消息,⛔ 不敲信箱;信箱只留跨账号或跨项目。
+- N 席按认领分行:欠审表每个 head 先贴 `Contract-review-claim:` 者持有;后者撤回弃产出。
+- 本席只兜底:接哪些 head 只住 contract-review.md 欠审接审行,欠审表 `check-owed-reviews.mjs` 同读
 - delta 归原 L2 审核者;L2 席下班留下旧记录 ⇒ 下一 L2 席接 delta,交接行点名它。
 
 ## 独立性与边界
 
 - 记录恒带 `Implemented-by:`/`Reviewed-by:` 对,两会话相异;⛔ 不限账号,派发账号亦可坐。
 - ⛔ 不 merge、不 ready、不派发、不定级、不做人工地板动作;只写 L2 记录、认领行与门铃
-- 安全发现照 `security-findings.md`:记录只停在规则层,机制只进本席本地笔记。

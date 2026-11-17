@@ -277,7 +277,7 @@
     },
     "resultDialog": {
       "status": "live",
-      "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}."
+      "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}. `fields[].format: 'table'` and its `columns` (#34391) are PLANNED until the console reader #33187 lands (see `preflight.fields.columns`, the same row): the spec refuses the contradictions at parse, and the console draws a `table` row's label alone today."
     },
     "preflight": {
       "status": "live",
@@ -325,6 +325,28 @@
               "status": "live",
               "verifiedAt": "2026-11-09",
               "note": "Live with its container `preflight.fields`: the row's display format, from resultDialog's format set."
+            },
+            "columns": {
+              "status": "planned",
+              "verifiedAt": "2026-11-16",
+              "note": "PLANNED (spec card #34391; reader #33187, maintainer ruling A 6915677641). The cells of a `format: 'table'` row, `[{ path, label?, format? }]`, from the row builder `resultDialog.fields` shares (packages/spec/src/ui/action.zod.ts#actionAnswerFieldRow). Enforced at parse today: required by `table`, refused beside any other format (#refuseTableColumnContradictions), and a cell takes the field formats minus `table`. NOT yet drawn: the console's `ResultField` (ui/packages/app-shell/src/views/ActionResultDialog.tsx) has no `table` branch, so until #33187 lands a `table` row draws its label alone. Re-grade `live` in the PR that lands that renderer.",
+              "children": {
+                "path": {
+                  "status": "planned",
+                  "verifiedAt": "2026-11-16",
+                  "note": "Planned with its container `preflight.fields.columns`: the dot path, in ONE element of the array, of the value a cell draws; a path that resolves to nothing draws an empty cell, and an element that is not an object draws as compact JSON text in its row's first cell."
+                },
+                "label": {
+                  "status": "planned",
+                  "verifiedAt": "2026-11-16",
+                  "note": "Planned with its container `preflight.fields.columns`: the column header; omitted, the header is the column's `path`."
+                },
+                "format": {
+                  "status": "planned",
+                  "verifiedAt": "2026-11-16",
+                  "note": "Planned with its container `preflight.fields.columns`: the cell format, the field formats minus `table` (refused at parse: a table does not nest); omitted, `text`. A value that does not fit the cell's format, whatever it is, draws as compact JSON text, and a missing value draws an empty cell (the `table` bullet of the `resultDialog` renderer contract)."
+                }
+              }
             }
           }
         },

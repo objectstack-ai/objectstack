@@ -10,7 +10,7 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest, FlowDryRunOptions, FlowDryRunResult } from '@objectstack/spec/contracts';
 import type { MetadataActivationWriteOptions } from '@objectstack/core';
 import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
@@ -130,6 +130,7 @@ import {
     executeWithoutRetry,
     type runUserOf,
 } from './dag-traversal.js';
+import { activeDryRunExecuteNode, dryRun as dryRunBody, type DryRunHost } from './dry-run.js';
 // [#25222] The run history's bodies: recording a run's log entry, finishing a
 // refused run, and reading runs and suspended runs back. Each
 // `AutomationEngine` method of the same name calls its body.
@@ -887,6 +888,15 @@ export interface FlowUserGrants {
    * it beside the grants ({@link SeededRunContext.principalKind}).
    */
   principalKind?: 'agent';
+  /**
+   * The capabilities the user's permission sets grant
+   * (`resolveUserAuthzGrants`' own field, under its own name; an AI service
+   * account's is empty there). Read by a dry run's admission alone
+   * ({@link AutomationEngine.dryRun}: the flow's `requiredPermissions`); run
+   * setup does not seed it on a run context. A resolver that omits it admits
+   * no declared capability.
+   */
+  systemPermissions?: string[];
 }
 
 /**
@@ -925,6 +935,22 @@ export type FlowUserGrantsResolver = (
  * succeed once the read does (`gradeAfterTenantCurrencyReadFault`).
  */
 export type FlowTenantCurrencyResolver = (
+  tenantId: string | undefined,
+) => Promise<string | undefined> | string | undefined;
+
+/**
+ * Resolves the language of a run's ORGANIZATION — the language a sentence the
+ * flow writes into a record is picked in (ruling 6913660232 on
+ * objectstack#34062, letter B): the organization's Localization setting when
+ * somebody set it, else the app's declared `i18n.defaultLocale`. Injected by
+ * the host — the automation plugin bridges it to `@objectstack/core`'s
+ * `resolveOrganizationLocale`, the one reader of that ladder. Returns
+ * `undefined` when neither answers; the text is then written as authored.
+ * Rejects when the read FAILED: it learned nothing, so the record node fails
+ * rather than writing another language over the organization's choice.
+ * When unwired, nothing is picked: marked text is written as authored.
+ */
+export type FlowOrganizationLocaleResolver = (
   tenantId: string | undefined,
 ) => Promise<string | undefined> | string | undefined;
 
@@ -1591,6 +1617,15 @@ export interface ChildRunRefusal {
  * never the throw.
  */
 class InputSchemaViolationError extends Error {}
+
+/**
+ * Whether `err` is the node input-schema check's refusal
+ * ({@link AutomationEngine.validateNodeInputSchemas}), the one a dry run
+ * answers `FLOW_INPUT_SCHEMA_INVALID` for, as `execute` does.
+ */
+export function isInputSchemaViolation(err: unknown): boolean {
+    return err instanceof InputSchemaViolationError;
+}
 
 /**
  * The refusal codes {@link AutomationEngine.resumeInternal} answers for a
@@ -3292,6 +3327,8 @@ export class AutomationEngine implements IAutomationService {
     /** Bridge to the host's localization read so a run carries its organization's
      *  default currency, if wired. See {@link FlowTenantCurrencyResolver}. */
     private tenantCurrencyResolver: FlowTenantCurrencyResolver | null = null;
+    /** The run organization's language for text a record write keeps, if wired. See {@link FlowOrganizationLocaleResolver}. */
+    private organizationLocaleResolver: FlowOrganizationLocaleResolver | null = null;
     private executionLogs: ExecutionLogEntry[] = [];
     private readonly maxLogSize: number;
     /** Level for the per-run summary line (#4354). See {@link RunSummaryLogLevel}. */
@@ -4751,6 +4788,34 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Wire the engine to the host's reader of the organization's language, the
+     * language a `create_record` / `update_record` node writes a field value
+     * marked as text in ({@link organizationLocale}). The automation plugin
+     * bridges it to `@objectstack/core`'s `resolveOrganizationLocale`. Passing
+     * `null` detaches it: marked text is then written as authored.
+     */
+    setOrganizationLocaleResolver(resolver: FlowOrganizationLocaleResolver | null): void {
+        this.organizationLocaleResolver = resolver;
+    }
+
+    /**
+     * The language of the run's organization (`context.tenantId`), read when a
+     * record node writes a field value marked as text — ruling 6913660232 on
+     * objectstack#34062: that text is picked in the ORGANIZATION's language,
+     * never the run's (`AutomationContext.locale`, the language of whoever
+     * started it), because the record keeps it for everyone in the
+     * organization. Read where it is used, never at run setup, so a run that
+     * writes no marked text pays no read. `undefined` when unwired or when no
+     * rung answers; rejects when the read failed ({@link FlowOrganizationLocaleResolver}).
+     */
+    async organizationLocale(context: AutomationContext): Promise<string | undefined> {
+        const resolver = this.organizationLocaleResolver;
+        if (!resolver) return undefined;
+        const locale = await resolver(context?.tenantId);
+        return typeof locale === 'string' && locale.trim() !== '' ? locale.trim() : undefined;
+    }
+
+    /**
      * Wire the record lookup-expander (#3475). The automation plugin bridges it
      * to a `findOne(..., { expand, context })` on the same data engine the CRUD
      * nodes use, scoped by the run's identity. Passing `null` detaches it (lookup
@@ -5495,14 +5560,72 @@ export class AutomationEngine implements IAutomationService {
      *   putting back the definition it held), which keeps the arm it had.
      *   {@link armedFlowPackage} reads it.
      */
-    registerFlow(name: string, definition: unknown, armedFrom?: FlowContender): FlowParsed {
-        const arm: FlowContender = armedFrom
-            ?? (definition !== null && typeof definition === 'object' ? this.flowArms.get(definition) : undefined)
-            ?? { source: 'runtime' };
+    /**
+     * Judge `definition` as {@link registerFlow} judges it under `name`, and
+     * register nothing: canonicalize and parse it, then run every
+     * registration check, throwing the first refusal. Returns the parsed
+     * flow. Shared by {@link registerFlow} and {@link dryRun} ("a definition
+     * registerFlow would refuse … throws what registerFlow throws for it"),
+     * so the two cannot disagree about what registers.
+     */
+    private judgeFlowRegistration(name: string, definition: unknown): FlowParsed {
         // One canonicalization policy, shared with the stored-row migration so
         // the two can never disagree about what "canonical" means (#4454).
         // Execution takes the parsed shape (schema defaults materialized).
         const { parsed } = this.canonicalizeFlow(name, definition);
+
+        // ADR-0018 §M1 — node types are validated against the live action
+        // registry, but NOT here: the check moved to the moment the vocabulary
+        // is closed (see the end of {@link registerFlow} and {@link
+        // sealNodeTypeVocabulary}).
+
+        // [#23317] Every registration check, in order, through the ONE list
+        // the stored pass previews with ({@link registrationChecks}). The first
+        // refusal is thrown, so a flow is refused exactly as before; a check
+        // belongs in that list, never as a second call here, or the stored
+        // pass would read a flow this method refuses as on protocol.
+        for (const check of this.registrationChecks({ advisory: true })) {
+            const refusal = check(name, parsed);
+            if (refusal) throw new Error(refusal.message);
+        }
+        return parsed;
+    }
+
+    /**
+     * Dry-run a flow definition that need not be published: once, unarmed, as
+     * a named user, against a supplied start, without changing live data —
+     * `IAutomationService.dryRun` (`@objectstack/spec/contracts`), whose
+     * docblock is this method's contract, implemented in `./dry-run.ts`.
+     */
+    dryRun(definition: unknown, options: FlowDryRunOptions): Promise<FlowDryRunResult> {
+        const readUserGrantsResolver = () => this.userGrantsResolver;
+        const host: DryRunHost = {
+            logger: this.logger,
+            nodeExecutors: this.nodeExecutors,
+            userGrantsResolver: readUserGrantsResolver,
+            judgeFlowRegistration: (...a) => this.judgeFlowRegistration(...a),
+            resolveRunContext: (...a) => this.resolveRunContext(...a),
+            seedRunVariables: (...a) => this.seedRunVariables(...a),
+            evaluateCondition: (...a) => this.evaluateCondition(...a),
+            evaluateValueEnvelope: (...a) => this.evaluateValueEnvelope(...a),
+            validateNodeInputSchemas: (...a) => this.validateNodeInputSchemas(...a),
+            isInputSchemaViolation,
+            getActionDescriptor: (...a) => this.getActionDescriptor(...a),
+            renderRefusalMessage: (...a) => this.renderRefusalMessage(...a),
+            renderFlowTextSlot: (...a) => this.renderFlowTextSlot(...a),
+            executeWithTimeout: (...a) => this.executeWithTimeout(...a),
+            setNodeError: (...a) => this.setNodeError(...a),
+        };
+        // Called with no `options` object is a caller error the body reports
+        // as the contract's first answer (a `TypeError` naming `userId`).
+        return dryRunBody.call(host, definition, options ?? ({} as FlowDryRunOptions));
+    }
+
+    registerFlow(name: string, definition: unknown, armedFrom?: FlowContender): FlowParsed {
+        const arm: FlowContender = armedFrom
+            ?? (definition !== null && typeof definition === 'object' ? this.flowArms.get(definition) : undefined)
+            ?? { source: 'runtime' };
+        const parsed = this.judgeFlowRegistration(name, definition);
 
         // ADR-0018 §M1 — node types are validated against the live action
         // registry, but NOT here: the check moved to the moment the vocabulary
@@ -5517,11 +5640,6 @@ export class AutomationEngine implements IAutomationService {
         // refusal is thrown, so a flow is refused exactly as before; a check
         // belongs in that list, never as a second call here, or the stored
         // pass would read a flow this method refuses as on protocol.
-        for (const check of this.registrationChecks({ advisory: true })) {
-            const refusal = check(name, parsed);
-            if (refusal) throw new Error(refusal.message);
-        }
-
         // [ADR-0150 D4, #31696] The slot the body is held in: its package's,
         // so two packages' flows of one name are both armed (the line #31677
         // Q1 drew, "arming neither", moves here). Every record below is filed
@@ -11130,8 +11248,11 @@ export class AutomationEngine implements IAutomationService {
         partialSteps?: StepLogEntry[],
     ): Promise<StepLogEntry[]> {
         // The body lives in ./dag-traversal.ts (#25222).
+        // [#33661] Inside a dry run the body runs the dry run's nodes, so a
+        // container's region writes nothing and sends nothing either.
+        const dryExecuteNode = activeDryRunExecuteNode();
         const host: ThisParameterType<typeof runRegion> = {
-            executeNode: (...a) => this.executeNode(...a),
+            executeNode: dryExecuteNode ?? ((...a) => this.executeNode(...a)),
             resolveSuspensionChainForCancel: (...a) => this.resolveSuspensionChainForCancel(...a),
             cancelRun: (...a) => this.cancelRun(...a),
             logger: this.logger,

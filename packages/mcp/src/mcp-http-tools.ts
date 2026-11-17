@@ -1187,8 +1187,11 @@ const DELETE_RECORD_TOOL = 'delete_record';
  * refusal `run_action` answers an author-gated action with: the same code,
  * status, envelope keys and `details` shape (`ActionConfirmationRequiredDetails`),
  * rendered by the same {@link codedErrorResult}. A client that already handles
- * that refusal confirms with its human and retries this call unchanged but for
- * the member.
+ * that refusal retries this call unchanged but for the member. The message
+ * says when (maintainer ruling 「点名单条就算确认」, the rule of
+ * {@link DELETE_NAMED_RECORD_IS_APPROVAL}): a request that named exactly this
+ * one record is the approval, so retry with the member; an ambiguous name or
+ * a bulk delete asks the human first.
  *
  * The runtime's builder is out of reach (`@objectstack/runtime` and this
  * package do not depend on each other), so the contract types and the shared
@@ -1214,8 +1217,9 @@ function recordDeleteConfirmationRefusal(
     DELETE_RECORD_TOOL,
     objectName,
     `delete_record on '${objectName}' record '${recordId}' carries no confirmation — nothing was deleted. `
-      + `${DELETE_IS_DESTRUCTIVE}: confirm with the human in the loop, then retry this call with `
-      + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
+      + `${DELETE_IS_DESTRUCTIVE}. When the human's request named exactly this one record, that request is the `
+      + `approval: retry this call with '${AI_ACTION_CONFIRMATION_MEMBER}': true on the request. When the name `
+      + 'matched more than one record, or the request is a bulk delete, ask the human first, then retry.',
   );
 }
 
@@ -1240,6 +1244,22 @@ const DELETE_RECYCLE_BIN_FACT =
   + 'restore your own deletes; a record of a platform object (sys_, cloud_, ai_), or any record on a '
   + 'deployment with no recycle bin, is deleted permanently. No MCP tool restores: tell the human it can be '
   + 'restored from the recycle bin (the console, or POST /api/v1/data/{objectName}/recycle-bin/{recycleBinEntryId}/restore).';
+
+/**
+ * When the human's request IS the approval of a `delete_record` (maintainer
+ * ruling 「点名单条就算确认」): a request naming one record, with exactly one
+ * match, approves that delete; anything less specific is a question first.
+ * Exported so the served skill (`skill-md.ts`) interpolates these two
+ * sentences instead of restating them: the tool text and the skill an agent
+ * installs from the same server cannot disagree. `delete_records` (bulk) does
+ * not take this rule; its unconfirmed call is the preview.
+ */
+export const DELETE_NAMED_RECORD_IS_APPROVAL =
+  'A request in which the human names the record to delete, with exactly one record matching, is the '
+  + 'human\'s approval of that delete: send confirm: true on that call, without asking again.';
+export const DELETE_AMBIGUOUS_ASKS_FIRST =
+  'When the name matches more than one record, or the request does not identify one record, do not delete '
+  + 'yet: list the candidates, ask the human which one, and send confirm: true only after the answer.';
 
 /** The clause both delete refusals open their instruction with: true whether or not the bin keeps the record. */
 const DELETE_IS_DESTRUCTIVE = 'Deleting is destructive even where the recycle bin keeps the record';
@@ -3121,12 +3141,17 @@ export function registerObjectTools(
       },
     );
 
+    // The two DELETE_* rule sentences ride on the tool description AND the
+    // confirm member, so a client that shows only one of them still reads the
+    // rule. The gate below is unchanged: a call without confirm: true is
+    // still refused.
     server.registerTool(
       note('delete_record'),
       {
         description:
           'Delete a record by id. This is destructive. A call is REFUSED unless it also sends ' +
-          'confirm: true — ask the human first, then retry; nothing is deleted on a refused call. ' +
+          'confirm: true; nothing is deleted on a refused call. ' +
+          `${DELETE_NAMED_RECORD_IS_APPROVAL} ${DELETE_AMBIGUOUS_ASKS_FIRST} ` +
           `${DELETE_RECYCLE_BIN_FACT} The answer's recycleBinEntryId names the recycle-bin entry; an answer ` +
           'without one means this delete was permanent.',
         inputSchema: strictToolInput(
@@ -3143,8 +3168,9 @@ export function registerObjectTools(
               .boolean()
               .optional()
               .describe(
-                'Set to true only when the human in the loop has approved deleting THIS record. Without it '
-                + 'the call is refused and nothing is deleted.',
+                'Set to true only when the human in the loop has approved deleting THIS record. '
+                + `${DELETE_NAMED_RECORD_IS_APPROVAL} ${DELETE_AMBIGUOUS_ASKS_FIRST} `
+                + 'Without it the call is refused and nothing is deleted.',
               ),
           },
         ),

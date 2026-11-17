@@ -239,6 +239,24 @@ describe('rehydrate sample-data healing', () => {
         );
     });
 
+    // [#34405] Withheld rows (`skipped`, no error) are a settled heal, pinned on
+    // the real loader in marketplace-install-local-landed-keys.test.ts. A load
+    // that landed nothing and withheld nothing, or that errored, is still the
+    // empty install the banner escalates.
+    it.each([
+        { case: 'nothing landed, nothing withheld', skipped: 0, errors: [] },
+        { case: 'rows skipped beside an error', skipped: 2, errors: [{ message: 'database is locked' }] },
+    ])('a heal run that lands no rows reports an empty install: $case', async ({ skipped, errors }) => {
+        seedResult = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: skipped }, errors };
+        const { ctx } = await rehydrateWith({}, { crm_x: [], crm_y: [] });
+        expect(loadCalls).toHaveLength(1);
+        expect((ctx.logger.warn as any).mock.calls.some((c: any[]) => String(c[0]).includes(`sample-data heal for ${MANIFEST.id}`))).toBe(true);
+        expect(recordSeedOutcome).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ source: MANIFEST.id, marketplace: true, inserted: 0, updated: 0, rejected: errors.length, emptyInstall: true }),
+        );
+    });
+
     it('purge → restart keeps the package empty (end to end through the endpoints)', async () => {
         // Install over an empty DB, with rows landing.
         seedResult = { summary: { totalInserted: 3, totalUpdated: 0, totalSkipped: 0 }, errors: [] };

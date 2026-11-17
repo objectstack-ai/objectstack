@@ -50,6 +50,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/driver-turso": "workspace:*",
+    "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/setup": "workspace:*",
     "@objectstack/trigger-api": "workspace:*",
     "@types/node": "^26.6.5",

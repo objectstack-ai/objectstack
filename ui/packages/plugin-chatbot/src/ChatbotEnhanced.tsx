@@ -2527,24 +2527,67 @@ function summarizeTools(
  * Renders nothing without health data (older hosts return a bare boolean).
  */
 function PublishHealthLine({ health }: { health: PublishHealth | undefined }) {
+  // objectstack#32984 — the line's own words come from the pack, as count
+  // families (`chatbot.build.health.*`). A finding speaks on the line only
+  // through its producer's customer sentence (`issues[].userMessage`, ruling
+  // B: the producer writes it). Agent text (`message`, `fix`) and the seed
+  // loader's engine text (`seedError`) never do: without a `userMessage` the
+  // line says the generic sentence the draft-issues block says, and that text
+  // folds under the same "Technical details".
+  const { t } = useObjectTranslation();
   if (!health) return null;
+  // `defaultValue` is the English a provider-less host reads; with a pack,
+  // i18next picks the family's slot for `count` and never consults it.
+  const en = (count: number, one: string, other: string): string => (count === 1 ? one : other);
   const issues = health.issues ?? [];
   const errors = issues.filter((i) => i.severity === 'error');
-  const warnings = issues.filter((i) => i.severity !== 'error');
+  const seedFailed = health.seedFailed === true || !!health.seedError;
   const checked = health.checked;
   const probesRan = !!checked && checked.seeds + checked.views + checked.widgets > 0;
   const okParts: string[] = [];
-  if (typeof health.seededRows === 'number' && health.seededRows > 0 && !health.seedError) {
-    okParts.push(`${health.seededRows} sample row${health.seededRows === 1 ? '' : 's'} live`);
+  if (typeof health.seededRows === 'number' && health.seededRows > 0 && !seedFailed) {
+    const count = health.seededRows;
+    okParts.push(
+      t('chatbot.build.health.sampleRowsLive', {
+        count,
+        defaultValue: en(count, '{{count}} sample row live', '{{count}} sample rows live'),
+      }),
+    );
   }
   if (probesRan && errors.length === 0) {
     const planes: string[] = [];
-    if (checked!.views > 0) planes.push(`${checked!.views} view${checked!.views === 1 ? '' : 's'}`);
-    if (checked!.widgets > 0) planes.push(`${checked!.widgets} widget${checked!.widgets === 1 ? '' : 's'}`);
-    if (checked!.seeds > 0) planes.push(`${checked!.seeds} seed${checked!.seeds === 1 ? '' : 's'}`);
-    if (planes.length) okParts.push(`${planes.join(' · ')} verified`);
+    const { views, widgets, seeds } = checked!;
+    if (views > 0) {
+      planes.push(t('chatbot.build.health.views', { count: views, defaultValue: en(views, '{{count}} view', '{{count}} views') }));
+    }
+    if (widgets > 0) {
+      planes.push(
+        t('chatbot.build.health.widgets', { count: widgets, defaultValue: en(widgets, '{{count}} widget', '{{count}} widgets') }),
+      );
+    }
+    if (seeds > 0) {
+      planes.push(
+        t('chatbot.build.health.seeds', {
+          count: seeds,
+          defaultValue: en(seeds, '{{count}} sample data set', '{{count}} sample data sets'),
+        }),
+      );
+    }
+    if (planes.length) {
+      okParts.push(t('chatbot.build.health.verified', { checks: planes.join(' · '), defaultValue: '{{checks}} verified' }));
+    }
   }
-  if (okParts.length === 0 && !health.seedError && issues.length === 0) return null;
+  if (okParts.length === 0 && !seedFailed && issues.length === 0) return null;
+  // Errors first, as the line always listed them.
+  const ordered = [...errors, ...issues.filter((i) => i.severity !== 'error')];
+  const voiced = ordered.filter((i) => i.userMessage);
+  // One generic sentence speaks for every finding its producer left without a
+  // customer sentence, chosen by the whole set as the draft-issues block does.
+  const unvoiced = issues.some((i) => !i.userMessage);
+  const details = [
+    ...(health.seedError ? [health.seedError] : []),
+    ...ordered.map((i) => (i.fix ? `${i.message} — ${i.fix}` : i.message)),
+  ];
   return (
     <div className="flex flex-col gap-1 border-t bg-muted/20 px-3 py-2" data-testid="publish-health">
       {okParts.length > 0 ? (
@@ -2553,24 +2596,63 @@ function PublishHealthLine({ health }: { health: PublishHealth | undefined }) {
           <span>{okParts.join(' · ')}</span>
         </div>
       ) : null}
-      {health.seedError ? (
-        <div className="flex items-start gap-1.5 text-xs text-red-600">
+      {seedFailed ? (
+        <div className="flex items-start gap-1.5 text-xs text-red-600" data-testid="publish-health-seed">
           <XCircle className="mt-0.5 size-3.5 shrink-0" />
-          <span>{health.seedError}</span>
+          <span>{t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' })}</span>
         </div>
       ) : null}
-      {errors.map((i, idx) => (
-        <div key={`e${idx}`} className="flex items-start gap-1.5 text-xs text-red-600">
-          <XCircle className="mt-0.5 size-3.5 shrink-0" />
-          <span>{i.message}</span>
+      {voiced.map((i, idx) => (
+        <div
+          key={`v${idx}`}
+          className={cn('flex items-start gap-1.5 text-xs', i.severity === 'error' ? 'text-red-600' : 'text-amber-600')}
+          data-testid="publish-health-finding"
+        >
+          {i.severity === 'error' ? (
+            <XCircle className="mt-0.5 size-3.5 shrink-0" />
+          ) : (
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          )}
+          <span>{i.userMessage}</span>
         </div>
       ))}
-      {warnings.map((i, idx) => (
-        <div key={`w${idx}`} className="flex items-start gap-1.5 text-xs text-amber-600">
-          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
-          <span>{i.message}</span>
+      {unvoiced ? (
+        <div
+          className={cn('flex items-start gap-1.5 text-xs', errors.length > 0 ? 'text-red-600' : 'text-amber-600')}
+          data-testid="publish-health-summary"
+        >
+          {errors.length > 0 ? (
+            <XCircle className="mt-0.5 size-3.5 shrink-0" />
+          ) : (
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          )}
+          <span>
+            {errors.length > 0
+              ? t('chatbot.build.issuesSummary', {
+                  defaultValue:
+                    'Some parts of this build need fixing before it is ready. Reply "fix the problems" and the assistant will repair them.',
+                })
+              : t('chatbot.build.warningsSummary', {
+                  defaultValue:
+                    'The build is ready, with a few things worth checking. Ask the assistant what they are if you want to improve them.',
+                })}
+          </span>
         </div>
-      ))}
+      ) : null}
+      {details.length > 0 ? (
+        <details className="text-xs text-muted-foreground" data-testid="publish-health-details">
+          <summary className="cursor-pointer select-none text-[11px]">
+            {t('chatbot.build.issuesDetails', { defaultValue: 'Technical details' })}
+          </summary>
+          <ul className="mt-1 flex flex-col gap-1 pl-5">
+            {details.map((text, idx) => (
+              <li key={idx} className="list-disc break-words font-mono text-[11px]">
+                {text}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </div>
   );
 }

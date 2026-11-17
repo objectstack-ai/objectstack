@@ -1860,12 +1860,15 @@ export interface IAutomationService {
      *
      * **Admission: the by-name start rule.** The rules that admit a start by
      * name (`flowStartRefusal`, `@objectstack/runtime`'s
-     * `flow-start-admission.ts`), judged on the supplied definition's `type`,
-     * `runAs` and `requiredPermissions` against the named user. There is no
+     * `flow-start-admission.ts`), judged on the supplied definition's `runAs`
+     * and `requiredPermissions` against the named user. There is no
      * system-principal bypass, since the run always names a user.
      *  - A definition declaring `runAs: 'system'` whose `type` starts on its own
-     *    trigger (`autolaunched`, `record_change`, `schedule`) is refused for
-     *    every named user.
+     *    trigger (`autolaunched`, `record_change`, `schedule`) is admitted to a
+     *    dry run for the named user (ruling B, record 6917953931). The run is
+     *    never elevated: every read and every permission judgement is the
+     *    named user's. A by-name start of a published flow keeps refusing it
+     *    (`flowStartRefusal`); the widening is the dry run's alone.
      *  - A definition declaring `runAs: 'system'` is refused when the named user
      *    is an AI service account (ADR-0151 D3), as at the trigger routes: a dry
      *    run starts with no action in hand, so no AI opt-in stands.
