@@ -10,7 +10,7 @@
 
 fix(objectql, metadata-protocol, console): a list view column on a field a disabled package adds no longer fails the whole list
 
-Clause-②: yes (widening: the view save door accepts withheld names; one spec read-decoration member; two locale keys)
+Clause-②: yes (widening: the view save door accepts withheld names; one spec read-decoration member; one locale key)
 Metadata-protocol: none
 
 A package can add fields to another package's object. While that package is disabled, the platform leaves those fields out of the served object, and the data door refuses every request that names one (`400 INVALID_FIELD`, or `400 INVALID_SORT` for a sort). The owner's views still named the field, so a view with such a column, sort, filter, grouping level or searchable field failed for everyone. Saving the view (a rename, a pin, a Studio edit) was refused too (`422`, `list-view-field-unknown` / `sort-field-unknown`).
