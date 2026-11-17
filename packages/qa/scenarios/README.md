@@ -140,10 +140,11 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
   arguments the model sent decide nothing), `asked-back` (the reply asks, names every candidate by a word other than
   the asked one, and states no figure; an option list's numbering, a count of the options it offers — `2 metrics`,
-  「2 个指标」 — and a year a time word or 年 marks are no figure) and `fallback-labelled` (an object
-  query on the expected object answered, no dataset did, and the reply says the figure is not a governed metric: a
-  closed word list, English and Chinese, in `labelsFallback`). Its notes say what the turn did on the way, ungraded: a
-  loaded skill, no `list_datasets` call, the `candidates` a `list_datasets` answer offered.
+  「2 个指标」 — and a year a time word or 年 marks are no figure, unless a counted noun follows it: `for 2031
+  orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
+  says the figure is not a governed metric: a closed word list, English and Chinese, in `labelsFallback`). Its notes
+  say what the turn did on the way, ungraded: a loaded skill, no `list_datasets` call, the `candidates` a
+  `list_datasets` answer offered.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
