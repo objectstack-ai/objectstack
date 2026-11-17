@@ -339,10 +339,10 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
  *
  * ## The census, re-derived on this tree
  *
- * 324 code-position matches over the tracked JS/TS corpus, 24 of them under
- * `ui/` since the objectui import (objectstack#25803). 290 are the bare
- * `selfTest`; the remaining 35 carry compound names over 29 distinct spellings,
- * and they are the rows below. 24 are genuine self-test batteries — the
+ * 330 code-position matches over the tracked JS/TS corpus, 21 of them under
+ * `ui/` since the objectui import (objectstack#25803). 294 are the bare
+ * `selfTest`; the remaining 36 carry compound names over 29 distinct spellings,
+ * and they are the rows below. 25 are genuine self-test batteries — the
  * anchor firing on them is the anchor working. ELEVEN are production code:
  *
  *   scripts/check-self-test-wired.mjs             carriesSelfTest
@@ -369,7 +369,7 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
  * and it is exactly the kind of claim that stops being true without anything
  * going red, which is what the pin in this module's self-test exists to catch.
  *
- * The same measurement, redone over the table's current 24 genuine rows,
+ * The same measurement, redone over the table's current 25 genuine rows,
  * is still NOT zero, and that asymmetry is what makes the classification
  * load-bearing rather than decorative: `fixtureSelfTest` drops
  * `packages/spec/spec-changes.json` and `prePushIsArmedSelfTest` drops
@@ -398,8 +398,8 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
  *     wider — and it would make the tool's self-scan differ from every other
  *     scan, which is a hazard of its own.
  *
- * ⇒ What ships is neither. The anchor keeps firing on all 35, the mask keeps
- * blanking all 35, and the cost of the eleven accidental ones is MEASURED on
+ * ⇒ What ships is neither. The anchor keeps firing on all 36, the mask keeps
+ * blanking all 36, and the cost of the eleven accidental ones is MEASURED on
  * every run instead of asserted in prose. Silence was the defect; the remedy is
  * noise on the day it starts costing something.
  *
@@ -423,6 +423,9 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
 export const COMPOUND_ANCHOR_LEDGER = [
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
   ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'fieldRuleSelfTest', false],
+  // #34764: the skill-evals runner's `--self-test` battery (its row labels are the roster), reached
+  // only from the CLI's `--self-test` branch and the package suite. Genuine: its fixture paths are masked.
+  ['packages/qa/scenarios/src/skill-evals/self-test.ts', 'runSelfTest', false],
   // #26076: the ADR index generator's battery, reached from its `--self-test` guard and run again
   // (never exited on) by its report-only `--report` mode, so a broken generator warns in CI instead
   // of going quiet. A battery, so its fixture filenames are masked away as hints — genuine.
@@ -948,6 +951,15 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *     each test "really" reads does NOT qualify: that map is a second thing
  *     that goes stale, and the run is cheap enough not to need one (measured
  *     below).
+ *   - spec-migration-entry entry: when a workflow runs the cli
+ *     migrate-meta-engine-guidance test as a step of its own, under an
+ *     invocation the discovery reads, the row can name that family instead of
+ *     standing in for the Test Core job; and when the job stops running the
+ *     package test task, or the test file is moved or deleted, the binding goes
+ *     STALE by itself. ⛔ Widening it to every cli test that imports the
+ *     published migrations subpath does NOT qualify as a repair of anything:
+ *     that import is a syntactic reach, not a reading of the entries' prose
+ *     (see `SPEC_MIGRATION_ENTRY_ROOTS`).
  *   - population-net entries (#31257, fifteen): when the gate's own source
  *     declares a population this derivation can MATCH (a subtree it really
  *     walks, beside a filter the derivation reads), the ordinary path match
@@ -1299,6 +1311,19 @@ export const CHANGE_KIND_ROWS = [
       },
     ],
   },
+  {
+    kind: 'adds, edits or deletes an ADR-0087 migration entry under packages/spec/src/migrations/entries (the generated registry the published migrations subpath serves, read from the PATH)',
+    matches: 'spec-migration-entry',
+    gates: [
+      {
+        name: 'pnpm --filter @objectstack/cli exec vitest run test/migrate-meta-engine-guidance.test.ts',
+        ciJob: 'Test Core',
+        ciRunner: 'set -- pnpm turbo run test',
+        ciSubset: 'packages/cli/test/migrate-meta-engine-guidance.test.ts',
+        why: "it spawns `os migrate meta --all` once and holds the block the terminal prints for EVERY semantic entry in the registry (surface, why: from `reason`, verify: from `acceptanceCriteria`) to carry no tracker number, so an entry whose prose cites one, or a new entry in any family, moves it. It is a cli test, so no check family and no spec package test covers it: CI runs it only inside the Test Core shards' package test task, and a card editing entry text learned of a red one a CI round later, after a fully green local ledger. It reads the entries through the PUBLISHED migrations subpath, which the cli test config does not alias to source, so build the cli dependency closure first or a stale spec dist answers for your edit: pnpm --filter '@objectstack/cli^...' build . Repair the entry's prose to state the lesson in words; ADR ids stay",
+      },
+    ],
+  },
 ];
 
 /**
@@ -1316,6 +1341,26 @@ export const UI_SCRIPTS_SUITE_ROOTS = Object.freeze([
   'ui/apps/**',
   'skills/objectui/**',
   'ui/scripts/**',
+]);
+
+/**
+ * The roots whose change the cli `migrate-meta-engine-guidance` test can see, in CI's own `paths:` language
+ * (matched by `triggerListCovers`, as `UI_SCRIPTS_SUITE_ROOTS` is). The test reads every semantic entry of
+ * the generated migration registry, and that registry is generated from the files under `entries/` (the
+ * `GENERATED_MODULE_SOURCES` row below names the same directory), so a change there is what moves it. The
+ * bare directory is listed beside its subtree because a dispatch surface is often given as that directory.
+ *
+ * ONE named test, not every cli test that imports the published migrations subpath. That import is a
+ * reliable SYNTACTIC signal (ten cli test files carry it on this tree) but not a reading of the entries'
+ * prose: the others import the chain to drive one conversion, a range or a write, and pin behaviour the
+ * spec package's own tests already reach, while one of them is nightly-tier and never runs in the queue.
+ * The guidance test is the one that holds every entry's printed text, which is what an entry edit moves,
+ * and the one measured missing on a green local ledger. A second consumer earns its own row on its own
+ * measured miss.
+ */
+export const SPEC_MIGRATION_ENTRY_ROOTS = Object.freeze([
+  'packages/spec/src/migrations/entries',
+  'packages/spec/src/migrations/entries/**',
 ]);
 
 /**
