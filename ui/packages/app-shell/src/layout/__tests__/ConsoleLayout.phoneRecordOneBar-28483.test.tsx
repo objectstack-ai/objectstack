@@ -22,6 +22,10 @@ import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
+// The layout's reach includes `import('@objectstack/lint')` (the draft
+// preview bar's capability lint): pay that load during collection, not inside
+// a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 vi.mock('../../hooks/useAiSurface', () => ({
   useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false }),
