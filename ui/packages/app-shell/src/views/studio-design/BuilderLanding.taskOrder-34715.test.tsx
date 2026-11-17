@@ -55,6 +55,7 @@ vi.mock('./packageSurfaces', async (importOriginal) => {
 });
 
 import { BuilderLanding } from './BuilderLanding';
+import { parsePackages } from './packages-io';
 
 const HOTCRM = { id: 'app.objectstack.hotcrm', name: 'HotCRM', writable: false, namespace: 'crm' };
 const SERVICE = { id: 'app.objectstack.service', name: 'HotCRM Service', writable: false, namespace: 'svc' };
@@ -140,6 +141,28 @@ describe('Studio landing: ordered by what the author came to do (objectstack#347
       'title',
       'app.objectstack.hotcrm',
     );
+  });
+
+  it('a system package served flat with a kernel scope is no installed app: no card, no Customize (comment 6943119575)', async () => {
+    // The list as the registry half serves a hosted environment: a `sys.*`
+    // package whose kernel `scope` is flat, beside an installed app.
+    const parsed = parsePackages({
+      data: [
+        { id: 'sys.package-state', name: 'Package State', scope: 'system', writable: false },
+        { id: 'sys.env-artifact-cache', name: 'Environment Artifact Cache', scope: 'cloud', writable: false },
+        { manifest: { id: 'app.objectstack.hotcrm', name: 'HotCRM', namespace: 'crm' }, writable: false },
+      ],
+    });
+    // CONTROL: the parser keeps the flat kernel rows, tagged — the landing is what drops them.
+    expect(parsed.filter((p) => p.kernel).map((p) => p.id)).toEqual(['sys.package-state', 'sys.env-artifact-cache']);
+    packages.list = parsed.map((p) => ({ ...p }));
+    renderLanding();
+
+    const installed = await screen.findByTestId('studio-landing-installed');
+    expect(within(installed).getByText('HotCRM')).toBeInTheDocument();
+    expect(within(installed).getAllByTestId('studio-landing-customize')).toHaveLength(1);
+    expect(document.querySelector('[data-package-id^="sys."]')).toBeNull();
+    expect(bodyText()).not.toMatch(/Package State|Environment Artifact Cache/u);
   });
 
   it('positions and permissions keep their Studio entry under the new name', async () => {

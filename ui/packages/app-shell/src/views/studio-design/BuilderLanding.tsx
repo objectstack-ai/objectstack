@@ -146,7 +146,13 @@ export function BuilderLanding(): React.ReactElement {
   // customized line and link, and the pair's export and delete stay on the
   // Packages page, which lists every package. A pair whose base is not listed
   // keeps its card.
-  const cards = pkgs === null ? [] : foldCustomizationPairs(pkgs).rows;
+  //
+  // objectstack#34715 — a kernel package (ADR-0016 §3.8: no one authors into
+  // it) is not an app the author installed, so it draws no card. The list
+  // leaves out a manifest-scoped one already; a flat-scoped one stays in it,
+  // tagged `kernel` (`parsePackages`), and is dropped here by the same tag the
+  // package switcher reads (objectstack#34593).
+  const cards = pkgs === null ? [] : foldCustomizationPairs(pkgs.filter((p) => !p.kernel)).rows;
   const writable = cards.filter((p) => p.writable);
   const readonly = cards.filter((p) => !p.writable);
 
