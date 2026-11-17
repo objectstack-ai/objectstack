@@ -270,25 +270,24 @@ describe('[#34247] the audience gate answers before the not-held-by-qualifier re
     });
 });
 
-
 describe('[#34247] S7: the view row, both transports', () => {
     // S7: the view row's order is declared and pinned; the ordering is carried
     // by the security channel (GHSA-ggc2-jqph-f74f, acknowledgement 6932974351).
-    it('a member outside the view\'s requiredPermissions, at `?package=` of a package holding none: 409 not-held-by-qualifier, on the plain read and /layers', async () => {
+    it('the view row at `?package=` of a package holding none, the first member (non-holder), plain read and /layers', async () => {
         for (const answer of await answersFor('non-holder', 'crm_pipeline_review', 'view')) {
             expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
                 .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
         }
     });
 
-    it('a member holding the view\'s requiredPermissions, same address: 409 not-held-by-qualifier, on the plain read and /layers', async () => {
+    it('the view row at the same address, the second member (view-holder), plain read and /layers', async () => {
         for (const answer of await answersFor('view-holder', 'crm_pipeline_review', 'view')) {
             expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
                 .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
         }
     });
 
-    it('CONTROL: at the holder\'s own address the view gate refuses the first member (403) and serves the second (200)', async () => {
+    it('CONTROL: the same two members at the holder\'s own address', async () => {
         for (const answer of await answersFor('non-holder', 'crm_pipeline_review', 'view', 'crm')) {
             expect([answer.status, answer.code, answer.door], JSON.stringify(answer.body))
                 .toEqual([403, 'PERMISSION_DENIED', answer.door]);
