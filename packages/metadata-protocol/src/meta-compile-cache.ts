@@ -48,29 +48,38 @@
  * counters above at their stamp, and a reading of everything outside this
  * process that the bound exists for ({@link readConfirmationMark}):
  *
- *  - the stored rows: a digest of every `sys_metadata` row's id, state,
- *    version, checksum, change time and stored body ({@link readStoreMark}).
- *    It reads the content itself, so it moves on another writer's insert,
- *    update or delete whatever that writer did to the bookkeeping columns: a
- *    write that bypasses the engine and leaves `updated_at` alone, an import
- *    that preserves timestamps, a node whose clock is behind. One read of the
- *    whole store per bound per engine, in place of recompiling every entry;
+ *  - the stored rows: a digest of every `sys_metadata` row's identity,
+ *    binding, layering, state, `version`, `checksum` and `updated_at`
+ *    ({@link readStoreMark}), never the stored bodies. It moves on another
+ *    writer's insert or delete and on any move of those columns, also an
+ *    `updated_at` older than the newest from a node whose clock is behind.
+ *    One read of those columns per bound per engine, in place of recompiling
+ *    every entry. A bypassing write that changes a body and leaves all three
+ *    bookkeeping columns as they were is the one row change it cannot see;
+ *    the age cap below bounds it;
  *  - the metadata service's loaders: `loaderChangeMark()` on the service
  *    (`@objectstack/metadata`), each loader's own reading of its backing
  *    store (the file loader stats the directories and files its reads
  *    touched, so a file a deployment creates, removes or edits under a
  *    running process moves it).
  *
- * Nothing moved: the entries are kept for another bound, up to
- * {@link META_COMPILE_CACHE_MAX_AGE_BOUNDS} bounds from when each was
- * compiled. The age cap is the backstop for what no reading sees: a file
- * edited in place to the same size within the file system's time
- * granularity, and an object the schema registry handed out that a caller
- * then edited in place (`registry-revision.ts`). Anything moved: every entry
- * goes. Either way the overlay row
+ * Nothing moved: the entries are kept for another bound, as long as that
+ * bound ends within {@link META_COMPILE_CACHE_MAX_AGE_BOUNDS} bounds of when
+ * each was compiled. The age cap is the backstop for what no reading sees: a
+ * body rewritten by a bypassing writer that left the bookkeeping columns
+ * alone, a file edited in place to the same size within the file system's
+ * time granularity, and an object the schema registry handed out that a
+ * caller then edited in place (`registry-revision.ts`). Anything moved: every
+ * entry goes. Either way the overlay row
  * cache is retired (`retireMetaOverlayCache`), so a recompile under the new
  * reading reads rows at least as new as the reading, never rows that cache
  * filled before another writer's change.
+ *
+ * One confirmation runs per bound per engine: the readers that cross the
+ * bound while it runs wait for it, and its failure reaches all of them. A
+ * bucket opened by a counter move takes no reading: its first bound ends at
+ * a confirmation that drops its entries and takes the reading later bounds
+ * renew on, so a local change costs no store read.
  *
  * ⛔ A renewal is a claim about what was looked at (ADR-0156 D5). When the
  * confirmation cannot read one of those (the store cannot be read, the
@@ -195,6 +204,8 @@ interface CompileBucket {
     mark: string | undefined;
     /** Until when the entries stand without a confirmation. */
     confirmedUntil: number;
+    /** The confirmation in flight, shared by every reader that crosses the bound while it runs. */
+    confirming: Promise<void> | undefined;
     readonly entries: Map<string, CompileEntry>;
 }
 
@@ -268,18 +279,32 @@ export async function readConfirmationMark(engine: unknown, metadataService: obj
     return JSON.stringify([store, loaders]);
 }
 
-/** The `sys_metadata` columns the store reading digests: identity, state, the bookkeeping columns and the body itself. */
-export const STORE_MARK_FIELDS: readonly string[] = Object.freeze(['id', 'state', 'version', 'checksum', 'updated_at', 'metadata']);
+/**
+ * The `sys_metadata` columns the store reading digests: identity, binding,
+ * layering, state and the bookkeeping columns every engine write moves. ⛔ Not
+ * the stored body: the reading must not carry every body through the process
+ * at each bound (contract review 6933112344 S3).
+ */
+export const STORE_MARK_FIELDS: readonly string[] = Object.freeze([
+    'id', 'type', 'name', 'namespace', 'package_id', 'bundle_member', 'extends', 'strategy',
+    'state', 'version', 'checksum', 'updated_at',
+]);
 
 /**
  * The store reading the confirmation compares (ADR-0156 D5): a digest of
  * every `sys_metadata` row's {@link STORE_MARK_FIELDS}, read as the system,
- * in id order. It reads the stored body, not only the bookkeeping columns, so
- * it moves on any insert, delete or content change another writer makes:
- * also one that bypasses the engine and leaves `updated_at`, `version` and
- * `checksum` alone, an import that preserves timestamps, and a node whose
- * clock writes an older `updated_at` than the newest already stored. Only the
- * digest is kept; no row leaves this function.
+ * sorted. It moves on any insert or delete, on a change of a row's identity,
+ * binding, layering or state, and on any change of `version`, `checksum` or
+ * `updated_at` whichever way it goes: a node whose clock writes an older
+ * `updated_at` than the newest already stored, or an import that preserves
+ * timestamps but stamps its own checksum. Only the digest is kept; no row
+ * leaves this function.
+ *
+ * What it cannot see: a writer that bypasses the engine and changes a stored
+ * body while leaving `version`, `checksum` and `updated_at` exactly as they
+ * were. That class is bounded by the age cap alone
+ * ({@link META_COMPILE_CACHE_MAX_AGE_BOUNDS}); a column every write moves
+ * would close it (#34522).
  *
  * `undefined` when there is nothing to read it with (an engine without
  * `find`) or no store yet (`sys_metadata` not provisioned, by error type):
@@ -354,8 +379,9 @@ async function confirm(engine: object, bucket: CompileBucket, ttlMs: number, now
     if (mark === undefined || bucket.mark !== mark) {
         bucket.entries.clear();
     } else {
+        // Renewed only when the bound it opens still ends within the cap.
         const maxAge = META_COMPILE_CACHE_MAX_AGE_BOUNDS * ttlMs;
-        for (const [key, entry] of bucket.entries) if (now - entry.compiledAt >= maxAge) bucket.entries.delete(key);
+        for (const [key, entry] of bucket.entries) if (now + ttlMs - entry.compiledAt > maxAge) bucket.entries.delete(key);
     }
     // What is compiled under this reading must read rows at least as new as
     // it: retire the overlay row cache, which may hold rows filled before
@@ -389,13 +415,20 @@ export async function readThroughMetaCompileCache<T>(
 
     let bucket = buckets.get(engine);
     if (bucket === undefined || !sameStamp(bucket.stamp, stamp)) {
-        bucket = { stamp, mark: undefined, confirmedUntil: 0, entries: new Map() };
+        // A new bucket opens its first bound without a reading: its entries
+        // live one bound, as the row cache's do, and the first confirmation
+        // drops them and takes the reading later bounds are renewed on. So a
+        // counter move costs no store read.
+        bucket = { stamp, mark: undefined, confirmedUntil: Date.now() + ttlMs, confirming: undefined, entries: new Map() };
         buckets.set(engine, bucket);
     }
-    const now = Date.now();
-    if (now >= bucket.confirmedUntil) {
-        await confirm(engine, bucket, ttlMs, now);
-        stamp = bucket.stamp;
+    if (Date.now() >= bucket.confirmedUntil) {
+        // One confirmation per bound per engine: a reader crossing the bound
+        // while one runs waits for it, and a failure reaches every waiter.
+        const open = bucket;
+        open.confirming ??= confirm(engine, open, ttlMs, Date.now()).finally(() => { open.confirming = undefined; });
+        await open.confirming;
+        stamp = open.stamp;
     }
 
     const key = entryKey(request);

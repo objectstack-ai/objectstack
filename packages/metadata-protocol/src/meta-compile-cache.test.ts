@@ -436,12 +436,12 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         expect(h.byNameReads('widget')).toBeGreaterThan(before);
     });
 
-    /** Replace the confirmation's store reading (the whole-store `find` over the body column) until the returned restore runs. */
+    /** Replace the confirmation's store reading (the whole-store `find` over the bookkeeping columns) until the returned restore runs. */
     const onStoreMark = (h: ReturnType<typeof harness>, impl: (real: () => Promise<unknown>) => Promise<unknown>) => {
         const find = h.engine.find as (table: string, q?: { where?: Row; fields?: string[] }) => Promise<unknown>;
         let calls = 0;
         h.engine.find = (table: string, q: { where?: Row; fields?: string[] } = {}) => {
-            const isMark = table === 'sys_metadata' && Object.keys(q.where ?? {}).length === 0 && (q.fields ?? []).includes('metadata');
+            const isMark = table === 'sys_metadata' && Object.keys(q.where ?? {}).length === 0 && (q.fields ?? []).includes('checksum');
             if (!isMark) return find(table, q);
             calls += 1;
             return impl(() => find(table, q));
@@ -503,17 +503,37 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         expect((await read(h)).item.label).toBe('Gadget');
     });
 
-    it('another writer\'s change that leaves every bookkeeping column alone is still seen at the bound', async () => {
+    it('an import that keeps updated_at but stamps its own checksum is seen at the bound', async () => {
         const clock = atBound();
         const rows = [storedObject('Widget')];
         const h = harness(rows);
         await read(h);
         clock.pass();
         await read(h);
-        // A write that bypasses the engine: same id, same updated_at, new body.
-        rows[0] = { ...rows[0], metadata: JSON.stringify({ name: 'widget', label: 'Gadget', fields: {}, actions: [] }) };
+        rows[0] = { ...rows[0], checksum: 'sha256:imported', metadata: JSON.stringify({ name: 'widget', label: 'Gadget', fields: {}, actions: [] }) };
         clock.pass();
         expect((await read(h)).item.label).toBe('Gadget');
+    });
+
+    it('the stored body is not read at the bound: a bypassing write that leaves every bookkeeping column alone waits for the age cap', async () => {
+        const clock = atBound();
+        const rows = [storedObject('Widget')];
+        const h = harness(rows);
+        const mark = onStoreMark(h, async (real) => real());
+        await read(h);
+        clock.pass();
+        await read(h); // the first confirmation takes the reading and recompiles
+        rows[0] = { ...rows[0], metadata: JSON.stringify({ name: 'widget', label: 'Gadget', fields: {}, actions: [] }) };
+        clock.pass();
+        expect((await read(h)).item.label).toBe('Widget'); // the named class: unseen by the reading
+        let label = 'Widget';
+        for (let i = 0; i < META_COMPILE_CACHE_MAX_AGE_BOUNDS && label === 'Widget'; i++) {
+            clock.pass();
+            label = (await read(h)).item.label;
+        }
+        expect(label).toBe('Gadget');
+        expect(mark.calls).toBeGreaterThan(0);
+        mark.restore();
     });
 
     it('another node\'s write stamped with an OLDER updated_at than the newest stored is still seen at the bound', async () => {
@@ -532,6 +552,8 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         const clock = atBound();
         const h = harness([storedObject('Widget')]);
         await read(h);
+        clock.pass();
+        await read(h);
         const outage = new Error('connect ECONNREFUSED 127.0.0.1:5432');
         const mark = onStoreMark(h, async () => { throw outage; });
         clock.pass();
@@ -547,6 +569,8 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
     it('a store not provisioned yet at the confirmation: no reading, so the entry is recompiled, not renewed', async () => {
         const clock = atBound();
         const h = harness([storedObject('Widget')]);
+        await read(h);
+        clock.pass();
         await read(h);
         const mark = onStoreMark(h, async () => { throw new Error('SQLITE_ERROR: no such table: sys_metadata'); });
         clock.pass();
@@ -571,19 +595,57 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         expect((await read(h)).item.label).toBe('Gadget');
     });
 
-    it(`no entry stands past ${META_COMPILE_CACHE_MAX_AGE_BOUNDS} bounds, renewals included`, async () => {
+    it(`no entry is served past ${META_COMPILE_CACHE_MAX_AGE_BOUNDS} bounds from its compile, renewals included`, async () => {
         const clock = atBound();
         const h = harness([storedObject('Widget')]);
         await read(h);
+        clock.pass();
+        await read(h); // the first confirmation drops the bucket's first-bound entries
+        const compiledAt = Date.now();
         const compiled = h.byNameReads('widget');
-        for (let i = 1; i < META_COMPILE_CACHE_MAX_AGE_BOUNDS; i++) {
+        const ttl = 30_000;
+        let renewals = 0;
+        for (;;) {
             clock.pass();
             await read(h);
+            if (h.byNameReads('widget') > compiled) break;
+            renewals += 1;
+            // A renewal opens a bound that must still end within the cap.
+            expect(Date.now() + ttl - compiledAt).toBeLessThanOrEqual(META_COMPILE_CACHE_MAX_AGE_BOUNDS * ttl);
+            expect(renewals).toBeLessThan(META_COMPILE_CACHE_MAX_AGE_BOUNDS);
         }
-        expect(h.byNameReads('widget')).toBe(compiled); // renewed every bound so far
+        expect(renewals).toBe(META_COMPILE_CACHE_MAX_AGE_BOUNDS - 2); // with a bound read 1 ms late each time
+    });
+
+    it('one confirmation per bound per engine: readers that cross the bound together share it', async () => {
+        const clock = atBound();
+        const h = harness([storedObject('Widget'), storedView('All widgets')]);
+        await read(h);
+        await read(h, 'view', 'widget_list');
+        clock.pass();
+        let release!: () => void;
+        const gate = new Promise<void>((r) => { release = r; });
+        const mark = onStoreMark(h, async (real) => { await gate; return real(); });
+        const reads = [read(h), read(h, 'view', 'widget_list'), read(h)];
+        await new Promise((r) => setTimeout(r, 0));
+        release();
+        await Promise.all(reads);
+        expect(mark.calls).toBe(1);
+        mark.restore();
+    });
+
+    it('a counter move costs no store read: the new bucket takes its reading at its first bound', async () => {
+        const clock = atBound();
+        const h = harness([storedObject('Widget')]);
+        const mark = onStoreMark(h, async (real) => real());
+        await read(h);
+        (h.registry.revision as number)++;
+        await read(h);
+        expect(mark.calls).toBe(0);
         clock.pass();
         await read(h);
-        expect(h.byNameReads('widget')).toBeGreaterThan(compiled);
+        expect(mark.calls).toBe(1);
+        mark.restore();
     });
 
     it('⛔ a source the confirmation cannot observe: nothing is renewed, every bound recompiles', async () => {

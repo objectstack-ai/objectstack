@@ -321,11 +321,13 @@ The hash is `sha256:` + 64-hex of a canonical JSON serialization of the body, wi
 > bound above: the same write epoch retires it, as do the schema registry's and
 > the metadata service's own change counters. A peer's write that reaches no
 > epoch is seen at its own bound, `OS_METADATA_COMPILE_CACHE_TTL_MS` (default
-> 30s, `0` disables it), where it reads every `sys_metadata` row's content
-> and the metadata files it read, and recompiles if any of them moved, also
-> when a write left `updated_at` alone. Each such check also drops the cached
-> rows, so the recompile reads the store as it is then, and no compiled answer
-> is kept past ten bounds.
+> 30s, `0` disables it), where it reads every `sys_metadata` row's
+> bookkeeping columns (`version`, `checksum`, `updated_at`, identity and
+> state) and the metadata files it read, and recompiles if any of them moved.
+> Each such check also drops the cached rows, so the recompile reads the store
+> as it is then. No compiled answer is kept past ten bounds, which also bounds
+> a write that bypasses the engine and changes a body without moving any of
+> those columns.
 
 ---
 
