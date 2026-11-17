@@ -9,7 +9,7 @@ export const entry: SemanticMigration = {
     + 'validation conditions, flow conditions) — a date or datetime field handed straight to a call that '
     + 'takes a timestamp: isoDate(record.start_at), isoDatetime(record.start_at), '
     + 'startsWith(isoDate(record.start_at), "2026"), record.start_date.getFullYear()'
-    + '. The same shapes in a flow VALUE envelope are refused too (#34451): an assignment node\'s '
+    + '. The same shapes in a flow VALUE envelope are refused too: an assignment node\'s '
     + 'assignments value, a create_record / update_record node\'s fields.* value, reading the field '
     + 'through record (or previous), in a record-triggered flow or a time-relative sweep of the typed '
     + 'object that rebinds neither record nor previous itself (no assignment target, output, iterator, '

@@ -11,7 +11,7 @@ export const entry: SemanticMigration = {
     + '(record.start_date - duration("24h")); and, as a formula value, an expression that computes a '
     + 'duration (today() - record.start_date, now() - record.start_at)'
     + '. The first two shapes (a field subtracted from another, a field in arithmetic with a duration; '
-    + 'not the formula-only duration value) are refused in a flow VALUE envelope too (#34451): an assignment node\'s '
+    + 'not the formula-only duration value) are refused in a flow VALUE envelope too: an assignment node\'s '
     + 'assignments value, a create_record / update_record node\'s fields.* value, reading the field '
     + 'through record (or previous), in a record-triggered flow or a time-relative sweep of the typed '
     + 'object that rebinds neither record nor previous itself (no assignment target, output, iterator, '

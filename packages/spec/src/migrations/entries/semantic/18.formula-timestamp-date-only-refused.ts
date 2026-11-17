@@ -9,7 +9,7 @@ export const entry: SemanticMigration = {
     + 'validation conditions, field rule predicates, flow conditions) — a date-only (date) field handed to '
     + 'timestamp(), alone or inside duration arithmetic: timestamp(record.borrow_date), '
     + 'isoDate(timestamp(record.borrow_date) + duration(\'168h\'))'
-    + '. The same shapes in a flow VALUE envelope are refused too (#34451): an assignment node\'s '
+    + '. The same shapes in a flow VALUE envelope are refused too: an assignment node\'s '
     + 'assignments value, a create_record / update_record node\'s fields.* value, reading the field '
     + 'through record (or previous), in a record-triggered flow or a time-relative sweep of the typed '
     + 'object that rebinds neither record nor previous itself (no assignment target, output, iterator, '
