@@ -24,6 +24,7 @@ import { DevModal } from './dev/DevModal';
 import { DevLookup } from './dev/DevLookup';
 import { DevRowActions } from './dev/DevRowActions';
 import {
+  AiAddressRedirect,
   ConsoleShell,
   RequireAiSurface,
   RequireOrganization,
@@ -94,20 +95,12 @@ const DocsSlug = lazy(() => import('./pages/DocsSlug'));
 const DocPage = lazy(() => import('./pages/DocPage'));
 
 /*
- * The AI chat surfaces, lazy for the same reason (objectui#13410).
- *
- * `/ai…` and the public share page `/s/:token` are the two console routes that
- * render the chat UI (`ChatbotEnhanced` and everything it reaches in
- * `@object-ui/plugin-chatbot`: `streamdown`, `shiki`, the AI Elements). Imported
- * statically here, that UI was in every first page load, the third-largest
- * eager chunk, including for users who never open a chat. The AI page arrives
- * through `./components/aiChatPage`, a console-local module nothing imports
- * statically, because an `import()` of the `@object-ui/app-shell` barrel this
- * file already imports would move nothing (see `./components/studioBuilder`).
+ * The public share page `/s/:token` renders the chat UI (`ChatbotEnhanced` and
+ * everything it reaches in `@object-ui/plugin-chatbot`), so it is lazy for the
+ * same reason (objectui#13410). The `/ai…` addresses no longer draw a page: they
+ * open the console's chat drawer (objectstack#34608, `AiAddressRedirect`), whose
+ * body loads the chat UI when it first renders.
  */
-const DefaultAiChatPage = lazy(() =>
-  import('./components/aiChatPage').then((m) => ({ default: m.DefaultAiChatPage })),
-);
 const SharedRecordPage = lazy(() => import('./pages/SharedRecordPage'));
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || '';
@@ -498,34 +491,33 @@ export function App() {
             </Route>
             <Route path="/system/*" element={<SystemRedirect />} />
             {/*
-              AI surfaces are agent-scoped: the active assistant is baked into
-              the route (`/ai/:agent`) rather than a `?agent=` query snapshot,
-              so each assistant ("build" authoring vs "ask" data Q&A, plus any
-              custom `*.agent.ts`) is its own page. AiChatPage handles the
-              back-compat redirects: bare `/ai` → the default agent surface, and
-              a single-segment `/ai/:agent` that is actually a legacy bare
-              conversation id → `/ai/:agent/:conversationId`.
+              objectstack#34608 (ui ADR-0057 as amended) — the AI assistant has
+              one container, the right-side drawer, and no page. The old
+              full-page addresses (`/ai`, `/ai/:agent`,
+              `/ai/:agent/:conversationId`, with `?package=` / `?new=`) stay
+              routed so bookmarks and shared links keep working:
+              `AiAddressRedirect` opens the drawer on the conversation the
+              address names, filling the window, over the declared landing.
 
               `RequireAiSurface` keeps these from dead-ending on a runtime that
               serves no AI (Community Edition): with AI unavailable a stale
               bookmark / external link gets a screen saying so, with the way
-              home, instead of a chat with no agent to talk to. Cloud installs
-              pass straight through. Purely additive runtime gating — same
-              server signal the floating-chat FAB has always used.
+              home. Purely additive runtime gating — the same server signal the
+              top-bar robot uses.
             */}
             <Route path="/ai" element={
               <ProtectedRoute>
-                <RequireAiSurface><Suspense fallback={<LoadingScreen />}><DefaultAiChatPage /></Suspense></RequireAiSurface>
+                <RequireAiSurface><AiAddressRedirect /></RequireAiSurface>
               </ProtectedRoute>
             } />
             <Route path="/ai/:agent" element={
               <ProtectedRoute>
-                <RequireAiSurface><Suspense fallback={<LoadingScreen />}><DefaultAiChatPage /></Suspense></RequireAiSurface>
+                <RequireAiSurface><AiAddressRedirect /></RequireAiSurface>
               </ProtectedRoute>
             } />
             <Route path="/ai/:agent/:conversationId" element={
               <ProtectedRoute>
-                <RequireAiSurface><Suspense fallback={<LoadingScreen />}><DefaultAiChatPage /></Suspense></RequireAiSurface>
+                <RequireAiSurface><AiAddressRedirect /></RequireAiSurface>
               </ProtectedRoute>
             } />
             {/* `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378).
