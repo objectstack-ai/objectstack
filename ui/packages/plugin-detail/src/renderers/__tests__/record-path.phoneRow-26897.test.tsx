@@ -74,7 +74,7 @@ describe('record:path — the phone row fits and ellipsises (objectstack#26897)'
     const r = mount();
     const phone = rows(r)[1];
     const compact = phone.closest('[data-record-path-compact]') as HTMLElement;
-    expect(tokens(compact)).toContain('sm:hidden');
+    expect(tokens(compact)).toContain('sm:@sm:hidden'); // objectstack#34696: viewport AND path width
     const rails = Array.from(compact.querySelectorAll('[data-record-path-rails] > [data-stage-rail]')) as HTMLElement[];
     expect(rails).toHaveLength(CASE_STAGES.length);
     for (const rail of rails) {
@@ -114,7 +114,7 @@ describe('record:path — the phone row fits and ellipsises (objectstack#26897)'
 
   it('CONTROL: the desktop rail is unchanged — no title, the ordinary label still truncates', () => {
     const desktop = rows(mount())[0];
-    expect(tokens(desktop)).toContain('sm:flex');
+    expect(tokens(desktop)).toContain('sm:@sm:flex'); // objectstack#34696: viewport AND path width
     const el = labelOf(stageNamed(desktop, 'Waiting on Customer'));
     expect(tokens(el)).toContain('truncate');
     expect(el).not.toHaveAttribute('title');

@@ -1537,6 +1537,8 @@ const ru = {
     writeStrippedUnknownReason: "Не применены сервером: {{fields}}",
     approvalPendingEditable: "На согласовании · редактирование доступно",
     approvalPendingTooltip: "У этой записи есть ожидающий запрос на согласование, но этот шаг всё ещё разрешает редактирование",
+    approvalPending: "На согласовании",
+    approvalPendingNotEditableTooltip: "У этой записи есть ожидающий запрос на согласование",
     approvalProgress: "Согласования — {{got}} из {{need}}",
     approvalProgressGroups: "Подписи — {{got}} из {{need}} групп",
     approvalProgressLabel: "Ход согласования",

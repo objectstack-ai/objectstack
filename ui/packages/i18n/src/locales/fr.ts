@@ -1418,6 +1418,8 @@ const fr = {
     writeStrippedUnknownReason: "Non appliqué par le serveur : {{fields}}",
     approvalPendingEditable: "En approbation · modifiable",
     approvalPendingTooltip: "Cet enregistrement a une demande d'approbation en attente ; cette étape autorise encore la modification",
+    approvalPending: "En approbation",
+    approvalPendingNotEditableTooltip: "Cet enregistrement a une demande d'approbation en attente",
     approvalProgress: "Approbations — {{got}} sur {{need}}",
     approvalProgressGroups: "Validation — {{got}} sur {{need}} groupes",
     approvalProgressLabel: "Progression de l'approbation",

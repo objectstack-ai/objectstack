@@ -278,6 +278,11 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // `lockRecord: false`, so the record stays editable while the request is open.
   'detail.approvalPendingEditable': 'In approval · editable',
   'detail.approvalPendingTooltip': 'This record has a pending approval request; this step still allows editing',
+  // …and the variant where the node does not lock but the record is still not
+  // editable for this user (permission, `disabledWhen`, a `readonlyWhen` lock):
+  // the badge only says an approval is running (objectstack#34701).
+  'detail.approvalPending': 'In approval',
+  'detail.approvalPendingNotEditableTooltip': 'This record has a pending approval request',
   // Quorum / 会签 progress on the pending node (objectstack#4478). The group
   // NAMES are data, not copy — they come from the flow author's config.
   'detail.approvalProgress': 'Approvals — {{got}} of {{need}}',

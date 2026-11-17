@@ -1245,6 +1245,8 @@ const zhHant = {
     writeStrippedUnknownReason: '以下欄位未被服務端寫入：{{fields}}',
     approvalPendingEditable: '審批中 · 可編輯',
     approvalPendingTooltip: '該記錄有待審批的請求，但當前審批節點仍允許編輯',
+    approvalPending: '審批中',
+    approvalPendingNotEditableTooltip: '該記錄有待審批的請求',
     approvalProgress: '審批 — 已通過 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '會籤 — 已完成 {{got}} / 共 {{need}} 個組',
     approvalProgressLabel: '審批進度',

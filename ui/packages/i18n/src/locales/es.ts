@@ -1421,6 +1421,8 @@ const es = {
     writeStrippedUnknownReason: "No aplicado por el servidor: {{fields}}",
     approvalPendingEditable: "En aprobación · editable",
     approvalPendingTooltip: "Este registro tiene una solicitud de aprobación pendiente; este paso todavía permite la edición",
+    approvalPending: "En aprobación",
+    approvalPendingNotEditableTooltip: "Este registro tiene una solicitud de aprobación pendiente",
     approvalProgress: "Aprobaciones — {{got}} de {{need}}",
     approvalProgressGroups: "Firmas — {{got}} de {{need}} grupos",
     approvalProgressLabel: "Progreso de la aprobación",
