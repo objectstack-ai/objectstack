@@ -68,15 +68,15 @@ type CustomizationLine =
 const studioPillarPath = (packageId: string, pillar: 'data' | 'automations') =>
   `/studio/${encodeURIComponent(packageId)}/${pillar}`;
 
+/** How many switched-off actions the landing line names before its "more" link (objectstack#34724). */
+const SWITCHED_OFF_ACTIONS_NAMED = 3;
+
 /**
  * objectstack#34724 (ADR-0146 D4 as amended 2026-11-17) — where a base's
  * switched-off actions are switched on again: an action's switch is on the
  * action in Studio. One action opens its own page in the "All metadata" area,
  * where the switch reads off; more than one opens that area's action list.
  */
-/** How many switched-off actions the landing line names before its "more" link (objectstack#34724). */
-const SWITCHED_OFF_ACTIONS_NAMED = 3;
-
 const switchedOffActionsPath = (packageId: string, actions: readonly string[]) => {
   const list = `/studio/${encodeURIComponent(packageId)}/metadata/action`;
   return actions.length === 1 ? `${list}/${encodeURIComponent(actions[0])}` : list;
