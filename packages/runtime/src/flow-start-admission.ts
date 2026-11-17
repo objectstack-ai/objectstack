@@ -115,9 +115,15 @@
  * The same reason `flow-dispatch-status.ts` is one: a rule each door spells
  * for itself is a rule that drifts, and a door left out is the defect, not a
  * gap. The type set, the account rule, the capability check, the refusals'
- * code and status, and their words live here once, so a caller refused at one
+ * code and status, and their words live once, so a caller refused at one
  * door is refused alike at the other two —
  * an MCP agent and a person are judged at the same door by the same rule.
+ * Rules 2 and 3 (their refusals, the account reading and the capability
+ * arithmetic) are written in `@objectstack/core`'s `flow-start-rules.ts` and
+ * re-exported here, because a dry run of an unpublished definition
+ * (`IAutomationService.dryRun`) asks them too, from a package that does not
+ * depend on this one; rule 1 and rule 2b are asked by the by-name doors alone
+ * and stay here.
  * ⛔ A second copy of the type set or the refusal, at any door, is the defect
  * by construction.
  *
@@ -147,7 +153,23 @@ import { isObjectLessActionKey } from '@objectstack/objectql';
 // and status rule 2b answers are the action door's own literals, checked at
 // compile time, with no value edge back into `action-execution.ts`.
 import type { ActionConfirmationRefusal } from './action-execution.js';
-import { missingCapabilities } from './required-capabilities.js';
+// Rules 2 and 3, their refusals and the account reading are spelled ONCE, in
+// `@objectstack/core` (`flow-start-rules.ts`): a dry run of an unpublished
+// definition (`IAutomationService.dryRun`, `@objectstack/service-automation`,
+// which does not depend on this package) asks the same two rules. Re-exported
+// here under the names every door imports.
+import {
+    aiAccountElevatedStartRefusal,
+    isAiServiceAccount,
+    requiredPermissionsStartRefusal,
+    type FlowStartPermissionRefusal,
+} from '@objectstack/core';
+export {
+    AI_ACCOUNT_ELEVATED_START_REFUSAL,
+    isAiServiceAccount,
+    requiredPermissionsRefusal,
+    type FlowStartPermissionRefusal,
+} from '@objectstack/core';
 
 /**
  * The three flow types that start on their OWN trigger — or as a sub-flow
@@ -182,55 +204,6 @@ export const ELEVATED_START_REFUSAL = Object.freeze({
         'This caller may not start this flow. A flow that runs on its own trigger starts there, '
         + "or as a sub-flow from a parent flow's `subflow` node.",
 } as const);
-
-/**
- * The refusal a door answers when the caller lacks a capability the flow's
- * `requiredPermissions` names — the same code and status as
- * {@link ELEVATED_START_REFUSAL} and as the action gate's 403 (ADR-0112). ⛔ No
- * new code is minted here.
- *
- * The message names the declared and the missing capabilities, as the action
- * gate's does — the remedy is a grant, and a caller cannot ask for one it
- * cannot name — and nothing else about the flow: not its name, its type or its
- * run-as declaration.
- */
-export function requiredPermissionsRefusal(required: readonly string[], missing: readonly string[]): FlowStartPermissionRefusal {
-    return {
-        code: 'PERMISSION_DENIED',
-        status: 403,
-        message:
-            `Starting this flow requires capability [${required.join(', ')}] — `
-            + `caller is missing [${missing.join(', ')}]`,
-    };
-}
-
-/**
- * The refusal a door answers when an AI service account starts a flow declared
- * `runAs: 'system'` and what starts the flow at that door carries no AI
- * opt-in (rule 2; ADR-0151 Non-goals, ruling record 6812617393, letter C) —
- * the same code and status as the two refusals beside it (ADR-0112). ⛔ No new
- * code is minted here.
- *
- * The message names the rule and the opt-in the author adds, and nothing else
- * about THIS flow: not its name, its type or its definition, and not the
- * door, so it reads the same at every door. It names the action route and the
- * MCP tool because those are the doors where the opt-in can stand.
- */
-export const AI_ACCOUNT_ELEVATED_START_REFUSAL = Object.freeze({
-    code: 'PERMISSION_DENIED',
-    status: 403,
-    message:
-        'An AI service account starts a flow that runs as the system only through an action its author opted '
-        + "into AI. Declare `ai: { exposed: true, description: … }` on an action of type 'flow' that targets the "
-        + 'flow, and have the account run that action (the REST actions route or the MCP `run_action` tool).',
-} as const);
-
-/** The ADR-0112 `403` a door answers for a start rules 1, 2 and 3 do not admit. */
-export interface FlowStartPermissionRefusal {
-    code: 'PERMISSION_DENIED';
-    status: 403;
-    message: string;
-}
 
 /**
  * The refusal rule 2b answers: the action door's own (`428
@@ -320,23 +293,6 @@ export function confirmationGatedStartRefusal(declaration: FlowStartActionDeclar
             + 'An AI service account does not confirm an action for itself: a person starts this flow.',
         details,
     };
-}
-
-/**
- * Whether `executionContext` is an AI service account's (ADR-0151 D3): the
- * agent principal that is its own subject, `principalKind: 'agent'` with no
- * `onBehalfOf`. An OAuth-delegated agent names the person it acts for and is
- * not one; neither is a person, the guest or the system principal.
- *
- * ONE reading, asked by rule 2 ({@link flowStartRefusal}) and by the two
- * builders that forward the account's kind onto the run it starts
- * (`buildAutomationContext`, `dispatchFlowAction`), so the caller a door
- * judges as an account is the caller whose run carries the kind.
- */
-export function isAiServiceAccount(
-    executionContext: { principalKind?: unknown; onBehalfOf?: unknown } | null | undefined,
-): boolean {
-    return executionContext?.principalKind === 'agent' && !executionContext?.onBehalfOf;
 }
 
 /**
@@ -710,9 +666,8 @@ export async function flowStartRefusal(
     if (flow && isElevatedSelfTriggered(flow)) return ELEVATED_START_REFUSAL;
     // [ADR-0151 Non-goals; ruling record 6812617393, letter C] Rule 2: the
     // account starts an elevated flow only where the author's AI opt-in stands.
-    if (flow && flow.runAs === 'system' && isAiServiceAccount(executionContext) && door.aiExposed !== true) {
-        return AI_ACCOUNT_ELEVATED_START_REFUSAL;
-    }
+    const accountRefusal = flow ? aiAccountElevatedStartRefusal(flow, executionContext, door.aiExposed) : null;
+    if (accountRefusal) return accountRefusal;
     // [ADR-0151 D3 rule 3] Rule 2b: the confirmation an action declares
     // travels with what it starts. It reads the flow's NAME and the door's
     // declarations only, so it is asked whether or not the definition could
@@ -731,7 +686,5 @@ export async function flowStartRefusal(
         if (gated) return confirmationGatedStartRefusal(gated);
     }
     if (!flow) return null;
-    const missing = missingCapabilities(flow.requiredPermissions, executionContext);
-    if (missing.length > 0) return requiredPermissionsRefusal(flow.requiredPermissions as string[], missing);
-    return null;
+    return requiredPermissionsStartRefusal(flow, executionContext);
 }
