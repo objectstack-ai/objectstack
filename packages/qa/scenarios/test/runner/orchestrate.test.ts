@@ -31,7 +31,7 @@ import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
-import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, confirmationTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
+import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, CONFIRMATION_WORDS, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -3403,5 +3403,27 @@ describe('runCard — dataset questions', () => {
     expect(renderScorecard(sc)).not.toContain('datasets');
     const record = runRecord({ run: 'r', date: '2026-11-17', packages: PUBLISHED, driver: driver.info(), runner: 'scenario-runner', evidenceDir: '/tmp' }, run) as { results: Array<{ id: string }> };
     expect(record.results.map((r) => r.id.split('.').pop())).toEqual(['build', 'run-ask', 'run-operations', 'iterate-build', 'iterate-run-ask', 'iterate-run-operations']);
+  });
+});
+
+describe('runHalf — a replay of a recording made before the card declared dataset questions', () => {
+  it('each dataset question it holds no turn for is not measured, never an error or a fail; the questions it holds replay as recorded', async () => {
+    const { scenario, ops, driver: scripted } = setup();
+    const live = new RecordingDriver(scripted);
+    const run = await runCard(scenario, live, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(Object.keys(live.recording.turns).filter((k) => k.includes('/dq_'))).toEqual([]);
+
+    const replay = new RecordedDriver(JSON.parse(JSON.stringify(live.recording)) as Recording);
+    const ref = { card: CARD, mode: 'scratch', phase: 'run' } as const;
+    const half = await runHalf(namespacedScenario(withDatasets()), new FakeApp(), replay, ref, citationLabels(withDatasets()));
+    expect(half.datasetQuestions!.map((q) => q.question)).toEqual(['dq_staff', 'dq_contacts']);
+    for (const q of half.datasetQuestions!) {
+      expect(typeof q.notMeasured).toBe('string');
+      expect(q.error).toBeUndefined();
+      expect(q.grade).toBeUndefined();
+    }
+    expect(datasetTally(half)).toEqual({ passed: 0, total: 0, notMeasured: 2, byGrader: {} });
+    const graded = (qs: QuestionResult[]) => qs.map((q) => ({ question: q.question, persona: q.persona, grade: q.grade }));
+    expect(graded(half.questions)).toEqual(graded(run.modes[0]!.run!.questions));
   });
 });

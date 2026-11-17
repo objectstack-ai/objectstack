@@ -17,6 +17,11 @@
  * (with the `version` its SKILL.md front matter declares, when it declares one),
  * so the version a turn had is the version on the record, whatever happens to
  * the directory during the run.
+ *
+ * A skill cannot widen the turn: a SKILL.md whose front matter carries a key
+ * that grants tools, swaps the model or effort, runs hooks or forks a subagent
+ * (`allowed-tools`, `model`, `hooks`, …) is refused when the directory is read,
+ * before any process starts. The set of keys a skill may carry is closed.
  */
 
 import { createHash } from 'node:crypto';
@@ -51,6 +56,62 @@ export interface AskSkillsBundle {
 export const SKILL_TOOL = 'Skill';
 
 const SKILL_FILE = 'SKILL.md';
+
+/**
+ * The top-level SKILL.md front-matter keys a skill given to an ask turn may
+ * carry; any other key is refused when the directory is read. A skill's front
+ * matter can change what the session that loads it may do: `allowed-tools`
+ * grants tools beyond `mcp__app` and `Skill`, `model` and `effort` swap what
+ * answers, `hooks` runs commands outside the tool system, `context` / `agent`
+ * hand the turn to a subagent with its own tools. The turn's argument list
+ * cannot pin all of those (`--tools` limits the built-in tools only), so the
+ * runner closes the set where it reads the bytes: what is not named here never
+ * reaches a turn. Every key here describes the skill or narrows who may call it.
+ */
+const ASK_SKILL_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'description',
+  'version',
+  'license',
+  'compatibility',
+  'metadata',
+  'when_to_use',
+  'argument-hint',
+  'user-invocable',
+  'disable-model-invocation',
+]);
+
+/**
+ * Why a SKILL.md's front matter is refused for an ask turn, or `undefined`
+ * when it may be given: a key outside {@link ASK_SKILL_KEYS}, or a block this
+ * reader cannot be sure it reads as the session would (front matter not on the
+ * first line, never closed, or a top-level line that is no plain `key:`), since
+ * an uncertain read is one that could hide a key. A file with no front matter
+ * declares nothing and is given. Pure over its input.
+ */
+function frontMatterRefusal(skillMd: string): string | undefined {
+  const lines = skillMd.replace(/^﻿/, '').split('\n').map((l) => l.replace(/\r$/, ''));
+  const first = lines.findIndex((l) => l.trim() !== '');
+  if (first === -1) return undefined;
+  if (!lines[first]!.trimStart().startsWith('---')) return undefined;
+  if (first !== 0 || lines[0] !== '---') return `its front matter does not open on the first line with a bare \`---\` (it opens with \`${lines[first]!.trim().slice(0, 40)}\`${first !== 0 ? ` on line ${first + 1}` : ''})`;
+  const close = lines.indexOf('---', 1);
+  if (close === -1) return 'its front matter opens with `---` and is never closed';
+  let inKey = false;
+  for (let i = 1; i < close; i++) {
+    const line = lines[i]!;
+    if (line.trim() === '' || line.startsWith('#')) continue;
+    if (/^[ \t]/.test(line)) {
+      if (!inKey) return `line ${i + 1} of its front matter is indented under no key`;
+      continue;
+    }
+    const key = /^([A-Za-z0-9_-]+)[ \t]*:(?:[ \t]|$)/.exec(line)?.[1];
+    if (key === undefined) return `line ${i + 1} of its front matter (\`${line.slice(0, 40)}\`) is no plain \`key:\` line`;
+    if (!ASK_SKILL_KEYS.has(key)) return `its front matter declares \`${key}\``;
+    inKey = true;
+  }
+  return undefined;
+}
 
 function filesUnder(dir: string): Map<string, Buffer> {
   const out = new Map<string, Buffer>();
@@ -93,7 +154,10 @@ export function skillVersionOf(skillMd: string): string | undefined {
  * named after the directory) or a directory of skills (each subdirectory that
  * holds `SKILL.md`, the layout of a `.claude/skills/` directory). Refused, with
  * the reason, when the path is no directory or holds no skill: an option that
- * gave the client nothing must not run as if it had.
+ * gave the client nothing must not run as if it had. Refused too when any
+ * SKILL.md of a skill carries a front-matter key outside the ask turn's closed
+ * set ({@link frontMatterRefusal}): a skill must not widen the turn beyond the
+ * app's tools and `Skill`.
  */
 export function readAskSkills(dirArg: string): AskSkillsBundle {
   const dir = resolve(dirArg);
@@ -111,6 +175,18 @@ export function readAskSkills(dirArg: string): AskSkillsBundle {
   const skills: AskSkill[] = [];
   for (const [name, at] of skillDirs) {
     const f = filesUnder(at);
+    // Every SKILL.md the skill carries, nested ones too: a turn is given all of its files.
+    for (const [rel, bytes] of f) {
+      if (rel !== SKILL_FILE && !rel.endsWith(`/${SKILL_FILE}`)) continue;
+      const why = frontMatterRefusal(bytes.toString('utf8'));
+      if (why !== undefined) {
+        throw new Error(
+          `--ask-skills: skill \`${name}\` is refused: ${why} (${join(at, rel)}). An ask turn may use the app's tools and \`${SKILL_TOOL}\` alone, ` +
+            `and a skill's front matter can grant tools, another model or effort, hooks or a subagent beyond them; ` +
+            `a skill given to an ask turn carries only ${[...ASK_SKILL_KEYS].map((k) => `\`${k}\``).join(', ')}`,
+        );
+      }
+    }
     files.set(name, f);
     const version = skillVersionOf(f.get(SKILL_FILE)!.toString('utf8'));
     skills.push({ name, sha256: skillHash(f), ...(version !== undefined ? { version } : {}) });

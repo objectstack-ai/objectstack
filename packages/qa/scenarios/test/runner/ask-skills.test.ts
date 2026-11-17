@@ -76,6 +76,39 @@ describe('readAskSkills — the directory read once, as the record states it', (
     expect(skillVersionOf('---\nname: x\n---\n')).toBeUndefined();
   });
 
+  it('⛔ a skill cannot widen the turn: a front-matter key outside the closed set is refused, naming the skill and the key', () => {
+    for (const key of ['allowed-tools: Bash Read', 'model: opus', 'effort: max', 'hooks:\n  PreToolUse: []', 'context: fork', 'agent: general-purpose']) {
+      const dir = skillsDir(SKILL_MD.replace('metadata:\n', `${key}\nmetadata:\n`));
+      expect(() => readAskSkills(dir), key).toThrow(new RegExp(`skill \`ask-data\` is refused: its front matter declares \`${key.split(':')[0]}\``));
+    }
+  });
+
+  it('⛔ a nested SKILL.md is held to the same set: the turn is given every file of the skill', () => {
+    const dir = skillsDir();
+    mkdirSync(join(dir, 'ask-data', 'inner'));
+    writeFileSync(join(dir, 'ask-data', 'inner', 'SKILL.md'), '---\nname: inner\nallowed-tools: Bash\n---\n');
+    expect(() => readAskSkills(dir)).toThrow(/skill `ask-data` is refused: its front matter declares `allowed-tools`/);
+  });
+
+  it('⛔ a front matter this reader cannot be sure of is refused, since an unsure read could hide a key', () => {
+    const refused = (md: string) => () => readAskSkills(skillsDir(md));
+    expect(refused('  ---\nallowed-tools: Bash\n---\n')).toThrow(/does not open on the first line/);
+    expect(refused('\n---\nallowed-tools: Bash\n---\n')).toThrow(/does not open on the first line/);
+    expect(refused('---\nname: x\nallowed-tools: Bash\n')).toThrow(/never closed/);
+    expect(refused('---\n  name: x\n  allowed-tools: Bash\n---\n')).toThrow(/indented under no key/);
+    expect(refused('---\n"allowed-tools": Bash\n---\n')).toThrow(/is no plain `key:` line/);
+    expect(refused('---\n{ allowed-tools: Bash }\n---\n')).toThrow(/is no plain `key:` line/);
+  });
+
+  it('the keys that describe a skill or narrow who calls it are given, as is a SKILL.md with no front matter', () => {
+    const md = '---\r\nname: ask-data\r\ndescription: >\r\n  Two lines\r\n  of description.\r\nlicense: Apache-2.0\r\ncompatibility: objectstack >= 5\r\n# a comment\r\nwhen_to_use: always\r\nargument-hint: none\r\nuser-invocable: false\r\ndisable-model-invocation: false\r\nversion: 3\r\nmetadata:\r\n  allowed-tools: nested keys are not the session’s\r\n---\r\nBody.\r\n';
+    expect(readAskSkills(skillsDir(md)).info.skills.map((s) => [s.name, s.version])).toEqual([
+      ['ask-data', '3'],
+      ['fallback', '0.1'],
+    ]);
+    expect(readAskSkills(skillsDir('# No front matter\n\nallowed-tools: Bash is body text here.\n')).info.skills).toHaveLength(2);
+  });
+
   it('placeAskSkills writes each skill where a project keeps its own: `.claude/skills/<name>/`', () => {
     const bundle = readAskSkills(skillsDir());
     const cwd = mkdtempSync(join(root, 'cwd-'));
@@ -147,6 +180,11 @@ describe('the live driver with and without `--ask-skills`', { timeout: 30_000 },
     const seen = read(await driver.ask(ask));
     expect(seen.files).not.toContain('.claude/skills/ask-data/extra.md');
     expect(driver.info().askSkills).toEqual(before);
+  });
+
+  it('⛔ a skill whose front matter would widen the turn is refused when the driver is made, before any turn runs', () => {
+    const dir = skillsDir(SKILL_MD.replace('metadata:\n', 'allowed-tools: Bash\nmetadata:\n'));
+    expect(() => new ClaudeCodeDriver({ bin, askSkillsDir: dir })).toThrow(/skill `ask-data` is refused: its front matter declares `allowed-tools`/);
   });
 
   it('an authoring turn is untouched by it: its own tools, and no skill written into the project', async () => {

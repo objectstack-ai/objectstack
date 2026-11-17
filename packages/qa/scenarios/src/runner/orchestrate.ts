@@ -298,7 +298,11 @@ export interface DatasetQuestionResult {
   question: string;
   /** Which ask of the turn this is, counted from 1, when the run asked each question turn more than once. */
   repeat?: number;
-  /** Why this ask measures nothing: it was replayed and the replay was not faithful. Never a fail. */
+  /**
+   * Why this ask measures nothing: it was replayed and the recording holds no
+   * turn for it ({@link datasetQuestionNotRecorded}), or the replay was not
+   * faithful. Never a fail.
+   */
   notMeasured?: string;
   grade?: DatasetGrade;
   turn?: TurnSummary;
@@ -394,6 +398,14 @@ export interface RowRestore {
    */
   freshCopy?: string[];
 }
+
+/**
+ * Why a replayed dataset question is not measured: the recording holds no turn
+ * for it. Dataset questions came later than most recordings, so a recording
+ * made before its card declared them holds none, and a replay of it has asked
+ * the agent nothing; nothing was graded, so nothing failed.
+ */
+const datasetQuestionNotRecorded = 'the recording holds no turn for this dataset question (it was made before the card declared it, or the run stopped short of it), so it was not replayed';
 
 /** Why a replayed operation's confirmed write is not measured: its recording was made before the runner sent a confirmation turn. */
 export const confirmationNotRecorded = 'the recording holds no confirmation turn for this operation, so the confirmed write was not replayed';
@@ -1491,7 +1503,8 @@ export async function runHalf(
           res.turn = summarize(turn);
           res.grade = gradeCardDatasetQuestion(scenario, q.id, turn);
         } catch (e) {
-          if (e instanceof ReplayNotFaithfulError) {
+          if (e instanceof MissingRecordingError) res.notMeasured = datasetQuestionNotRecorded;
+          else if (e instanceof ReplayNotFaithfulError) {
             res.turn = summarize(e.turn);
             res.notMeasured = replayNotFaithful(e);
           } else res.error = errText(e);
