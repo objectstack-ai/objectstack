@@ -27,6 +27,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
+
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import { invokeBusinessAction, disabledActionRefusal } from '../action-execution.js';
@@ -142,7 +145,7 @@ describe('door 1 — REST `POST /actions/:object/:action`', () => {
         // The words are the contract here (they are what the toast reads), so
         // the first sentence is pinned, and the remedy beside it.
         expect(message.startsWith('This action is turned off for this deployment.')).toBe(true);
-        expect(message).toContain('An administrator can turn it on again under Setup › Packaged Actions');
+        expect(message).toContain('An administrator can turn it on again on the action in its package in Studio');
         // No system table, no ADR citation, no tracker number in what an end user reads.
         expect(message).not.toContain('sys_metadata_activation');
         expect(message).not.toMatch(/ADR-\d+/);

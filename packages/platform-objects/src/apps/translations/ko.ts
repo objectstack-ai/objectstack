@@ -38,7 +38,6 @@ export const ko: TranslationData = {
       navigation: {
         group_overview: { label: '개요' },
         group_apps: { label: '앱' },
-        nav_packaged_actions: { label: '패키지 액션' },
         nav_marketplace_browse: { label: '마켓플레이스 둘러보기' },
         nav_marketplace_installed: { label: '설치된 앱' },
         nav_cloud_connection: { label: '클라우드 연결' },

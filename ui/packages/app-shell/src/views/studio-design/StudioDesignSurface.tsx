@@ -355,6 +355,7 @@ import {
   useSurfaceDeepLink,
   useSurfaceDeepLinkCapture,
   useSurfaceDeepLinkMirror,
+  useSurfaceActionDeepLink,
   resolveSurfaceDeepLink,
   type SurfaceTarget,
 } from './useSurfaceDeepLink.js';
@@ -5760,6 +5761,10 @@ export function DataPillar({
     }
     setFieldSel({ kind: target.kind, id: target.id });
   };
+  // objectstack#34724 — `?surface=object:<name>&action=<action>` opens the
+  // deep-linked object's Actions view on that action (Studio's landing links a
+  // switched-off action that lives in its object's `actions[]` here).
+  useSurfaceActionDeepLink(initialSurface, current, (name) => showObjTarget({ kind: 'action', id: name }));
   // objectstack#26730 — a refusal's "Show me" also ends on the input it names:
   // in the field inspector, or in the actions panel for an action.
   const fieldInspectorBodyRef = React.useRef<HTMLDivElement>(null);

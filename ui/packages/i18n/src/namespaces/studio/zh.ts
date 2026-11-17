@@ -3060,6 +3060,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.customizations.failed': '无法读取定制',
   'engine.studio.landing.customizations.pairTitle': '在 Studio 中打开定制包 {pair}',
   'engine.studio.landing.customizations.switchedOffTitle': '打开该软件包的自动化，在那里启用或停用其中的项',
+  'engine.studio.landing.customizations.switchedOffActionsLead': '动作：',
+  'engine.studio.landing.customizations.switchedOffActionsMore': '另 {count} 项',
+  'engine.studio.landing.customizations.switchedOffActionsTitle': '打开已停用的动作：在动作上即可重新启用',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': '不属于软件包',
   'engine.studio.org.name': '组织流程',
@@ -3304,6 +3307,11 @@ const STUDIO_ZH: Record<string, string> = {
   // Actions view
   'engine.studio.actions.none': '该对象没有操作。',
   'engine.studio.actions.newButton': '新建操作',
+  // objectstack#34724 — 只读应用的厂商动作：启停开关。
+  'engine.studio.actions.ledger.hint': '该动作来自只读软件包。此开关只在本部署中启用或停用它，不改动软件包本身。',
+  'engine.studio.actions.ledger.walled': '在此部署中，只有平台运营方可以启用或停用打包动作。',
+  'engine.studio.actions.ledger.offMark': '已停用',
+  'engine.studio.actions.ledger.loadFailed': '无法读取该动作在本部署中是否启用：{message}',
   'engine.studio.actions.editorMissing': '本次会话没有注册操作编辑器,因此无法在这里编辑该操作的属性。',
   'engine.studio.actions.newLabel': '新操作',
   'engine.studio.actions.delete': '删除',

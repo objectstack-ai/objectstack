@@ -3466,6 +3466,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.customizations.failed': 'Couldn’t read customizations',
   'engine.studio.landing.customizations.pairTitle': 'Open the customization package {pair} in Studio',
   'engine.studio.landing.customizations.switchedOffTitle': 'Open this package’s Automations, where its items are switched on and off',
+  'engine.studio.landing.customizations.switchedOffActionsLead': 'Actions: ',
+  'engine.studio.landing.customizations.switchedOffActionsMore': '+{count} more',
+  'engine.studio.landing.customizations.switchedOffActionsTitle': 'Open the switched-off actions: each one is switched on again on the action',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': 'Not in a package',
   'engine.studio.org.name': 'Organization flows',
@@ -3738,6 +3741,12 @@ const STUDIO_EN: Record<string, string> = {
   // Actions view
   'engine.studio.actions.none': 'No actions on this object.',
   'engine.studio.actions.newButton': 'New action',
+  // objectstack#34724 — a read-only app's vendor action: its ledger switch.
+  'engine.studio.actions.ledger.hint':
+    'This action comes from a read-only package. This switch only turns it on or off in this deployment and leaves the package unchanged.',
+  'engine.studio.actions.ledger.walled': 'On this deployment, only the platform operator can switch a packaged action on or off.',
+  'engine.studio.actions.ledger.offMark': 'Off',
+  'engine.studio.actions.ledger.loadFailed': 'Could not read whether this action is switched on here: {message}',
   'engine.studio.actions.editorMissing':
     'No action editor is registered in this session, so this action’s properties cannot be edited here.',
   'engine.studio.actions.newLabel': 'New action',

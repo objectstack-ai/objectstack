@@ -73,3 +73,23 @@ export function packagedAutomationStudioPath(search: string, hash = ''): string 
   if (pkg && pkg !== 'all') return `/studio/${encodeURIComponent(pkg)}/automations${tail}`;
   return `${studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)}/flow${tail}`;
 }
+
+/**
+ * Where a bookmark of the retired Setup › Packaged Actions page lands
+ * (`/apps/<app>/component/automation/packaged-actions`, objectstack#34724, the
+ * ADR-0146 D4 amendment of 2026-11-17): Studio, where a packaged action's
+ * switch now is, on the action in its app.
+ *
+ * With `?package=<id>` (not `all`), that app's Data pillar, whose objects'
+ * Actions views carry the switch, the query kept. With no package named (the
+ * page listed every package's actions), the Studio landing, which lists each
+ * installed app with its switched-off count.
+ */
+export function packagedActionsStudioPath(search: string, hash = ''): string {
+  const params = new URLSearchParams(search);
+  const query = params.toString();
+  const tail = `${query ? `?${query}` : ''}${hash}`;
+  const pkg = params.get('package');
+  if (pkg && pkg !== 'all') return `/studio/${encodeURIComponent(pkg)}/data${tail}`;
+  return `/studio${tail}`;
+}
