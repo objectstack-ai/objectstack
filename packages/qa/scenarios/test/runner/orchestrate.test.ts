@@ -3601,14 +3601,14 @@ describe('runHalf — a live turn that throws is recorded as a failed turn, and 
 
   it('the recording holds each thrown turn: an empty turn naming the error; a replay counts the same rows, the dataset question 1/2 as live, never 1/1', async () => {
     const { recording, half: live } = await recordLive();
-    expect(recording.turns[`${CARD}/ask/run/dq_staff/-`]).toEqual({ replyText: '', toolCalls: [], meta: {}, thrown: { name: 'Error', message: 'write EPIPE (dq_staff)' } });
-    expect(recording.turns[`${CARD}/ask/run/add_contact/sdr`]!.thrown).toEqual({ name: 'Error', message: 'write EPIPE (add_contact)' });
     // Live, each throw is a counted failure.
     expect(live.datasetQuestions!.find((q) => q.question === 'dq_staff')!.error).toBe('write EPIPE (dq_staff)');
     expect(datasetTally(live)).toMatchObject({ passed: 1, total: 2, notMeasured: 0 });
 
     const replayed = await replay(recording);
     expect(datasetTally(replayed)).toEqual(datasetTally(live));
+    expect(recording.turns[`${CARD}/ask/run/dq_staff/-`]).toEqual({ replyText: '', toolCalls: [], meta: {}, thrown: { name: 'Error', message: 'write EPIPE (dq_staff)' } });
+    expect(recording.turns[`${CARD}/ask/run/add_contact/sdr`]!.thrown).toEqual({ name: 'Error', message: 'write EPIPE (add_contact)' });
     expect(counted(replayed.datasetQuestions!)).toEqual(counted(live.datasetQuestions!));
     expect(counted(replayed.questions)).toEqual(counted(live.questions));
     expect(measuredQuestions(replayed.questions)).toEqual(measuredQuestions(live.questions));
@@ -3618,8 +3618,8 @@ describe('runHalf — a live turn that throws is recorded as a failed turn, and 
 
   it('a recording without the throw marker (made before throws were recorded) replays as it always did: no turn, so the dataset question is not measured', async () => {
     const { recording } = await recordLive();
-    const turns = Object.fromEntries(Object.entries(recording.turns).filter(([, t]) => t.thrown === undefined));
-    expect(Object.keys(recording.turns).length - Object.keys(turns).length).toBe(THROWN.size);
+    // The thrown steps' keys removed: the recording a run made before this change, which recorded nothing for a throw.
+    const turns = Object.fromEntries(Object.entries(recording.turns).filter(([key]) => !THROWN.has(key.split('/')[3]!)));
     const replayed = await replay({ ...recording, turns });
     const dq = replayed.datasetQuestions!.find((q) => q.question === 'dq_staff')!;
     expect([typeof dq.notMeasured, dq.error, dq.grade]).toEqual(['string', undefined, undefined]);
