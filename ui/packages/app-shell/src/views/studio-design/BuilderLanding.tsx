@@ -420,7 +420,7 @@ export function BuilderLanding(): React.ReactElement {
                   onClick={() => open(p.id)}
                   aria-label={tFormat('engine.studio.landing.customizeTitle', locale, { name: p.name })}
                   title={tFormat('engine.studio.landing.customizeTitle', locale, { name: p.name })}
-                  className="shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium hover:bg-muted"
+                  className="shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium hover:bg-muted max-md:min-h-11 max-md:px-3"
                 >
                   {t('engine.studio.customize.action', locale)}
                 </button>
