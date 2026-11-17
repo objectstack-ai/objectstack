@@ -143,6 +143,11 @@ describe('the request page moves on after a decision (objectstack#34586)', () =>
     rerender(<Harness entry={fromQueue('r1', ['r1', 'r2'])} rows={{ ...rows, r1: { id: 'r1', status: 'approved', viewer: { can_act: false } } }} />);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(where()).toBe(pageOf('r1'));
+    // Turning it back on later moves nothing: the decision was seen while it was off.
+    fireEvent.click(box);
+    expect(box).toHaveAttribute('aria-checked', 'true');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(where()).toBe(pageOf('r1'));
     unmount();
 
     render(<Harness entry={fromQueue('r2', ['r1', 'r2'])} rows={rows} />);
