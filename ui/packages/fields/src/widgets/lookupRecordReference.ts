@@ -177,9 +177,10 @@ export function readRecordBeingEdited(field: unknown): RecordBeingEdited | undef
 
 /**
  * The value a `{ $record }` path names, or `undefined` when it is empty,
- * cannot be read, or is multi-valued (a list on the record or the hop's row). `hopRows` holds the rows read for each hop's lookup, by
- * `via`; an expanded row on the record itself is read first, so a host that
- * already holds the related record costs no request.
+ * cannot be read, or is multi-valued (a list on the record or the hop's
+ * row). `hopRows` holds the rows read for each hop's lookup, by `via`; an
+ * expanded row on the record itself is read first, so a host that already
+ * holds the related record costs no request.
  */
 function readRecordPath(
   path: string,
