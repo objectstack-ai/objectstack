@@ -744,6 +744,30 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
                 .toEqual([leg, 404, 'RESOURCE_NOT_FOUND', 404, 'RESOURCE_NOT_FOUND', null]);
             const own = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'fr-FR', package: D });
             expect([leg, own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([leg, 200, 'addon fr', D]);
+            // [#34441 cell 2, L1 R1] The doors naming no member address the
+            // canonical member `en-US` too, so they take the same arm: the plain
+            // read, `/layers`, `/published` and the execution read serve A's
+            // `en-US`, as a shipped base's own member is served. FROM (`main`
+            // 31096af83d, measured with the arm ablated, both orders, before and
+            // after a reboot): over a row-held base each refused 409
+            // RESOURCE_CONFLICT (the execution read threw
+            // PackageScopedNameRefusedError). The overlay layer and `/published`
+            // differ by holding, not by this change: over a row-held base A's
+            // own row is the overlay; over a shipped base A holds no row and the
+            // #28409 orphan arm reports D's row as the overlay its code shadows
+            // (unchanged).
+            const at = (r: { status?: number; body: unknown }, pick: (u: any) => unknown) => [r.status, r.status === 200 ? pick(unwrap(r.body)) : codeOf(r.body)];
+            const bare = {
+                read: at(await get(b.kernel, '/meta/email_template/sharedmail'), (u) => [u?.item?.subject, u?.packageId ?? null]),
+                layers: at(await get(b.kernel, '/meta/email_template/sharedmail/layers'), (u) => [u?.effective?.subject, u?.overlay?.subject ?? null]),
+                published: at(await get(b.kernel, '/meta/email_template/sharedmail/published'), (u) => u?.subject),
+                executed: await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'sharedmail' })
+                    .then((r: any) => r?.item?.subject ?? null, (e: any) => ['threw', e?.name, e?.code ?? null]),
+            };
+            const overlay = ships ? 'addon en' : 'base en';
+            expect({ leg, ...bare }).toEqual({
+                leg, read: [200, ['base en', A]], layers: [200, ['base en', overlay]], published: [200, overlay], executed: 'base en',
+            });
             // [#34441 cell 2] The shared member `en-US`, naming no package, is
             // the base's, however A holds the name: D's row of it is a bundle
             // addition, never a second holder, so the plain read, /layers and
