@@ -1049,8 +1049,10 @@ const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
       'rollupSourceUnreadableReason: \'<why holders of this set read the total>\' } }`. That one finding, ' +
       'for this set and this column, is then reported as a note that quotes the reason, so `--strict` passes ' +
       'and a reviewer still sees the pair and why it stands. Another set reading the same column, another ' +
-      'column of the same set and the row-scope note are judged as before. The key is read only at authoring ' +
-      'time and changes nothing at runtime; a blank reason, or a reason beside `readable: false`, is refused.',
+      'column of the same set and the row-scope note are judged as before. The runtime does not read the key, ' +
+      'but the entry that carries it is an ordinary declaring entry and votes `readable: true` in the field ' +
+      'merge: on a set that had no entry for the column, adding one restores the column for holders whose ' +
+      'other sets mask it. A blank reason, or a reason beside `readable: false`, is refused.',
   ],
 };
 

@@ -45,7 +45,8 @@
  * set reading the same column, another column of the same set, and the
  * `row-scoped` note are judged as before. The key is the spec's
  * (`FieldPermissionSchema`), which refuses a blank reason and a reason beside
- * `readable: false`; the runtime does not read it.
+ * `readable: false`; the runtime does not read it, but the entry carrying it
+ * votes `readable: true` in the field merge like any declaring entry.
  *
  * ## "Can read", as the runtime decides it
  *
@@ -448,7 +449,7 @@ export function validateRollupSourceVisibility(stack: AnyRec): RollupSourceVisib
               rule: SECURITY_ROLLUP_SOURCE_UNREADABLE,
               where: `permission set "${setName}" · summary field "${column}"`,
               path: `permissions[${i}].fields["${column}"].rollupSourceUnreadableReason`,
-              message: `${message}; ${ROLLUP_SEMANTICS}. Acknowledged on the set: "${acknowledged}"`,
+              message: `${message}; ${ROLLUP_SEMANTICS}. Acknowledged on the set: ${JSON.stringify(acknowledged)}`,
               hint:
                 `Nothing to change while the reason holds. If holders of permission set "${setName}" should no ` +
                 `longer read "${column}", remove rollupSourceUnreadableReason and the warning returns with its remedy`,

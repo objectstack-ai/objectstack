@@ -1042,8 +1042,8 @@ const FIELD_PERMISSION_ROLLUP_REASON_BLANK =
 
 const FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN =
   'A `rollupSourceUnreadableReason` acknowledges that holders of this set READ a roll-up summary over child data '
-  + 'they cannot read, so it is refused beside `readable: false`: the entry hides the column and there is no read '
-  + 'to acknowledge. Keep `readable: true` (the default) to acknowledge the read, or remove the reason to keep the '
+  + 'they cannot read, so it is refused beside `readable: false`: that entry declares no read of the column, so there '
+  + 'is nothing to acknowledge. Keep `readable: true` (the default) to acknowledge the read, or remove the reason to keep the '
   + 'column hidden.';
 
 /**
@@ -1076,11 +1076,14 @@ const FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN =
  * a `summary` column it acknowledges a meant pair — this set reads the roll-up
  * although it cannot read the child data the roll-up aggregates — and turns
  * that one finding (this set × this column) into an `info` note quoting the
- * reason. The runtime reads no part of it: the field merge, the read mask and
- * the roll-up's own semantics are unchanged, and the server never sends it on
- * the permission responses that reuse this shape. A blank reason, and a reason
- * beside `readable: false` (nothing is read, so nothing is acknowledged), are
- * refused at parse time.
+ * reason. The runtime reads no part of the KEY, and the server never sends it
+ * on the permission responses that reuse this shape. The ENTRY that carries it
+ * is an ordinary declaring entry, though: it votes `readable: true` (its
+ * default) in the field merge, where only declaring sets vote and the most
+ * permissive vote wins, so on a set that had no entry for the column, adding
+ * one to carry the reason restores the column for holders whose other sets mask
+ * it. A blank reason, and a reason beside `readable: false` (the entry declares
+ * no read, so there is nothing to acknowledge), are refused at parse time.
  */
 export const FieldPermissionSchema = lazySchema(() => strictObject(
   {
@@ -1148,7 +1151,8 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
    * cannot read. Authoring-time only: `os lint` reads it on the set's entry for
    * a `summary` column and reports `security-rollup-source-unreadable` for that
    * set and column as an `info` note quoting the reason, instead of a warning
-   * `--strict` fails on. The runtime does not read it.
+   * `--strict` fails on. The runtime does not read the key; the entry carrying
+   * it votes `readable: true` in the field merge like any declaring entry.
    */
   rollupSourceUnreadableReason: z.string()
     .refine(NON_BLANK_STRING, { message: FIELD_PERMISSION_ROLLUP_REASON_BLANK })
@@ -1159,9 +1163,11 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
       + 'aggregated child field or a child field the roll-up\'s `filter` tests (e.g. \'Service staff read account '
       + 'totals but not invoice rows\'). Declared on the set\'s entry for the summary column, it turns that set\'s '
       + '`security-rollup-source-unreadable` warning for the column into an `info` note quoting the reason, so '
-      + '`os lint --strict` passes; every other finding is unchanged. It changes nothing at runtime: the column is '
-      + 'read under the parent field\'s own field-level security either way. A blank reason is refused, and so is a '
-      + 'reason beside `readable: false`, which hides the column and leaves no read to acknowledge.',
+      + '`os lint --strict` passes; every other finding is unchanged. The runtime does not read the key, but the entry '
+      + 'that carries it is an ordinary declaring entry: it votes `readable: true` in the field merge (only declaring '
+      + 'sets vote, and the most permissive vote wins), so on a set that had no entry for the column, adding one to '
+      + 'carry the reason restores the column for holders whose other sets mask it. A blank reason is refused, and so '
+      + 'is a reason beside `readable: false`, an entry that declares no read to acknowledge.',
     ),
 }).refine(
   // The cross-key rule: a condition reaches the edit vote only, so an entry

@@ -121,6 +121,42 @@ describe('rollupSourceUnreadableReason acknowledges one meant pair (#34664)', ()
     expect(findings[0].message).not.toContain(REASON);
   });
 
+  it('the aggregated-field and filter-field arms are acknowledged the same way', () => {
+    const readsBoth = { invoice: READ, invoice_line: READ };
+    // Aggregated-field arm: the set reads the child but hides `amount`.
+    const fieldArm = (fields: Rec) => run(staff({ 'invoice_line.amount': { readable: false }, ...fields }, { objects: readsBoth }));
+    expect(fieldArm({}).map((f) => [f.where, f.severity])).toEqual([[W('warehouse_staff', 'invoice.total'), 'warning']]);
+    expect(fieldArm({ 'invoice.total': { rollupSourceUnreadableReason: REASON } }).map((f) => [f.where, f.severity])).toEqual([
+      [W('warehouse_staff', 'invoice.total'), 'info'],
+    ]);
+    // Filter-field arm: a count filtered on a field the set hides.
+    const banded = {
+      ...invoice,
+      fields: {
+        open_count: {
+          type: 'summary',
+          label: 'Open Lines',
+          summaryOperations: { object: 'invoice_line', function: 'count', filter: { band: 'open' } },
+        },
+      },
+    };
+    const line = { ...invoiceLine, fields: { ...(invoiceLine.fields as Rec), band: { type: 'text', label: 'Band' } } };
+    const filterArm = (fields: Rec) =>
+      runAuthoringRules('lint', {
+        normalized: {
+          objects: [banded, line],
+          permissions: [staff({ 'invoice_line.band': { readable: false }, ...fields }, { objects: readsBoth })],
+        },
+      }).filter((f) => f.rule === UNREADABLE);
+    expect(filterArm({}).map((f) => f.severity)).toEqual(['warning']);
+    expect(filterArm({ 'invoice.open_count': { rollupSourceUnreadableReason: REASON } }).map((f) => f.severity)).toEqual(['info']);
+  });
+
+  it('the reason is quoted as a string literal, so a quote or a line break in it stays inside the quotes', () => {
+    const [f] = run(staff({ 'invoice.total': { rollupSourceUnreadableReason: 'Totals are "public"\nby design' } }));
+    expect(f.message.endsWith('Acknowledged on the set: "Totals are \\"public\\"\\nby design"')).toBe(true);
+  });
+
   it('a parsed permission set answers what the raw one does', () => {
     const parsed = PermissionSetSchema.parse(staff({ 'invoice.total': { rollupSourceUnreadableReason: REASON } })) as Rec;
     expect(run(parsed).map((f) => f.severity)).toEqual(['info', 'warning']);

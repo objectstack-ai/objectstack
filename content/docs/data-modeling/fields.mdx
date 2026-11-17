@@ -429,9 +429,11 @@ fields: {
 },
 ```
 
-The key is read only by these authoring checks and changes nothing at runtime.
-Every other set and column is still reported, and a blank reason, or one beside
-`readable: false`, is refused.
+Only these authoring checks read the key. The entry that carries it is still an
+ordinary field permission, though, and votes `readable: true`: on a set that had
+no entry for the summary, adding one restores the column for holders whose other
+sets mask it. Every other set and column is still reported, and a blank reason,
+or one beside `readable: false`, is refused.
 
 A child validation rule can read a parent summary one hop through its
 reference, for example "each supplier has at most one primary contact" as a
