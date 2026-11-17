@@ -736,8 +736,8 @@ wrapper, with no change to the runner.
 
 Every published skill bundle carries eval cases (`skills/BUNDLE/evals/*.json`: a `prompt`, an `expected_output` and
 `assertions.must_contain` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
-once with the bundle installed and once without, and grades each answer by the case's own tokens. It runs from this
-checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
+once with the bundle installed and once without, and grades each answer by the case's own tokens. A trigger case
+asks instead whether the skill was loaded, and runs with the bundle installed only. It runs from this checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
 the skill authors' and the runner never edits them.
 
 ```bash
@@ -770,6 +770,18 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   record's `armEvidence` says whether the turn launched the bundle (`launched`) or nothing in the stream shows it
   (`not-shown`). A turn with no answer is `error`: the process failed or timed out, or the result line is not
   `success` (`error_max_turns` included). Both kinds are counted and named, and neither is in a denominator.
+- **Trigger cases**: an entry with `"should_trigger": true | false` in place of `assertions` (the reader refuses one
+  carrying both) asks whether the skill was loaded when it should be and left alone when it should not. It runs on
+  the with-skill arm only and is graded on the turn, never on its answer: the turn loaded the bundle when it launched
+  it with the `Skill` tool or read a file under its `.claude/skills/BUNDLE/` (the record's `trigger.loadedBy` says
+  which), and the case passes when that matches `should_trigger`. A turn that loaded the bundle is judged however it
+  ended; one that did not is judged only when it ended `success`, and is `error` otherwise. A bundle whose trigger
+  cases are all positive, or all negative, is refused. The summary reports trigger cases in their own section beside
+  the behaviour cases, never inside their pass rates: per bundle, loaded when it should, left alone when it should
+  not, the missed loads and the false loads.
+- **Case files**: a case's `files` entries are paths under the bundle's `evals/files/` (anything else is refused, and
+  so is a path the bundle lacks). Each is copied, a directory whole, into both arms' directories at its path below
+  `evals/files/`, so the arms still differ only in the bundle. A case whose prompt states its context needs none.
   `--regrade DIR` applies the current rules to a recorded round's answers and arm facts. A changed record keeps the
   verdict its turn was first given as `regradedFrom`. Each record carries `caseHash`, a hash of its case's prompt and
   token lists as the turn ran them. A case changed or removed since the round is set apart: it is not regraded, its
@@ -777,7 +789,7 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   hash; it is regraded against the case as it is now, and the summary counts it as unhashed.
 - **Records**: by default the round goes to `docs/qa/platform-checklist/runs/skill-evals/ROUND/` (git-ignored), or to
   `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, the answer, the skills listed
-  and launched, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
+  and launched, the skill files read, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
   scope and the full per-case scores on both arms) and `summary.md`. The summary has one row per bundle (each arm's
   pass rate, the with-skill failing cases, and the cases where the no-skill arm scored at least as high) and then
   every case. `summary.github.md` is the same text with angle brackets spelled `(lt)` / `(gt)` for a GitHub body.
