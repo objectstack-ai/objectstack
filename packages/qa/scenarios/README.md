@@ -482,7 +482,19 @@ npx @objectstack/scenarios help                                      # the comma
   measured: author turn failed: …**. Never a degraded score, and nothing runs on it: no score, seed, Run or iterate. The
   scorecard's author rows show every authoring turn's `resultSubtype`, the turns it took of its cap
   (`error_max_turns · 300/300 turns`) and its elapsed time.
-- **Seed** (`seed.ts`): rows go in as the admin, a lookup's target before its referrer. Where the card's declared
+- **Seed** (`seed.ts`, `loadSeedRows` in `orchestrate.ts`): rows go in as the admin through the platform's own seed
+  path, never the data API: the runner installs one data-only package whose `data[]` holds the card's rows (keyed on
+  the card's own `id`, so a lookup value names the row seeded under it), through the managed install door. The
+  platform's seed loader writes them as established facts: a build's `state_machine` rule (its `initialStates` entry
+  check) does not judge them, so a claim the card states as already `paid` loads as the card states it. Every other
+  validation rule and every hook still judges each row, and a refused row is recorded with its object, id and the
+  loader's message (`seed.refused`; the seed door names no error code). **Seed rows fire no record-triggered flow**,
+  where the data API's insert used to fire a build's "on create" automation on each one. No card relies on that: every
+  truth is computed from the seed's own values (`truth.ts` refuses one the seed does not determine), and the four cards
+  that ask for record-triggered flows (`asset_lifecycle`, `requisition_to_receipt`, `service_desk`, `travel_expense`)
+  seed the values such a flow produces (a ticket's group, SLA policy and breach flag, a line's over-standard flag, the
+  statuses) explicitly. An operation's own write still goes through the agent's door and fires the build's automation.
+  A restore puts a removed seeded row back the same way. A lookup's target loads before its referrer. Where the card's declared
   lookups lead back to where they start — `department.manager → employee` with `employee.department → department`, or a
   self-lookup naming a later row — the seed loads in two passes: every row first with each lookup naming a row not in
   yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
