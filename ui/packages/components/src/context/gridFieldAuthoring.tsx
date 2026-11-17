@@ -34,6 +34,14 @@ export interface GridFieldAuthoring {
   /** Optional tooltip/aria-label for the edit-field button (defaults to "Edit field"). */
   editColumnLabel?: string;
   /**
+   * Set to draw a visible caret in every column header that opens the
+   * table's own column menu (sort, hide) — the menu a right-click opens.
+   * The value is the caret's tooltip/aria-label. A design host that takes
+   * the header click for itself (Studio selects the field) sets it so sort
+   * and hide stay one click away. Omit it and the header draws no caret.
+   */
+  columnMenuLabel?: string;
+  /**
    * Invoked when the user drag-reorders columns. Receives the new column order
    * as accessorKeys (= field names, including any non-field columns). Providing
    * this also ENABLES the table's built-in column drag-reorder (design mode), so
@@ -41,6 +49,13 @@ export interface GridFieldAuthoring {
    * reordering to the table's own `reorderableColumns`/`onColumnsReorder`.
    */
   onReorderFields?: (orderedFieldNames: string[]) => void;
+  /**
+   * A mark drawn after a column's header label, keyed by the column's
+   * accessorKey (= field name); a column with no entry draws none. The Studio
+   * Data pillar marks the fields its AI assistant changed in the pending draft
+   * (objectstack#34725). Omit for no marks.
+   */
+  columnMarks?: Readonly<Record<string, React.ReactNode>>;
 }
 
 const GridFieldAuthoringContext = React.createContext<GridFieldAuthoring | null>(null);

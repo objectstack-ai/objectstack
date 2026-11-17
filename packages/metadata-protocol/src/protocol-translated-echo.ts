@@ -75,8 +75,10 @@ import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
 import {
     BUILTIN_SYSTEM_FIELD_LABEL_LOCALES,
+    scalarOverridesPackagedBase,
     translateObject,
     type ObjectLike,
+    type TranslateDocumentOptions,
     type TranslationBundle,
 } from '@objectstack/spec/system';
 
@@ -156,8 +158,12 @@ function optionKey(option: unknown): string | undefined {
     return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : undefined;
 }
 
+function optionOf(options: unknown, key: string): Rec | undefined {
+    return Array.isArray(options) ? (options.find((o) => optionKey(o) === key) as Rec | undefined) : undefined;
+}
+
 function optionLabel(options: unknown, key: string): unknown {
-    return Array.isArray(options) ? (options.find((o) => optionKey(o) === key) as Rec | undefined)?.label : undefined;
+    return optionOf(options, key)?.label;
 }
 
 /**
@@ -173,28 +179,38 @@ export function translatedEchoLocales(bundle: TranslationBundle | undefined): st
  * only the names the incoming body declares.
  */
 interface TranslatedSource {
+    /** Which source: the stored row, one patch entry's base, or the platform's columns. */
+    kind: 'stored' | 'patch' | 'injected';
     doc: Rec;
     fields: Map<string, Rec>;
     reads: Array<{ doc: Rec; fields: Map<string, Rec> }>;
 }
 
+type PatchBundles = NonNullable<TranslateDocumentOptions['patchBundles']>;
+
 function translatedSource(
+    kind: TranslatedSource['kind'],
     doc: Rec,
     locales: readonly string[],
     bundle: TranslationBundle | undefined,
     packagedBase: unknown,
+    patchBundles: PatchBundles | undefined,
 ): TranslatedSource {
     return {
+        kind,
         doc,
         fields: fieldMap(doc),
         reads: locales.map((locale) => {
             // The read's own options: with the packaged base, a slot that
             // diverged from the packaged text is served untranslated in every
             // locale (ADR-0029 D9.2a), so it is no translation's source here
-            // either.
+            // either. [#33952] With the patch entries, a slot a code package's
+            // `fieldPatches` wrote reads that package's own translation, as
+            // the read serves it.
             const read = translateObject(doc as unknown as ObjectLike, bundle, {
                 locale,
                 ...(packagedBase !== undefined && packagedBase !== null ? { packagedBase } : {}),
+                ...(patchBundles !== undefined && patchBundles.length > 0 ? { patchBundles } : {}),
             }) as unknown as Rec;
             return { doc: read, fields: fieldMap(read) };
         }),
@@ -227,12 +243,37 @@ export function restoreTranslatedEchoes<T>(
          * for an object no package ships.
          */
         packagedBase?: unknown;
+        /**
+         * [#33952] The read's `patchBundles` (`TranslateDocumentOptions`):
+         * one entry per code package whose `fieldPatches` wrote a slot of
+         * this object, its patched base and its own translations. Passed to
+         * every read of every source, and each entry's patched base is a
+         * source of its own (after the stored row, before the platform's
+         * columns): with no stored row the source is the packaged base, which
+         * never carries a patch, so the patch text a read translated is
+         * explained only by the base that carries it. Absent when no code
+         * package patches the object or none translates its patch.
+         *
+         * [#34836] A patch entry is asked for a slot only where its patch
+         * changed that slot (a patch of `label` explains nothing about the
+         * field's `description` or options), and only where the stored row
+         * does not declare the slot, carries the packaged text there, or
+         * holds an empty string. A stored slot with text of its own is the
+         * tenant's: the read serves it as written in every locale, so a save
+         * carrying it back keeps it, even when it equals the patching
+         * package's translation.
+         */
+        patchBundles?: PatchBundles;
     },
 ): { item: T; restored: RestoredTranslatedSlot[] } {
     const restored: RestoredTranslatedSlot[] = [];
     if (!isRec(item) || typeof item.name !== 'string') return { item, restored };
     const incoming = fieldMap(item);
-    const locales = translatedEchoLocales(args.bundle);
+    const patchBundles = args.patchBundles !== undefined && args.patchBundles.length > 0 ? args.patchBundles : undefined;
+    const locales = [...new Set([
+        ...translatedEchoLocales(args.bundle),
+        ...(patchBundles ?? []).flatMap((entry) => Object.keys((entry.bundle as Rec | undefined) ?? {})),
+    ])];
 
     const storedFields = fieldMap(args.source);
     const storedDoc: Rec = { name: item.name, fields: {} };
@@ -249,10 +290,27 @@ export function restoreTranslatedEchoes<T>(
     for (const [name, def] of Object.entries(injectedSystemColumnDefs(item))) {
         if (incoming.has(name)) (injectedDoc.fields as Rec)[name] = { ...def };
     }
-    const sources = [storedDoc, injectedDoc]
-        .filter((doc) => Object.keys(doc.fields as Rec).length > 0 || Object.keys(doc).length > 2)
-        .map((doc) => translatedSource(doc, locales, args.bundle, args.packagedBase));
+    // Each patch entry's base, cut to the incoming fields its patch changed:
+    // a field it left as packaged is the stored row's or the packaged base's
+    // to explain, never a second source that could out-explain a tenant's own
+    // text on it. The cut is finished per slot in `sourceOf` [#34836].
+    const packagedFields = fieldMap(args.packagedBase);
+    const patchDocs: Rec[] = (patchBundles ?? []).map((entry) => {
+        const patchedFields = fieldMap(entry.patchedBase);
+        const doc: Rec = { name: item.name, fields: {} };
+        for (const name of incoming.keys()) {
+            const def = patchedFields.get(name);
+            if (def && JSON.stringify(def) !== JSON.stringify(packagedFields.get(name))) (doc.fields as Rec)[name] = { ...def };
+        }
+        return doc;
+    });
+    const sources = ([['stored', storedDoc], ...patchDocs.map((doc) => ['patch', doc] as const), ['injected', injectedDoc]] as const)
+        .filter(([, doc]) => Object.keys(doc.fields as Rec).length > 0 || Object.keys(doc).length > 2)
+        .map(([kind, doc]) => translatedSource(kind, doc, locales, args.bundle, args.packagedBase, patchBundles));
     if (sources.length === 0) return { item, restored };
+    const storedView = { doc: storedDoc, fields: fieldMap(storedDoc) };
+    const packagedView = { doc: { name: item.name, fields: {} } as Rec, fields: packagedFields };
+    const unset = (v: unknown): boolean => v === NOT_DECLARED || v === undefined;
 
     /**
      * The source text `value` is a translation of, through `pick` (which reads
@@ -260,12 +318,35 @@ export function restoreTranslatedEchoes<T>(
      * where that source does not declare it); `null` when no source explains
      * it. A source the value equals explains nothing and the next is asked:
      * that is the stored echo meeting the platform's definition.
+     *
+     * [#34836] A patch entry answers a slot only where its patch changed that
+     * slot against the packaged base, and only where the stored row does not
+     * override the packaged text there: a stored slot with text of its own
+     * (`税号` typed over the patched `Tax ID`) is the tenant's, served as
+     * written in every locale, never the patching package's translation
+     * coming back. "Overrides" is the fold's own question, asked through
+     * `packagedOwner` (the packaged field, option or object that holds the
+     * slot, and its key) by {@link scalarOverridesPackagedBase}, ⛔ never a
+     * second copy: the fold applies the patch over a stored slot that is
+     * unset, equal to the packaged text or an empty string, so the read
+     * serves the patch text there and its translation comes back.
      */
-    const sourceOf = (value: unknown, pick: (doc: Rec, fields: Map<string, Rec>) => unknown): { to: unknown } | null => {
+    const sourceOf = (
+        value: unknown,
+        pick: (doc: Rec, fields: Map<string, Rec>) => unknown,
+        packagedOwner: () => { base: unknown; key: string },
+    ): { to: unknown } | null => {
         if (typeof value !== 'string') return null;
         for (const source of sources) {
             const original = pick(source.doc, source.fields);
             if (original === NOT_DECLARED || original === value) continue;
+            if (source.kind === 'patch') {
+                const packaged = pick(packagedView.doc, packagedView.fields);
+                if (original === packaged || (unset(original) && unset(packaged))) continue;
+                const { base, key } = packagedOwner();
+                const stored = pick(storedView.doc, storedView.fields);
+                if (scalarOverridesPackagedBase(base, key as Parameters<typeof scalarOverridesPackagedBase>[1], stored)) continue;
+            }
             if (source.reads.some((read) => {
                 const translated = pick(read.doc, read.fields);
                 return translated !== original && translated === value;
@@ -276,7 +357,7 @@ export function restoreTranslatedEchoes<T>(
 
     let nextItem: Rec = item;
     for (const slot of OBJECT_TEXT_SLOTS) {
-        const hit = sourceOf(item[slot], (doc) => (typeof doc[slot] === 'string' ? doc[slot] : NOT_DECLARED));
+        const hit = sourceOf(item[slot], (doc) => (typeof doc[slot] === 'string' ? doc[slot] : NOT_DECLARED), () => ({ base: args.packagedBase, key: slot }));
         if (!hit || typeof hit.to !== 'string') continue;
         restored.push({ path: slot, from: item[slot] as string, to: hit.to });
         nextItem = nextItem === item ? { ...item } : nextItem;
@@ -291,7 +372,7 @@ export function restoreTranslatedEchoes<T>(
             const hit = sourceOf(field[slot], (_doc, fields) => {
                 const f = fields.get(name);
                 return f ? f[slot] : NOT_DECLARED;
-            });
+            }, () => ({ base: packagedFields.get(name), key: slot }));
             if (!hit) continue;
             restored.push({ path: `fields.${name}.${slot}`, from: field[slot] as string, to: hit.to as string | undefined });
             next = next === field ? { ...field } : next;
@@ -306,7 +387,7 @@ export function restoreTranslatedEchoes<T>(
                 const hit = sourceOf(option.label, (_doc, fields) => {
                     const f = fields.get(name);
                     return f ? optionLabel(f.options, key) ?? NOT_DECLARED : NOT_DECLARED;
-                });
+                }, () => ({ base: optionOf(packagedFields.get(name)?.options, key), key: 'label' }));
                 if (!hit || typeof hit.to !== 'string') return;
                 restored.push({ path: `fields.${name}.options[${key}].label`, from: option.label as string, to: hit.to });
                 options ??= [...(field.options as unknown[])];

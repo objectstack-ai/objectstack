@@ -2429,7 +2429,7 @@ const ar = {
       changesApplied: "تم التطبيق",
       changesDrafted: "حُفظ كمسودة",
       changesFailed: "لم يُطبَّق",
-      discussing: "قيد المناقشة: {{target}}",
+      discussing: "قيد العرض: {{target}}",
       changeVerb: {
         createObject: "إنشاء كائن",
         addField: "إضافة حقل",
@@ -3231,6 +3231,10 @@ const ar = {
       missingToken: "رابط التحقق لا يحتوي على رمز.",
       emailMissing: "عنوان البريد الإلكتروني مفقود",
       resendButton: "إعادة إرسال بريد التحقق",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "لم يتم التحقق من بريدك الإلكتروني بعد. أرسل رابط التحقق إلى {{email}}، ثم انقر على الرابط للتحقق من حسابك.",
+      sendButton: "إرسال بريد التحقق",
       resending: "جارٍ الإرسال…",
       resent: "تم إرسال البريد! تحقق من صندوق الوارد",
       resentSuccess: "تم إرسال بريد التحقق!",
@@ -5281,6 +5285,7 @@ const ar = {
       securityBlockTitle_many: 'سيتم رفض النشر — {{count}} عنصرًا بحاجة إلى قرار أولاً',
       securityBlockTitle_other: 'سيتم رفض النشر — {{count}} عنصر بحاجة إلى قرار أولاً',
       securityBlockWhere: 'أصلحه في الكائن ضمن الإعدادات ← مشاركة السجلات، ثم انشر مرة أخرى.',
+      flowChecksTitle: 'قبل النشر: سيُبلغ فحص النشر عمّا يلي',
       securityRule: {
         owdUnset: 'لم يُعرَّف أساس مشاركة السجلات (sharingModel). يعود وقت التشغيل إلى private، لكن يجب أن يكون الأساس قرارًا صريحًا.',
         owdAlias: 'أساس مشاركة السجلات (sharingModel) ليس قيمة قياسية، لذا يعامل وقت التشغيل الكائن على أنه private.',
