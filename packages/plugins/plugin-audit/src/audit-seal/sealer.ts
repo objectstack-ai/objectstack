@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { DispatchLoop } from '@objectstack/core';
+import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
 import type {
   IAuditCheckpointSigner,
   IAuditCheckpointSink,
@@ -155,15 +156,30 @@ export interface AuditSealerEngine extends SealStorageEngine {
   datasource?(name: string): SealStorageDriver | undefined;
 }
 
+/** The signer a pass signs with: the seam's surface, plus the default signer's key-id hint. */
+type SealSigner = IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> };
+
+/** The three host seams of one pass, each resolved once at the pass's start. */
+interface PassSeams {
+  signer: SealSigner | undefined;
+  sink: IAuditCheckpointSink | undefined;
+  cluster: IClusterService | undefined;
+}
+
 export interface AuditSealerOptions {
   engine: AuditSealerEngine;
   crypto?: ICryptoProvider;
-  /** Resolved per pass: a host's `audit.checkpointSigner`, or the default one. */
-  signer: () => (IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> }) | undefined;
+  /**
+   * Resolved per pass: a host's `audit.checkpointSigner`, or the default one.
+   * Each of the three seams answers `undefined` only when nothing is
+   * registered; a registered service that cannot be resolved THROWS, and the
+   * pass then seals nothing (see {@link AuditSealer.resolveSeams}).
+   */
+  signer: () => SealSigner | undefined | Promise<SealSigner | undefined>;
   /** Resolved per pass: a host's `audit.checkpointSink`, if any. */
-  sink?: () => IAuditCheckpointSink | undefined;
+  sink?: () => IAuditCheckpointSink | undefined | Promise<IAuditCheckpointSink | undefined>;
   /** Resolved per pass: the `cluster` service, if any. */
-  cluster?: () => IClusterService | undefined;
+  cluster?: () => IClusterService | undefined | Promise<IClusterService | undefined>;
   logger: AuditSealerLogger;
   now?: () => number;
   /**
@@ -396,13 +412,43 @@ export class AuditSealer {
     return plans;
   }
 
-  private async acquireLock(): Promise<LockHandle | null> {
-    let cluster: IClusterService | undefined;
-    try {
-      cluster = this.options.cluster?.();
-    } catch {
-      cluster = undefined;
+  /**
+   * #34280: resolve the three host seams once, at the start of a pass. Only an
+   * ABSENT seam has a stand-in — the default local signer, no off-host export,
+   * the in-process lock. A seam that IS registered but cannot be resolved (a
+   * factory that throws, a KMS client that cannot start) stops the pass: no
+   * checkpoint is signed, and the fault is reported at `error`, naming the
+   * slot, once per {@link REPORT_REPEAT_MS} while it lasts. Falling back there
+   * would sign with the local key where the host chose its own, export
+   * nothing where it chose an off-host copy, or run without its cluster lock,
+   * and nothing would say so. Resolves to `null` when the pass must stop.
+   */
+  private async resolveSeams(): Promise<PassSeams | null> {
+    const slots = [
+      ['signer', AUDIT_CHECKPOINT_SIGNER_SERVICE, this.options.signer, 'sign with the local key'],
+      ['sink', AUDIT_CHECKPOINT_SINK_SERVICE, this.options.sink, 'seal without the off-host export'],
+      ['cluster', 'cluster', this.options.cluster, 'hold the audit.sealer lock in-process only'],
+    ] as const;
+    const seams: Partial<Record<(typeof slots)[number][0], unknown>> = {};
+    let failed = false;
+    for (const [seam, slot, resolve, fallback] of slots) {
+      try {
+        seams[seam] = await resolve?.();
+        this.reported.delete(`resolve:${slot}`);
+      } catch (err) {
+        failed = true;
+        const fault = faultOf(err);
+        this.report(`resolve:${slot}`, () =>
+          `AuditSealer: the '${slot}' service is registered but could not be resolved (${fault}) — NO checkpoint is ` +
+          `signed and rows of the sealed objects are NOT being sealed until it resolves; the sealer does not ${fallback} ` +
+          'in place of a service the host registered. Each pass retries. Fix the registration of the service named here.');
+      }
     }
+    if (failed) return null;
+    return seams as PassSeams;
+  }
+
+  private async acquireLock(cluster: IClusterService | undefined): Promise<LockHandle | null> {
     if (cluster?.lock) return cluster.lock.acquire(AUDIT_SEALER_LOCK, { ttlMs: LOCK_TTL_MS, waitMs: 0 });
     if (!this.reported.has('in-process-lock')) {
       this.reported.set('in-process-lock', this.now());
@@ -421,7 +467,9 @@ export class AuditSealer {
   async runPass(): Promise<number> {
     const plans = this.plans();
     if (plans.length === 0) return 0;
-    const signer = this.options.signer();
+    const seams = await this.resolveSeams();
+    if (!seams) return 0;
+    const { signer } = seams;
     if (!this.options.crypto || !signer) {
       this.report('no-crypto', () =>
         `AuditSealer: ${plans.map((p) => `'${p.name}'`).join(', ')} declare(s) lifecycle.seal, but this deployment has ` +
@@ -430,7 +478,7 @@ export class AuditSealer {
         'wire a crypto provider (AuditPluginOptions.cryptoProvider), or remove lifecycle.seal.');
       return 0;
     }
-    const lock = await this.acquireLock();
+    const lock = await this.acquireLock(seams.cluster);
     if (!lock) return 0;
     // D3 amended (E): the audit seal lock beside audit.sealer, on each sealed object's database, or no pass.
     let session: AuditSealPassLocks;
@@ -453,7 +501,7 @@ export class AuditSealer {
         // One object's fault never stops another's sealing; it is reported while it lasts.
         let pass: ObjectPass | undefined;
         try {
-          pass = new ObjectPass(this.options, plan, passLock, signer, this.now());
+          pass = new ObjectPass(this.options, plan, passLock, signer, seams.sink, this.now());
           await pass.run();
           for (const cause of this.reported.keys()) if (cause.startsWith(`object:${plan.name}:`)) this.reported.delete(cause);
         } catch (err) {
@@ -519,7 +567,8 @@ class ObjectPass {
     private readonly options: AuditSealerOptions,
     private readonly plan: SealPlan,
     private readonly lock: PassLock,
-    private readonly signer: IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> },
+    private readonly signer: SealSigner,
+    private readonly sink: IAuditCheckpointSink | undefined,
     private readonly now: number,
   ) {
     const { engine } = options;
@@ -1024,10 +1073,8 @@ class ObjectPass {
   }
 
   private async deliver(body: CheckpointSignedBody, keyId: string, signature: string): Promise<void> {
-    let sink: IAuditCheckpointSink | undefined;
     try {
-      sink = this.options.sink?.();
-      await sink?.deliver({ kind: 'checkpoint', body: body as unknown as Record<string, unknown>, keyId, signature });
+      await this.sink?.deliver({ kind: 'checkpoint', body: body as unknown as Record<string, unknown>, keyId, signature });
     } catch (err) {
       this.options.logger.warn('AuditSealer: the checkpoint sink failed to take a checkpoint; it stays stored on the host', {
         sealed_object: body.sealed_object,

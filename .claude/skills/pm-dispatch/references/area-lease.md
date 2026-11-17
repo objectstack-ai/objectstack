@@ -11,6 +11,7 @@
 - 排空的区并入邻区,积压即再拆(「比如增加分区」),⛔ 不抬一容器 2 dev 的并行验证上限。
 - 租约表(区→路径→线程会话)住座位贴,任一列变或线程轮换即重写,为唯一记录。
 - L1 线程每 3 活跃区一条,新开名 `L1-a`、`L1-b`…,在跑留原名;`lanes/l2-review.md` 席规不及它。
+- 请 L1 审或 delta 发线程消息,只取区在 PR 评论宣布的定稿绿 head;信箱只留跨账号或跨项目。
 - ⛔ 不入区:大卡(`dispatch-runbook.md` 卡线程节)与队列值守(只照 `lanes/queue.md`,含其无席兜底)。
 
 ## 开席
@@ -49,7 +50,6 @@
 - 送审:≤50 行、只改文本或测试、`Clause-②: no` 且无他契约面 PR 由区照 `l1-review-checklist.md`
   自审落地,ACCEPT 点名自审;余者由 L1 线程 ACCEPT 读,先于 `contract-review.md` 不起第二个 agent。
 - 契约记录只欠 `contract-review.md` 四面,head 移动照其例外;同 patch-id 干净合 main 只保 ACCEPT。
-- L1 审核只取区在 PR 评论宣布定稿的绿 head;修后只 delta。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 照 `landing-operations.md` 自落,受拒报原文。
 - PASS 且全绿的非受管 PR 10 分钟内落地;挂前先查 PR 上已有落地评论,有即 ⛔ 不再挂。
 - 受管面与超 3,000 行 PR 区 ⛔ 不落,交席位;席位照 SKILL.md〈路径分叉〉①–④ 一笔交棒。
