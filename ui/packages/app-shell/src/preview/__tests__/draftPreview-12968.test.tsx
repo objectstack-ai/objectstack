@@ -17,6 +17,9 @@
  *  (c) CONTROL: outside draft preview the bar draws nothing.
  */
 import '@testing-library/jest-dom/vitest';
+// The draft bar reaches `import('@objectstack/lint')` (its publish
+// preflight); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
