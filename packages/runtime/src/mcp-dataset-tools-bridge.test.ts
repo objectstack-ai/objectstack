@@ -10,6 +10,9 @@
  * carries no dataset member); the executor is bound to the saved datasets of
  * the protocol's merged read, to the request's security probe and to the tool
  * layer's page cap; and every call runs as the request's own principal.
+ * Also pinned (its own describe below): an i18n service that resolves but
+ * whose `getLocales` / `getTranslations` throws, over the REAL executor, is a
+ * degraded read on both dataset tools (seat ruling A).
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -18,6 +21,7 @@ import { describe, it, expect, vi } from 'vitest';
 import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { buildMcpBridge, resolveMcpDatasetToolsService, type McpDatasetToolsService } from './domains/mcp.js';
+import { AnalyticsServicePlugin, type AnalyticsService } from '@objectstack/service-analytics';
 
 const EC = { userId: 'u1', tenantId: 'org_1', systemPermissions: [] };
 const SAVED = [{ name: 'sales_analysis', label: 'Sales analysis', object: 'crm_opportunity' }];
@@ -106,5 +110,86 @@ describe('[ADR-0149 D2] the MCP bridge\'s dataset members', () => {
         protocol.getMetaItems.mockRejectedValueOnce(new Error('metadata store down'));
         buildMcpBridge(deps, ctx, { datasetTools: analytics }).datasetToolDefinitions();
         await expect(bound[0].loadDatasets(EC)).rejects.toThrow('metadata store down');
+    });
+});
+
+/**
+ * [ADR-0149 D2] The HTTP door's dataset members when the request's i18n
+ * service RESOLVES but its reads throw — not the lookup that throws, which
+ * `metaTranslationSources` reads as none (text served untranslated).
+ * `translationBundleOf` calls `getLocales` and `getTranslations` unguarded, so
+ * the `/meta` list translation rejects with the i18n error, and `loadDatasets`
+ * leaves that rejection to throw. The executor is the REAL one (the analytics
+ * service `AnalyticsServicePlugin` registers, admission wired), so the answer
+ * is its degraded-read contract: `list_datasets` lists nothing, says `partial`
+ * and names the error; `query_dataset` refuses 503 `SERVICE_UNAVAILABLE`.
+ *
+ * Pinned on purpose under seat ruling A: the catalogue degrades and says so.
+ * A follow-up (B: serve the untranslated text on a translation fault, inside
+ * the shared translator) would flip these expectations deliberately, on both
+ * transports at once.
+ */
+describe('[ADR-0149 D2] the HTTP dataset tools when the i18n service resolves but its reads throw', () => {
+    /** The analytics service AnalyticsServicePlugin registers, so the executor is the platform's own. */
+    async function wiredAnalytics(): Promise<AnalyticsService> {
+        const registered: Record<string, unknown> = {};
+        const pluginCtx = {
+            getService: (name: string) => registered[name],
+            registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+            replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+            logger: { info() {}, warn() {}, error() {}, debug() {} },
+        };
+        await new AnalyticsServicePlugin().init(pluginCtx as never);
+        const analytics = registered.analytics as AnalyticsService;
+        expect(analytics.hasPluginWiredAdmission()).toBe(true);
+        return analytics;
+    }
+
+    /** A resolved i18n service whose `read` throws `message`; the other read answers a bundle. */
+    function i18nWhoseReadThrows(read: 'getLocales' | 'getTranslations', message: string) {
+        return {
+            getLocales: () => {
+                if (read === 'getLocales') throw new Error(message);
+                return ['zh-CN', 'en'];
+            },
+            getTranslations: (locale: string) => {
+                if (read === 'getTranslations') throw new Error(message);
+                return locale === 'zh-CN' ? { datasets: { sales_analysis: { label: '销售分析' } } } : {};
+            },
+            getDefaultLocale: () => 'zh-CN',
+        };
+    }
+
+    async function bridgeOverRealExecutor(read: 'getLocales' | 'getTranslations', message: string) {
+        const analytics = await wiredAnalytics();
+        const { ctx, deps } = harness({ analytics, i18n: i18nWhoseReadThrows(read, message) });
+        expect(await resolveMcpDatasetToolsService(deps, ctx)).toBe(analytics);
+        return buildMcpBridge(deps, ctx, { datasetTools: analytics });
+    }
+
+    const CASES = [
+        { read: 'getLocales' as const, message: 'locales exploded' },
+        { read: 'getTranslations' as const, message: 'bundle offline' },
+    ];
+
+    it.each(CASES)('$read throwing: list_datasets lists nothing, says partial and names the i18n error', async ({ read, message }) => {
+        const bridge = await bridgeOverRealExecutor(read, message);
+        const answer = await bridge.listDatasets!({});
+        expect(answer).toEqual({ datasets: [], partial: true, warning: expect.stringContaining(message) });
+        expect(answer.warning).toMatch(/^The dataset catalogue could not be read: /);
+    });
+
+    it.each(CASES)('$read throwing: query_dataset refuses 503 SERVICE_UNAVAILABLE, naming the failed read', async ({ read, message }) => {
+        const bridge = await bridgeOverRealExecutor(read, message);
+        const refused = await bridge
+            .queryDataset!({ datasetName: 'sales_analysis', selection: { measures: ['revenue'] } }, { maxRows: 10 })
+            .then(
+                () => undefined,
+                (e: unknown) => e as { code?: unknown; status?: unknown; message?: unknown },
+            );
+        expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+        // The failed read's own 503 (naming the i18n error), not the executor's
+        // "not available on this deployment" one.
+        expect(refused?.message).toContain(`the dataset read failed (${message})`);
     });
 });
