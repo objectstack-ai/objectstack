@@ -11,8 +11,13 @@
  * whose bundle is malformed was told the database was down.
  *
  * Driven through the real `POST /api/v1/marketplace/install-local` handler
- * under the `single` posture, where the D5e gate reads no body and 2c″ is the
- * first step to resolve the packages. The controls pin the rest of the
+ * under the `single` posture, where the D5e gate reads no body, over a runtime
+ * that predates the step-1c code judgements (`@objectstack/runtime` is mocked
+ * without `collectJobsWithoutBody` / `collectHooksWithoutBody`, as in
+ * `marketplace-install-local-composed-top-level-reads.test.ts`), so 2c″ is the
+ * first step to resolve the packages. (A runtime that carries those
+ * judgements resolves the packages at step 1c first, and the resolver's
+ * refusal leaves the door as a throw.) The controls pin the rest of the
  * contract: a table that really could not be read still answers 503, and an
  * undeclared throw out of the resolver (its own dependency-cycle error) is
  * rethrown, never relabelled.
