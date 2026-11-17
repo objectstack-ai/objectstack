@@ -3226,7 +3226,7 @@ export function ChatPane({
         surfaceContextLabel={
           surfaceContext?.artifact
             ? t('console.ai.discussing', {
-                defaultValue: 'Discussing: {{target}}',
+                defaultValue: 'Viewing: {{target}}',
                 target:
                   surfaceArtifactLabel ||
                   `${surfaceContext.artifact.type} · ${surfaceContext.artifact.name}`,

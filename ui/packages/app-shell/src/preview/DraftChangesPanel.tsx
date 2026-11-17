@@ -1247,7 +1247,7 @@ function EntryDetail({
       data-testid="draft-entry-agent"
     >
       {source.by === 'copilot'
-        ? t('preview.changes.draftedByCopilot', { defaultValue: 'Includes changes drafted by the AI copilot' })
+        ? t('preview.changes.draftedByCopilot', { defaultValue: 'Includes changes drafted by the AI assistant' })
         : source.client
           ? t('preview.changes.draftedByMcpClient', {
               client: source.client,

@@ -388,7 +388,7 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
   // while the panel is hidden unfolds it on that node's configuration.
   it('a hidden slot unfolds on a selection, on the selected node’s configuration', async () => {
     await openFlow();
-    fireEvent.click(screen.getByTestId('studio-slot-toggle'));
+    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
     expect(slot()).not.toBeVisible();
     expect(window.sessionStorage.getItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY)).toBe('0');
 
@@ -396,7 +396,7 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
     await waitFor(() => expect(slot()).toBeVisible());
     expect(slot()).toHaveAttribute('data-mode', 'props');
     expect(within(slotProps()).getByLabelText('Node start')).toBeVisible();
-    expect(screen.getByTestId('studio-slot-toggle')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('topbar-ai-assistant')).toHaveAttribute('aria-pressed', 'true');
     expect(window.sessionStorage.getItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY)).toBe('1');
     expect(screen.queryByTestId('auto-config-drawer')).toBeNull();
   });
@@ -406,7 +406,7 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
     fireEvent.click(screen.getByTestId('pick-node'));
     await waitFor(() => expect(within(slotProps()).getByTestId('stub-flow-inspector')).toBeVisible());
 
-    fireEvent.click(screen.getByTestId('studio-slot-toggle'));
+    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
     await act(async () => {});
     expect(slot()).not.toBeVisible();
     // The same node again is no new selection.

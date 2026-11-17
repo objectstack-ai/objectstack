@@ -193,7 +193,7 @@ describe('Studio copilot chip reads the selected item label (objectui#8219 item 
   it('a labelled leaf: the chip reads the label, its title is type · name, and the agent data is unchanged', async () => {
     renderStudio();
     await screen.findByRole('button', { name: '客户仪表盘 仪表盘' });
-    await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在讨论：客户仪表盘'), { timeout: 4000 });
+    await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：客户仪表盘'), { timeout: 4000 });
     expect(chip.surfaceContextTitle).toBe('dashboard · b2r4_customer_dashboard');
     // The label is display-only: the agent still receives exactly the
     // URL-derived surface, and no label under any key.
@@ -210,7 +210,7 @@ describe('Studio copilot chip reads the selected item label (objectui#8219 item 
     renderStudio();
     // The rail row and the chip read the same inherited text.
     fireEvent.click(await screen.findByRole('button', { name: '客户 对象' }));
-    await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在讨论：客户'), {
+    await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：客户'), {
       timeout: 4000,
     });
     expect(chip.surfaceContextTitle).toBe('object · b2r4_customer');
