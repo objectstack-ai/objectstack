@@ -24,6 +24,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
@@ -138,12 +142,12 @@ describe("Setup's sharing-model chip reads through the catalogue (objectstack#29
   it('zh names the sharing model in Chinese, with no bare OWD', async () => {
     mount('zh', 'setup');
     const chip = await screen.findByText(/^记录共享模型：/u, undefined, { timeout: 8000 });
-    expect(chip.textContent).toBe('记录共享模型：私有（默认）');
+    expect(chip.textContent).toBe('记录共享模型：只有负责人能看（默认）');
     expect(chip.textContent).not.toMatch(/OWD/u);
   });
 
   it('CONTROL — en keeps "OWD {value}"', async () => {
     mount('en', 'setup');
-    expect(await screen.findByText('OWD Private (default)')).toBeInTheDocument();
+    expect(await screen.findByText('OWD Only the owner can see (default)')).toBeInTheDocument();
   });
 });

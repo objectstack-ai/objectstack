@@ -28,6 +28,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import { CubeSchema, type Cube } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { AnalyticsService } from '../analytics-service.js';
 import { AnalyticsServicePlugin } from '../plugin.js';
 
@@ -197,6 +198,21 @@ describe('[#20917] analytics — the field-level read gate at the door', () => {
       expect(executed.length).toBeGreaterThan(0);
       expect(getReadableFields.mock.calls.map((c) => c[0]).sort()).toEqual([LEDGER, OWNER]);
       for (const call of getReadableFields.mock.calls) expect(call[1]).toBe(CALLER);
+    });
+
+    it("[#34699] a predicate refusal carries the user's half in the caller's language; an aggregate refusal marks none", async () => {
+      const { service } = makeService({ capabilities, getReadableFields: readable });
+      const zh = { ...CALLER, locale: 'zh-CN' } as ExecutionContext;
+      const predicate = await service
+        .query({ cube: LEDGER, measures: ['count'], where: { hidden_text: 'x1' } } as never, zh)
+        .then(() => null, (e: unknown) => e as Record<string, unknown>);
+      expect(predicate).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(predicate?.userMessage).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].query_field_not_readable);
+      const aggregate = await service
+        .query({ cube: LEDGER, measures: ['count'], dimensions: ['hidden_text'] } as never, zh)
+        .then(() => null, (e: unknown) => e as Record<string, unknown>);
+      expect(String(aggregate?.message)).toBe(aggregateSentence(LEDGER, ['hidden_text']));
+      expect(aggregate?.userMessage).toBeUndefined();
     });
 
     it('a query naming no field asks the reader nothing', async () => {

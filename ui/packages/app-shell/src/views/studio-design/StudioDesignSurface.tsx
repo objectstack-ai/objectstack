@@ -18,6 +18,7 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams, useLocation, Link, Navigate } from 'react-router-dom';
 import { useAdapter, SchemaRendererProvider, useMetadata } from '@object-ui/react';
+import { leadWithNameField } from '@object-ui/core';
 // The ONE draft-envelope reader (objectui#8181): unwrap AND strip the
 // framework's read decorations in one place. This file used to carry its own
 // copy that did the unwrap and skipped the strip.
@@ -417,6 +418,7 @@ import {
 import { readAuthoredDraft } from './authoredDraft.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 import { AddFieldPopover } from './AddFieldPopover.js';
+import { StudioGridAddFieldButton, StudioGridAddFieldProvider, type StudioGridAddFieldValue } from './StudioGridAddField.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
@@ -1936,6 +1938,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onDirtyChange={setPillarDirty}
+                packageLabel={pkgEntry?.id === packageId ? pkgEntry.name : undefined}
               />
             ) : (
               // objectui#11203 / objectui#11232 — keyed by package. A package
@@ -5466,6 +5469,10 @@ export function renderStudioGridList(props: {
       onEdit={onEdit}
       onAddRecord={onAddRecord}
       className={className}
+      // objectstack#34794 — the Records tab's always-visible Add field, at the
+      // start of this toolbar row; it draws only where the grid's "+" column
+      // does (see `StudioGridAddFieldButton`).
+      toolbarLeading={<StudioGridAddFieldButton />}
     />
   );
 }
@@ -6331,13 +6338,28 @@ export function DataPillar({
    * a PRODUCER-side fix; ListView's by-identity dependency is correct for a genuine
    * column change and is left alone.
    */
+  const draftNameField = shownDraft.nameField;
+  const draftDisplayNameField = shownDraft.displayNameField;
   const gridColumnsComputed = React.useMemo(() => {
-    // objectstack#29793 — the served object's columns the buffer does not
-    // declare (`owner_id` and the other injected ones) lead, as they lead the
-    // served object: the grid shows the records as the server has them.
+    // objectstack#29793 — the grid also shows the served object's columns the
+    // buffer does not declare (`owner_id` and the other injected ones).
+    // objectstack#34794 — they follow the author's fields, and the object's
+    // name field leads: the design grid opens on the column that tells its
+    // rows apart. The lead is the ADR-0079 D4 order through the shared
+    // `leadWithNameField`, over the fields this memo already holds. This is
+    // the design grid's default only; runtime list views keep their order.
     const held = readFields(shownDraft.fields).entries;
     const heldNames = new Set(held.map((e) => e.name));
-    return [...servedOnly.filter((e) => !heldNames.has(e.name)), ...held]
+    const all = [...held, ...servedOnly.filter((e) => !heldNames.has(e.name))];
+    // Only the declared pointer keys and the fields reach the helper, so the
+    // memo stays keyed on them rather than on the whole draft (see above).
+    const ordered = leadWithNameField(
+      { nameField: draftNameField, displayNameField: draftDisplayNameField, fields: Object.fromEntries(all.map((e) => [e.name, e.def])) },
+      all.map((e) => e.name),
+    );
+    const byName = new Map(all.map((e) => [e.name, e]));
+    return ordered
+        .map((n) => byName.get(n)!)
         // objectui#11780 — a column the platform injects AND hides (`__search`,
         // `owning_business_unit_id`) is no column an author manages. Read off
         // the definition this memo already holds, so the key stays
@@ -6358,7 +6380,7 @@ export function DataPillar({
         // inspector, which is where it gets configured; it joins the grid once
         // it is published and therefore queryable.
         .filter((n) => publishedFieldNames.has(n));
-  }, [shownDraft.fields, publishedFieldNames, servedOnly]);
+  }, [shownDraft.fields, draftNameField, draftDisplayNameField, publishedFieldNames, servedOnly]);
   // objectstack#28575 — with a base object's extension open, the folded object
   // (`shownDraft`) is rebuilt on every extension edit, so a label typed into an
   // extension field would hand the grid a fresh columns array per keystroke:
@@ -6921,6 +6943,13 @@ export function DataPillar({
   // take focus back when the popover closes.
   const [gridAddFieldOpen, setGridAddFieldOpen] = React.useState(false);
   const gridAddFieldButton = React.useRef<HTMLElement | null>(null);
+  // Scopes the selected-header outline rule to this records body.
+  const recordsColumnsScope = React.useId();
+  // objectstack#34794 — what the Records toolbar's Add field creates with.
+  const gridAddFieldCreate = React.useMemo<StudioGridAddFieldValue>(
+    () => ({ onCreate: addField, takenNames: addFieldTakenNames, extensionField: extendsBase }),
+    [addField, addFieldTakenNames, extendsBase],
+  );
 
   // Drag-reorder columns → reorder the object's `fields` metadata (field display
   // order follows metadata order), saved as a DRAFT. Published later via the
@@ -7321,8 +7350,10 @@ export function DataPillar({
             }
             icon={current ? HeaderIcon : undefined}
             title={current ? current.label : t('engine.studio.data.objects', locale)}
-            titleProps={current ? undefined : { className: 'text-[13px] font-normal text-muted-foreground' }}
-            apiName={current?.name}
+            // objectstack#34794 — the object's machine name is the title's
+            // tooltip, not a chip beside it: the header reads as the label
+            // the app shows, and the name stays one hover away.
+            titleProps={current ? { title: current.name } : { className: 'text-[13px] font-normal text-muted-foreground' }}
             chips={current?.addedIn ? <StudioPairItemChip pairId={current.addedIn} locale={locale} /> : undefined}
             meta={current && objLoaded ? fieldCountText : undefined}
             status={objDraftStatus}
@@ -7366,9 +7397,10 @@ export function DataPillar({
                 {/* objectui#12511 — the header holds no actions of its own, so
                     it reads the same on every tab. Object settings retired: the
                     Settings tab is that control. Add field is a field action,
-                    offered where fields are laid out: the Form toolbar and the
-                    Records grid's own "+" column, both opening the Add field
-                    popover that runs `addField` (objectui#12516). The
+                    offered where fields are laid out: the Form toolbar, the
+                    Records toolbar (objectstack#34794) and the Records grid's
+                    own "+" column, all opening the Add field popover that
+                    runs `addField` (objectui#12516). The
                     More menu went with it, since the header has no object-level
                     action left to put in one. */}
                 {/* objectui#12453 — on the Form tab it carries the layout's
@@ -7611,14 +7643,38 @@ export function DataPillar({
               <div
                 className="relative min-h-0 flex-1 overflow-auto bg-background"
                 data-testid="data-records-body"
+                data-records-columns={recordsColumnsScope}
                 onClickCapture={(e) => {
                   // React carries a click inside the (portalled) popover here
                   // too; only a click in the body's own DOM is the grid's.
-                  if (e.target instanceof Element && e.currentTarget.contains(e.target)) {
-                    gridAddFieldButton.current = e.target.closest('button');
-                  }
+                  if (!(e.target instanceof Element) || !e.currentTarget.contains(e.target)) return;
+                  gridAddFieldButton.current = e.target.closest('button');
+                  // objectstack#34794 — a click on a field's column header
+                  // selects that field and opens its properties, as the
+                  // Interfaces canvas does (objectui#12725's
+                  // `ColumnHeaderSelect`): taken in the capture phase, before
+                  // the header's own sort handler. Sort and hide stay in the
+                  // header's column menu (`columnMenuLabel` below). A control
+                  // inside the header (the menu caret, the edit button) keeps
+                  // its job, and a column the buffer does not declare (an
+                  // injected one) keeps the grid's own click.
+                  const header = e.target.closest('thead th[data-column-key]');
+                  if (!header || !e.currentTarget.contains(header)) return;
+                  const control = e.target.closest('button, input, a, [role="checkbox"]');
+                  if (control && header.contains(control)) return;
+                  const field = header.getAttribute('data-column-key');
+                  if (!field || !readFields(shownDraft.fields).entries.some((en) => en.name === field)) return;
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setFieldSel({ kind: 'field', id: field });
                 }}
               >
+                {fieldSel?.kind === 'field' ? (
+                  // The selected field's header is outlined, as the Interfaces
+                  // canvas outlines its selected column: a style rule, since
+                  // the grid owns its cells and redraws them.
+                  <style>{`[data-records-columns="${recordsColumnsScope}"] thead th[data-column-key=${JSON.stringify(fieldSel.id)}]{box-shadow:inset 0 0 0 2px hsl(var(--primary));}`}</style>
+                ) : null}
                 {canAddFields && (
                   <AddFieldPopover
                     open={gridAddFieldOpen}
@@ -7644,6 +7700,7 @@ export function DataPillar({
                           addColumnLabel: t('engine.studio.data.addField', locale),
                         }
                       : {}),
+                    columnMenuLabel: t('engine.studio.data.columnMenu', locale),
                     onEditColumn: (fieldName) => {
                       // ignore non-field columns (e.g. the row-actions column)
                       if (readFields(shownDraft.fields).entries.some((e) => e.name === fieldName)) {
@@ -7655,6 +7712,7 @@ export function DataPillar({
                     ...(agentColumnMarks ? { columnMarks: agentColumnMarks } : {}),
                   }}
                 >
+                  <StudioGridAddFieldProvider value={canAddFields ? gridAddFieldCreate : null}>
                   {/* Provide the adapter as the dataSource context so the object-grid's
                     * inline-edit save can write back: the ListView only fetches and
                     * passes data inline, leaving the grid itself without a write dataSource. */}
@@ -7687,6 +7745,7 @@ export function DataPillar({
                       renderListView={renderStudioGridList}
                     />
                   </SchemaRendererProvider>
+                  </StudioGridAddFieldProvider>
                 </GridFieldAuthoringProvider>
               </div>
               </>
@@ -9971,6 +10030,7 @@ export function AccessPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onDirtyChange,
+  packageLabel,
 }: {
   packageId: string;
   publishNonce?: number;
@@ -9985,6 +10045,8 @@ export function AccessPillar({
    * beforeunload). Reports `false` when the pillar unmounts, same contract as
    * PermissionMatrixEditPage's own onDirtyChange. */
   onDirtyChange?: (dirty: boolean) => void;
+  /** objectstack#34795 — the open app's name: the open set's title reads "app · set". */
+  packageLabel?: string;
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -10717,23 +10779,27 @@ export function AccessPillar({
                 if (isMobile) setRailOpen(false);
               }}
               icon={<Shield className="h-4 w-4 shrink-0 text-muted-foreground" />}
-              // objectui#12456 — two-line rows (label, then the api name in
-              // mono) at 36 px: the one height the shared rail lets differ.
-              className="h-9"
               trailing={
                 <>
                   <RailCustomizationMark row={{ type: 'permission', ...p }} marks={railMarks} locale={locale} />
                   {p.isDefault ? (
-                    <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60">default</span>
+                    <span className="text-[10px] text-muted-foreground/70">{t('perm.badge.default', locale)}</span>
                   ) : null}
                 </>
               }
             >
-              {/* objectui#11862 — the set's label first, its machine name as
-                  secondary text. A set listed from its draft header alone
-                  has no label in hand (the header carries none), so its
-                  name is the text, as before. */}
-              <StudioNameLabel label={p.label} name={p.name} />
+              {/* objectui#11862 — the set's label. objectstack#34795: the
+                  machine name is no longer drawn as secondary text; it is the
+                  row's tooltip. A set listed from its draft header alone has
+                  no label in hand (the header carries none), so its name is
+                  the text, as before. */}
+              <span
+                className="flex min-w-0 flex-1"
+                title={p.label.trim() && p.label !== p.name ? p.name : undefined}
+                data-testid={`access-rail-set-${p.name}`}
+              >
+                <StudioNameLabel label={p.label.trim() ? p.label : p.name} />
+              </span>
             </StudioRailRow>
           ))}
         </StudioRail>
@@ -10785,6 +10851,7 @@ export function AccessPillar({
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,
+                appLabel: packageLabel || undefined,
                 onCloneSourceRead,
                 leading: accessRailToggleEl,
                 chips: currentAddedIn ? (

@@ -465,6 +465,17 @@ function appOfModule(row: PackageListRow, apps: ReadonlyMap<string, PackageListR
   return parents.length === 1 ? parents[0] : null;
 }
 
+/**
+ * The DOM id of a module line in the Installed Apps table: its app's toggle
+ * lists these ids in `aria-controls` while the modules are shown. `base` is the
+ * page's `React.useId()`, so a second mounted page never repeats one; the row id
+ * is percent-encoded, so the id holds no whitespace and stays one token of the
+ * space-separated IDREF list.
+ */
+function moduleRowDomId(base: string, rowId: string): string {
+  return `${base}pkg-module-${encodeURIComponent(rowId)}`;
+}
+
 /** Fold each module row under its app ({@link appOfModule}), keeping the rows' order. */
 function groupInstalledApps(rows: readonly PackageListRow[]): InstalledAppGroup[] {
   const apps = new Map<string, PackageListRow>();
@@ -1818,6 +1829,7 @@ export function PackagesPage() {
       .filter((g): g is InstalledAppGroup & { matchedModules: boolean } => g !== null);
   }, [installedAppsView, rows, query]);
   const [expandedApps, setExpandedApps] = React.useState<ReadonlySet<string>>(() => new Set());
+  const moduleIdBase = React.useId();
   const toggleApp = (id: string) =>
     setExpandedApps((prev) => {
       const next = new Set(prev);
@@ -2128,6 +2140,7 @@ export function PackagesPage() {
                       key={rowId}
                       className={cn(p ? 'cursor-pointer' : undefined, module ? 'bg-muted/30' : undefined)}
                       onClick={p ? () => openDetail(p) : undefined}
+                      id={module ? moduleRowDomId(moduleIdBase, rowId) : undefined}
                       data-testid={`pkg-row-${rowId}`}
                       data-module-of={module ? row.id : undefined}
                     >
@@ -2139,7 +2152,11 @@ export function PackagesPage() {
                               size="icon"
                               className="h-6 w-6 shrink-0"
                               aria-expanded={open}
-                              aria-controls={`pkg-modules-${rowId}`}
+                              // The module lines it shows and hides: named only while
+                              // they are drawn, since a collapsed group renders none.
+                              aria-controls={
+                                open ? modules.map((m) => moduleRowDomId(moduleIdBase, m.id)).join(' ') : undefined
+                              }
                               aria-label={
                                 open
                                   ? tFormat('engine.packages.installedApps.hideModules', locale, { name: p?.manifest.name || rowId })

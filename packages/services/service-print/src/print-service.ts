@@ -411,10 +411,10 @@ export class PrintService implements IPrintService {
     } catch (err) {
       // A read the caller is refused answers exactly as a record that does not
       // exist: never a 403 that tells the two apart.
-      if ((err as { status?: unknown })?.status === 403) throw recordNotFoundError(req.object, req.recordId);
+      if ((err as { status?: unknown })?.status === 403) throw recordNotFoundError(req.object, req.recordId, context);
       throw err;
     }
-    if (!row) throw recordNotFoundError(req.object, req.recordId);
+    if (!row) throw recordNotFoundError(req.object, req.recordId, context);
   }
 
   private refuseUnlessFilesEnabled(engine: PrintEngine, object: string): void {

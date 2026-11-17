@@ -439,7 +439,9 @@
         "!.turbo/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
-        "$TURBO_ROOT$/ui/apps/console/src/pages/developer/objectstack-skill.ts"
+        "$TURBO_ROOT$/ui/apps/console/src/pages/developer/objectstack-skill.ts",
+        "$TURBO_ROOT$/skills/objectstack-ask/SKILL.md",
+        "$TURBO_ROOT$/scripts/gen-mcp-ask-skill.mjs"
       ]
     },
     "@objectstack/runtime#test": {
