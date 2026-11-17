@@ -96,6 +96,7 @@ function payload(userId: string, systemPermissions: string[] | undefined): MePer
     tenantId: 'org_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     ...(systemPermissions !== undefined ? { systemPermissions } : {}),
     objects: { account: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false } },
