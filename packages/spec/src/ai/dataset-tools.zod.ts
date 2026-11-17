@@ -17,10 +17,12 @@ import { AnalyticsResultResponseSchema, DatasetSelectionSchema } from '../api/an
  * through dashboards and reports: `list_datasets` returns the catalogue (the
  * datasets the caller may query, their dimensions and measures, each member's
  * business vocabulary, which of the caller's words matched which member, and,
- * for a word that matched nothing, the members offered as `candidates`),
+ * for a word that matched nothing, the members offered as `candidates`; with
+ * them `nextStep`, which case of the selection rule those words are in),
  * and `query_dataset` runs a `DatasetSelection` against one saved dataset and
  * answers rows plus a `provenance` block naming the dataset and the measures
- * used. The shapes are declared here once and projected to the JSON Schema an
+ * used, with `sourceLine`, that source as one finished line. The shapes are
+ * declared here once and projected to the JSON Schema an
  * `AIToolDefinition` carries ({@link getDatasetToolJsonSchemas}), so the MCP
  * registration and the product AI's registration read one definition.
  *
@@ -39,6 +41,9 @@ import { AnalyticsResultResponseSchema, DatasetSelectionSchema } from '../api/an
  * `data:read` to `@objectstack/mcp` (card #31590). The tool descriptions, which
  * carry the ADR-0149 D3 selection rule to the model, are written by the
  * executor: AI guidance text does not enter the spec (ADR-0149 M1, ruled A).
+ * The two sentences an answer carries, `nextStep.note` and `sourceLine`, are
+ * the executor's in the same way (card #34919): the spec declares a string
+ * slot for each and fixes no wording (the amendment note under M1).
  */
 
 /** The `list_datasets` tool name, in the `list_objects` family's spelling. */
@@ -142,6 +147,79 @@ export const DatasetTermCandidateSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * Which case of the ADR-0149 D3 selection rule a term is in: the `decision`
+ * of {@link DatasetNextStepSchema}.
+ *
+ * D3 selects a MEASURE, so the values count measures. A term that equals a
+ * dimension and no measure is in `no_measure`: a grouping is not a number
+ * (rule 5).
+ *
+ * - `one_measure`: the term equals exactly one measure (rule 2).
+ * - `several_measures`: it equals more than one measure, in one dataset or in
+ *   several (rule 3).
+ * - `candidates_only`: it matched no member and has entries in `candidates`
+ *   (the amendment note under the rules).
+ * - `no_measure`: it equals no measure and has no entry in `candidates`
+ *   (rule 4).
+ *
+ * The set is closed: a value outside it does not parse, and a fifth case is a
+ * change to this enum, never a free string.
+ *
+ * Each value names what the platform FOUND, in the words of the members it
+ * found it in, and none names what a reader then does. What follows from a
+ * case is D3's to say, and the text that carries it to a model is the
+ * executor's (M1). Were the rule for a case re-ruled (M2 names its own
+ * revisits), the four findings would still be these four.
+ */
+export const DatasetNextStepDecision = z.enum(['one_measure', 'several_measures', 'candidates_only', 'no_measure']);
+
+/**
+ * `list_datasets`' reading of the caller's terms under the ADR-0149 D3
+ * selection rule: {@link ListDatasetsOutputSchema}'s `nextStep` (ADR-0149 M1,
+ * the amendment note under it).
+ *
+ * Three members: the case (`decision`), the terms it is about (`terms`) and
+ * the case in words (`note`).
+ *
+ * It holds NO member list. The members a decision rests on are already in the
+ * answer: a match is an entry of a dataset's `matches`
+ * ({@link DatasetTermMatchSchema}), a candidate is an entry of `candidates`
+ * ({@link DatasetTermCandidateSchema}), and both carry the caller's `term`.
+ * `terms` is that same key, so the reference is by term and no
+ * `{ dataset, member }` pointer is declared a second time: an answer has one
+ * list of candidates, and `nextStep` holds no second one that could disagree
+ * with it.
+ *
+ * The caller's terms can be in different cases (one equals a measure, another
+ * has only candidates). Which case one answer reports is the executor's rule;
+ * the shape says which terms the reported case is about.
+ *
+ * What a schema cannot refuse is the executor's to hold, as it is for
+ * `candidates`: that `decision` is the case the named terms are in, and that
+ * every term named was sent.
+ */
+export const DatasetNextStepSchema = lazySchema(() => z.object({
+  decision: DatasetNextStepDecision.describe(
+    'Which case of the ADR-0149 D3 selection rule each term in `terms` is in, computed by the platform from this '
+    + 'answer\'s `matches` and `candidates`. `one_measure`: the term equals exactly one measure. '
+    + '`several_measures`: it equals more than one measure, in one dataset or in several. `candidates_only`: it '
+    + 'matched no member and has entries in `candidates`. `no_measure`: it equals no measure and has no entry in '
+    + '`candidates`. A dimension the term equals is not counted',
+  ),
+  terms: z.array(z.string()).min(1).describe(
+    'The caller\'s terms the decision is about, each as sent in `terms`. This is the reference to the members the '
+    + 'decision rests on, which `nextStep` does not list: they are the entries carrying one of these terms in the '
+    + 'same answer, in a dataset\'s `matches` (those whose `member` is a measure) for `one_measure` and '
+    + '`several_measures`, and in `candidates` for `candidates_only`. `no_measure` rests on no member',
+  ),
+  note: z.string().min(1).describe(
+    'The decision in words: finished text in the caller\'s locale, composed by the tool from this answer and never '
+    + 'typed by the model. The wording is the executor\'s; the schema declares the slot and fixes no text '
+    + '(ADR-0149 M1)',
+  ),
+}));
+
+/**
  * A dimension as the catalogue lists it.
  *
  * The three catalogue schemas carry `Tool` in their names because
@@ -234,6 +312,12 @@ export const ListDatasetsOutputSchema = lazySchema(() => z.object({
     + 'Present only when `terms` were sent and a term that matched nothing has a candidate; absent otherwise, '
     + 'never an empty list. A term with a match has no candidate',
   ),
+  nextStep: DatasetNextStepSchema.optional().describe(
+    'Which case of the ADR-0149 D3 selection rule the caller\'s `terms` are in, as the platform computed it from '
+    + 'this answer\'s own `matches` and `candidates`: the case, the terms it is about and the case in words. It adds '
+    + 'no match and no candidate and lists no member: the members it rests on are read from `matches` and '
+    + '`candidates` under its `terms`. Present only when `terms` were sent',
+  ),
 }));
 
 // ==========================================
@@ -322,11 +406,22 @@ export const DatasetProvenanceSchema = lazySchema(() => z.object({
  * `AnalyticsResultResponseSchema`'s `data`, so a column property the REST door
  * gains reaches the tool without a second edit. `sql` is left out: the AI is
  * given no raw SQL (ADR-0021).
+ *
+ * `sourceLine` is declared in the `.extend` below, beside `provenance`: a
+ * member of the tool's answer only. `AnalyticsResultResponseSchema` is not
+ * edited, so the REST door's answer and every other reader of it are what
+ * they were.
  */
 export const QueryDatasetOutputSchema = lazySchema(() => AnalyticsResultResponseSchema.shape.data
   .omit({ sql: true })
   .extend({
     provenance: DatasetProvenanceSchema.describe('The dataset and members the answer was computed from'),
+    sourceLine: z.string().min(1).optional().describe(
+      'The answer\'s source as one finished line, in the caller\'s locale: composed by the tool from `provenance` '
+      + 'after the query ran, never typed by the model. `provenance` stays the structured source and this is the '
+      + 'same source in words. The wording is the executor\'s; the schema declares the slot and fixes no text '
+      + '(ADR-0149 M1). Absent when the tool composed none, never an empty string',
+    ),
     rowCount: z.number().int().nonnegative().describe('How many rows `rows` holds'),
     truncated: z.boolean().describe(
       '`true` when more rows existed past the row cap the tool applied and were not returned',
@@ -391,6 +486,8 @@ export type ListDatasetsInput = z.input<typeof ListDatasetsInputSchema>;
 export type DatasetTermMatchedOn = z.input<typeof DatasetTermMatchedOn>;
 export type DatasetTermMatch = z.input<typeof DatasetTermMatchSchema>;
 export type DatasetTermCandidate = z.input<typeof DatasetTermCandidateSchema>;
+export type DatasetNextStepDecision = z.input<typeof DatasetNextStepDecision>;
+export type DatasetNextStep = z.input<typeof DatasetNextStepSchema>;
 export type DatasetToolCatalogDimension = z.input<typeof DatasetToolCatalogDimensionSchema>;
 export type DatasetToolCatalogMeasure = z.input<typeof DatasetToolCatalogMeasureSchema>;
 export type DatasetToolCatalogEntry = z.input<typeof DatasetToolCatalogEntrySchema>;
