@@ -23,6 +23,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// Paid at collection, not inside a clocked case (check:test-source-alias):
+// the source under test loads `@objectstack/lint` lazily.
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Module scope as well as in the `vi.mock` factory below: the cold transform is paid

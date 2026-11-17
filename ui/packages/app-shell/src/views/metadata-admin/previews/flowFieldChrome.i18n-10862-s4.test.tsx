@@ -38,6 +38,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+// Paid at collection, not inside a clocked case (check:test-source-alias):
+// the source under test loads `@objectstack/lint` lazily.
+import '@objectstack/lint';
 import { render, cleanup, act, fireEvent, screen } from '@testing-library/react';
 import { I18nProvider, useObjectTranslation } from '@object-ui/i18n';
 
