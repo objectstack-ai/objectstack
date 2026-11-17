@@ -294,6 +294,8 @@ interface MePermissionsGrants {
     tabPermissions: Record<string, MePermissionsTabVisibility>;
     /** [#28508] See {@link organizationHasAnyQueue}. */
     hasAnyQueue: boolean;
+    /** [#34602] See {@link organizationObjectsUsingQueues}; narrowed to readable objects on this body. */
+    objectsUsingQueues: string[];
 }
 
 /**
@@ -309,7 +311,7 @@ interface MePermissionsGrants {
 function closedMePermissionsGrants(): MePermissionsGrants {
     return {
         positions: [], permissionSets: [], objects: {}, fields: {}, systemPermissions: [], tabPermissions: {},
-        hasAnyQueue: false,
+        hasAnyQueue: false, objectsUsingQueues: [],
     };
 }
 
@@ -317,7 +319,7 @@ function closedMePermissionsGrants(): MePermissionsGrants {
  * [#28508] The slice of the ownership-queue contract this handler reads: its
  * one "any queue at all?" answer.
  */
-type AnyQueueReader = Pick<IOwnershipQueueService, 'hasAnyQueue'>;
+type AnyQueueReader = Pick<IOwnershipQueueService, 'hasAnyQueue' | 'objectsUsingQueues'>;
 
 /**
  * [#28508] Does the caller's organization have at least one ownership queue,
@@ -391,6 +393,60 @@ async function organizationHasAnyQueue(
 }
 
 /**
+ * [#34602] The objects of the caller's organization on which the list's "in a
+ * queue" filter can find something: a record sits in a queue now, or an active
+ * assignment rule routes the object into a queue (the ownership-queue
+ * service's `objectsUsingQueues`). The console reads it once per session with
+ * `hasAnyQueue`, so the filter shows only where it can return a row.
+ *
+ * Asked only when `hasAnyQueue` is true: with no queue nothing can sit in one,
+ * and an organization without queues pays no read for this. Like
+ * {@link organizationHasAnyQueue} it never throws: no service, a service
+ * without the method, a throw, or an answer that is not a list of names ⇒
+ * `[]`, logged on a throw. A queue fault hides a toolbar filter; it must not
+ * cost the caller the permissions body.
+ *
+ * What it discloses is per object, never per queue: no queue name, no count.
+ * The full body narrows it to the objects the caller may read
+ * ({@link readableObjectsUsingQueues}).
+ */
+async function organizationObjectsUsingQueues(
+    ctx: CurrentUserEndpointsContext,
+    organizationId: string | null,
+    hasAnyQueue: boolean,
+): Promise<string[]> {
+    if (!hasAnyQueue) return [];
+    try {
+        const service = (() => {
+            try { return ctx.getService<Partial<AnyQueueReader>>(OWNERSHIP_QUEUE_SERVICE) ?? null; }
+            catch { return null; }
+        })();
+        const objectsUsingQueues = service?.objectsUsingQueues;
+        if (typeof objectsUsingQueues !== 'function') return [];
+        const answer: unknown = await objectsUsingQueues.call(service, organizationId);
+        if (!Array.isArray(answer)) return [];
+        return [...new Set(answer.filter((name): name is string => typeof name === 'string' && name !== ''))].sort();
+    } catch (err: any) {
+        ctx.logger?.warn?.('[hono] /auth/me/permissions: objectsUsingQueues could not be resolved — answering []', {
+            err: err?.message,
+        });
+        return [];
+    }
+}
+
+/**
+ * [#34602] The disclosure bound of `objectsUsingQueues` on a security-wired
+ * body: only objects the caller may read are named, so a member learns nothing
+ * about an object the served `objects` map already withholds from them.
+ */
+function readableObjectsUsingQueues(
+    names: readonly string[],
+    objects: Record<string, { allowRead?: unknown } | undefined>,
+): string[] {
+    return names.filter((name) => objects[name]?.allowRead === true);
+}
+
+/**
  * [#23047] The ONE builder of the authenticated `/auth/me/permissions` body on a
  * security-wired stack. The success path hands it the computed grants, the
  * handler's outer `catch` hands it {@link closedMePermissionsGrants}, so the two
@@ -417,6 +473,7 @@ function mePermissionsBody(
         systemPermissions: grants.systemPermissions,
         tabPermissions: grants.tabPermissions,
         hasAnyQueue: grants.hasAnyQueue,
+        objectsUsingQueues: grants.objectsUsingQueues,
     };
 }
 
@@ -1073,6 +1130,9 @@ export function registerCurrentUserEndpoints(
             // included: whether the organization has a queue does not depend on
             // SecurityPlugin. Never throws (see {@link organizationHasAnyQueue}).
             const hasAnyQueue = await organizationHasAnyQueue(ctx, identity.tenantId);
+            // [#34602] Same posture: asked on every authenticated branch, only
+            // when there is a queue at all, and never throws.
+            const objectsUsingQueues = await organizationObjectsUsingQueues(ctx, identity.tenantId, hasAnyQueue);
             if (!resolvePermissionSets || !metadata) {
                 // Auth resolved but security plugin isn't wired — emit
                 // an empty-but-authenticated body so the frontend can
@@ -1087,6 +1147,9 @@ export function registerCurrentUserEndpoints(
                     objects: {},
                     fields: {},
                     hasAnyQueue,
+                    // Not narrowed: this body serves no `objects` map to narrow
+                    // by, and the server enforces no object grant here either.
+                    objectsUsingQueues,
                 });
             }
             // [#7616] The caller's sets, resolved ONCE by the owner of the
@@ -1169,6 +1232,7 @@ export function registerCurrentUserEndpoints(
                 systemPermissions: Array.from(systemPermissions),
                 tabPermissions,
                 hasAnyQueue,
+                objectsUsingQueues: readableObjectsUsingQueues(objectsUsingQueues, objects as Record<string, { allowRead?: unknown } | undefined>),
             }) });
         } catch (err: any) {
             ctx.logger?.warn?.('[hono] /auth/me/permissions failed', { err: err?.message });

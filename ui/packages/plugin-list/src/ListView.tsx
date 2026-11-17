@@ -1073,6 +1073,16 @@ export function objectHasOwnershipQueue(objectDef: unknown): boolean {
 }
 
 /**
+ * Does the session's per-object queue answer name this object? `objectsUsingQueues`
+ * is the server's list (objectstack#34602): the objects on which a record sits
+ * in a queue now, or an assignment rule routes new records into one. Only
+ * membership in a present list counts; an absent answer is not a yes.
+ */
+export function objectUsesQueues(objectsUsingQueues: readonly string[] | undefined, objectName: unknown): boolean {
+  return Array.isArray(objectsUsingQueues) && typeof objectName === 'string' && objectsUsingQueues.includes(objectName);
+}
+
+/**
  * What `ListView` applies in place of a held user filter it withholds
  * (`appliedFilters` / `appliedUserFilterConditions`, objectui#10512). Module
  * constants, so every render hands the fetch effect the same identity.
@@ -2574,15 +2584,21 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // The "In a queue" toggle (objectstack ADR-0142 D3). Offered only on an
   // object the server serves with its injected `queue` column, AND only when
   // the session says the organization has at least one queue (`hasAnyQueue`
-  // on `/auth/me/permissions`, objectstack#28428): with no queue the toggle
-  // could only ever return an empty list. The flag rides the permissions
-  // answer the console already holds, so a list mount reads no queue list.
-  // An unknown answer (no provider, the role-based one, anonymous) hides it.
+  // on `/auth/me/permissions`, objectstack#28428) AND names this object among
+  // those that use queues (`objectsUsingQueues`, objectstack#34602: a record
+  // of it sits in a queue now, or an assignment rule routes it into one):
+  // anywhere else the toggle could only ever return an empty list. Both ride
+  // the permissions answer the console already holds, so a list mount reads
+  // no queue list. An unknown answer (no provider, the role-based one,
+  // anonymous) hides it.
   // Withheld with the user filters on a dataset-bound chart. Ephemeral like
   // the toolbar's other unpersisted toggles: it narrows what is on screen.
   const [sittingInQueueOnly, setSittingInQueueOnly] = React.useState(false);
-  const { hasAnyQueue } = usePermissions();
-  const queueFilterOffered = hasAnyQueue === true && objectHasOwnershipQueue(objectDef);
+  const { hasAnyQueue, objectsUsingQueues } = usePermissions();
+  const queueFilterOffered =
+    hasAnyQueue === true
+    && objectUsesQueues(objectsUsingQueues, schema.objectName)
+    && objectHasOwnershipQueue(objectDef);
   const appliedQueueSittingConditions =
     queueFilterOffered && sittingInQueueOnly && !datasetChartOnScreen
       ? QUEUE_SITTING_CONDITIONS
