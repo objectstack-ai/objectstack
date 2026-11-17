@@ -2098,7 +2098,7 @@ export class UpdateFacet {
                        )
                      : undefined;
                    if (summaryFold) {
-                       summaryFold.setDependents(await loadSummaryFoldDependents(this, summaryFold.foldedSummaries(), opCtx.context, permissionResolution));
+                       summaryFold.setDependents(await loadSummaryFoldDependents(this, summaryFold.foldedSummaries(), opCtx.context));
                    }
                    const foldMaster = summaryFold && parentForRow ? resolveMasterDetailRelation(updateSchema as any)?.master : undefined;
                    for (const [i, row] of matchedRows.entries()) {
@@ -2365,34 +2365,56 @@ export class UpdateFacet {
  * roll-up). A rule reading `record.project.remaining` reads such a field, and
  * one by one it would read it over the roll-up the earlier rows moved.
  *
- * One read of the parents the fold reads (their stored rows, as SYSTEM, like
- * the base aggregates), and the formula plan's own permission map, one-hop
- * related rows and option labels, resolved ONCE over those rows: none of
- * them moves while the update is judged, only the roll-ups do. Each overlay
- * then evaluates the plan over the stored parent with the folded roll-ups in
- * place, synchronously, with the read path's own evaluator
+ * Read the way a by-id update's rule reads the parent: the values as SYSTEM
+ * (`resolvePredicateRelated` reads related rows under system authority). So
+ * the parents' stored rows, the plan's permission map (with the SYSTEM
+ * context's own permission resolution), its one-hop related rows and its
+ * option labels are all resolved under the SYSTEM context, ONCE over the
+ * stored parents: none of them moves while the update is judged, only the
+ * roll-ups do.
+ *
+ * Computed as one by one computes them, in two passes over each parent:
+ *
+ * 1. the stored computed fields, as the recompute's write computes them:
+ *    over the stored image (the row WITHOUT its formula fields, which a write's
+ *    image never carries, so a stored field reading a formula computes
+ *    `null` here as it does on every write), in their own plan order, with the
+ *    DECLARED option labels;
+ * 2. then the formulas, as the next read computes them: over that row with
+ *    the stored fields just computed, in the read plan's order, with the
+ *    option labels the SYSTEM read of the parent uses.
+ *
+ * Each pass runs synchronously, with the read path's own evaluator
  * ({@link applyFormulaPlan}). An object no such field reads a folded roll-up
  * of reads nothing.
  */
 async function loadSummaryFoldDependents(
-  host: Pick<UpdateHost, 'facade' | 'getSchema' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels'>,
+  host: Pick<UpdateHost, 'facade' | 'getSchema' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels'>,
   folded: Map<string, { fields: Set<string>; parentIds: Set<string> }>,
   context: Parameters<UpdateHost['resolveFormulaPermissions']>[3],
-  resolution: Parameters<UpdateHost['resolveFormulaPermissions']>[4],
 ): Promise<SummaryDependents> {
+  type Plan = ReturnType<typeof planStoredExpressions>;
   const served = new Map<string, {
-    plan: ReturnType<typeof planStoredExpressions>;
+    storedPlan: Plan;
+    formulaPlan: Plan;
+    formulaFields: string[];
     rows: Map<string, Record<string, unknown>>;
     permissions: Awaited<ReturnType<UpdateHost['resolveFormulaPermissions']>>;
     related: Awaited<ReturnType<UpdateHost['resolveFormulaRelated']>>;
-    optionLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+    storedLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+    formulaLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
   }>();
   const systemCtx = { ...(context ?? {}), isSystem: true } as typeof context;
+  const systemResolution = host.permissionResolution(systemCtx);
   for (const [object, { fields, parentIds }] of folded) {
     const schema = host.getSchema(object) as any;
     if (!schema) continue;
-    const plan = storedExpressionsReading([...planStoredExpressions(schema), ...planFormulaProjection(schema, undefined).plan], fields);
-    if (plan.length === 0 || parentIds.size === 0) continue;
+    const storedAll = planStoredExpressions(schema);
+    const formulaAll = planFormulaProjection(schema, undefined).plan;
+    const readers = new Set(storedExpressionsReading([...storedAll, ...formulaAll], fields));
+    const storedPlan = storedAll.filter((entry) => readers.has(entry));
+    const formulaPlan = formulaAll.filter((entry) => readers.has(entry));
+    if (storedPlan.length + formulaPlan.length === 0 || parentIds.size === 0) continue;
     const rows = new Map<string, Record<string, unknown>>();
     const ids = [...parentIds];
     for (let start = 0; start < ids.length; start += SUMMARY_GROUPED_AGGREGATE_CHUNK) {
@@ -2400,23 +2422,30 @@ async function loadSummaryFoldDependents(
       for (const row of found ?? []) if (row?.id != null) rows.set(String(row.id), row);
     }
     if (rows.size === 0) continue;
-    const stored = [...rows.values()];
+    const storedRows = [...rows.values()];
+    const plan = [...storedPlan, ...formulaPlan];
     served.set(object, {
-      plan,
+      storedPlan,
+      formulaPlan,
+      formulaFields: formulaAll.map((entry) => entry.name),
       rows,
-      permissions: await host.resolveFormulaPermissions(object, plan, stored, context, resolution),
-      related: await host.resolveFormulaRelated(schema, plan, stored, context),
-      optionLabels: host.formulaOptionLabels(schema, plan, context),
+      permissions: await host.resolveFormulaPermissions(object, plan, storedRows, systemCtx, systemResolution),
+      related: await host.resolveFormulaRelated(schema, plan, storedRows, systemCtx),
+      storedLabels: declaredOptionLabels(schema, storedPlan),
+      formulaLabels: host.formulaOptionLabels(schema, formulaPlan, systemCtx),
     });
   }
   return (object, parentId, moved) => {
     const entry = served.get(object);
     const stored = entry?.rows.get(parentId);
     if (!entry || !stored) return undefined;
+    // The write's image: the stored row, no formula on it, the folded roll-ups in place.
     const scratch: Record<string, unknown> = { ...stored, ...moved };
-    applyFormulaPlan(entry.plan, [scratch], context, entry.permissions, undefined, entry.related, entry.optionLabels);
+    for (const name of entry.formulaFields) delete scratch[name];
+    if (entry.storedPlan.length > 0) applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels);
+    if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels);
     const values: Record<string, unknown> = {};
-    for (const step of entry.plan) values[step.name] = scratch[step.name];
+    for (const step of [...entry.storedPlan, ...entry.formulaPlan]) values[step.name] = scratch[step.name];
     return values;
   };
 }

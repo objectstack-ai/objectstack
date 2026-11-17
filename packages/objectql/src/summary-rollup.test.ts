@@ -1423,8 +1423,20 @@ describe('[#34465] a predicate update judges each matched row against the parent
         // Calculated from a roll-up: on read (a formula) and on write (a stored computed field).
         remaining: { type: 'formula', expression: 'record.budget - record.total', returnType: 'number' },
         headroom: { type: 'number', expression: { dialect: 'cel', source: 'record.budget - record.total' } },
+        // A formula reading a lookup hop as well as the roll-up, and a stored computed field reading a formula.
+        cap_ref: { type: 'lookup', reference: 'inv_cap' },
+        cap_left: { type: 'formula', expression: 'record.cap_ref.amount - record.total', returnType: 'number' },
+        slack: { type: 'number', expression: { dialect: 'cel', source: 'record.remaining' } },
       },
     } as any);
+    engine.registry.registerObject({ name: 'inv_cap', fields: { amount: { type: 'number' } } } as any);
+    // Row-level security on the cap object: a caller that is not SYSTEM reads none of it.
+    engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      if (ctx.object === 'inv_cap' && ['find', 'findOne'].includes(ctx.operation) && !ctx.context?.isSystem) {
+        ctx.ast = { ...(ctx.ast ?? {}), where: { $and: [ctx.ast?.where ?? {}, { id: '__none__' }] } };
+      }
+      await next();
+    });
     engine.registry.registerObject({
       name: 'inv_line',
       fields: {
@@ -1444,6 +1456,9 @@ describe('[#34465] a predicate update judges each matched row against the parent
         // Rules reading a field calculated from a roll-up, not the roll-up itself.
         { name: 'remaining_floor', type: 'script', severity: 'error', message: 'invoice remaining below 0', condition: "record.tag == 'rem' && record.inv.remaining < 0" },
         { name: 'headroom_floor', type: 'script', severity: 'error', message: 'invoice headroom below 0', condition: "record.tag == 'head' && record.inv.headroom < 0" },
+        { name: 'cap_floor', type: 'script', severity: 'error', message: 'invoice cap left below 0', condition: "record.tag == 'capref' && record.inv.cap_left != null && record.inv.cap_left < 0" },
+        // A stored computed field reading a formula: what does the rule read for it?
+        { name: 'slack_set', type: 'script', severity: 'error', message: 'invoice slack is set', condition: "record.tag == 'slack' && record.inv.slack != null" },
       ],
     } as any);
     // CONTROL object: a roll-up of it exists, but no rule reads one.
@@ -1563,6 +1578,45 @@ describe('[#34465] a predicate update judges each matched row against the parent
     await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'rem' }, { inv: p.id, amount: 40, tag: 'rem' }]);
     expect(await engine.update('inv_line', { amount: 50 }, { where: { inv: p.id }, multi: true })).toBe(2);
     expect(inv(p.id).total).toBe(100);
+  });
+
+  // A caller that is not SYSTEM: it cannot read the cap object (the middleware above).
+  const CALLER = { userId: 'u_caller' } as any;
+
+  it('one by one (the reference answer), as a caller who cannot read the cap: a rule reading a formula over a lookup hop and the roll-up refuses the second line', async () => {
+    const cap = await engine.insert('inv_cap', { amount: 100 });
+    const p = await engine.insert('inv', { name: 'P', cap_ref: cap.id }, { context: { isSystem: true } });
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'capref' });
+    const b = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'capref' });
+    await engine.update('inv_line', { id: a.id, amount: 70 }, { context: CALLER });
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { id: b.id, amount: 70 }, { context: CALLER })), 'invoice cap left below 0');
+  });
+
+  it('predicate update, the same caller: the calculated field is computed as the by-id rule reads it (SYSTEM), so the second row is refused', async () => {
+    const cap = await engine.insert('inv_cap', { amount: 100 });
+    const p = await engine.insert('inv', { name: 'P', cap_ref: cap.id }, { context: { isSystem: true } });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'capref' }, { inv: p.id, amount: 40, tag: 'capref' }]);
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true, context: CALLER })), 'invoice cap left below 0');
+    expect(inv(p.id).total).toBe(80);
+  });
+
+  it('one by one (the reference answer): a stored computed field that reads a formula is computed over the write\'s image, which carries no formula, so it is null and the rule admits both', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 100 });
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'slack' });
+    const b = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'slack' });
+    expect(inv(p.id).slack).toBeNull();
+    await engine.update('inv_line', { id: a.id, amount: 70 });
+    expect(inv(p.id).slack).toBeNull();
+    await engine.update('inv_line', { id: b.id, amount: 70 });
+    expect(inv(p.id).total).toBe(140);
+  });
+
+  it('predicate update: the stored computed field is computed as the write computes it (over the image, before any formula), so both rows are admitted', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 100 });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'slack' }, { inv: p.id, amount: 40, tag: 'slack' }]);
+    // Computed over the parent as READ (its formula values on it), the field would carry a value and the rule refuse.
+    expect(await engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })).toBe(2);
+    expect(inv(p.id).total).toBe(140);
   });
 
   it('predicate update that reparents: the header a parent. predicate reads counts the rows moved before', async () => {
