@@ -34,6 +34,8 @@ function makeDriver() {
         case '$lte': return value <= target;
         case '$in': return Array.isArray(target) && target.includes(value);
         case '$nin': return Array.isArray(target) && !target.includes(value);
+        // [#34465] The engine widens a `$nin` to `{ $or: [{ x: { $null: true } }, { x: { $nin } }] }`.
+        case '$null': return target ? value == null : value != null;
         default: return true;
       }
     });
@@ -1379,5 +1381,189 @@ describe('[#34466] a multi-row insert accumulates its earlier rows into the pare
     expect(out.results!.map((r) => r.valid)).toEqual([true, true, false]);
     expect(out.results![2]!.errors.map((e) => ({ field: e.field, code: e.code }))).toEqual([{ field: 'description', code: 'required' }]);
     expect(lines(p.id)).toHaveLength(0);
+  });
+});
+
+// [#34465] A predicate update (`multi: true`) whose rules read a parent
+// roll-up answers the way consecutive by-id updates of the matched rows do
+// (「批量等于逐条」: ruling 6377847361 for inserts, ruling record 6928862195
+// for updateMany; this is the third door). The matched rows are all judged
+// before the one `updateMany`, and each is judged against the roll-up as the
+// rows judged before it move it: a base read in the database (every child as
+// stored for count / sum / avg, the children outside the matched set for
+// min / max), folded in memory with the matched rows.
+//
+// Reverse verification, predicted before running: drop the fold from the
+// validation loop and every "predicate update" refusal below goes green-to-red
+// (each row reads the roll-up as stored, so both rows are admitted); the
+// one-by-one references, the single-match case and the CONTROL stay green.
+describe('[#34465] a predicate update judges each matched row against the parent roll-ups the rows before it move', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let log: ReturnType<typeof makeDriver>['log'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    log = d.log;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        primaries: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'count', filter: { is_primary: true } } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'count' } },
+        total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        low: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'min' } },
+        mean: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'avg' } },
+        memo_total: { type: 'summary', summaryOperations: { object: 'memo_line', field: 'amount', function: 'sum' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        is_primary: { type: 'boolean' },
+        tag: { type: 'text' },
+        inv: { type: 'master_detail', reference: 'inv' },
+        // Class (ii): a field-level predicate reading a roll-up on `parent`.
+        note: { type: 'text', requiredWhen: 'parent.line_count >= 3' },
+      },
+      validations: [
+        // Class (i): rules reading roll-ups one hop through the reference.
+        { name: 'one_primary', type: 'script', severity: 'error', message: 'one primary per invoice', condition: 'record.is_primary == true && record.inv.primaries > 0' },
+        { name: 'total_cap', type: 'script', severity: 'error', message: 'invoice total over 100', condition: "record.tag == 'cap' && record.inv.total > 100" },
+        { name: 'mean_cap', type: 'script', severity: 'error', message: 'invoice mean over 50', condition: "record.tag == 'mean' && record.inv.mean != null && record.inv.mean > 50" },
+        { name: 'low_floor', type: 'script', severity: 'error', message: 'invoice low at 50 or more', condition: "record.tag == 'low' && record.inv.low != null && record.inv.low >= 50" },
+      ],
+    } as any);
+    // CONTROL object: a roll-up of it exists, but no rule reads one.
+    engine.registry.registerObject({
+      name: 'memo_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+      },
+      validations: [
+        { name: 'amount_cap', type: 'script', severity: 'error', message: 'amount over 1000', condition: 'record.amount > 1000' },
+      ],
+    } as any);
+  });
+
+  const inv = (id: string) => storeFor('inv').get(id);
+  const rows = (object: string, invId: string) => [...storeFor(object).values()].filter((r) => r.inv === invId);
+
+  async function refusalOf(write: Promise<unknown>): Promise<unknown> {
+    try { await write; } catch (err) { return err; }
+    throw new Error('expected the write to be refused');
+  }
+
+  function expectRuleRefusal(err: unknown, message: string): void {
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => f.message).join(' | ')).toContain(message);
+  }
+
+  it('one by one (the reference answer): the second line made primary is refused', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 1, is_primary: false });
+    const b = await engine.insert('inv_line', { inv: p.id, amount: 2, is_primary: false });
+    await engine.update('inv_line', { id: a.id, is_primary: true });
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { id: b.id, is_primary: true })), 'one primary per invoice');
+    expect(inv(p.id).primaries).toBe(1);
+  });
+
+  it('predicate update (count with a filter): refused as one by one refuses its second row, and nothing is written', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 1, is_primary: false }, { inv: p.id, amount: 2, is_primary: false }]);
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { is_primary: true }, { where: { inv: p.id }, multi: true })), 'one primary per invoice');
+    expect(rows('inv_line', p.id).map((r) => r.is_primary)).toEqual([false, false]);
+    expect(inv(p.id).primaries).toBe(0);
+  });
+
+  it('predicate update matching one row reads the roll-up as stored, as its one by-id update does', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 1, is_primary: false }, { inv: p.id, amount: 2, is_primary: false }]);
+    expect(await engine.update('inv_line', { is_primary: true }, { where: { inv: p.id, amount: 1 }, multi: true })).toBe(1);
+    expect(inv(p.id).primaries).toBe(1);
+  });
+
+  it('predicate update (sum): the second row reads the total the first row moves', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'cap' }, { inv: p.id, amount: 40, tag: 'cap' }]);
+    expect(inv(p.id).total).toBe(80);
+    // One by one: the first update reads 80 and is admitted (total 110); the second reads 110.
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })), 'invoice total over 100');
+    expect(inv(p.id).total).toBe(80);
+  });
+
+  it('predicate update (avg): the second row reads the mean the first row moves, rows outside the match included', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'mean' }, { inv: p.id, amount: 40, tag: 'mean' }, { inv: p.id, amount: 40, tag: 'other' }]);
+    // One by one: the first reads 40 (admitted, mean then 60); the second reads 60.
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 100 }, { where: { inv: p.id, tag: 'mean' }, multi: true })), 'invoice mean over 50');
+    expect(inv(p.id).mean).toBe(40);
+  });
+
+  it('predicate update (min): a matched row holding the extreme takes it with it', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 5, tag: 'low' }, { inv: p.id, amount: 60, tag: 'low' }, { inv: p.id, amount: 50, tag: 'other' }]);
+    expect(inv(p.id).low).toBe(5);
+    // One by one: the first reads 5 (admitted; min then 50, the row outside); the second reads 50.
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id, tag: 'low' }, multi: true })), 'invoice low at 50 or more');
+    expect(inv(p.id).low).toBe(5);
+  });
+
+  it('predicate update that reparents: the header a parent. predicate reads counts the rows moved before', async () => {
+    const from = await engine.insert('inv', { name: 'FROM' });
+    const to = await engine.insert('inv', { name: 'TO' });
+    await engine.insert('inv_line', [{ inv: from.id, amount: 1, tag: 'move' }, { inv: from.id, amount: 2, tag: 'move' }, { inv: from.id, amount: 3, tag: 'move' }]);
+    await engine.insert('inv_line', [{ inv: to.id, amount: 4 }]);
+    expect(inv(to.id).line_count).toBe(1);
+    // One by one: the moves land under 1, 2, then 3 lines; the third needs a note.
+    const err = await refusalOf(engine.update('inv_line', { inv: to.id }, { where: { tag: 'move' }, multi: true }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect((err as ValidationError).fields.map((f) => ({ field: f.field, code: f.code }))).toEqual([{ field: 'note', code: 'required' }]);
+    expect(rows('inv_line', from.id)).toHaveLength(3);
+    expect(inv(to.id).line_count).toBe(1);
+  });
+
+  it('predicate update that reparents, below the line: two lines move under a header holding none, the second reads 1', async () => {
+    const from = await engine.insert('inv', { name: 'FROM' });
+    const to = await engine.insert('inv', { name: 'TO' });
+    await engine.insert('inv_line', [{ inv: from.id, amount: 1 }, { inv: from.id, amount: 2 }, { inv: from.id, amount: 3 }]);
+    expect(inv(from.id).line_count).toBe(3);
+    // Each moved row lands under TO (0, then 1, then 2 lines): every one passes.
+    expect(await engine.update('inv_line', { inv: to.id }, { where: { inv: from.id }, multi: true })).toBe(3);
+    expect(inv(to.id).line_count).toBe(3);
+  });
+
+  it('CONTROL: an object whose rules read no roll-up reads nothing more before its write, and admits as before', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('memo_line', [{ inv: p.id, amount: 1 }, { inv: p.id, amount: 2 }]);
+    const real = engine.aggregate.bind(engine);
+    (engine as any).aggregate = async (object: string, query: any, options?: any) => { log.push({ op: 'find', object: `aggregate:${object}`, ast: query }); return real(object, query, options); };
+    const start = log.length;
+    expect(await engine.update('memo_line', { amount: 5 }, { where: { inv: p.id }, multi: true })).toBe(2);
+    const write = log.findIndex((e, i) => i >= start && e.op === 'updateMany');
+    expect(log.slice(start, write).filter((e) => e.object.startsWith('aggregate:'))).toEqual([]);
+    expect(inv(p.id).memo_total).toBe(10);
+  });
+
+  it('the subject reads its bases before the write: one grouped aggregate per roll-up a rule reads', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 1, tag: 'x' }, { inv: p.id, amount: 2, tag: 'x' }]);
+    const real = engine.aggregate.bind(engine);
+    (engine as any).aggregate = async (object: string, query: any, options?: any) => { log.push({ op: 'find', object: `aggregate:${object}`, ast: query }); return real(object, query, options); };
+    const start = log.length;
+    expect(await engine.update('inv_line', { amount: 3 }, { where: { inv: p.id }, multi: true })).toBe(2);
+    const write = log.findIndex((e, i) => i >= start && e.op === 'updateMany');
+    const before = log.slice(start, write).filter((e) => e.object === 'aggregate:inv_line');
+    // primaries, line_count, total, low, mean: every roll-up of inv_line a rule or predicate reads.
+    expect(before).toHaveLength(5);
+    expect(before.every((e) => Array.isArray(e.ast.groupBy) && e.ast.groupBy[0] === 'inv')).toBe(true);
   });
 });

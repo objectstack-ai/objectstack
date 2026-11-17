@@ -53,8 +53,9 @@
  * stored value they started from.
  */
 
-import type { SummaryDescriptor } from './summary-aggregate.js';
-import { summaryEmptySetValue } from './summary-aggregate.js';
+import type { SummaryAggregateEngine, SummaryDescriptor } from './summary-aggregate.js';
+import { SUMMARY_GROUPED_AGGREGATE_CHUNK, summaryEmptySetValue } from './summary-aggregate.js';
+import { ROLLUP_AGGREGATE_OPTION } from './record-currency-aggregate-door.js';
 import { declaredFieldClasses, declaredJsonStoredFields, matchesAggregationFilter } from './having-filter.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 
@@ -220,4 +221,341 @@ export function createBatchSummaryAccumulator(
   };
 
   return { accept, overlay, overlayRow };
+}
+
+/**
+ * [#34465] Batch equals one-by-one for a PREDICATE update (`multi: true`)
+ * whose rules read a parent roll-up — the third door of the family after the
+ * bulk insert above (ruling 6377847361, C) and `updateMany` (ruling record
+ * 6928862195, B), inheriting both (route A, recorded on the card).
+ *
+ * A predicate update judges every matched row before its one `updateMany`
+ * statement, against related rows and master-detail headers read ONCE for
+ * the batch, and recomputes the roll-ups once after it. One by one, the k-th
+ * update is judged while the rows before it already stand in their new state
+ * and the rest (the k-th included) in their stored one, with the roll-ups
+ * recomputed between. So for each roll-up a rule reads, this computes that
+ * value exactly:
+ *
+ * - a base read in the database ({@link loadPredicateUpdateSummaryBases}),
+ *   one grouped aggregate per read roll-up and chunk of parents. For `count`,
+ *   `sum` and `avg` (its sum and non-null count) the base is every child as
+ *   stored, the matched rows included; for `min` / `max` it is the children
+ *   OUTSIDE the matched set (`id` not in it), since an extreme cannot be
+ *   taken back out;
+ * - folded in memory with the matched rows: as row k is judged, every row
+ *   before it has left its stored contribution and taken the one the update
+ *   gives it.
+ *
+ * `count`, `sum`, `min`, `max` and `avg` are all exact, a reparent included
+ * (a row leaves one parent and joins another). The batch is still judged in
+ * full before the one statement, so it stays all-or-nothing. A roll-up whose
+ * value the fold cannot say exactly keeps reading the value the binding
+ * carries (the stored one, as before), the limits the insert arm names: a
+ * value that is not a number, and a `filter` naming a dotted path or one the
+ * in-memory walker refuses; and a `min` / `max` under a parent holding more
+ * than {@link MIN_MAX_EXCLUDED_ID_BUDGET} matched rows, whose exclusion
+ * would not fit one statement.
+ */
+
+/**
+ * The most matched ids one `min` / `max` base aggregate excludes (`id $nin`).
+ * Parents are packed so a statement names at most this many, plus at most
+ * {@link SUMMARY_GROUPED_AGGREGATE_CHUNK} parent ids: far below every
+ * dialect's bound-parameter limit (SQLite 32766, PostgreSQL 65535).
+ */
+export const MIN_MAX_EXCLUDED_ID_BUDGET = 5000;
+
+/** Whether a roll-up's base counts the matched rows as stored (else it leaves them out). */
+function baseHoldsMatched(fn: SummaryDescriptor['fn']): boolean {
+  return fn === 'count' || fn === 'sum' || fn === 'avg';
+}
+
+/** One matched row of a predicate update: as stored, and as the update leaves it. */
+export interface MatchedRowStates {
+  previous: Record<string, unknown>;
+  next: Record<string, unknown>;
+}
+
+/** One parent's base, as the database aggregates it (see {@link baseHoldsMatched}). */
+export interface SummaryBase {
+  count: number;
+  sum: number;
+  /** Rows whose source value is not null (an `avg`'s denominator). */
+  nonNull: number;
+  min: number | null;
+  max: number | null;
+}
+
+/** Descriptor → parent id → base. A descriptor absent from the map is not folded. */
+export type SummaryBases = Map<SummaryDescriptor, Map<string, SummaryBase>>;
+
+/** A database value as a finite number, or `undefined` when it is not one. */
+function finiteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Read, for each roll-up in `descriptors` and each parent the matched rows
+ * name (as stored or as left), its base: every child as stored for `count` /
+ * `sum` / `avg`, the children outside the matched set for `min` / `max`. A
+ * descriptor whose answer is not a number (a `min` over dates), or whose
+ * exclusion does not fit {@link MIN_MAX_EXCLUDED_ID_BUDGET}, is left out, and
+ * its roll-up is not folded.
+ */
+export async function loadPredicateUpdateSummaryBases(
+  engine: SummaryAggregateEngine,
+  descriptors: readonly SummaryDescriptor[],
+  matched: readonly MatchedRowStates[],
+  execCtx?: unknown,
+): Promise<SummaryBases> {
+  const bases: SummaryBases = new Map();
+  for (const desc of descriptors) {
+    if (filterNamesDottedPath(desc.filter)) continue;
+    if (desc.fn !== 'count' && desc.sourceField === undefined) continue;
+    const holdsMatched = baseHoldsMatched(desc.fn);
+    const parents = new Set<string>();
+    /** Parent id (as stored) → the matched ids the database still holds under it. */
+    const heldUnder = new Map<string, string[]>();
+    for (const { previous, next } of matched) {
+      const was = singleId(previous[desc.fkField]);
+      const now = singleId(next[desc.fkField]);
+      if (was !== undefined) parents.add(was);
+      if (now !== undefined) parents.add(now);
+      const id = singleId(previous.id);
+      if (!holdsMatched && was !== undefined && id !== undefined) {
+        const list = heldUnder.get(was) ?? [];
+        list.push(id);
+        heldUnder.set(was, list);
+      }
+    }
+    if (parents.size === 0) continue;
+    // Pack the parents into statements: at most one chunk of parent ids, and
+    // (min / max) at most the budget of excluded ids.
+    const statements: string[][] = [];
+    let current: string[] = [];
+    let excludedInCurrent = 0;
+    let fits = true;
+    for (const id of parents) {
+      const held = heldUnder.get(id)?.length ?? 0;
+      if (held > MIN_MAX_EXCLUDED_ID_BUDGET) { fits = false; break; }
+      if (current.length >= SUMMARY_GROUPED_AGGREGATE_CHUNK || excludedInCurrent + held > MIN_MAX_EXCLUDED_ID_BUDGET) {
+        statements.push(current);
+        current = [];
+        excludedInCurrent = 0;
+      }
+      current.push(id);
+      excludedInCurrent += held;
+    }
+    if (!fits) continue;
+    if (current.length > 0) statements.push(current);
+    const byParent = new Map<string, SummaryBase>();
+    // The aggregate's aliases must not be the group key's name.
+    const alias = desc.fkField === 'value' ? 'summary_value' : 'value';
+    const countAlias = desc.fkField === 'value_count' ? 'summary_value_count' : 'value_count';
+    let numeric = true;
+    for (const chunk of statements) {
+      if (!numeric) break;
+      const excluded = chunk.flatMap((id) => heldUnder.get(id) ?? []);
+      const clauses: Record<string, unknown>[] = [{ [desc.fkField]: { $in: chunk } }];
+      if (excluded.length > 0) clauses.push({ id: { $nin: excluded } });
+      if (desc.filter) clauses.push(desc.filter);
+      if (desc.fn === 'avg') clauses.push({ [desc.sourceField!]: { $ne: null } });
+      const aggregations = desc.fn === 'avg'
+        ? [{ function: 'sum', field: desc.sourceField, alias }, { function: 'count', alias: countAlias }]
+        : [{ function: desc.fn, ...(desc.fn === 'count' ? {} : { field: desc.sourceField }), alias }];
+      const rows = await engine.aggregate(desc.childObject, {
+        where: clauses.length === 1 ? clauses[0] : { $and: clauses },
+        groupBy: [desc.fkField],
+        aggregations,
+        context: execCtx,
+      // [ADR-0144 D6, amended] Each group is one parent's rows through
+      // `fkField`, the channel the roll-up's own grouped aggregate rides; every
+      // id here is one concrete id (`singleId`).
+      }, { [ROLLUP_AGGREGATE_OPTION]: desc.fkField });
+      for (const row of rows ?? []) {
+        const key = row?.[desc.fkField];
+        if (key == null || key === '') continue;
+        const raw = row?.[alias];
+        const value = raw == null ? undefined : finiteNumber(raw);
+        const rawCount = desc.fn === 'avg' ? finiteNumber(row?.[countAlias] ?? 0) : 0;
+        if ((raw != null && value === undefined) || rawCount === undefined) { numeric = false; break; }
+        const base: SummaryBase = { count: 0, sum: 0, nonNull: 0, min: null, max: null };
+        if (desc.fn === 'count') base.count = value ?? 0;
+        else if (desc.fn === 'sum') base.sum = value ?? 0;
+        else if (desc.fn === 'min') base.min = value ?? null;
+        else if (desc.fn === 'max') base.max = value ?? null;
+        else if (desc.fn === 'avg') { base.sum = value ?? 0; base.nonNull = rawCount; }
+        byParent.set(String(key), base);
+      }
+    }
+    if (!numeric) continue;
+    // A parent no row matched has the empty set's base.
+    for (const id of parents) if (!byParent.has(id)) byParent.set(id, { count: 0, sum: 0, nonNull: 0, min: null, max: null });
+    bases.set(desc, byParent);
+  }
+  return bases;
+}
+
+export interface PredicateUpdateSummaryFold {
+  /** {@link BatchSummaryAccumulator.overlay}, with the values the rows judged so far move the roll-ups to. */
+  overlay(binding: RelatedRecordBinding | undefined): RelatedRecordBinding | undefined;
+  /** {@link BatchSummaryAccumulator.overlayRow}, for the master-detail header. */
+  overlayRow<R extends Record<string, unknown> | null | undefined>(object: string, row: R): R;
+  /** Matched row `i` has been judged: from here on it counts in the state the update leaves it. */
+  advance(i: number): void;
+}
+
+/** What one row adds to one parent's roll-up. */
+interface Contribution { parentId: string; value: number | undefined }
+
+/**
+ * The matched rows' part of one parent's roll-up, relative to its base: a bag,
+ * so a row can leave it again. Over a base that holds the matched rows as
+ * stored (count / sum / avg) the bag starts empty and goes negative as rows
+ * leave; `values` (min / max only) never does.
+ */
+interface Bag { count: number; sum: number; nonNull: number; values: Map<number, number> }
+
+/**
+ * The fold for one predicate update, or `undefined` when no roll-up is folded
+ * (`bases` empty — the common case, which then pays nothing). `matched` is in
+ * the order the rows are judged; before any {@link
+ * PredicateUpdateSummaryFold.advance}, every matched row counts as stored.
+ */
+export function createPredicateUpdateSummaryFold(
+  bases: SummaryBases,
+  matched: readonly MatchedRowStates[],
+  childFields: unknown,
+): PredicateUpdateSummaryFold | undefined {
+  if (bases.size === 0) return undefined;
+  const classes = declaredFieldClasses(childFields);
+  const jsonStored = declaredJsonStoredFields(childFields);
+  const live = new Map(bases);
+
+  /** The row's contribution to `desc`, `null` for none, `undefined` when it cannot be said exactly. */
+  const contributionOf = (desc: SummaryDescriptor, row: Record<string, unknown>): Contribution | null | undefined => {
+    const parentId = singleId(row[desc.fkField]);
+    if (parentId === undefined) return null;
+    if (desc.filter) {
+      try {
+        if (!matchesAggregationFilter(row, desc.filter as any, 0, classes, jsonStored)) return null;
+      } catch {
+        return undefined;
+      }
+    }
+    if (desc.fn === 'count') return { parentId, value: undefined };
+    const raw = row[desc.sourceField!];
+    if (raw == null) return { parentId, value: undefined };
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
+    return { parentId, value: raw };
+  };
+
+  /** Descriptor → [previous, next] contribution per matched row. */
+  const contributions = new Map<SummaryDescriptor, Array<[Contribution | null, Contribution | null]>>();
+  for (const desc of [...live.keys()]) {
+    const list: Array<[Contribution | null, Contribution | null]> = [];
+    let exact = true;
+    for (const { previous, next } of matched) {
+      const was = contributionOf(desc, previous);
+      const now = contributionOf(desc, next);
+      if (was === undefined || now === undefined) { exact = false; break; }
+      list.push([was, now]);
+    }
+    if (exact) contributions.set(desc, list);
+    else live.delete(desc);
+  }
+  if (live.size === 0) return undefined;
+
+  const bags = new Map<SummaryDescriptor, Map<string, Bag>>();
+  const move = (desc: SummaryDescriptor, c: Contribution | null, sign: 1 | -1): void => {
+    if (!c) return;
+    let byParent = bags.get(desc);
+    if (!byParent) bags.set(desc, (byParent = new Map()));
+    const bag = byParent.get(c.parentId) ?? { count: 0, sum: 0, nonNull: 0, values: new Map<number, number>() };
+    bag.count += sign;
+    if (c.value !== undefined) {
+      bag.sum += sign * c.value;
+      bag.nonNull += sign;
+      if (baseHoldsMatched(desc.fn)) { byParent.set(c.parentId, bag); return; }
+      const left = (bag.values.get(c.value) ?? 0) + sign;
+      if (left > 0) bag.values.set(c.value, left);
+      else bag.values.delete(c.value);
+    }
+    byParent.set(c.parentId, bag);
+  };
+  // A min / max base leaves the matched rows out: they start in the bag as stored.
+  for (const [desc, list] of contributions) if (!baseHoldsMatched(desc.fn)) for (const [was] of list) move(desc, was, 1);
+
+  /** The roll-up's value for `parentId` in the current state, or `undefined` when this fold does not say it. */
+  const valueOf = (desc: SummaryDescriptor, parentId: string): number | null | undefined => {
+    const base = live.get(desc)?.get(parentId);
+    if (!base) return undefined;
+    const bag = bags.get(desc)?.get(parentId);
+    const extreme = (pick: (a: number, b: number) => number, start: number | null): number | null => {
+      let out = start;
+      for (const v of bag?.values.keys() ?? []) out = out === null ? v : pick(out, v);
+      return out;
+    };
+    switch (desc.fn) {
+      case 'count': return base.count + (bag?.count ?? 0);
+      case 'sum': return base.sum + (bag?.sum ?? 0);
+      case 'min': return extreme(Math.min, base.min);
+      case 'max': return extreme(Math.max, base.max);
+      case 'avg': {
+        const n = base.nonNull + (bag?.nonNull ?? 0);
+        return n === 0 ? summaryEmptySetValue('avg') : (base.sum + (bag?.sum ?? 0)) / n;
+      }
+      default: return undefined;
+    }
+  };
+
+  const patchRow = (object: string, row: Record<string, unknown>): Record<string, unknown> | undefined => {
+    const parentId = singleId(row.id);
+    if (parentId === undefined) return undefined;
+    let patched: Record<string, unknown> | undefined;
+    for (const desc of live.keys()) {
+      if (desc.parentObject !== object || !(desc.summaryField in row)) continue;
+      const value = valueOf(desc, parentId);
+      if (value === undefined) continue;
+      patched ??= { ...row };
+      patched[desc.summaryField] = value;
+    }
+    return patched;
+  };
+
+  const overlay = (binding: RelatedRecordBinding | undefined): RelatedRecordBinding | undefined => {
+    if (!binding) return binding;
+    let out: Record<string, RelatedFieldBinding> | undefined;
+    for (const [fk, entry] of Object.entries(binding)) {
+      if (!entry.row) continue;
+      const patched = patchRow(entry.object, entry.row);
+      if (patched) {
+        out ??= { ...binding };
+        out[fk] = { ...entry, row: patched };
+      }
+    }
+    return out ?? binding;
+  };
+
+  const overlayRow = <R extends Record<string, unknown> | null | undefined>(object: string, row: R): R => {
+    if (!row) return row;
+    return (patchRow(object, row) as R | undefined) ?? row;
+  };
+
+  const advance = (i: number): void => {
+    for (const [desc, list] of contributions) {
+      const pair = list[i];
+      if (!pair) continue;
+      move(desc, pair[0], -1);
+      move(desc, pair[1], 1);
+    }
+  };
+
+  return { overlay, overlayRow, advance };
 }

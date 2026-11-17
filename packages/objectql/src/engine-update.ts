@@ -59,6 +59,7 @@ import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedReado
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
+import { createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases } from './summary-batch-accumulation.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external-driver-floor.js';
 import { ENGINE_UPDATE_REJECT_MESSAGE, engineUpdateDispatchRejectError, resolveEngineUpdateDispatch } from './engine-update-dispatch.js';
@@ -134,6 +135,7 @@ export interface UpdateHost {
   resolveOptionPermissions: ObjectQLClass['resolveOptionPermissions'];
   resolvePredicateRelated: ObjectQLClass['resolvePredicateRelated'];
   settleMasterDetailLanding: ObjectQLClass['settleMasterDetailLanding'];
+  summaryDescriptorsReadByRules: ObjectQLClass['summaryDescriptorsReadByRules'];
   summaryForeignKeyColumns: ObjectQLClass['summaryForeignKeyColumns'];
   triggerHooks: ObjectQLClass['triggerHooks'];
   update: ObjectQLClass['update'];
@@ -146,7 +148,7 @@ export interface UpdateHost {
 /** The bodies of the "Update" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class UpdateFacet {
   /** The body of `ObjectQL#update`; the method's docblock there is its contract. */
-  static async update(this: Pick<UpdateHost, '_registry' | 'admittedViolationSink' | 'assertBulkPerRowHookBudget' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildReferentialFieldClear' | 'buildSession' | 'buildUser' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'hasHooksFor' | 'homeAmountServing' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'priorMasterIdsCallerReads' | 'projectHomeAmountsOntoPatch' | 'publishBulkDataEvent' | 'publishDataEvent' | 'readUpdatePriorRow' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParent' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'settleMasterDetailLanding' | 'summaryForeignKeyColumns' | 'triggerHooks' | 'update' | 'updateByIdExpecting' | 'validationMessageContext' | 'valueShapeStrictFor' | 'withResolvedWhere'>, object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
+  static async update(this: Pick<UpdateHost, '_registry' | 'admittedViolationSink' | 'assertBulkPerRowHookBudget' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildReferentialFieldClear' | 'buildSession' | 'buildUser' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'hasHooksFor' | 'homeAmountServing' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'priorMasterIdsCallerReads' | 'projectHomeAmountsOntoPatch' | 'publishBulkDataEvent' | 'publishDataEvent' | 'readUpdatePriorRow' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParent' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'settleMasterDetailLanding' | 'summaryDescriptorsReadByRules' | 'summaryForeignKeyColumns' | 'triggerHooks' | 'update' | 'updateByIdExpecting' | 'validationMessageContext' | 'valueShapeStrictFor' | 'withResolvedWhere'>, object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
      object = this.resolveObjectName(object);
      // [#22782, #34412] An aborting `afterUpdate`, or a refusal after a `beforeUpdate` hook's
      // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
@@ -2062,9 +2064,32 @@ export class UpdateFacet {
                );
                if (referencesFirst) await checkReferences();
                if (rulesNeedRows) {
-                   for (const row of priorRows ?? []) {
+                   // [#34465] Batch equals one-by-one for a rule that reads a
+                   // roll-up of a parent: each matched row is judged against
+                   // the value the rows judged before it move that roll-up to,
+                   // as consecutive by-id updates would read it (ruling
+                   // 6377847361, C; ruling record 6928862195, B). Only when a
+                   // rule reads one and more than one row matched; still all
+                   // rows judged before the one `updateMany`.
+                   const matchedRows = priorRows ?? [];
+                   const readSummaries = matchedRows.length > 1 ? this.summaryDescriptorsReadByRules(object) : [];
+                   const matchedStates = readSummaries.length > 0
+                     ? matchedRows.map((row) => ({ previous: row ?? {}, next: { ...(row ?? {}), ...bulkPatch } }))
+                     : [];
+                   const summaryFold = readSummaries.length > 0
+                     ? createPredicateUpdateSummaryFold(
+                         await loadPredicateUpdateSummaryBases(this.facade, readSummaries, matchedStates, { ...(opCtx.context ?? {}), isSystem: true }),
+                         matchedStates,
+                         (updateSchema as any)?.fields,
+                       )
+                     : undefined;
+                   const foldMaster = summaryFold && parentForRow ? resolveMasterDetailRelation(updateSchema as any)?.master : undefined;
+                   for (const [i, row] of matchedRows.entries()) {
                        try {
-                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions }), this.logger, object);
+                           const header = parentForRow?.(row);
+                           const related = bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch });
+                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: foldMaster ? summaryFold!.overlayRow(foldMaster, header) : header, previousParent: foldMaster ? summaryFold!.overlayRow(foldMaster, previousParentForRow?.(row)) : previousParentForRow?.(row), related: summaryFold ? summaryFold.overlay(related) : related, permissions: bulkPermissions }), this.logger, object);
+                           summaryFold?.advance(i);
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
