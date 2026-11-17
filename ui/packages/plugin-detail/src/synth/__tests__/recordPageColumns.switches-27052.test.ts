@@ -9,8 +9,8 @@
 /**
  * objectstack#27052 → objectstack#27524, Target 5 — the record page's
  * timeline switch and its object-derived default retired with the timeline
- * column (「宽屏时间线放中间不需要了吧」— ruled yes). 动态 is a panel, the
- * first of the right column, for EVERY object: nothing derives from the
+ * column (「宽屏时间线放中间不需要了吧」— ruled yes). 动态 is a panel of the
+ * right column (its last since objectstack#34590), for EVERY object: nothing derives from the
  * object where it goes, so a worked object (a stage, option kinds, files)
  * and a container (a price book, a product) synthesize the same strip
  * order. What remains of #27052 is the reader's one switch, ⊟ (the right

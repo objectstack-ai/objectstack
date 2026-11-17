@@ -7,8 +7,9 @@
  */
 
 /**
- * objectstack#27524, Target 5 — 动态 is a panel: the first panel of the
- * record page's right column, the same shape as the related panels (「动态」
+ * objectstack#27524, Target 5 — 动态 is a panel of the record page's right
+ * column (its last since objectstack#34590, which supersedes Target 5's
+ * 动态-first), the same shape as the related panels (「动态」
  * and the stream's count; the header row opens the 动态 tab), holding a
  * one-line composer, the newest three entries (five when wide) and
  * 「查看全部 N 条 →」 to the 动态 tab — no chips, no column. Drawn here with
