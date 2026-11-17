@@ -222,8 +222,8 @@ export function resolveEmailVerificationRequirement(
 export const OPEN_POSTURE_VERIFICATION_OFF_WARNING =
   "[auth] audience posture 'open' is running with email verification explicitly OFF " +
   '(emailAndPassword.requireEmailVerification: false, or OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false). ' +
-  'Anyone can register an address they do not control and is signed in at once, and an organization ' +
-  'invitation sent to that address can then be accepted by that account. Keep this to a deployment ' +
+  'Anyone can register an address they do not control and is signed in at once; an organization ' +
+  'invitation sent to that address still waits for the address to be verified. Keep this to a deployment ' +
   'with no mail transport that trusts its sign-ups, such as a pre-production environment; remove the ' +
   'explicit false to force verification back on.';
 

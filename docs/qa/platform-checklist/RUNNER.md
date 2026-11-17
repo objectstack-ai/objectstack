@@ -597,11 +597,17 @@ contradicts it, and correct it here when it does.
      invitation's role onto that membership and the invitation reads `accepted`
      (`adoptExistingMembership` in `packages/plugins/plugin-auth/src/adopt-membership.ts`,
      which never lowers a grade; pinned by `accept-invitation-adopt-membership.test.ts`
-     beside it, 6 passed at `bfc1539fe0`). The invitee's email need not be verified: the
-     deployment declares `requireEmailVerificationOnInvitation: false`. QA run #24616 met it:
-     an `admin` invitation signed up as `member`, and the persona held `org_admin` only after
-     the accept. **Check:** read the persona's `sys_member` row (`role`) before scoring a
-     role-gated clause, never the invitation you sent.
+     beside it, 6 passed at `bfc1539fe0`). The invitee's email must be verified before the
+     accept: the deployment declares `requireEmailVerificationOnInvitation: true`
+     (`auth-manager-organization-plugin.ts`), so an unverified persona's accept, decline,
+     `get-invitation` and listing answer `403`
+     (`EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`,
+     `EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION`). Verify the persona first through the
+     verification mail (`POST /api/v1/auth/send-verification-email`, then open its link).
+     QA run #24616 met the role half: an `admin` invitation signed up as `member`, and the
+     persona held `org_admin` only after the accept. **Check:** read the persona's
+     `sys_member` row (`role`) before scoring a role-gated clause, never the invitation you
+     sent.
   2. **Admin create.** `POST /api/v1/auth/admin/create-user`, which answers
      `mustChangePassword: true` by default
      (`packages/plugins/plugin-auth/src/admin-user-endpoints.ts`, `runAdminCreateUser`);

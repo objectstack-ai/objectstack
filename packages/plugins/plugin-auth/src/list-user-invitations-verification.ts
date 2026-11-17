@@ -26,16 +26,14 @@
  *   throw APIError.from("FORBIDDEN", ORGANIZATION_ERROR_CODES.EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION);
  * ```
  *
- * unconditionally. `auth-manager.ts` declares the option `false` on purpose
- * (no mailer wired ⇒ nothing can ever verify an invitee ⇒ requiring
- * verification dead-ends every invite flow), so on exactly the deployment
- * shape the option exists for an invitee can ACCEPT an invitation and can
- * never LIST it, and the SDK's `organizations.invitations.listMine()` inbox
- * is empty-by-403 for every user. `list-user-invitations-verification.test.ts`
- * measures both halves on the real pipeline — the 403, and the 200s from the
- * three siblings for the same unverified session — and pins that the vendor
- * still has the defect, so an upstream fix turns that pin red and this module
- * is what gets deleted.
+ * unconditionally. The platform declares the option `true`
+ * (`auth-manager-organization-plugin.ts`): accepting an invitation needs a
+ * verified address, so a session whose address is not verified can neither
+ * accept, reject, read nor list one, and the listing answers it exactly as
+ * its three siblings do. `list-user-invitations-verification.test.ts`
+ * measures the four routes on the real pipeline for the same session, and
+ * pins that the vendor's listing still never reads the option, so an
+ * upstream change turns that pin red and this module is what gets deleted.
  *
  * ## Why this shape: the endpoint is rebuilt IN PLACE, from the vendor's own options
  *
