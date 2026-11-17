@@ -760,6 +760,15 @@ account of a new deployment needs no invitation. Admission is all the
 invitation's `id` grants: the account it admits joins no organization until it
 accepts the invitation, and accepting needs a verified address.
 
+**Under `email_domain`, an invitation admits an address off the allowlist, and
+grants nothing more.** A pending invitation addressed to an address outside
+the list admits that address's sign-up. Verification is forced on under this
+posture, and while the account's address is unverified it joins no
+organization: it joins by accepting the invitation, with the invitation's role,
+once the address is verified. Verifying the address binds nothing by itself.
+An address on the list is admitted by its domain, invitation or not, and the
+membership policy binds it at creation as before.
+
 **Accepting, declining and listing an invitation need a verified email
 address, on every deployment.** The invitation's `id`, which its link carries,
 proves nothing about the mailbox. From a session whose address is not
