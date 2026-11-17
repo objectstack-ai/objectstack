@@ -1541,6 +1541,8 @@ const ar = {
     writeStrippedUnknownReason: "لم تُطبَّق من قِبل الخادم: {{fields}}",
     approvalPendingEditable: "قيد الموافقة · قابل للتعديل",
     approvalPendingTooltip: "يحتوي هذا السجل على طلب موافقة معلق، لكن هذه الخطوة لا تزال تسمح بالتعديل",
+    approvalPending: "قيد الموافقة",
+    approvalPendingNotEditableTooltip: "يحتوي هذا السجل على طلب موافقة معلق",
     approvalProgress: "الموافقات — {{got}} من {{need}}",
     approvalProgressGroups: "التوقيعات — {{got}} من {{need}} مجموعات",
     approvalProgressLabel: "تقدّم الموافقة",
