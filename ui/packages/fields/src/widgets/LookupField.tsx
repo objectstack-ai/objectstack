@@ -1954,9 +1954,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         {/* The popover never runs past the room Radix reports on the side it
             opens to, and goes to the side with more room when its whole list
             does not fit (Radix's default flip, kept): the search row keeps its
-            height and the list takes what is left (objectstack#34362). */}
+            height and the list takes what is left (objectstack#34362).
+            Across, it is as wide as its trigger but never narrower than 18rem,
+            so an option name stays readable when the trigger is a narrow
+            line-item grid cell; and never wider than the room Radix reports,
+            so on a narrow screen it stays inside the viewport. The floor is
+            itself capped by that room (`min()`), because a min-width larger
+            than the max-width would win over it. Radix's default shift keeps
+            a widened panel on screen when the trigger sits at the right edge
+            (objectstack#34601). */}
         <PopoverContent
-          className="flex max-h-(--radix-popover-content-available-height) w-[var(--radix-popover-trigger-width)] flex-col p-0"
+          className="flex max-h-(--radix-popover-content-available-height) w-[var(--radix-popover-trigger-width)] min-w-[min(18rem,var(--radix-popover-content-available-width,100vw))] max-w-(--radix-popover-content-available-width) flex-col p-0"
           align="start"
           data-testid="lookup-popover"
         >
