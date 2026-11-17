@@ -1274,15 +1274,24 @@ every row through better-auth so the accounts are login-capable:
   `import-sso-users` reads. Each is assigned after every row has landed, as a
   `sys_user_position` grant written under the importing admin's own access,
   so it passes the checks Setup applies when you assign a position there (the
-  position must exist, and you must be allowed to assign it). A position that does not exist or is refused is reported on
-  its row and the user is still created: `rows[].positions` lists each named
-  position with its outcome (`assigned`, `already_assigned`, `unresolved`, or
-  `refused` with the refusal's `code`), and `summary.positions` counts them.
-  The import only adds positions; it never removes one a user holds. Permission
-  sets come with the position (a position carries its sets); a direct grant
-  stays a Setup step. A file that names positions on a server that cannot
-  judge the grant is refused with nothing created (`501`), and dry runs do
-  not assign.
+  position must exist, and you must be allowed to assign it). A position that
+  does not exist or is refused is reported on its row and the user is still
+  created: `rows[].positions` is an array with one entry per named position
+  and its outcome (`assigned`, `already_assigned`, `unresolved`, or `refused`
+  with the refusal's `code`), and `summary.positions` counts them. A cell that
+  is not a list of names (a number or an object on a JSON row) assigns
+  nothing, and that row's `rows[].positions` is the **string**
+  `'unreadable'`, not an array — check for it before reading the entries. It
+  counts once under `summary.positions.unresolved`, and the user is still
+  created. The import only adds positions; it never removes one a user holds.
+  Permission sets come with the position (a position carries its sets); a
+  direct grant stays a Setup step.
+- A file that names positions is refused whole, with nothing created, when
+  its positions cannot be judged: `501 NOT_IMPLEMENTED` when the server
+  cannot assign positions during an import, and `403 PERMISSION_DENIED` when
+  your own access cannot be resolved. Both are decided before any row is
+  written, on a dry run too. A dry run never assigns positions, and reports
+  `summary.positions` as zeros.
 - Synchronous only, at most 500 rows per request (password hashing is
   CPU-bound); split larger files into batches. Imports are not undoable.
 
