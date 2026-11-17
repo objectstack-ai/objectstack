@@ -79,7 +79,9 @@
  * bound while it runs wait for it, and its failure reaches all of them. A
  * bucket opened by a counter move takes no reading: its first bound ends at
  * a confirmation that drops its entries and takes the reading later bounds
- * renew on, so a local change costs no store read.
+ * renew on, so a local change costs no store read. Opening it retires the
+ * overlay row cache, as a confirmation does, so its entries never carry
+ * rows older than the bucket.
  *
  * ⛔ A renewal is a claim about what was looked at (ADR-0156 D5). When the
  * confirmation cannot read one of those (the store cannot be read, the
@@ -415,10 +417,14 @@ export async function readThroughMetaCompileCache<T>(
 
     let bucket = buckets.get(engine);
     if (bucket === undefined || !sameStamp(bucket.stamp, stamp)) {
-        // A new bucket opens its first bound without a reading: its entries
-        // live one bound, as the row cache's do, and the first confirmation
-        // drops them and takes the reading later bounds are renewed on. So a
-        // counter move costs no store read.
+        // A new bucket opens its first bound without a reading: the first
+        // confirmation drops its entries and takes the reading later bounds
+        // are renewed on, so a counter move costs no store read. It retires
+        // the overlay row cache first, as a confirmation does: what it
+        // compiles reads rows from now on, never rows that cache filled
+        // before a peer's write, so its entries are at most one bound old.
+        const overlay = retireMetaOverlayCache(engine);
+        if (overlay !== undefined) stamp = { ...stamp, overlay };
         bucket = { stamp, mark: undefined, confirmedUntil: Date.now() + ttlMs, confirming: undefined, entries: new Map() };
         buckets.set(engine, bucket);
     }

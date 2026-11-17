@@ -634,6 +634,17 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         mark.restore();
     });
 
+    it('a counter move retires the row cache: a peer\'s write the row cache predates is in the new bucket\'s answer', async () => {
+        vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '600000'); // the row cache outlives every bound here
+        atBound();
+        const rows = [storedObject('Widget')];
+        const h = harness(rows);
+        expect((await read(h)).item.label).toBe('Widget'); // the row cache is warm
+        rows[0] = storedObject('Gadget', '2026-11-16T01:00:00.000Z'); // a peer replica with no bridge
+        (h.registry.revision as number)++; // a local counter move opens a new bucket
+        expect((await read(h)).item.label).toBe('Gadget');
+    });
+
     it('a counter move costs no store read: the new bucket takes its reading at its first bound', async () => {
         const clock = atBound();
         const h = harness([storedObject('Widget')]);
