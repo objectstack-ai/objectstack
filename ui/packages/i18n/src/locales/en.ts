@@ -4297,7 +4297,7 @@ const en = {
       securityBlockTitle: 'Publishing will be refused — {{count}} item(s) need a decision first',
       securityBlockTitle_one: 'Publishing will be refused — {{count}} item needs a decision first',
       securityBlockTitle_other: 'Publishing will be refused — {{count}} items need a decision first',
-      securityBlockWhere: 'Fix it on the object under Settings → Record sharing, then publish again.',
+      securityBlockWhere: 'Fix it on the object under Settings → Who can see which records, then publish again.',
       // The pre-publish security rows, by the rule id of the finding (DraftChangesPanel `SECURITY_RULE_TEXT`).
       securityRule: {
         owdUnset: 'No record-sharing baseline (sharingModel) is declared. The runtime falls back to private, but the baseline must be an authored decision.',
