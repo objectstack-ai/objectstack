@@ -37,6 +37,7 @@ import { REGION_BLOCK_PAD, REGION_GAP, REGION_LABEL_H } from './flow-region-metr
 // stable region `key`. It lives in its own module so the nested-node inspector
 // breadcrumb reads the same rows (objectui#10696).
 import { displayRegionLabel } from './flow-region-label.js';
+import { useFlowLabelTranslationsContext } from './flow-label-translations.js';
 
 /**
  * Node box inside a region — a compact echo of `NodeCard`. Read-only by default
@@ -60,6 +61,8 @@ function RegionNode({
 }) {
   const tone = nodeTone(node.type);
   const interactive = !!onSelect;
+  // An approval step's label in the viewer's language, where the package translates it.
+  const label = useFlowLabelTranslationsContext()?.stepLabel(node) ?? (node.label || node.id);
   return (
     <div
       data-region-node-id={node.id}
@@ -96,8 +99,8 @@ function RegionNode({
         <NodeTypeIcon type={node.type} className={cn('h-4 w-4', tone.icon)} />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[12px] font-semibold leading-tight text-foreground" title={node.label || node.id}>
-          {node.label || node.id}
+        <div className="truncate text-[12px] font-semibold leading-tight text-foreground" title={label}>
+          {label}
         </div>
         <div className={cn('text-[10px] font-semibold uppercase tracking-[0.08em]', tone.label)}>{node.type}</div>
       </div>

@@ -385,11 +385,13 @@ import {
 import {
   FlowMetaPills,
   FlowPreviewChromeProvider,
+  FlowSelectionTitle,
   flowSelectionHeading,
   type FlowPreviewSection,
   type FlowProblemTally,
 } from '../metadata-admin/previews/FlowPreview.js';
 import { InspectorShellHostProvider } from '../metadata-admin/inspectors/_shared.js';
+import { useFlowLabelTranslations } from '../metadata-admin/previews/flow-label-translations.js';
 import type { FlowRegistration } from '@objectstack/spec/api';
 import {
   navEntryLabelText,
@@ -8229,6 +8231,8 @@ export function AutomationsPillar({
     dialog: flowConflictDialog,
   } = useDraftSaveGuard(client, reloadFlowDraft);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
+  // The package's translations of the flow label and its approval-step labels (flow-label-translations.tsx).
+  const flowLabels = useFlowLabelTranslations(current?.name ?? '');
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
@@ -9425,7 +9429,7 @@ export function AutomationsPillar({
               </button>
             }
             icon={current ? Workflow : undefined}
-            title={current ? current.label || current.name : t('engine.studio.auto.heading', locale)}
+            title={current ? flowLabels?.flowLabel || current.label || current.name : t('engine.studio.auto.heading', locale)}
             titleProps={
               current
                 ? { 'data-testid': 'auto-canvas-caption', title: `${t('designer.field.apiName', locale)}: ${current.name}` }
@@ -9721,13 +9725,13 @@ export function AutomationsPillar({
           // draws none of its own (`InspectorShellHostProvider`). With nothing
           // selected the aside keeps its "Configuration" eyebrow.
           const heading =
-            selection && inspector && current && flowLoaded ? flowSelectionHeading(draft, selection, locale) : null;
+            selection && inspector && current && flowLoaded ? flowSelectionHeading(draft, selection, locale, flowLabels) : null;
           const aside = (
             <StudioInspector
               testId="auto-config-aside"
               className={inSlot ? 'w-full flex-1 border-l-0' : undefined}
               eyebrow={heading?.eyebrow ?? t('engine.studio.auto.config', locale)}
-              title={heading?.title}
+              title={heading && <FlowSelectionTitle heading={heading} locale={locale} />}
               onClose={selection ? () => setSelection(null) : undefined}
               closeLabel={t('engine.studio.deselect', locale)}
               // objectui#12453 — a read-only package saves no draft: no footer.

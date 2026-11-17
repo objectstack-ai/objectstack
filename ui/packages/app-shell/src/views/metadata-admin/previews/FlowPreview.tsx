@@ -39,8 +39,9 @@ import type { MetadataPreviewProps, MetadataSelection } from '../preview-registr
 import { PreviewShell, PreviewMessage, PreviewErrorBoundary } from './PreviewShell.js';
 import { appendArray } from '../inspectors/_shared.js';
 import { useObjectCatalog, type ObjectCatalogEntry } from '../inspectors/ObjectPicker.js';
-import { t as tr, translateFlowMeta } from '../i18n.js';
+import { t as tr, tFormat, translateFlowMeta } from '../i18n.js';
 import { FlowCanvas } from './FlowCanvas.js';
+import { FlowLabelTranslationsProvider, useFlowLabelTranslations, type FlowLabelTranslations } from './flow-label-translations.js';
 import { defaultNodeLabel, flowEdgeDisplayName, flowNodeDisplayName } from './flow-canvas-parts.js';
 import { edgeKey, type FlowDesignerEdge, type FlowDesignerNode } from './flow-canvas-layout.js';
 import { NESTED_NODE_KIND, parseNestedNodeId, encodeNestedNodeId, locateFlowNode } from '../inspectors/flow-nested-selection.js';
@@ -125,12 +126,18 @@ export function FlowPreviewChromeProvider({ value, children }: { value: FlowPrev
  * node with its type's display name ("Node · Decision"), or a connection — and
  * the title is the one the inspector's own header would show (the node's label
  * or id; the connection's `source → target`, each end by its node's name).
+ *
+ * An `approval` node's title is its step label in the viewer's language when
+ * the package bundle carries one (`translations`, see
+ * `flow-label-translations.tsx`); `source` is then the authored label, which
+ * the header shows beside it, since Studio is where that label is authored.
  */
 export function flowSelectionHeading(
   draft: Record<string, unknown>,
   selection: MetadataSelection,
   locale?: string,
-): { eyebrow: string; title: string } {
+  translations?: FlowLabelTranslations,
+): { eyebrow: string; title: string; source?: string } {
   if (selection.kind === 'edge') {
     const edges = Array.isArray(draft.edges) ? (draft.edges as FlowDesignerEdge[]) : [];
     const edge = edges.find((e, i) => edgeKey(e, i) === selection.id);
@@ -150,10 +157,30 @@ export function flowSelectionHeading(
     return { eyebrow: kind, title: selection.label ?? nested?.nodeId ?? selection.id };
   }
   const type = typeof node.type === 'string' ? node.type : '';
+  const authored = (typeof node.label === 'string' && node.label) || node.id;
+  const translated = translations?.stepLabel(node);
   return {
     eyebrow: type ? `${kind} · ${defaultNodeLabel(type, locale)}` : kind,
-    title: (typeof node.label === 'string' && node.label) || node.id,
+    title: translated ?? authored,
+    ...(translated !== undefined && translated !== authored ? { source: authored } : {}),
   };
+}
+
+/**
+ * A {@link flowSelectionHeading}'s title as a host's inspector header draws
+ * it: the title, and under it the authored label when a translation stands in
+ * for it.
+ */
+export function FlowSelectionTitle({ heading, locale }: { heading: { title: string; source?: string }; locale?: string }) {
+  if (heading.source === undefined) return <>{heading.title}</>;
+  return (
+    <>
+      {heading.title}
+      <span data-testid="flow-selection-source" className="block truncate text-xs font-normal text-muted-foreground">
+        {tFormat('engine.inspector.flowNode.sourceLabel', locale, { label: heading.source })}
+      </span>
+    </>
+  );
 }
 
 /**
@@ -460,6 +487,7 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
 
   // Run history needs the published flow name (the engine keys runs by it).
   const flowName = typeof d.name === 'string' && d.name ? d.name : '';
+  const labelTranslations = useFlowLabelTranslations(flowName);
 
   const empty = canEdit ? (
     <div className="p-3">
@@ -485,6 +513,8 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
   const canvasEl = nodes.length === 0 ? (
     <div className="h-full">{empty}</div>
   ) : (
+    // The approval steps' labels in the viewer's language (flow-label-translations.tsx).
+    <FlowLabelTranslationsProvider value={labelTranslations}>
     <FlowCanvas
       nodes={nodes}
       edges={edges}
@@ -525,6 +555,7 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
       onPatch={onPatch}
       mintNodeId={mintNodeId}
     />
+    </FlowLabelTranslationsProvider>
   );
 
   // The bar's four panel toggles, as the designer has them: one panel at a time beside the canvas.

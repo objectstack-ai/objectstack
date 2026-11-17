@@ -676,6 +676,7 @@ const STUDIO_EN: Record<string, string> = {
   // Flow node inspector
   'engine.inspector.flowNode.kind': 'Node',
   'engine.inspector.flowNode.close': 'Close node',
+  'engine.inspector.flowNode.sourceLabel': 'Authored label: “{label}”',
   'engine.inspector.flowNode.id': 'ID',
   // objectui#11827 — the ID field's inline refusal of a rename that cannot land;
   // the field shows the stored id again, so each says nothing was renamed.
