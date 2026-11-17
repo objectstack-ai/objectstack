@@ -50,7 +50,6 @@ import { toCanvas } from 'qrcode';
 // confusable and answer wrongly for each other's input (objectui#4167), and
 // `resultDialog`'s label members are the INLINE form.
 import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
-import type { Action as SpecAction } from '@objectstack/spec/ui';
 import type { ResultDialogSpec, ResultDialogFieldSpec } from '@object-ui/core';
 
 export interface ResultDialogState {
@@ -66,18 +65,14 @@ interface ActionResultDialogProps {
 }
 
 type FieldFormat = NonNullable<ResultDialogFieldSpec['format']>;
-/** A `table` column, derived from the contract's answer-field row (objectstack#34391). */
-type AnswerTableColumn = NonNullable<
-  NonNullable<NonNullable<SpecAction['resultDialog']>['fields']>[number]['columns']
->[number];
 /**
- * One answer field as this renderer reads it: the runner's field spec plus the
- * contract's `columns`, which `format: 'table'` requires. Both callers hand
- * the declared row through whole (the result dialog's localized spec spreads
- * each row; the preflight panel's rows are the contract's own), so `columns`
- * arrives as written.
+ * A `table` column, as the runner's field spec derives it from the contract's
+ * answer-field row (objectstack#34391). Both callers hand the declared row
+ * through whole (the result dialog's localized spec spreads each row; the
+ * preflight panel's rows are the contract's own), so `columns` arrives as
+ * written.
  */
-type AnswerField = ResultDialogFieldSpec & { columns?: AnswerTableColumn[] };
+type AnswerTableColumn = NonNullable<ResultDialogFieldSpec['columns']>[number];
 
 function readPath(root: unknown, path: string): unknown {
   if (root == null) return undefined;
@@ -115,8 +110,8 @@ export function ActionResultDialog({ state, onAcknowledge }: ActionResultDialogP
   // path does not resolve in the payload are dropped: the value is
   // response-shape dependent (e.g. `temporaryPassword` only exists when the
   // server generated one), and a labelled `undefined` row helps nobody.
-  const fields = useMemo<Array<{ field: AnswerField; value: unknown }>>(() => {
-    const declared: AnswerField[] =
+  const fields = useMemo<Array<{ field: ResultDialogFieldSpec; value: unknown }>>(() => {
+    const declared: ResultDialogFieldSpec[] =
       spec?.fields && spec.fields.length > 0
         ? spec.fields
         : [{ path: '', label: undefined, format: spec?.format ?? 'json' }];
@@ -185,7 +180,7 @@ export function ResultField({
   value,
   defaultFormat,
 }: {
-  field: AnswerField;
+  field: ResultDialogFieldSpec;
   value: unknown;
   defaultFormat?: FieldFormat;
 }) {

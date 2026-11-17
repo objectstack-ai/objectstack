@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act, within } from '@testing-library/react';
-import type { ResultDialogSpec } from '@object-ui/core';
+import type { ResultDialogSpec, ResultDialogFieldSpec } from '@object-ui/core';
 import { ActionResultDialog, ResultField } from '../ActionResultDialog';
 
 /**
@@ -253,9 +253,9 @@ describe('ActionResultDialog — a `table` field draws its array as rows', () =>
     { path: 'host.reason' },
     { path: 'notApplied', label: 'Not applied', format: 'code-list' as const },
   ];
-  const tableSpec = (cols: unknown[] = columns): ResultDialogSpec => ({
+  const tableSpec = (cols: NonNullable<ResultDialogFieldSpec['columns']> = columns): ResultDialogSpec => ({
     title: 'Import Finished',
-    fields: [{ path: 'rows', label: 'Result per row', format: 'table', columns: cols } as never],
+    fields: [{ path: 'rows', label: 'Result per row', format: 'table', columns: cols }],
   });
   const bodyRows = () => within(screen.getByTestId('result-table')).getAllByRole('row').slice(1);
   const cellsOf = (row: HTMLElement) => within(row).getAllByRole('cell').map((cell) => cell.textContent);
@@ -370,7 +370,7 @@ describe('ActionResultDialog — a `table` field draws its array as rows', () =>
     i18nState.language = 'en';
     render(
       <ResultField
-        field={{ path: 'findings', label: 'Findings', format: 'table', columns: [{ path: 'object' }, { path: 'kind' }] } as never}
+        field={{ path: 'findings', label: 'Findings', format: 'table', columns: [{ path: 'object' }, { path: 'kind' }] }}
         value={[{ object: 'crm_lead', kind: 'drop' }]}
       />,
     );
