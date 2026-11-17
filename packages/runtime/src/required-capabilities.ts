@@ -20,16 +20,8 @@
  * (`content/docs/permissions/system-context.mdx`) anchors it there.
  */
 
-/**
- * The capabilities in `required` the caller does not hold, in declaration
- * order. Empty when nothing is declared (an ungated surface) or when the
- * caller holds all of them. A value that is not an array declares nothing.
- */
-export function missingCapabilities(
-    required: unknown,
-    executionContext: { systemPermissions?: readonly string[] } | null | undefined,
-): string[] {
-    if (!Array.isArray(required) || required.length === 0) return [];
-    const held = new Set<string>(executionContext?.systemPermissions ?? []);
-    return (required as string[]).filter((perm) => !held.has(perm));
-}
+// The arithmetic itself lives in `@objectstack/core` (`flow-start-rules.ts`),
+// below this package, because a dry run in `@objectstack/service-automation`
+// asks it too and that package does not depend on this one. Re-exported under
+// the name every gate here imports.
+export { missingCapabilities } from '@objectstack/core';

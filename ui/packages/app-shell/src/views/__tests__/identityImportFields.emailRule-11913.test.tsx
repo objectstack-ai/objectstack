@@ -27,7 +27,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ImportWizard } from '@object-ui/plugin-grid';
-import { identityImportFields } from '../IdentityImportPanels';
+import { identityImportFields, IdentityImportOptions } from '../IdentityImportPanels';
 
 /** Paste TSV into the upload step via the wizard's window-level handler. */
 function pasteRows(text: string) {
@@ -67,5 +67,17 @@ describe('identityImportFields: the email column is checked by the identity rule
     expect(cell(2, 0)).toHaveAttribute('aria-invalid', 'true');
     expect(cell(1, 0).closest('td')).toHaveAttribute('title', 'Invalid email');
     expect(button).toHaveTextContent('Import 1 Row');
+  });
+});
+
+describe('identityImportFields: the positions column (objectstack#33113)', () => {
+  it('offers `positions`, the column the endpoint assigns positions from', () => {
+    const positions = identityImportFields(undefined).find((f) => f.name === 'positions');
+    expect(positions).toMatchObject({ type: 'text' });
+  });
+
+  it('the options panel explains the column', () => {
+    render(<IdentityImportOptions policy="auto" onPolicyChange={() => {}} />);
+    expect(screen.getByTestId('identity-import-positions-hint')).toHaveTextContent(/position machine names.*";"/);
   });
 });

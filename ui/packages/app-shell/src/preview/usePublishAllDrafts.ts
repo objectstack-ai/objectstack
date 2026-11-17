@@ -86,7 +86,16 @@ export function usePublishAllDrafts(t: TranslateFn) {
       let seededRows = 0;
       const recordHealth = (health: PublishHealth | undefined) => {
         if (!health) return;
-        if (health.seedError) seedProblems.push(health.seedError);
+        // objectstack#32984 — `seedFailed` is the failure; `seedError` is only
+        // the producer's own text and is absent when it sent none. The rule
+        // the chat's publish-health line reads. With no producer text the
+        // toast says the line's own sentence, from the pack.
+        if (health.seedFailed === true || health.seedError) {
+          seedProblems.push(
+            health.seedError ||
+              t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' }),
+          );
+        }
         if (typeof health.seededRows === 'number') seededRows += health.seededRows;
         for (const issue of health.issues ?? []) {
           if (issue.severity === 'error') probeProblems.push(issue.message);

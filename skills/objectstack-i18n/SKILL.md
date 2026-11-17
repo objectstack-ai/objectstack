@@ -183,11 +183,14 @@ book once carried stays retired), `metadataForms`, `settingsCommon`; `reports`, 
 `datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
 authored list carries every language), and a joined report's block headings sit at
 `reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
-Two keys sit deeper than their group's `label`: a `page:tabs` item at
+Three keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
-one has no key) and an approval step at `flows.{flow}.approvals.{node_id}.label`.
+one has no key), an approval step at `flows.{flow}.approvals.{node_id}.label`, and the text a
+`create_record` / `update_record` writes into a field marked `{ dialect: 'template', source }` at
+`flows.{flow}.records.{node_id}.fields.{field}`, picked in the organization's language (the
+Localization setting if set, else `i18n.defaultLocale`; never the run starter's).
 `os i18n extract --no-objects-only` scaffolds every group above but `messages` and
-`settingsCommon`, both keys included. The `inlineTitle` and report-block keys, as the
+`settingsCommon`, all three keys included. The `inlineTitle` and report-block keys, as the
 shipped `app-crm` and `app-showcase` bundles spell them for `zh-CN`:
 
 ```typescript
