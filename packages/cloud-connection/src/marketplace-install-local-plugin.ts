@@ -4617,8 +4617,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // the plan reads them by ({@link packageUpgradeSideOf}: the
         // `resolveStackCollection` reads of `objects`, `objectExtensions` and
         // `data`), so a body the resolver refuses is told apart from a table
-        // that could not be read: the plan below then meets the same resolved
-        // bodies, and a throw out of it is the table read's. Without this, the
+        // that could not be read: the resolver is deterministic over the same
+        // bytes, so the plan below never meets its refusal, and what the plan
+        // throws is answered as the table read's. Without this, the
         // resolver's 422 was answered as the 503 below and its author was told
         // to retry once the database answers.
         try {
