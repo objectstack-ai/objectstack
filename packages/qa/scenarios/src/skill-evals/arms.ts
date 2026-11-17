@@ -78,9 +78,13 @@ export interface ArmWorkdir {
  * Make one turn's directory: `ROOT/project` as the working directory, holding
  * `.claude/skills/BUNDLE/` (without `evals/`) on the with-skill arm and
  * nothing on the no-skill arm, and `ROOT/mcp.json` beside it.
+ *
+ * `ROOT` is always under the system temp directory, spelled at the call so the
+ * dispatch-gates scratch scan reads it as outside the tree; a caller that
+ * wants it gone removes `root` itself.
  */
-export function prepareArmWorkdir(arm: Arm, bundle: string, skillsRoot: string, base: string = tmpdir()): ArmWorkdir {
-  const root = mkdtempSync(join(base, 'skill-eval-'));
+export function prepareArmWorkdir(arm: Arm, bundle: string, skillsRoot: string): ArmWorkdir {
+  const root = mkdtempSync(join(tmpdir(), 'skill-eval-'));
   const cwd = join(root, 'project');
   mkdirSync(cwd);
   const mcpConfigPath = join(root, 'mcp.json');

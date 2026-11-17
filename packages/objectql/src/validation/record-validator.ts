@@ -1010,6 +1010,23 @@ function receivedObjectShape(value: object): string {
  * single-value field (refused) and every element that is not a number or a
  * boolean.
  *
+ * ## [#34916] The boolean arm's half: a string or a number on a boolean field
+ *
+ * The record validator's boolean arm admits more than a JS boolean: `0` / `1`,
+ * `'0'` / `'1'` and `'true'` / `'false'` pass it too. The write carried the
+ * reading as sent, so `'true'` reached the driver as the TEXT `'true'`. SQLite
+ * kept it as text beside rows holding the integer `1`, so a filter on
+ * `won = true` missed the row, and a `requiredWhen: record.won == true` read
+ * the string, judged `'true' == true` false and admitted the write the rule
+ * should refuse. The console's inline grid sends exactly these strings: it
+ * draws a boolean column as a select whose option values are `'true'` /
+ * `'false'`. This writes the boolean the arm judged ({@link BOOLEAN_READINGS}):
+ * `'true'`, `'1'` and `1` as `true`, `'false'`, `'0'` and `0` as `false`, on
+ * `boolean` / `toggle` fields. The accepted set does not move: a value outside
+ * those readings (`'yes'`, `'TRUE'`, `2`, an array) stays as sent, and the arm
+ * refuses it with `invalid_boolean` as before. ⛔ No driver copy: a row already
+ * stored as text is the read side's to present (driver-sql `formatOutput`).
+ *
  * Same contract as {@link normalizeBlankTypedValues}: one record or an array of
  * them, pure — the same reference comes back when nothing changed, else a
  * shallow copy (per row, and a copied array).
@@ -1031,6 +1048,17 @@ export function normalizeNumericStringValues<T>(
   return normalizeNumericStringRow(fields, data) as T;
 }
 
+/**
+ * [#34916] The non-boolean values the record validator's boolean arm admits,
+ * and the boolean each one reads as. Exactly the arm's list (`validateOne`,
+ * the `boolean` / `toggle` branch): compared by `SameValueZero`, so `'TRUE'`,
+ * `' true'` and `2` are not here, and the arm refuses them.
+ */
+const BOOLEAN_READINGS: ReadonlyMap<unknown, boolean> = new Map<unknown, boolean>([
+  ['true', true], ['1', true], [1, true],
+  ['false', false], ['0', false], [0, false],
+]);
+
 function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknown): unknown {
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
@@ -1041,6 +1069,13 @@ function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknow
     // Own-property: a field name may be `constructor` / `valueOf`.
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
     if (!def || !isInReadonlyScope(name, def, 'include')) continue;
+    if (def.type === 'boolean' || def.type === 'toggle') {
+      // [#34916] The boolean arm's reading, written as the boolean it judged.
+      // Anything else is left as sent, for the arm to refuse.
+      const judged = BOOLEAN_READINGS.get(value);
+      if (judged !== undefined) (out ??= { ...row })[name] = judged;
+      continue;
+    }
     if (isString) {
       if (!isJudgedNumberType(def.type)) continue;
       const n = parseNumericString(value);

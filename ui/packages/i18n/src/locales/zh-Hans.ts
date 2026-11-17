@@ -2645,7 +2645,7 @@ const zh = {
       expandToPage: '整页打开',
       openAsPage: '整页打开',
       objectNotFound: '未找到对象',
-      objectNotFoundDescription: '对象"{{objectName}}"在当前配置中不存在。',
+      objectNotFoundDescription: '对象"{{objectName}}"不存在，或者您无权访问它。',
       objectNotFoundHint: '请检查您的应用导航设置或从侧边栏选择其他对象。',
       objectPackageDisabled: '对象“{{objectName}}”所属的软件包已被禁用，因此当前不提供该对象。',
       filterOrGroupNotEditable: '该筛选条件在其他条件之外还含有一个「或」分组，筛选编辑器无法显示这种结构，因此此处只读。视图仍会应用它。',
@@ -3501,7 +3501,6 @@ const zh = {
   },
   empty: {
     objectNotFound: '未找到对象',
-    objectNotFoundDescription: '对象 “{{name}}” 的定义不存在。请检查配置或返回选择有效的对象。',
     interfacePageSourceMissing: '此界面页引用了 “{{name}}”，但该来源不可用。',
     recordNotFound: '未找到记录',
     recordNotFoundDescription: '您查找的记录不存在、已被删除，或您没有访问权限。',

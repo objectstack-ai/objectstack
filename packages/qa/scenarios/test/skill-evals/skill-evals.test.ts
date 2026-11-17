@@ -174,13 +174,19 @@ describe('the arms: one fresh directory per turn, differing only in the bundle',
 
   it('with-skill holds the bundle without evals/; no-skill holds nothing; the MCP config is empty and outside the project', () => {
     const root = writeCatalog();
-    const w = prepareArmWorkdir('with-skill', 'alpha-skill', root, scratch);
-    expect(readdirSync(join(w.cwd, '.claude', 'skills'))).toEqual(['alpha-skill']);
-    expect(readdirSync(join(w.cwd, '.claude', 'skills', 'alpha-skill')).sort()).toEqual(['SKILL.md', 'rules']);
-    expect(JSON.parse(readFileSync(w.mcpConfigPath, 'utf8'))).toEqual({ mcpServers: {} });
-    expect(w.mcpConfigPath.startsWith(w.cwd)).toBe(false);
-    const n = prepareArmWorkdir('no-skill', 'alpha-skill', root, scratch);
-    expect(readdirSync(n.cwd)).toEqual([]);
+    const w = prepareArmWorkdir('with-skill', 'alpha-skill', root);
+    const n = prepareArmWorkdir('no-skill', 'alpha-skill', root);
+    try {
+      expect(w.root.startsWith(join(tmpdir(), 'skill-eval-'))).toBe(true);
+      expect(readdirSync(join(w.cwd, '.claude', 'skills'))).toEqual(['alpha-skill']);
+      expect(readdirSync(join(w.cwd, '.claude', 'skills', 'alpha-skill')).sort()).toEqual(['SKILL.md', 'rules']);
+      expect(JSON.parse(readFileSync(w.mcpConfigPath, 'utf8'))).toEqual({ mcpServers: {} });
+      expect(w.mcpConfigPath.startsWith(w.cwd)).toBe(false);
+      expect(readdirSync(n.cwd)).toEqual([]);
+    } finally {
+      rmSync(w.root, { recursive: true, force: true });
+      rmSync(n.root, { recursive: true, force: true });
+    }
   });
 
   it('a round hands each turn its arm\'s directory, the prompt on stdin and an environment with no API key or effort override; records land and directories go', async () => {
