@@ -4018,7 +4018,7 @@ const zhHant = {
     noPendingApprovals: '暫無待審批事項',
     openApprovalsInbox: '開啟審批中心',
     needsYou: '需要你處理',
-    viewApprovalDetails: '查看詳情',
+    viewApprovalDetails: '檢視詳情',
     badgeTotal: '共 {{total}} 項',
     badgeNotifications: '{{count}} 個未讀主題',
     badgeNotifications_one: '{{count}} 個未讀主題',
