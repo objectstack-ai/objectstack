@@ -78,6 +78,7 @@ import {
 } from './loadFailure';
 import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
+import { FormDirtyReportContext } from './formDirtyReport';
 import { useInitialFieldFocus } from './initialFieldFocus';
 
 // Localized strings for the unsaved-changes guard and, since objectui#11039,
@@ -953,9 +954,13 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   ) : null;
 
   // Master-detail in a drawer: render the master-detail form (it owns its Save
-  // bar) when the schema declares inline child collections; saved atomically.
+  // bar, pinned to the bottom of this drawer's scroll frame) when the schema
+  // declares inline child collections; saved atomically. It reports its unsaved
+  // input into this drawer's close guard (`formDirtyReport.ts`), so the close
+  // paths prompt as they do for the flat body (objectstack#34599).
   const subforms = (schema as any).subforms as any[] | undefined;
   const drawerBody = subforms?.length && schema.mode !== 'view' ? (
+    <FormDirtyReportContext.Provider value={setIsDirty}>
     <MasterDetailForm
       schema={{
         type: 'object-master-detail-form',
@@ -973,6 +978,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
       }}
       dataSource={dataSource}
     />
+    </FormDirtyReportContext.Provider>
   ) : (
     <>
       {closedAffordanceNotice}
