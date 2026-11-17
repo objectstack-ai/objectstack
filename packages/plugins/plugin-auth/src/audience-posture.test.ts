@@ -32,6 +32,7 @@ import {
   emailDomainAllowed,
   extractEmailDomain,
   invitationProofFor,
+  isAdmittedByInvitationAlone,
   resolveAudience,
   resolveEmailVerificationRequirement,
   SELF_REGISTRATION_CLOSED,
@@ -1084,5 +1085,46 @@ describe('the invitation a creation must show (invitationProofFor)', () => {
     expect(proof({ audience: audience({ invalid: { raw: "'bogus'" } }) })).toBe('address');
     expect(proof({ creationClass: 'provider', method: 'sso-oidc' })).toBe('address');
     expect(proof({ audience: audience({ posture: 'open' }), method: 'oauth', emailVerified: false })).toBe('address');
+  });
+});
+
+describe('a sign-up admitted by its invitation alone (isAdmittedByInvitationAlone)', () => {
+  const DOMAIN = audience({ posture: 'email_domain', allowedEmailDomains: ['acme.com'] });
+  const alone = (over: Partial<Parameters<typeof isAdmittedByInvitationAlone>[0]> = {}) =>
+    isAdmittedByInvitationAlone({
+      audience: DOMAIN,
+      creationClass: 'self-serve',
+      email: 'contractor@partner.example',
+      proof: 'address',
+      hasPendingInvitation: true,
+      ...over,
+    });
+
+  it('under email_domain, an address off the allowlist admitted by an invitation addressed to it is admitted by its invitation alone', () => {
+    expect(alone()).toBe(true);
+    expect(alone({ email: 'Contractor@Mail.Acme.com' }), 'a subdomain is off the list').toBe(true);
+    expect(alone({ email: undefined }), 'no address is off the list').toBe(true);
+  });
+
+  it('under email_domain, an address on the allowlist is admitted by its domain, invitation or not', () => {
+    expect(alone({ email: 'colleague@acme.com' })).toBe(false);
+    expect(alone({ email: 'Colleague+tag@ACME.COM' })).toBe(false);
+    expect(alone({ email: 'colleague@acme.com', hasPendingInvitation: false })).toBe(false);
+  });
+
+  it('under invite_only, only a sign-up that presented its invitation is admitted by its invitation alone', () => {
+    const invite = audience();
+    expect(alone({ audience: invite, proof: 'presented' })).toBe(true);
+    expect(alone({ audience: invite, proof: 'address' })).toBe(false);
+    expect(alone({ audience: invite, proof: 'none' })).toBe(false);
+  });
+
+  it('a creation no pending invitation admitted, a creation that is not self-serve, open and an off-vocabulary posture are never admitted by an invitation alone', () => {
+    expect(alone({ hasPendingInvitation: false })).toBe(false);
+    expect(alone({ audience: audience(), proof: 'presented', hasPendingInvitation: false })).toBe(false);
+    expect(alone({ creationClass: 'operator' })).toBe(false);
+    expect(alone({ creationClass: 'provider' })).toBe(false);
+    expect(alone({ audience: audience({ posture: 'open' }) })).toBe(false);
+    expect(alone({ audience: { ...DOMAIN, invalid: { raw: "'bogus'" } } })).toBe(false);
   });
 });
