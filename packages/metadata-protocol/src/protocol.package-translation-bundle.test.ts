@@ -17,6 +17,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+// The protocol module reaches a dynamic `import('@objectstack/lint')` (metadata diagnostics): pay its load at collection.
+import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const DEP = 'com.customer.blackcat';
