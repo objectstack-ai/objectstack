@@ -2226,7 +2226,7 @@ const ja = {
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {
-        title: "アシスタント",
+        title: "AI アシスタント",
         description: "AI アシスタントのチャット",
         resize: "チャットのサイズを変更",
         collapse: "チャットを折りたたむ",

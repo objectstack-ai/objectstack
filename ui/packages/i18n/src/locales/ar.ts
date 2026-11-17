@@ -2479,7 +2479,7 @@ const ar = {
       unavailableRetry: "إعادة المحاولة",
       unavailableHome: "العودة إلى الرئيسية",
       dock: {
-        title: "المساعد",
+        title: "مساعد الذكاء الاصطناعي",
         description: "محادثة مساعد الذكاء الاصطناعي",
         resize: "تغيير حجم المحادثة",
         collapse: "طي المحادثة",

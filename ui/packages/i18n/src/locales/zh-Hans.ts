@@ -2508,7 +2508,7 @@ const zh = {
       unavailableRetry: '重试',
       unavailableHome: '返回首页',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手对话',
         resize: '调整对话宽度',
         collapse: '收起对话',

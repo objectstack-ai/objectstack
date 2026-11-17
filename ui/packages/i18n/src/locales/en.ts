@@ -2993,7 +2993,7 @@ const en = {
       unavailableRetry: 'Try again',
       unavailableHome: 'Back to home',
       dock: {
-        title: 'Assistant',
+        title: 'AI Assistant',
         description: 'AI assistant chat',
         resize: 'Resize chat',
         collapse: 'Collapse chat',

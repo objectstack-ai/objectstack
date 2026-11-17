@@ -2358,7 +2358,7 @@ const ru = {
       unavailableRetry: "Повторить",
       unavailableHome: "На главную",
       dock: {
-        title: "Ассистент",
+        title: "ИИ-ассистент",
         description: "Чат с ассистентом ИИ",
         resize: "Изменить размер чата",
         collapse: "Свернуть чат",

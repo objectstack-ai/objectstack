@@ -2285,7 +2285,7 @@ const pt = {
       unavailableRetry: "Tentar novamente",
       unavailableHome: "Voltar ao início",
       dock: {
-        title: "Assistente",
+        title: "Assistente de IA",
         description: "Conversa com o assistente de IA",
         resize: "Redimensionar a conversa",
         collapse: "Recolher a conversa",

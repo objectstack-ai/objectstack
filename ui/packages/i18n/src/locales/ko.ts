@@ -2224,7 +2224,7 @@ const ko = {
       unavailableRetry: "다시 시도",
       unavailableHome: "홈으로 돌아가기",
       dock: {
-        title: "어시스턴트",
+        title: "AI 어시스턴트",
         description: "AI 어시스턴트 채팅",
         resize: "채팅 크기 조정",
         collapse: "채팅 접기",

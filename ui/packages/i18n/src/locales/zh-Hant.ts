@@ -2508,7 +2508,7 @@ const zhHant = {
       unavailableRetry: '重試',
       unavailableHome: '返回首頁',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手對話',
         resize: '調整對話寬度',
         collapse: '收起對話',

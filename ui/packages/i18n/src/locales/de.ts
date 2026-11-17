@@ -2224,7 +2224,7 @@ const de = {
       unavailableRetry: "Erneut versuchen",
       unavailableHome: "Zurück zur Startseite",
       dock: {
-        title: "Assistent",
+        title: "KI-Assistent",
         description: "KI-Assistent-Chat",
         resize: "Chatbreite anpassen",
         collapse: "Chat einklappen",
