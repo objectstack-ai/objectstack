@@ -397,7 +397,11 @@ insert (an import batch, `createManyData`, `insertManyData`) each row's rules
 read the summary as it stands after the earlier rows of the same batch that the
 rules admitted, accumulated in memory, so two primary contacts in one import
 create one row and refuse the other with the rule's error. A row the rules
-refuse is not counted. This holds for `count`, and for `sum`, `min` and `max`
+refuse is not counted. A detail object's `requiredWhen` that reads the summary
+on `parent` (the master-detail header, for example
+`requiredWhen: 'parent.line_count >= 2'`) reads it the same way, so the third
+of three bare lines in one batch is refused as the third single insert is.
+This holds for `count`, and for `sum`, `min` and `max`
 over number values. An `avg` summary, a `sum`/`min`/`max` meeting a value that
 is not a number, and a summary whose `filter` reads a dotted path through
 another reference keep reading the stored value, as they did before.

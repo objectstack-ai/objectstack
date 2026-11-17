@@ -7,6 +7,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { ObjectSchema } from '@objectstack/spec/data';
+import { mapDataError } from '@objectstack/types';
+import { ValidationError } from './validation/record-validator.js';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -1258,5 +1260,124 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
     await engine.deferSummaryRecompute(async () => { await engine.insert('region', { name: 'R' }); });
     expect(parentWrites).toHaveLength(0);
     expect(aggregateReads(before)).toBe(0);
+  });
+});
+
+// [#34466] A multi-row insert under one header answers a field-level
+// `parent.<summary>` predicate the way inserting the rows one by one does
+// (#25579's 「批量等于逐条」, extended from the related binding a rule reads
+// through a reference to the master-detail header a `requiredWhen` reads as
+// `parent`). The header is read once for the batch; the rows the rules have
+// admitted are accumulated in memory and overlaid on it for each later row.
+//
+// Reverse verification, predicted before running: drop the header overlay and
+// the atomic, partial, and preview cases go red (every row reads `line_count`
+// 0, so all three rows are admitted); the one-by-one, the CONTROL predicate
+// reading `parent.status`, and the unbound-header cases stay green.
+describe('[#34466] a multi-row insert accumulates its earlier rows into the parent summary a field-level parent. predicate reads', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        status: { type: 'text' },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+        // THE SUBJECT: from the third line on, a line carries a description.
+        description: { type: 'text', requiredWhen: 'parent.line_count >= 2' },
+        // CONTROL: reads a header field that is no summary.
+        note: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+      },
+    } as any);
+  });
+
+  const lines = (inv: string) => [...storeFor('inv_line').values()].filter((r) => r.inv === inv);
+  const threeBare = (inv: string) => [{ inv, amount: 1 }, { inv, amount: 2 }, { inv, amount: 3 }];
+
+  /** The refusal the third row earns: `required` on `description`, in the ADR-0112 envelope the data door maps to 400. */
+  function expectDescriptionRequired(err: unknown): void {
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => ({ field: f.field, code: f.code }))).toEqual([{ field: 'description', code: 'required' }]);
+  }
+
+  async function refusalOf(write: Promise<unknown>): Promise<unknown> {
+    try { await write; } catch (err) { return err; }
+    throw new Error('expected the write to be refused');
+  }
+
+  it('one by one (the reference answer): the first two lines are admitted, the third is refused', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    const [a, b, c] = threeBare(p.id);
+    await engine.insert('inv_line', a);
+    await engine.insert('inv_line', b);
+    expectDescriptionRequired(await refusalOf(engine.insert('inv_line', c)));
+    expect(lines(p.id)).toHaveLength(2);
+    expect(storeFor('inv').get(p.id).line_count).toBe(2);
+  });
+
+  it('insert(array), all or nothing: the third row is refused as one by one refuses it, and nothing is written', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    expectDescriptionRequired(await refusalOf(engine.insert('inv_line', threeBare(p.id))));
+    expect(lines(p.id)).toHaveLength(0);
+  });
+
+  it('insertMany, per-row outcome: the first two rows land, the third carries the refusal', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    const out = await engine.insertMany('inv_line', threeBare(p.id));
+    expect(out.map((o) => o.ok)).toEqual([true, true, false]);
+    expectDescriptionRequired((out[2] as { ok: false; error: unknown }).error);
+    expect(lines(p.id)).toHaveLength(2);
+    expect(storeFor('inv').get(p.id).line_count).toBe(2);
+  });
+
+  it('a refused row moves nothing: with the second row refused, the third reads one earlier line and is admitted', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    // The second row is refused on its own (a non-number amount), so the batch
+    // counts one admitted row before the third, as one by one would store one.
+    const out = await engine.insertMany('inv_line', [{ inv: p.id, amount: 1 }, { inv: p.id, amount: 'x' }, { inv: p.id, amount: 3 }]);
+    expect(out.map((o) => o.ok)).toEqual([true, false, true]);
+    expect(lines(p.id)).toHaveLength(2);
+  });
+
+  it('the rows of the batch count per header: two headers, two lines each, all admitted', async () => {
+    const p = await engine.insert('inv', { name: 'P', status: 'draft' });
+    const q = await engine.insert('inv', { name: 'Q', status: 'draft' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 1 }, { inv: q.id, amount: 1 }, { inv: p.id, amount: 2 }, { inv: q.id, amount: 2 }]);
+    expect(storeFor('inv').get(p.id).line_count).toBe(2);
+    expect(storeFor('inv').get(q.id).line_count).toBe(2);
+  });
+
+  it('CONTROL: a parent. predicate reading a field that is no summary answers as before — draft admits the batch, sent refuses its first row', async () => {
+    const draft = await engine.insert('inv', { name: 'D', status: 'draft' });
+    const sent = await engine.insert('inv', { name: 'S', status: 'sent' });
+    await engine.insert('inv_line', [{ inv: draft.id, amount: 1, description: 'x' }, { inv: draft.id, amount: 2, description: 'x' }]);
+    expect(lines(draft.id)).toHaveLength(2);
+    const out = await engine.insertMany('inv_line', [{ inv: sent.id, amount: 1, description: 'x' }, { inv: sent.id, amount: 2, description: 'x', note: 'n' }]);
+    expect(out.map((o) => o.ok)).toEqual([false, true]);
+    expect((out[0] as { ok: false; error: ValidationError }).error.fields.map((f) => ({ field: f.field, code: f.code }))).toEqual([{ field: 'note', code: 'required' }]);
+  });
+
+  it('the multi-row insert preview answers the write: the third row is not valid', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    const out = await engine.validate('inv_line', threeBare(p.id), { mode: 'insert' });
+    expect(out.results!.map((r) => r.valid)).toEqual([true, true, false]);
+    expect(out.results![2]!.errors.map((e) => ({ field: e.field, code: e.code }))).toEqual([{ field: 'description', code: 'required' }]);
+    expect(lines(p.id)).toHaveLength(0);
   });
 });
