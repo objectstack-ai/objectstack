@@ -50,6 +50,18 @@ function tracesTo(check: string, prompt: string, card: ScenarioCard, phase: 'bui
   if ((m = /^select:([a-z0-9_]+\.[a-z0-9_]+)>=(\d+)opts$/.exec(check))) return prompt.includes(`${code(m[1]!)} (${m[2]})`);
   if ((m = /^dashboard:([a-z0-9_]+)$/.exec(check))) return /^- Dashboards, each a dashboard named exactly: .*$/m.exec(prompt)?.[0].includes(code(m[1]!)) ?? false;
   if ((m = /^nav:([a-z0-9_]+)->exists$/.exec(check))) return /^- The app's navigation has an entry for each of: .*$/m.exec(prompt)?.[0].includes(code(m[1]!)) ?? false;
+  // A dataset: on its object, by its label; a member: on its own line, with every synonym and its description, word for word.
+  if ((m = /^dataset:([a-z0-9_]+)$/.exec(check))) {
+    const d = card.expect.datasets?.find((x) => x.name === m![1]);
+    return d !== undefined && prompt.includes(`  - ${code(d.name)} on ${code(d.object)}, label ${JSON.stringify(d.label)}`);
+  }
+  if ((m = /^dataset-(measure|dimension):([a-z0-9_]+)\.([a-z0-9_]+)$/.exec(check))) {
+    const d = card.expect.datasets?.find((x) => x.name === m![2]);
+    const member = (m[1] === 'measure' ? d?.measures : d?.dimensions)?.find((x) => x.name === m![3]);
+    if (member === undefined) return false;
+    const line = prompt.split('\n').find((l) => l.startsWith(`    - ${m![1]} ${code(member.name)} `));
+    return line !== undefined && (member.synonyms ?? []).every((w) => line.includes(JSON.stringify(w))) && (member.description === undefined || line.includes(JSON.stringify(member.description)));
+  }
   return undefined;
 }
 

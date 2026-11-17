@@ -1498,9 +1498,9 @@ describe('ApprovalService (node era)', () => {
   it('getRequest: viewer.can_act is true for a pending approver, false for the submitter', async () => {
     const req = await svc.openNodeRequest(openInput(['u9']), CTX); // submitter u1, approver u9
     const asApprover = await svc.getRequest(req.id, { userId: 'u9', tenantId: 't1' } as any);
-    expect(asApprover!.viewer).toEqual({ can_act: true, is_submitter: false, can_override: false });
+    expect(asApprover!.viewer).toEqual({ can_act: true, is_submitter: false, can_override: false, can_override_approve: false });
     const asSubmitter = await svc.getRequest(req.id, { userId: 'u1', tenantId: 't1' } as any);
-    expect(asSubmitter!.viewer).toEqual({ can_act: false, is_submitter: true, can_override: false });
+    expect(asSubmitter!.viewer).toEqual({ can_act: false, is_submitter: true, can_override: false, can_override_approve: false });
     // #3590: a same-tenant stranger participates in nothing, so the request is
     // not readable at all — previously it came back with an all-false viewer
     // block, which meant every authenticated user could read every request.

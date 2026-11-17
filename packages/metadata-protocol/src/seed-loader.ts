@@ -48,6 +48,7 @@ import { validationFailureDetails } from '@objectstack/types';
 // `SysMetadataRepository` (#4867) and `cascadeDeleteRelations` (#8895) ask, so
 // a driver quirk is taught to the platform once instead of per seam.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { createHash } from 'node:crypto';
 // [#25779] `seedFile(path)` values: stored, kept across replays, and owned by
 // the row that holds them; an id-shaped file value that names no file refused.
 import { SeedDatasetFiles, type SeedFileClaims } from './seed-files.js';
@@ -422,6 +423,32 @@ function seedLandedKey(record: Record<string, unknown>, externalId: string | str
     pairs.push([field, String(value)]);
   }
   return JSON.stringify(pairs);
+}
+
+/**
+ * [#34800] The id a seed row lands with when a reference in its `externalId`
+ * is still empty on the load that inserts it — a person not signed up yet,
+ * deferred to pass 2 and held past it.
+ *
+ * Such a row is stored with that key column NULL, so the natural key the load
+ * matches existing rows by can never find it again: while the reference stays
+ * unresolvable the record keys empty, and once it resolves the record carries
+ * an id the stored row does not. Each load then inserted another copy. The
+ * row's identity has to come from what does not move between loads: the key
+ * as AUTHORED (`authoredKey`, {@link seedLandedKey} over the record before
+ * its references resolve — the natural key the author wrote, never the id it
+ * resolves to), in the object and organization the row belongs to.
+ *
+ * DERIVED, never minted, for {@link perOrganizationSeedRowId}'s reason: a
+ * replay finds its row again by recomputing the id. A digest rather than the
+ * key itself, because the key is any text the author wrote and an id is not.
+ * A row a person created never carries one, so a lookup by this id can only
+ * find the seed's own row, and two records whose keys differ only in that
+ * reference derive two ids.
+ */
+function seedDeferredKeyRowId(objectName: string, rowOrganization: string, authoredKey: string): string {
+  const digest = createHash('sha256').update(JSON.stringify([objectName, rowOrganization, authoredKey])).digest('hex');
+  return `seed_${digest.slice(0, 32)}`;
 }
 
 /**
@@ -1611,8 +1638,19 @@ export class SeedLoaderService implements ISeedLoaderService {
     // that share the same natural key — e.g. `name: 'Acme Corp'`).
     let existingRecords: Map<string, any> | undefined;
     const keyedMode = mode === 'upsert' || mode === 'update' || mode === 'ignore';
+    // [#34800] The externalId fields that are references. A row can land with
+    // one of them still empty, and a replay finds that row by its id (see
+    // `seedDeferredKeyRowId`), so the same read also indexes every row by id.
+    const referenceKeyFields: ReadonlySet<string> = new Set(
+      (refMap.get(objectName) ?? [])
+        .map((ref) => ref.field)
+        .filter((field) => (Array.isArray(externalId) ? externalId : [externalId]).includes(field)),
+    );
+    const existingRowsById = referenceKeyFields.size > 0 ? new Map<string, any>() : undefined;
+    /** [#34800] Ids of rows a record of this dataset found by id (or will insert with), so no two claim one. */
+    const claimedKeyRowIds = new Set<string>();
     if (keyedMode && !config.dryRun) {
-      existingRecords = await this.loadExistingRecords(objectName, externalId, config.organizationId);
+      existingRecords = await this.loadExistingRecords(objectName, externalId, config.organizationId, existingRowsById);
     }
     // [#28952] A keyed dataset whose every record keys EMPTY — its
     // `externalId` names a field no record carries, most often a field the
@@ -2103,6 +2141,17 @@ export class SeedLoaderService implements ISeedLoaderService {
         authoredIdByRecordIndex.set(i, authoredId);
       }
 
+      // [#34800] The key as AUTHORED, before any of its references resolves:
+      // the identity of a row that lands while one of them is still empty.
+      // `''` when the dataset keys on no reference or the record leaves a key
+      // field blank as written; such a record matches by natural key alone.
+      const authoredKey = existingRowsById ? seedLandedKey(record, externalId) : '';
+      const authoredKeyValues = authoredKey === ''
+        ? undefined
+        : new Map([...referenceKeyFields].map((field) => [field, record[field]] as const));
+      /** [#34800] Key fields whose reference this record defers to pass 2. */
+      const deferredKeyFields = new Set<string>();
+
       // Resolve references
       let unresolvedRefError = false;
 
@@ -2170,6 +2219,54 @@ export class SeedLoaderService implements ISeedLoaderService {
       }
 
       /**
+       * [#34800] The row this record landed on while a reference in its key
+       * was still empty, found by id when its natural key cannot find it:
+       * the row's own key column is NULL, so the key misses whether the
+       * reference is still deferred (the record keys `''`) or resolves now
+       * (the record carries an id the row does not). An exact natural-key
+       * match always wins. The id is the record's own `id` when it carries
+       * one, else {@link seedDeferredKeyRowId}; a row found by it is taken
+       * only when its other key columns still equal the record's and each
+       * reference column it holds is empty or the very value the record
+       * resolved, and only by one record of the load. A row a person created
+       * carries neither id, so it is never taken.
+       *
+       * Asked once the key is final — after the key's references resolved —
+       * and answered once per record.
+       */
+      let deferredKeyRow: { row: any } | null | undefined;
+      const rowLandedWithEmptyKeyReference = (): any | undefined => {
+        if (deferredKeyRow !== undefined) return deferredKeyRow?.row;
+        deferredKeyRow = null;
+        if (!existingRowsById || authoredKey === '') return undefined;
+        const key = this.externalIdKey(record, externalId);
+        if (key !== '' && existingRecords?.has(key)) return undefined;
+        const ownId = record['id'];
+        const rowId = typeof ownId === 'string' && ownId !== ''
+          ? ownId
+          : seedDeferredKeyRowId(objectName, String(record[organizationColumn] ?? ''), authoredKey);
+        const row = existingRowsById.get(rowId);
+        if (row === undefined || claimedKeyRowIds.has(rowId)) return undefined;
+        for (const field of keyFields) {
+          if (deferredKeyFields.has(field)) continue;
+          if (referenceKeyFields.has(field) && isMissing(row[field])) continue;
+          if (String(row[field] ?? '') !== String(record[field] ?? '')) return undefined;
+        }
+        claimedKeyRowIds.add(rowId);
+        deferredKeyRow = { row };
+        return row;
+      };
+      /**
+       * [#34800] The existing rows this record's write decision reads: the
+       * dataset's, or — when the record landed on a row its natural key
+       * cannot find — that one row, under the key the record has.
+       */
+      const existingRowsFor = (): Map<string, any> | undefined => {
+        const row = rowLandedWithEmptyKeyReference();
+        return row === undefined ? existingRecords : new Map([[this.externalIdKey(record, externalId), row]]);
+      };
+
+      /**
        * [#25761] Is this row one the load MATCHED — an existing row this
        * dataset writes over? The create-only policy is the only thing that
        * asks. The same lookup {@link SeedLoaderService.decideWriteAction}
@@ -2179,7 +2276,7 @@ export class SeedLoaderService implements ISeedLoaderService {
        * nothing, so every row they see is one they create.
        */
       const matchesExistingRow = (): boolean =>
-        existingRecords?.has(this.externalIdKey(record, externalId)) === true;
+        existingRowsFor()?.has(this.externalIdKey(record, externalId)) === true;
 
       const allRecordRefs: Array<
         Pick<ReferenceResolutionParsed, 'field' | 'targetObject' | 'targetField'> & { multiple?: boolean }
@@ -2217,6 +2314,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (!recordedKeys || !this.landedKeyLedger?.honour) return false;
         const key = this.externalIdKey(record, externalId);
         if (key === '' || existingRecords?.has(key)) return false;
+        // [#34800] Found by id: the row is there, under a key column still empty.
+        if (rowLandedWithEmptyKeyReference() !== undefined) return false;
         return recordedKeys.has(landedKeyOf(record, i));
       };
       let withdrawnRow = false;
@@ -2404,6 +2503,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // array): a partially-written array is a corrupt association, and
             // pass 2 re-resolves every element from the same authored keys.
             delete record[ref.field];
+            if (keyFields.has(ref.field)) deferredKeyFields.add(ref.field); // [#34800]
             deferredUpdates.push({
               objectName,
               recordExternalId: this.externalIdKey(record, externalId),
@@ -2524,12 +2624,54 @@ export class SeedLoaderService implements ISeedLoaderService {
         for (const column of createOnlyColumns) delete record[column];
       }
 
+      // [#34800] A row that lands while a reference in its key is still empty
+      // takes the id derived from its authored key, so the next load finds it
+      // by that id (`rowLandedWithEmptyKeyReference`) instead of inserting
+      // another. Only for the modes that insert a keyed row they do not find,
+      // only when the record names no id of its own, and never an id a row of
+      // this organization or another record of this load already has.
+      if (!config.dryRun && (mode === 'upsert' || mode === 'ignore') && deferredKeyFields.size > 0
+        && authoredKey !== '' && record['id'] === undefined && rowLandedWithEmptyKeyReference() === undefined) {
+        const rowId = seedDeferredKeyRowId(objectName, String(record[organizationColumn] ?? ''), authoredKey);
+        if (!existingRowsById!.has(rowId) && !claimedKeyRowIds.has(rowId)) {
+          claimedKeyRowIds.add(rowId);
+          record['id'] = rowId;
+        }
+      }
+      // [#34800] `ignore` writes nothing over a row it found, so a key
+      // reference that was empty when the row landed and resolves now is
+      // back-filled by pass 2 onto that row, that column only — the way a held
+      // person reference is written later onto the row the seed landed on.
+      const landedKeyRow = mode === 'ignore' && config.multiPass && !config.dryRun
+        ? rowLandedWithEmptyKeyReference()
+        : undefined;
+      if (landedKeyRow !== undefined) {
+        for (const ref of allRecordRefs) {
+          if (!referenceKeyFields.has(ref.field) || deferredKeyFields.has(ref.field) || ref.multiple) continue;
+          if (!isMissing(landedKeyRow[ref.field]) || isMissing(record[ref.field])) continue;
+          deferredUpdates.push({
+            objectName,
+            recordExternalId: this.externalIdKey(record, externalId),
+            externalIdLabel: this.externalIdLabel(externalId),
+            field: ref.field,
+            targetObject: ref.targetObject,
+            targetField: ref.targetField,
+            attemptedValue: authoredKeyValues!.get(ref.field),
+            multiple: false,
+            recordIndex: i,
+          });
+          // Booked as pass 2's, which counts it resolved once it is written.
+          if (record[ref.field] !== authoredKeyValues!.get(ref.field)) referencesResolved--;
+          referencesDeferred++;
+        }
+      }
+
       // [#25779] Seed files, once the row's references and organization are
       // final: each `seedFile(path)` becomes the id of a file stored for (or
       // kept by) this row, and a file value that cannot be honoured refuses
       // the row before anything of it is written.
       if (datasetFiles) {
-        const matched = existingRecords?.get(this.externalIdKey(record, externalId));
+        const matched = existingRowsFor()?.get(this.externalIdKey(record, externalId));
         const organizationOfRow =
           typeof record[organizationColumn] === 'string' && record[organizationColumn] !== ''
             ? (record[organizationColumn] as string)
@@ -2590,7 +2732,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       // verbatim — this line only moves WHEN the author learns, from after the
       // engine's rejection to before the write that provokes it.
       if (!config.dryRun && requiredDeferrals.length > 0) {
-        if (this.decideWriteAction(record, mode, externalId, existingRecords, comparands).action === 'insert') {
+        if (this.decideWriteAction(record, mode, externalId, existingRowsFor(), comparands).action === 'insert') {
           for (const deferral of requiredDeferrals) {
             if (earlySignalledFields.has(deferral.field)) continue;
             earlySignalledFields.add(deferral.field);
@@ -2629,7 +2771,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           // against an earlier one via `insertedRecords` — see `hasSelfRef`.
           try {
             const result = await this.writeRecord(
-              objectName, record, mode, externalId, existingRecords, comparands, record[organizationColumn],
+              objectName, record, mode, externalId, existingRowsFor(), comparands, record[organizationColumn],
             );
 
             if (result.action === 'inserted') written.inserted++;
@@ -2653,7 +2795,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             // already exist (rejected update), so keep its natural-key
             // mapping alive for downstream reference resolution.
             const externalIdValue = this.externalIdKey(record, externalId);
-            const existingId = this.extractId(existingRecords?.get(externalIdValue));
+            const existingId = this.extractId(existingRowsFor()?.get(externalIdValue));
             if (existingId) noteLanded(i, existingId); // [commit 9a884c6e4]
             if (externalIdValue && existingId) {
               insertedRecords.get(objectName)!.set(externalIdValue, existingId);
@@ -2672,7 +2814,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             );
           }
         } else {
-          const decision = this.decideWriteAction(record, mode, externalId, existingRecords, comparands);
+          const decision = this.decideWriteAction(record, mode, externalId, existingRowsFor(), comparands);
           const externalIdValue = this.externalIdKey(record, externalId);
 
           if (decision.action === 'skip') {
@@ -4740,6 +4882,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     objectName: string,
     externalId: string | string[],
     organizationId?: string,
+    /** [#34800] When given, filled with every row read, by id — keyed or not. */
+    byId?: Map<string, any>,
   ): Promise<Map<string, any>> {
     const map = new Map<string, any>();
     try {
@@ -4770,6 +4914,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         if (key) {
           map.set(key, record);
         }
+        const id = byId ? this.extractId(record) : undefined;
+        if (id) byId!.set(id, record);
       }
     } catch (error) {
       // [#8896] Discriminate by error TYPE. This map is not a convenience —
