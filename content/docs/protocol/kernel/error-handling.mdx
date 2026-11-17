@@ -684,14 +684,16 @@ resource is named in `message`.
 
 <Callout type="info">
 **The `/data` door answers a different code.** A record missing from a CRUD route is
-`RECORD_NOT_FOUND` in the flat envelope, with the object as a top-level sibling — see
+`RECORD_NOT_FOUND` in the flat envelope, with the object as a top-level sibling and the
+end user's sentence on `userMessage`, in the caller's language — see
 [HTTP API](/docs/protocol/kernel/http-protocol):
 
 ```json
 {
   "error": "Record acc_999 not found in account",
   "code": "RECORD_NOT_FOUND",
-  "object": "account"
+  "object": "account",
+  "userMessage": "This record does not exist, or you do not have access to it."
 }
 ```
 
