@@ -1917,6 +1917,7 @@ const de = {
       },
       passwordsNote: "Temporäre Passwörter — einmalig angezeigt, nie gespeichert. Speichern Sie sie jetzt; jeder Benutzer muss seines bei der ersten Anmeldung ändern.",
       passwordsMore: "Weitere Einträge ausgelassen — bitte den Download verwenden.",
+      positionsHint: "Positionen: Ordnen Sie eine Spalte mit Maschinennamen von Positionen zu, mehrere durch Semikolon (;) getrennt. Jede wird wie in Setup zugewiesen; ein Name, den es nicht gibt oder den Sie nicht zuweisen dürfen, wird in seiner Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
       passwordsDownload: "CSV herunterladen",
     },
     ai: {
@@ -4164,6 +4165,7 @@ const de = {
         seeds_one: "{{count}} Beispieldatenpaket",
         seeds_other: "{{count}} Beispieldatenpakete",
         verified: "{{checks}} geprüft",
+        seedFailed: "Die Beispieldaten konnten nicht geladen werden.",
       },
       unknownPhase: "Unbekannte Build-Phase",
       nextStepsLead: "Als Nächstes können Sie sagen: {{steps}}",

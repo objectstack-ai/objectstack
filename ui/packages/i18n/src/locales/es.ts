@@ -1973,6 +1973,7 @@ const es = {
       },
       passwordsNote: "Contraseñas temporales — se muestran una sola vez y nunca se almacenan. Guárdelas ahora; cada usuario debe cambiar la suya en el primer inicio de sesión.",
       passwordsMore: "Se han omitido más entradas — use la descarga.",
+      positionsHint: "Puestos: asigne una columna con nombres de máquina de puestos, varios separados por «;». Cada uno se asigna como en Setup; un nombre que no existe o que usted no puede asignar se informa en su fila, y el usuario se crea igualmente.",
       passwordsDownload: "Descargar CSV",
     },
     ai: {
@@ -4258,6 +4259,7 @@ const es = {
         seeds_many: "{{count}} de conjuntos de datos de ejemplo",
         seeds_other: "{{count}} conjuntos de datos de ejemplo",
         verified: "Verificado: {{checks}}",
+        seedFailed: "No se pudieron cargar los datos de ejemplo.",
       },
       unknownPhase: "Fase de creación desconocida",
       nextStepsLead: "A continuación puede decir: {{steps}}",
