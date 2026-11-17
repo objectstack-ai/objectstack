@@ -329,6 +329,89 @@ describe('[#19995, ruling C] a read scope the engine refuses is refused by the a
     });
   });
 
+  describe('[#33876] a nested-relation condition on a driver that does not declare it can run one', () => {
+    // A second engine whose driver declares no `DriverCapabilities.readableIdsLeaf`.
+    // Execution refuses a single-valued nested-relation condition on such a
+    // driver up front, and the engine's filter judge answers that same refusal
+    // from the declared bit, so the merge refuses the scope before any read.
+    let bitlessDriver: SqliteWasmDriver;
+    let bitless: AnalyticsService;
+    let reads: ReturnType<typeof vi.fn<(verb: string, object: unknown) => void>>;
+    /** A single-valued relation (`account`, a lookup) with a condition on the related object. */
+    const NESTED = { account: { rank: { $lte: 1 } } };
+
+    beforeAll(async () => {
+      bitlessDriver = new SqliteWasmDriver({ filename: ':memory:' });
+      (bitlessDriver as unknown as { logger: unknown }).logger = quiet;
+      await bitlessDriver.initObjects([
+        { name: BASE, fields: BASE_FIELDS },
+        { name: REF, fields: REF_FIELDS },
+      ] as never);
+      for (const row of BASE_ROWS) await bitlessDriver.create(BASE, { ...row });
+      for (const row of REF_ROWS) await bitlessDriver.create(REF, { ...row });
+      // The same SQL storage under a driver that declares everything but the bit.
+      const declared = { ...(bitlessDriver.supports as Record<string, unknown>), readableIdsLeaf: false };
+      Object.defineProperty(bitlessDriver, 'supports', { get: () => declared });
+      Object.defineProperty(bitlessDriver, 'name', { value: 'test.driver.declares-no-readable-ids-leaf' });
+      reads = vi.fn<(verb: string, object: unknown) => void>();
+      for (const verb of ['find', 'findOne', 'count', 'aggregate'] as const) {
+        const own = (bitlessDriver as unknown as Record<string, (...a: unknown[]) => unknown>)[verb].bind(bitlessDriver);
+        (bitlessDriver as unknown as Record<string, unknown>)[verb] = (...a: unknown[]) => {
+          reads(verb, a[0]);
+          return own(...a);
+        };
+      }
+
+      const bitlessEngine = new ObjectQL({ logger: quiet });
+      bitlessEngine.registerDriver(bitlessDriver as never, true);
+      await bitlessEngine.init();
+      bitlessEngine.registerObject({ name: BASE, label: 'Deal', fields: BASE_FIELDS } as never);
+      bitlessEngine.registerObject({ name: REF, label: 'Account', fields: REF_FIELDS } as never);
+      bitless = (await pluginService(bitlessEngine)).service;
+    });
+
+    afterAll(async () => {
+      await bitlessDriver?.disconnect?.();
+    });
+
+    it('a BASE scope with such a condition → READ_SCOPE_COMPILE_FAILED / 500, prose withheld, nothing read', async () => {
+      reads.mockClear();
+      const { refusal, rows } = await outcome(() => bitless.query(DIRECT, MEMBER), { [BASE]: NESTED });
+      expect(rows, 'a scope the driver cannot run must not be served').toBeUndefined();
+      assertWithheldServerFault(refusal, 'account');
+      expect(reads, 'refused before any read').not.toHaveBeenCalled();
+    });
+
+    it('the same scope on the cross-object path → withheld 500', async () => {
+      // The dimension through the lookup is itself refused on this driver
+      // (INVALID_QUERY / 400, the caller's own query); the scope is judged at
+      // the merge before that, so its verdict is the one raised.
+      const { refusal, rows } = await outcome(() => bitless.query(CROSS, MEMBER), { [BASE]: NESTED });
+      expect(rows).toBeUndefined();
+      assertWithheldServerFault(refusal, 'account');
+    });
+
+    it('CONTROL: the driver that declares the bit serves the same scope with exactly its rows', async () => {
+      const { refusal, rows } = await outcome(() => wired.query(DIRECT, MEMBER), { [BASE]: NESTED });
+      expect(refusal).toBeUndefined();
+      expect(counts(rows, 'region')).toEqual({ emea: 1, amer: 1 });
+    });
+
+    it('CONTROL: a well-formed scope with no such condition is served on the driver without the bit', async () => {
+      const { refusal, rows } = await outcome(() => bitless.query(DIRECT, MEMBER), { [BASE]: { region: { $in: ['emea', 'apac'] } } });
+      expect(refusal).toBeUndefined();
+      expect(counts(rows, 'region')).toEqual({ emea: 1, apac: 1 });
+    });
+
+    it("the caller's own `where` with such a condition keeps the engine's INVALID_FILTER / 400", async () => {
+      const { refusal } = await outcome(
+        () => bitless.query({ ...DIRECT, where: NESTED } as AnalyticsQuery, MEMBER),
+        { [BASE]: ALL_REGIONS },
+      );
+      assertCallersOwn(refusal, 'INVALID_FILTER', 'account');
+    });
+  });
+
   describe('a host that cannot answer keeps today’s behaviour and says so once', () => {
     it('AnalyticsService given no judgeFilter: the engine’s 400 as before, one warn across queries', async () => {
       const warn = vi.fn();

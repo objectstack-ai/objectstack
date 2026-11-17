@@ -2071,6 +2071,7 @@ const zhHant = {
       view: '檢視',
       confirm: '確認',
       cancel: '取消',
+      continue: '繼續',
       prefilled: '尚未設定的項已按你的瀏覽器給出建議。確認之前不會儲存任何內容。',
       organizationName: {
         title: '為組織命名',

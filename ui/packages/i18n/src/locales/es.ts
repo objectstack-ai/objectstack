@@ -2387,6 +2387,7 @@ const es = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Los valores aún sin configurar se sugieren a partir de su navegador. No se guarda nada hasta que confirme.",
       organizationName: {
         title: "Asigne un nombre a su organización",

@@ -823,6 +823,11 @@ export interface ResultDialogFieldSpec {
   label?: SpecResultDialogField['label'];
   /** Derived, like `label`: the contract's field format set (`table` included). */
   format?: SpecResultDialogField['format'];
+  /**
+   * Derived, like `format`: the cells of a `format: 'table'` field,
+   * `[{ path, label?, format? }]`, `path` read in one element of the array.
+   */
+  columns?: SpecResultDialogField['columns'];
 }
 export interface ResultDialogSpec {
   /** Derived `I18nLabel` — see `ResultDialogFieldSpec.label` on resolving it. */

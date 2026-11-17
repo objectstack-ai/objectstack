@@ -2382,6 +2382,7 @@ const pt = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Os valores ainda não definidos foram sugeridos com base no seu navegador. Nada é salvo até você confirmar.",
       organizationName: {
         title: "Dê um nome à sua organização",

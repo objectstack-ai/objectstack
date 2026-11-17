@@ -2383,6 +2383,7 @@ const fr = {
       view: "Voir",
       confirm: "Confirmer",
       cancel: "Annuler",
+      continue: "Continuer",
       prefilled: "Les valeurs non encore définies sont suggérées d’après votre navigateur. Rien n’est enregistré avant votre confirmation.",
       organizationName: {
         title: "Nommez votre organisation",
