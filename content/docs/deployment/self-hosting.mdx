@@ -777,12 +777,15 @@ in and opens the link from the invitation mail itself needs no separate step:
 the accept page offers the one-step form, which verifies the address as it
 accepts. No setting relaxes this rule.
 
-**A deployment without a live mail transport cannot onboard anyone by
-invitation link.** With no transport configured, or the log transport, no
-verification mail and no invitation mail reaches anyone, so no invitee can
-verify an address or accept; a link handed over with the invitation's **Copy
-Invite Link** action admits the sign-up and nothing more. To bring a person in
-there, a platform administrator creates the account
+**A deployment without a live mail transport cannot onboard a password
+account by invitation link.** With no transport configured, or the log
+transport, no verification mail and no invitation mail reaches anyone, so an
+invitee who signs up with a password cannot verify the address or accept; a
+link handed over with the invitation's **Copy Invite Link** action admits the
+sign-up and nothing more. The one exception is an invitee who signs in through
+a social or SSO provider that verifies the address: that account counts as
+verified, so it can accept a copied link without any mail. To bring anyone
+else in there, a platform administrator creates the account
 (`POST /api/v1/auth/admin/create-user`), or attaches an account that already
 exists with the member list's **Add Member** action. Add Member is open to
 platform administrators only, and it attaches existing accounts only: it

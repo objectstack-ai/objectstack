@@ -2,7 +2,6 @@
 '@objectstack/plugin-auth': patch
 '@objectstack/verify': patch
 '@object-ui/app-shell': patch
-'@object-ui/console': patch
 ---
 
 fix(plugin-auth)!: accepting, declining and listing an organization invitation need a verified email address on every deployment, and an invitation sign-up joins by accepting once verified
@@ -18,11 +17,11 @@ Skills-docs: none — no skill under `skills/**` teaches accepting an organizati
 - Accepting, declining and listing an organization invitation require a verified email address, on every deployment. A password account verifies by the verification mail; an account a social or SSO provider made counts only when the provider verified the address. The invitation's id, which its accept link and a copied link carry, is no proof of the mailbox, and no setting relaxes the rule.
 - Reading one invitation by its id (`GET /api/v1/auth/organization/get-invitation`) stays open, so the accept page can show it.
 - Under `invite_only` with `membershipPolicy: 'auto'`, an account a sign-up admitted by the invitation it presents is not bound to the Default Organization while its address is unverified. Its membership comes from accepting the invitation once the address is verified, with the role the invitation carries, or from a platform administrator.
-- A deployment without a live mail transport cannot onboard anyone by invitation link.
+- A deployment without a live mail transport cannot onboard a password account by invitation link; an invitee whose social or SSO provider verifies the address can still accept a copied link there.
 
 Unchanged: the invitation mail's own link, which carries a proof of the mailbox and accepts in one step (`POST /api/v1/auth/organization/accept-invitation-one-step`); a verified account, which accepts, declines and lists its invitations as before; the first account of a deployment, accounts an administrator creates and accounts a boot command provisions, which are bound as before; sending, resending and cancelling invitations.
 
-The Console's accept-invitation page answers a refused accept or decline with the verification-mail screen for the account's address, whose link brings the person back to answer the invitation.
+The Console's accept-invitation page answers a refused decline with the verification-mail screen for the account's address, as it answers a refused accept, and that screen's link brings the person back to answer the invitation.
 
 `@objectstack/verify`: a booted stack's `signUp` mints its fixture member through the operator door (the ticket the stack's own auth manager stages for that address), so the account is bound at creation as before; a stack whose auth service offers no such door falls back to the invitation lane.
 
