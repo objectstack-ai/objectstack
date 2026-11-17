@@ -95,6 +95,7 @@ function renderLanding() {
       <Routes>
         <Route path="/studio" element={<BuilderLanding />} />
         <Route path="/studio/:packageId/:tab" element={<div data-testid="pillar-builder" />} />
+        <Route path="/studio/:packageId/metadata/*" element={<div data-testid="metadata-area" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -234,6 +235,87 @@ describe('Studio landing: a read-only base says "n customized, m switched off" (
  * switcher folds it, and the base's card carries it through its customized
  * line and link. The pair's export and delete stay on the Packages page.
  */
+/** A served answer for `id` whose switched-off items are exactly `items`. */
+function servedOff(id: string, items: Array<{ type: string; name: string }>) {
+  const data = {
+    packageId: id,
+    overrides: [],
+    extensions: [],
+    switchedOff: items,
+    contributions: [],
+    counts: { overrides: 0, extensions: 0, switchedOff: items.length, contributions: 0 },
+  };
+  return { status: 200, body: { success: true, data } };
+}
+
+describe('Studio landing: "m switched off" leads to the switched-off actions (objectstack#34724)', () => {
+  async function readLine() {
+    const line = await within(await waitFor(() => cardOf('Showcase'))).findByTestId('studio-landing-customizations');
+    await waitFor(() => expect(line).toHaveAttribute('data-state', 'read'));
+    return line;
+  }
+
+  it('one switched-off action: the count opens that action\'s page, where its switch reads off', async () => {
+    packages.list = [SHOWCASE];
+    stubWire({ 'com.example.showcase': servedOff('com.example.showcase', [{ type: 'action', name: 'showcase_mark_done' }]) });
+    renderLanding();
+    const line = await readLine();
+    const off = within(line).getByTestId('studio-landing-customizations-switched-off');
+    expect(off).toHaveTextContent(switchedOffText(1));
+    expect(off).toHaveAttribute('href', '/studio/com.example.showcase/metadata/action/showcase_mark_done');
+    expect(off).toHaveAttribute('title', t('engine.studio.landing.customizations.switchedOffActionsTitle', 'en-US'));
+    expect(within(line).queryByTestId('studio-landing-customizations-switched-off-actions')).not.toBeInTheDocument();
+  });
+
+  it('several switched-off actions: the count opens the action list', async () => {
+    packages.list = [SHOWCASE];
+    stubWire({
+      'com.example.showcase': servedOff('com.example.showcase', [
+        { type: 'action', name: 'showcase_mark_done' },
+        { type: 'action', name: 'showcase_portfolio_snapshot' },
+      ]),
+    });
+    renderLanding();
+    const off = within(await readLine()).getByTestId('studio-landing-customizations-switched-off');
+    expect(off).toHaveAttribute('href', '/studio/com.example.showcase/metadata/action');
+  });
+
+  it('flows and actions switched off: the count opens Automations, and a second link the actions', async () => {
+    packages.list = [SHOWCASE];
+    stubWire({
+      'com.example.showcase': servedOff('com.example.showcase', [
+        { type: 'action', name: 'showcase_mark_done' },
+        { type: 'flow', name: 'showcase_nightly' },
+      ]),
+    });
+    renderLanding();
+    const line = await readLine();
+    expect(within(line).getByTestId('studio-landing-customizations-switched-off')).toHaveAttribute(
+      'href',
+      '/studio/com.example.showcase/automations',
+    );
+    const actions = within(line).getByTestId('studio-landing-customizations-switched-off-actions');
+    expect(actions).toHaveTextContent(tFormat('engine.studio.landing.customizations.switchedOffActions', 'en-US', { count: 1 }));
+    expect(actions).toHaveAttribute('href', '/studio/com.example.showcase/metadata/action/showcase_mark_done');
+    fireEvent.click(actions);
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent('/studio/com.example.showcase/metadata/action/showcase_mark_done'),
+    );
+  });
+
+  it('flows only: the count opens Automations, with no actions link (unchanged)', async () => {
+    packages.list = [SHOWCASE];
+    stubWire({ 'com.example.showcase': servedOff('com.example.showcase', [{ type: 'flow', name: 'showcase_nightly' }]) });
+    renderLanding();
+    const line = await readLine();
+    expect(within(line).getByTestId('studio-landing-customizations-switched-off')).toHaveAttribute(
+      'href',
+      '/studio/com.example.showcase/automations',
+    );
+    expect(within(line).queryByTestId('studio-landing-customizations-switched-off-actions')).not.toBeInTheDocument();
+  });
+});
+
 describe('Studio landing: a base’s .custom pair has no card of its own (ADR-0146 D3)', () => {
   /** Every package card the landing draws, by the package id each card carries. */
   const cardIds = () =>

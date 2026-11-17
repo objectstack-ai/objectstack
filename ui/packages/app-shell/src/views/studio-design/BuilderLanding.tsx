@@ -68,6 +68,17 @@ type CustomizationLine =
 const studioPillarPath = (packageId: string, pillar: 'data' | 'automations') =>
   `/studio/${encodeURIComponent(packageId)}/${pillar}`;
 
+/**
+ * objectstack#34724 (ADR-0146 D4 as amended 2026-11-17) — where a base's
+ * switched-off actions are switched on again: an action's switch is on the
+ * action in Studio. One action opens its own page in the "All metadata" area,
+ * where the switch reads off; more than one opens that area's action list.
+ */
+const switchedOffActionsPath = (packageId: string, actions: readonly string[]) => {
+  const list = `/studio/${encodeURIComponent(packageId)}/metadata/action`;
+  return actions.length === 1 ? `${list}/${encodeURIComponent(actions[0])}` : list;
+};
+
 export function BuilderLanding(): React.ReactElement {
   const navigate = useNavigate();
   const locale = useMetadataLocale();
@@ -254,6 +265,13 @@ export function BuilderLanding(): React.ReactElement {
       customized: line.counts.customized,
     });
     const linkClass = 'hover:text-foreground hover:underline';
+    // objectstack#34724 — the "switched off" count leads to the items: a flow's
+    // switch is in the Automations pillar, an action's on the action. When
+    // every switched-off item is an action, the count opens them; when flows
+    // are among them too, the count opens Automations and a second link the
+    // actions.
+    const offActions = line.counts.switchedOffActions ?? [];
+    const offOnlyActions = offActions.length > 0 && offActions.length === line.counts.switchedOff;
     return (
       <p data-testid="studio-landing-customizations" data-state="read" className={lineClass}>
         {pair ? (
@@ -270,8 +288,13 @@ export function BuilderLanding(): React.ReactElement {
         )}
         {t('engine.studio.landing.customizations.separator', locale)}
         <Link
-          to={studioPillarPath(baseId, 'automations')}
-          title={t('engine.studio.landing.customizations.switchedOffTitle', locale)}
+          to={offOnlyActions ? switchedOffActionsPath(baseId, offActions) : studioPillarPath(baseId, 'automations')}
+          title={t(
+            offOnlyActions
+              ? 'engine.studio.landing.customizations.switchedOffActionsTitle'
+              : 'engine.studio.landing.customizations.switchedOffTitle',
+            locale,
+          )}
           data-testid="studio-landing-customizations-switched-off"
           className={linkClass}
         >
@@ -279,6 +302,19 @@ export function BuilderLanding(): React.ReactElement {
             switchedOff: line.counts.switchedOff,
           })}
         </Link>
+        {offActions.length > 0 && !offOnlyActions && (
+          <>
+            {' '}
+            <Link
+              to={switchedOffActionsPath(baseId, offActions)}
+              title={t('engine.studio.landing.customizations.switchedOffActionsTitle', locale)}
+              data-testid="studio-landing-customizations-switched-off-actions"
+              className={linkClass}
+            >
+              {tFormat('engine.studio.landing.customizations.switchedOffActions', locale, { count: offActions.length })}
+            </Link>
+          </>
+        )}
       </p>
     );
   };
