@@ -18,6 +18,7 @@ import {
   useObjectTranslation,
 } from '@object-ui/i18n';
 import { clearSharedDiscoveryCache } from '../../../packages/data-objectstack/src/sharedDiscovery';
+import { resolveLocaleAmong } from '@objectstack/spec/system';
 import { __resetPreferredLocaleForTests, pickPreferredLocale, seedTenantLanguage } from './languageSeed';
 
 const BASE = '';
@@ -176,30 +177,35 @@ describe('seedTenantLanguage', () => {
   });
 });
 
-describe('a supported browser language, else the app default (objectstack#33985)', () => {
+describe('a supported browser language, else the server decides (objectstack#33985, objectstack#34392)', () => {
   /**
-   * A server that answers `/auth/me/localization` by its three rungs: the
-   * user's own `sys_user.locale`, else the request's `Accept-Language`, else
-   * the deployment default. A request that states no `Accept-Language` carries
-   * the browser's own, which is what a bare `fetch` sends. Discovery serves the
-   * app's `locale.default` and `locale.supported` (the default alone when no
-   * list is given).
+   * A server that answers `/auth/me/localization` by its rungs: the user's own
+   * `sys_user.locale`, else the request's `Accept-Language` when the app lists
+   * it (in the app's spelling), else the organization's `localization.locale`,
+   * else the app's declared default. A request that states no
+   * `Accept-Language` carries the browser's own, which is what a bare `fetch`
+   * sends. Discovery serves the app's `locale.default` and `locale.supported`
+   * (the default alone when no list is given); with no app default it serves
+   * no locale block, and the server has no list to match the request against.
    */
   function fakeServer(opts: {
     appDefault?: string;
     supported?: string[];
+    orgLocale?: string;
     userLocale?: string;
     browser: string;
   }) {
+    const served = opts.appDefault ? (opts.supported ?? [opts.appDefault]) : undefined;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (String(url).endsWith(DISCOVERY)) {
         if (!opts.appDefault) return noDiscovery;
-        const supported = opts.supported ?? [opts.appDefault];
-        const data = { locale: { default: opts.appDefault, supported, timezone: 'UTC' } };
+        const data = { locale: { default: opts.appDefault, supported: served, timezone: 'UTC' } };
         return { ok: true, status: 200, json: async () => ({ success: true, data }) };
       }
       const stated = (init?.headers as Record<string, string> | undefined)?.['Accept-Language'];
-      const locale = opts.userLocale ?? stated ?? opts.browser;
+      const requested = stated ?? opts.browser;
+      const listed = served ? resolveLocaleAmong(requested, served) : requested;
+      const locale = opts.userLocale ?? listed ?? opts.orgLocale ?? opts.appDefault;
       return { ok: true, status: 200, json: async () => ({ authenticated: true, locale }) };
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -246,14 +252,26 @@ describe('a supported browser language, else the app default (objectstack#33985)
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBeNull();
   });
 
-  it('CONTROL: an fr browser on the same app gets the app default en', async () => {
+  it("an fr browser on an app that does not ship fr gets the organization's language (objectstack#34392)", async () => {
+    const fetchMock = fakeServer({ appDefault: 'en', supported: ['en', 'zh-CN'], orgLocale: 'zh-CN', browser: 'fr' });
+
+    const seen = await bootConsole();
+
+    expect(seen.text).toBe('zh-CN|取消');
+    expect(seen.htmlLang).toBe('zh-CN');
+    // No language the app ships to state: the server's deployment default decides.
+    expect(statedLanguage(fetchMock)).toBeUndefined();
+    expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('zh-CN');
+  });
+
+  it('CONTROL: an fr browser on the same app with no organization language gets the app default en', async () => {
     const fetchMock = fakeServer({ appDefault: 'en', supported: ['en', 'zh-CN'], browser: 'fr' });
 
     const seen = await bootConsole();
 
     expect(seen.text).toBe('en|Cancel');
     expect(seen.htmlLang).toBe('en');
-    expect(statedLanguage(fetchMock)).toBe('en');
+    expect(statedLanguage(fetchMock)).toBeUndefined();
     expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('en');
   });
 
@@ -264,8 +282,17 @@ describe('a supported browser language, else the app default (objectstack#33985)
 
     expect(seen.text).toBe('zh-CN|取消');
     expect(seen.htmlLang).toBe('zh-CN');
-    expect(statedLanguage(fetchMock)).toBe('zh-CN');
+    expect(statedLanguage(fetchMock)).toBeUndefined();
     expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('zh-CN');
+  });
+
+  it("a browser language the app ships still outranks the organization's language", async () => {
+    const fetchMock = fakeServer({ appDefault: 'en', supported: ['en', 'zh-CN'], orgLocale: 'zh-CN', browser: 'en-GB' });
+
+    const seen = await bootConsole();
+
+    expect(seen.text).toBe('en|Cancel');
+    expect(statedLanguage(fetchMock)).toBe('en');
   });
 
   it("an en-US browser on a zh-CN app that also ships en gets the app's en", async () => {
@@ -301,34 +328,31 @@ describe('a supported browser language, else the app default (objectstack#33985)
 
 describe('pickPreferredLocale', () => {
   it('picks the browser language when the app lists it, in the app spelling', () => {
-    expect(pickPreferredLocale('zh-CN', ['en', 'zh-CN'], 'en')).toBe('zh-CN');
-    expect(pickPreferredLocale('zh-cn', ['en', 'zh-CN'], 'en')).toBe('zh-CN');
+    expect(pickPreferredLocale('zh-CN', ['en', 'zh-CN'])).toBe('zh-CN');
+    expect(pickPreferredLocale('zh-cn', ['en', 'zh-CN'])).toBe('zh-CN');
   });
 
   it('matches a regional browser tag to the bare language the app ships', () => {
-    expect(pickPreferredLocale('en-US', ['zh-CN', 'en'], 'zh-CN')).toBe('en');
+    expect(pickPreferredLocale('en-US', ['zh-CN', 'en'])).toBe('en');
   });
 
   it("reads the browser tag through the platform table's aliases, as the server's rung does", () => {
-    expect(pickPreferredLocale('ja', ['en', 'ja-JP'], 'en')).toBe('ja-JP');
-    expect(pickPreferredLocale('zh-TW', ['en', 'zh-Hant'], 'en')).toBe('zh-Hant');
-    expect(pickPreferredLocale('zh-HK', ['en', 'zh-Hant'], 'en')).toBe('zh-Hant');
+    expect(pickPreferredLocale('ja', ['en', 'ja-JP'])).toBe('ja-JP');
+    expect(pickPreferredLocale('zh-TW', ['en', 'zh-Hant'])).toBe('zh-Hant');
+    expect(pickPreferredLocale('zh-HK', ['en', 'zh-Hant'])).toBe('zh-Hant');
   });
 
   it('expands a browser language to a variant the app ships', () => {
-    expect(pickPreferredLocale('es-MX', ['en', 'es-ES'], 'en')).toBe('es-ES');
-    expect(pickPreferredLocale('pt', ['en', 'pt-BR'], 'en')).toBe('pt-BR');
+    expect(pickPreferredLocale('es-MX', ['en', 'es-ES'])).toBe('es-ES');
+    expect(pickPreferredLocale('pt', ['en', 'pt-BR'])).toBe('pt-BR');
     // The platform table reads a bare `zh` as Simplified, as the server answers that header.
-    expect(pickPreferredLocale('zh', ['en', 'zh-CN', 'zh-TW'], 'en')).toBe('zh-CN');
+    expect(pickPreferredLocale('zh', ['en', 'zh-CN', 'zh-TW'])).toBe('zh-CN');
   });
 
-  it('CONTROL: falls to the app default for an unsupported or absent browser language', () => {
-    expect(pickPreferredLocale('fr', ['en', 'zh-CN'], 'en')).toBe('en');
-    expect(pickPreferredLocale(undefined, ['en', 'zh-CN'], 'en')).toBe('en');
-    expect(pickPreferredLocale('zh-CN', [], 'en')).toBe('en');
-  });
-
-  it('answers nothing when neither matches nor a default is served', () => {
-    expect(pickPreferredLocale('fr', ['en'], undefined)).toBeUndefined();
+  it('CONTROL: answers nothing for an unsupported or absent browser language, or an empty list (objectstack#34392)', () => {
+    expect(pickPreferredLocale('fr', ['en', 'zh-CN'])).toBeUndefined();
+    expect(pickPreferredLocale(undefined, ['en', 'zh-CN'])).toBeUndefined();
+    expect(pickPreferredLocale('  ', ['en', 'zh-CN'])).toBeUndefined();
+    expect(pickPreferredLocale('zh-CN', [])).toBeUndefined();
   });
 });

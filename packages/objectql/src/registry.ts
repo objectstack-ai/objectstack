@@ -180,6 +180,7 @@ import { PackagesFacet } from './registry-packages.js';
 import { AppsFacet } from './registry-apps.js';
 // [#33949 codemod] Plugins, kinds, shared picklists and reset: the methods of the same names below hand the bodies what they read (`PicklistsHost`).
 import { PicklistsFacet } from './registry-picklists.js';
+import { installSchemaRegistryRevision, schemaRegistryRevisionOf } from './registry-revision.js';
 // [#33949 codemod] The facets' hosts, one per registry, which the static block at the end of the class builds.
 import {
   appsHost, bareNamesHost, itemsHost, namespacesAndClaimsHost, objectRegistrationHost, packageAddressingHost,
@@ -2097,6 +2098,17 @@ export class SchemaRegistry {
   /** See {@link _objectRevision}. Read it, compare it, rebuild when it moves. */
   get objectRevision(): number {
     return this._objectRevision;
+  }
+
+  /**
+   * [#34206, ADR-0156 D2] Moved by every call to a public method that can
+   * change what this registry answers: items, objects, packages and their
+   * enablement, navigation contributions, namespaces, claims. Compared,
+   * never interpreted. The classification of the public surface, and why it
+   * is not a list of bump sites, is in `registry-revision.ts`.
+   */
+  get revision(): number {
+    return schemaRegistryRevisionOf(this);
   }
 
   /** Namespace → Set<PackageId> (multiple packages can share a namespace) */
@@ -6281,6 +6293,9 @@ export class SchemaRegistry {
     }));
   }
 }
+
+// [#34206, ADR-0156 D2] Every public write moves `revision`; see `registry-revision.ts`.
+installSchemaRegistryRevision(SchemaRegistry);
 
 /**
  * [#31699, epic ruling on the App pair's plain slot] Whether `item`, a row of a

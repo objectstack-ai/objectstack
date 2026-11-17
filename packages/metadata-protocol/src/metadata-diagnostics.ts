@@ -80,10 +80,11 @@ export type MetadataDiagnostics = MetadataValidationResult;
 // and the spec's own constants (the node-config contract maps are fixed at
 // first build), and no code path installs a global zod error map.
 //
-// ⛔ Not a cache of any read's ANSWER. The overlay cache's position in
-// `readActiveOverlayRows` explains why a merged answer is never cached; this
-// memo sits below every merge, on a pure function of its own input, so a
-// metadata change is a different document and a different key.
+// ⛔ Not a cache of any read's ANSWER. The one cache of a merged answer is
+// the compile cache (`meta-compile-cache.ts`, ADR-0156), retired by every
+// source's change counter; this memo sits below every merge, on a pure
+// function of its own input, so a metadata change is a different document
+// and a different key.
 //
 // The cached verdict never leaves this module: each caller gets its own copy
 // ({@link copyDiagnostics}), so a caller that edits the verdict it was handed
