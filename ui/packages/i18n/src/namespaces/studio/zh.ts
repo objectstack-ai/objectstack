@@ -622,7 +622,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowNode.kv.empty': '暂无条目。',
   'engine.inspector.flowNode.kv.asExpression': '写成公式',
   'engine.inspector.flowNode.kv.expressionPlaceholder': '公式，例如 joinNonEmpty(…)',
-  'engine.inspector.flowNode.kv.expressionNeeded': '这个值需要一个表达式。请填写表达式，或把这个值切回文本。',
+  'engine.inspector.flowNode.kv.expressionNeeded': '这个值需要一个公式。请填写公式，或把这个值切回文本。',
   'engine.inspector.flowNode.kv.undeclaredKey': '该动作没有声明这个输入，运行时会拒绝它。请删除它，或选择声明了它的动作。',
   // objectstack#27834 — the Update Records filter's "Triggering record" target.
   'engine.inspector.flowNode.triggeringRecord.use': '更新触发记录',

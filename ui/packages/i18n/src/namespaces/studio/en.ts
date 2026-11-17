@@ -732,7 +732,7 @@ const STUDIO_EN: Record<string, string> = {
   // map (the assignment node's `assignments`); see `flow-value-envelope.ts`.
   'engine.inspector.flowNode.kv.asExpression': 'Write as a formula',
   'engine.inspector.flowNode.kv.expressionPlaceholder': 'Formula, e.g. joinNonEmpty(…)',
-  'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
+  'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs a formula. Write one, or switch the value back to text.',
   // objectstack#33838 — a connector Input key the action does not declare: the run refuses it.
   'engine.inspector.flowNode.kv.undeclaredKey': 'The action does not declare this input, so the run refuses it. Remove it, or pick an action that declares it.',
   // objectstack#27834 — the Update Records filter's "Triggering record" target.
