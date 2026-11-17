@@ -61,6 +61,9 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
+// The source loads `@objectstack/lint` lazily; paid here, at collection, not
+// inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { STUDIO_HEADER, STUDIO_HEADER_PILLAR, STUDIO_HEADER_PILLAR_NAME, STUDIO_HEADER_PILLAR_NAV } from './studio-tokens';
 import { t } from '../metadata-admin/i18n';
