@@ -1355,6 +1355,7 @@ export const SysUser = ObjectSchema.create({
     dev_seed_credential: Field.text({
       label: 'Development Seed Credential',
       required: false,
+      maxLength: 64, // a SHA-256 digest in base64url is 43 characters; keyed by the index below
       readonly: true,
       internal: true,
       group: 'System',

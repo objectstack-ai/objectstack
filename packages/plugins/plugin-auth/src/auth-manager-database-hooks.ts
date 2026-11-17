@@ -123,7 +123,9 @@ export function composeDatabaseHooks(
     await this.stampIdentitySource(account, ctx);
     // The development seed's stamp, on the password credential of an account
     // the seed creates (`dev-seed-credential.ts`). Never throws.
-    await stampDevSeedCredential(this.config.dataEngine as never, account, this.config.logger);
+    await stampDevSeedCredential(this.config.dataEngine as never, account, {
+      error: (message, meta) => this.audienceLogError(message, meta as Record<string, unknown> | undefined),
+    });
   };
   // [ADR-0151 D2] An AI service account holds no password and no sign-in
   // provider link. Asked FIRST, before the host's own `create.before`, for

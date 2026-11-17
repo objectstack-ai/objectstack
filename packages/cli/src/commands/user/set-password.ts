@@ -41,7 +41,7 @@ export default class UserSetPassword extends Command {
 
   static override examples = [
     '<%= config.bin %> user set-password admin@example.com',
-    'printf %s "$NEW_PASSWORD" | <%= config.bin %> user set-password admin@example.com --password-stdin',
+    '<%= config.bin %> user set-password admin@example.com --password-stdin',
   ];
 
   static override args = {
