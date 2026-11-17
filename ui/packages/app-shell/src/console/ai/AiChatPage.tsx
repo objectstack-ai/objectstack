@@ -137,7 +137,7 @@ import {
   publishPlanApprovalPending,
   subscribeMetadataRefresh,
 } from '../../assistant/assistantBus.js';
-import { getRuntimeConfig, isAiStudioEnabled } from '../../runtime-config.js';
+import { getRuntimeConfig, getUpgradeUrl, isAiStudioEnabled } from '../../runtime-config.js';
 import { makerConvergedOnBuild, makerVisibleAgents } from '../../hooks/surfaceAgent.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
@@ -2935,13 +2935,13 @@ export function ChatPane({
       >
       <ChatbotEnhanced
         className="min-h-0 flex-1 bg-background md:max-w-5xl"
-        // The paywall exit. Wired only when this runtime named an upstream
-        // cloud — an undefined `onUpgrade` renders NO upgrade button, which is
-        // the honest state for a runtime with no control plane behind it
-        // (objectui#7253).
+        // The paywall exit: the control plane's declared upgrade entry when
+        // served (objectstack#34622), else its origin. Neither ⇒ an undefined
+        // `onUpgrade` renders NO upgrade button, which is the honest state for
+        // a runtime with no control plane behind it (objectui#7253).
         onUpgrade={
-          cloudConsoleUrl()
-            ? () => window.open(cloudConsoleUrl(), '_blank', 'noopener,noreferrer')
+          (getUpgradeUrl() ?? cloudConsoleUrl())
+            ? () => window.open(getUpgradeUrl() ?? cloudConsoleUrl(), '_blank', 'noopener,noreferrer')
             : undefined
         }
         onOpenBuilder={openBuilder}
