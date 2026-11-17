@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ruling 6917064203 on #34398 · #34247] The audience gate answers before any
- * refusal that names holders.
+ * [ruling 6917064203 on #34398 · #34247] For a doc, the audience gate answers
+ * before the `not-held-by-qualifier` refusal.
  *
  * An exact `?package=X` read of a doc X holds no item of, while another
  * package holds the name, is refused by the protocol `409 RESOURCE_CONFLICT`
@@ -13,6 +13,9 @@
  * and neither answer names a holder. Both transports (the dispatcher and
  * `RestServer`) ask the one question, `gateHolderNamingRefusal` in
  * `@objectstack/rest`, on the plain read and on `/layers`.
+ *
+ * S7: the view row's order is declared and pinned; the ordering is carried by
+ * the security channel (GHSA-ggc2-jqph-f74f, acknowledgement 6932974351).
  *
  * The protocol is a double that throws the protocol's own refusal shape; the
  * gate, its audience resolution and both transports are the real ones.
@@ -25,7 +28,7 @@ import '@objectstack/metadata';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
-const THROW: { name?: string } = {};
+const THROW: { type?: string; name?: string } = {};
 
 // ── Fixtures (the #20193 parity rig's docs) ───────────────────────────────────
 
@@ -51,7 +54,10 @@ const DOCS = [
     { name: 'crm_intro', label: 'Getting started', content: 'Welcome aboard.', _packageId: 'crm' },
     { name: 'crm_admin_runbook', label: 'Admin runbook', content: DOC_SECRET, _packageId: 'crm' },
 ];
-const STORE: Record<string, any[]> = { book: [ADMIN_GUIDE, HELP_CENTER], doc: DOCS };
+const VIEWS = [
+    { name: 'crm_pipeline_review', label: 'Pipeline review', type: 'grid', data: { provider: 'object', object: 'crm_deal' }, requiredPermissions: ['crm_pipeline_audit'], _packageId: 'crm' },
+];
+const STORE: Record<string, any[]> = { book: [ADMIN_GUIDE, HELP_CENTER], doc: DOCS, view: VIEWS };
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const singular = (type: unknown): string => String(type ?? '').replace(/s$/, '');
@@ -65,7 +71,7 @@ interface Caller {
     holdings: string[];
     readableFields: string[];
 }
-const CALLERS: Record<'holder' | 'non-holder' | 'anonymous', Caller> = {
+const CALLERS: Record<'holder' | 'non-holder' | 'anonymous' | 'view-holder', Caller> = {
     holder: {
         ctx: { userId: 'u_holder', isSystem: false, systemPermissions: [] },
         holdings: ['crm_admin'],
@@ -77,22 +83,28 @@ const CALLERS: Record<'holder' | 'non-holder' | 'anonymous', Caller> = {
         readableFields: [],
     },
     anonymous: { ctx: { isSystem: false, systemPermissions: [] }, holdings: [], readableFields: [] },
+    'view-holder': {
+        ctx: { userId: 'u_view_holder', isSystem: false, systemPermissions: ['crm_pipeline_audit'] },
+        holdings: [],
+        readableFields: [],
+    },
 };
 type CallerName = keyof typeof CALLERS;
 
 /**
- * The protocol's refusal of `?package=sales` for a doc `sales` ships none of
- * while `crm` ships it (`notHeldByQualifierRefusal` in
+ * The protocol's refusal of `?package=sales` for a doc or view `sales` ships
+ * none of while `crm` ships it (`notHeldByQualifierRefusal` in
  * `@objectstack/metadata-protocol`): `PackageScopedNameRefusedError`, reason
  * `not-held-by-qualifier`, naming the holder.
  */
 function refuseIfAsked(type: unknown, name: unknown): void {
-    if (singular(type) !== 'doc' || name !== THROW.name) return;
+    const t = singular(type);
+    if (t !== (THROW.type ?? 'doc') || name !== THROW.name) return;
     const base = {
-        status: 'refused' as const, reason: 'not-held-by-qualifier' as const, type: 'doc', name: String(name),
+        status: 'refused' as const, reason: 'not-held-by-qualifier' as const, type: t, name: String(name),
         callerPackageId: 'sales', candidates: [{ kind: 'package' as const, packageId: 'crm' }],
     };
-    throw new PackageScopedNameRefusedError({ ...base, message: `doc "${String(name)}" is not held by package "sales"` } as never);
+    throw new PackageScopedNameRefusedError({ ...base, message: `${t} "${String(name)}" is not held by package "sales"` } as never);
 }
 
 /** One protocol double, the same shape both transports read. */
@@ -124,7 +136,7 @@ const securityFor = (caller: Caller) => ({
 interface Answer { status: number; code?: string; body: any; served?: any }
 
 /** The dispatcher, exactly as `createHonoApp` builds it: `new HttpDispatcher(kernel)`. */
-function bootDispatcher(callerName: CallerName) {
+function bootDispatcher(callerName: CallerName, packageId = 'sales') {
     const caller = CALLERS[callerName];
     const protocol = protocolDouble();
     const services: Record<string, unknown> = {
@@ -140,7 +152,7 @@ function bootDispatcher(callerName: CallerName) {
     // dispatch-level pins do).
     (dispatcher as any).timedResolveExecutionContext = async () => clone(caller.ctx);
     const read = async (path: string): Promise<Answer> => {
-        const res = await dispatcher.dispatch('GET', path, undefined, { package: 'sales' }, { request: { headers: {} } } as any);
+        const res = await dispatcher.dispatch('GET', path, undefined, { package: packageId }, { request: { headers: {} } } as any);
         const status = res.response?.status ?? 0;
         const body = res.response?.body;
         const data = body?.data;
@@ -168,7 +180,7 @@ function makeRes() {
 }
 
 /** `RestServer` over the same protocol double and the same caller — the reference answer. */
-function bootRest(callerName: CallerName) {
+function bootRest(callerName: CallerName, packageId = 'sales') {
     const caller = CALLERS[callerName];
     const rest: any = new RestServer(createMockServer() as any, protocolDouble() as any, {} as any);
     if (caller.ctx.userId) {
@@ -188,7 +200,7 @@ function bootRest(callerName: CallerName) {
         const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === routePath);
         if (!route) throw new Error(`GET ${routePath} is not registered`);
         const res = makeRes();
-        await route.handler({ method: 'GET', path: `${META}/${type}/${name}${suffix}`, params: { type, name }, query: { package: 'sales' }, body: {}, headers: {} }, res);
+        await route.handler({ method: 'GET', path: `${META}/${type}/${name}${suffix}`, params: { type, name }, query: { package: packageId }, body: {}, headers: {} }, res);
         const served = res.statusCode === 200 ? res.body?.item : undefined;
         return { status: res.statusCode, code: res.body?.code ?? res.body?.error?.code, body: res.body, served };
     };
@@ -196,18 +208,29 @@ function bootRest(callerName: CallerName) {
 }
 
 const DOORS = ['', '/layers'] as const;
-const PATH = (name: string, suffix: string) => `/meta/doc/${name}${suffix}`;
+const PATH = (type: string, name: string, suffix: string) => `/meta/${type}/${name}${suffix}`;
 
-/** Each transport's answer to `GET /meta/doc/NAME[SUFFIX]?package=sales`, for one caller. */
-async function answersFor(callerName: CallerName, name: string): Promise<Array<Answer & { door: string }>> {
+/**
+ * Each transport's answer to `GET /meta/TYPE/NAME[SUFFIX]?package=PKG`, for
+ * one caller. At `sales` (no holder) the protocol double refuses; at `crm`
+ * (the holder) it serves the holder's item.
+ */
+async function answersFor(
+    callerName: CallerName, name: string, type = 'doc', packageId = 'sales',
+): Promise<Array<Answer & { door: string }>> {
     const answers: Array<Answer & { door: string }> = [];
-    THROW.name = name;
+    if (packageId === 'sales') {
+        THROW.type = type;
+        THROW.name = name;
+    }
     try {
         for (const suffix of DOORS) {
-            answers.push({ door: `dispatcher ${PATH(name, suffix)}`, ...(await bootDispatcher(callerName).read(PATH(name, suffix))) });
-            answers.push({ door: `rest ${PATH(name, suffix)}`, ...(await bootRest(callerName).read('doc', name, suffix)) });
+            const door = `${PATH(type, name, suffix)}?package=${packageId}`;
+            answers.push({ door: `dispatcher ${door}`, ...(await bootDispatcher(callerName, packageId).read(PATH(type, name, suffix))) });
+            answers.push({ door: `rest ${door}`, ...(await bootRest(callerName, packageId).read(type, name, suffix)) });
         }
     } finally {
+        THROW.type = undefined;
         THROW.name = undefined;
     }
     return answers;
@@ -243,6 +266,35 @@ describe('[#34247] the audience gate answers before the not-held-by-qualifier re
         for (const answer of await answersFor('non-holder', 'crm_intro')) {
             expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
                 .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
+        }
+    });
+});
+
+
+describe('[#34247] S7: the view row, both transports', () => {
+    // S7: the view row's order is declared and pinned; the ordering is carried
+    // by the security channel (GHSA-ggc2-jqph-f74f, acknowledgement 6932974351).
+    it('a member outside the view\'s requiredPermissions, at `?package=` of a package holding none: 409 not-held-by-qualifier, on the plain read and /layers', async () => {
+        for (const answer of await answersFor('non-holder', 'crm_pipeline_review', 'view')) {
+            expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
+                .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
+        }
+    });
+
+    it('a member holding the view\'s requiredPermissions, same address: 409 not-held-by-qualifier, on the plain read and /layers', async () => {
+        for (const answer of await answersFor('view-holder', 'crm_pipeline_review', 'view')) {
+            expect([answer.status, answer.code, namesHolders(answer), answer.door], JSON.stringify(answer.body))
+                .toEqual([409, 'RESOURCE_CONFLICT', true, answer.door]);
+        }
+    });
+
+    it('CONTROL: at the holder\'s own address the view gate refuses the first member (403) and serves the second (200)', async () => {
+        for (const answer of await answersFor('non-holder', 'crm_pipeline_review', 'view', 'crm')) {
+            expect([answer.status, answer.code, answer.door], JSON.stringify(answer.body))
+                .toEqual([403, 'PERMISSION_DENIED', answer.door]);
+        }
+        for (const answer of await answersFor('view-holder', 'crm_pipeline_review', 'view', 'crm')) {
+            expect([answer.status, answer.door], JSON.stringify(answer.body)).toEqual([200, answer.door]);
         }
     });
 });

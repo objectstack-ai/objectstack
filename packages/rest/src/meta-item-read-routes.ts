@@ -1086,8 +1086,8 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             // [#22877] The member, read once above.
                             ...memberSelector,
                         };
-                        // [ruling 6917064203 on #34398] The audience gate answers
-                        // before any refusal that names holders
+                        // [ruling 6917064203 on #34398] For a doc, the audience
+                        // gate answers before the `not-held-by-qualifier` refusal
                         // (`gateHolderNamingRefusal`, the one both transports ask).
                         const readPolicyFor: MetaReadGatePolicy = isDraftRead
                             ? this.STORED_VERSION_DOOR_POLICY

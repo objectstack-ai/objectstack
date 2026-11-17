@@ -4756,13 +4756,14 @@ export function createMetaItemAnswer(
 }
 
 /**
- * [ruling 6917064203 on #34398 · #34247] The audience gate answers before any
- * refusal that names holders. An exact `?package=X` read of a `doc` X holds no
- * item of, while another package holds the name, is refused by the protocol
- * `409 RESOURCE_CONFLICT` `not-held-by-qualifier` with the holders as its
- * candidates; that refusal is answered only to a caller the ADR-0046 §6.7
- * docs audience admits to the name. A caller the gate refuses is answered the
- * gate's own `401 UNAUTHENTICATED` / `403 PERMISSION_DENIED` instead.
+ * [ruling 6917064203 on #34398 · #34247] For a `doc`, the audience gate
+ * answers before the `not-held-by-qualifier` refusal. An exact `?package=X`
+ * read of a `doc` X holds no item of, while another package holds the name, is
+ * refused by the protocol `409 RESOURCE_CONFLICT` `not-held-by-qualifier` with
+ * the holders as its candidates; that refusal is answered only to a caller
+ * the ADR-0046 §6.7 docs audience admits to the name. A caller the gate
+ * refuses is answered the gate's own `401 UNAUTHENTICATED` /
+ * `403 PERMISSION_DENIED` instead.
  *
  * The doc arm of {@link createMetaItemReadGate} judges a doc by its NAME (its
  * effective audience over the books that claim the name), so the judgment
@@ -4770,6 +4771,9 @@ export function createMetaItemAnswer(
  * `undefined`: the transport answers the thrown value as it did. A gate input
  * that cannot be read REJECTS, as the gate always does: the transport answers
  * that fault, never the refusal.
+ *
+ * S7: the view row's order is declared and pinned; the ordering is carried by
+ * the security channel (GHSA-ggc2-jqph-f74f, acknowledgement 6932974351).
  *
  * One function, called by both transports' plain read and `/layers` read.
  */

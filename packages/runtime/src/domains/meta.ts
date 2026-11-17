@@ -1019,8 +1019,9 @@ async function answerMetaLayered(
             { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), ...memberSelector, maskPosture },
         )(layered);
     } catch (e: any) {
-        // [ruling 6917064203 on #34398] The audience gate answers before any
-        // refusal that names holders, as `RestServer`'s layered read asks it.
+        // [ruling 6917064203 on #34398] For a doc, the audience gate answers
+        // before the `not-held-by-qualifier` refusal, as `RestServer`'s layered
+        // read asks it.
         let gated: Awaited<ReturnType<typeof gateHolderNamingRefusal>>;
         try {
             gated = await gateHolderNamingRefusal(
@@ -2429,9 +2430,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // whichever item it finds first.
                     if (isPackageScopedRefusal(e)) {
                         // [ruling 6917064203 on #34398] …answered only after
-                        // the audience gate admits the caller: the audience
-                        // gate answers before any refusal that names holders
-                        // (`gateHolderNamingRefusal`, `RestServer`'s question).
+                        // the audience gate admits the caller: for a doc, the
+                        // audience gate answers before the `not-held-by-qualifier`
+                        // refusal (`gateHolderNamingRefusal`, `RestServer`'s
+                        // question).
                         const gated = await gateHolderNamingRefusal(
                             metaItemReadGateSources(deps, _context, protocol), singularType, name, RENDERED_DOCUMENT_POLICY, e,
                         );
