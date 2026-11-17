@@ -6932,7 +6932,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         version: string | undefined,
     ): Promise<Array<{ name: string; status: string }> | undefined> => {
         let declared: any[];
-        let objects: unknown[];
+        let objects: any[];
         try {
             declared = declaredDatasources(manifest);
             objects = resolveStackCollection(manifest, 'objects');
