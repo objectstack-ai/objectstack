@@ -35,7 +35,6 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
 const objectDef = {
@@ -110,6 +109,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
 
 const dataSource = createEmptyDataSource();
@@ -259,10 +261,10 @@ describe('DataPillar — the CEL hold belongs to the draft, not to the open insp
 
   it('removing the field ends the hold: nothing judged is left in the draft', async () => {
     await breakFormula();
-    // objectstack#34794 — Delete is the header ⋯ menu's entry, confirmed first.
-    await userEvent.click(screen.getByTestId('field-more-menu'));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Remove “Total”' }));
-    await userEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('field-remove-confirm-action'));
+    // objectstack#34794 — Delete is the header ⋯ menu's entry (a passthrough
+    // here, see the mock above), and it asks before it removes.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove “Total”' }));
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('field-remove-confirm-action'));
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
     const body = (mockClient.save.mock.calls.at(-1) as unknown[] | undefined)?.[2] as { fields: Array<{ name: string }> };
     expect(body.fields.map((f) => f.name)).toEqual(['est_hours']);

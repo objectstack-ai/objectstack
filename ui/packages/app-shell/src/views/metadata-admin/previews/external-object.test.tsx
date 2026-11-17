@@ -26,6 +26,10 @@ vi.mock('../../../hooks/useAiSurface', () => ({
 }));
 
 import { ObjectFormCanvas } from './ObjectFormCanvas';
+// The source under test reaches a dynamic import of `@objectstack/lint` and `@objectstack/formula`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@objectstack/formula';
 import { ObjectFieldInspector } from '../inspectors/ObjectFieldInspector';
 import { readExternalBinding } from './external-object';
 

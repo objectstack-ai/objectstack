@@ -178,6 +178,9 @@ describe('ObjectFieldInspector — display-patch mode explains every locked cont
   it('Tab reaches a lock, and focus or hover shows the reason as a tooltip', async () => {
     const rail = mount('name');
     const sentence = within(rail).getByTestId('field-base-patch-only').textContent!.trim();
+    // objectstack#34794 — the API name sits in the collapsed Developer info
+    // section: open it, as an author must, before Tab can reach its lock.
+    await userEvent.click(within(rail).getByTestId('field-developer-toggle'));
     const apiNameLock = within(rail).getByTestId('field-apiname-input').closest<HTMLElement>('[data-disabled-reason]')!;
     let reached = false;
     for (let i = 0; i < 12 && !reached; i++) {
