@@ -39,13 +39,13 @@
  * the executor boundary's comparison):
  *
  * - **Before planning** — the registry already answers: the related object
- *   has a restriction no planned `where` can carry, or the read's driver
- *   compiles no subquery: an object-scoped middleware or an `afterFind` hook
- *   on the related object (both act after its driver call), another
- *   datasource than the read's object, a federated related object, a related
- *   object of another tenancy class than the read's object under a walled
- *   posture (its driver options differ), or a driver outside
- *   {@link SEMI_JOIN_COMPILING_DRIVERS}. The related read is dispatched once.
+ *   has a restriction no planned `where` can carry: an object-scoped
+ *   middleware or an `afterFind` hook on the related object (both act after
+ *   its driver call), another datasource than the read's object, a federated
+ *   related object, a related object of another tenancy class than the
+ *   read's object under a walled posture (its driver options differ). The
+ *   related read is dispatched once. (A read whose driver compiles no
+ *   subquery is not a fallback: it is refused before this point.)
  * - **After planning** — the related read did not reach exactly one driver
  *   call, or came back with rows the driver never returned (a middleware
  *   answered without the driver, or added rows after it).
@@ -75,10 +75,12 @@
  *
  * The composed leaf is ADR-0139's: `driver-sql` (every dialect, Turso and
  * the WASM SQLite face included) compiles it into a nested subquery;
- * `driver-memory` evaluates it in process. Every other driver keeps the id
- * read: no capability bit says which drivers compile the leaf yet, so the
- * engine names the ones it knows do, and an unnamed driver is never handed
- * one by this lowering.
+ * `driver-memory` evaluates it in process. Each says so with the
+ * `DriverCapabilities.readableIdsLeaf` bit ({@link driverCompilesReadableIdsLeaf}).
+ * A driver without the bit (MongoDB, OData) is never handed one by this
+ * lowering: the condition is refused before anything is planned or read
+ * (`relation-filter-lowering.ts`#`relationSemiJoinDriverRefusal`), `INVALID_FILTER` / 400, rather
+ * than reaching the driver and failing there as a composition fault.
  *
  * ## Forgery
  *
@@ -112,19 +114,30 @@ export interface RelationScopePlan {
   readonly rows: unknown[];
 }
 
-/** The driver names whose drivers compile (or, in process, evaluate) a composed `ReadableIds` leaf. */
-export const SEMI_JOIN_COMPILING_DRIVERS: ReadonlySet<string> = new Set([
-  'com.objectstack.driver.sql',
-  'com.objectstack.driver.turso',
-  'com.objectstack.driver.sqlite-wasm',
-  'com.objectstack.driver.memory',
-]);
+/**
+ * Whether `driver` compiles (or, in process, evaluates) a composed
+ * `ReadableIds` leaf: its `DriverCapabilities.readableIdsLeaf` bit, `true`
+ * exactly. Absence is `false` — a driver that declares nothing is never
+ * handed a leaf by the relation lowering. The one reader of the bit: the
+ * nested-relation `where` refusal (`relation-filter-lowering.ts`#`relationSemiJoinDriverRefusal`),
+ * the semi-join plan ({@link relationSemiJoinServes}) and the analytics
+ * relation-group refusal (`relation-group-join.ts`) all ask it here.
+ */
+export function driverCompilesReadableIdsLeaf(driver: { readonly supports?: unknown } | undefined): boolean {
+  const supports = driver?.supports;
+  return supports !== null && typeof supports === 'object' && (supports as { readableIdsLeaf?: unknown }).readableIdsLeaf === true;
+}
+
+/** The driver's name as an author reads it in a refusal: its `name`, or `unnamed`. */
+export function driverNameOf(driver: { readonly name?: unknown } | undefined): string {
+  return typeof driver?.name === 'string' && driver.name !== '' ? driver.name : 'unnamed';
+}
 
 /** What {@link relationSemiJoinServes} reads off the engine. */
 export interface RelationSemiJoinServesHost {
   uncomposableReadableIdsParent(object: string, parent: string): unknown;
   hasHooksFor(event: string, object: string): boolean;
-  getDriver(object: string): { readonly name?: unknown } | undefined;
+  getDriver(object: string): { readonly name?: unknown; readonly supports?: unknown } | undefined;
   /** The registered schema of `object` (`undefined` when none is registered). */
   getObjectSchema(object: string): unknown;
   /** The tenancy posture in force, as the engine's driver options read it. */
@@ -149,7 +162,9 @@ export interface RelationSemiJoinServesHost {
  *   options carry a tenant scope the other's do not, and the executor
  *   boundary would fall back after the related read was already planned —
  *   dispatching it a second time. Deciding it here dispatches it once.
- * - `object`'s driver compiles the composed leaf ({@link SEMI_JOIN_COMPILING_DRIVERS}).
+ * - `object`'s driver compiles the composed leaf ({@link driverCompilesReadableIdsLeaf});
+ *   a read on one that does not never gets here on a read verb — it is
+ *   refused first (`relation-filter-lowering.ts`#`relationSemiJoinDriverRefusal`).
  */
 export function relationSemiJoinServes(this: RelationSemiJoinServesHost, object: string, target: string): boolean {
   if (this.uncomposableReadableIdsParent(object, target) !== undefined) return false;
@@ -160,8 +175,7 @@ export function relationSemiJoinServes(this: RelationSemiJoinServesHost, object:
     postureEnforcesWall(this.resolveEnginePosture()) &&
     isDriverTenantScopedSchema(this.getObjectSchema(object)) !== isDriverTenantScopedSchema(targetSchema)
   ) return false;
-  const name = this.getDriver(object)?.name;
-  return typeof name === 'string' && SEMI_JOIN_COMPILING_DRIVERS.has(name);
+  return driverCompilesReadableIdsLeaf(this.getDriver(object));
 }
 
 /** What a planned related read answered for one leaf. */

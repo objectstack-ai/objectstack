@@ -44,7 +44,7 @@ import {
 } from '@object-ui/app-shell';
 
 import { AppContent, ConsolePermissionsRequest, ConsolePermissionsScope } from './AppContent';
-import { FirstRunChecklist } from './pages/settings/FirstRunChecklist';
+import { FirstRunChecklist, type FirstRunChecklistPlacement } from './pages/settings/FirstRunChecklist';
 import { publishAuthState } from './i18nSession';
 import { FaviconSync } from './components/FaviconSync';
 import { RootLandingRedirect } from './components/RootLandingRedirect';
@@ -191,19 +191,24 @@ function NativeShellRouting() {
   return null;
 }
 
+/** Home's checklist slot: the first-run checklist, where Home places it. */
+function homeChecklist(placement: FirstRunChecklistPlacement) {
+  return <FirstRunChecklist placement={placement} />;
+}
+
 /**
  * Wraps `DefaultHomeLayout` so the FAB gets the signed-in user id, and draws
- * an administrator's first-run checklist above the page's own sections
- * (objectstack#30206). The route sits under `ConsolePermissionsScope`, which
- * is what tells the checklist whether this session may write the settings it
- * lists; for anyone else it draws nothing.
+ * an administrator's first-run checklist in Home's checklist slot
+ * (objectstack#30206): above the page's own sections on a desktop, after the
+ * apps on a phone (objectstack#34596). The route sits under
+ * `ConsolePermissionsScope`, which is what tells the checklist whether this
+ * session may write the settings it lists; for anyone else it draws nothing.
  */
 function HomeRoute() {
   const { user } = useAuth();
   return (
     <DefaultHomeLayout userId={user?.id}>
-      <FirstRunChecklist />
-      <DefaultHomePage />
+      <DefaultHomePage checklist={homeChecklist} />
     </DefaultHomeLayout>
   );
 }

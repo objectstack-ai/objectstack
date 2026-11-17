@@ -1830,8 +1830,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
    * did not return — the rows go through the same {@link rebucketCrossObject},
    * keyed per row, so the buckets and their measures are the FK-expand's.
    *
+   * Throws the engine's refusal (`INVALID_QUERY` / 400) when the read's
+   * driver compiles no semi-join (MongoDB, OData, [#33876]): the dimension is
+   * served on no path there.
+   *
    * `null` — serve by the FK-expand — when the host wired no such hook or the
-   * engine declined (a driver that compiles no join: memory, MongoDB, OData;
+   * engine declined (a driver that compiles no join: memory, Turso;
    * a read it cannot prove is one statement), and when anything on the way
    * refused with a 4xx: the FK-expand re-derives that refusal, so its order
    * and its envelope stay today's.
@@ -1911,6 +1915,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       if (isClientRefusal(error)) return null;
       throw error;
     }
+    // [#33876] The read's driver compiles no semi-join (MongoDB, OData): the
+    // engine refused the dimension before reading anything, and no path
+    // serves it — thrown here, never answered by the FK-expand.
+    if (!answer.joined && answer.refusal !== undefined) throw answer.refusal;
     if (!answer.joined) return null;
 
     // Each row is one group of the joined statement. Its key for a relation

@@ -132,10 +132,10 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 // asks the matrix instead of keeping a copy, and an unreadable matrix fails
 // the import rather than falling back to a remembered count. ci.yml spells it
 // twice more (`--shard N/M` and the attestation's `--total`); the self-test
-// below reads those back. scripts/ci/select-shard-timings-run.mjs spells it
-// once more, but only as its matchers' default: the timings refresh judges
-// each run at the width that run's own `Test Core (N/M)` jobs carry, so a
-// resize leaves the runs from before it readable (#25376).
+// below reads those back. scripts/ci/select-shard-timings-run.mjs reads the
+// same matrix for its matchers' default (#34710), and only that: the timings
+// refresh judges each run at the width that run's own `Test Core (N/M)` jobs
+// carry, so a resize leaves the runs from before it readable (#25376).
 //
 // WHY EIGHT (#25376, 6 -> 8). On the committed dataset (the 2026-10-23
 // refresh), bins of predicted test windows, the CLI cut into its 3 slices:
@@ -163,6 +163,34 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 // beside them. That last figure is the floor this count cannot move: a CLI
 // slice (~960-1010s measured) is serial, so past eight the slowest shard is
 // the slice and more shards only add runners.
+//
+// RE-DERIVED AT 10 (#34710, 8 -> 10), on the whole-package leg cap
+// (WHOLE_LEG_CAP_SECONDS, pin 3d), not on balance. The 2026-11-16 refresh (PR
+// #34314's dataset, measuredAt 2026-11-16) measured 14524s of whole
+// packages, the CLI at 2245.53s and spec at 1769.27s, and at eight five shards
+// carried ~2195s of whole packages against the 1868s cap. The cap's own rule
+// is a wider matrix or a finer slice, never a denser shard, and the count it
+// asks for is the whole seconds plus the CLI's 3 slices plus the reader slice's
+// closure charge over the cap: (14524 + 2245.53 + 783) / 1868 = 9.4, so ten.
+// Through planShards() at the CI split, that dataset's bins and whole legs:
+//
+//    8 shards -> max 2195s  mean 2194s  ratio 1.00x  whole legs max 2195s  5 past the cap
+//    9 shards -> max 1954s  mean 1951s  ratio 1.00x  whole legs max 1954s  6 past the cap
+//   10 shards -> max 1769s  mean 1755s  ratio 1.01x  whole legs max 1769s  <- spec alone
+//   11 shards -> max 1769s  mean 1596s  ratio 1.11x  whole legs max 1769s
+//
+// The CLI stays at 3 slices: pin 3c judges the count on serial floors, which
+// the shard count does not enter, so FILE_SHARDED_PACKAGES and
+// PREVIOUS_FILE_SHARDED_PACKAGES are unchanged and the generator decodes the
+// runs made at eight exactly as before. On the committed 2026-11-02 dataset
+// ten reads max 1304s, mean 1242s, 1.05x, whole legs at most 1236s.
+//
+// Ten is again the count where a floor binds: spec's whole weight is the
+// heaviest bin, and its whole leg stays 1769s at any width. So spec past
+// 1868s is a finer slice's card (OS_TEST_SHARD support in spec and a
+// FILE_SHARDED_PACKAGES entry), not an eleventh shard's. In the shard wall
+// model (whole sum / WHOLE_LEG_WALL_DIVISOR + slice) the slowest tests step
+// on that dataset goes ~1247s -> ~1095s, a CLI slice shard both times.
 export const SHARD_COUNT = liveShardTotal('test');
 
 // The acceptance bound #10472 set: the slowest shard within ~1.3x the mean.
@@ -1363,7 +1391,7 @@ export function refineToCap(bins, items, cap) {
 //
 // So a candidate split that CARRIES the reader slice is judged against the cap
 // plus that displacement: DECLARATION_CLOSURE_CHARGE_SECONDS / (shardCount - 1),
-// 111.86s at 8 shards. It is the charge's own arithmetic -- the density the
+// 111.86s at 8 shards, 87.00s at 10 (#34710). It is the charge's own arithmetic -- the density the
 // closure pin already chose to move -- and nothing else: a split with no reader
 // slice (the package whole, a run without it, a document that states its own
 // slicing) is judged against the bare cap, and a split denser than the cap plus

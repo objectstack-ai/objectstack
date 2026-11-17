@@ -2388,9 +2388,10 @@ const FLOW_TRIGGER_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
       '`config.objectName`, and a time-relative sweep queries the exact name in `config.timeRelative.object`. ' +
       'Names match exactly — `app_candidate`, not `candidate` — so when no object answers to that name the ' +
       'flow never fires, or the sweep matches nothing, and the runtime says nothing about it.',
-    'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
-      'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
-      'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
+    'The rule asks whether this stack defines the object, counting the objects of the packages its ' +
+      'manifest declares in `dependencies` when the artifact carries them. One it does not define may be ' +
+      'declared by another installed package, which a build of this stack cannot see, so the finding is a ' +
+      'warning and can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
       'not judged. Of the findings that say a flow never fires, it is the only one that stays advisory: ' +
       'the others are settled by contracts this repository ships. At the runtime publish gate a write that ' +
       'names no package gets it as a save advisory, judged against the live object registry.',
@@ -2418,10 +2419,11 @@ const FLOW_INPUT_UNKNOWN_OBJECT_EXPLANATION: RuleExplanation = {
       'scope before the run exists, so a name no object answers to refuses every start that supplies ' +
       'the input. Names match exactly — `app_candidate`, not `candidate`. Every door that starts the flow ' +
       'by name enforces the declaration.',
-    'The rule asks whether this stack defines the object. One it does not define may be declared by ' +
-      'another installed package, which a build of this stack cannot see, so the finding is a warning and ' +
-      'can be ignored when such a package declares the object; a `sys_` name is a platform object and is ' +
-      'not judged. A start that omits the input is not affected, so this is not a verdict that the flow ' +
+    'The rule asks whether this stack defines the object, counting the objects of the packages its ' +
+      'manifest declares in `dependencies` when the artifact carries them. One it does not define may be ' +
+      'declared by another installed package, which a build of this stack cannot see, so the finding is a ' +
+      'warning and can be ignored when such a package declares the object; a `sys_` name is a platform ' +
+      'object and is not judged. A start that omits the input is not affected, so this is not a verdict that the flow ' +
       'never runs.',
     'A write into a package is judged against that package\'s closure instead: its own objects, the objects ' +
       'of the packages its manifest declares in `dependencies`, and platform objects. An object outside it ' +
