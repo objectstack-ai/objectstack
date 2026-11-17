@@ -391,8 +391,7 @@
           "pendingId"
         ],
         "must_not_contain": [
-          "confirm: true",
-          "requiresConfirmation: false"
+          "recordId, confirm: true"
         ]
       }
     }
