@@ -4611,6 +4611,8 @@ const zhHant = {
     progressBar: '決策進度',
     declaredActions: '操作',
     decisionPanelOffRequestPage: '審批決策面板僅在審批請求頁面上可用。',
+    openNextAfterDecision: '處理後開啟下一條',
+    queueDone: '這個列表裡的待審請求已全部處理完。',
     snapshotAsSubmitted: '提交時的內容',
     attachmentChip: '附件',
     attachmentOpenFailed: '無法開啟附件，請重試',

@@ -4361,6 +4361,8 @@ const ko = {
     progressBar: '결정 진행 상황',
     declaredActions: '작업',
     decisionPanelOffRequestPage: '승인 결정 패널은 승인 요청 페이지에서만 작동합니다.',
+    openNextAfterDecision: '결정 후 다음 열기',
+    queueDone: '이 목록에 대기 중인 요청이 더 이상 없습니다.',
     snapshotAsSubmitted: '제출 당시 내용',
     attachmentChip: '첨부 파일',
     attachmentOpenFailed: '첨부 파일을 열 수 없습니다. 다시 시도해 주세요',

@@ -60,6 +60,7 @@ import { coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFiel
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedRequiredWhen, preserveAuditIgnoredOnInsertWarning, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import type { staticReadonlyInsertSubject } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { resolveMasterDetailRelation } from './master-detail.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
@@ -311,7 +312,8 @@ export class InsertFacet {
   /** The body of `ObjectQL#insert`; the method's docblock there is its contract. */
   static async insert(this: Pick<InsertHost, '_registry' | 'admittedViolationSink' | 'applyAutonumbers' | 'applyFieldDefaults' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'assignment' | 'autonumberCounters' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'createWithAutonumberResync' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'getSummaryDescriptors' | 'homeAmountServing' | 'inAfterAbortUnit' | 'initializeSummaryFields' | 'insert' | 'insertRecomputeListeners' | 'invalidateOrganizationProbe' | 'isIssuedAutonumberCollision' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'releaseSecretHandles' | 'resolveDefaultPermissions' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'resolveSystemInsertOrganization' | 'staticReadonlyCreateStrip' | 'triggerHooks' | 'validationMessageContext' | 'valueShapeStrictFor' | 'warnAutonumberReadersUnserved'>, object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
-    // [#22782] An aborting `afterInsert` rolls this write back — see `opensAfterAbortUnit`.
+    // [#22782, #34412] An aborting `afterInsert`, or a refusal after a `beforeInsert` hook's
+    // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
     if (this.opensAfterAbortUnit('afterInsert', object, options?.context)) {
       return this.inAfterAbortUnit(() => this.insert(object, data, options));
     }
@@ -1315,6 +1317,16 @@ export class InsertFacet {
         const batchSummaries = rows.length > 1
           ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
           : undefined;
+        // [#34466] The same overlay for the master-detail header a field-level
+        // `parent.` predicate reads (`requiredWhen: parent.line_count >= 3`):
+        // `insertParentForRow` above was read once too, before the batch.
+        const insertParentMaster = batchSummaries && insertParentForRow
+          ? resolveMasterDetailRelation(schemaForValidation as any)?.master
+          : undefined;
+        const insertParentOf = (row: Record<string, unknown>) => {
+          const header = insertParentForRow?.(row);
+          return insertParentMaster ? batchSummaries!.overlayRow(insertParentMaster, header) : header;
+        };
         // [#18783] The subject's effective object permissions, for an option
         // gated on `current_user.can(…)`: ONE resolution for the whole batch,
         // and none at all unless a row picks such an option. A resolution
@@ -1348,7 +1360,7 @@ export class InsertFacet {
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
             if (referencesFirst) await checkReferences();
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentOf(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
             if (!referencesFirst) await checkReferences();
             // [#25579] Admitted: a later row of this batch reads it in the summary.
             batchSummaries?.accept(rows[i]);
