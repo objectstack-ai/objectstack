@@ -207,8 +207,31 @@ export function buildTimesheetRows(
 export function parseCellInput(text: string): number | null | 'invalid' {
   const trimmed = text.trim();
   if (trimmed === '') return null;
+  // One `,` is a decimal comma (de, fr, ru…); the grid displays without digit
+  // grouping, so a `,` never stands for a thousands separator here.
+  if ((trimmed.match(/,/g) ?? []).length > 1 || (trimmed.includes(',') && trimmed.includes('.'))) return 'invalid';
   const n = Number(trimmed.replace(',', '.'));
   return Number.isFinite(n) ? n : 'invalid';
+}
+
+/**
+ * The comparands that bound one displayed week on `dateField`: `[start, end)`.
+ *
+ * A date field stores calendar days, so the week's day keys bound it exactly. A
+ * date-time field stores instants, and a bare `YYYY-MM-DD` comparand is read by
+ * the data layer as UTC midnight, while every record is placed on the viewer's
+ * LOCAL day (`dayKeyOf`). So a date-time week is bounded by the instants of
+ * local midnight at its first day and the day after its last: the query and the
+ * placement then agree in every time zone, and a record written at local noon
+ * (`dateFieldValue`) is always inside the week it was typed in.
+ */
+export function weekQueryBounds(
+  weekStart: string,
+  weekEnd: string,
+  dateFieldType?: string,
+): [string, string] {
+  if (dateFieldType !== 'datetime') return [weekStart, weekEnd];
+  return [fromDayKey(weekStart).toISOString(), fromDayKey(weekEnd).toISOString()];
 }
 
 /**

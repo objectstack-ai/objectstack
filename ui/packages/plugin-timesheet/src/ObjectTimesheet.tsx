@@ -86,6 +86,7 @@ import {
   rowValuesComplete,
   startOfWeek,
   weekDays,
+  weekQueryBounds,
   fromDayKey,
   type TimesheetBinding,
   type TimesheetCell,
@@ -248,11 +249,12 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
         const expand = !perms?.isLoaded
           ? expandable
           : expandable.filter((f) => perms.checkField(objectName, f, 'read'));
+        const [from, to] = weekQueryBounds(weekStart, weekEnd, objectSchema?.fields?.[binding.dateField]?.type);
         const result = await dataSource.find(objectName, {
           $filter: mergeFilterNodes(
             queryFilter,
-            [binding.dateField, '>=', weekStart],
-            [binding.dateField, '<', weekEnd],
+            [binding.dateField, '>=', from],
+            [binding.dateField, '<', to],
           ) as any,
           ...nonGridRowCeilingQuery(),
           ...(expand.length > 0 ? { $expand: expand } : {}),
@@ -282,7 +284,7 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
     const fallback = objectSchema?.fields?.[name]?.label || name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     return fieldLabels.fieldLabel(objectName, name, fallback);
   };
-  const numberFormat = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }), [locale]);
+  const numberFormat = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 2, useGrouping: false }), [locale]);
   const dayHeading = useMemo(
     () => new Intl.DateTimeFormat(locale, { weekday: 'short', month: 'numeric', day: 'numeric' }),
     [locale],

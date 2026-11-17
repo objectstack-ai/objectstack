@@ -68,6 +68,30 @@ describe('ObjectTimesheet', () => {
     expect(filter).toContain('Apollo');
   });
 
+  it('bounds a date-time date field by local-midnight instants, not day keys', async () => {
+    const ds = makeDataSource([]);
+    ds.getObjectSchema.mockResolvedValue({
+      ...objectSchema,
+      fields: { ...objectSchema.fields, work_date: { name: 'work_date', type: 'datetime', label: 'Date' } },
+    } as any);
+    renderTimesheet(ds);
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+    const filter = JSON.stringify((ds.find.mock.calls[0] as any[])[1].$filter);
+    expect(filter).toContain(`["work_date",">=","${new Date(2026, 10, 15).toISOString()}"]`);
+    expect(filter).toContain(`["work_date","<","${new Date(2026, 10, 22).toISOString()}"]`);
+  });
+
+  it('shows a value of a thousand or more without grouping, so it edits back', async () => {
+    const ds = makeDataSource([{ id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 1234.5 }]);
+    renderTimesheet(ds);
+    await waitFor(() => expect(screen.getAllByTestId('timesheet-row')).toHaveLength(1));
+    const monday = screen.getAllByTestId('timesheet-cell')[1] as HTMLInputElement;
+    expect(monday.value).toBe('1234.5');
+    fireEvent.change(monday, { target: { value: '1234.6' } });
+    fireEvent.blur(monday);
+    await waitFor(() => expect(ds.update).toHaveBeenCalledWith('time_entry', 'r1', { hours: 1234.6 }));
+  });
+
   it('pivots records into rows and days with row, day and week totals', async () => {
     const ds = makeDataSource([
       { id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 2 },

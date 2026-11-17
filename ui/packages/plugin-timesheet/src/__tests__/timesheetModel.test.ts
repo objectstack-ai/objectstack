@@ -9,6 +9,7 @@ import {
   rowValuesComplete,
   startOfWeek,
   weekDays,
+  weekQueryBounds,
   type TimesheetBinding,
 } from '../timesheetModel';
 
@@ -62,6 +63,19 @@ describe('week arithmetic', () => {
   it('writes a date-time day at local noon', () => {
     expect(dateFieldValue('2026-11-17')).toBe('2026-11-17');
     expect(dayKeyOf(dateFieldValue('2026-11-17', 'datetime'))).toBe('2026-11-17');
+  });
+});
+
+describe('week query bounds, in the suite zone', () => {
+  // The off-UTC cases are in `timesheet.dateTimeZone-34382.test.ts`, driven on
+  // the forks pool by `scripts/__tests__/date-only-zone-pins-10183.test.ts`.
+  it('bounds a date field by the day keys and a date-time field by instants', () => {
+    expect(weekQueryBounds('2026-11-16', '2026-11-23', 'date')).toEqual(['2026-11-16', '2026-11-23']);
+    expect(weekQueryBounds('2026-11-16', '2026-11-23')).toEqual(['2026-11-16', '2026-11-23']);
+    expect(weekQueryBounds('2026-11-16', '2026-11-23', 'datetime')).toEqual([
+      new Date(2026, 10, 16).toISOString(),
+      new Date(2026, 10, 23).toISOString(),
+    ]);
   });
 });
 
@@ -139,6 +153,13 @@ describe('parseCellInput and rowValuesComplete', () => {
     expect(parseCellInput('1,5')).toBe(1.5);
     expect(parseCellInput('')).toBeNull();
     expect(parseCellInput('abc')).toBe('invalid');
+  });
+
+  it('reads the ungrouped display back, and refuses a grouped number rather than misread it', () => {
+    expect(parseCellInput('1234.5')).toBe(1234.5);
+    expect(parseCellInput('1234,5')).toBe(1234.5);
+    expect(parseCellInput('1,234.5')).toBe('invalid');
+    expect(parseCellInput('1,234,5')).toBe('invalid');
   });
 
   it('requires every row field', () => {
