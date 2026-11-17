@@ -84,6 +84,16 @@ export async function fetchPackageCustomizations(baseId: string): Promise<Packag
  * counts the server served.
  */
 export async function fetchPackageCustomizationCounts(baseId: string): Promise<PackageCustomizationCounts> {
-  const { counts } = await fetchPackageCustomizations(baseId);
+  return customizationCountsOf(await fetchPackageCustomizations(baseId));
+}
+
+/**
+ * The two numbers a card draws, off one served answer: "customized" is the
+ * served overrides plus the served extensions, "switched off" the served
+ * switched-off count. Pure, so a reader that holds the whole answer (the
+ * landing, which also lists its rows, objectstack#34714) draws the same
+ * numbers without a second request.
+ */
+export function customizationCountsOf({ counts }: Pick<PackageCustomizations, 'counts'>): PackageCustomizationCounts {
   return { customized: counts.overrides + counts.extensions, switchedOff: counts.switchedOff };
 }

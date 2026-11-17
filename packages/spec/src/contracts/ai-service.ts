@@ -54,6 +54,7 @@ import type {
 } from 'ai';
 import type { z } from 'zod';
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
+import type { EvalUser } from '../identity/eval-user.zod.js';
 
 /**
  * @deprecated Use `ModelMessage` from `ai` instead.
@@ -517,6 +518,10 @@ export interface ActionConfirmationRequiredDetails {
  *    - Elicited `accept`: the call dispatches as any admitted call does,
  *      exactly once, under the caller's permissions. The confirmation covers
  *      that one call: nothing is stored, and the next call is asked again.
+ *      For a `resume_run` call the accept is bound to the screen the run was
+ *      parked on when the person was asked: when the run has moved on to
+ *      another screen meanwhile, the resume is refused `409
+ *      RESOURCE_CONFLICT`, nothing resumes, and the run stays where it is.
  *    - Elicited `decline`: the person said no. Refused, reason `declined`;
  *      nothing runs. The caller does not retry unless the person asks again.
  *    - Elicited `cancel`: the person dismissed the question without choosing.
@@ -533,7 +538,10 @@ export interface ActionConfirmationRequiredDetails {
  *      carries its run ({@link ActionConfirmationHandOff.run}): approving it
  *      resumes THAT parked run with the values the call carried, as the
  *      approver, who must be the run's owner as today; it never starts a new
- *      run of the flow.
+ *      run of the flow. The approval is bound to the screen the run was
+ *      parked on when the call was handed off (the run's `screenNodeId`):
+ *      when the host passes that screen back and the run has moved on to
+ *      another one, the resume is refused and the run stays where it is.
  *    - Handed off, then rejected in the app: nothing runs.
  *    The approve and reject doors of the pending-confirmation service take a
  *    person's signed-in session to the app and nothing else. They refuse an
@@ -721,6 +729,17 @@ export interface ActionConfirmationHandOff {
         runId: string;
         /** The screen's field values the call carried. */
         values: Record<string, unknown>;
+        /**
+         * The screen the run was parked on when the call was handed off: its
+         * `nodeId` (`ScreenSpec.nodeId`, `./automation-service`), the screen
+         * `values` were given for. Absent when the engine named no node for
+         * it. A host that stores it and passes it back on approval
+         * (`ActionResumeRequest.screenNodeId`, `@objectstack/runtime`) binds
+         * the approval to that screen: a run that has moved on to another
+         * screen (a wizard the person advanced in the app, or a second
+         * approval of the same call) is refused, and nothing resumes.
+         */
+        screenNodeId?: string;
     };
 }
 
@@ -777,11 +796,13 @@ export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
  * true })` resumes the run a handed-off `resume_run` carries
  * ({@link ActionConfirmationHandOff.run}) as that person, asking every
  * `resume_run` gate again: a run no longer paused, or one another person
- * started, is refused. That is the only replay it refuses: a wizard the first
- * approval moved on to its next screen is still paused under the same run id,
- * and a second call with the same hand-off resumes it again with the values
- * given. Deciding a pending item once, and voiding an item whose run has
- * moved on, are the host's.
+ * started, is refused. A wizard the first approval moved on to its next
+ * screen is still paused under the same run id, so the host passes back the
+ * screen the call was handed off on (`run.screenNodeId`, as `screenNodeId`):
+ * a run no longer on that screen is refused, `409 RESOURCE_CONFLICT`, and
+ * stays where it is. Without it, a second call with the same hand-off
+ * resumes whatever screen the run is on with the values given. Deciding a
+ * pending item once is the host's.
  *
  * A host may build it over its own pending-action store; the
  * `held` outcome of {@link IAIService.approvePendingAction} is the existing
@@ -797,6 +818,81 @@ export interface IActionConfirmationService {
      *                whose call the item is recorded
      */
     submit(handOff: ActionConfirmationHandOff, context: ExecutionContext): Promise<{ pendingId: string }>;
+}
+
+// ---------------------------------------------------------------------------
+// The AI-route caller — `req.user` on an AI route handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Which credential admitted the caller of an AI route, as
+ * {@link AIRouteUser.credential} carries it. One vocabulary: the runtime's
+ * environment-membership gate and its api-action forward read the same three
+ * values.
+ *
+ * - `session`: a person's signed-in session to the app, whichever carrier
+ *   brought its token: the session cookie, or an `Authorization: Bearer`
+ *   header (the same session, read by the same session read; a client on a
+ *   split-origin deployment, where the cookie does not flow, sends it that
+ *   way). Ruled on #34184 (record 6942875153), Q1 A.
+ * - `api_key`: an API key, in any spelling the key header accepts.
+ * - `oauth`: an OAuth access token (honoured on the MCP endpoint alone), or
+ *   the credential the server mints to forward an OAuth-connected agent's call
+ *   in process; both resolve to an agent principal carrying the token's
+ *   scopes.
+ */
+export type AIRouteCredentialKind = 'session' | 'api_key' | 'oauth';
+
+/**
+ * The caller an AI route handler receives as `req.user`: the route table the
+ * AI service registers (`buildAIRoutes`) is dispatched with
+ * `{ body, params, query, headers, user }`, and `user` is this shape, or
+ * absent for an anonymous caller (reachable only on a route that declares
+ * `auth: false`).
+ *
+ * The identity core is an `EvalUser` (ADR-0068 D1), extended with the keys
+ * every dispatch path that hands a user to customer code publishes: the
+ * id and display-name aliases and the two authority channels, which are never
+ * merged. Two facts are the AI route's own, so that a door reserved to the
+ * person (an approval only the person the call ran as may give) can tell who
+ * is acting and how they came in, without reading request headers:
+ * {@link AIRouteUser.impersonatedBy} and {@link AIRouteUser.credential}.
+ */
+export interface AIRouteUser extends EvalUser {
+    /** The acting user's id (`sys_user.id`). */
+    id: string;
+    /** Alias of {@link AIRouteUser.id}. */
+    userId: string;
+    /** The display name (`sys_user.name`); the id when none resolves. */
+    name: string;
+    /** Alias of {@link AIRouteUser.name}. */
+    displayName: string;
+    /** ADR-0090 position names held by the caller. */
+    positions: string[];
+    /** Permission-SET names (`admin_full_access`, `ai_seat`, …). */
+    permissions: string[];
+    /** CAPABILITIES (`manage_metadata`, `studio.access`, …): a separate channel. */
+    systemPermissions: string[];
+    /**
+     * The administrator (a `sys_user` id) who started the impersonation session
+     * this request runs in: `ExecutionContext.impersonatedBy`, carried as is.
+     * Absent on every other request; absence means the user in
+     * {@link AIRouteUser.id} is acting themselves. {@link AIRouteUser.id} stays
+     * the impersonated user.
+     *
+     * A fact a door may use to refuse an act reserved to the person (ruled on
+     * #34184, record 6942875153, Q2 A). It is never the authorization subject, and no platform
+     * middleware reads it; what it decides is the consuming door's.
+     */
+    impersonatedBy?: string;
+    /**
+     * Which credential admitted this caller; see {@link AIRouteCredentialKind}.
+     * Absent when the request recorded none (a host that hands the dispatcher
+     * an execution context without running its identity step). A door reserved
+     * to a person's signed-in session reads anything but `'session'`, absence
+     * included, as not that session.
+     */
+    credential?: AIRouteCredentialKind;
 }
 
 // ---------------------------------------------------------------------------

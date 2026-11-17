@@ -2143,6 +2143,24 @@ const ar = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} تغيير غير منشور. انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_zero: '{{count}} تغيير غير منشور. انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_one: 'تغيير واحد غير منشور ({{count}}). انشره من شريط المسودة في الأعلى.',
+        publishFromBar_two: 'تغييران غير منشورين ({{count}}). انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_few: '{{count}} تغييرات غير منشورة. انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_many: '{{count}} تغييرًا غير منشور. انشرها من شريط المسودة في الأعلى.',
+        publishFromBar_other: '{{count}} تغيير غير منشور. انشرها من شريط المسودة في الأعلى.',
+        showDraftToPublish: '{{count}} تغيير غير منشور. اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_zero: '{{count}} تغيير غير منشور. اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_one: 'تغيير واحد غير منشور ({{count}}). اعرض المسودة لمراجعته ونشره.',
+        showDraftToPublish_two: 'تغييران غير منشورين ({{count}}). اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_few: '{{count}} تغييرات غير منشورة. اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_many: '{{count}} تغييرًا غير منشور. اعرض المسودة لمراجعتها ونشرها.',
+        showDraftToPublish_other: '{{count}} تغيير غير منشور. اعرض المسودة لمراجعتها ونشرها.',
+        showDraft: 'عرض المسودة',
+        receipt: 'تم النشر. تغييراتك أصبحت مباشرة.',
+        dismissReceipt: 'إغلاق',
         count: "هناك {{count}} من التغييرات لم تُنشر بعد — لا يمكن للمستخدمين رؤيتها.",
         publish: "نشر",
         published: "جميع التغييرات المعلّقة فعّالة الآن.",
@@ -2412,7 +2430,7 @@ const ar = {
       changesApplied: "تم التطبيق",
       changesDrafted: "حُفظ كمسودة",
       changesFailed: "لم يُطبَّق",
-      discussing: "قيد المناقشة: {{target}}",
+      discussing: "قيد العرض: {{target}}",
       changeVerb: {
         createObject: "إنشاء كائن",
         addField: "إضافة حقل",
@@ -3488,7 +3506,7 @@ const ar = {
     aiAssistant: "مساعد الذكاء الاصطناعي",
     designInStudio: "التصميم في Studio",
     editApp: "تعديل التطبيق",
-    openAppInStudio: "عرض التطبيق في Studio",
+    openAppInStudio: "عرض {{app}} في Studio",
   },
   home: {
     build: {
@@ -5015,6 +5033,14 @@ const ar = {
       pendingHere_few: 'معاينة المسودة · {{count}} تغييرات غير منشورة في هذه الصفحة',
       pendingHere_many: 'معاينة المسودة · {{count}} تغييرًا غير منشور في هذه الصفحة',
       pendingHere_other: 'معاينة المسودة · {{count}} تغيير غير منشور في هذه الصفحة',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'معاينة المسودة · {{count}} تغيير غير منشور في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_zero: 'معاينة المسودة · {{count}} تغيير غير منشور في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_one: 'معاينة المسودة · تغيير واحد غير منشور ({{count}}) في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_two: 'معاينة المسودة · تغييران غير منشورين ({{count}}) في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_few: 'معاينة المسودة · {{count}} تغييرات غير منشورة في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_many: 'معاينة المسودة · {{count}} تغييرًا غير منشور في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
+      pendingInApp_other: 'معاينة المسودة · {{count}} تغيير غير منشور في هذا التطبيق. لا شيء هنا مباشر حتى تنشر.',
     },
     changes: {
       title: 'التغييرات المعلّقة',
@@ -5256,6 +5282,7 @@ const ar = {
       securityBlockTitle_many: 'سيتم رفض النشر — {{count}} عنصرًا بحاجة إلى قرار أولاً',
       securityBlockTitle_other: 'سيتم رفض النشر — {{count}} عنصر بحاجة إلى قرار أولاً',
       securityBlockWhere: 'أصلحه في الكائن ضمن الإعدادات ← مشاركة السجلات، ثم انشر مرة أخرى.',
+      flowChecksTitle: 'قبل النشر: سيُبلغ فحص النشر عمّا يلي',
       securityRule: {
         owdUnset: 'لم يُعرَّف أساس مشاركة السجلات (sharingModel). يعود وقت التشغيل إلى private، لكن يجب أن يكون الأساس قرارًا صريحًا.',
         owdAlias: 'أساس مشاركة السجلات (sharingModel) ليس قيمة قياسية، لذا يعامل وقت التشغيل الكائن على أنه private.',
@@ -5266,6 +5293,8 @@ const ar = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'هذا التطبيق غير منشور بعد. إنه يعمل، لكن لا يراه إلا المنشئون. انشره ليراه مستخدموك.',
       message: 'تطبيق غير منشور — يعمل بالكامل، لكن لا يراه سوى المنشئين. انشره ليصبح مرئياً لمستخدميك.',
       publish: 'نشر',
       publishing: 'جارٍ النشر…',

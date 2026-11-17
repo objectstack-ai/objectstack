@@ -316,7 +316,7 @@ describe('the record-reader tier ON for the object', () => {
     expect(served).not.toHaveProperty('viewer');
     // …and on the approvals door the tier confers no decision either.
     expect((await rig.svc.getRequest(rig.ids.requestA, ctx))?.viewer)
-      .toEqual({ can_act: false, can_override: false, is_submitter: false });
+      .toEqual({ can_act: false, can_override: false, can_override_approve: false, is_submitter: false });
   });
 
   it('the filter-array spelling of a record\'s list names the record too', async () => {

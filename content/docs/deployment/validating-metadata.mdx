@@ -528,7 +528,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Row-level-security predicates (#4983) — a permission set's policies, an object's `defaultRowScope`, a membership key's `filter` and a field permission entry's `when` (#25866); at the save door also a membership key nothing owns (#25234) | ✓ | ✓ | ✓ | ✓ᵖᵉᵒ |
 | Membership key declarations — `userField` / `valueField` columns, one key on one object, a key the registered resolver also owns (save door only) (#25234) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Advisory: retired permission residue — the `allowRestore` / `allowPurge` default the parse strips in silence (`permission-retired-lifecycle-residue`, #17425) | ✓ | ✓ | ✓ | ✓ᵖᵉ |
-| Advisory: a roll-up a permission set reads over child data it cannot read — the child object, the aggregated child field or a field the roll-up's `filter` tests unreadable to the set, through its grants, its field entries or a `requiredPermissions` capability it lacks (`security-rollup-source-unreadable`, a warning), or child rows a row-level policy narrows (`security-rollup-source-row-scoped`, a note); a roll-up aggregates the whole child collection and follows only the parent field's own permissions | ✓ | ✓ | ✓ | — |
+| Advisory: a roll-up a permission set reads over child data it cannot read — the child object, the aggregated child field or a field the roll-up's `filter` tests unreadable to the set, through its grants, its field entries or a `requiredPermissions` capability it lacks (`security-rollup-source-unreadable`, a warning), or child rows a row-level policy narrows (`security-rollup-source-row-scoped`, a note); a roll-up aggregates the whole child collection and follows only the parent field's own permissions. A set whose entry for the summary column carries `rollupSourceUnreadableReason` gets that warning as a note quoting the reason | ✓ | ✓ | ✓ | — |
 | Platform-schedule `create_record` organization (#6285) | — | — | — | ✓ᶠ |
 | Public-form anonymous intake on this deployment's tenancy posture — advisory only (#21476) | — | — | — | ✓ᵛ |
 | Public-form file fields — a form open to anonymous intake whose sections declare a `file`, `image`, `avatar`, `video` or `audio` field (#25650) | ✓ | ✓ | ✓ | ✓ᵛ |
@@ -697,6 +697,14 @@ or MCP/AI author can actually read — server logs are not. A clean save carries
 refusal to a loud log for a migration window, so rows written before the gate
 existed stay re-savable; it converts refusals, and never promotes them into
 `advisories`.
+
+A flow draft can be read before it is published. That read (`GET /api/v1/meta/flow/:name?state=draft`)
+runs the publish's own judgement, so its `_diagnostics` say what the publish would answer. A refusal is
+listed in `errors`. Each advisory is listed in `warnings`, at the flow-relative path of the step it is
+about (`nodes.1`), as the finding's sentence for the builder in the language the request states
+(`Accept-Language`, else the workspace default, else English). `valid` is not changed by an advisory.
+The flow designer's Problems tab and the pending-changes drawer read these warnings, so an author sees
+the publish checks before pressing Publish. A draft of any other type carries no advisories in its read.
 
 So `os validate` is the fast inner-loop check (no artifact), `os build` is what
 you run when you need the deployable artifact, and `os lint` adds its own style

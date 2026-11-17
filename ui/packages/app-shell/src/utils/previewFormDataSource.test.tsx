@@ -61,6 +61,15 @@ const OVERLAY = {
     priority: { type: 'text', label: 'Priority', defaultValue: 'high' },
   },
 };
+// A draft that adds a REQUIRED field with no default, and a conditional one.
+const REQUIRED_OVERLAY = {
+  name: 'tracker_task',
+  fields: {
+    title: { type: 'text', label: 'Task title' },
+    due_note: { type: 'text', label: 'Due note', required: true },
+    owner_note: { type: 'text', label: 'Owner note', requiredWhen: 'true' },
+  },
+};
 
 const makeAdapter = () => ({
   getObjectSchema: vi.fn(async (_objectName: string): Promise<unknown> => structuredClone(PUBLISHED)),
@@ -87,6 +96,14 @@ describe('withDraftOnlyFields (objectstack#34807)', () => {
     expect(out.fields.title).toEqual({ type: 'text', label: 'Title' });
     expect(overlay).toEqual(OVERLAY);
     expect(published).toEqual(PUBLISHED);
+  });
+
+  it('a draft-only field drops required and requiredWhen; a published field keeps its own', () => {
+    const published = { name: 'tracker_task', fields: { title: { type: 'text', required: true } } };
+    const out = withDraftOnlyFields(published, structuredClone(REQUIRED_OVERLAY)) as Doc;
+    expect(out.fields.due_note).toEqual({ type: 'text', label: 'Due note', [DRAFT_ONLY_FIELD_KEY]: true });
+    expect(out.fields.owner_note).toEqual({ type: 'text', label: 'Owner note', [DRAFT_ONLY_FIELD_KEY]: true });
+    expect(out.fields.title).toEqual({ type: 'text', required: true });
   });
 
   it('the copy keeps the published sortability projection', () => {
@@ -190,7 +207,7 @@ describe('usePreviewFormDataSource (objectstack#34807)', () => {
 });
 
 describe('the global New modal under draft preview (objectstack#34807)', () => {
-  function Modal({ adapter }: { adapter: ReturnType<typeof makeAdapter> }) {
+  function Modal({ adapter, fields }: { adapter: ReturnType<typeof makeAdapter>; fields: string[] }) {
     const ds = usePreviewFormDataSource(adapter);
     return (
       <ModalForm
@@ -201,17 +218,17 @@ describe('the global New modal under draft preview (objectstack#34807)', () => {
           mode: 'create',
           open: true,
           title: 'New task',
-          fields: ['title', 'priority'],
+          fields,
         } as never}
         dataSource={ds as never}
       />
     );
   }
-  const renderModal = (preview: boolean, adapter: ReturnType<typeof makeAdapter>) =>
+  const renderModal = (preview: boolean, adapter: ReturnType<typeof makeAdapter>, fields = ['title', 'priority']) =>
     render(
       <MemoryRouter>
         <PreviewModeProvider force={preview}>
-          <Modal adapter={adapter} />
+          <Modal adapter={adapter} fields={fields} />
         </PreviewModeProvider>
       </MemoryRouter>,
     );
@@ -231,6 +248,39 @@ describe('the global New modal under draft preview (objectstack#34807)', () => {
     expect(object).toBe('tracker_task');
     expect(payload).toMatchObject({ title: 'Ship it' });
     expect(payload).not.toHaveProperty('priority');
+  });
+
+  it('a REQUIRED draft-only field is drawn disabled and does not block Save; the create leaves it out', async () => {
+    const adapter = makeAdapter();
+    GET_ITEM.fn = async () => structuredClone(REQUIRED_OVERLAY);
+    renderModal(true, adapter, ['title', 'due_note', 'owner_note']);
+    await waitFor(() => expect(screen.getByText('Due note')).toBeInTheDocument());
+    expect(document.body.querySelector('input[name="due_note"]')).toBeDisabled();
+    expect(document.body.querySelector('input[name="owner_note"]')).toBeDisabled();
+
+    fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
+    fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(adapter.create).toHaveBeenCalledTimes(1));
+    const [, payload] = adapter.create.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({ title: 'Ship it' });
+    expect(payload).not.toHaveProperty('due_note');
+    expect(payload).not.toHaveProperty('owner_note');
+  });
+
+  it('CONTROL: outside preview a required published field left empty still blocks Save', async () => {
+    const adapter = makeAdapter();
+    adapter.getObjectSchema.mockImplementation(async () => ({
+      name: 'tracker_task',
+      fields: { title: { type: 'text', label: 'Title' }, code: { type: 'text', label: 'Code', required: true } },
+    }));
+    GET_ITEM.fn = async () => structuredClone(OVERLAY);
+    renderModal(false, adapter, ['title', 'code']);
+    await waitFor(() => expect(screen.getByText('Code')).toBeInTheDocument());
+    expect(document.body.querySelector('input[name="code"]')).not.toBeDisabled();
+    fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
+    fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(document.body.querySelector('input[name="code"]')).toHaveAttribute('aria-invalid', 'true'));
+    expect(adapter.create).not.toHaveBeenCalled();
   });
 
   it('CONTROL: outside preview the published document is read once and the draft field is absent', async () => {

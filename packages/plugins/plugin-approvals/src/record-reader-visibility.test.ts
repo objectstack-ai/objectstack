@@ -378,7 +378,7 @@ describe('record-reader approval visibility (#8652)', () => {
       const svc = service([OBJECT]);
       const row: any = await svc.getRequest(REQUEST, asUser(LEDGER_ROLE));
       // What a console ORs into the decision actions' `visible` gate.
-      expect(row.viewer).toEqual({ can_act: false, is_submitter: false, can_override: false });
+      expect(row.viewer).toEqual({ can_act: false, is_submitter: false, can_override: false, can_override_approve: false });
     });
   });
 

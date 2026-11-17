@@ -71,9 +71,29 @@ vi.mock('../providers/AdapterProvider', () => ({
   useAdapter: () => ENV.adapter,
 }));
 
-function setUp(objects: unknown[]) {
+// A draft that adds a REQUIRED field with no default.
+const REQUIRED_OVERLAY = {
+  name: 'tracker_task',
+  label: 'Task',
+  fields: {
+    title: { type: 'text', label: 'Title' },
+    due_note: { type: 'text', label: 'Due note', required: true },
+  },
+};
+
+// A draft whose form view restates `required` on the draft-only field.
+const VIEW_REQUIRED_OVERLAY = {
+  ...REQUIRED_OVERLAY,
+  fields: { title: { type: 'text', label: 'Title' }, due_note: { type: 'text', label: 'Due note' } },
+  form: {
+    type: 'simple',
+    sections: [{ name: 'main', fields: ['title', { field: 'due_note', required: true }] }],
+  },
+};
+
+function setUp(objects: unknown[], overlay: unknown = OVERLAY) {
   ENV.objects = objects;
-  ENV.getItem = vi.fn(async () => structuredClone(OVERLAY));
+  ENV.getItem = vi.fn(async () => structuredClone(overlay));
   ENV.adapter = {
     getObjectSchema: vi.fn(async () => structuredClone(PUBLISHED)),
     create: vi.fn(async () => ({ id: 'r1', title: 'Ship it' })),
@@ -113,6 +133,34 @@ describe('RecordFormPage under draft preview (objectstack#34807)', () => {
     expect(object).toBe('tracker_task');
     expect(payload).toMatchObject({ title: 'Ship it' });
     expect(payload).not.toHaveProperty('priority');
+  });
+
+  it('a REQUIRED draft-only field is drawn disabled and does not block Save; the create leaves it out', async () => {
+    const { adapter } = setUp([REQUIRED_OVERLAY], REQUIRED_OVERLAY);
+    renderNew(true);
+    await waitFor(() => expect(screen.getByText('Due note')).toBeInTheDocument());
+    expect(document.body.querySelector('input[name="due_note"]')).toBeDisabled();
+
+    fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
+    fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(adapter.create).toHaveBeenCalledTimes(1));
+    const [, payload] = adapter.create.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({ title: 'Ship it' });
+    expect(payload).not.toHaveProperty('due_note');
+  });
+
+  it('a draft form view restating `required` on the draft-only field does not block Save', async () => {
+    const { adapter } = setUp([VIEW_REQUIRED_OVERLAY], VIEW_REQUIRED_OVERLAY);
+    renderNew(true);
+    await waitFor(() => expect(screen.getByText('Due note')).toBeInTheDocument());
+    expect(document.body.querySelector('input[name="due_note"]')).toBeDisabled();
+
+    fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
+    fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(adapter.create).toHaveBeenCalledTimes(1));
+    const [, payload] = adapter.create.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({ title: 'Ship it' });
+    expect(payload).not.toHaveProperty('due_note');
   });
 
   it('CONTROL: outside preview the form reads the published document once and draws no draft field', async () => {

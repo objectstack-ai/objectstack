@@ -16,7 +16,8 @@ import { AnalyticsResultResponseSchema, DatasetSelectionSchema } from '../api/an
  * The two tools give an AI the business semantic layer a person already reads
  * through dashboards and reports: `list_datasets` returns the catalogue (the
  * datasets the caller may query, their dimensions and measures, each member's
- * business vocabulary, and which of the caller's words matched which member),
+ * business vocabulary, which of the caller's words matched which member, and,
+ * for a word that matched nothing, the members offered as `candidates`),
  * and `query_dataset` runs a `DatasetSelection` against one saved dataset and
  * answers rows plus a `provenance` block naming the dataset and the measures
  * used. The shapes are declared here once and projected to the JSON Schema an
@@ -31,7 +32,8 @@ import { AnalyticsResultResponseSchema, DatasetSelectionSchema } from '../api/an
  * author a dataset inline could author its own 口径.
  *
  * Only the shapes are spec. The executor, the catalogue builder with its
- * admission and member withholding, the term matcher and the row cap
+ * admission and member withholding, the term matcher, the rule that finds a
+ * zero-match term's candidates and the row cap
  * (`selection.limit` held to the bridge's `maxQueryLimit`) belong to
  * `@objectstack/service-analytics` (card #31589); the MCP registration under
  * `data:read` to `@objectstack/mcp` (card #31590). The tool descriptions, which
@@ -89,6 +91,53 @@ export const DatasetTermMatchSchema = lazySchema(() => z.object({
   matchedOn: DatasetTermMatchedOn.describe(
     'Which of the member\'s words the term equals after normalization: its `name`, its `label` (any locale) or '
     + 'one of its `synonyms`',
+  ),
+}));
+
+/**
+ * How many candidates `list_datasets` lists for one term, at most
+ * ({@link ListDatasetsOutputSchema}'s `candidates`).
+ *
+ * Exported so the executor that fills the list and a client that reads it use
+ * the one number. Declared ahead of the schema on purpose: under
+ * `OS_EAGER_SCHEMAS=1` (`gen:schema`) the factory runs at module evaluation.
+ */
+export const LIST_DATASETS_MAX_CANDIDATES_PER_TERM = 5;
+
+/**
+ * One member offered as a possible reading of a term that matched nothing: an
+ * entry of {@link ListDatasetsOutputSchema}'s `candidates` (ADR-0149 D3, the
+ * amendment note under its rules).
+ *
+ * A candidate is NOT a match. A match ({@link DatasetTermMatchSchema}) says
+ * the term equals one of the member's words after normalization, and D3 rule
+ * 2 lets one match win. A candidate says only that the platform offers the
+ * member for a clarifying question; what counts as a match is unchanged, and
+ * a term has candidates only when it has no match anywhere in the answer.
+ *
+ * The entry is a pointer, `{ term, dataset, member }`, and carries no
+ * `matchedOn`: that key states an equality a candidate does not have. It
+ * carries no word the term was found near either. D3 rule 1 lets a substring,
+ * a stem or an embedding neighbour be offered, an embedding neighbour is near
+ * no single word of the member, and the rule that finds candidates is the
+ * executor's, so the shape does not presume it. The label, dataset label and
+ * description a clarifying question lists (D3 rule 3) are read from the
+ * `datasets` entry the pointer names, in the same answer.
+ *
+ * `member` is {@link DatasetTermMatchSchema}'s `member` BY REFERENCE under its
+ * own description: one member-reference format, declared once.
+ */
+export const DatasetTermCandidateSchema = lazySchema(() => z.object({
+  term: z.string().describe(
+    'The caller\'s term, as sent in `terms`: one that matched no member of any listed dataset',
+  ),
+  dataset: z.string().describe(
+    'The dataset the offered member belongs to, by name: an entry of `datasets` in the same answer, and what '
+    + '`query_dataset` takes as `datasetName`',
+  ),
+  member: DatasetTermMatchSchema.shape.member.describe(
+    'The member offered, as `measures.<name>` or `dimensions.<name>`: a member that dataset\'s entry lists. The '
+    + 'term does not equal any of its words after normalization',
   ),
 }));
 
@@ -175,6 +224,16 @@ export const ListDatasetsOutputSchema = lazySchema(() => z.object({
     + 'why. Absent on a complete answer',
   ),
   warning: z.string().optional().describe('Why the answer is partial; present exactly when `partial` is'),
+  candidates: z.array(DatasetTermCandidateSchema).min(1).optional().describe(
+    'Members offered as possible readings of a term that matched no member of any listed dataset, for a '
+    + 'clarifying question. A candidate is not a match: its term has no entry in any dataset\'s `matches`. The '
+    + 'platform selects none: the list carries no score, and its order is the listing order stated here, not a '
+    + 'ranking. Every candidate is a member this caller may read, listed in `datasets`. Terms in the order sent; '
+    + 'for one term, datasets in the order listed, and each dataset\'s measures before its dimensions, as its '
+    + `entry lists them; at most ${LIST_DATASETS_MAX_CANDIDATES_PER_TERM} per term, the first in that order. `
+    + 'Present only when `terms` were sent and a term that matched nothing has a candidate; absent otherwise, '
+    + 'never an empty list. A term with a match has no candidate',
+  ),
 }));
 
 // ==========================================
@@ -331,6 +390,7 @@ export function getDatasetToolJsonSchemas(): Readonly<
 export type ListDatasetsInput = z.input<typeof ListDatasetsInputSchema>;
 export type DatasetTermMatchedOn = z.input<typeof DatasetTermMatchedOn>;
 export type DatasetTermMatch = z.input<typeof DatasetTermMatchSchema>;
+export type DatasetTermCandidate = z.input<typeof DatasetTermCandidateSchema>;
 export type DatasetToolCatalogDimension = z.input<typeof DatasetToolCatalogDimensionSchema>;
 export type DatasetToolCatalogMeasure = z.input<typeof DatasetToolCatalogMeasureSchema>;
 export type DatasetToolCatalogEntry = z.input<typeof DatasetToolCatalogEntrySchema>;

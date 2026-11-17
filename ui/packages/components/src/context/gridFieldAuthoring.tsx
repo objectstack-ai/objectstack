@@ -41,6 +41,13 @@ export interface GridFieldAuthoring {
    * reordering to the table's own `reorderableColumns`/`onColumnsReorder`.
    */
   onReorderFields?: (orderedFieldNames: string[]) => void;
+  /**
+   * A mark drawn after a column's header label, keyed by the column's
+   * accessorKey (= field name); a column with no entry draws none. The Studio
+   * Data pillar marks the fields its AI assistant changed in the pending draft
+   * (objectstack#34725). Omit for no marks.
+   */
+  columnMarks?: Readonly<Record<string, React.ReactNode>>;
 }
 
 const GridFieldAuthoringContext = React.createContext<GridFieldAuthoring | null>(null);

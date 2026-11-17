@@ -1928,6 +1928,16 @@ const ko = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        publishFromBar_one: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        publishFromBar_other: '게시되지 않은 변경이 {{count}}개 있습니다. 상단의 초안 표시줄에서 게시하세요.',
+        showDraftToPublish: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraftToPublish_one: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraftToPublish_other: '게시되지 않은 변경이 {{count}}개 있습니다. 초안을 열어 검토하고 게시하세요.',
+        showDraft: '초안 보기',
+        receipt: '게시했습니다. 변경 사항이 반영되었습니다.',
+        dismissReceipt: '닫기',
         count: "게시되지 않은 변경이 {{count}}건 있습니다 — 사용자에게는 보이지 않습니다.",
         publish: "게시",
         published: "대기 중인 변경 사항이 모두 반영되었습니다.",
@@ -2165,7 +2175,7 @@ const ko = {
       changesApplied: "적용됨",
       changesDrafted: "초안으로 저장됨",
       changesFailed: "적용되지 않음",
-      discussing: "논의 중: {{target}}",
+      discussing: "보는 중: {{target}}",
       changeVerb: {
         createObject: "객체 생성",
         addField: "필드 추가",
@@ -3214,7 +3224,7 @@ const ko = {
     aiAssistant: "AI 어시스턴트",
     designInStudio: "Studio에서 디자인",
     editApp: "앱 편집",
-    openAppInStudio: "Studio에서 앱 보기",
+    openAppInStudio: "Studio에서 {{app}} 보기",
   },
   home: {
     build: {
@@ -4577,6 +4587,10 @@ const ko = {
       pendingHere: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
       pendingHere_one: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
       pendingHere_other: '초안 미리보기 · 이 페이지의 게시되지 않은 변경 {{count}}개',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
+      pendingInApp_one: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
+      pendingInApp_other: '초안 미리보기 · 이 앱의 게시되지 않은 변경 {{count}}개. 게시하기 전에는 여기의 내용이 반영되지 않습니다.',
     },
     changes: {
       title: '대기 중인 변경 사항',
@@ -4593,7 +4607,7 @@ const ko = {
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
       fieldOrderChanged: '필드 순서가 변경됨',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI 코파일럿이 초안으로 작성한 변경 사항 포함',
+      draftedByCopilot: 'AI 어시스턴트가 초안으로 작성한 변경 사항 포함',
       draftedByMcpClient: 'MCP 클라이언트 “{{client}}”이(가) 초안으로 작성한 변경 사항 포함',
       draftedByMcp: 'MCP 클라이언트가 초안으로 작성한 변경 사항 포함',
       detailChangedKeys: '기타 변경:',
@@ -4702,6 +4716,7 @@ const ko = {
       securityBlockTitle_one: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_other: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockWhere: '객체의 설정 → 레코드 공유에서 수정한 후 다시 게시하세요.',
+      flowChecksTitle: '게시하기 전에 확인하세요 — 게시 검사에서 다음 사항을 알립니다',
       securityRule: {
         owdUnset: '레코드 공유 기준(sharingModel)이 선언되지 않았습니다. 런타임은 private로 처리하지만 기준은 명시적으로 결정해야 합니다.',
         owdAlias: '레코드 공유 기준(sharingModel)이 정식 값이 아니므로 런타임은 이 개체를 private로 처리합니다.',
@@ -4712,6 +4727,8 @@ const ko = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: '이 앱은 아직 게시되지 않았습니다. 작동하지만 빌더만 볼 수 있습니다. 게시하면 사용자에게 표시됩니다.',
       message: '게시되지 않은 앱 — 기능은 모두 작동하지만 빌더만 볼 수 있습니다. 게시하면 사용자에게 표시됩니다.',
       publish: '게시',
       publishing: '게시 중…',

@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_ORGANIZATION_NAME,
+  aiProviderState,
   browserRegion,
   checklistCompletion,
   dismissRecordKey,
@@ -241,5 +242,62 @@ describe('completion counts the required rows; email delivery is optional (objec
       complete: false,
     });
     expect(checklistCompletion([{ id: 'connect_assistant', done: false }]).complete).toBe(false);
+  });
+});
+
+describe('in use is read from the stated source, never from a null value (objectstack#34749)', () => {
+  // A host's own transport, which no option names, is stated `{ value: null, source: 'environment' }`.
+  const HOST_OWN = { value: null, source: 'environment' } as const;
+  const SAVED = { provider: fromTenant('smtp'), from_email: fromTenant('a@b.co'), smtp_host: fromTenant('mx') };
+
+  it('mail: environment with a null value delivers; none does not; settings with an empty value does not', () => {
+    expect(isMailDelivering({ values: {}, live: { provider: HOST_OWN } })).toBe(true);
+    expect(isMailDelivering({ values: {}, live: { provider: { value: null, source: 'none' } } })).toBe(false);
+    expect(isMailDelivering({ values: SAVED, live: { provider: { value: '', source: 'settings' } } })).toBe(false);
+  });
+
+  it('mail: saved values that would pass, under a host-own transport, read done from the statement', () => {
+    expect(isMailConfigured(SAVED)).toBe(true);
+    expect(isMailDelivering({ values: SAVED, live: { provider: HOST_OWN } })).toBe(true);
+    // The statement decides, not the saved values: the same host-own statement over nothing that would pass.
+    expect(isMailDelivering({ values: { provider: fromTenant('log') }, live: { provider: HOST_OWN } })).toBe(true);
+  });
+
+  it('CONTROL mail: a payload without the statement still falls back to the saved values', () => {
+    expect(isMailDelivering({ values: SAVED })).toBe(true);
+    expect(isMailDelivering({ values: {} })).toBe(false);
+  });
+
+  const AI_MANIFEST = {
+    namespace: 'ai',
+    label: 'AI',
+    scope: 'global',
+    writePermission: 'manage_platform_settings',
+    specifiers: [{ type: 'select', key: 'provider', label: 'Provider', options: [{ value: 'openai', label: 'OpenAI' }] }],
+  } as unknown as SettingsManifest;
+
+  it('ai: environment with a null value is done, its source kept, with no option to name it by', () => {
+    expect(aiProviderState({ manifest: AI_MANIFEST, live: { provider: HOST_OWN } })).toEqual({
+      done: true,
+      value: null,
+      source: 'environment',
+    });
+  });
+
+  it('ai: none is not done', () => {
+    expect(aiProviderState({ manifest: AI_MANIFEST, live: { provider: { value: null, source: 'none' } } })).toEqual({
+      done: false,
+      value: null,
+      source: 'none',
+    });
+  });
+
+  it('CONTROL ai: a provider named by an option keeps its value, source and label', () => {
+    expect(aiProviderState({ manifest: AI_MANIFEST, live: { provider: { value: 'openai', source: 'environment' } } })).toEqual({
+      done: true,
+      value: 'openai',
+      source: 'environment',
+      optionLabel: 'OpenAI',
+    });
   });
 });

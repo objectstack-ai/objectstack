@@ -15,9 +15,10 @@ import {
 } from '@objectstack/core';
 import { isServiceServeable } from '../service-serveable.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
+import { admittingCredentialKind } from '../security/admitting-credential.js';
 import { capabilityUnavailable } from './unavailable.js';
 import { buildApiError } from '../error-envelope.js';
-import type { IAIService } from '@objectstack/spec/contracts';
+import type { AIRouteUser, IAIService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -268,15 +269,41 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // principal: an AI route handler distinguishes "no caller" by the
         // absence of `user`, and this route only reaches anonymous when the
         // deployment does not require auth.
-        const user = ec?.userId
-            ? actorUserFromExecutionContext(
+        //
+        // [#34184, ruling 6942875153 Q1 A · Q2 A] Two facts are the AI
+        // route's own, beside the actor envelope (`AIRouteUser` in
+        // `@objectstack/spec/contracts`), so a door reserved to the person can
+        // tell who is acting and how they came in without reading headers:
+        //
+        //   - `impersonatedBy` — `ec.impersonatedBy` as the shared resolver set
+        //     it off the session read, carried as is. A fact for the consuming
+        //     door to judge; nothing here reads it, and `id` stays the
+        //     impersonated user.
+        //   - `credential` — the ONE reading the membership gate and the
+        //     api-action forward take (`admittingCredentialKind`): a session
+        //     is `session` whether its token rode in the cookie or in an
+        //     `Authorization: Bearer` header.
+        //
+        // Both keys are ABSENT, never `undefined`, when there is nothing to
+        // say, so `'impersonatedBy' in user` answers "an administrator is
+        // acting" with no second reading.
+        let user: AIRouteUser | undefined;
+        if (ec?.userId) {
+            const actor = actorUserFromExecutionContext(
                 ec,
                 await resolveActorDisplayName(
                     () => deps.getObjectQL(context, context?.environmentId),
                     ec,
                 ),
-            )
-            : undefined;
+            );
+            const impersonatedBy = typeof ec.impersonatedBy === 'string' ? ec.impersonatedBy.trim() : '';
+            const credential = admittingCredentialKind(context);
+            user = {
+                ...actor,
+                ...(impersonatedBy ? { impersonatedBy } : {}),
+                ...(credential ? { credential } : {}),
+            };
+        }
 
         const result = await route.handler({
             body: admittedBody,

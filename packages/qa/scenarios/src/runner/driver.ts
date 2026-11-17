@@ -40,6 +40,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 import { SCENARIO_TIERS, type ScenarioTier } from '../schema.js';
+import { placeAskSkills, readAskSkills, SKILL_TOOL, type AskSkillsBundle, type AskSkillsInfo } from './ask-skills.js';
 import { flowRefusalOf } from '../score/scenario-run-grade.js';
 import type { ToolAnswer } from './app.js';
 import { noResult, runTurnProcess } from './drivers/process.js';
@@ -155,6 +156,13 @@ export interface DriverInfo {
   authorEffort?: string;
   /** The effort level the live driver asks for on a question or operation turn (`--effort` / `--ask-effort`); absent ⇒ the CLI's default effort. */
   askEffort?: string;
+  /**
+   * The skills every question and operation turn was given (`--ask-skills`,
+   * `ask-skills.ts`): each skill's name, the sha256 of its files and its
+   * declared version. Absent ⇒ none: the turn's directory held no skill and
+   * the `Skill` tool was not allowed. A replay states the recording's.
+   */
+  askSkills?: AskSkillsInfo;
 }
 
 export interface AgentDriver {
@@ -294,6 +302,13 @@ export interface ClaudeCodeDriverOptions {
   authorEffort?: string;
   /** The effort level for a question or operation turn, in place of {@link effort}. */
   askEffort?: string;
+  /**
+   * A skills directory every question and operation turn is given
+   * (`--ask-skills`, `ask-skills.ts`): read once here, written into each turn's
+   * directory under `.claude/skills/`, with `Skill` added to the turn's allowed
+   * tools. Absent ⇒ the turn runs as it always did.
+   */
+  askSkillsDir?: string;
 }
 
 /** `claude-sonnet-4-5-20250929[1m]` → `['claude', 'sonnet', '4', '5', '20250929']`: the name's parts, the context-size suffix dropped. */
@@ -350,10 +365,13 @@ export class ClaudeCodeDriver implements AgentDriver {
   private readonly opts: ClaudeCodeDriverOptions;
   private readonly version: string;
   private readonly authMethod: string;
+  private readonly askSkills: AskSkillsBundle | undefined;
 
   constructor(opts: ClaudeCodeDriverOptions = {}) {
     this.opts = opts;
     this.bin = opts.bin ?? 'claude';
+    // Read before any process starts: a directory that holds no skill is refused, and every turn gets these bytes.
+    this.askSkills = opts.askSkillsDir !== undefined ? readAskSkills(opts.askSkillsDir) : undefined;
     const ver = spawnSync(this.bin, ['--version'], { encoding: 'utf8', env: subscriptionOnlyEnv() });
     if (ver.status !== 0) throw new Error(`\`${this.bin} --version\` failed: is Claude Code installed? ${ver.stderr ?? ''}`.trim());
     this.version = ver.stdout.trim();
@@ -431,6 +449,7 @@ export class ClaudeCodeDriver implements AgentDriver {
       ...(this.askModel ? { askModel: this.askModel } : {}),
       ...(this.authorEffort ? { authorEffort: this.authorEffort } : {}),
       ...(this.askEffort ? { askEffort: this.askEffort } : {}),
+      ...(this.askSkills ? { askSkills: this.askSkills.info } : {}),
     };
   }
 
@@ -479,7 +498,9 @@ export class ClaudeCodeDriver implements AgentDriver {
       const maxTurns = this.askMaxTurns;
       const model = this.askModel;
       const effort = this.askEffort;
-      const args = ['-p', ...this.base(maxTurns, model, effort), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app'];
+      // The skills, when given, sit where a project's own skills sit, and only then may the session load one.
+      if (this.askSkills) placeAskSkills(this.askSkills, dir);
+      const args = ['-p', ...this.base(maxTurns, model, effort), '--mcp-config', cfg, '--strict-mcp-config', '--allowedTools', 'mcp__app', ...(this.askSkills ? [SKILL_TOOL] : [])];
       const run = await runTurnProcess(this.bin, args, { cwd: dir, input: task.prompt, timeoutMs: this.opts.askTimeoutMs ?? 5 * 60_000, env: this.turnEnv() });
       const turn = parseStreamJson(run.stdout);
       turn.meta.process = { ...run.process, maxTurns, ...(model ? { requestedModel: model } : {}), ...(effort ? { requestedEffort: effort } : {}) };
@@ -672,6 +693,8 @@ export class RecordedDriver implements AgentDriver {
       replayOf,
       ...(made.authMethod ? { authMethod: `replay of ${made.driver} (${made.authMethod})` } : {}),
       apiBilled: false,
+      // The replayed answers were made with these skills: the record says so, as it says whose turns they are.
+      ...(made.askSkills ? { askSkills: made.askSkills } : {}),
     };
   }
 
