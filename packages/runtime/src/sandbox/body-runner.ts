@@ -1577,7 +1577,8 @@ function buildSandboxContext(
     // sites; widening the accessor to it is a separate capability call and is
     // deliberately not taken here — the ruling names hook bodies.
     title,
-    // [#34374] Hook face only: the hook's declared texts, answered in the
+    // [#34374] The hook's declared texts (the action face carries its own,
+    // #34374 PR2, `buildActionSandboxContext`), answered in the
     // organization's language (`hook-text.ts`).
     ...(text ? { text } : {}),
     // [#11552] Hook face only, both of them: an action is never one of N

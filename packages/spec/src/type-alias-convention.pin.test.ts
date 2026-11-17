@@ -304,7 +304,7 @@ import type * as M204 from './ai/dataset-tools.zod.js';
 import type * as M205 from './ai/object-query-source.zod.js';
 
 // ---------------------------------------------------------------------------
-// 859 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 860 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1576,6 +1576,7 @@ export type Iso_ui_actionParams__ActionSessionSchema = Assert<Eq< z.input< typeo
 // ui/action.zod.ts
 export type Iso_ui_action__ActionLocationSchema = Assert<Eq< z.input< typeof M155.ActionLocationSchema >, z.infer< typeof M155.ActionLocationSchema > >>;
 export type Iso_ui_action__ActionRefusalSchema = Assert<Eq< z.input< typeof M155.ActionRefusalSchema >, z.infer< typeof M155.ActionRefusalSchema > >>;
+export type Iso_ui_action__ActionTextSchema = Assert<Eq< z.input< typeof M155.ActionTextSchema >, z.infer< typeof M155.ActionTextSchema > >>;
 export type Iso_ui_action__ActionType = Assert<Eq< z.input< typeof M155.ActionType >, z.infer< typeof M155.ActionType > >>;
 
 // ui/app.zod.ts
@@ -1834,7 +1835,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 859 isomorphic pins', () => {
+  it('still declares all 860 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2922,7 +2923,12 @@ describe('ADR-0122 type-alias convention', () => {
     // declared-entry factory as `HookRefusalSchema` and closed at the same
     // four keys with no default or transform, pinned here
     // (Iso_ui_action__ActionRefusalSchema). +1 added.
-    expect(pins).toHaveLength(859);
+    // 859 -> 860 is the action half of #34374: an action's declared text
+    // entry, `ActionTextSchema` (`ui/action.zod.ts`), built by the same
+    // declared-entry factory as `HookTextSchema` and closed at the same two
+    // keys with no default or transform, pinned here
+    // (Iso_ui_action__ActionTextSchema). +1 added.
+    expect(pins).toHaveLength(860);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
