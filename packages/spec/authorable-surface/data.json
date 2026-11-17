@@ -213,6 +213,7 @@
     "data/DriverCapabilities:querySubqueries [RETIRED]",
     "data/DriverCapabilities:queryWindowFunctions [RETIRED]",
     "data/DriverCapabilities:read [RETIRED]",
+    "data/DriverCapabilities:readableIdsLeaf",
     "data/DriverCapabilities:savepoints [RETIRED]",
     "data/DriverCapabilities:schemaSync [RETIRED]",
     "data/DriverCapabilities:streaming [RETIRED]",

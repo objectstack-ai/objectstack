@@ -785,7 +785,12 @@ matrix answers the first question only.
    page, action, app, dashboard or flow (the
    [orphan-key table](/docs/protocol/kernel/i18n-standard#orphan-keys-and-option-keys)
    lists every rung) — while the collections being judged stay that package's
-   alone. It is de-duplicated against the union run, so what it reports is the
+   alone. A flow's trigger object and a start input's record object are the one
+   place it is narrower: they resolve only through the packages the manifest
+   declares in `dependencies` (transitively), the closure the publish gate
+   judges the same flow against, so a flow on a declared dependency's object is
+   clean and one on an undeclared sibling's object still warns
+   `flow-trigger-unknown-object` (#34616). It is de-duplicated against the union run, so what it reports is the
    set of per-package findings no union finding already carried under the same
    rule, `where`, message and non-top-level position — the leading
    `collection[N]` index is neutralised, because a package body re-bases its

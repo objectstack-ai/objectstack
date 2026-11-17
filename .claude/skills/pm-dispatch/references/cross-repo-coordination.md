@@ -42,6 +42,6 @@
 - 转移落对方队列:目标仓立单带 `pm:queue`、出处行与一行可执行判据,依赖用 `Blocked-by:`。
 - 跨座位请求骑在它所关的既有卡上:请求席在自卡写 `Blocked-by:`,并在目标卡留一条评论。
 - 该评论点名席位与步骤;无既有卡承载且请求自身即立卡门 ①②④ 时才立新卡。
-- 本仓卡挂 `domain:cloud`+`repo:cloud`+活态,摘车道 `domain:*`,⛔ 不挂 `status:parked`。
+- 本仓卡挂 `domain:cloud`+`repo:cloud`+活态,摘车道 `domain:*`,⛔ 不挂 `status:parked`;先转仓再做。
 - 他仓卡能转即转 cloud 仓,否则本仓立 `repo:cloud` 承接卡写全所求;⛔ 不拆半边等读数。
 - 在飞卡涉 cloud 即 `Release:`+`pm:retriage` 交分诊转 cloud 车道,读点留卡;只缺事实读数敲信箱。
