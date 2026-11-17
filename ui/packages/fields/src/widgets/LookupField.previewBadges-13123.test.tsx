@@ -406,18 +406,18 @@ describe('LookupField picker popover: bound to the room it is given (objectstack
 describe('LookupField picker popover: wide enough to read an option, never wider than the screen (objectstack#34601)', () => {
   /**
    * The width contract, as classes: jsdom has no layout. The trigger width
-   * stays the width, a 16rem floor keeps option names readable when the
+   * stays the width, an 18rem floor keeps option names readable when the
    * trigger is a narrow line-item grid cell, and the room Radix reports caps
    * both the panel and the floor, so a narrow screen never puts the panel past
    * its edge. The pixels were read in Chromium; the pull request records them.
    */
   const WIDTH = [
     'w-[var(--radix-popover-trigger-width)]',
-    'min-w-[min(16rem,var(--radix-popover-content-available-width,100vw))]',
+    'min-w-[min(18rem,var(--radix-popover-content-available-width,100vw))]',
     'max-w-(--radix-popover-content-available-width)',
   ];
 
-  it('floors a compact (grid-cell) trigger\'s popover at 16rem and caps it at the available width', async () => {
+  it('floors a compact (grid-cell) trigger\'s popover at 18rem and caps it at the available width', async () => {
     await openPicker(['name', 'status'], { compact: true });
     const popover = screen.getByTestId('lookup-popover');
     for (const cls of WIDTH) {
