@@ -363,7 +363,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   const homePath = useHomePath();
   const previewDrafts = usePreviewDrafts();
   // objectstack#34807 — the global New/Edit modal reads its object definition
-  // through the draft overlay under preview; outside preview this is
+  // through the draft overlay under preview (a field only the draft declares is
+  // drawn disabled and left out of every write); outside preview this is
   // `dataSource` itself.
   const formDataSource = usePreviewFormDataSource(dataSource);
   const { t, language } = useObjectTranslation();

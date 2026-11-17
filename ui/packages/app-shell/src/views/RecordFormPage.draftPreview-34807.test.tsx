@@ -14,8 +14,8 @@
  * draft overlay in preview; the real `ObjectForm` draws only a name its object
  * definition declares, and that definition comes from the data source the page
  * hands it. In preview that source answers the published document plus the
- * draft-only field, so the field is drawn, and Save leaves it out of the
- * create: what the viewer typed into it and its declared default alike.
+ * draft-only field marked `_draftOnly`, so the field is drawn DISABLED, and
+ * Save leaves it out of the create, its declared default included.
  *
  * CONTROL: outside preview the page hands the form the adapter itself — one
  * published read (objectui#13044), no overlay read, no draft field.
@@ -98,12 +98,13 @@ function renderNew(preview: boolean) {
 }
 
 describe('RecordFormPage under draft preview (objectstack#34807)', () => {
-  it('draws the draft-only field with its draft label, and Save leaves it out of the create', async () => {
+  it('draws the draft-only field disabled with its draft label, and Save leaves it out of the create', async () => {
     const { adapter, getItem } = setUp([OVERLAY]);
     renderNew(true);
     await waitFor(() => expect(screen.getByText('Priority')).toBeInTheDocument());
     expect(getItem).toHaveBeenCalledWith('object', 'tracker_task');
-    fireEvent.change(document.body.querySelector('input[name="priority"]') as HTMLInputElement, { target: { value: 'urgent' } });
+    expect(document.body.querySelector('input[name="priority"]')).toBeDisabled();
+    expect(document.body.querySelector('input[name="title"]')).not.toBeDisabled();
 
     fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
     fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);

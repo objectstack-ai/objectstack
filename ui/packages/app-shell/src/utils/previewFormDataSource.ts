@@ -20,15 +20,17 @@
  *
  * Preview stays read-only for data (ADR-0037 Phase 1: the data plane is
  * untouched; seat ruling 6946403206). A field the draft adds does not exist in
- * the published object the data door validates against, so the proxy's
- * `create` / `update` leave its name out of the record they send: what the
- * viewer typed into it, or its declared default, is never written (the draft
- * bar above every preview page says nothing there is live until publish).
- * ⛔ The field is not locked instead: a create form drops a field declared
- * `readonly: true` (`filterCreateModeFields` in `@object-ui/plugin-form`) and
- * does not evaluate `readonlyWhen`, so either would hide the very field the
- * preview exists to show or do nothing. Every other member is the adapter's
- * own, bound to it, so a write goes out as it does without preview.
+ * the published object the data door validates against, so it carries
+ * {@link DRAFT_ONLY_FIELD_KEY} and the form draws it DISABLED: visible with its
+ * draft definition, never fillable (`@object-ui/plugin-form` maps the marker
+ * onto the field's `disabled`, in `ObjectForm` and in `fromObjectSchema`). As
+ * the safety net, the proxy's `create` / `update` leave its name out of the
+ * record they send, so its declared default is never written either.
+ * ⛔ Not `readonly: true`: `filterSystemFields` in `@object-ui/plugin-form`
+ * drops such a field before render, on create and edit alike, and a create
+ * form does not evaluate `readonlyWhen` — either would hide the very field
+ * the preview exists to show, or do nothing. Every other member is the
+ * adapter's own, bound to it, so a write goes out as it does without preview.
  *
  * @module utils/previewFormDataSource
  */
@@ -52,9 +54,12 @@ function isDocument(value: unknown): value is ObjectDocument {
 
 /**
  * The undeclared key that marks a field the draft adds: present in the draft
- * overlay document, absent from the published one. Client-side only (the copy
- * carrying it is never written back); a draft-preview reader that must keep
- * such a name out of a data request reads it here.
+ * overlay document, absent from the published one. An underscore-private
+ * convention between this package and `@object-ui/plugin-form` (which spells
+ * the same literal and draws a marked field disabled), never an authoring
+ * key: the copy carrying it is client-side only and never written back. A
+ * draft-preview reader that must keep such a name out of a data request reads
+ * it here.
  */
 export const DRAFT_ONLY_FIELD_KEY = '_draftOnly';
 

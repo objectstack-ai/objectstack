@@ -336,7 +336,12 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // (#4069) — the control is deliberately left empty for exactly that
     // resolution, so refusing the submit would leave nothing to type.
     required: isRequiredInForm(field, isCreateFormMode(ctx)),
-    disabled: ctx.readOnly || ctx.mode === 'view' || field.readonly,
+    // `_draftOnly` is the console's draft-preview marker on a field only the
+    // draft declares (app-shell `previewFormDataSource`, which also keeps it
+    // out of every write): an underscore-private convention between two of
+    // this repository's packages, never an authoring key. It is drawn disabled
+    // rather than `readonly`, which `filterSystemFields` drops before render.
+    disabled: ctx.readOnly || ctx.mode === 'view' || field.readonly || field._draftOnly === true,
     placeholder: field.placeholder,
     // The help line under the control: the spec's `inlineHelpText`, else
     // `description`, through the one read `ObjectForm`'s field builder shares

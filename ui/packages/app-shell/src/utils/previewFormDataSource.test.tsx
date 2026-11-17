@@ -14,8 +14,8 @@
  *     adapter's sortability projection survives the copy, and the proxy's
  *     writes leave a draft-only name out of the record.
  *   - The real `ModalForm` (the console's global New/Edit modal) draws such a
- *     field, and Save leaves it out of the create: what the viewer typed into
- *     it and its declared default alike.
+ *     field DISABLED, and Save leaves it out of the create, its declared
+ *     default included.
  *   - CONTROL: outside preview the hook returns the adapter itself, so the form
  *     reads the published document through one adapter read (objectui#13044)
  *     and never draws the draft field.
@@ -216,12 +216,13 @@ describe('the global New modal under draft preview (objectstack#34807)', () => {
       </MemoryRouter>,
     );
 
-  it('draws the draft-only field, and Save leaves it out of the create', async () => {
+  it('draws the draft-only field disabled, and Save leaves it out of the create', async () => {
     const adapter = makeAdapter();
     GET_ITEM.fn = async () => structuredClone(OVERLAY);
     renderModal(true, adapter);
     await waitFor(() => expect(screen.getByText('Priority')).toBeInTheDocument());
-    fireEvent.change(document.body.querySelector('input[name="priority"]') as HTMLInputElement, { target: { value: 'urgent' } });
+    expect(document.body.querySelector('input[name="priority"]')).toBeDisabled();
+    expect(document.body.querySelector('input[name="title"]')).not.toBeDisabled();
 
     fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
     fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);

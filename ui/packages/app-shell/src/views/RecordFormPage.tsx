@@ -93,9 +93,10 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   const location = useLocation();
   const dataSource = useAdapter();
   // objectstack#34807 — under draft preview the form reads its object
-  // definition through the draft overlay (draft-only fields read-only); outside
-  // preview this is `dataSource` itself. Writes and the answer-warning claim
-  // below stay on the adapter.
+  // definition through the draft overlay: a field only the draft declares is
+  // drawn disabled, and the proxy leaves it out of every create and update.
+  // Outside preview this is `dataSource` itself. The answer-warning claim below
+  // keeps the raw adapter.
   const formDataSource = usePreviewFormDataSource(dataSource);
   const { objects, loading: metadataLoading } = useMetadata();
   const { t, language } = useObjectTranslation();
