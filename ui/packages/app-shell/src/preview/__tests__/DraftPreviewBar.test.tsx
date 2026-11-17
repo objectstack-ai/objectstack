@@ -7,9 +7,12 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The draft bar reaches `import('@objectstack/lint')` (its publish
+// preflight); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 // In preview mode regardless of the URL plumbing — we are testing the bar's
 // own count logic, not the query-flag reader.
@@ -24,10 +27,14 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
     t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
   }),
 }));
+const publishAll = vi.hoisted(() => vi.fn(async (_opts?: { packageId?: string | null }) => ({ ok: true })));
 vi.mock('../usePublishAllDrafts', () => ({
-  usePublishAllDrafts: () => ({ publishAll: vi.fn(async () => ({ ok: true })), publishing: false }),
+  usePublishAllDrafts: () => ({ publishAll, publishing: false }),
 }));
 vi.mock('../DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
+vi.mock('../../providers/MetadataProvider', () => ({
+  useMetadata: () => ({ apps: [{ name: 'crm', _packageId: 'app.crm' }] }),
+}));
 
 import { DraftPreviewBar } from '../DraftPreviewBar';
 
@@ -112,5 +119,26 @@ describe('DraftPreviewBar', () => {
     // objectui#13140 — an unknown count read no entries, so nothing says a
     // seed is pending: the sample-data promise is not made.
     expect(screen.queryByTestId('draft-preview-sample-hint')).not.toBeInTheDocument();
+  });
+
+  // objectstack#34610 — the bar is the screen's one Publish while the drawer
+  // builds: it publishes the app's package (the scope its count read) and
+  // leaves preview without reloading the page, which would drop the drawer's
+  // conversation and the chat's receipt.
+  it("publishes the app's package and leaves preview without a page reload (objectstack#34610)", async () => {
+    mockDrafts([{ type: 'object', name: 'a', packageId: 'app.crm' }]);
+    const reload = vi.fn();
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, reload } as Location);
+    render(
+      <MemoryRouter initialEntries={['/apps/crm/account?preview=draft']}>
+        <Routes>
+          <Route path="/apps/:appName/*" element={<DraftPreviewBar />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByTestId('draft-preview-publish'));
+    await waitFor(() => expect(publishAll).toHaveBeenCalledWith({ packageId: 'app.crm' }));
+    await new Promise((r) => setTimeout(r, 400));
+    expect(reload).not.toHaveBeenCalled();
   });
 });

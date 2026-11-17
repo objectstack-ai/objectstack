@@ -1418,6 +1418,8 @@ const pt = {
     writeStrippedUnknownReason: "Não aplicado pelo servidor: {{fields}}",
     approvalPendingEditable: "Em aprovação · editável",
     approvalPendingTooltip: "Este registro tem uma solicitação de aprovação pendente; esta etapa ainda permite a edição",
+    approvalPending: "Em aprovação",
+    approvalPendingNotEditableTooltip: "Este registro tem uma solicitação de aprovação pendente",
     approvalProgress: "Aprovações — {{got}} de {{need}}",
     approvalProgressGroups: "Assinaturas — {{got}} de {{need}} grupos",
     approvalProgressLabel: "Progresso da aprovação",
@@ -1976,6 +1978,18 @@ const pt = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        publishFromBar_one: '{{count}} alteração não publicada. Publique-a na barra do rascunho no topo.',
+        publishFromBar_many: '{{count}} de alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        publishFromBar_other: '{{count}} alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        showDraftToPublish: '{{count}} alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraftToPublish_one: '{{count}} alteração não publicada. Mostre o rascunho para revisá-la e publicá-la.',
+        showDraftToPublish_many: '{{count}} de alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraftToPublish_other: '{{count}} alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraft: 'Mostrar rascunho',
+        receipt: 'Publicado. Suas alterações estão no ar.',
+        dismissReceipt: 'Fechar',
         count: "{{count}} alteração(ões) ainda não publicada(s) — os usuários não conseguem vê-las.",
         publish: "Publicar",
         published: "Todas as alterações pendentes estão ativas.",
@@ -2221,7 +2235,7 @@ const pt = {
       changesApplied: "Aplicado",
       changesDrafted: "Salvo como rascunho",
       changesFailed: "Não aplicado",
-      discussing: "Discutindo: {{target}}",
+      discussing: "Vendo: {{target}}",
       changeVerb: {
         createObject: "Criar objeto",
         addField: "Adicionar campo",
@@ -2382,6 +2396,7 @@ const pt = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Os valores ainda não definidos foram sugeridos com base no seu navegador. Nada é salvo até você confirmar.",
       organizationName: {
         title: "Dê um nome à sua organização",
@@ -3275,7 +3290,7 @@ const pt = {
     aiAssistant: "Assistente de IA",
     designInStudio: "Projetar no Studio",
     editApp: "Editar aplicativo",
-    openAppInStudio: "Ver aplicativo no Studio",
+    openAppInStudio: "Ver {{app}} no Studio",
   },
   home: {
     build: {
@@ -4679,6 +4694,11 @@ const pt = {
       pendingHere_one: 'Pré-visualização do rascunho · {{count}} alteração não publicada nesta página',
       pendingHere_many: 'Pré-visualização do rascunho · {{count}} de alterações não publicadas nesta página',
       pendingHere_other: 'Pré-visualização do rascunho · {{count}} alterações não publicadas nesta página',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Pré-visualização do rascunho · {{count}} alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_one: 'Pré-visualização do rascunho · {{count}} alteração não publicada neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_many: 'Pré-visualização do rascunho · {{count}} de alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_other: 'Pré-visualização do rascunho · {{count}} alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
     },
     changes: {
       title: 'Alterações pendentes',
@@ -4695,7 +4715,7 @@ const pt = {
       detailNone: 'Nenhuma diferença detectada — o rascunho corresponde à versão publicada.',
       fieldOrderChanged: 'Ordem dos campos alterada',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclui alterações rascunhadas pelo copiloto de IA',
+      draftedByCopilot: 'Inclui alterações rascunhadas pelo assistente de IA',
       draftedByMcpClient: 'Inclui alterações rascunhadas pelo cliente MCP “{{client}}”',
       draftedByMcp: 'Inclui alterações rascunhadas por um cliente MCP',
       detailChangedKeys: 'Também alterado:',
@@ -4833,6 +4853,7 @@ const pt = {
       securityBlockTitle_many: 'A publicação será recusada — {{count}} de itens precisam de uma decisão primeiro',
       securityBlockTitle_other: 'A publicação será recusada — {{count}} itens precisam de uma decisão primeiro',
       securityBlockWhere: 'Corrija no objeto em Configurações → Compartilhamento de registros e publique novamente.',
+      flowChecksTitle: 'Antes de publicar: a verificação de publicação vai apontar o seguinte',
       securityRule: {
         owdUnset: 'Nenhuma base de compartilhamento de registros (sharingModel) foi declarada. O runtime usa private, mas a base precisa ser uma decisão explícita.',
         owdAlias: 'A base de compartilhamento de registros (sharingModel) não é um valor canônico, então o runtime trata o objeto como private.',
@@ -4843,6 +4864,8 @@ const pt = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Este app ainda não foi publicado. Ele funciona, mas só os criadores podem vê-lo. Publique para que seus usuários o vejam.',
       message: 'App não publicado — totalmente funcional, mas somente os criadores o veem. Publique-o para que seus usuários o vejam.',
       publish: 'Publicar',
       publishing: 'Publicando…',

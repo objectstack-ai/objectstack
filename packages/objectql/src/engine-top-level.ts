@@ -19,7 +19,7 @@ import { assertResolvedTemporalTokensInRange, assertTemporalComparandsInterpreta
 import type { ResolvedTokenJudge } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 import { mapRelationConditions, narrowNumberComparands } from './number-comparand-declared-type-door.js';
-import { lowerRelationSite } from './relation-filter-lowering.js';
+import { lowerRelationSite, relationReadDriverRefusal } from './relation-filter-lowering.js';
 import type { RelationFilterSite } from './relation-filter-lowering.js';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { judgeCollectionItemOwnerStamp } from '@objectstack/spec/kernel';
@@ -1236,6 +1236,16 @@ function admissionRefusalOf(
  * stops there: which ids the read finds, the cap and the caller's permissions
  * on the related object need data and a caller, and are execution's alone.
  *
+ * [#33876] One driver verdict IS the engine's own admission, so the judge
+ * answers it too: on a read verb, a single-valued nested-relation condition
+ * is refused before any related read when the object's driver does not
+ * declare `DriverCapabilities.readableIdsLeaf` (`relationReadDriverRefusal`,
+ * the one function execution calls). The judge reads the driver's DECLARED
+ * capabilities through `driverOf` and calls nothing on it. A host that
+ * resolves no driver for the object (`driverOf` absent or answering `null`:
+ * the authoring-time judge, whose engine holds no datasource) does not judge
+ * this verdict; execution, which must resolve a driver, still raises it.
+ *
  * What differs by verb sits BETWEEN or AROUND those stages and judges
  * something other than `where`: option-key folding and refusal, the driver
  * lookup (`getDriver`, before stage 1 on the writes and between the stages on
@@ -1247,9 +1257,10 @@ function admissionRefusalOf(
  * ## What it reads
  *
  * The `where` value, the object's declared field map (`schema`, the
- * registry's), and the execution context (for stage 2). No driver, no data,
- * no hook, no middleware. Execution's own stages read nothing more, measured
- * door by door on #20157.
+ * registry's), the execution context (for stage 2), and [#33876] the
+ * declared capabilities of the object's driver (above). No driver call, no
+ * data, no hook, no middleware. Execution's own stages read nothing more,
+ * measured door by door on #20157.
  *
  * A thrown door diagnostic becomes the returned refusal, with the same `code`,
  * `status` and `message` execution raises. Anything else is re-thrown
@@ -1262,6 +1273,7 @@ function judgeWhereAdmission(
   schema: unknown,
   context: Parameters<typeof filterTokenContextFrom>[0],
   schemaOf?: (name: string) => unknown,
+  driverOf?: (name: string) => { readonly name?: unknown; readonly supports?: unknown } | null,
 ): EngineFilterJudgement {
   try {
     const admitted = lowerWhereFilterArray(object, operation, { where }, schema, schemaOf);
@@ -1277,8 +1289,15 @@ function judgeWhereAdmission(
     // of the filter is lowered with each condition standing for the empty id
     // set, which the shared lowering treats as it treats any `$in` / `$or`.
     const sites = relationSitesOf(object, operation, resolved, schema, schemaOf);
+    // [#33876] Execution's up-front driver verdict, at the point execution
+    // raises it: after admission, before any related read.
+    const driver = sites.length === 0 || driverOf === undefined ? null : driverOf(object);
+    if (driver !== null) {
+      const driverRefusal = relationReadDriverRefusal(object, operation, sites, () => driver);
+      if (driverRefusal !== undefined) throw driverRefusal;
+    }
     for (const site of sites) {
-      const inner = judgeWhereAdmission(site.target, 'find', site.condition, schemaOf?.(site.target), context, schemaOf);
+      const inner = judgeWhereAdmission(site.target, 'find', site.condition, schemaOf?.(site.target), context, schemaOf, driverOf);
       if (!inner.ok) return inner;
     }
     const related = sites.length === 0

@@ -304,7 +304,7 @@ import type * as M204 from './ai/dataset-tools.zod.js';
 import type * as M205 from './ai/object-query-source.zod.js';
 
 // ---------------------------------------------------------------------------
-// 858 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 859 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -383,6 +383,7 @@ export type Iso_ai_conversation__TokenBudgetStrategySchema = Assert<Eq< z.input<
 
 // ai/dataset-tools.zod.ts -- [ADR-0149 D2] plain objects, enums and literals, no default and no transform
 export type Iso_ai_datasetTools__DatasetProvenanceSchema = Assert<Eq< z.input< typeof M204.DatasetProvenanceSchema >, z.infer< typeof M204.DatasetProvenanceSchema > >>;
+export type Iso_ai_datasetTools__DatasetTermCandidateSchema = Assert<Eq< z.input< typeof M204.DatasetTermCandidateSchema >, z.infer< typeof M204.DatasetTermCandidateSchema > >>;
 export type Iso_ai_datasetTools__DatasetTermMatchSchema = Assert<Eq< z.input< typeof M204.DatasetTermMatchSchema >, z.infer< typeof M204.DatasetTermMatchSchema > >>;
 export type Iso_ai_datasetTools__DatasetTermMatchedOn = Assert<Eq< z.input< typeof M204.DatasetTermMatchedOn >, z.infer< typeof M204.DatasetTermMatchedOn > >>;
 export type Iso_ai_datasetTools__DatasetToolCatalogDimensionSchema = Assert<Eq< z.input< typeof M204.DatasetToolCatalogDimensionSchema >, z.infer< typeof M204.DatasetToolCatalogDimensionSchema > >>;
@@ -1833,7 +1834,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 858 isomorphic pins', () => {
+  it('still declares all 859 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2910,12 +2911,18 @@ describe('ADR-0122 type-alias convention', () => {
     // (`data/hook.zod.ts`), closed at `message` / `params` with no default or
     // transform, pinned here (Iso_data_hook__HookTextSchema) beside its
     // refusal sibling rather than given a `…Parsed` synonym. +1 added.
-    // 857 -> 858 is #34273: an action's declared refusal entry,
+    // 857 -> 858 is the ADR-0149 D3 amendment note's candidate entry
+    // (`ai/dataset-tools.zod.ts` `DatasetTermCandidateSchema`): a plain object
+    // of two strings and one regex string, no default and no transform
+    // (Iso_ai_datasetTools__DatasetTermCandidateSchema). +1 added. The
+    // `candidates` list it fills on `ListDatasetsOutputSchema` is an optional
+    // array of that object, so that schema's own pin still holds.
+    // 858 -> 859 is #34273: an action's declared refusal entry,
     // `ActionRefusalSchema` (`ui/action.zod.ts`), built by the same
     // declared-entry factory as `HookRefusalSchema` and closed at the same
     // four keys with no default or transform, pinned here
     // (Iso_ui_action__ActionRefusalSchema). +1 added.
-    expect(pins).toHaveLength(858);
+    expect(pins).toHaveLength(859);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

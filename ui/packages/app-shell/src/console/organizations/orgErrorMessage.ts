@@ -178,6 +178,24 @@ function errorCode(err: unknown): string | undefined {
 }
 
 /**
+ * better-auth's code for an accept refused because the session's address is
+ * not verified. objectstack answers it while the deployment delivers mail
+ * (objectstack#34272, plugin-auth `invitation-accept-verified-email.ts`), and
+ * the vendor's own accept route answers it when its option is on.
+ */
+export const ACCEPT_NEEDS_VERIFIED_EMAIL_CODE =
+  'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION';
+
+/**
+ * Was this rejection the accept refused for an unverified address? Read by
+ * code only. The accept page answers it with the verification screen rather
+ * than a toast: the person's next step is to verify, not to retry.
+ */
+export function isAcceptNeedsVerifiedEmail(err: unknown): boolean {
+  return errorCode(err) === ACCEPT_NEEDS_VERIFIED_EMAIL_CODE;
+}
+
+/**
  * Resolve a rejected organization call into the message to show the user.
  *
  * Order — mapped code, then the server's own sentence, then the site's own

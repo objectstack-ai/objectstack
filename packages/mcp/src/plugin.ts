@@ -816,6 +816,10 @@ export class MCPServerPlugin implements Plugin {
           // registered during `init()`, so an absence now is final (ADR-0116),
           // and the tools must be registered before the transport attaches.
           datasetTools: datasetToolsService(ctx),
+          // [ADR-0149 D2] The i18n service the saved datasets are localized
+          // with, resolved at each use as the protocol is; a host that
+          // registers none serves them untranslated.
+          i18n: () => optionalService('i18n'),
         });
       } else {
         // Functional degradation, said once and naming the remedy: two of the

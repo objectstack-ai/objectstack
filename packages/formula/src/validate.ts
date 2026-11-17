@@ -297,6 +297,50 @@ export interface ExprSchemaHint {
    * Absent ⇒ every verdict is exactly as before this key.
    */
   timeRelativeSweep?: boolean;
+  /**
+   * [#34451] `value` role only: the expression is a flow VALUE envelope — an
+   * `assignment` node's `assignments.*`, a `create_record` / `update_record`
+   * node's `fields.*` — and {@link fieldTypes} are the field types of the
+   * object whose row the flow's run binds as `record`.
+   *
+   * The PREMISE is the caller's to establish, and both callers pass the key
+   * only where it holds: the flow is record-triggered on that object, or a
+   * time-relative sweep of it (the entrance hands the run that object's row
+   * as `record`), AND the flow rebinds neither root the typing reads — no
+   * declared variable, node id, output / iterator / index / error variable
+   * or `assignment` target named `record`, and no node id, output / iterator
+   * / index / error variable or `assignment` target named `previous` (the
+   * run's seed sets `previous` over a declared variable of that name, so a
+   * declaration does not rebind it) — since the run's variables are spread
+   * over the scope an envelope reads. On any other flow (an inbound hook, a schedule,
+   * a flow started by a parent's `subflow` / `map` or by hand) `record` is
+   * whatever the entrance handed the run, and the key is not set.
+   *
+   * Of the schema-aware passes, ONLY the date-text verdict family runs —
+   * `date-text-call*` and `date-text-arithmetic*` — and only over the
+   * `record.<field>` / `previous.<field>` reads, which under that premise hold
+   * what the entrance bound: the row under `record`, and under `previous` the
+   * row before the write (on a record-change trigger's update leg) or null
+   * (its create leg, and a sweep, have none; a read of it faults whatever the
+   * field's type). Every other pass stands down: field existence, the
+   * near-miss, the role catalog, the bare-reference refusal, `type-mismatch*`,
+   * `date-arithmetic*` and `date-duration-value` say nothing here. A bare name
+   * stands down too: in a value envelope it holds whatever the run's variable
+   * map holds under that name, which no door judging this envelope alone can
+   * prove is the field. So does an expression that reads the `input` root,
+   * which a flow does not bind to the row the types describe.
+   *
+   * The verdict is an error under the `-run-may-fail` arm: the envelope faults
+   * wherever the field holds the text the runtime keeps for it, and the
+   * engine's value evaluator throws on that fault, so the run fails there.
+   *
+   * Both doors set it with the same inputs — `@objectstack/lint`'s
+   * `validateStackExpressions` and `@objectstack/service-automation`'s
+   * `registerFlow` — so they refuse one set. The run-time evaluator does not
+   * set it: an envelope that registered is evaluated exactly as before.
+   * Absent ⇒ every verdict is exactly as before this key.
+   */
+  flowValueEnvelope?: boolean;
 }
 
 /**
@@ -776,6 +820,37 @@ function dateTextCallIssue(
         `${head}this faults at runtime, so the field silently evaluates to null. ${use}`,
       ),
   };
+}
+
+/** [#34451] The date-text verdict family: `date-text-call` / `date-text-arithmetic` and their outcome arms. */
+const DATE_TEXT_FAMILY_RE = /^date-text-(?:call|arithmetic)(?:-|$)/;
+
+/**
+ * [#34451] The verdict a flow value envelope gets ({@link ExprSchemaHint.flowValueEnvelope}):
+ * the date-text family over the `record.<field>` / `previous.<field>` reads,
+ * or `null`.
+ *
+ * Typed at `record` scope, which types exactly those roots (and `input`, which
+ * is why a source reading `input` stands down): a bare name is then not a
+ * field at all, so it never takes a verdict. The order is
+ * {@link typeSoundnessIssue}'s: a shape the Timestamp typing already faults on
+ * (`record.due_date + 1`, `record.note * 2`) is another family's, so the
+ * date-text check is not asked about it. The outcome is `run-may-fail`, the
+ * arm that names the field as the condition of the fault.
+ */
+function flowValueEnvelopeDateTextIssue(
+  source: string,
+  fieldTypes: Readonly<Record<string, string>>,
+  ast: () => CelAstNode | null,
+): ExprValidationError | null {
+  const celFieldTypes = toCelFieldTypes(fieldTypes);
+  if (!Object.values(celFieldTypes).includes('timestamp')) return null;
+  const tree = ast();
+  if (!tree || readRootMembers(tree, ['input']).length > 0) return null;
+  if (firstTypeMismatch(source, celFieldTypes, 'record')) return null;
+  const dateOnly = new Set(Object.keys(fieldTypes).filter((name) => fieldTypes[name] === 'date'));
+  const found = dateTextIssue(source, celFieldTypes, 'record', 'value', 'run-may-fail', dateOnly);
+  return found && DATE_TEXT_FAMILY_RE.test(found.issue.code) ? found.issue : null;
 }
 
 /** A bare `{x}` that is NOT part of a `{{x}}` mustache hole. */
@@ -1536,6 +1611,12 @@ export function validateExpression(
         `${lead} — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`,
       ));
     }
+  } else if (schema?.flowValueEnvelope === true) {
+    // [#34451] A flow value envelope: the date-text family alone (see the key's docblock).
+    const issue = role === 'value' && schema.fieldTypes
+      ? flowValueEnvelopeDateTextIssue(source, schema.fieldTypes, ast)
+      : null;
+    if (issue) errors.push(issue);
   } else {
     checkFieldExistence(ast, source, schema, errors);
     checkOptionLabelTargets(ast, source, schema, errors);
@@ -1632,7 +1713,10 @@ export function validateExpression(
   // engine's formula read path preloads it before computing the field. Its
   // caller opts in exactly as a validation condition's does, and the conflicts
   // are worded for a field that reads null rather than a write that is refused.
-  if (schema?.fieldTypes && schema.traversalHydration === true && (role === 'predicate' || role === 'value')) {
+  if (
+    schema?.fieldTypes && schema.traversalHydration === true && schema.flowValueEnvelope !== true
+    && (role === 'predicate' || role === 'value')
+  ) {
     const tree = ast();
     const analysis = tree ? traversalsOf(readRootMembers(tree, [DEFAULT_TRAVERSAL_ROOT])) : null;
     if (analysis) {

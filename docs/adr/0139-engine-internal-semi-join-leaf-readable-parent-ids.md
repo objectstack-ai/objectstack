@@ -28,6 +28,19 @@ the chain unchanged, and D6's other ⛔ (an interim with two spellings of one sc
 [#33696](https://github.com/objectstack-ai/objectstack/issues/33696)). D6 carries the ruling's binding bullets verbatim,
 and ADR-0055 is noted in step, as the ruling orders. This amendment declares; #33696's change lands only after it
 merges.
+**Amended** (2026-11-17): D3's "⛔ No `DriverCapabilities` bit returns" is lifted for one bit and the engine's own
+readers of it, and nothing else. A driver declares `DriverCapabilities.readableIdsLeaf` when its filter compiler compiles
+(or, in process, evaluates) a composed `ReadableIds` leaf: `driver-sql` (every dialect; the WASM SQLite face and Turso
+by inheritance) and `driver-memory` declare it, MongoDB and OData do not. The engine reads it for author-written
+conditions only. A nested-relation condition beneath a single-valued relation on a read verb is refused up front on a
+driver without it, `INVALID_FILTER` / 400, and the engine's filter judge answers that same refusal (the maintainer's
+ruling A on [#33626](https://github.com/objectstack-ai/objectstack/issues/33626)'s Q2, record
+[`6889543194`](https://github.com/objectstack-ai/objectstack/issues/33626#issuecomment-6889543194); Q1, record
+[`6889549817`](https://github.com/objectstack-ai/objectstack/issues/33626#issuecomment-6889549817), keeps `driver-memory` serving in process). An
+analytics dimension through a lookup is refused `INVALID_QUERY` / 400 (the scope note on
+[#33876](https://github.com/objectstack-ai/objectstack/issues/33876), [`6917475155`](https://github.com/objectstack-ai/objectstack/issues/33876#issuecomment-6917475155), under Prime
+Directive 5). Each refusal names the driver and the two-step route, before any related read. D3's refusal envelope
+(`INTERNAL_ERROR` / 500) for a leaf any consumer composes is unchanged.
 **Decided by**: the maintainer, 「同意」 to the director seat's batch #312 item 2 (ruling
 [`6097072172`](https://github.com/objectstack-ai/objectstack/issues/22590#issuecomment-6097072172), 2026-10-10T11:34Z):
 **A is the end state, its first deliverable an ADR**; B (an unbounded `$in`) and a raised cap are ⛔ not taken. The
@@ -151,6 +164,16 @@ any position but a `$in` comparand, the engine refuses it loudly. ⛔ No second 
 > `FIELD in current_user.org_user_ids` names, under its own brand, never as a mode of `ReadableIds`. "No `EXISTS`, no
 > correlated form" stands. So does everything this D1 says about `ReadableIds`.
 
+> **Amendment note (2026-11-17, [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) — ruling record [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) on #33787).**
+> ADR-0155 (Accepted) revisits "No second leaf" for **one** more leaf and nothing else: the record ids that
+> `sys_record_share` grants one user on one object (provisionally `SharedRecordIds`), under its own brand, never as a
+> mode of `ReadableIds` or of ADR-0147's leaf. It is the second record to do so, and a new leaf still needs a Tier H
+> record of its own. It also revisits this D1's read-verbs sentence for that leaf alone (its ③, ruled A): the leaf's
+> write form is legal in the `where` of a predicate `update`, and nowhere else. For `ReadableIds`, for ADR-0147's leaf
+> and on `delete`, the sentence stands as written. "No `EXISTS`, no correlated form" stands. This note records a
+> decision that ADR-0155's execution cards will implement: until they land, `main` admits no such leaf, and this D1
+> holds as written for every verb.
+
 ### D2 — ObjectQL composes the scope, once per parent object per request, fail closed
 
 At the engine's executor boundary — on the final AST, after ingress parsing, the comparand doors, the middleware chain
@@ -200,8 +223,30 @@ restriction".
   > refusal is excluded, because it would fail every `sys_user` read on a driver that does not compile it. So the
   > engine consults a driver declaration to choose between the compiled leaf and the exact-array floor before the call.
   > A declaration the engine consults is not the inert bit the 17.0.0 rationale removed.
+
+  > **Amendment note (2026-11-17, #33876).** For every consumer this bullet stands as written: its leaf still
+  > reaches a refusing driver and is refused there in this envelope. It no longer holds for two author-written
+  > conditions, where a 500 from inside the driver is the wrong answer because the author can rewrite them: a
+  > nested-relation condition beneath a single-valued relation on a read verb
+  > (`packages/objectql/src/relation-filter-lowering.ts#relationReadDriverRefusal`, which the nested-relation lowering
+  > and the engine's filter judge both call) and an analytics dimension through a lookup
+  > (`packages/objectql/src/relation-group-join.ts#relationGroupDriverRefusal`). For those the engine reads
+  > `DriverCapabilities.readableIdsLeaf` (`packages/objectql/src/relation-semi-join.ts#driverCompilesReadableIdsLeaf`)
+  > and refuses with a 400 before any read on a driver that does not declare it. The bit has readers in the same
+  > change, so it is not the inert bit the 17.0.0 rationale removed.
 - The leaf joins the per-driver conformance case-sets, so a driver that compiles it is measured and one that refuses
   is recorded as refusing.
+
+> **Amendment note (2026-11-17, [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) — ruling record [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) on #33787).**
+> The refusal bullet's "⛔ No `DriverCapabilities` bit returns" is revisited for ADR-0155's leaf alone, as ADR-0147
+> (Proposed) revisits it for its own. Under ADR-0155's ②, ruled R2 for the storage that cannot run that leaf, a driver declares
+> whether it evaluates such leaves, and the declaration is read up front: on an object whose evaluator does not
+> declare it, the producer writes no share arm and share grants are refused as inert (ADR-0111 D7, as noted there).
+> A leaf that still reaches a driver that cannot run it is refused in the refusal bullet's envelope (status 500,
+> `INTERNAL_ERROR`, logged at `error` once per driver; ADR-0155's R1). The declaration's name is ADR-0155's O1, and
+> where ADR-0147's declaration is the same one, it is built once (ADR-0155 D4). This note moves nothing this section
+> says about `ReadableIds`. It records a decision that ADR-0155's execution cards will implement: until they land,
+> `main` has no such declaration and no such leaf.
 
 ### D4 — The six consumers emit one leaf per parent object, and no pre-scan
 
@@ -344,6 +389,9 @@ change is #33696's, and by the ruling it lands only after this amendment merges.
   roughly 3–5k lines over 6–10 PRs across three lanes, by the ruling's own estimate, with no precedent in the tree.
 - **A deployment on a refusing driver** (`driver-mongodb`, until O3) reads the six objects as a loud 500, not a short
   list — the ruling's "refuse loudly"; a silent re-entry into the probe is the shape this record exists to remove.
+  On such a deployment, and on OData, a nested-relation `where` beneath a single-valued relation on a read verb and an
+  analytics dimension through a lookup answer a stable 400 before any read (amended 2026-11-17, #33876). Before, the
+  condition took the capped id read and the dimension read the related records by id.
 - **The bound-parameter ceiling moves, it does not vanish.** `getReadFilter`'s scope may itself carry pre-resolved id
   lists (ADR-0055's `rlsMembership`, record shares); they now bind inside the subquery. ADR-0055's known limit is
   unchanged, and O1 names the ceilings as unmeasured.
@@ -373,6 +421,13 @@ change is #33696's, and by the ruling it lands only after this amendment merges.
 - **O3** — `driver-mongodb`: the cost of a pipeline form is unprototyped; it refuses until measured.
 - **O4** — `packages/plugins/plugin-sharing/src/sharing-service.ts` reads a caller's record-share grants at
   `limit: 5000` with no warning; that scope rides into the subquery unchanged. A separate finding, not this record's.
+  **Answered** (2026-11-17): [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md)
+  (Accepted; ruling record
+  [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) on #33787) decides
+  that the share arm will lower to its own engine-internal semi-join leaf over `sys_record_share`, with no cap, so
+  every grant counts. The amendment notes under D1 and D3 say what that record revisits here. This records a decision
+  that ADR-0155's execution cards will implement: the capped read above stands until the plugin-sharing switch under
+  #33787 lands, and not before.
 - **O5** — whether `controlled_by_parent`'s id set becomes a seventh consumer (D6). **Answered** (2026-10-21): the
   ruling is recorded verbatim in D6, as amended.
 

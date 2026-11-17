@@ -2444,6 +2444,7 @@ export class AuthManager {
       getEmailService: (...a) => this.getEmailService(...a),
       getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
       getApi: (...a) => this.getApi(...a),
+      isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },

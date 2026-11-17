@@ -234,7 +234,9 @@ the detail.
    with `?keepData=true` every row stays, sample rows included, and no door
    tells them apart any more, so purge first if you want them gone.
 7. **Enable and disable.** **Setup → Installed Apps** lists the apps installed
-   from the marketplace, each package of a suite as its own row. An admin with
+   from the marketplace, one line per app: a module package that declares
+   exactly one installed app in its `manifest.dependencies` is folded under
+   that app's line, and the app's toggle shows it. An admin with
    `manage_metadata` may disable a writable package, and a **module of an
    installed app**: a `type: 'module'` package that declares an installed
    `type: 'app'` package in its `manifest.dependencies`
@@ -296,7 +298,7 @@ An app ships extras in one of two shapes:
 A customer who does not use one of your modules can switch it off, per
 environment, with `PATCH /api/v1/packages/:id/disable`, and back on with
 `PATCH /api/v1/packages/:id/enable`. In the Console, the admin opens the
-module's row in **Setup → Installed Apps** (or **Setup → Packages** for a suite
+module's row under its app's line in **Setup → Installed Apps** (or **Setup → Packages** for a suite
 booted from code) and presses **Disable**, then confirms. The row's
 `disableable` key on `GET /api/v1/packages` is the runtime's own answer to
 whether the disable door accepts the package, and the Console offers

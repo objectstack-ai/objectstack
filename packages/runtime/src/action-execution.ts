@@ -102,6 +102,7 @@ import type { HttpProtocolContext } from './http-dispatcher.js';
 import { addressedUnknownNameRefusal, refusalOfThrown, refuseDispatchToDisabledObject, runResolvedAction, type ActionRefusal } from './action-dispatch.js';
 import { admittingCredentialKind, type AdmittingCredentialKind } from './security/admitting-credential.js';
 import {
+    ENVIRONMENT_ACTION_COORDINATE,
     GLOBAL_ACTION_OBJECT_KEY,
     actionHandlerObjectKeys,
     actionHolderCoordinate,
@@ -3026,7 +3027,10 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  *
  * For every other caller, a door that enforces the author's AI opt-in and
  * still reads the member: today a host's door under the `ai` posture
- * (`dispatchAction`, `action-dispatch.ts`). [#33690] The MCP `run_action`
+ * (`dispatchAction`, `action-dispatch.ts`), and the host's resume door
+ * (`dispatchActionResume`, `action-dispatch.ts`, #34386), the approval leg of
+ * a handed-off `resume_run`, which reads the person's `confirm` for the
+ * candidate action that admits the run as `dispatchAction` reads it. [#33690] The MCP `run_action`
  * ({@link invokeBusinessAction}) and `resume_run` doors no longer read it:
  * under the amended contract they hand a declared-gated call to the person
  * ({@link aiDoorConfirmation}, {@link handOffActionConfirmation}) and the
@@ -5308,10 +5312,28 @@ export type EnvironmentStoredActionNames = () => Promise<{ actions: ReadonlySet<
  * no `find`. A read that throws travels to the caller: the store failing to
  * answer is never read as "no row" (ADR-0110 D3).
  */
-export function environmentStoredActionNames(ql: any): EnvironmentStoredActionNames | undefined {
+export function environmentStoredActionNames(
+    ql: any,
+    /**
+     * [ADR-0150 D4] One action name, and the object it is routed on: the
+     * action rows read are that name's (the row's `name` column), the legacy
+     * plural only when the store holds no `action` row at all (the resync's
+     * own fallback), and the object rows read are that object's. Omitted,
+     * every row is read.
+     */
+    scope?: { actionName: string; objectName?: string },
+): EnvironmentStoredActionNames | undefined {
     if (typeof ql?.find !== 'function') return undefined;
-    const read = async (type: string): Promise<any[]> =>
-        (await ql.find('sys_metadata', { where: { type, state: 'active' }, context: { isSystem: true } })) ?? [];
+    const read = async (type: string, name?: string, limit?: number): Promise<any[]> =>
+        (await ql.find('sys_metadata', {
+            where: { type, state: 'active', ...(name !== undefined ? { name } : {}) },
+            ...(limit !== undefined ? { limit } : {}),
+            context: { isSystem: true },
+        })) ?? [];
+    const readObjectRows = async (): Promise<any[]> => {
+        if (scope === undefined) return read('object');
+        return scope.objectName !== undefined && !isObjectLessActionKey(scope.objectName) ? read('object', scope.objectName) : [];
+    };
     const body = (row: any): any => {
         try {
             return typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
@@ -5321,9 +5343,11 @@ export function environmentStoredActionNames(ql: any): EnvironmentStoredActionNa
     };
     const packageless = (row: any): boolean => row?.package_id === null || row?.package_id === undefined || row?.package_id === '';
     return async () => {
-        let actionRows = await read('action');
-        if (actionRows.length === 0) actionRows = await read('actions');
-        const objectRows = await read('object');
+        let actionRows = await read('action', scope?.actionName);
+        if (actionRows.length === 0 && (scope === undefined || (await read('action', undefined, 1)).length === 0)) {
+            actionRows = await read('actions', scope?.actionName);
+        }
+        const objectRows = await readObjectRows();
         const legacy = actionRows.length + objectRows.length === 0
             ? new Set<string>()
             : new Set((await readLegacyOrganizationRows(ql.getDriverForObject?.('sys_metadata'))).keys());
@@ -6094,6 +6118,219 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
         if (switchedOff) return switchedOff;
     }
     return undefined;
+}
+
+
+/**
+ * [ADR-0150 D4] A coordinate no handler is registered under. A dispatch naming
+ * it reaches, by the engine's package-scoped rule, the ONE shared handler held
+ * under the key — host code's or a plugin's — refuses two of them
+ * (`409 RESOURCE_CONFLICT`), and never reaches the environment's slot or a
+ * package's. It is the platform item's coordinate in a dispatch. Not a package
+ * id: a manifest id is reverse-domain and never parenthesised.
+ */
+export const PLATFORM_DISPATCH_COORDINATE = '(platform)';
+
+/** Whose handler an attributed script dispatch runs: the environment's own item's, or the platform item's. */
+export type ActionHandlerHolder = 'environment' | 'platform';
+
+/**
+ * What {@link attributeActionHandler} answers: the holder whose handler the
+ * script dispatch runs and the package coordinate the owner gate judges, or
+ * nothing (`{}`: the dispatch names what the declaration names, as before),
+ * or the metadata plane failing to answer.
+ */
+export type ActionHandlerAttribution =
+    | { holder?: ActionHandlerHolder; packageId?: string }
+    | { degraded: true; reason: string };
+
+/** One row of the engine's handler listing, keyed `OBJECT:KEY`. */
+interface ReachedHandlerRow { entry: string; package?: string; coordinate?: string }
+
+/**
+ * The script dispatch of a declaration through the engine registry: the
+ * handler ENTRY it reaches (`OBJECT:KEY`, the rotation of
+ * {@link executeRegisteredAction}) in one snapshot of
+ * `listRegisteredActions(options)`, among the rows `accept` admits, with the
+ * owner label and the package coordinate the engine reports for it.
+ * `undefined` when the engine cannot enumerate its handlers or the dispatch
+ * reaches nothing.
+ */
+function reachedHandlerRow(
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    options?: { packageId: string },
+    accept: (row: Omit<ReachedHandlerRow, 'entry'>) => boolean = () => true,
+): ReachedHandlerRow | undefined {
+    if (!ql || typeof ql.listRegisteredActions !== 'function') return undefined;
+    const rows = new Map<string, Omit<ReachedHandlerRow, 'entry'>>();
+    const listing = (options === undefined ? ql.listRegisteredActions() : ql.listRegisteredActions(options)) as
+        Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }> | undefined;
+    for (const row of listing ?? []) {
+        const at = { package: row.package, coordinate: row.coordinate };
+        if (accept(at)) rows.set(`${row.objectName}:${row.actionName}`, at);
+    }
+    const entry = reachedHandlerEntry(new Set(rows.keys()), objectName, candidates);
+    return entry === undefined ? undefined : { entry, ...rows.get(entry) };
+}
+
+/** A handler in the environment's own slot ({@link ENVIRONMENT_ACTION_COORDINATE}). */
+const inEnvironmentSlot = (row: { coordinate?: string }) => row.coordinate === ENVIRONMENT_ACTION_COORDINATE;
+/** A shared handler (host code or a plugin): any coordinate but the environment's. */
+const inSharedSlot = (row: { coordinate?: string }) => row.coordinate !== undefined && row.coordinate !== ENVIRONMENT_ACTION_COORDINATE;
+
+/**
+ * The entry an attributed dispatch runs, and the coordinate it names: for the
+ * environment's own item, a handler in the environment's slot, else a handler
+ * the authored-action resync bound as a declared override (the unqualified
+ * slot's entry, registered under that resync's owner label); for the platform
+ * item, the one shared handler. `undefined`: the holder has no handler here.
+ */
+function attributedHandlerEntry(
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    holder: ActionHandlerHolder,
+): { entry: string; packageId?: string } | undefined {
+    if (holder === 'platform') {
+        const shared = reachedHandlerRow(ql, objectName, candidates, { packageId: PLATFORM_DISPATCH_COORDINATE }, inSharedSlot);
+        return shared === undefined ? undefined : { entry: shared.entry, packageId: PLATFORM_DISPATCH_COORDINATE };
+    }
+    const own = reachedHandlerRow(ql, objectName, candidates, { packageId: ENVIRONMENT_ACTION_COORDINATE }, inEnvironmentSlot);
+    if (own !== undefined) return { entry: own.entry, packageId: ENVIRONMENT_ACTION_COORDINATE };
+    const top = reachedHandlerRow(ql, objectName, candidates);
+    return top?.package === PLANE_AUTHORED_HANDLER_PACKAGE ? { entry: top.entry } : undefined;
+}
+
+/**
+ * [ADR-0150 D4] Run the handler of `holder` for a script dispatch: the entry
+ * is chosen and the engine's `executeAction` is called for it in ONE
+ * synchronous step, so the handler that runs is the one the choice read. The
+ * engine looks the handler up before it awaits anything. `{ dispatched: false }`
+ * when the holder has no handler here, which the doors answer as their routing
+ * miss; a handler's own failure propagates, as {@link executeRegisteredAction}'s does.
+ */
+export function executeAttributedAction(
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    actionContext: any,
+    holder: ActionHandlerHolder,
+): Promise<{ dispatched: boolean; result?: any }> {
+    const picked = attributedHandlerEntry(ql, objectName, candidates, holder);
+    if (picked === undefined || !ql || typeof ql.executeAction !== 'function') return Promise.resolve({ dispatched: false });
+    const at = picked.entry.indexOf(':');
+    const [obj, key] = [picked.entry.slice(0, at), picked.entry.slice(at + 1)];
+    let run: Promise<any>;
+    try {
+        run = Promise.resolve(picked.packageId === undefined
+            ? ql.executeAction(obj, key, actionContext)
+            : ql.executeAction(obj, key, actionContext, { packageId: picked.packageId }));
+    } catch (err) {
+        return Promise.reject(err);
+    }
+    return run.then(
+        (result) => ({ dispatched: true, result }),
+        (err) => {
+            if (isActionNotRegisteredError(err)) return { dispatched: false };
+            throw err;
+        },
+    );
+}
+
+/**
+ * [ADR-0150 D4] Whose handler the script dispatch of a declaration that names
+ * no package runs, so the declaration a door gated on and the handler it runs
+ * are ONE item's.
+ *
+ * Two package-less items can hold a handler under one `OBJECT:NAME` key: the
+ * environment's own item, whose handler the authored-action resync binds in
+ * the environment's slot (or over a package's, as a declared override), and
+ * the platform's item, whose handler host code or a plugin registers in a
+ * shared slot. The registry serves one package-less item per owner key, and
+ * the dispatch follows the item the door resolved:
+ *
+ *  - the ENVIRONMENT'S OWN item — a package-less row the environment's store
+ *    holds under its owner key and name, standalone or embedded in a stored
+ *    object row ({@link environmentStoredActionNames}, the test the route's
+ *    own holder census applies) — runs the handler the resync bound for it,
+ *    whichever owner registered under its key last; when that handler is
+ *    gone by the moment it dispatches, the door answers its routing miss. One
+ *    whose handler the environment's slot does not hold — no `body` of its
+ *    own, or a `body` no handler is bound for — is dispatched as before;
+ *  - the PLATFORM'S item, beside a handler of the resync's on top of the
+ *    unqualified slot whose source neither the store nor the metadata
+ *    service's listing (the resync's two sources) still holds, runs the one
+ *    shared handler under the key ({@link PLATFORM_DISPATCH_COORDINATE}).
+ *
+ * Ownership is read from the stored rows alone. An item the metadata
+ * service serves with no stored row is the platform's in that test, and
+ * beside a shared handler under its key it is dispatched as before: the
+ * declaration a door resolves carries nothing that tells it apart from a
+ * platform item of the same owner key and name.
+ *
+ * The store is read only when the answer can change: the environment's slot
+ * holds a handler the dispatch reaches while the unqualified slot holds
+ * another owner's; or the unqualified slot holds the resync's
+ * handler while exactly one shared handler is held under the same key. The
+ * metadata service is read only in the second case. A read that throws is the
+ * metadata plane failing to answer (ADR-0110 D3): `degraded`, which the door
+ * refuses rather than run a handler it cannot attribute. An engine that
+ * registers no metadata store holds no environment row.
+ */
+export async function attributeActionHandler(
+    ql: any,
+    args: {
+        action: any;
+        objectName: string;
+        candidates: string[];
+        obj?: any;
+        /** The metadata service's `action` items (its `loadMany`), or `undefined` when the host has none. */
+        readServiceActions?: () => Promise<unknown[] | undefined>;
+    },
+): Promise<ActionHandlerAttribution> {
+    const { action, objectName, candidates, obj, readServiceActions } = args;
+    if (!dispatchesThroughHandlerRegistry(action)) return {};
+    const declaredPackage = actionDeclaringPackage(action, obj);
+    if (declaredPackage !== undefined && declaredPackage !== 'sys_metadata') return {};
+    const name: unknown = action?.name;
+    if (typeof name !== 'string' || name === '') return {};
+    const top = reachedHandlerRow(ql, objectName, candidates);
+    const topIsResync = top?.package === PLANE_AUTHORED_HANDLER_PACKAGE;
+    if (topIsResync) {
+        const shared = reachedHandlerRow(ql, objectName, candidates, { packageId: PLATFORM_DISPATCH_COORDINATE }, inSharedSlot);
+        if (shared?.entry !== top.entry) return {};
+    } else {
+        const environmentSlotHolds = reachedHandlerRow(ql, objectName, candidates, { packageId: ENVIRONMENT_ACTION_COORDINATE }, inEnvironmentSlot) !== undefined;
+        if (!environmentSlotHolds) return {};
+    }
+    const ownerKey = standaloneActionOwnerKey(action);
+    const routedKey = isObjectLessActionKey(objectName) ? GLOBAL_ACTION_OBJECT_KEY : objectName;
+    const store = environmentStoredActionNames(ql, { actionName: name, objectName });
+    let environmentOwn = false;
+    if (store !== undefined) {
+        try {
+            const stored = await store();
+            // A standalone row bound to its owner key — also when the routed
+            // object serves it inside its own `actions` by reference — or an
+            // action a stored object row embeds.
+            environmentOwn = stored.actions.has(`${ownerKey}:${name}`) || stored.embedded.has(`${routedKey}:${name}`);
+        } catch (err: any) {
+            if (!listingNotServed(err)) return { degraded: true, reason: err?.message ?? String(err) };
+        }
+    }
+    if (environmentOwn) return { holder: 'environment', packageId: ENVIRONMENT_ACTION_COORDINATE };
+    if (!topIsResync) return {};
+    let served: unknown[] | undefined;
+    try {
+        served = await readServiceActions?.();
+    } catch (err: any) {
+        return { degraded: true, reason: err?.message ?? String(err) };
+    }
+    const sourced = (served ?? []).some((item: any) =>
+        item && typeof item === 'object' && item.name === name && standaloneActionOwnerKey(item) === ownerKey);
+    return sourced ? {} : { holder: 'platform', packageId: PLATFORM_DISPATCH_COORDINATE };
 }
 
 

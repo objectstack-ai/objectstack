@@ -68,20 +68,20 @@ describe('addedArrayElements — the draft array against the published one (obje
 
 describe('draftSourceText — the source sentence (objectui#12725)', () => {
   it('reads the ruled zh copy, N minutes from `at`', () => {
-    expect(draftSourceText(copilot(ago(2)), 'zh-CN', [], NOW)).toBe('由 AI 副驾在 2 分钟前作为草稿加入');
-    expect(draftSourceText(copilot(ago(2)), 'zh-CN', ['读者', '应还日期'], NOW)).toBe('「读者」「应还日期」 2 项由 AI 副驾在 2 分钟前作为草稿加入');
+    expect(draftSourceText(copilot(ago(2)), 'zh-CN', [], NOW)).toBe('由 AI 助手在 2 分钟前作为草稿加入');
+    expect(draftSourceText(copilot(ago(2)), 'zh-CN', ['读者', '应还日期'], NOW)).toBe('「读者」「应还日期」 2 项由 AI 助手在 2 分钟前作为草稿加入');
   });
 
   it('reads the en copy, and moves to hours and days past an hour', () => {
-    expect(draftSourceText(copilot(ago(2)), 'en-US', [], NOW)).toBe('Added as a draft by the AI copilot 2 min ago');
-    expect(draftSourceText(copilot(ago(125)), 'en-US', [], NOW)).toBe('Added as a draft by the AI copilot 2 h ago');
-    expect(draftSourceText(copilot(ago(3 * 1440)), 'zh-CN', [], NOW)).toBe('由 AI 副驾在 3 天前作为草稿加入');
-    expect(draftSourceText(copilot(ago(2)), 'en-US', ['Reader', 'Due date'], NOW)).toBe('"Reader", "Due date": 2 added as a draft by the AI copilot 2 min ago');
+    expect(draftSourceText(copilot(ago(2)), 'en-US', [], NOW)).toBe('Added as a draft by the AI assistant 2 min ago');
+    expect(draftSourceText(copilot(ago(125)), 'en-US', [], NOW)).toBe('Added as a draft by the AI assistant 2 h ago');
+    expect(draftSourceText(copilot(ago(3 * 1440)), 'zh-CN', [], NOW)).toBe('由 AI 助手在 3 天前作为草稿加入');
+    expect(draftSourceText(copilot(ago(2)), 'en-US', ['Reader', 'Due date'], NOW)).toBe('"Reader", "Due date": 2 added as a draft by the AI assistant 2 min ago');
   });
 
   it('under a minute reads "just now", never "0 minutes ago"', () => {
-    expect(draftSourceText(copilot(ago(0)), 'zh-CN', [], NOW)).toBe('由 AI 副驾刚刚作为草稿加入');
-    expect(draftSourceText(copilot(ago(0)), 'en-US', [], NOW)).toBe('Added as a draft by the AI copilot just now');
+    expect(draftSourceText(copilot(ago(0)), 'zh-CN', [], NOW)).toBe('由 AI 助手刚刚作为草稿加入');
+    expect(draftSourceText(copilot(ago(0)), 'en-US', [], NOW)).toBe('Added as a draft by the AI assistant just now');
   });
 });
 

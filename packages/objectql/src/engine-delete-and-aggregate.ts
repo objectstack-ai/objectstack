@@ -83,7 +83,7 @@ import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-joi
 import {
   assertRelationGroupRequestShape, assertRelationGroupRowsJoined, declineRelationGroup, planRelationGroups,
   RELATION_GROUP_JOINS, relationFieldsJudgedAsGroupKeys, relationGroupByRequestOf, relationGroupJoinsAtBoundary,
-  relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
+  relationGroupDriverRefusal, relationGroupRegistryDecline, withoutJudgedRelationFields, type PlannedRelationGroup,
 } from './relation-group-join.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
@@ -947,6 +947,16 @@ export class DeleteAndAggregateFacet {
       // is read, so the caller's own path runs the doors below itself.
       const relationGroup = relationGroupByRequestOf(options);
       if (relationGroup !== undefined) {
+          // [#33876] A driver that compiles no `ReadableIds` leaf refuses the
+          // dimension outright, before the decline: the caller throws the
+          // error rather than serve its FK-expand.
+          const refusal = relationGroupDriverRefusal(
+              object, relationGroup, this.getDriver(object) as { readonly name?: unknown; readonly supports?: unknown } | undefined,
+          );
+          if (refusal !== undefined) {
+              relationGroup.outcome = { kind: 'refused', error: refusal };
+              return [];
+          }
           const reason = relationGroupRegistryDecline.call({
               getObjectSchema: (name: string) => this._registry.getObject(name),
               getDriver: (name: string) => this.getDriver(name) as { readonly name?: unknown; readonly aggregate?: unknown } | undefined,

@@ -8,7 +8,16 @@ export const entry: SemanticMigration = {
     'data.Field.expression of a formula field (and any CEL predicate judged with the object\'s field types: '
     + 'validation conditions, flow conditions) — a date or datetime field handed straight to a call that '
     + 'takes a timestamp: isoDate(record.start_at), isoDatetime(record.start_at), '
-    + 'startsWith(isoDate(record.start_at), "2026"), record.start_date.getFullYear()',
+    + 'startsWith(isoDate(record.start_at), "2026"), record.start_date.getFullYear()'
+    + '. The same shapes in a flow VALUE envelope are refused too: an assignment node\'s '
+    + 'assignments value, a create_record / update_record node\'s fields.* value, reading the field '
+    + 'through record (or previous), in a record-triggered flow or a time-relative sweep of the typed '
+    + 'object that rebinds neither record nor previous itself (no assignment target, output, iterator, '
+    + 'index or error variable or node id of either name, and no declared variable named record); '
+    + 'os validate and the engine\'s registerFlow '
+    + 'refuse the same set. A stored flow carrying one fails to register at boot on an engine with the '
+    + 'object-schema resolver wired (the automation service bridged to ObjectQL) until it is rewritten '
+    + 'with the same rewrite',
   replacement:
     'Parse the field\'s text into a timestamp first with date(…): isoDate(date(record.start_at)), '
     + 'isoDatetime(date(record.start_at)), date(record.start_date).getFullYear(). date(…) keeps a '
@@ -36,5 +45,11 @@ export const entry: SemanticMigration = {
     'os validate and os build report no date-text-call finding; each rewritten formula field reads a '
     + 'value on GET /api/v1/data/OBJECT/ID where it read null before (and the same value where it read '
     + 'one), and each rewritten validation rule admits a write it refused as unevaluable before; no '
-    + 'stored sys_metadata object row reports the finding in its _diagnostics.',
+    + 'stored sys_metadata object row reports the finding in its _diagnostics.'
+    + ' For a stored flow: the boot log carries no "[Automation] failed to register flow" (or '
+    + '"cold-boot flow bind: failed to register flow") warning naming it, and POST '
+    + '/api/v1/meta/_migrate-stored on the running server lists no registerFlow TODO at its assignments '
+    + 'or fields slots. The CLI\'s os migrate meta --stored cannot show this: it boots the automation '
+    + 'plugin inert (armRuntime: false), which returns before the object-schema resolver is wired, so '
+    + 'its stored pass types no value envelope and lists no such TODO whether or not the flow carries one.',
 };

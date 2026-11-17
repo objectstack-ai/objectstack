@@ -24,6 +24,7 @@
     "ai/ConversationSession",
     "ai/ConversationSummary",
     "ai/DatasetProvenance",
+    "ai/DatasetTermCandidate",
     "ai/DatasetTermMatch",
     "ai/DatasetTermMatchedOn",
     "ai/DatasetToolCatalogDimension",

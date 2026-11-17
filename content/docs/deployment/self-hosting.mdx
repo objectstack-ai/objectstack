@@ -760,6 +760,22 @@ reaches the invitee in the invitation mail; on a deployment with no mail
 transport, an administrator hands it over with the invitation's **Copy Invite
 Link** action. The first account of a new deployment needs no invitation.
 
+**While the mail transport is live, accepting an invitation needs a verified
+address.** `POST /api/v1/auth/organization/accept-invitation` from a session
+whose address was never verified answers `403
+EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION` and
+writes nothing: an unverified address does not prove the person holds the
+invited mailbox. The Console's accept page sends the person to the
+verification-mail screen for their address, and the link in that mail brings
+them back to accept. A visitor who is not signed in and opens the invitation's
+link from the invitation mail itself needs no separate step: the accept page
+offers the one-step form, which verifies the address as it accepts. A visitor
+already signed in to an unverified account who opens that link is sent to
+verify first, like any other unverified session. Reading, listing and declining an invitation are not affected. On a
+deployment with no live transport (none configured, or the log transport)
+nothing can verify an address, so acceptance stays open to an unverified
+address, as before.
+
 **What decides it on `open` and `email_domain`.** A sign-up for an address that
 already has an account gets the same answer as a successful new sign-up, and
 writes nothing, when all three of these hold:

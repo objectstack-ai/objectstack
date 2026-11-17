@@ -442,6 +442,18 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
     + 'ADR-0106 masking is unaffected — draft preview is admin-gated '
     + 'upstream, not by this schema.',
   ),
+  userTextLocales: z.array(z.string()).max(2).optional().describe(
+    'The locales the user-facing sentences of a served DRAFT\'s check findings are composed in, in ladder '
+    + 'order: the locale the request names, then the workspace default — the save request\'s member of the '
+    + 'same name, read the same way (each value against the platform locale table, whole and then one '
+    + 'subtag shorter at a time; a value that names no table language is passed over; `en` is the last '
+    + 'rung). Read only by the `state: \'draft\'` read, which folds what publishing the draft would say '
+    + 'into its `_diagnostics`: an advisory finding that carries a user sentence becomes a '
+    + '`_diagnostics.warnings[]` entry in that sentence. Stated by the door that holds the request (the '
+    + 'REST door and the dispatcher state `[ExecutionContext.locale, ExecutionContext.workspaceLocale]`), '
+    + 'never read from a query string. ABSENT ⇒ the sentences are composed in `en`. It selects a language '
+    + 'only: which row is read, and what the verdict is, do not depend on it.',
+  ),
 }));
 
 /**
@@ -1215,7 +1227,33 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'creates the package-unbound draft. It is refused `409 RESOURCE_CONFLICT` '
     + 'when the active rows (or, with none and no package-unbound draft, the '
     + 'drafts) are bound to two or more packages, as that publish is (see '
-    + '`PublishMetaItemRequestSchema.packageId`). The row written is also the one the parent-version '
+    + '`PublishMetaItemRequestSchema.packageId`). An `action` is keyed by the '
+    + 'object it binds (ADR-0150 D4): when one or more packages\' active rows '
+    + 'hold the name and none of those rows binds the object the body binds '
+    + '(object-less is its own key), the save writes the environment\'s own '
+    + 'package-unbound row (`active`) or draft (`draft`), never a package\'s '
+    + 'item. The environment keeps one package-unbound row and one '
+    + 'package-unbound draft per action name: such a save over the '
+    + 'environment\'s own row or draft bound to another object rewrites it '
+    + 'onto the body\'s object, and over one bound to an object a package\'s '
+    + 'active row binds (that package\'s customization) it is refused `409 '
+    + 'RESOURCE_CONFLICT`; a `draft` save is refused the same way when the '
+    + 'package-unbound row its publish would rewrite is that customization. '
+    + 'Otherwise the address above stands, judged over every holder of the '
+    + 'name (every enabled holder, for an `active` save), except that an '
+    + '`active` save is judged over '
+    + 'the holders at the body\'s object only when a disabled package is one '
+    + 'of them and another holder binds another object. The per-item publish '
+    + 'and the draft discard naming no package act on the environment\'s '
+    + 'draft so written, except that with one package holding the name, that '
+    + 'package\'s own draft, when one is stored, comes first; that publish '
+    + 'is refused `409 RESOURCE_CONFLICT` when the package-unbound row it '
+    + 'would rewrite is a package\'s customization. '
+    // The read half that keys an action by object is #33904.
+    + 'Until the read naming no package keys an action by object, '
+    + 'the version it serves is the package\'s item\'s, so a save carrying '
+    + 'it as the parent is refused as a version conflict. '
+    + 'The row written is also the one the parent-version '
     + 'resolution reads: an unpinned save takes its version as the parent '
     + '(last-write-wins), a pinned one is judged against it, and the item '
     + 'read at the same scope serves it as `version`.',

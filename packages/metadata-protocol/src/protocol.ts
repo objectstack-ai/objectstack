@@ -266,6 +266,8 @@ import type { ImportUnmanagedPackageAnswer } from './protocol-package-install.js
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
+    draftPublishJudgement,
+    type DraftPublishJudgement,
     draftPublishVerdict,
     refuseRestoredBodyTheSaveDoorRefuses,
     restoredBodyDerivation,
@@ -1235,6 +1237,7 @@ export class ObjectStackProtocolImplementation implements
             diffMetaItem: (...a) => protocol.diffMetaItem(...a),
             disabledActionsOf: (...a) => protocol.disabledActionsOf(...a),
             discardDraftInItsScope: (...a) => protocol.discardDraftInItsScope(...a),
+            draftPublishJudgement: (...a) => protocol.draftPublishJudgement(...a),
             draftPublishVerdict: (...a) => protocol.draftPublishVerdict(...a),
             dropObjectStorage: (...a) => protocol.dropObjectStorage(...a),
             dropStorageRemainingRowsRefusal: (...a) => ObjectStackProtocolImplementation.dropStorageRemainingRowsRefusal(...a),
@@ -1904,9 +1907,22 @@ export class ObjectStackProtocolImplementation implements
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
     }): Promise<RuntimeAuthoringIssue[]> {
+        return draftPublishVerdict.call(this.draftVerdictHost(), draft);
+    }
+
+    /** [#34818] The same judgement with the gate's advisories beside its refusal (see `draftPublishJudgement`). */
+    private draftPublishJudgement(draft: {
+        type: string; name: string; body: unknown; packageId: string | null;
+        userTextLocales?: readonly (string | undefined)[];
+    }): Promise<DraftPublishJudgement> {
+        return draftPublishJudgement.call(this.draftVerdictHost(), draft);
+    }
+
+    /** The host both draft verdict bodies read: the promotion's own collaborators. */
+    private draftVerdictHost(): ThisParameterType<typeof draftPublishJudgement> {
         const readAuthoringChannel = () => this.authoringChannel;
         const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof draftPublishVerdict> = {
+        const host: ThisParameterType<typeof draftPublishJudgement> = {
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
             collectBatchPendingDeclarations: (...a) => this.collectBatchPendingDeclarations(...a),
@@ -1922,7 +1938,7 @@ export class ObjectStackProtocolImplementation implements
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
-        return draftPublishVerdict.call(host, draft);
+        return host;
     }
 
     /**
@@ -4103,6 +4119,8 @@ export class ObjectStackProtocolImplementation implements
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItem(protocolHost(this), request);
@@ -4156,7 +4174,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readMetaItemFace(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
-        member?: string,
+        member?: string, userTextLocales?: readonly string[],
     }, face: 'served' | 'execution') {
         // [#25467 cut 31] The body moved to `protocol-meta-item-face.ts` (see `MetaItemFaceHost`).
         const readEngine = () => this.engine;
@@ -4195,7 +4213,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
-        member?: string,
+        member?: string, userTextLocales?: readonly string[],
     }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return readMetaItem(protocolHost(this), request, opts);
@@ -7923,6 +7941,12 @@ export class ObjectStackProtocolImplementation implements
      * The address is the draft save's, read from the item's ACTIVE rows
      * ({@link packagelessAddress}):
      *
+     *  - [ADR-0150 D4] an `action` whose body (the saved body, else the
+     *    stored package-unbound draft's) binds an object none of those rows
+     *    binds: the environment's own package-unbound draft, promoted into
+     *    the package-unbound row, whatever the number of bindings, except
+     *    that a package-unbound draft is judged only where no package's own
+     *    draft is the address (the cases below);
      *  - bound to one package `P`: `P`'s draft, else the package-unbound draft,
      *    which the draft save adopts into `P` on its next write and the read
      *    serves in `P`'s place (ADR-0048 prefer-local). A publish promotes such
@@ -7959,6 +7983,8 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** [#22877] The bundle member the door addresses; omitted, the canonical one. */
         member?: string,
+        /** [ADR-0150 D4] The body a draft save writes; omitted, the stored package-unbound draft's. */
+        body?: unknown,
     ): Promise<
         | { kind: 'ambiguous'; candidates: readonly string[] }
         | {
@@ -7971,8 +7997,10 @@ export class ObjectStackProtocolImplementation implements
         // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
         const host: ThisParameterType<typeof packagelessDraftAddress> = {
             packagelessAddress: (...a) => this.packagelessAddress(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            readItemActiveRows: (...a) => this.readItemActiveRows(...a),
         };
-        return packagelessDraftAddress.call(host, type, name, member);
+        return packagelessDraftAddress.call(host, type, name, member, body);
     }
 
     /**

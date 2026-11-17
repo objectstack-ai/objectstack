@@ -12,6 +12,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -138,14 +140,27 @@ describe('Studio landing: a read-only base says "n customized, m switched off" (
     expect(customizationRequests(requested)).toEqual(['/api/v1/packages/hotcrm/customizations']);
   });
 
-  it('reads a base with no pair as "0 customized, 0 switched off", with no pair link', async () => {
+  it('reads a base with nothing changed as "No changes yet", with no number and no link (objectstack#34715)', async () => {
     packages.list = [SHOWCASE];
     stubWire({ 'com.example.showcase': served('com.example.showcase', 0, 0, 0) });
     renderLanding();
 
     const line = await within(await waitFor(() => cardOf('Showcase'))).findByTestId('studio-landing-customizations');
     await waitFor(() => expect(line).toHaveAttribute('data-state', 'read'));
-    expect(line).toHaveTextContent('0 customized, 0 switched off');
+    expect(line).toHaveAttribute('data-changes', 'none');
+    expect(line).toHaveTextContent(t('engine.studio.landing.customizations.none', 'en-US'));
+    expect(line.textContent).not.toMatch(/\d/);
+    expect(within(line).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('reads a base with no pair and one switched-off item as "0 customized, 1 switched off", with no pair link', async () => {
+    packages.list = [SHOWCASE];
+    stubWire({ 'com.example.showcase': served('com.example.showcase', 0, 0, 1) });
+    renderLanding();
+
+    const line = await within(await waitFor(() => cardOf('Showcase'))).findByTestId('studio-landing-customizations');
+    await waitFor(() => expect(line).toHaveAttribute('data-state', 'read'));
+    expect(line).toHaveTextContent('0 customized, 1 switched off');
     expect(within(line).queryByTestId('studio-landing-customizations-pair')).not.toBeInTheDocument();
     expect(within(line).getByText(customizedText(0))).not.toHaveAttribute('href');
     expect(within(line).getByTestId('studio-landing-customizations-switched-off')).toHaveAttribute(
@@ -220,9 +235,9 @@ describe('Studio landing: a read-only base says "n customized, m switched off" (
  * line and link. The pair's export and delete stay on the Packages page.
  */
 describe('Studio landing: a base’s .custom pair has no card of its own (ADR-0146 D3)', () => {
-  /** Every package card the landing draws, by the id line each card shows. */
+  /** Every package card the landing draws, by the package id each card carries. */
   const cardIds = () =>
-    Array.from(document.querySelectorAll('.rounded-lg.border .font-mono')).map((el) => el.textContent);
+    Array.from(document.querySelectorAll('[data-package-id]')).map((el) => el.getAttribute('data-package-id'));
 
   it('draws one card for a base and its writable pair: the base’s, with its customized count and the pair link', async () => {
     packages.list = [HOTCRM, HOTCRM_PAIR, WRITABLE];
@@ -238,7 +253,7 @@ describe('Studio landing: a base’s .custom pair has no card of its own (ADR-01
     expect(screen.queryByText('HotCRM customizations')).not.toBeInTheDocument();
     expect(cardIds()).not.toContain('hotcrm.custom');
     // CONTROL: a writable package that is no pair keeps its card.
-    expect(cardIds()).toEqual(['com.acme.app', 'hotcrm']);
+    expect(cardIds()).toEqual(['hotcrm', 'com.acme.app']);
   });
 
   it('folds a read-only pair under its listed base too', async () => {

@@ -66,12 +66,16 @@ import {
 } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
+    bareDocServiceCopyDisplacesEntry,
     judgeBareActionRead,
     judgeDroppedServiceRefusal,
     packageScopedRefusalOf,
+    refuseAmbiguousBareDocRead,
     rethrowPackageScopedRefusal,
+    registryAnswerAtAddress,
     servedFromDisabledHolder,
     serviceAnswerFitsBareAction,
+    serviceCopyOfAnotherPackage,
 } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
@@ -274,6 +278,19 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         ? await judgeBareActionRead(host, request.name)
         : undefined;
     const exactAddress = await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
+    // [#34248, ruling 6893582352] …and a bare doc read of a name two enabled
+    // packages hold, beside the environment's own entry, reads that entry as
+    // {@link getMetaItem} serves it ({@link refuseAmbiguousBareDocRead}): as
+    // its code layer, never the package copy the service kept. Its refusal
+    // without such an entry stays the door's, as before.
+    let bareDocEnvironmentEntry: unknown;
+    if (!request.packageId && request.type === 'doc') {
+        try {
+            bareDocEnvironmentEntry = refuseAmbiguousBareDocRead(host, request.name, member);
+        } catch (error) {
+            if (packageScopedRefusalOf(error) === undefined) throw error;
+        }
+    }
     // [ADR-0150 D3, #32914] …and, naming no package, a type addressed by
     // package is judged by the registry's package-scoped resolver, as the
     // plain read judges it ({@link getMetaItem}, its `packagelessScopedRead`):
@@ -308,9 +325,15 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // another holder's ({@link serviceAnswerFitsBareAction}), [#32560]
         // or a disabled package's customization ({@link servedFromDisabledHolder}),
         // as in {@link getMetaItem}.
+        // [ADR-0150 D3, red line 2] …or, at an address naming a package the
+        // exact qualifier does not judge, another package's item, as in
+        // {@link getMetaItem} ({@link serviceCopyOfAnotherPackage}): the
+        // lookups below read the package's own.
         if (fromService.data !== undefined && fromService.data !== null
             && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
-                || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
+                || await servedFromDisabledHolder(host, request.name, fromService.data)))
+            && !(exactAddress === undefined && serviceCopyOfAnotherPackage(host, request, fromService.data))
+            && !bareDocServiceCopyDisplacesEntry(bareDocEnvironmentEntry, fromService.data)) {
             // [#26699] …when it is the member this read addresses, as in
             // {@link getMetaItem}: the service keys a type's items by name
             // alone, so for a bundle it holds whichever member it
@@ -401,17 +424,28 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         const judgedPackageId = typeof (bareActionAnswer?.item as { _packageId?: unknown } | undefined)?._packageId === 'string'
             ? (bareActionAnswer!.item as { _packageId: string })._packageId
             : undefined;
-        const artifact = bareActionAnswer !== undefined && judgedPackageId === undefined
+        // [#34248] …and so is a bare doc read's environment entry: no
+        // package's artifact is its code layer; the entry is, as the plain
+        // read's code step serves it.
+        const artifact = (bareActionAnswer !== undefined && judgedPackageId === undefined) || bareDocEnvironmentEntry !== undefined
             ? undefined
             : host.lookupArtifactItem(request.type, request.name, request.packageId || judgedPackageId, wantedMember);
         let regItem = (artifact !== undefined && isWantedMember(artifact) ? artifact : undefined)
             ?? namedMemberOnly(runtimeOnly(bareActionAnswer !== undefined
                 ? bareActionAnswer.item
-                : host.engine.registry.getItem(request.type, request.name, request.packageId, member)));
-        if (regItem === undefined) {
+                : bareDocEnvironmentEntry !== undefined
+                    ? bareDocEnvironmentEntry
+                    : host.engine.registry.getItem(request.type, request.name, request.packageId, member)));
+        if (regItem === undefined && bareDocEnvironmentEntry === undefined) {
             const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
             if (alt) regItem = namedMemberOnly(runtimeOnly(host.engine.registry.getItem(alt, request.name, request.packageId, member)));
         }
+        // [ADR-0150 D3/D5, red line 2] …and at such an address, the package's
+        // own item, as {@link getMetaItem}'s code step answers there
+        // ({@link registryAnswerAtAddress}): a package that holds no item of
+        // the name read another package's artifact or first composite, and is
+        // now refused naming the holders (ruling 6917064203 on #34398).
+        if (exactAddress === undefined) regItem = namedMemberOnly(runtimeOnly(registryAnswerAtAddress(host, request, regItem, member, isWantedMember, { refuse: true })));
         if (regItem !== undefined) code = regItem;
 
         // [#34441 cell 1, #21059] Naming no member, the bare-name read answers
@@ -422,7 +456,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // read answered `code` = the base's `fr-FR` before a restart and
         // `null` after it (404 on `/layers`), with a dependent's `en-US` row
         // stored. A named member is never answered here (its own lookups ran).
-        if (code === null && member === undefined && bareActionAnswer === undefined) {
+        // [#34248] Nor is a bare doc read's environment entry: beside two
+        // enabled holders that entry is the read's answer, and the artifact
+        // lookup's first composite is the holder registered first, which the
+        // read never serves (as for the bare action read's judged answer).
+        if (code === null && member === undefined && bareActionAnswer === undefined && bareDocEnvironmentEntry === undefined) {
             code = host.lookupArtifactItem(request.type, request.name, request.packageId) ?? null;
         }
     }
@@ -800,9 +838,22 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // layer it derives from, not the value the by-name read serves.
     // [#28409] …and an orphaned row (above) is a shadowed layer of the
     // same kind: `effective` is the code layer the by-name read serves.
+    // [#34248, ruling 6893582352] …but not the package-less row behind a bare
+    // doc read's environment entry, beside two enabled holders: the entry the
+    // hydrator lays for it is tenant-authored, so it is no code layer (#21059,
+    // above), and the row it came from is the environment's own item, which
+    // answers first. Declined, `effective` was the empty code layer while the
+    // plain read served the row. Only that entry: a stamp-less runtime
+    // registration is a code layer (`code` holds it), and beside a different
+    // package-less stored row it stays the effective layer, as the plain read
+    // serves it.
+    const environmentRowAnswers = bareDocEnvironmentEntry !== undefined
+        && code === null
+        && isTenantAuthored(bareDocEnvironmentEntry)
+        && isPackageLessRow({ package_id: overlayBinding });
     const effectiveBase: unknown | null = expandedFrom !== undefined
         ? expandedFrom.item
-        : overlay !== null && !orphaned && !host.declinesStoredRow(request.type, request.name, overlayRow)
+        : overlay !== null && !orphaned && (environmentRowAnswers || !host.declinesStoredRow(request.type, request.name, overlayRow))
             ? host.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
             : code;
     // [#21738] The lock is the one item-lock resolution's — the

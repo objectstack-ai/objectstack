@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 134 |
-| Proposed | 9 |
+| Accepted | 135 |
+| Proposed | 8 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -222,7 +222,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0152](./0152-scim-group-grants-only-an-ordinary-permission-set-through-a-per-connection-mapping.md) | A SCIM group grants only an ordinary permission set, through a per-connection mapping row a platform administ… | Accepted — implemented, 2026-11-08, recording the maintainer's ruling of 2… | 2026-11-08 | — | — |
 | [ADR-0153](./0153-one-way-sync-in-beside-federation.md) | One-way sync-in beside federation — a connector or a federated object, a warehouse table included, fills an o… | Proposed — 2026-11-10. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-10 | — | — |
 | [ADR-0154](./0154-audit-ledger-tamper-evidence-sealer-signed-checkpoints-amendments-verify.md) | The audit ledger is tamper-evident — an asynchronous sealer signs per-organization checkpoints, redaction and… | Proposed — 2026-11-10 — draft. This record declares; it implements nothing… | 2026-11-10 | — | — |
-| [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) | The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table,… | Proposed — 2026-11-15; questions ①–③ are open for the maintainer and are ⛔… | 2026-11-15 | — | — |
+| [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) | The sharing scope's share-grant arm lowers to an engine-internal semi-join leaf over the record-share table,… | Accepted — 2026-11-17, recording the maintainer's answers to questions ①–③… | 2026-11-15 | — | — |
 | [ADR-0156](./0156-compiled-metadata-answer-cache-every-source-counts-its-own-changes.md) | A compiled metadata answer is cached only when every source it reads counts its own changes, and a bound cove… | Accepted — 2026-11-16 — maintainer ruling on #34206, comment 6920925378, v… | 2026-11-16 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)

@@ -1760,6 +1760,28 @@ export const DetailView: React.FC<DetailViewProps> = ({
         // re-derives the engine's tally rules. Absent on `first_response`
         // nodes, where one decision IS the whole step and a "1 of 1" bar would
         // be noise.
+        // "Editable" is a claim about the whole record, not about the approval
+        // node (objectstack#34701). A `lockRecord: false` node only means the
+        // APPROVAL does not lock it; the host's `canEdit` is the conjunction of
+        // every other gate it knows (record permission, the edit action's
+        // `disabledWhen` / `visibleWhen`, a `readonlyWhen` lock on every
+        // field). The badge read the node alone, so a record those gates
+        // close read 「审批中 · 可编辑」 and every edit was then refused. With
+        // `canEdit` false the badge says only that an approval is running.
+        // No host ⇒ no `inline` ⇒ nothing pending here but the column
+        // fallback, which reads as locked; a host that threads no `canEdit`
+        // gets the provider default `true` and keeps its label.
+        const editableHere = inline?.canEdit !== false;
+        const pendingLabelKey = isLocked
+          ? 'detail.lockedByApproval'
+          : editableHere
+            ? 'detail.approvalPendingEditable'
+            : 'detail.approvalPending';
+        const pendingTooltip = isLocked
+          ? (inline?.lockedReason ?? t('detail.lockedTooltip'))
+          : editableHere
+            ? t('detail.approvalPendingTooltip')
+            : t('detail.approvalPendingNotEditableTooltip');
         const progress = isPending ? inline?.approvalProgress : undefined;
         // A bar of `need` ticks is legible up to about a dozen; past that the
         // count in the label carries it alone rather than shrinking to hairlines.
@@ -1779,18 +1801,10 @@ export const DetailView: React.FC<DetailViewProps> = ({
                     // amber here would read as "something is blocked".
                     : 'inline-flex items-center gap-1 rounded-md border border-sky-300 bg-sky-50 px-2 py-1 text-xs text-sky-800'
                 }
-                title={
-                  isLocked
-                    ? (inline?.lockedReason ?? t('detail.lockedTooltip'))
-                    : t('detail.approvalPendingTooltip')
-                }
+                title={pendingTooltip}
               >
                 {isLocked ? <Lock className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
-                <span>
-                  {isLocked
-                    ? t('detail.lockedByApproval')
-                    : t('detail.approvalPendingEditable')}
-                </span>
+                <span>{t(pendingLabelKey)}</span>
               </span>
               {/* Recall belongs to the approval, not to the lock: an editable
                   pending approval is just as recallable as a locked one.

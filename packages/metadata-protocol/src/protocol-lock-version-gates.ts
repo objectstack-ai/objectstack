@@ -49,7 +49,7 @@
 
 import type { ObjectStackProtocolImplementation, MetadataAuditEntry } from './protocol.js';
 import { canonicalMetaType } from './protocol.js';
-import { SysMetadataRepository, unboundItemDraftAddress } from './sys-metadata-repository.js';
+import { SysMetadataRepository, actionHeldOnlyOnOtherObjects, unboundItemDraftAddress } from './sys-metadata-repository.js';
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import { resolveItemLockLazily } from './item-lock.js';
 import { ConflictError } from '@objectstack/metadata-core';
@@ -108,6 +108,7 @@ export interface LockVersionGateHost {
     overlayLockLayerAt: ObjectStackProtocolImplementation['overlayLockLayerAt'];
     packagelessAddress: ObjectStackProtocolImplementation['packagelessAddress'];
     packagelessDraftAddress: ObjectStackProtocolImplementation['packagelessDraftAddress'];
+    readItemActiveRows: ObjectStackProtocolImplementation['readItemActiveRows'];
     readLockGateOverlayLayer: ObjectStackProtocolImplementation['readLockGateOverlayLayer'];
     receiptVersion: ObjectStackProtocolImplementation['receiptVersion'];
     recordMetadataAudit: ObjectStackProtocolImplementation['recordMetadataAudit'];
@@ -459,11 +460,17 @@ export async function strictDraftReadAddress(
 
 /** The body of `ObjectStackProtocolImplementation#packagelessDraftAddress`; the method's docblock there is its contract. */
 export async function packagelessDraftAddress(
-    this: Pick<LockVersionGateHost, 'packagelessAddress'>,
+    this: Pick<LockVersionGateHost, 'packagelessAddress' | 'getOverlayRepo' | 'readItemActiveRows'>,
     type: string,
     name: string,
     /** [#22877] The bundle member the door addresses; omitted, the canonical one. */
     member?: string,
+    /**
+     * [ADR-0150 D4] The body a draft SAVE writes. Omitted (the per-item
+     * publish, the draft discard and the draft read), the body of the stored
+     * package-unbound draft is the one judged.
+     */
+    body?: unknown,
 ): Promise<
     | { kind: 'ambiguous'; candidates: readonly string[] }
     | {
@@ -474,19 +481,56 @@ export async function packagelessDraftAddress(
     }
 > {
     const active = await this.packagelessAddress(type, name, member, 'active');
-    if (active.candidates.length > 1) return { kind: 'ambiguous', candidates: active.candidates };
-    const drafts = await this.packagelessAddress(type, name, member, 'draft');
+    // [ADR-0150 D4, ruling 6902014292] An action draft whose body binds an
+    // object no package's active row binds the name to is the environment's
+    // own draft: the package-unbound draft, promoted into the package-unbound
+    // row, whatever packages hold the name on other objects (the one rule,
+    // {@link actionHeldOnlyOnOtherObjects}, which the repository's draft
+    // write asks too). A save asks it of the body it writes, first, as the
+    // repository does; the doors that act on a stored draft ask it of the
+    // package-unbound draft, where no package's own draft is the address.
+    const drafts = active.candidates.length > 0 && type === 'action'
+        ? await this.packagelessAddress(type, name, member, 'draft')
+        : undefined;
+    const environmentOwnDraft = async (): Promise<boolean> => {
+        if (drafts === undefined) return false;
+        let item = body;
+        if (item === undefined) {
+            if (!drafts.unbound) return false;
+            const repo = this.getOverlayRepo();
+            const stored = await repo.get(
+                { type, name, org: 'env' } as Parameters<typeof repo.get>[0],
+                { state: 'draft', packageId: null, ...(member !== undefined ? { member } : {}) },
+            );
+            if (!stored) return false;
+            item = stored.body;
+        }
+        return actionHeldOnlyOnOtherObjects(type, item, await this.readItemActiveRows(type, name));
+    };
+    const environmentDraft = () => ({
+        kind: drafts?.unbound ? 'draft' as const : 'none' as const, key: null, into: null,
+        drafts: drafts ?? { packageId: null, candidates: [], unbound: false },
+    });
+    if (body !== undefined && await environmentOwnDraft()) return environmentDraft();
+    if (active.candidates.length > 1) {
+        if (body === undefined && await environmentOwnDraft()) return environmentDraft();
+        return { kind: 'ambiguous', candidates: active.candidates };
+    }
+    const draftRows = drafts ?? await this.packagelessAddress(type, name, member, 'draft');
     const own = active.packageId;
     if (own !== null) {
-        if (drafts.candidates.includes(own)) return { kind: 'draft', key: own, into: own, drafts };
-        if (drafts.unbound) return { kind: 'draft', key: null, into: own, drafts };
-        return { kind: 'none', key: own, into: own, drafts };
+        if (draftRows.candidates.includes(own)) return { kind: 'draft', key: own, into: own, drafts: draftRows };
+        if (draftRows.unbound) {
+            if (body === undefined && await environmentOwnDraft()) return environmentDraft();
+            return { kind: 'draft', key: null, into: own, drafts: draftRows };
+        }
+        return { kind: 'none', key: own, into: own, drafts: draftRows };
     }
     // [#23657] Bound to none: the rule the draft save's address takes too
     // ({@link unboundItemDraftAddress}, in `resolveWriteHead`).
-    const address = unboundItemDraftAddress(drafts);
+    const address = unboundItemDraftAddress(draftRows);
     if (address.kind === 'ambiguous') return address;
-    return { kind: address.kind, key: address.key, into: address.key, drafts };
+    return { kind: address.kind, key: address.key, into: address.key, drafts: draftRows };
 }
 
 /** The body of `ObjectStackProtocolImplementation#storedParentForToken`; the method's docblock there is its contract. */

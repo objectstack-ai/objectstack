@@ -818,7 +818,8 @@ whose package is disabled is **404** `OBJECT_PACKAGE_DISABLED`.
 
 When the MCP `resume_run` tool hands a resume to the person (an action that
 declares `ai.requiresConfirmation: true`, on a host with a pending-confirmation
-service), the hand-off carries the paused run: `run: { runId, values }`.
+service), the hand-off carries the paused run: `run: { runId, values, screenNodeId }`,
+where `screenNodeId` names the screen the values were given for.
 Your approve door resumes that run with `dispatchActionResume`, as the person
 who approved it, instead of re-implementing the `resume_run` checks:
 
@@ -830,6 +831,7 @@ const answer = await dispatchActionResume(kernel, {
   environmentId,               // optional, placed as for dispatchAction
   runId: handOff.run.runId,
   values: handOff.run.values,
+  screenNodeId: handOff.run.screenNodeId,  // binds the approval to that screen
   confirm: true,               // the person's confirmation
 });
 if (answer.status !== 200) throw answer.body.error;
@@ -841,11 +843,15 @@ paused and must have been started by them (otherwise **404**
 that admits the run must pass every `run_action` check, the record is read
 again as them, and the run must be paused on a screen (otherwise **409**). The
 run then resumes; it never starts a new run and is never handed off again.
-Only a run that is no longer paused is refused: a wizard your approval moved
-on to its next screen is still paused under the same run id, so calling again
-with the same hand-off resumes that next screen with the same values. Decide
-each pending item once in your approve door, and void an item whose run has
-moved on. Without `confirm: true`, an action that declares
+A wizard stays paused under the same run id as it moves from screen to
+screen, so pass `screenNodeId` back: when the run is no longer on that screen
+(an earlier approval of the same item moved it on, or the person advanced it
+in the app) the call is refused **409** `RESOURCE_CONFLICT`, nothing resumes,
+and the run stays where it is. Without `screenNodeId`, the run's current
+screen is resumed with the values given. A `screenNodeId` that is `null`, empty
+or not a string is refused **400**, so omit the key for an item stored without
+one. A wizard that loops back to the same screen is not told apart by its
+screen id. Decide each pending item once in your approve door. Without `confirm: true`, an action that declares
 `ai.requiresConfirmation: true` is refused **428** `ACTION_CONFIRMATION_REQUIRED`,
 and an AI service account is refused whatever it sends. The answer is the REST
 envelope, with `resume_run`'s `{ ok, action, objectName, recordId, result }` as

@@ -1440,6 +1440,8 @@ const ja = {
     writeStrippedUnknownReason: "次の項目はサーバーで反映されませんでした: {{fields}}",
     approvalPendingEditable: "承認中 · 編集可能",
     approvalPendingTooltip: "このレコードには承認待ちのリクエストがありますが、このステップでは編集できます",
+    approvalPending: "承認中",
+    approvalPendingNotEditableTooltip: "このレコードには承認待ちのリクエストがあります",
     approvalProgress: "承認 — {{need}} 件中 {{got}} 件",
     approvalProgressGroups: "合議 — {{need}} グループ中 {{got}} グループ",
     approvalProgressLabel: "承認の進捗",
@@ -1925,6 +1927,16 @@ const ja = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '未公開の変更が {{count}} 件あります。上部の下書きバーから公開してください。',
+        publishFromBar_one: '未公開の変更が {{count}} 件あります。上部の下書きバーから公開してください。',
+        publishFromBar_other: '未公開の変更が {{count}} 件あります。上部の下書きバーから公開してください。',
+        showDraftToPublish: '未公開の変更が {{count}} 件あります。下書きを表示して確認・公開してください。',
+        showDraftToPublish_one: '未公開の変更が {{count}} 件あります。下書きを表示して確認・公開してください。',
+        showDraftToPublish_other: '未公開の変更が {{count}} 件あります。下書きを表示して確認・公開してください。',
+        showDraft: '下書きを表示',
+        receipt: '公開しました。変更が反映されました。',
+        dismissReceipt: '閉じる',
         // {{detail}} はランタイムが返すメッセージ列なので、中間コロンは全角
         // (exportFailed などと同じ。単一トークンの値なら半角)。
         count: "未公開の変更が {{count}} 件あります — ユーザーには表示されません。",
@@ -2164,7 +2176,7 @@ const ja = {
       changesApplied: "適用済み",
       changesDrafted: "下書きとして保存",
       changesFailed: "未適用",
-      discussing: "話題: {{target}}",
+      discussing: "表示中: {{target}}",
       changeVerb: {
         createObject: "オブジェクトを作成",
         addField: "項目を追加",
@@ -2323,6 +2335,7 @@ const ja = {
       view: "表示",
       confirm: "確定",
       cancel: "キャンセル",
+      continue: "続ける",
       prefilled: "未設定の項目にはブラウザーから推測した値が入っています。確定するまで何も保存されません。",
       organizationName: {
         title: "組織に名前を付ける",
@@ -3212,7 +3225,7 @@ const ja = {
     aiAssistant: "AI アシスタント",
     designInStudio: "Studio でデザイン",
     editApp: "アプリを編集",
-    openAppInStudio: "Studio でアプリを表示",
+    openAppInStudio: "Studio で {{app}} を表示",
   },
   home: {
     build: {
@@ -4576,6 +4589,10 @@ const ja = {
       pendingHere: '下書きプレビュー · このページの未公開の変更 {{count}} 件',
       pendingHere_one: '下書きプレビュー · このページの未公開の変更 {{count}} 件',
       pendingHere_other: '下書きプレビュー · このページの未公開の変更 {{count}} 件',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '下書きプレビュー · このアプリの未公開の変更 {{count}} 件。公開するまでここの内容は反映されません。',
+      pendingInApp_one: '下書きプレビュー · このアプリの未公開の変更 {{count}} 件。公開するまでここの内容は反映されません。',
+      pendingInApp_other: '下書きプレビュー · このアプリの未公開の変更 {{count}} 件。公開するまでここの内容は反映されません。',
     },
     changes: {
       title: '保留中の変更',
@@ -4592,7 +4609,7 @@ const ja = {
       detailNone: '差分は検出されませんでした — ドラフトは公開版と一致しています。',
       fieldOrderChanged: 'フィールドの順序が変更されました',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI コパイロットが下書きした変更を含みます',
+      draftedByCopilot: 'AI アシスタントが下書きした変更を含みます',
       draftedByMcpClient: 'MCP クライアント「{{client}}」が下書きした変更を含みます',
       draftedByMcp: 'MCP クライアントが下書きした変更を含みます',
       detailChangedKeys: 'その他の変更：',
@@ -4701,6 +4718,7 @@ const ja = {
       securityBlockTitle_one: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_other: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockWhere: 'オブジェクトの「設定 → レコード共有」で修正してから、もう一度公開してください。',
+      flowChecksTitle: '公開する前に確認してください — 公開チェックが次の点を指摘します',
       securityRule: {
         owdUnset: 'レコード共有のベースライン（sharingModel）が宣言されていません。ランタイムは private として扱いますが、ベースラインは明示的に決める必要があります。',
         owdAlias: 'レコード共有のベースライン（sharingModel）が正規の値ではないため、ランタイムはこのオブジェクトを private として扱います。',
@@ -4711,6 +4729,8 @@ const ja = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'このアプリはまだ公開されていません。動作はしますが、表示できるのはビルダーだけです。公開するとユーザーに表示されます。',
       message: '未公開のアプリ — 機能はすべて使えますが、ビルダーにしか表示されません。公開するとユーザーに表示されます。',
       publish: '公開',
       publishing: '公開中…',

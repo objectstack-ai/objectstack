@@ -1433,6 +1433,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../metadata-core
+      '@objectstack/rest':
+        specifier: workspace:*
+        version: link:../rest
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -1449,6 +1452,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/service-analytics':
+        specifier: workspace:*
+        version: link:../services/service-analytics
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -1900,6 +1906,9 @@ importers:
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
         version: link:../../drivers/driver-sqlite-wasm
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../../services/service-messaging
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

@@ -60,6 +60,16 @@ export const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
 /** objectui#12513 — the Studio landing (`BuilderLanding`), where the header's first button and the switcher's first row lead. */
 export const STUDIO_LANDING_PATH = '/studio';
 
+/**
+ * The rows the switcher offers: every listed package but a kernel one
+ * (ADR-0016 §3.8 — "you cannot author into a kernel package"). `null` while
+ * the list has not answered. There is no toggle that shows them: a kernel
+ * package opened by its URL is still named by the chip (`openEntry`).
+ */
+export function offeredPackages(pkgs: readonly PkgEntry[] | null): PkgEntry[] | null {
+  return pkgs === null ? null : pkgs.filter((p) => !p.kernel);
+}
+
 export function PackageSwitcher({
   packageId,
   tab,
@@ -152,12 +162,19 @@ export function PackageSwitcher({
     };
   }, [packageId]);
 
+  // ADR-0016 §3.8 — kernel packages are not offered for authoring. `fetchPackages`
+  // already leaves out the manifest-scoped ones; a row the registry half serves
+  // flat with a kernel `scope` stays in that list, tagged `kernel`, because the
+  // app → Studio entry gate reads the tag. The switcher hides it here.
+  const offered = offeredPackages(pkgs);
+  // The trigger NAMES the open package, which is not offering it: a kernel
+  // package opened by its URL is still named from its listed row.
   const listedCurrent = pkgs?.find((p) => p.id === packageId) ?? null;
   // Only once the list has answered, so the three trigger states stay its own.
   const current = listedCurrent ?? (pkgs !== null && openEntry?.id === packageId ? openEntry : null);
   // objectstack#28572 (ADR-0146 D3) — a base's paired `<base>.custom` has no
   // row of its own: it is folded under its base, which names it.
-  const folded = React.useMemo(() => foldCustomizationPairs(pkgs ?? []), [pkgs]);
+  const folded = React.useMemo(() => foldCustomizationPairs(offeredPackages(pkgs) ?? []), [pkgs]);
   /**
    * Which of the three the trigger is showing (objectui#7368). A failure wins
    * over a list already in hand: after a failed refresh the names on screen are
@@ -591,10 +608,10 @@ export function PackageSwitcher({
                   {pkgsErr}
                 </p>
               )}
-              {pkgListState === 'loaded' && pkgs?.length === 0 && (
+              {pkgListState === 'loaded' && offered?.length === 0 && (
                 <p className="px-2 py-2 text-[11px] text-muted-foreground">{t('engine.studio.pkg.none', locale)}</p>
               )}
-              {pkgs !== null && folded.rows.map((p) => (
+              {offered !== null && folded.rows.map((p) => (
                 <button
                   key={p.id}
                   data-testid="studio-switcher-row"

@@ -18,6 +18,18 @@
  *   J2  no current organization: refused, and no user is created — never a
  *       member-less account.
  *
+ * Import Users follows the same rule, row by row (ruling on #34535, option B):
+ *
+ *   I1  every imported row joins the administrator's current organization;
+ *       a row the organization's member cap refuses is rolled back in the real
+ *       engine transaction — no account, no temporary password — and the other
+ *       rows land.
+ *   I2  no current organization: the whole import is refused, and no user is
+ *       created.
+ *
+ * The member cap is `OS_ORG_MEMBERSHIP_LIMIT`, read when better-auth's
+ * organization plugin is built, so it is set before the boot.
+ *
  * Harness: the admin identity routes 501 unless better-auth's `admin` plugin
  * is on; `OS_SCIM_ENABLED` is the one env knob that reaches it (see
  * `admin-identity-audit-trail.dogfood.test.ts`). The posture is a real,
@@ -44,10 +56,16 @@ describe("Create User in multi-org mode joins the administrator's current organi
   /** The administrator's own current organization. */
   let adminOrgId: string;
   let priorScim: string | undefined;
+  let priorMemberCap: string | undefined;
+  /** I1's organization: the administrator (owner) plus two imported members fill its cap. */
+  let importOrgId: string;
+  const MEMBER_CAP = 3;
 
   beforeAll(async () => {
     priorScim = process.env.OS_SCIM_ENABLED;
     process.env.OS_SCIM_ENABLED = 'true';
+    priorMemberCap = process.env.OS_ORG_MEMBERSHIP_LIMIT;
+    process.env.OS_ORG_MEMBERSHIP_LIMIT = String(MEMBER_CAP);
     stack = await bootStack(crmStack as never, { multiTenant: 'posture-only' });
     adminToken = await stack.signIn(); // the seeded dev admin (platform admin)
     ql = await stack.kernel.getServiceAsync<any>('objectql');
@@ -64,12 +82,20 @@ describe("Create User in multi-org mode joins the administrator's current organi
     });
     expect(home.status, `admin org create: ${await home.clone().text()}`).toBe(200);
     adminOrgId = ((await home.json()) as { id: string }).id;
+
+    const importHome = await stack.apiAs(adminToken, 'POST', '/auth/organization/create', {
+      name: 'Import Home', slug: 'import-home-create-user',
+    });
+    expect(importHome.status, `import org create: ${await importHome.clone().text()}`).toBe(200);
+    importOrgId = ((await importHome.json()) as { id: string }).id;
   }, 180_000);
 
   afterAll(async () => {
     await stack?.stop?.();
     if (priorScim === undefined) delete process.env.OS_SCIM_ENABLED;
     else process.env.OS_SCIM_ENABLED = priorScim;
+    if (priorMemberCap === undefined) delete process.env.OS_ORG_MEMBERSHIP_LIMIT;
+    else process.env.OS_ORG_MEMBERSHIP_LIMIT = priorMemberCap;
   });
 
   async function setActive(organizationId: string | null): Promise<void> {
@@ -113,6 +139,46 @@ describe("Create User in multi-org mode joins the administrator's current organi
     const res = await stack.apiAs(adminToken, 'POST', '/auth/admin/create-user', {
       email,
       password: 'Orphan!Pass123',
+    });
+    const text = await res.clone().text();
+    expect(res.status, text).toBe(400);
+    expect((await res.json()).error.code).toBe('NO_ACTIVE_ORGANIZATION');
+    expect(await findRows(ql, 'sys_user', { email })).toHaveLength(0);
+  }, 120_000);
+
+  it("I1 import: each row joins the administrator's current organization; a row the member cap refuses is rolled back", async () => {
+    await setActive(importOrgId);
+    const emails = ['one.import-org@example.com', 'two.import-org@example.com', 'three.import-org@example.com'];
+    const res = await stack.apiAs(adminToken, 'POST', '/auth/admin/import-users', {
+      format: 'json',
+      passwordPolicy: 'temporary',
+      rows: emails.map((email, i) => ({ email, name: `Import ${i + 1}` })),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const { summary, rows } = (await res.json()).data;
+    expect(summary.created).toBe(2);
+    expect(summary.errors).toBe(1);
+
+    for (const [i, email] of emails.slice(0, 2).entries()) {
+      expect(rows[i]).toMatchObject({ ok: true, action: 'created' });
+      const members = await findRows(ql, 'sys_member', { user_id: String(rows[i].id) });
+      expect(members.map((m) => [m.organization_id, m.role]), email).toEqual([[importOrgId, 'member']]);
+    }
+    // The third row would exceed the cap: refused, and the real transaction took its account back.
+    expect(rows[2]).toMatchObject({ ok: false, action: 'failed' });
+    expect(rows[2].error).toContain('no user was created');
+    expect(rows[2].temporaryPassword).toBeUndefined();
+    expect(await findRows(ql, 'sys_user', { email: emails[2] })).toHaveLength(0);
+    expect(await findRows(ql, 'sys_member', { organization_id: importOrgId })).toHaveLength(MEMBER_CAP);
+  }, 120_000);
+
+  it('I2 import with no current organization: the whole import is refused, and no user is created', async () => {
+    await setActive(null);
+    const email = 'orphan.import-org@example.com';
+    const res = await stack.apiAs(adminToken, 'POST', '/auth/admin/import-users', {
+      format: 'json',
+      passwordPolicy: 'temporary',
+      rows: [{ email, name: 'Orphan' }],
     });
     const text = await res.clone().text();
     expect(res.status, text).toBe(400);

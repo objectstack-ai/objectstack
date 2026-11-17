@@ -121,3 +121,17 @@ describe('InboxPopover at phone width (objectstack#29076)', () => {
     expect(within(dialog).getByRole('button', { name: 'View all activity' }).className).toContain(PHONE_TAP);
   });
 });
+
+describe('the bell badge stays inside the phone bar (objectstack#34596)', () => {
+  it('below md the badge sits inside the 44 px trigger, at its corner; from md it keeps its desktop offset', () => {
+    render(bell(9));
+    const badge = screen.getByTestId('inbox-bell-badge');
+    // Two unread topics and nine approvals: past nine, the clamped label.
+    expect(badge.textContent).toBe('9+');
+    const classes = badge.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(['max-md:top-1', 'max-md:right-1', '-top-0.5', '-right-0.5']));
+    const trigger = screen.getByRole('button', { name: /^Notifications(,|$)/ });
+    expect(trigger).toContainElement(badge);
+    expect(trigger.className.split(/\s+/)).toEqual(expect.arrayContaining(['relative', 'max-md:size-11']));
+  });
+});

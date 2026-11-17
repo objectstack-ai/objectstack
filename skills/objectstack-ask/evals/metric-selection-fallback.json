@@ -1,0 +1,75 @@
+{
+  "skill_name": "objectstack-ask",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "用户问:「本季度的营收是多少?」 You called `list_datasets({ terms: ['营收', '本季度'] })`. The answer lists one dataset, `sales_analysis` (label 销售分析), with `matches: [{ term: '营收', member: 'measures.revenue', matchedOn: 'synonym' }]`; no other dataset has a match. What do you do next, and how do you write the answer?",
+      "expected_output": "One measure matches, so the governed metric answers: calls `query_dataset` with `datasetName: 'sales_analysis'` and a `selection` whose `measures` is `['revenue']`, with a `selection.runtimeFilter` on the dataset's date dimension for this quarter. Writes the answer in Chinese, cites the source from the answer's `provenance` (the dataset's label and the measure's label, as in 「指标：营收（数据集：销售分析）」) rather than from memory, uses the measure's `description` to say what the number includes, and states the quarter it filtered to in words. It does not compute the figure from the object tools.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["query_dataset"],
+        "must_not_contain": ["aggregate_records", "非指标口径"]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "The user asks: \"What is our pipeline?\" `list_datasets({ terms: ['pipeline'] })` answers two datasets with a match each: `opportunity_metrics` (label Opportunities) has `{ term: 'pipeline', member: 'measures.open_amount', matchedOn: 'synonym' }`, where `open_amount` is labelled Open Pipeline and described as \"Amount of opportunities not yet closed\"; `forecast_metrics` (label Forecast) has `{ term: 'pipeline', member: 'measures.weighted_amount', matchedOn: 'synonym' }`, labelled Weighted Pipeline and described as \"Open amount multiplied by stage probability\". What is your reply?",
+      "expected_output": "Several measures match (one word in two datasets), so the reply is a question and nothing else, such as \"Which pipeline do you mean?\", listing each candidate by its label, its dataset's label and its description (Open Pipeline, in Opportunities: amount of opportunities not yet closed; Weighted Pipeline, in Forecast: open amount multiplied by stage probability). It shows labels, not the measures' machine names. It does not pick one, gives no figure, and makes no further tool call until the user answers.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["Open Pipeline", "Weighted Pipeline", "Opportunities", "Forecast", "?"],
+        "must_not_contain": ["query_dataset", "aggregate_records", "open_amount", "weighted_amount"]
+      }
+    },
+    {
+      "id": 3,
+      "prompt": "The user asks: \"What was revenue last month?\" `list_datasets({ terms: ['revenue', 'last month'] })` answers three datasets, each with `matches: []`. Their measures include Won Revenue (dataset Sales: \"Amount of opportunities closed as won\"), Annual Revenue (dataset Accounts: \"Sum of each account's stated yearly revenue\") and Planned Revenue (dataset Targets: \"Revenue target set for the period\"); no measure has the synonym `revenue`. What is your reply?",
+      "expected_output": "Nothing matches, and the word is a loose form of several listed measures: the catalogue already in hand lists Won Revenue, Annual Revenue and Planned Revenue, whose labels contain it. A similar word is not a match, so no measure is selected. The reply is a question and nothing else, such as \"Which revenue do you mean?\", listing each candidate by its label, its dataset's label and its description (Won Revenue, in Sales; Annual Revenue, in Accounts; Planned Revenue, in Targets). It does not pick one and computes nothing: no figure, and no tool call until the user answers.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["Won Revenue", "Annual Revenue", "Planned Revenue", "Sales", "Accounts", "Targets", "?"],
+        "must_not_contain": ["query_dataset", "aggregate_records", "非指标口径"]
+      }
+    },
+    {
+      "id": 4,
+      "prompt": "The user asks: \"How many open support tickets do we have per priority?\" `list_datasets({ terms: ['open support tickets', 'priority'] })` answers two sales datasets with `matches: []`; none of their measures is about tickets. `list_objects` shows an object `support_ticket`. What do you do, and how does the answer open?",
+      "expected_output": "Nothing matches and no listed measure is a reading of the word, so this is the fallback. Calls `describe_object({ objectName: 'support_ticket' })` and reads the fields before filtering: `status` and `priority` carry `options`, so the filter uses the option's `value`, never its label. Calls `aggregate_records` once with a count grouped by `priority` and a `where` on the open status value, instead of paging `query_records` and adding rows up. Opens the answer with one line saying, in the user's language, that the figure is not from a governed metric, computed from the Support Ticket object's status and priority fields, then shows the counts by priority label and states the filter in words.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["describe_object", "aggregate_records", "priority"],
+        "must_not_contain": ["provenance"]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "The user asks: \"Which of this week's shipments are over the carrier's weight limit?\" `list_datasets` has no match and no measure about shipments. `describe_object({ objectName: 'shipment' })` lists `name`, `carrier`, `status`, `shipped_at` and `destination`; no object has a field for weight or for a carrier's limit. What is your reply?",
+      "expected_output": "The data cannot answer. Says the data it can read does not record it and names what is missing: a shipment's weight, and each carrier's limit. Offers the computation if the user supplies those values. It fills the gap with no figure of its own and draws no conclusion from one, so it names no shipment as over or under the limit. Any figure it does add (such as how many shipments went out this week) comes from a tool answer in this conversation.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["weight", "limit"],
+        "must_not_contain": ["typical", "probably"]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "用户问:「我们的毛利率是多少?」 `list_datasets({ terms: ['毛利率'] })` answers one dataset, `finance_summary` (label 财务汇总), with `membersWithheld: true`, `matches: []` and two listed measures, 营业收入 and 费用合计. What is your reply?",
+      "expected_output": "`membersWithheld: true` on 财务汇总 means it has members (measures or groupings) this user may not read, and the metric asked for may be among them, so the reply says exactly that, in Chinese and naming the dataset by its label, as in 「财务汇总里有您无权查看的指标或分组，毛利率可能是其中之一」. It never tells the user the metric is absent, and it shows the user no raw flag name. Nothing matched and the two listed measures (营业收入, 费用合计) are not readings of 毛利率, so no measure is selected and no governed figure is given; if it goes on to compute anything from the object tools, that answer opens with the 非指标口径 line.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["财务汇总", "毛利率"],
+        "must_not_contain": ["不存在"]
+      }
+    },
+    {
+      "id": 7,
+      "prompt": "用户问:「本月的营收和赢单率各是多少?」 You called `list_datasets({ terms: ['营收', '赢单率', '本月'] })`. The answer lists one dataset, `sales_analysis` (label 销售分析), with `matches: [{ term: '营收', member: 'measures.revenue', matchedOn: 'synonym' }, { term: '赢单率', member: 'measures.win_rate', matchedOn: 'label' }]`; no other dataset has a match. What do you do next, and how do you write the answer?",
+      "expected_output": "Each word matches exactly one measure (营收 names `revenue`, 赢单率 names `win_rate`), so these are two metrics, not two candidates for one word: both are computed and the user is not asked which one is meant. They share a dataset, so one `query_dataset` call does it: `datasetName: 'sales_analysis'`, a `selection` whose `measures` is `['revenue', 'win_rate']`, and a `selection.runtimeFilter` on the dataset's date dimension for this month. Writes the answer in Chinese with both figures, cites the source from the answer's `provenance` (as in 「指标：营收、赢单率（数据集：销售分析）」), and states the month it filtered to in words. It does not compute either figure from the object tools.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["query_dataset", "营收", "赢单率", "销售分析"],
+        "must_not_contain": ["aggregate_records", "非指标口径"]
+      }
+    }
+  ]
+}
