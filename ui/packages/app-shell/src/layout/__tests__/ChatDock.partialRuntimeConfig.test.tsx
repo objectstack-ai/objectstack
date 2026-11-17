@@ -60,6 +60,7 @@ vi.mock('../../runtime-config', async (importOriginal) => {
 // early return — so an empty catalog still exercises the read.
 vi.mock('../../hooks/surfaceAgent', () => ({
   resolveSurfaceAgent: vi.fn(() => undefined),
+  makerConvergedOnBuild: vi.fn(() => false),
 }));
 
 // The rest of the chat graph is irrelevant to the flag under test.
@@ -84,6 +85,8 @@ function dockState(overrides: Partial<ChatDockState> = {}): ChatDockState {
     width: 420,
     dragging: false,
     maximized: false,
+    fullWindow: false,
+    setFullWindow: vi.fn(),
     toggle: vi.fn(),
     expand: vi.fn(),
     collapse: vi.fn(),

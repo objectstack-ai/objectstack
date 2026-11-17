@@ -64,6 +64,24 @@ describe('collectExpectedEntries', () => {
   });
 });
 
+describe('collectExpectedEntries — a hook\'s declared texts (#34374)', () => {
+  const entries = collectExpectedEntries({
+    hooks: [{
+      name: 'lead_follow_up',
+      object: 'lead',
+      events: ['afterUpdate'],
+      body: { language: 'js', source: "await ctx.text('follow_up_subject', { lead: 'x' });" },
+      texts: { follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] } },
+    }],
+  }, { warnedGroups: new Set() });
+
+  it('yields hooks.<hook>.texts.<key>.message with the declared sentence, from the hook', () => {
+    const entry = entries.find((e) => e.path.join('.') === 'hooks.lead_follow_up.texts.follow_up_subject.message');
+    expect(entry?.sourceValue).toBe('Follow up with qualified lead: {{ lead }}');
+    expect(entry?.source).toBe('hook');
+  });
+});
+
 describe('authorWarnedTranslationGroups on the shipped ledger', () => {
   // A browser reads no ledger file, so there the default leaves no group out.
   // That matches the CLI only while the ledger warns on no translation group;

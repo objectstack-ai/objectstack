@@ -140,6 +140,7 @@
  *       (see `authorWarnedTranslationGroups`)
  *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message      (#33214)
+ *   hooks.<hook>.texts.<key>.message                           (#34374)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
@@ -1756,6 +1757,9 @@ export function collectExpectedEntries(
   // ── Hook refusal catalogues (`hooks.<hook>.refusals.<CODE>.message`) ─
   walkHookRefusals(config, out);
 
+  // ── Hook texts (`hooks.<hook>.texts.<key>.message`, #34374) ─────
+  walkHookTexts(config, out);
+
   // ── Object sections (fieldGroups + authored form/page sections) ───
   // Deliberately a pass of its own: the two authoring surfaces live in
   // `objects`, `views` and `pages`, and one section may be declared by more
@@ -2444,6 +2448,29 @@ function walkHookRefusals(config: any, out: ExpectedEntry[]): void {
           'hook',
         );
       }
+    }
+  }
+}
+
+/**
+ * Emit `hooks.<hook>.texts.<key>.message` for every text a hook declares
+ * (#34374, ruling 6913660232 parameter 7), seeded with the declared message.
+ *
+ * The hook runtime reads exactly that key (`hookTextMessageKey`) in the
+ * organization's language when the hook asks for the text (`ctx.text`), so
+ * each declared text is one demand, counted under the `hook` bucket like a
+ * refusal, and `os i18n extract` scaffolds it (parameter 5: the existing
+ * coverage check demands it, no new gate). Keyed by hook name.
+ */
+function walkHookTexts(config: any, out: ExpectedEntry[]): void {
+  const hooks: any[] = Array.isArray(config?.hooks) ? config.hooks : [];
+  for (const hook of hooks) {
+    const hookName = typeof hook?.name === 'string' && hook.name.length > 0 ? hook.name : undefined;
+    if (!hookName) continue;
+    const texts = hook.texts;
+    if (!texts || typeof texts !== 'object' || Array.isArray(texts)) continue;
+    for (const [key, entry] of Object.entries<any>(texts)) {
+      pushOptional(out, ['hooks', hookName, 'texts', key, 'message'], inlineText(entry?.message), 'hook');
     }
   }
 }
