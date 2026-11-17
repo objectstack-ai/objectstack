@@ -3231,6 +3231,10 @@ const ar = {
       missingToken: "رابط التحقق لا يحتوي على رمز.",
       emailMissing: "عنوان البريد الإلكتروني مفقود",
       resendButton: "إعادة إرسال بريد التحقق",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "لم يتم التحقق من بريدك الإلكتروني بعد. أرسل رابط التحقق إلى {{email}}، ثم انقر على الرابط للتحقق من حسابك.",
+      sendButton: "إرسال بريد التحقق",
       resending: "جارٍ الإرسال…",
       resent: "تم إرسال البريد! تحقق من صندوق الوارد",
       resentSuccess: "تم إرسال بريد التحقق!",

@@ -2397,7 +2397,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(run.modes.map((m) => m.mode)).toEqual(['scratch', 'ask']);
     const ask = run.modes[1]!;
     expect(ask.skipped).toBeUndefined();
-    expect(ask.template).toEqual({ source: 'this run’s from-scratch build', install: { ok: true, status: 200 }, installModesSupplied: true });
+    expect(ask.template).toEqual({ source: 'this run’s from-scratch build', install: { ok: true, status: 200 }, installModesSupplied: true, installMode: 'unmanaged' });
     expect(ask.build).toBeUndefined();
     expect(ask.iterate).toBeUndefined();
     expect(ask.findings).toEqual([]);
@@ -2614,6 +2614,140 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     const rows = (run: CardRun, driver: AgentDriver) => (runRecord(meta(driver), run).results as Array<{ id: string }>).filter((r) => !r.id.includes('.ask.'));
     expect(JSON.stringify(rows(withAsk, b.driver))).toBe(JSON.stringify(rows(without, a.driver)));
     expect(JSON.stringify(cardScorecard(withAsk).modes.slice(0, 2))).toBe(JSON.stringify(cardScorecard(without).modes));
+  });
+});
+
+// ── Ask mode's managed fallback ─────────────────────────────────────────────
+
+describe('runCard — ask mode installs a build the unmanaged door refuses UNMANAGED_INSTALL_UNCOPYABLE managed instead, and records the mode (#34687)', () => {
+  const CARD = 'crm_account_with_contacts';
+  const UNCOPYABLE: HttpAnswer = {
+    ok: false,
+    status: 422,
+    body: {},
+    code: 'UNMANAGED_INSTALL_UNCOPYABLE',
+    message: "Package 'com.example.democrm' cannot be installed unmanaged: `capabilities` — 1 'capability' item(s). Install it managed instead.",
+  };
+
+  /** A host whose unmanaged door answers `unmanaged`, and whose managed door installs and answers `managed`. */
+  class TwoDoors extends FakeApp {
+    unmanagedCalls: Array<Record<string, unknown>> = [];
+    managedCalls: Array<Record<string, unknown>> = [];
+    managedAnswer: HttpAnswer = { ok: true, status: 200, body: {} };
+    constructor(private readonly unmanaged: HttpAnswer) {
+      super();
+    }
+    override async installUnmanaged(manifest: Record<string, unknown>) {
+      this.unmanagedCalls.push(manifest);
+      if (this.unmanaged.ok) this.installed = manifest;
+      return this.unmanaged;
+    }
+    async installManaged(manifest: Record<string, unknown>) {
+      this.managedCalls.push(manifest);
+      if (this.managedAnswer.ok) this.installed = manifest;
+      return this.managedAnswer;
+    }
+  }
+
+  it('the refusal falls back to a managed install of the same build, unchanged; the Run half runs; the record names the mode and the refusal; every fresh copy installs managed too', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new TwoDoors(UNCOPYABLE) });
+    const build = { ...artifact(), capabilities: [{ name: 'democrm_bulk_reassign' }] };
+    const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: build });
+    const ask = run.modes[0]!;
+    expect(ask.template).toEqual({
+      source: 'supplied template',
+      install: { ok: true, status: 200 },
+      installModesSupplied: false,
+      installMode: 'managed',
+      unmanagedRefusal: { ok: false, status: 422, code: 'UNMANAGED_INSTALL_UNCOPYABLE', message: UNCOPYABLE.message },
+    });
+    expect(ask.findings).toEqual(['unmanaged install refused UNMANAGED_INSTALL_UNCOPYABLE (422): installed the same build managed instead']);
+    // The question and operation turns ran on the managed install.
+    expect(ask.run).toBeDefined();
+    expect(ask.run!.questions.length).toBeGreaterThan(0);
+    expect(ask.run!.operations.length).toBeGreaterThan(0);
+    expect(driver.seen.some((k) => k.startsWith(`${CARD}/ask/run/`))).toBe(true);
+    // Nothing stripped: the managed body is the unmanaged one minus only the `installModes` the runner adds for the copy.
+    const host = apps[0]!;
+    expect(host.unmanagedCalls).toHaveLength(1);
+    expect(host.managedCalls).toHaveLength(1);
+    const { installModes, ...copyBody } = host.unmanagedCalls[0]!;
+    expect(installModes).toEqual(['unmanaged']);
+    expect(host.managedCalls[0]).toEqual(copyBody);
+    expect(host.managedCalls[0]!.capabilities).toEqual([{ name: 'democrm_bulk_reassign' }]);
+    // A fresh copy is installed the way the run's own install landed: managed, never the refused door again.
+    const copies = apps.slice(1);
+    expect(copies.length).toBeGreaterThan(0);
+    for (const copy of copies) {
+      expect(copy.unmanagedCalls).toEqual([]);
+      expect(copy.managedCalls).toEqual([copyBody]);
+    }
+    expect(renderScorecard(cardScorecard(run))).toContain('- ask finding: unmanaged install refused UNMANAGED_INSTALL_UNCOPYABLE (422): installed the same build managed instead');
+  });
+
+  it('a different 4xx from the unmanaged door does not fall back: the refusal stays the finding and no turn runs', async () => {
+    for (const refusal of [
+      { ok: false, status: 422, body: {}, code: 'INSTALL_MODE_NOT_PERMITTED', message: 'the package does not permit unmanaged' },
+      { ok: false, status: 409, body: {}, code: 'UNMANAGED_INSTALL_WALLED_POSTURE', message: 'the deployment walls organizations' },
+      { ok: false, status: 400, body: {}, code: 'PLUGIN_MANIFEST_INVALID', message: 'Invalid manifest payload.' },
+    ] satisfies HttpAnswer[]) {
+      const { scenario, ops, driver, apps } = setup({ app: () => new TwoDoors(refusal) });
+      const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+      const ask = run.modes[0]!;
+      expect(apps.every((a) => a.managedCalls.length === 0)).toBe(true);
+      expect(ask.template).toEqual({
+        source: 'supplied template',
+        install: { ok: false, status: refusal.status, code: refusal.code, message: refusal.message },
+        installModesSupplied: true,
+        installMode: 'unmanaged',
+      });
+      expect(ask.findings).toEqual([`unmanaged install refused: ${refusal.status} ${refusal.code} ${refusal.message}`]);
+      expect(ask.run).toBeUndefined();
+      expect(driver.seen).toEqual([]);
+    }
+  });
+
+  it('an unmanaged install the door accepts records `unmanaged`, and the managed door is never called', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new TwoDoors({ ok: true, status: 200, body: {} }) });
+    const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    const ask = run.modes[0]!;
+    expect(ask.template).toEqual({ source: 'supplied template', install: { ok: true, status: 200 }, installModesSupplied: true, installMode: 'unmanaged' });
+    expect(ask.findings).toEqual([]);
+    expect(ask.run).toBeDefined();
+    expect(apps.every((a) => a.managedCalls.length === 0)).toBe(true);
+    expect(apps.every((a) => a.unmanagedCalls.length === 1)).toBe(true);
+  });
+
+  it('template mode stays unmanaged: the same refusal is its finding, its iterate never runs, and the managed door is never called', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new TwoDoors(UNCOPYABLE) });
+    const run = await runCard(scenario, driver, ops, { modes: ['template'], admin: ADMIN, templateArtifact: artifact() });
+    const template = run.modes[0]!;
+    expect(apps.every((a) => a.managedCalls.length === 0)).toBe(true);
+    expect(template.template).toMatchObject({ install: { ok: false, status: 422, code: 'UNMANAGED_INSTALL_UNCOPYABLE' }, installMode: 'unmanaged' });
+    expect(template.template!.unmanagedRefusal).toBeUndefined();
+    expect(template.findings).toEqual([`unmanaged install refused: 422 UNMANAGED_INSTALL_UNCOPYABLE ${UNCOPYABLE.message}`]);
+    expect(template.iterate).toBeUndefined();
+    expect(driver.seen).toEqual([]);
+  });
+
+  it('a managed install refused too is the finding, naming both answers; a harness with no managed door keeps the refusal and says so', async () => {
+    class BothRefuse extends TwoDoors {
+      override managedAnswer: HttpAnswer = { ok: false, status: 422, body: {}, code: 'VALIDATION_ERROR', message: 'a hook with no body' };
+    }
+    const both = setup({ app: () => new BothRefuse(UNCOPYABLE) });
+    const r = await runCard(both.scenario, both.driver, both.ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    expect(r.modes[0]!.template).toMatchObject({ install: { ok: false, status: 422, code: 'VALIDATION_ERROR' }, installMode: 'managed', unmanagedRefusal: { code: 'UNMANAGED_INSTALL_UNCOPYABLE' } });
+    expect(r.modes[0]!.findings).toEqual([`unmanaged install refused: 422 UNMANAGED_INSTALL_UNCOPYABLE ${UNCOPYABLE.message}; the managed install of the same build was refused too: 422 VALIDATION_ERROR a hook with no body`]);
+    expect(r.modes[0]!.run).toBeUndefined();
+
+    class UnmanagedOnly extends FakeApp {
+      override installAnswer = UNCOPYABLE;
+    }
+    const bare = setup({ app: () => new UnmanagedOnly() });
+    const b = await runCard(bare.scenario, bare.driver, bare.ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    expect(b.modes[0]!.template).toMatchObject({ installMode: 'unmanaged', install: { code: 'UNMANAGED_INSTALL_UNCOPYABLE' } });
+    expect(b.modes[0]!.findings).toEqual([`unmanaged install refused: 422 UNMANAGED_INSTALL_UNCOPYABLE ${UNCOPYABLE.message} (this app harness has no managed install door to fall back to)`]);
+    expect(b.modes[0]!.run).toBeUndefined();
   });
 });
 

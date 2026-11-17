@@ -3098,6 +3098,10 @@ const ru = {
       missingToken: "В ссылке подтверждения отсутствует токен.",
       emailMissing: "Email не указан",
       resendButton: "Отправить письмо повторно",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Ваш email ещё не подтверждён. Отправьте ссылку подтверждения на {{email}}, затем нажмите на ссылку для подтверждения аккаунта.",
+      sendButton: "Отправить письмо подтверждения",
       resending: "Отправка…",
       resent: "Письмо отправлено! Проверьте входящие",
       resentSuccess: "Письмо с подтверждением отправлено!",
