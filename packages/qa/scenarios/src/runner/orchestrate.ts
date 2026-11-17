@@ -1269,12 +1269,12 @@ function seedLoadLetters(n: number): string {
  * does not hold. An entry carries the loader's message and no error code. A
  * door that refuses the package, a harness with no managed door, or a load
  * that did not run inline (`seeded.mode` other than `inline`) refuses every
- * row, with that reason.
+ * row, with that reason in its message (the door's status and code included).
  */
 async function loadSeedRows(app: AppHarness, datasets: readonly SeedDataset[]): Promise<{ inserted: number; refused: RunHalf['seed']['refused'] }> {
   const sent = datasets.flatMap((d) => d.records.map((r) => ({ object: d.object, id: String(r.id) })));
   if (sent.length === 0) return { inserted: 0, refused: [] };
-  const all = (message: string, code?: string) => ({ inserted: 0, refused: sent.map((r) => ({ ...r, ...(code ? { code } : {}), message: message.slice(0, 300) })) });
+  const all = (message: string) => ({ inserted: 0, refused: sent.map((r) => ({ ...r, message: message.slice(0, 300) })) });
   if (!app.installManaged) return all('this app harness has no managed install door, which the seed loads through');
   const namespace = `scenarioseed${seedLoadLetters(++seedLoads)}`;
   const manifest = {
@@ -1287,7 +1287,7 @@ async function loadSeedRows(app: AppHarness, datasets: readonly SeedDataset[]): 
     data: datasets.map((d) => ({ object: d.object, mode: 'insert', externalId: 'id', records: d.records })),
   };
   const answer = await app.installManaged(manifest);
-  if (!answer.ok) return all(`the seed package was refused: ${answer.status}${answer.message ? ` ${answer.message}` : ''}`, answer.code);
+  if (!answer.ok) return all(`the seed package was refused: ${answer.status}${answer.code ? ` ${answer.code}` : ''}${answer.message ? ` ${answer.message}` : ''}`);
   const seeded = (answer.body as { data?: { seeded?: SeedLoaderAnswer } } | null)?.data?.seeded;
   if (seeded?.mode !== 'inline') return all(`the seed did not load inline: ${seeded ? `mode ${String(seeded.mode)}${seeded.reason ? ` (${seeded.reason})` : ''}` : 'the install answered no seed result'}`);
 
