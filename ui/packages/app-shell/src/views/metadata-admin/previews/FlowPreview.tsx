@@ -109,6 +109,12 @@ export interface FlowPreviewChrome {
    * state setter (whose identity React keeps), never a fresh closure.
    */
   onProblemsChange: (tally: FlowProblemTally) => void;
+  /**
+   * objectstack#34818 — whether the open flow has a published version, as the
+   * host read it; the Runs body says "publish to see runs" for `false` and
+   * names the engine alone for `true`. Absent: the host does not know.
+   */
+  published?: boolean;
 }
 
 const FlowPreviewChromeContext = React.createContext<FlowPreviewChrome | null>(null);
@@ -576,7 +582,7 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
             <div className="min-h-0 overflow-hidden">
               <div className="mx-auto h-full max-w-3xl px-3 py-2">
                 {/* The engine keys runs by the flow's name; the host offers this section only with one. */}
-                {flowName && <FlowRunsPanel flowName={flowName} nodes={nodes} locale={locale} />}
+                {flowName && <FlowRunsPanel flowName={flowName} nodes={nodes} locale={locale} published={chrome.published} />}
               </div>
             </div>
           )}

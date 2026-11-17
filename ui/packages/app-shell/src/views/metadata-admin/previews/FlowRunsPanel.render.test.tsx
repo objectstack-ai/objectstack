@@ -144,3 +144,39 @@ describe('FlowRunsPanel (render)', () => {
     expect(screen.queryByText('failure')).toBeNull();
   });
 });
+
+// objectstack#34818 item 9 — the empty Runs tab says which of its two causes
+// holds when the host knows: a flow never published says how runs come to be
+// listed and asks the engine nothing; a published flow whose read fails names
+// the engine alone. A host that does not know keeps the sentence naming both.
+describe('FlowRunsPanel — why the list is empty (objectstack#34818)', () => {
+  it('an unpublished flow says to publish and turn it on, and fetches nothing', () => {
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    render(<FlowRunsPanel flowName="xin_huiyi_tixing" published={false} />);
+    expect(screen.getByTestId('flow-runs-unpublished').textContent).toBe(
+      'Publish and turn on this flow, and each of its runs is listed here.',
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a published flow whose read fails names the engine alone', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+    render(<FlowRunsPanel flowName="xin_huiyi_tixing" published />);
+    const line = await screen.findByTestId('flow-runs-unavailable');
+    expect(line.textContent).toMatch(/automation engine is not answering/);
+    expect(line.textContent).not.toMatch(/published/);
+  });
+
+  it('control: a host that does not know keeps the sentence naming both causes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('down', { status: 503 })));
+    render(<FlowRunsPanel flowName="xin_huiyi_tixing" />);
+    expect((await screen.findByTestId('flow-runs-unavailable')).textContent).toMatch(/offline or this flow hasn’t been published/);
+  });
+
+  it('control: a published flow with no runs still says "No runs yet."', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: { runs: [] } }), { status: 200 })));
+    render(<FlowRunsPanel flowName="xin_huiyi_tixing" published />);
+    expect(await screen.findByText('No runs yet.')).toBeTruthy();
+  });
+});

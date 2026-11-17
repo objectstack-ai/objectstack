@@ -8046,6 +8046,32 @@ export function DataPillar({
 // objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.
 export { FlowStatusDot, type NewFlowTrigger };
 
+/**
+ * objectstack#34818 — the names of the flows that have a published version in
+ * these scopes: the published list (`list()` serves no drafts). Any failed read
+ * answers `null`, "unknown", so the Runs tab keeps its sentence that names both
+ * causes rather than claim the flow was never published.
+ */
+async function readPublishedFlowNames(
+  client: Pick<MetadataClient, 'listResponse'>,
+  scopes: ReadonlyArray<string | null>,
+): Promise<ReadonlySet<string> | null> {
+  try {
+    const answers = await Promise.all(
+      scopes.map((packageId) => client.listResponse<Record<string, unknown>>('flow', packageId === null ? {} : { packageId })),
+    );
+    const names = new Set<string>();
+    for (const answer of answers) {
+      for (const item of answer?.items ?? []) {
+        if (item && typeof item.name === 'string' && item.name) names.add(item.name);
+      }
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
 /** Automations pillar — flows: list → FlowPreview (default OFF / review-then-enable). */
 export function AutomationsPillar({
   packageId: railPackageId,
@@ -8329,6 +8355,10 @@ export function AutomationsPillar({
   // list's `registrations` (served beside the items, keyed by name). A flow
   // with no entry is one no engine judged, which reads as before.
   const [flowRegistrations, setFlowRegistrations] = React.useState<Record<string, FlowRegistration>>({});
+  // objectstack#34818 — the flows of the rail's scope that have a published
+  // version, so the Runs tab can tell "not published yet" from "the engine is
+  // not answering". `null` until read, and after a failed read: unknown.
+  const [publishedFlowNames, setPublishedFlowNames] = React.useState<ReadonlySet<string> | null>(null);
   // objectui#12454 — the rail groups flows by the object each is about and
   // marks each with its trigger kind, both read off the flow's definition as
   // served (`flowGrouping.ts`), with the scope's objects naming the groups.
@@ -8397,7 +8427,7 @@ export function AutomationsPillar({
                 readFlowDefinitions(client, pairId),
                 readObjectLabels(client, pairId, locale),
               ]);
-        const [baseItems, registrations, definitions, objects, pair] = await Promise.all([
+        const [baseItems, registrations, definitions, objects, pair, publishedNames] = await Promise.all([
           packageId === null
             ? loadPackageLessSurfaces(client, 'flow', locale)
             : loadPackageSurfaces(client, 'flow', packageId, locale),
@@ -8405,10 +8435,12 @@ export function AutomationsPillar({
           readFlowDefinitions(client, packageId),
           readObjectLabels(client, packageId, locale),
           readPair().catch(() => null),
+          readPublishedFlowNames(client, [packageId, ...(pairId === null ? [] : [pairId])]),
         ]);
         if (cancelled) return;
         const items: Surface[] = withPairItems<Surface>(baseItems, pair?.[0] ?? [], pairId);
         setFlows(items);
+        setPublishedFlowNames(publishedNames);
         setFlowRegistrations(pair ? { ...pair[1], ...registrations } : registrations);
         setFlowDefinitions(pair ? new Map([...pair[2], ...definitions]) : definitions);
         setObjectLabels(pair ? new Map([...pair[3], ...objects]) : objects);
@@ -9660,7 +9692,12 @@ export function AutomationsPillar({
                     {/* objectui#12454 — the header holds the meta and the tabs, so the
                         preview shows the open tab's section and draws no bar of its own. */}
                     <FlowPreviewChromeProvider
-                      value={{ section, onSectionChange: setFlowSection, onProblemsChange: setProblemTally }}
+                      value={{
+                        section,
+                        onSectionChange: setFlowSection,
+                        onProblemsChange: setProblemTally,
+                        published: current && publishedFlowNames ? publishedFlowNames.has(current.name) : undefined,
+                      }}
                     >
                       {React.createElement(Preview, {
                         type: current.type,

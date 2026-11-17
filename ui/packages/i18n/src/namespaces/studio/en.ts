@@ -4082,6 +4082,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.flowRuns.unavailable':
     'Run history unavailable — the automation engine is offline or this flow hasn’t been published.',
   'engine.flowRuns.empty': 'No runs yet.',
+  // objectstack#34818 — the two causes the line above names, each said alone when the host knows which.
+  'engine.flowRuns.unpublished': 'Publish and turn on this flow, and each of its runs is listed here.',
+  'engine.flowRuns.engineOffline': 'Run history unavailable — the automation engine is not answering. Try again later.',
   'engine.flowRuns.noSteps': 'No step log recorded.',
   'engine.flowRuns.iteration': 'Iteration',
   'engine.flowRuns.iterationN': 'Iteration {n}',

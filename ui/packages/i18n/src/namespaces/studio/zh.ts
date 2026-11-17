@@ -3680,6 +3680,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowRuns.refresh': '刷新运行历史',
   'engine.flowRuns.unavailable': '运行历史不可用 —— 自动化引擎已离线,或此流程尚未发布。',
   'engine.flowRuns.empty': '暂无运行记录。',
+  // objectstack#34818 — 上面那句里的两种原因，宿主知道是哪一种时各说各的。
+  'engine.flowRuns.unpublished': '发布并启用后，这里显示每次运行的记录。',
+  'engine.flowRuns.engineOffline': '运行历史暂时不可用 —— 自动化引擎没有响应，请稍后再试。',
   'engine.flowRuns.noSteps': '未记录步骤日志。',
   'engine.flowRuns.iteration': '迭代',
   'engine.flowRuns.iterationN': '第 {n} 次迭代',
