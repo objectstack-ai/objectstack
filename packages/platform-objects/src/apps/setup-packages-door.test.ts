@@ -66,7 +66,7 @@ describe('the unfiltered package list is a Studio surface, not a Setup one (#250
     const items = setupItems();
     // Control: the walk reads the real Setup shell and its contributions.
     expect(items.some((i) => i.id === 'group_apps')).toBe(true);
-    expect(items.some((i) => i.id === 'nav_packaged_actions')).toBe(true);
+    expect(items.some((i) => i.id === 'nav_users')).toBe(true);
 
     expect(items.filter(isUnfilteredPackagesDoor)).toEqual([]);
     expect(items.filter((i) => i.id === 'nav_packages')).toEqual([]);

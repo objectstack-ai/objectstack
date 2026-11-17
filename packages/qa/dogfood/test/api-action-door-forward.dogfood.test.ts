@@ -196,9 +196,13 @@ describe('[#27506] a same-origin api action is dispatched through the action doo
     expect(refused.json?.error?.code).toBe('ACTION_DISABLED');
     // [#27842] The sentence is the end user's: it names where an administrator
     // turns the action back on, and no system table (the code is the machine half).
+    // [#34724, ruling 6944409840] ban_user is a platform (plugin-auth, scope
+    // `system`) action, which Studio offers no switch for, so the sentence
+    // names the activation door instead.
     const message = String(refused.json?.error?.message);
     expect(message).toMatch(/^This action is turned off for this deployment\. /);
-    expect(message).toContain('An administrator can turn it on again under Setup › Packaged Actions');
+    expect(message).toContain('An administrator can turn it on again through the action activation API (POST /api/v1/actions/_activation/');
+    expect(message).not.toContain('in its package in Studio');
     expect(message).not.toContain('sys_metadata_activation');
     expect(await isBanned(), 'a switched-off Ban User still banned — the #27506 defect').toBe(false);
   }, 120_000);

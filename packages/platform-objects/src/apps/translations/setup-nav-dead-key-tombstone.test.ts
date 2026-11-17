@@ -73,7 +73,15 @@
 //                           are the whole claim.
 //   nav_packaged_automation Setup › Packaged automation (ADR-0146 D11): its
 //                           flows half moved into Studio (D4), and its actions
-//                           half is its own entry, `nav_packaged_actions`.
+//                           half became its own entry, `nav_packaged_actions`.
+//   nav_packaged_actions    Setup › Packaged Actions (objectstack#34724, the
+//                           ADR-0146 D4 amendment of 2026-11-17): a packaged
+//                           action's switch moved onto the action, in its app
+//                           in Studio. Measured differently: the grep answers
+//                           zero for `id: 'nav_packaged_actions'`, but the id
+//                           is still spelled by this file, the retirement pin
+//                           and the QA checklist, so the assertions below are
+//                           the whole claim.
 //   nav_audit_log_browser   the console's audit browser (`audit:log`), which
 //                           `@objectstack/plugin-audit` now contributes under
 //                           `nav_audit_logs` ("Audit Log"), the id its
@@ -126,6 +134,7 @@ const DEAD_SETUP_NAV_IDS = [
   'nav_device_codes',
   'nav_jwks',
   'nav_metadata',
+  'nav_packaged_actions',
   'nav_packaged_automation',
   'nav_permission_sets',
   'nav_positions',

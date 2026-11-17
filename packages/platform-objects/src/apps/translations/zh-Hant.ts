@@ -38,7 +38,6 @@ export const zhHant: TranslationData = {
       navigation: {
         group_overview: { label: '總覽' },
         group_apps: { label: '應用程式' },
-        nav_packaged_actions: { label: '打包動作' },
         nav_marketplace_browse: { label: '瀏覽應用程式市場' },
         nav_marketplace_installed: { label: '已安裝應用程式' },
         nav_cloud_connection: { label: '雲端連線' },

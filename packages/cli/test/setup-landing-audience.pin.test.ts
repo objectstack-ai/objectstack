@@ -13,18 +13,20 @@
 // entry wins; an entry whose `visible` is false is not shown, and an `object`
 // entry is pruned when the member may not read its object (objectui#12109).
 //
-// Setup's first served entry is Packaged Actions (`nav_packaged_actions`, a
-// `component`). Its page reads `/data/sys_metadata_activation`, and the
-// object-read prune does not judge a `component` entry, so before #33224 every
-// member landed there: a separation-of-duties officer whose ledger read
-// answers 403 opened Setup on `activation ledger HTTP 403`. The entry now
-// carries `visible: current_user.can('sys_metadata_activation', 'read')`, and:
+// Setup's first served entry used to be Packaged Actions
+// (`nav_packaged_actions`, a `component`). Its page read
+// `/data/sys_metadata_activation`, and the object-read prune does not judge a
+// `component` entry, so before #33224 every member landed there: a
+// separation-of-duties officer whose ledger read answers 403 opened Setup on
+// `activation ledger HTTP 403`. #33224 gave the entry the ledger-read audience.
+// objectstack#34724 (the ADR-0146 D4 amendment of 2026-11-17) then retired the
+// entry and its page: a packaged action's switch is on the action, in Studio.
+// So now:
 //
-//   - an officer who may not read the ledger, and may read users, lands on
-//     People & Org › Users (`nav_users`);
-//   - a member who may read the ledger lands on Packaged Actions, as before;
-//   - the platform administrator still lands on System Overview, which is
-//     served to them ahead of Packaged Actions, and is still shown the entry.
+//   - no Packaged Actions entry is served, to anyone;
+//   - an officer who may read users lands on People & Org › Users
+//     (`nav_users`), whatever their ledger read;
+//   - the platform administrator still lands on System Overview.
 //
 // The served `/meta/app/setup` tree is real (shell, contributions, registry
 // fold, per-request filter); the landing walk below restates the console's two
@@ -191,18 +193,15 @@ function entries(items: AnyRec[] | undefined): AnyRec[] {
 const OFFICER = ['setup.access', 'view_all_audit_log'];
 
 describe('Setup lands each member on an entry whose page they can read (#33224)', () => {
-    it('Packaged Actions is served with the ledger-read audience its page needs', async () => {
-        const setup = await servedSetup(OFFICER);
-        const packaged = entries(setup.navigation).find((i) => i.id === 'nav_packaged_actions');
-        expect(packaged).toMatchObject({
-            type: 'component',
-            componentRef: 'automation:packaged-actions',
-            visible: "current_user.can('sys_metadata_activation', 'read')",
-        });
-        // Control: it is still the FIRST landing-type entry served, so the
-        // predicate is what moves the officer's landing, not the order.
-        const firstLanding = entries(setup.navigation).find((i) => LANDING_TYPES.has(i.type));
-        expect(firstLanding?.id).toBe('nav_packaged_actions');
+    it('no Packaged Actions entry is served: the page retired (objectstack#34724)', async () => {
+        for (const permissions of [OFFICER, ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []]) {
+            const setup = await servedSetup(permissions);
+            const served = entries(setup.navigation);
+            // Control: the walk reads the served tree.
+            expect(served.some((i) => i.id === 'nav_users')).toBe(true);
+            expect(served.filter((i) => i.id === 'nav_packaged_actions')).toEqual([]);
+            expect(served.filter((i) => i.componentRef === 'automation:packaged-actions')).toEqual([]);
+        }
     });
 
     it('an officer who may not read the activation ledger lands on Users, not on a 403 page', async () => {
@@ -211,7 +210,7 @@ describe('Setup lands each member on an entry whose page they can read (#33224)'
         expect(landingFor(setup, officer)).toBe('nav_users');
     });
 
-    it('a member who may read the activation ledger still lands on Packaged Actions', async () => {
+    it('a member who may read the activation ledger lands on Users too: no ledger page is ahead of it', async () => {
         // Same served tree as the officer's; only the ledger read differs.
         const setup = await servedSetup(OFFICER);
         const reader = {
@@ -219,20 +218,15 @@ describe('Setup lands each member on an entry whose page they can read (#33224)'
             sys_audit_log: { allowRead: true },
             sys_user: { allowRead: true },
         };
-        expect(landingFor(setup, reader)).toBe('nav_packaged_actions');
+        expect(landingFor(setup, reader)).toBe('nav_users');
     });
 
-    it('the platform administrator lands where they did before, and is still shown Packaged Actions', async () => {
+    it('the platform administrator lands where they did before', async () => {
         const setup = await servedSetup(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []);
         const admin = {
             sys_metadata_activation: { allowRead: true, viewAllRecords: true },
             sys_user: { allowRead: true, viewAllRecords: true },
         };
-        // The administrator's first served entry is the System Overview, ahead
-        // of Packaged Actions; the predicate does not move it.
         expect(landingFor(setup, admin)).toBe('nav_system_overview');
-        const packaged = entries(setup.navigation).find((i) => i.id === 'nav_packaged_actions');
-        expect(packaged).toBeDefined();
-        expect(landingFor({ navigation: [packaged] }, admin)).toBe('nav_packaged_actions');
     });
 });

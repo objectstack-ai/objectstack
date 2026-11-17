@@ -73,7 +73,6 @@ export const en: TranslationData = {
         nav_connect_agent: { label: 'Connect an AI Assistant' },
 
         // Apps / Marketplace
-        nav_packaged_actions: { label: 'Packaged Actions' },
         nav_marketplace_browse: { label: 'Browse Marketplace' },
         nav_marketplace_installed: { label: 'Installed Apps' },
         nav_cloud_connection: { label: 'Cloud Connection' },

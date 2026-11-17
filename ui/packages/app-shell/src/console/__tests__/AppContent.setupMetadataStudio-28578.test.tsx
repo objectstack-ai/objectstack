@@ -28,7 +28,9 @@
  * One more retired Setup URL redirects here (ADR-0146 D11): a bookmark of
  * Setup › Packaged automation (`component/automation/packaged`) opens Studio's
  * Automations pillar for the package its `?package=` names, or the area's
- * cross-package flow list when it names none.
+ * cross-package flow list when it names none. And objectstack#34724: a
+ * bookmark of Setup › Packaged Actions (`component/automation/packaged-actions`)
+ * opens the named app's Data pillar, or the Studio landing.
  *
  * The host's own aliases (`system/objects`, `system/metadata`,
  * `system/{roles,positions,permissions}`) are `apps/console`'s, pinned in
@@ -42,6 +44,10 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
+// The page reaches `celAuthoring`'s dynamic `@objectstack/lint` import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 
@@ -220,10 +226,23 @@ describe('a bookmark of the retired Setup › Packaged automation page opens Stu
   });
 
   it('control: another component ref still resolves through the component route, not Studio', async () => {
-    const chain = renderAt('/apps/setup/component/automation/packaged-actions');
+    const chain = renderAt('/apps/setup/component/developer/packages');
     await screen.findByTestId('console-layout');
-    expect(chain).toEqual(['/apps/setup/component/automation/packaged-actions']);
+    expect(chain).toEqual(['/apps/setup/component/developer/packages']);
     expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
+  });
+});
+
+describe('a bookmark of the retired Setup › Packaged Actions page opens Studio (objectstack#34724)', () => {
+  it.each([
+    ['/apps/setup/component/automation/packaged-actions', '/studio'],
+    ['/apps/setup/component/automation/packaged-actions?package=crm', '/studio/crm/data?package=crm'],
+    ['/apps/crm/component/automation/packaged-actions?package=all', '/studio?package=all'],
+  ])('%s → %s, in one hop', async (from, to) => {
+    const chain = renderAt(from);
+
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+    expect(chain).toEqual([from, to]);
   });
 });
 

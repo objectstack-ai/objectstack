@@ -38,7 +38,6 @@ export const ar: TranslationData = {
       navigation: {
         group_overview: { label: 'نظرة عامة' },
         group_apps: { label: 'التطبيقات' },
-        nav_packaged_actions: { label: 'الإجراءات المضمَّنة في الحزم' },
         nav_marketplace_browse: { label: 'تصفح السوق' },
         nav_marketplace_installed: { label: 'التطبيقات المثبّتة' },
         nav_cloud_connection: { label: 'الاتصال السحابي' },

@@ -450,6 +450,27 @@ Fork D), not one of the §9 walls. This record moves the switch to where the ite
   open; it is decided.
 - **The action ledger switch is out of this epic** (#27842, #27504; 「四个小问题 同意」): `action` keeps ADR-0126 §8's
   disable leg where it is.
+- **Amended 2026-11-17 — the action switch moves onto the action in Studio; Setup › Packaged Actions retires**
+  ([#34724](https://github.com/objectstack-ai/objectstack/issues/34724), child of epic
+  [#34571](https://github.com/objectstack-ai/objectstack/issues/34571); maintainer, verbatim:
+  「打包动作不是应该在 studio 对应的软件包中自定义吗」, and on platform actions getting no switch, 「同意，立卡」).
+  The bullet above is superseded: in Studio, on a **read-only app package**, each vendor action carries the activation
+  ledger's switch — on the object's Actions view for an action embedded in the object, on the item's page in the "All
+  metadata" area for a standalone `action` item — with the flow switch's control, words ("on / off for this
+  deployment"), pre-judged gate and verbatim refusals (the first two bullets of this decision, unchanged). The doors
+  are the ones Setup's page used and are unchanged: the read is the `sys_metadata_activation` list (rows with
+  `metadata_type: 'action'`, absence meaning active), the write `POST /api/v1/actions/_activation/:object/:action`
+  (objectstack#12348), its gate the same `refuseUngrantedActivationWrite`. **The platform's own actions** (those a
+  kernel package ships, on `sys_user`, `sys_api_key`, `sys_sso_provider` …) **carry no switch anywhere** in the
+  console, and the server door is not changed. A row that already switches a platform action off stays in force:
+  no boot or upgrade step re-enables it (maintainer ruling
+  [6944409840](https://github.com/objectstack-ai/objectstack/issues/34724#issuecomment-6944409840), on the
+  measurement [6943920659](https://github.com/objectstack-ai/objectstack/issues/34724#issuecomment-6943920659)).
+  Turning one on again is the activation door's `{ enabled: true }`, and the `ACTION_DISABLED` sentence for a
+  platform action names that door rather than Studio. Setup's `nav_packaged_actions` entry and its
+  `automation:packaged-actions` page retire in the same change as the switch, so no window is left without one; a
+  bookmark of the page opens Studio. Action-clone stays unchartered (ADR-0126 §8 item 2): ⛔ no "new similar" for an
+  action, and a customer's own button stays a new action in `.custom` ([D9](#d9)).
 
 Maintainer, verbatim (2026-10-30): 「打包自动化开关，这个就很奇怪，正常的操作我应该是在studio中进入 hotcrm app，选中一个流程，点禁用或者复制更符合逻辑吧？」
 

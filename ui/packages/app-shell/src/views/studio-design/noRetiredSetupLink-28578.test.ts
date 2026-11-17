@@ -4,11 +4,12 @@
  * Studio links into no retired Setup page (objectstack ADR-0146; N-28).
  *
  * Setup › Packaged automation retired with D11: a packaged flow's switch and
- * its copy (New similar) are Studio's, and the page's actions half is Setup's
- * own `automation:packaged-actions` entry. A Studio file that still linked to
- * the retired page would open a route nothing serves. This pin reads every
- * non-test source under `views/studio-design/`, comments masked, and refuses
- * any spelling of the retired ref or its URL.
+ * its copy (New similar) are Studio's. Setup › Packaged Actions, the page's
+ * actions half, retired with objectstack#34724: a packaged action's switch is
+ * Studio's too. A Studio file that still linked to either retired page would
+ * open a redirect back into Studio. This pin reads every non-test source under
+ * `views/studio-design/`, comments masked, and refuses any spelling of either
+ * retired ref or its URL.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -35,18 +36,23 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
-/** The retired ref (`automation:packaged`) or its URL (`…/component/automation/packaged`), not the actions entry. */
-const RETIRED = /automation[:/]packaged(?![\w-])/g;
+/**
+ * The retired refs (`automation:packaged`, `automation:packaged-actions`) or
+ * their URLs (`…/component/automation/packaged[-actions]`).
+ */
+const RETIRED = /automation[:/]packaged(?:-actions)?(?![\w-])/g;
 
 describe('Studio links into no retired Setup page (ADR-0146)', () => {
-  it('the matcher sees the ref and the URL, and spares the actions entry', () => {
+  it('the matcher sees both refs and both URLs, and nothing longer', () => {
     expect("'/apps/setup/component/automation/packaged'".match(RETIRED)).toHaveLength(1);
     expect("const REF = 'automation:packaged';".match(RETIRED)).toHaveLength(1);
-    expect("'automation:packaged-actions'".match(RETIRED)).toBeNull();
+    expect("'automation:packaged-actions'".match(RETIRED)).toHaveLength(1);
+    expect("'/apps/setup/component/automation/packaged-actions'".match(RETIRED)).toHaveLength(1);
+    expect("'automation:packaged-actions-v2'".match(RETIRED)).toBeNull();
     expect(mask('// was automation:packaged\nconst a = 1;').match(RETIRED)).toBeNull();
   });
 
-  it('no Studio source opens the retired Setup › Packaged automation page (D11)', () => {
+  it('no Studio source opens a retired Setup › Packaged page (D11, objectstack#34724)', () => {
     const files = sourceFiles(here);
     // Control: the walk really reads the folder.
     expect(files.some((file) => file.endsWith('StudioDesignSurface.tsx'))).toBe(true);

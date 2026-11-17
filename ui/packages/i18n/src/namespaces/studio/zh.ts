@@ -3222,6 +3222,11 @@ const STUDIO_ZH: Record<string, string> = {
   // Actions view
   'engine.studio.actions.none': '该对象没有操作。',
   'engine.studio.actions.newButton': '新建操作',
+  // objectstack#34724 — 只读应用的厂商动作：启停开关。
+  'engine.studio.actions.ledger.hint': '该动作来自只读软件包。此开关只在本部署中启用或停用它，不改动软件包本身。',
+  'engine.studio.actions.ledger.walled': '在此部署中，只有平台运营方可以启用或停用打包动作。',
+  'engine.studio.actions.ledger.offMark': '已停用',
+  'engine.studio.actions.ledger.loadFailed': '无法读取该动作在本部署中是否启用：{message}',
   'engine.studio.actions.editorMissing': '本次会话没有注册操作编辑器,因此无法在这里编辑该操作的属性。',
   'engine.studio.actions.newLabel': '新操作',
   'engine.studio.actions.delete': '删除',

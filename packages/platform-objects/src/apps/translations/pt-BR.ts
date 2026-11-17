@@ -38,7 +38,6 @@ export const ptBR: TranslationData = {
       navigation: {
         group_overview: { label: 'Visão geral' },
         group_apps: { label: 'Aplicativos' },
-        nav_packaged_actions: { label: 'Ações fornecidas por pacotes' },
         nav_marketplace_browse: { label: 'Explorar o Marketplace' },
         nav_marketplace_installed: { label: 'Aplicativos instalados' },
         nav_cloud_connection: { label: 'Conexão com a nuvem' },

@@ -73,7 +73,6 @@ export const frSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.description': 'deacdfc679232a4a',
   'apps.setup.navigation.group_overview.label': 'eebdbe1cc7b59cdf',
   'apps.setup.navigation.group_apps.label': '699b367291abcbe6',
-  'apps.setup.navigation.nav_packaged_actions.label': '0d86b11df972dff3',
   'apps.setup.navigation.nav_marketplace_browse.label': '2afbe021f5419fdd',
   'apps.setup.navigation.nav_marketplace_installed.label': '93bd5d458e05db60',
   'apps.setup.navigation.nav_cloud_connection.label': '3a7caad0cb98e71d',

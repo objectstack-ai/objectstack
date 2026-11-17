@@ -19,14 +19,23 @@
  * on this package, so the one sentence adds no edge.
  *
  * The kinds differ in two places, and both follow where the switch is
- * (ADR-0146 D4, D11). WHERE: an action's switch is on Setup's Packaged Actions
- * page (the `nav_packaged_actions` entry); a flow's switch is on the flow, in
- * its package's Automations in Studio. Setup's Packaged automation page, which
- * held both, is retired, so neither sentence names it. MEANWHILE: flow clone is
+ * (ADR-0146 D4, amended 2026-11-17; D11). WHERE: an action's switch is on the
+ * action, in its package in Studio (the object's Actions view, or a standalone
+ * action's item page; objectstack#34724 retired Setup's Packaged Actions page,
+ * which held it); a flow's switch is on the flow, in its package's Automations
+ * in Studio. Neither retired Setup page is named. MEANWHILE: flow clone is
  * chartered (ADR-0126 §7.2: `POST /automation/:name/clone`), offered as New
  * similar on the same Studio flow, so the flow sentence offers a copy there.
  * Action-clone is not (§8 item 2), so the action sentence ⛔ never does:
  * recommending one would advertise machinery that does not exist.
+ *
+ * A PLATFORM action (one a kernel package ships) has no switch in Studio
+ * (ADR-0146 D4 as amended: no switch anywhere), yet a ledger row written
+ * before Setup's page retired can still hold it off (maintainer ruling
+ * 6944409840: such rows stay in force). Its sentence therefore names the
+ * activation door itself, the one way left to turn it on again, rather than a
+ * Studio place that offers nothing. `platform` is the caller's verdict; it is
+ * read for an action only (a flow has no platform variant).
  *
  * The item's name is not in the sentence: the caller named the item it asked
  * for, and a machine name read in a toast is not plain language.
@@ -34,7 +43,7 @@
 export type PackagedItemKind = 'action' | 'flow';
 
 const WHERE: Record<PackagedItemKind, string> = {
-    action: 'under Setup › Packaged Actions',
+    action: 'on the action in its package in Studio',
     flow: "in its package's Automations in Studio",
 };
 
@@ -43,9 +52,23 @@ const MEANWHILE: Record<PackagedItemKind, string> = {
     flow: 'or copy it there under a new name',
 };
 
-export function describeTurnedOffPackagedItem(kind: PackagedItemKind): string {
+/** Where a switched-off PLATFORM action is turned on again: the activation door, not Studio. */
+const WHERE_PLATFORM_ACTION =
+    'through the action activation API (POST /api/v1/actions/_activation/<object>/<action> with {"enabled": true}; ' +
+    'Studio has no switch for the platform\'s own actions)';
+
+export interface TurnedOffPackagedItemOptions {
+    /** The item is a platform (kernel-package) action. Ignored for a flow. */
+    platform?: boolean;
+}
+
+export function describeTurnedOffPackagedItem(
+    kind: PackagedItemKind,
+    options: TurnedOffPackagedItemOptions = {},
+): string {
+    const where = kind === 'action' && options.platform === true ? WHERE_PLATFORM_ACTION : WHERE[kind];
     return (
         `This ${kind} is turned off for this deployment. An administrator can turn it on again ` +
-        `${WHERE[kind]}, ${MEANWHILE[kind]}.`
+        `${where}, ${MEANWHILE[kind]}.`
     );
 }

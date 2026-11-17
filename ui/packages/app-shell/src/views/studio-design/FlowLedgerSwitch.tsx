@@ -36,7 +36,18 @@ import { t } from '../metadata-admin/i18n.js';
 import { STUDIO_FOLD_LABEL } from './studio-tokens.js';
 import type { ActivationReading } from '../setup/packagedFlows.js';
 
-export function FlowLedgerSwitch({ checked, reading, notRunningReason, busy, walledReason, locale, onToggle }: {
+export function FlowLedgerSwitch({
+  checked,
+  reading,
+  notRunningReason,
+  busy,
+  walledReason,
+  locale,
+  onToggle,
+  hint: hintText,
+  testId = 'auto-ledger-switch',
+  label,
+}: {
   /** The ledger flag. */
   checked: boolean;
   /** What the flag means on this deployment (`activationReading`). */
@@ -49,11 +60,24 @@ export function FlowLedgerSwitch({ checked, reading, notRunningReason, busy, wal
   walledReason?: string;
   locale: string;
   onToggle: () => void;
+  /**
+   * objectstack#34724 — the switch's one-line sentence, when the item is not a
+   * flow: a packaged action's switch says what it switches. Defaults to the
+   * flow's.
+   */
+  hint?: string;
+  /** objectstack#34724 — the action switch's own test id; the flow's by default. */
+  testId?: string;
+  /**
+   * objectstack#34724 — an accessible name of its own, where one view draws a
+   * switch per item. Absent, the visible word names it, as on the flow header.
+   */
+  label?: string;
 }): React.ReactElement {
   const hintId = React.useId();
   const reasonId = React.useId();
   const notRunningId = React.useId();
-  const hint = t('engine.studio.auto.ledger.hint', locale);
+  const hint = hintText ?? t('engine.studio.auto.ledger.hint', locale);
   const notRunning = reading === 'not-running';
   const why = notRunning && notRunningReason ? notRunningReason : undefined;
   const describedBy = [hintId, why ? notRunningId : '', walledReason ? reasonId : ''].filter(Boolean).join(' ');
@@ -62,8 +86,9 @@ export function FlowLedgerSwitch({ checked, reading, notRunningReason, busy, wal
       type="button"
       role="switch"
       aria-checked={checked}
-      data-testid="auto-ledger-switch"
+      data-testid={testId}
       data-reading={reading}
+      aria-label={label}
       onClick={() => {
         if (!busy) onToggle();
       }}
