@@ -615,11 +615,16 @@ describe('referenceTitlesPerRead — a referenced title is served only to a read
   const reader = { userId: 'u' };
   const answer = (served: string[] | undefined) => async () => served;
   const security = (admits: boolean | Error | undefined) => ({
-    getReadableFields: async () => [],
-    getQueryableFields: async () => [],
+    getReadableFields: async (): Promise<string[]> => [],
+    getQueryableFields: async (): Promise<string[]> => [],
     ...(admits === undefined
       ? {}
-      : { canReadObject: async () => { if (admits instanceof Error) throw admits; return admits; } }),
+      : {
+          canReadObject: async (): Promise<boolean> => {
+            if (admits instanceof Error) throw admits;
+            return admits === true;
+          },
+        }),
   });
 
   it('a source that is not a reference is judged by the parent alone', async () => {
