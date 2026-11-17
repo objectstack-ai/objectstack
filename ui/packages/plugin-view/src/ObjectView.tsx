@@ -2013,6 +2013,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           chart: 'chart-column',
           tree: 'list-tree',
           page: 'layout-template',
+          timesheet: 'calendar-clock',
         } satisfies Record<string, string>;
 
         /** `never` only while every {@link ViewType} has an icon name. */
