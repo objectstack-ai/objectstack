@@ -559,7 +559,7 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
         <div
           data-testid="flow-preview-section"
           data-section={section}
-          className={'grid h-full min-h-0 gap-0 ' + (section === 'debug' ? 'lg:grid-cols-[1fr_240px]' : 'grid-cols-1')}
+          className={'grid h-full min-h-0 gap-0 ' + (section === 'debug' ? 'lg:grid-cols-[1fr_300px]' : 'grid-cols-1')}
         >
           {/* Kept mounted under a body section, so its pan, zoom and opened
               regions are where the author left them when the canvas returns. */}

@@ -9760,7 +9760,11 @@ export function AutomationsPillar({
           </main>
         </div>
 
-        {flowsEmpty ? null : configFolded && !inSlot ? (
+        {/* #34818 — Debug takes the Configuration's place: the simulator
+            column widens to the aside's width, and the aside is not drawn
+            (classic row and right slot alike). The selection is kept, so
+            leaving Debug brings the aside back as it was. */}
+        {flowsEmpty || section === 'debug' ? null : configFolded && !inSlot ? (
           // objectui#11795 — the folded row: no aside reserving width beside
           // the canvas; the selection's configuration opens over it, and
           // closing the drawer clears the selection, as the aside's ✕ does.
