@@ -67,14 +67,22 @@
  * group is `NULL`; the caller tells it from a real `NULL` attribute by the
  * resolved column, and so keeps its "restricted" bucket exactly.
  *
+ * ## Refused, on a driver that compiles no semi-join
+ *
+ * [#33876] A read whose driver lacks the `DriverCapabilities.readableIdsLeaf`
+ * bit (MongoDB, OData) is REFUSED before anything else is judged or read
+ * ({@link relationGroupDriverRefusal}): the outcome is `refused`, carrying
+ * an `INVALID_QUERY` / 400 the caller throws instead of serving its
+ * FK-expand. The same bit decides a nested-relation `where` on that driver.
+ *
  * ## Declined, never half-served
  *
- * Every case this module cannot prove is the same read as the FK-expand's is
- * DECLINED: the engine runs nothing more and writes the reason to the
+ * Every other case this module cannot prove is the same read as the
+ * FK-expand's is DECLINED: the engine runs nothing more and writes the reason to the
  * request's `outcome`, and the caller serves the dimension the way it always
  * has. Declined before anything is read when the registry already answers —
- * a driver outside {@link RELATION_GROUP_JOIN_COMPILING_DRIVERS} (memory keeps
- * its in-process FK-expand; MongoDB and OData keep theirs), a federated
+ * a driver outside {@link RELATION_GROUP_JOIN_COMPILING_DRIVERS} that does
+ * declare the bit (memory and Turso keep their FK-expand), a federated
  * object, a field that is not a single-valued relation to the named object,
  * or a related object `relationSemiJoinServes` keeps the id read for; and
  * after planning, when the related read was not provably one planned
@@ -94,7 +102,10 @@ import {
 } from '@objectstack/spec/data';
 import { readableIdsRefusalError } from './filter-comparand-shape.js';
 import { isFederatedObject } from './federated-object.js';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import {
+  driverCompilesReadableIdsLeaf,
+  driverNameOf,
   planRelationSemiJoinLeaf,
   plannedRelationLeafVerdict,
   RELATION_SCOPE_PLAN,
@@ -139,10 +150,16 @@ export interface RelationGroupBy {
   readonly resolvedAlias: string;
 }
 
-/** What the engine did with a {@link RelationGroupByRequest}. */
+/**
+ * What the engine did with a {@link RelationGroupByRequest}. `refused`
+ * ([#33876]): the read's driver compiles no `ReadableIds` leaf, so the
+ * dimension is not served on ANY path — the caller throws `error` rather
+ * than fall back to its FK-expand ({@link relationGroupDriverRefusal}).
+ */
 export type RelationGroupOutcome =
   | { readonly kind: 'joined' }
-  | { readonly kind: 'declined'; readonly reason: string };
+  | { readonly kind: 'declined'; readonly reason: string }
+  | { readonly kind: 'refused'; readonly error: Error };
 
 /**
  * The request: the relations to group by, and the slot the engine writes its
@@ -277,6 +294,50 @@ export function withoutJudgedRelationFields<T extends { groupBy?: unknown }>(
   const drop = new Set(judged);
   const kept = (ast.groupBy as unknown[]).filter((entry) => !(typeof entry === 'string' && drop.has(entry)));
   return { ...ast, groupBy: kept.length === 0 && !Array.isArray(ownGroupBy) ? undefined : kept };
+}
+
+/**
+ * [#33876] The up-front refusal of a relation group request on a driver that
+ * compiles no `ReadableIds` leaf (its `DriverCapabilities.readableIdsLeaf`
+ * bit is absent: MongoDB, OData) — the analytics dimension through a lookup,
+ * decided by the same bit as a nested-relation `where`
+ * (`relationSemiJoinDriverRefusal`): the scope note on #33876 (6917475155)
+ * under Prime Directive 5 (memory and mongo refuse what they cannot run with
+ * a stable code). `undefined` when the driver declares the bit: `driver-memory` does, and
+ * keeps its in-process FK-expand through the ordinary decline. Nothing is
+ * read; the caller serves nothing and throws the error, `INVALID_QUERY` /
+ * 400, naming the driver and the two-step route.
+ */
+export function relationGroupDriverRefusal(
+  object: string,
+  request: RelationGroupByRequest,
+  driver: { readonly name?: unknown; readonly supports?: unknown } | undefined,
+): Error | undefined {
+  if (driverCompilesReadableIdsLeaf(driver)) return undefined;
+  const relations: readonly RelationGroupBy[] = Array.isArray(request.relations) ? request.relations : [];
+  const relation: RelationGroupBy | undefined = relations[0];
+  const field = typeof relation?.field === 'string' ? relation.field : 'the relation field';
+  const target = typeof relation?.object === 'string' ? relation.object : 'the related object';
+  const declared: readonly RelationGroupAttribute[] = Array.isArray(relation?.attrs) ? relation.attrs : [];
+  const attrs = declared
+    .map((entry: RelationGroupAttribute | undefined) => entry?.attr)
+    .filter((attr: unknown): attr is string => typeof attr === 'string');
+  const what = attrs.length > 0 ? attrs.map((a) => `'${a}'`).join(', ') : 'its attributes';
+  const err = new Error(
+    `aggregate('${object}'): grouping by ${what} of '${target}' through '${object}.${field}' cannot run on `
+    + `this read's driver '${driverNameOf(driver)}', which compiles no semi-join of '${target}'. Group by `
+    + `'${field}' itself, then read '${target}' for ${what} by those ids. The query was NOT run and nothing `
+    + 'was read. A driver that declares the readableIdsLeaf capability (the SQL drivers, the in-memory '
+    + 'driver) serves it.',
+  ) as Error & { code?: string; status?: number; httpStatus?: number; object?: string; param?: string };
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  err.status = 400;
+  // …and `httpStatus`, the same number under ADR-0112 D5's spelling — what a
+  // consumer holding the THROWN error reads; `status` stays for the HTTP doors.
+  err.httpStatus = 400;
+  err.object = object;
+  err.param = 'groupBy';
+  return err;
 }
 
 /** What {@link relationGroupRegistryDecline} reads off the engine. */

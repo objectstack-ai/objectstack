@@ -23,6 +23,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
 import {
   DATASET_QUERY_AUDIT_ACTION,
+  buildDatasetQueryAuditRow,
   createDatasetQueryAuditWriter,
   type DatasetQueryAuditEvent,
 } from './dataset-query-audit.js';
@@ -255,4 +256,43 @@ describe('the dataset_query opt-in through AuditPlugin and the `audit` slot', ()
       await Promise.race([kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
     }
   }, 120_000);
+});
+
+describe('[#33694] an in-product AI query is marked on the dataset_query row by the CRUD mirror\'s rule', () => {
+  const PERFORMER_KEYS = ['performed_by', 'on_behalf_of', 'conversation_id', 'confirmation_id'];
+  const QUERIED_AT = new Date('2026-11-17T00:00:00.000Z');
+  const aiQuery = (performedBy: Record<string, string>) =>
+    queryEvent({ context: { userId: 'u_analyst', tenantId: 'org_a', performedBy } as any });
+
+  it('an AI-performed query records the agent, the person, the conversation and the confirmation', () => {
+    const row = buildDatasetQueryAuditRow(
+      aiQuery({ agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' }),
+      QUERIED_AT,
+    );
+    expect(row.user_id).toBe('u_analyst');
+    expect(metadataOf(row)).toMatchObject({
+      performed_by: 'sales_assistant',
+      on_behalf_of: 'u_analyst',
+      conversation_id: 'conv_1',
+      confirmation_id: 'pend_1',
+    });
+  });
+
+  it('CONTROL: an OAuth client — alone, or beside an agent — is the performer, with no conversation or confirmation', () => {
+    const envelopes: Array<Record<string, string>> = [
+      { clientId: 'client_agent', conversationId: 'conv_1', confirmationId: 'pend_1' },
+      { clientId: 'client_agent', agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' },
+    ];
+    for (const performedBy of envelopes) {
+      const meta = metadataOf(buildDatasetQueryAuditRow(aiQuery(performedBy), QUERIED_AT));
+      expect(meta).toMatchObject({ performed_by: 'client_agent', on_behalf_of: 'u_analyst' });
+      expect(meta).not.toHaveProperty('conversation_id');
+      expect(meta).not.toHaveProperty('confirmation_id');
+    }
+  });
+
+  it('CONTROL: a person\'s own query carries no performer key at all', () => {
+    const meta = metadataOf(buildDatasetQueryAuditRow(queryEvent(), QUERIED_AT));
+    for (const key of PERFORMER_KEYS) expect(meta).not.toHaveProperty(key);
+  });
 });

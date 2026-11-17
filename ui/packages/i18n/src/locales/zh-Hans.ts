@@ -1245,6 +1245,8 @@ const zh = {
     writeStrippedUnknownReason: '以下字段未被服务端写入：{{fields}}',
     approvalPendingEditable: '审批中 · 可编辑',
     approvalPendingTooltip: '该记录有待审批的请求，但当前审批节点仍允许编辑',
+    approvalPending: '审批中',
+    approvalPendingNotEditableTooltip: '该记录有待审批的请求',
     approvalProgress: '审批 — 已通过 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '会签 — 已完成 {{got}} / 共 {{need}} 个组',
     approvalProgressLabel: '审批进度',
@@ -2071,6 +2073,7 @@ const zh = {
       view: '查看',
       confirm: '确认',
       cancel: '取消',
+      continue: '继续',
       prefilled: '尚未设置的项已按你的浏览器给出建议。确认之前不会保存任何内容。',
       organizationName: {
         title: '为组织命名',
@@ -2194,6 +2197,16 @@ const zh = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '有 {{count}} 项未发布的改动，请在顶部的草稿栏发布。',
+        publishFromBar_one: '有 {{count}} 项未发布的改动，请在顶部的草稿栏发布。',
+        publishFromBar_other: '有 {{count}} 项未发布的改动，请在顶部的草稿栏发布。',
+        showDraftToPublish: '有 {{count}} 项未发布的改动，打开草稿查看并发布。',
+        showDraftToPublish_one: '有 {{count}} 项未发布的改动，打开草稿查看并发布。',
+        showDraftToPublish_other: '有 {{count}} 项未发布的改动，打开草稿查看并发布。',
+        showDraft: '查看草稿',
+        receipt: '已发布，改动已生效。',
+        dismissReceipt: '关闭',
         count: '有 {{count}} 项改动尚未发布——用户还看不到。',
         publish: '发布',
         published: '全部待发布改动已生效。',
@@ -3276,7 +3289,7 @@ const zh = {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中设计',
     editApp: '编辑应用',
-    openAppInStudio: '在 Studio 中查看应用',
+    openAppInStudio: '在 Studio 中查看 {{app}}',
     openAssistant: '打开{{name}}助手',
     offline: '离线',
     usersOnline: '当前在线用户',
@@ -3549,6 +3562,10 @@ const zh = {
       pendingHere: '草稿预览 · 本页 {{count}} 项未发布',
       pendingHere_one: '草稿预览 · 本页 {{count}} 项未发布',
       pendingHere_other: '草稿预览 · 本页 {{count}} 项未发布',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '草稿预览 · 这个应用有 {{count}} 项未发布的改动，发布前都不会生效。',
+      pendingInApp_one: '草稿预览 · 这个应用有 {{count}} 项未发布的改动，发布前都不会生效。',
+      pendingInApp_other: '草稿预览 · 这个应用有 {{count}} 项未发布的改动，发布前都不会生效。',
       // 魔法时刻提示：刚搭好的草稿因为种子/示例数据要发布后才载入，预览里
       // 仪表盘显示 0、列表显示“暂无内容”。直接说明，避免把空预览误当成搭坏了。
       sampleDataTitle: '示例数据将在发布后出现',
@@ -3689,6 +3706,8 @@ const zh = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: '这个应用还没发布过。它可以正常使用，但只有搭建者能看到。发布后你的用户才能看到它。',
       message: '未发布的应用 —— 功能完整，但只有构建者能看到。发布后即可让您的用户看到。',
       publish: '发布',
       publishing: '发布中…',

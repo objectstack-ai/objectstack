@@ -2,19 +2,19 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * objectui#12842 — the Studio copilot's 「在完整页面中打开」 button opens the
- * package's build surface and remembers where it was pressed, so the page's
- * collapse-to-dock comes back to this Studio surface.
+ * objectstack#34610 (ui ADR-0057 Amendment A3) — the Studio copilot's expand
+ * control widens its slot IN PLACE and the same control narrows it again; the
+ * Studio page stays where it is.
  *
- * That is all the button does. It used to also leave a one-shot opt-out in
- * session storage for the built-moment transition; objectui#12724 removed that
- * transition, so nothing read the flag and the write went with it.
+ * It used to open `/ai/build?package=PKG` (objectui#12842). After
+ * objectstack#34608 that address opens the console's drawer full window over
+ * Home, so pressing it lost the Studio page.
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { readDockReturnLocation } from '../../../layout/chatDockState';
 
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
@@ -43,22 +43,39 @@ function Where() {
   return <div data-testid="where">{`${location.pathname}${location.search}`}</div>;
 }
 
+function Slot() {
+  const [wide, setWide] = useState(false);
+  return (
+    <>
+      <div data-testid="slot-wide">{String(wide)}</div>
+      <StudioChatDock packageId="app.crm" wide={wide} onWideChange={setWide} />
+      <Where />
+    </>
+  );
+}
+
 beforeEach(() => {
   window.sessionStorage.clear();
 });
 
-describe('the Studio copilot\'s full-page button (objectui#12842)', () => {
-  it('opens /ai/build?package=PKG and remembers the Studio surface it left', () => {
+describe("the Studio copilot's expand control (objectstack#34610)", () => {
+  it('widens the slot in place and narrows it again, never leaving the Studio page', () => {
     render(
       <MemoryRouter initialEntries={['/studio/app.crm/interfaces?surface=nav_dash']}>
         <Routes>
-          <Route path="/studio/*" element={<StudioChatDock packageId="app.crm" />} />
-          <Route path="/ai/*" element={<Where />} />
+          <Route path="/studio/*" element={<Slot />} />
+          <Route path="/ai/*" element={<div data-testid="left-studio" />} />
         </Routes>
       </MemoryRouter>,
     );
+    const button = screen.getByTestId('studio-copilot-maximize');
+    expect(button).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(button);
+    expect(screen.getByTestId('slot-wide')).toHaveTextContent('true');
+    expect(screen.getByTestId('studio-copilot-maximize')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('where')).toHaveTextContent('/studio/app.crm/interfaces?surface=nav_dash');
+    expect(screen.queryByTestId('left-studio')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('studio-copilot-maximize'));
-    expect(screen.getByTestId('where')).toHaveTextContent('/ai/build?package=app.crm');
-    expect(readDockReturnLocation()).toBe('/studio/app.crm/interfaces?surface=nav_dash');
+    expect(screen.getByTestId('slot-wide')).toHaveTextContent('false');
   });
 });

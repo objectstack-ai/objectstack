@@ -225,3 +225,177 @@ describe('[#21878] an activity row names its record by the ADR-0079 title, with 
     expect(blob).not.toContain(V.companyRenamed);
   });
 });
+
+// ── a label naming a referenced record by its title ─────────────────────────
+//
+// An object titled by a lookup is labelled by the referenced record's title.
+// On a real boot, through the list door and the by-id door: a reader whose
+// permission set withholds the target's title field is served the rows without
+// the label and without a summary naming it, and keeps the record id; the
+// control reader is served the title. Armed first: the data plane serves the
+// withheld reader the target without its title field and the control with it,
+// and the rows at rest carry the title.
+
+const REF_TARGET = 'ald_ref_target';
+const REF_TITLED = 'ald_ref_titled';
+const REF_TITLE = 'ALDREFTITLE65';
+
+const RefTarget = ObjectSchema.create({
+  name: REF_TARGET,
+  label: 'ALD Ref Target',
+  pluralLabel: 'ALD Ref Targets',
+  sharingModel: 'public_read_write',
+  nameField: 'code_name',
+  fields: {
+    name: Field.text({ label: 'Name' }),
+    code_name: Field.text({ label: 'Code Name' }),
+  },
+});
+const RefTitled = ObjectSchema.create({
+  name: REF_TITLED,
+  label: 'ALD Ref Titled',
+  pluralLabel: 'ALD Ref Titled',
+  sharingModel: 'public_read_write',
+  nameField: 'target',
+  fields: {
+    name: Field.text({ label: 'Name' }),
+    target: Field.lookup(REF_TARGET, { label: 'Target' }),
+  },
+});
+
+const refFixtureStack = defineStack({
+  manifest: {
+    id: 'com.dogfood.activity-label-reference-title',
+    namespace: 'ald',
+    version: '0.0.0',
+    type: 'app',
+    name: 'Activity Label Reference Title Fixture',
+    description: 'An object titled by a lookup, mirrored on the activity timeline.',
+  },
+  objects: [RefTarget, RefTitled],
+});
+
+const refGrants = {
+  ...Object.fromEntries(
+    [REF_TARGET, REF_TITLED].map((o) => [o, { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false }]),
+  ),
+  sys_activity: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+};
+const refBaselineSet = PermissionSetSchema.parse({ name: 'ald_ref_baseline', label: 'ALD ref baseline', objects: refGrants });
+const refWithholdSet = PermissionSetSchema.parse({
+  name: 'ald_ref_withhold_set',
+  label: 'ALD ref withhold',
+  objects: refGrants,
+  fields: { [`${REF_TARGET}.code_name`]: { readable: false, editable: false } },
+});
+const REF_PRINCIPALS: Record<'writer' | 'withheld' | 'control', string[]> = {
+  writer: [refBaselineSet.name],
+  withheld: [refWithholdSet.name],
+  control: [refBaselineSet.name],
+};
+
+describe('an activity label naming a referenced record by its title is served only to a reader served that title field', () => {
+  let stack: VerifyStack;
+  let ql: any;
+  const token: Record<string, string> = {};
+  let targetId = '';
+  let recordId = '';
+
+  const listed = async (who: keyof typeof REF_PRINCIPALS): Promise<Row[]> => {
+    const filter = encodeURIComponent(JSON.stringify({ object_name: REF_TITLED, record_id: recordId }));
+    const res = await stack.apiAs(token[who], 'GET', `/data/sys_activity?$filter=${filter}`);
+    expect(res.status).toBe(200);
+    return rowsOf(await res.json());
+  };
+  const byId = async (who: keyof typeof REF_PRINCIPALS, id: string): Promise<Row> => {
+    const res = await stack.apiAs(token[who], 'GET', `/data/sys_activity/${id}`);
+    expect(res.status).toBe(200);
+    return recordOf(await res.json());
+  };
+
+  beforeAll(async () => {
+    stack = await bootStack(refFixtureStack as unknown as Parameters<typeof bootStack>[0], {
+      security: new SecurityPlugin({
+        defaultPermissionSets: [...securityDefaultPermissionSets, refBaselineSet, refWithholdSet],
+        fallbackPermissionSet: refBaselineSet.name,
+      }),
+      extraPlugins: [new AuditPlugin()],
+    });
+    ql = await stack.kernel.getServiceAsync('objectql');
+    const idOf = async (object: string, where: Record<string, unknown>) =>
+      String((await ql.findOne(object, { where, context: { isSystem: true } }))?.id ?? '');
+
+    for (const who of Object.keys(REF_PRINCIPALS) as Array<keyof typeof REF_PRINCIPALS>) {
+      const email = `ald-ref-${who}@verify.test`;
+      token[who] = await stack.signUp(email);
+      const userId = await idOf('sys_user', { email });
+      for (const name of REF_PRINCIPALS[who]) {
+        expect(await catalogPermissionSet(ql, name), `fixture permission set ${name} served by the security catalog`).toBeTruthy();
+        await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: name }, SYS);
+      }
+    }
+
+    const post = async (object: string, body: Row) => {
+      const res = await stack.apiAs(token.writer, 'POST', `/data/${object}`, body);
+      expect(res.status).toBe(201);
+      return idOfBody(await res.json());
+    };
+    targetId = await post(REF_TARGET, { name: 'target', code_name: REF_TITLE });
+    recordId = await post(REF_TITLED, { name: 'titled', target: targetId });
+    const update = await stack.apiAs(token.writer, 'PATCH', `/data/${REF_TITLED}/${recordId}`, { name: 'titled again' });
+    expect(update.status).toBe(200);
+
+    const targetAs = async (who: keyof typeof REF_PRINCIPALS) => {
+      const res = await stack.apiAs(token[who], 'GET', `/data/${REF_TARGET}/${targetId}`);
+      const rec = recordOf(await res.json());
+      return { status: res.status, title: !('code_name' in rec) ? 'absent' : rec.code_name === REF_TITLE ? 'stored' : 'replaced' };
+    };
+
+    await assertArmed([
+      armedWhen({
+        control: 'the mirror wrote a created and an updated row, each labelled by the referenced record\'s title',
+        disarmedBy: 'a row labelled by an id would let every case below pass without a title to withhold',
+        observe: async () =>
+          ((await ql.find('sys_activity', { where: { object_name: REF_TITLED, record_id: recordId }, context: { isSystem: true } })) as Row[])
+            .map((r) => `${r.type}:${r.record_label === REF_TITLE}`).sort().join(','),
+        armed: (o) => o === 'created:true,updated:true',
+        describe: (o) => o,
+      }),
+      armedWhen({
+        control: 'the data plane serves the withheld reader the target without its title field, and the control with it',
+        disarmedBy: 'a withholding set that did not resolve would make the withheld case measure an unrestricted reader',
+        observe: async () => ({ withheld: await targetAs('withheld'), control: await targetAs('control') }),
+        armed: (o) =>
+          o.withheld.status === 200 && o.withheld.title === 'absent' &&
+          o.control.status === 200 && o.control.title === 'stored',
+        describe: (o) => JSON.stringify(o),
+      }),
+    ]);
+  }, 180_000);
+
+  afterAll(async () => {
+    if (stack) await stack.stop();
+  });
+
+  it('a reader withheld the referenced title field is served the rows without the label or a summary naming it, list and by id', async () => {
+    const rows = await listed('withheld');
+    expect(rows.map((r) => r.type).sort()).toEqual(['created', 'updated']);
+    for (const row of rows) {
+      expect(row).not.toHaveProperty('record_label');
+      expect(row).not.toHaveProperty('summary');
+      expect(row.record_id).toBe(recordId);
+      expect(JSON.stringify(await byId('withheld', row.id))).not.toContain(REF_TITLE);
+    }
+    expect(JSON.stringify(rows)).not.toContain(REF_TITLE);
+  });
+
+  it('control: a reader served the referenced title reads the label and the summary naming it', async () => {
+    const rows = await listed('control');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.record_label).toBe(REF_TITLE);
+      expect(String(row.summary)).toContain(REF_TITLE);
+      expect((await byId('control', row.id)).record_label).toBe(REF_TITLE);
+    }
+  });
+});

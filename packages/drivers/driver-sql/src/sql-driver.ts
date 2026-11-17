@@ -407,6 +407,12 @@ export class SqlDriver implements IDataDriver {
       // engine keeps bucketing those zones in memory. TursoDriver is SQLite in
       // every mode and inherits `false` through this getter.
       zonedDateBucketing: this.isPostgres,
+      // [#33876] The filter compiler compiles a composed `ReadableIds` leaf
+      // to one nested subquery (ADR-0139 D3, `applyFilterCondition`), so the
+      // engine plans a nested-relation condition on a read verb as that leaf
+      // here. Every dialect; `SqliteWasmDriver` and `TursoDriver` inherit it
+      // (Turso's remote transport compiles the leaf with its own compiler).
+      readableIdsLeaf: true,
     };
   }
 

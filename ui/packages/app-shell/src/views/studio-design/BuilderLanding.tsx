@@ -4,25 +4,29 @@
  * BuilderLanding — the application builder's front door.
  *
  * The journey from login: Home → Studio app → the App Builder landing (this page, embedded
- * in the app chrome via the `studio:builder` component ref) → pick or create a
- * writable base package → the full-screen pillar builder
- * (`/studio/:packageId/:tab`). Also served standalone at bare `/studio` so the
+ * in the app chrome via the `studio:builder` component ref) → pick an installed app to
+ * customize, or create or open an app of the author's own → the full-screen pillar
+ * builder (`/studio/:packageId/:tab`). Also served standalone at bare `/studio` so the
  * builder is bookmarkable.
  *
- * The packages the author was last in lead, when there are any (objectui#11863).
- * Writable bases (where authoring happens) follow; the organization's own
- * package-less flows have one entry of their own (objectui#11553); read-only
- * code and installed packages are listed last: they open for browsing, and each
- * card points at the routes that customize one (objectui#11808). Writability is
- * the server's verdict read by packages-io (`PkgEntry.writable`, ADR-0070 D2),
- * and the server's write gate stays the authority. Each read-only base's card
- * says what this deployment changed on it, "n customized, m switched off"
- * (ADR-0146 D3), from the server's per-package customization read.
+ * The page is ordered by what the author came to do (objectstack#34715).
+ * Installed apps come first, because changing one is the likeliest
+ * errand: each card says what this deployment changed on it, "n customized,
+ * m switched off" (ADR-0146 D3), from the server's per-package customization
+ * read, and carries a Customize button that opens the app in Studio, where its
+ * items are customized (objectui#11808). The author's own writable bases, with
+ * the create card, follow. Last come the entries that belong to no app: the
+ * environment's positions and permissions (the "All metadata" area's
+ * cross-package leg, ADR-0146 D1 keeps it in Studio), and the organization's
+ * package-less flows (objectui#11553), shown only when there are any.
+ * Writability is the server's verdict read by packages-io (`PkgEntry.writable`,
+ * ADR-0070 D2), and the server's write gate stays the authority. The page's
+ * copy says what the author can do; it names no package mechanism.
  */
 
 import * as React from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Boxes, Building2, Clock, Hammer, Library, Lock, Plus, Loader2, Copy, Store } from 'lucide-react';
+import { Boxes, Building2, Clock, Hammer, Library, Plus, Loader2, Copy, Store } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRecentItems, type RecentNamedItem } from '../../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
@@ -30,13 +34,21 @@ import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { PackageFormDialog } from '../metadata-admin/PackageFormDialog.js';
 import { isMarketplaceEnabled } from '../../runtime-config.js';
 import { fetchPackages, fetchListedPackageIds, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
-import { fetchPackageCustomizationCounts, type PackageCustomizationCounts } from './packageCustomizations-io.js';
+import {
+  customizationCountsOf,
+  fetchPackageCustomizations,
+  type PackageCustomizationCounts,
+  type PackageCustomizations,
+} from './packageCustomizations-io.js';
+import { LandingCustomizationsPanel, type AppCustomizationRead } from './LandingCustomizationsPanel.js';
 import { customizationPackageId, isCustomizationPackage } from '@objectstack/spec/kernel';
 import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataArea.js';
 import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.js';
 import { foldCustomizationPairs } from './StudioRailCustomizations.js';
+import { loadPackageLessSurfaces } from './packageSurfaces.js';
+import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 
 /**
  * objectui#11808 — where a read-only package's card sends the author beyond
@@ -55,7 +67,7 @@ const RECENT_PACKAGES_SHOWN = 3;
  * read. No entry means the read has not answered: the line shows no number.
  */
 type CustomizationLine =
-  | { kind: 'read'; counts: PackageCustomizationCounts }
+  | { kind: 'read'; counts: PackageCustomizationCounts; read: PackageCustomizations }
   | { kind: 'failed'; message: string };
 
 /** A package's Studio address on one pillar, the way `open` below spells it. */
@@ -140,7 +152,13 @@ export function BuilderLanding(): React.ReactElement {
   // customized line and link, and the pair's export and delete stay on the
   // Packages page, which lists every package. A pair whose base is not listed
   // keeps its card.
-  const cards = pkgs === null ? [] : foldCustomizationPairs(pkgs).rows;
+  //
+  // objectstack#34715 — a kernel package (ADR-0016 §3.8: no one authors into
+  // it) is not an app the author installed, so it draws no card. The list
+  // leaves out a manifest-scoped one already; a flat-scoped one stays in it,
+  // tagged `kernel` (`parsePackages`), and is dropped here by the same tag the
+  // package switcher reads (objectstack#34593).
+  const cards = pkgs === null ? [] : foldCustomizationPairs(pkgs.filter((p) => !p.kernel)).rows;
   const writable = cards.filter((p) => p.writable);
   const readonly = cards.filter((p) => !p.writable);
 
@@ -158,9 +176,14 @@ export function BuilderLanding(): React.ReactElement {
     if (!customizationTargetKey) return;
     let cancelled = false;
     for (const id of customizationTargetKey.split('\n')) {
-      fetchPackageCustomizationCounts(id).then(
-        (counts) => {
-          if (!cancelled) setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'read', counts } }));
+      // objectstack#34714 — the whole answer is kept: the card draws its two
+      // numbers off it and the "Customizations in this environment" panel its
+      // rows, so one read serves both and the panel's total is the cards' sum.
+      fetchPackageCustomizations(id).then(
+        (read) => {
+          if (!cancelled) {
+            setCustomizationLines((prev) => ({ ...prev, [id]: { kind: 'read', counts: customizationCountsOf(read), read } }));
+          }
         },
         (e: unknown) => {
           const message = e instanceof Error ? e.message : String(e);
@@ -172,6 +195,45 @@ export function BuilderLanding(): React.ReactElement {
       cancelled = true;
     };
   }, [customizationTargetKey]);
+  // objectstack#34714 — the panel's apps are the cards' bases, in card order;
+  // its reads are the same answers the cards draw.
+  const customizationApps = React.useMemo(
+    () => readonly.filter((p) => !isCustomizationPackage(p.id)).map((p) => ({ id: p.id, name: p.name })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customizationTargetKey, pkgs],
+  );
+  const customizationReads = React.useMemo(() => {
+    const out: Record<string, AppCustomizationRead> = {};
+    for (const [id, line] of Object.entries(customizationLines)) {
+      out[id] = line.kind === 'read' ? { kind: 'read', read: line.read } : line;
+    }
+    return out;
+  }, [customizationLines]);
+
+  // objectui#11553 — how many flows belong to no package: the same published
+  // and draft union the package-less scope lists (`loadPackageLessSurfaces`).
+  // The entry is drawn once the read says there is at least one; a failed read
+  // draws it with no number, so the scope stays reachable when the count is
+  // unknown. `null` = not answered yet.
+  const metadataClient = useMetadataClient();
+  const [packageLessFlows, setPackageLessFlows] = React.useState<number | 'failed' | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    loadPackageLessSurfaces(metadataClient, 'flow', locale).then(
+      (flows) => {
+        if (!cancelled) setPackageLessFlows(flows.length);
+      },
+      () => {
+        if (!cancelled) setPackageLessFlows('failed');
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // Read once per page visit: the count does not follow the display locale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // The pair is linked only when the package list holds it: a base with no
   // pair has nothing to open, and the read never creates one.
   const listedIds = new Set(pkgs?.map((p) => p.id) ?? []);
@@ -201,6 +263,15 @@ export function BuilderLanding(): React.ReactElement {
           className={`${lineClass} italic opacity-80`}
         >
           {t('engine.studio.landing.customizations.failed', locale)}
+        </p>
+      );
+    }
+    if (line.counts.customized === 0 && line.counts.switchedOff === 0) {
+      // objectstack#34715 — a base this deployment has not changed says so in
+      // words; the Customize button beside it is the way in.
+      return (
+        <p data-testid="studio-landing-customizations" data-state="read" data-changes="none" className={lineClass}>
+          {t('engine.studio.landing.customizations.none', locale)}
         </p>
       );
     }
@@ -278,6 +349,10 @@ export function BuilderLanding(): React.ReactElement {
     }
   };
 
+  const headingClass = 'mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground';
+  const entryCardClass = 'flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2.5 text-left hover:bg-muted/40';
+  const entryIconClass = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary';
+
   return (
     <div className="mx-auto w-full max-w-5xl p-6">
       <div className="mb-1 flex items-center gap-2">
@@ -287,7 +362,7 @@ export function BuilderLanding(): React.ReactElement {
         <h1 className="text-lg font-semibold">{t('engine.studio.landing.title', locale)}</h1>
       </div>
       <p className="mb-5 max-w-2xl text-xs leading-5 text-muted-foreground">
-        {t('engine.studio.landing.description', locale)}
+        {t('engine.studio.landing.lead', locale)}
       </p>
 
       {error && (
@@ -296,41 +371,90 @@ export function BuilderLanding(): React.ReactElement {
         </div>
       )}
 
-      {recentPackages.length > 0 && (
-        <>
-          <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {t('engine.home.recent', locale)}
-          </h2>
-          <div data-testid="studio-landing-recent" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-            {recentPackages.map((item) => (
+      {pkgs === null && <p className="mb-6 text-[11px] text-muted-foreground">{t('engine.studio.loading', locale)}</p>}
+
+      {/* objectui#11808 — an installed (read-only) app is not a dead end, and
+        * it leads the page (objectstack#34715). ADR-0070 D2: code and
+        * installed packages take no new items, and D4's Duplicate clones a
+        * writable base, not them. The card's Customize button, like the card
+        * itself, opens the app in Studio, where its items are customized
+        * (ADR-0146 D2, D3: saved in its paired customization package); the
+        * card links into no Setup page (ADR-0146 D1). The app's id is not on
+        * the card's face, only in its title. The marketplace is offered only
+        * when this runtime serves one (`isMarketplaceEnabled`, objectui#5504):
+        * elsewhere that route does not exist. */}
+      {readonly.length > 0 && (
+        <section data-testid="studio-landing-installed" className="mb-6">
+          <div className="mb-1 flex items-baseline justify-between gap-3">
+            <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {t('engine.studio.landing.appsHeading', locale)}
+            </h2>
+            {isMarketplaceEnabled() && (
               <Link
-                key={item.id}
-                to={item.href}
-                className="flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2.5 text-left hover:bg-muted/40"
+                to={MARKETPLACE_PATH}
+                data-testid="studio-landing-marketplace"
+                className="flex shrink-0 items-center gap-1 text-[11px] text-primary hover:underline"
               >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Clock className="h-4 w-4" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium">{recentLabel(item)}</span>
-                  <span className="block truncate font-mono text-[10px] text-muted-foreground">{item.name}</span>
-                </span>
+                <Store className="h-3 w-3" /> {t('engine.studio.landing.marketplaceInstall', locale)}
               </Link>
+            )}
+          </div>
+          <p
+            data-testid="studio-landing-readonly-hint"
+            className="mb-2 max-w-2xl text-[11px] leading-4 text-muted-foreground"
+          >
+            {t('engine.studio.landing.appsHint', locale)}
+          </p>
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {readonly.map((p) => (
+              <div
+                key={p.id}
+                data-package-id={p.id}
+                title={p.id}
+                className="flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2.5"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <Boxes className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => open(p.id)}
+                    className="block w-full truncate text-left text-[13px] font-medium hover:underline"
+                  >
+                    {p.name}
+                  </button>
+                  {renderCustomizationLine(p.id)}
+                </div>
+                <button
+                  type="button"
+                  data-testid="studio-landing-customize"
+                  onClick={() => open(p.id)}
+                  aria-label={tFormat('engine.studio.landing.customizeTitle', locale, { name: p.name })}
+                  title={tFormat('engine.studio.landing.customizeTitle', locale, { name: p.name })}
+                  className="shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium hover:bg-muted max-md:min-h-11 max-md:px-3"
+                >
+                  {t('engine.studio.customize.action', locale)}
+                </button>
+              </div>
             ))}
           </div>
-        </>
+        </section>
       )}
 
-      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {t('engine.studio.landing.mineHeading', locale)}
-      </h2>
-      <div className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-        {pkgs === null && <p className="text-[11px] text-muted-foreground">{t('engine.studio.loading', locale)}</p>}
-        {pkgs !== null && writable.length === 0 && (
-          <p className="text-[11px] text-muted-foreground">{t('engine.studio.landing.noneWritable', locale)}</p>
-        )}
+      {/* objectstack#34714 — every change this deployment made to its
+        * installed apps, in one list, under the apps themselves. */}
+      <LandingCustomizationsPanel
+        apps={customizationApps}
+        reads={customizationReads}
+        locale={locale}
+        headingClass={headingClass}
+      />
+
+      <h2 className={headingClass}>{t('engine.studio.landing.ownHeading', locale)}</h2>
+      <div data-testid="studio-landing-own" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
         {writable.map((p) => (
-          <div key={p.id} className="rounded-lg border bg-background">
+          <div key={p.id} data-package-id={p.id} className="rounded-lg border bg-background">
             <div className="flex items-center gap-2.5 px-3 py-2.5">
               <button
                 type="button"
@@ -411,10 +535,14 @@ export function BuilderLanding(): React.ReactElement {
         {/* new-package card — opens the spec-driven create dialog (PackageFormDialog) */}
         <button
           type="button"
+          data-testid="studio-landing-new-app"
           onClick={() => setCreateOpen(true)}
-          className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed px-3 py-2.5 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground"
+          className="flex flex-col items-start gap-0.5 rounded-lg border border-dashed px-3 py-2.5 text-left text-muted-foreground hover:border-primary/50 hover:text-foreground"
         >
-          <Plus className="h-4 w-4" /> {t('engine.studio.pkg.new', locale)}
+          <span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
+            <Plus className="h-4 w-4" /> {t('engine.studio.landing.newApp', locale)}
+          </span>
+          <span className="text-[10px] leading-4">{t('engine.studio.landing.newAppDescription', locale)}</span>
         </button>
       </div>
 
@@ -425,107 +553,83 @@ export function BuilderLanding(): React.ReactElement {
         onSaved={(r) => open(r.id)}
       />
 
-      {/* objectui#11553 — the organization's own flows, which belong to no
-        * package (a clone of a packaged flow is one, by ADR-0126 §7.1). They
-        * match no package card above, so they get their own entry, shown
-        * whether or not any writable package exists. */}
-      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {t('engine.studio.landing.orgHeading', locale)}
-      </h2>
-      <div className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-        <button
-          type="button"
-          data-testid="studio-landing-org-scope"
-          onClick={() => navigate(studioOrgScopePath())}
-          className="flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2.5 text-left hover:bg-muted/40"
-        >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Building2 className="h-4 w-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-medium">{t('engine.studio.org.name', locale)}</span>
-            <span className="block text-[10px] leading-4 text-muted-foreground">
-              {t('engine.studio.org.description', locale)}
-            </span>
-          </span>
-        </button>
-        {/* objectstack#28561 — the "All metadata" area's cross-package leg
-          * (ADR-0146 D1): the environment catalog, whose items have one name
-          * per deployment and may belong to no package (ADR-0131 D3). */}
-        <button
-          type="button"
-          data-testid="studio-landing-env-catalog"
-          onClick={() => navigate(studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT))}
-          className="flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2.5 text-left hover:bg-muted/40"
-        >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Library className="h-4 w-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-medium">{t('engine.studio.landing.envCatalog.name', locale)}</span>
-            <span className="block text-[10px] leading-4 text-muted-foreground">
-              {t('engine.studio.landing.envCatalog.description', locale)}
-            </span>
-          </span>
-        </button>
-      </div>
-
-      {/* objectui#11808 — a read-only package is not a dead end. ADR-0070 D2:
-        * code and installed packages take no new items, and D4's Duplicate
-        * clones a writable base, not them. Each card opens the package in
-        * Studio, where it is customized (objectstack ADR-0146: Customize, and
-        * the "All metadata" area's per-type overlays); the card links into no
-        * Setup page. The marketplace, which Home's "Start with a template"
-        * opens, is offered only when this runtime serves one
-        * (`isMarketplaceEnabled`, objectui#5504): elsewhere that route does not
-        * exist. */}
-      {readonly.length > 0 && (
+      {/* objectui#11863 — the packages last opened here. objectstack#34715
+        * orders the page by the errand: installed apps first, the author's own
+        * apps next, then the other entries, this one among them. */}
+      {recentPackages.length > 0 && (
         <>
-          <h2 className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {t('engine.studio.landing.installedHeading', locale)}
-          </h2>
-          <p
-            data-testid="studio-landing-readonly-hint"
-            className="mb-2 max-w-2xl text-[11px] leading-4 text-muted-foreground"
-          >
-            {t('engine.studio.landing.readonlyHint', locale)}
-          </p>
-          {isMarketplaceEnabled() && (
-            <Link
-              to={MARKETPLACE_PATH}
-              data-testid="studio-landing-marketplace"
-              className="mb-2 flex w-fit items-center gap-1 text-[11px] text-primary hover:underline"
-            >
-              <Store className="h-3 w-3" /> {t('engine.studio.landing.marketplace', locale)}
-            </Link>
-          )}
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-            {readonly.map((p) => (
-              <div key={p.id} className="rounded-lg border bg-muted/20">
-                <button
-                  type="button"
-                  onClick={() => open(p.id)}
-                  className="flex w-full items-center gap-2.5 rounded-t-lg px-3 py-2.5 text-left hover:bg-muted/40"
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                    <Boxes className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px]">{p.name}</span>
-                    <span className="block truncate font-mono text-[10px] text-muted-foreground">{p.id}</span>
-                  </span>
-                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-400/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-300">
-                    <Lock className="h-2.5 w-2.5" /> {t('engine.studio.pkg.readonly', locale)}
-                  </span>
-                </button>
-                <div className="flex flex-col gap-1 border-t px-3 py-1.5">
-                  {renderCustomizationLine(p.id)}
-                </div>
-              </div>
+          <h2 className={headingClass}>{t('engine.home.recent', locale)}</h2>
+          <div data-testid="studio-landing-recent" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {recentPackages.map((item) => (
+              <Link key={item.id} to={item.href} className={entryCardClass}>
+                <span className={entryIconClass}>
+                  <Clock className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium">{recentLabel(item)}</span>
+                  <span className="block truncate font-mono text-[10px] text-muted-foreground">{item.name}</span>
+                </span>
+              </Link>
             ))}
           </div>
         </>
       )}
+
+      <h2 className={headingClass}>{t('engine.studio.landing.outsideHeading', locale)}</h2>
+      <div className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        {/* objectstack#28561 — the "All metadata" area's cross-package leg
+          * (ADR-0146 D1): the environment's positions, permission sets and
+          * sharing rules, which have one name per deployment and may belong to
+          * no package (ADR-0131 D3). Named for what it holds (objectstack#34715). */}
+        <button
+          type="button"
+          data-testid="studio-landing-env-catalog"
+          onClick={() => navigate(studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT))}
+          className={entryCardClass}
+        >
+          <span className={entryIconClass}>
+            <Library className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium">
+              {t('engine.studio.landing.rolesPermissions.name', locale)}
+            </span>
+            <span className="block text-[10px] leading-4 text-muted-foreground">
+              {t('engine.studio.landing.rolesPermissions.description', locale)}
+            </span>
+          </span>
+        </button>
+        {/* objectui#11553 — the organization's own flows, which belong to no
+          * package (a clone of a packaged flow is one, by ADR-0126 §7.1). They
+          * match no package card above, so they get their own entry, shown
+          * whether or not any writable package exists, and only when there is
+          * at least one such flow (objectstack#34715). */}
+        {packageLessFlows !== null && packageLessFlows !== 0 && (
+          <button
+            type="button"
+            data-testid="studio-landing-org-scope"
+            onClick={() => navigate(studioOrgScopePath())}
+            className={entryCardClass}
+          >
+            <span className={entryIconClass}>
+              <Building2 className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-baseline gap-1.5 truncate text-[13px] font-medium">
+                {t('engine.studio.landing.unassignedFlows.name', locale)}
+                {typeof packageLessFlows === 'number' && (
+                  <span data-testid="studio-landing-org-scope-count" className="font-normal text-muted-foreground">
+                    {packageLessFlows}
+                  </span>
+                )}
+              </span>
+              <span className="block text-[10px] leading-4 text-muted-foreground">
+                {t('engine.studio.landing.unassignedFlows.description', locale)}
+              </span>
+            </span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }

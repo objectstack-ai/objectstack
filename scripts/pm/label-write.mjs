@@ -2358,7 +2358,7 @@ const RELEASE_FILE = '/tmp/self-test/release.md';
 /** The operator's text WITHOUT its signature line — `judgeBody` refuses it before the stroke. */
 const RELEASE_TEXT_UNSIGNED =
   'Release: session `session_01TRIAGE000000000000000000` · reason: a silent claim — the owned-24h re-check 200 has had no answer · destination `pm:queue`\n\n' +
-  'Provenance, three items: the triage duties text (the reclaim clock); verbatim 「敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ 一笔中继释放」; said in `triage-duties.md`. Stamped {{NOW}}.';
+  'Provenance, three items: the triage duties text (the reclaim clock); verbatim 「敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ 兄弟席一笔中继释放」; said in `triage-duties.md`. Stamped {{NOW}}.';
 /** The text a triage seat sends: its signature line, then the `Release:` line (#27113). */
 const RELEASE_TEXT = `triage#1 · os-justin · session_01TRIAGE000000000000000000\n${RELEASE_TEXT_UNSIGNED}`;
 /** A silent card: claimed, knocked ~24 h later, nothing since. `serverNow` is what the fixture varies. */

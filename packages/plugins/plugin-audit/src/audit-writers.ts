@@ -471,24 +471,92 @@ export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objec
 
 /**
  * [#33694] The `sys_audit_log.metadata` keys that ride beside `performed_by` /
- * `on_behalf_of` when the in-product AI performed a record write for a person:
+ * `on_behalf_of` when the in-product AI performed an operation for a person:
  * the AI conversation it ran in, and the pending item the person's approval
- * decided before it ran. Copied from `HookContext.provenance` (and from there
- * from `ExecutionContext.performedBy`), never from the request.
+ * decided before it ran. Copied from `ExecutionContext.performedBy` (for a
+ * record write, through `HookContext.provenance`), never from the request.
  */
 const PERFORMED_IN_CONVERSATION_KEY = 'conversation_id';
 const PERFORMED_UNDER_CONFIRMATION_KEY = 'confirmation_id';
 
 /**
- * One server-stamped `HookContext.provenance` attribution mark, read only as a
- * non-blank string (trimmed); anything else reads as absent.
+ * One server-stamped attribution mark, read only as a non-blank string
+ * (trimmed); anything else reads as absent.
  */
-function provenanceMark(
-  ctx: HookContext,
-  key: 'performedByClientId' | 'performedByAgentId' | 'performedByConversationId' | 'performedByConfirmationId',
-): string | undefined {
-  const value: unknown = (ctx as any).provenance?.[key];
+function attributionMark(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * The performer of one operation, in the shape of `ExecutionContext.performedBy`
+ * (`HookContext.provenance` carries the same four marks as
+ * `performedByClientId` / `performedByAgentId` / `performedByConversationId` /
+ * `performedByConfirmationId`). Each member is read only as a non-blank string.
+ */
+export interface AuditPerformerSource {
+  clientId?: unknown;
+  agentId?: unknown;
+  conversationId?: unknown;
+  confirmationId?: unknown;
+}
+
+/** The performer keys one `sys_audit_log.metadata` object carries. */
+export interface AuditPerformerMetadata {
+  performed_by: string;
+  on_behalf_of: string | null;
+  conversation_id?: string;
+  confirmation_id?: string;
+}
+
+/**
+ * [ADR-0090 D10 rule 4; #33694, owner ruling on objectstack-ai/cloud#3826
+ * 「3826 照建议（征询版）」] The ONE rule every `sys_audit_log` writer applies to
+ * the performer of an operation — the record-write mirror below and the
+ * action-invocation, data-export and dataset-query rows alike — so the four row
+ * kinds can never disagree about what `performed_by` means.
+ *
+ * Two server-side producers name a performer, each only its own key: the /mcp
+ * OAuth door names its client in `clientId`; the server-constructed in-product
+ * AI path, which runs AS the signed-in person, names the agent it ran in
+ * `agentId`, the conversation it ran in and, when the person confirmed the
+ * call, the confirmation. The ruling reuses the existing `performed_by` /
+ * `on_behalf_of` pair and adds no actor vocabulary, so the agent lands in
+ * `performed_by` exactly where an OAuth client does; if one envelope ever
+ * carried both, the OAuth client keeps the column it has always held and the
+ * agent is dropped with its marks.
+ *
+ * The conversation and the confirmation are the in-product path's own marks,
+ * so they are written ONLY when the in-product agent is the performer the row
+ * records — never beside an OAuth client id. That is what the spec promises a
+ * reader of `performed_by`, which holds either kind. Each is present only when
+ * the producer stamped it: no confirmation key ⇒ the operation needed none.
+ *
+ * `onBehalfOf` is the row's own `user_id` value, so the two sides of rule 4
+ * come from one source and never disagree. Answers `undefined` when no
+ * performer is named: the principal acted for itself and the row carries none
+ * of these keys.
+ */
+export function auditPerformerMetadata(
+  performer: AuditPerformerSource | undefined,
+  onBehalfOf: string | null | undefined,
+): AuditPerformerMetadata | undefined {
+  const performedByClientId = attributionMark(performer?.clientId);
+  const performedByAgentId = attributionMark(performer?.agentId);
+  const performedBy = performedByClientId ?? performedByAgentId;
+  if (performedBy === undefined) return undefined;
+  const agentIsRecordedPerformer: boolean = !performedByClientId && performedByAgentId !== undefined;
+  const performedInConversationId = agentIsRecordedPerformer
+    ? attributionMark(performer?.conversationId)
+    : undefined;
+  const performedUnderConfirmationId = agentIsRecordedPerformer
+    ? attributionMark(performer?.confirmationId)
+    : undefined;
+  return {
+    performed_by: performedBy,
+    on_behalf_of: onBehalfOf ?? null,
+    ...(performedInConversationId ? { [PERFORMED_IN_CONVERSATION_KEY]: performedInConversationId } : {}),
+    ...(performedUnderConfirmationId ? { [PERFORMED_UNDER_CONFIRMATION_KEY]: performedUnderConfirmationId } : {}),
+  };
 }
 
 /**
@@ -2208,33 +2276,25 @@ export function installAuditWriters(
     // wrote in the Console, and 「这是 AI 代替人类执行」 was not recoverable
     // from the ledger at all. Stamped from `provenance`, never from `session`,
     // because no caller-gating hook may read the client as the caller.
-    const performedByClientId: string | undefined = provenanceMark(ctx, 'performedByClientId');
+    //
     // [#33694, owner ruling on objectstack-ai/cloud#3826 「3826 照建议（征询版）」]
     // The SAME channel from its second producer: the server-constructed
     // in-product AI path, which writes AS the signed-in person in `userId` and
     // names the agent it ran, the conversation it ran in and, when the person
-    // confirmed the call, the confirmation. The ruling reuses the existing
-    // `performed_by` / `on_behalf_of` pair and adds no actor vocabulary, so the
-    // agent lands in `performed_by` exactly where an OAuth client does. The
-    // /mcp OAuth door and the in-product path each set only their own key
-    // (`clientId` vs `agentId`); if one envelope ever carried both, the OAuth
-    // client keeps the column it has always held.
-    //
-    // The conversation and the confirmation are the in-product path's own
-    // marks, so they are written ONLY when the in-product agent is the
-    // performer this row records — never beside an OAuth client id. That is
-    // what the spec promises a reader of `performed_by`, which holds either
-    // kind: `conversation_id` / `confirmation_id` come from the in-product
-    // path alone.
-    const performedByAgentId: string | undefined = provenanceMark(ctx, 'performedByAgentId');
-    const performedBy: string | undefined = performedByClientId ?? performedByAgentId;
-    const agentIsRecordedPerformer: boolean = !performedByClientId && performedByAgentId !== undefined;
-    const performedInConversationId: string | undefined = agentIsRecordedPerformer
-      ? provenanceMark(ctx, 'performedByConversationId')
-      : undefined;
-    const performedUnderConfirmationId: string | undefined = agentIsRecordedPerformer
-      ? provenanceMark(ctx, 'performedByConfirmationId')
-      : undefined;
+    // confirmed the call, the confirmation. `auditPerformerMetadata` holds the
+    // one rule (which performer the row records, and when the conversation and
+    // confirmation ride beside it) that the action-invocation, data-export and
+    // dataset-query rows apply too.
+    const provenance = (ctx as any).provenance;
+    const performer: AuditPerformerMetadata | undefined = auditPerformerMetadata(
+      {
+        clientId: provenance?.performedByClientId,
+        agentId: provenance?.performedByAgentId,
+        conversationId: provenance?.performedByConversationId,
+        confirmationId: provenance?.performedByConfirmationId,
+      },
+      userId,
+    );
     // The ADMINISTRATOR who made this write from an impersonation session. A
     // FOURTH channel, for the same reason as the agent's: `session.userId` is
     // the impersonated user — the session is theirs, the write authorizes as
@@ -2389,14 +2449,12 @@ export function installAuditWriters(
     // performed the write in, and the pending item the person's approval
     // decided for it. Each is present only when the producer stamped it — no
     // confirmation key ⇒ the write needed none.
-    if (performedBy || impersonatedBy || signInStamp || scimConnectionId) {
+    if (performer || impersonatedBy || signInStamp || scimConnectionId) {
       auditRow.metadata = safeStringify({
         // A sign-in stamp names its event the way a `config_change` row does
         // (`metadata.event`); every other CRUD row still carries no event.
         ...(signInStamp ? { event: SIGN_IN_STAMP_EVENT } : {}),
-        ...(performedBy ? { performed_by: performedBy, on_behalf_of: userId ?? null } : {}),
-        ...(performedInConversationId ? { [PERFORMED_IN_CONVERSATION_KEY]: performedInConversationId } : {}),
-        ...(performedUnderConfirmationId ? { [PERFORMED_UNDER_CONFIRMATION_KEY]: performedUnderConfirmationId } : {}),
+        ...(performer ?? {}),
         ...(impersonatedBy ? { [IMPERSONATED_BY_KEY]: impersonatedBy } : {}),
         ...(scimConnectionId ? { [SCIM_CONNECTION_ID_KEY]: scimConnectionId } : {}),
       });

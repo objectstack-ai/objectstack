@@ -5,8 +5,8 @@
  * author sees on it (objectui#11862: label first).
  *
  * The 2026-10-15 test pass read the recent-package links, the writable and
- * installed package cards, and the "Organization flows" card as controls with
- * no name. The browser's computed tree names each one from its visible text;
+ * installed package cards, and the package-less flows card (now "Flows in no
+ * app", objectstack#34715) as controls with no name. The browser's computed tree names each one from its visible text;
  * these cases pin that by querying each card by role and name, so a later
  * restyle that hides the text from the tree (an `aria-hidden` on the label, an
  * icon-only card) turns them red.
@@ -37,9 +37,15 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 // A read-only base's customization read (ADR-0146 D3) is not under test here:
 // it stays pending, so no request leaves the file.
-vi.mock('./packageCustomizations-io', () => ({
-  fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
+vi.mock('./packageCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./packageCustomizations-io')>()),
+  fetchPackageCustomizations: vi.fn(() => new Promise<never>(() => {})),
 }));
+// One flow belongs to no package, so the landing draws that entry (objectstack#34715).
+vi.mock('./packageSurfaces', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./packageSurfaces')>();
+  return { ...mod, loadPackageLessSurfaces: vi.fn(async () => [{ type: 'flow', name: 'org_flow', label: 'Org flow' }]) };
+});
 
 import { BuilderLanding } from './BuilderLanding';
 import { RecentItemsProvider } from '../../context/RecentItemsProvider';
@@ -90,11 +96,12 @@ describe('Studio home cards carry their visible label as their name (objectui#12
 
     // The writable card: its label leads the name; the api name follows it.
     expect(screen.getByRole('button', { name: /^Acme CRM\b/ })).toBeInTheDocument();
-    // The installed (read-only) card.
-    expect(screen.getByRole('button', { name: /^HotCRM\b.*Read-only/ })).toBeInTheDocument();
-    // The organization's flows.
-    expect(screen.getByTestId('studio-landing-org-scope')).toHaveAccessibleName(/^Organization flows/);
-    expect(screen.getByRole('button', { name: /^New package/ })).toBeInTheDocument();
+    // The installed (read-only) card: its label, and its Customize button named for it.
+    expect(screen.getByRole('button', { name: 'HotCRM' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Customize HotCRM' })).toBeInTheDocument();
+    // The flows that belong to no package.
+    expect(await screen.findByTestId('studio-landing-org-scope')).toHaveAccessibleName(/^Flows in no app/);
+    expect(screen.getByRole('button', { name: /^New app of your own/ })).toBeInTheDocument();
 
     // No button or link on the page is left without a name.
     const unnamed = [...screen.getAllByRole('button'), ...screen.getAllByRole('link')].filter(
