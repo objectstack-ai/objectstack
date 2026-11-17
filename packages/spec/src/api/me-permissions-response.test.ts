@@ -2,7 +2,7 @@
 //
 // #28508: `GET /auth/me/permissions` has a declared, STRICT response contract.
 // The console reads this body once per session for its whole permission layer,
-// and since #28508 for `hasAnyQueue` too. A key the server starts sending is
+// and since #28508 for `hasAnyQueue` too (#34602: `objectsUsingQueues`). A key the server starts sending is
 // declared here first, and an undeclared one is refused rather than dropped.
 //
 // The handler's own bodies are parsed through this schema in
@@ -28,6 +28,7 @@ const FULL = {
   systemPermissions: ['setup.access'],
   tabPermissions: { sales: 'visible' },
   hasAnyQueue: true,
+  objectsUsingQueues: ['crm_case'],
 } as const;
 
 /** The closed body: the caller is known, the grants could not be computed. */
@@ -42,6 +43,7 @@ const CLOSED = {
   systemPermissions: [],
   tabPermissions: {},
   hasAnyQueue: false,
+  objectsUsingQueues: [],
 } as const;
 
 /** The degraded body: no SecurityPlugin; capabilities unknown, so the two keys are absent. */
@@ -54,6 +56,7 @@ const DEGRADED = {
   objects: {},
   fields: {},
   hasAnyQueue: false,
+  objectsUsingQueues: [],
 } as const;
 
 const issuesOf = (value: unknown) => {
@@ -81,6 +84,15 @@ describe('[#28508] MePermissionsResponseSchema — the declared /auth/me/permiss
   it('hasAnyQueue is required on an authenticated body — every authenticated branch carries it', () => {
     const { hasAnyQueue: _dropped, ...withoutIt } = FULL;
     expect(issuesOf(withoutIt).map((i) => i.path.join('.'))).toEqual(['hasAnyQueue']);
+  });
+
+  it('[#34602] objectsUsingQueues is declared, required, and a list of object names', () => {
+    expect(MePermissionsAuthenticatedResponseSchema.shape.objectsUsingQueues).toBeDefined();
+    expect(MePermissionsResponseSchema.parse(FULL)).toMatchObject({ objectsUsingQueues: ['crm_case'] });
+    expect(issuesOf({ ...FULL, objectsUsingQueues: true }).map((i) => i.path.join('.'))).toEqual(['objectsUsingQueues']);
+    expect(issuesOf({ ...FULL, objectsUsingQueues: [1] }).map((i) => i.path.join('.'))).toEqual(['objectsUsingQueues.0']);
+    const { objectsUsingQueues: _dropped, ...withoutIt } = FULL;
+    expect(issuesOf(withoutIt).map((i) => i.path.join('.'))).toEqual(['objectsUsingQueues']);
   });
 
   it('an unknown sibling is refused on the authenticated body, not dropped', () => {

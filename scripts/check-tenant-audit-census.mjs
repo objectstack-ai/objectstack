@@ -2,8 +2,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check-tenant-audit-census -- holds `content/docs/permissions/tenant-audit-census.mdx`
- * to the code it claims to enumerate.
+ * check-tenant-audit-census -- holds `content/docs/permissions/tenant-audit-census.mdx`,
+ * its ledger index and the ledger's per-package shards to the code they claim to
+ * enumerate, and PRINTS the census totals no committed file states.
  *
  *   node scripts/check-tenant-audit-census.mjs
  *   node scripts/check-tenant-audit-census.mjs --self-test
@@ -47,22 +48,30 @@
  *
  * ## The checks
  *
- *   A  DRIFT       both generated artefacts equal what the generator produces
+ *   A  DRIFT       every generated artefact equals what the generator produces
  *                  from the tree right now, byte-for-byte: the page's generated
- *                  region, and the whole of the audit ledger
- *                  `docs/audits/2026-08-tenant-audit-write-call-sites.counts.md`.
- *                  This is the load-bearing one: it holds them to the CODE, in
- *                  the census -> page direction, so a site that arrives with no
- *                  row fails rather than going unnoticed. ⛔ The CORPUS-SCALE
- *                  rows and their dated marker are masked out of the comparison
- *                  -- they must be PRESENT and DATED, never equal. See the split
- *                  at `UNENFORCED_SCALE_ROWS`.
- *   B  PROSE       every census-derived number the page states OUTSIDE that
- *                  region equals the census. A pattern that matches NOTHING is
- *                  an error, so a reworded page cannot silently stop being
- *                  checked -- the page's headline and its own deviation table
- *                  are hand-written, and a hand-written number is exactly the
- *                  thing that goes stale first. Its corpus-scale counterpart is
+ *                  region, the ledger index
+ *                  `docs/audits/2026-08-tenant-audit-write-call-sites.counts.md`,
+ *                  and every per-package shard under `SHARD_DIR` -- a package
+ *                  with sites and no shard, and a shard naming a package the
+ *                  census finds nothing in, are drift too. This is the
+ *                  load-bearing one: it holds them to the CODE, in the census ->
+ *                  page direction, so a site that arrives with no row fails
+ *                  rather than going unnoticed. Each shard carries its package's
+ *                  TOTALS, and every census total is a sum of those, so a moved
+ *                  total is a drifted shard. ⛔ The CORPUS-SCALE rows and their
+ *                  dated marker are masked out of the comparison -- they must be
+ *                  PRESENT and DATED, never equal. See the split at
+ *                  `UNENFORCED_SCALE_ROWS`.
+ *   B  PROSE       the page's hand-written prose states NO live census total.
+ *                  It used to state two dozen, each held equal to the census --
+ *                  and every PR adding a write call site then rewrote them, so
+ *                  any two such PRs conflicted on the page. Those figures are
+ *                  now the gate's printed output, and a sentence restating one
+ *                  in any shape it used to take (`LIVE_TOTAL_PROSE_SHAPES`) is
+ *                  a finding: a hand-written number is exactly the thing that
+ *                  goes stale first, and a hand-written TOTAL is the thing two
+ *                  branches both rewrite. Its corpus-scale counterpart is
  *                  `UNENFORCED_PROSE_COUNTS`: required to be said, not to be right.
  *   C  CENSUS       the census this gate just ran placed every write call site it
  *                  found, and every `UNTYPED_RECEIVERS` row still matches a call.
@@ -89,9 +98,10 @@
  * alternative (line 30 there, the ⭐ line quoted below), and the measurement that draws the line
  * where it is drawn are all at `UNENFORCED_SCALE_ROWS` below.
  *
- * Check B is not redundant with A. The generated region cannot lie, because it
- * is rewritten; the prose around it is where a human writes a claim, and #13178's
- * whole lesson is that a quoted number outlives the measurement it quoted.
+ * Check B is not redundant with A. The generated artefacts cannot lie, because
+ * they are rewritten; the prose around the region is where a human writes a
+ * claim, and #13178's whole lesson is that a quoted number outlives the
+ * measurement it quoted -- so the prose quotes none, and B holds it to that.
  *
  * ## Refusals, never quiet passes (#4690)
  *
@@ -133,7 +143,7 @@ import { isEntrypoint } from './invoked-as.mjs';
 // self-test runs once per process, and it is what lets the existing sink route
 // through `registerCase()` with no case rewritten and no assertion changed.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'A DRIFT': 5,
+  'A DRIFT': 7,
   'B PROSE': 4,
   '⭐ THE SPLIT': 9,
   'census refusals': 7,
@@ -221,12 +231,17 @@ import {
   COUNTS,
   END_MARKER,
   PAGE,
+  SHARD_DIR,
   corpusScaleRows,
   notRoundTrippableSites,
+  readShardFiles,
   renderCountsFile,
   renderGeneratedRegion,
+  renderShards,
   runCensus,
   selfTest as censusSelfTest,
+  totalsRows,
+  undefendedCountRows,
 } from './tenant-audit-census.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -269,138 +284,54 @@ const ROOT_DIR_WATCH_HINTS = [
   'packages/plugins/**',
   'content/docs/permissions/tenant-audit-census.mdx',
   'docs/audits/2026-08-tenant-audit-write-call-sites.counts.md',
+  'docs/audits/2026-08-tenant-audit-write-call-sites.counts/**',
 ];
 
 /**
- * The census-derived numbers the page states in its own prose.
+ * The shapes in which the page's prose used to state a LIVE census total.
  *
- * Each row's `pattern` must match EXACTLY ONCE outside the generated region, and
- * its capture must equal `expected(census)`. Zero matches is a failure, not a
- * pass: that is what stops a reworded page from quietly falling out of scope.
+ * ## ⭐ Why the prose states none any more
+ *
+ * Each of these was once a `PROSE_COUNTS` row: the sentence was required to
+ * appear and its number to equal the census. That held the prose honest and made
+ * the page the hottest conflict surface in the census -- every PR adding a write
+ * call site rewrote two dozen hand-written numbers, so any two such PRs conflicted
+ * on the page even when the generated artefacts merged. The figures are now the
+ * gate's printed output (`printTotals`), and every number left in the prose is
+ * dated history that is never regenerated.
+ *
+ * ⇒ Each shape below must match NOTHING. A live total written back into the prose
+ *   is a finding whatever its value: a right number there is the next conflict,
+ *   and a wrong one is #13178's lesson -- a quoted number outliving its
+ *   measurement. ⚠️ Two former rows are deliberately absent: the over-claim
+ *   history ("published **N sites ...**", "when N said so and N were simply
+ *   unread") now carries the figures of the day it was caught, dated, so those
+ *   shapes match history and are not live.
  *
  * ⚠️ Matched against the prose with WHITESPACE COLLAPSED, so every pattern is
- * written with single spaces and none of them can break on a re-wrap. The page is
- * hard-wrapped at 80 columns; a pattern spanning two words is one reflow away
- * from matching nothing, and "matches nothing" is a FAILURE here -- so a
- * line-sensitive pattern would turn every cosmetic re-wrap into a red gate and
- * teach the next author to loosen the rule. Reflow is not a semantic change and
- * this gate must not treat it as one.
+ * written with single spaces and none of them can break on a re-wrap.
  */
-export const PROSE_COUNTS = [
-  {
-    name: 'sites reached through an erased receiver',
-    pattern: /there are (\d+) of them/,
-    expected: (c) => c.totals.placedByObjectName + c.totals.placedByObjectNameParameter + c.totals.placedByLedger,
-  },
+export const LIVE_TOTAL_PROSE_SHAPES = [
+  { name: 'sites reached through an erased receiver', pattern: /there are \d+ of them/ },
   {
     name: 'sites reached through an erased receiver (deviation section)',
-    pattern: /the (\d+) sites reached through an erased \(`any`\) receiver/,
-    expected: (c) => c.totals.placedByObjectName + c.totals.placedByObjectNameParameter + c.totals.placedByLedger,
+    pattern: /the \d+ sites reached through an erased \(`any`\) receiver/,
   },
-  {
-    name: 'sites naming their object through a const',
-    pattern: /and the (\d+) that name their object through a `const`/,
-    expected: (c) => c.totals.objectNameConst,
-  },
-  {
-    name: 'sites whose options argument is unreadable (limits section)',
-    pattern: /\*\*(\d+) of the \d+ sites are spelled that way\*\*/,
-    expected: (c) => c.totals.tenantContextUnreadable,
-  },
-  {
-    name: 'the population that unreadable share is of',
-    pattern: /\*\*\d+ of the (\d+) sites are spelled that way\*\*/,
-    expected: (c) => c.totals.writeCallSites,
-  },
-  {
-    name: 'decidably-not-elevated is now zero',
-    pattern: /decidably-not-elevated sites is now \*\*(\d+)\*\*/,
-    expected: (c) => c.totals.nonElevatedContext,
-  },
-  {
-    name: 'sites the over-claim published as carrying no context',
-    pattern: /published \*\*(\d+) sites "carrying no tenant context at all"\*\*/,
-    expected: (c) => c.totals.provablyNoTenantContext + c.totals.tenantContextUnreadable,
-  },
-  {
-    name: 'of those, the ones that actually said so',
-    pattern: /when (\d+) said so and \d+ were simply unread/,
-    expected: (c) => c.totals.provablyNoTenantContext,
-  },
-  {
-    name: 'of those, the ones that were merely unread',
-    pattern: /when \d+ said so and (\d+) were simply unread/,
-    expected: (c) => c.totals.tenantContextUnreadable,
-  },
-  {
-    name: 'deviation row: write call sites',
-    pattern: /\| 175 write call sites \|[^|]*\| \*\*(\d+)\*\* \|/,
-    expected: (c) => c.totals.writeCallSites,
-  },
+  { name: 'sites naming their object through a const', pattern: /and the \d+ that name their object through a `const`/ },
+  { name: 'sites whose options argument is unreadable', pattern: /\*\*\d+ of the \d+ sites are spelled that way\*\*/ },
+  { name: 'decidably-not-elevated is now N', pattern: /decidably-not-elevated sites is now \*\*\d+\*\*/ },
+  { name: 'deviation row: write call sites', pattern: /\| 175 write call sites \|[^|]*\| \*\*\d+\*\* \|/ },
   {
     name: 'deviation row: provable and tenancy-enabled',
-    pattern: /\| 24 carrying no tenant context \|[^|]*\| \*\*(\d+)\*\* provable and tenancy-enabled/,
-    expected: (c) => c.totals.tenancyEnabledProvablyNoContext,
+    pattern: /\| 24 carrying no tenant context \|[^|]*\| \*\*\d+\*\* provable and tenancy-enabled/,
   },
-  {
-    name: 'deviation row: unreadable and tenancy-enabled',
-    pattern: /provable and tenancy-enabled; \*\*(\d+)\*\* more whose options argument is unreadable/,
-    expected: (c) => c.totals.tenancyEnabledContextUnreadable,
-  },
-  {
-    name: 'deviation row: statically decidable',
-    pattern: /\| \*\*(\d+) of \d+\*\* decidable, \*\*\d+\*\* undecidable \|/,
-    expected: (c) => c.totals.staticallyDecidableObjectName,
-  },
-  {
-    name: 'deviation row: population the decidable share is of',
-    pattern: /\| \*\*\d+ of (\d+)\*\* decidable, \*\*\d+\*\* undecidable \|/,
-    expected: (c) => c.totals.writeCallSites,
-  },
-  {
-    name: 'deviation row: undecidable',
-    pattern: /\| \*\*\d+ of \d+\*\* decidable, \*\*(\d+)\*\* undecidable \|/,
-    expected: (c) => c.totals.undecidableObjectName,
-  },
-  {
-    name: 'deviation row: decidably elevated',
-    pattern: /\*\*not reproduced\*\*: (\d+) decidably elevated/,
-    expected: (c) => c.totals.elevatedContext,
-  },
-  {
-    name: 'deviation row: decidably not elevated',
-    pattern: /decidably elevated, (\d+) decidably not/,
-    expected: (c) => c.totals.nonElevatedContext,
-  },
-  {
-    name: 'deviation row: elevation undecidable',
-    pattern: /decidably not, (\d+) undecidable \|/,
-    expected: (c) => c.totals.elevationUndecidable,
-  },
-  {
-    name: 'the elevated share restated in prose',
-    pattern: /This census reads (\d+) of \d+ \(\d+%\) as decidably elevated/,
-    expected: (c) => c.totals.elevatedContext,
-  },
-  {
-    name: 'the population that elevated share is of',
-    pattern: /This census reads \d+ of (\d+) \(\d+%\) as decidably elevated/,
-    expected: (c) => c.totals.writeCallSites,
-  },
-  {
-    name: 'the figure downstream cards should cite',
-    pattern: /Cite `(\d+) \/ \d+`/,
-    expected: (c) => c.totals.tenancyEnabledProvablyNoContext,
-  },
-  {
-    name: 'the population that figure is of',
-    pattern: /Cite `\d+ \/ (\d+)`/,
-    expected: (c) => c.totals.writeCallSites,
-  },
+  { name: 'deviation row: statically decidable', pattern: /\| \*\*\d+ of \d+\*\* decidable, \*\*\d+\*\* undecidable \|/ },
+  { name: 'deviation row: decidably elevated', pattern: /\*\*not reproduced\*\*: \d+ decidably elevated/ },
+  { name: 'the elevated share restated in prose', pattern: /This census reads \d+ of \d+ \(\d+%\) as decidably elevated/ },
+  { name: 'the figure downstream cards should cite', pattern: /Cite `\d+ \/ \d+`/ },
   {
     name: 'the further sites that are neither in nor out',
-    pattern: /\*\*(\d+) further sites\*\* have an options argument this cannot read/,
-    expected: (c) => c.totals.tenancyEnabledContextUnreadable,
+    pattern: /\*\*\d+ further sites\*\* have an options argument this cannot read/,
   },
 ];
 
@@ -663,14 +594,16 @@ export function censusRefusals(census) {
 }
 
 /**
- * Run both artefact checks against a census and a page text.
+ * Run both artefact checks against a census, a page text, the ledger index text
+ * and the shard texts (repo-relative path -> text, as `readShardFiles` reads them).
  *
- * Takes the page as TEXT rather than reading it, so the self-test can feed
- * adversarial pages through the same code path the production run uses.
+ * Takes every artefact as TEXT rather than reading it, so the self-test can feed
+ * adversarial pages and shard sets through the same code path the production run
+ * uses.
  *
  * @returns {string[]} problems, empty when clean.
  */
-export function checkPage(census, pageText, countsText) {
+export function checkPage(census, pageText, countsText, shardTexts = new Map()) {
   const problems = [];
 
   if (census.sites.length === 0) {
@@ -734,33 +667,56 @@ export function checkPage(census, pageText, countsText) {
     );
   }
 
-  // ── B PROSE ────────────────────────────────────────────────────────────────
-  for (const row of PROSE_COUNTS) {
+  // ── A DRIFT, per package ───────────────────────────────────────────────────
+  // ⭐ The population's rows AND its totals, one shard per package. Byte-for-byte,
+  // with nothing masked: a shard carries no unenforced number. The two shapes a
+  // single file could not have are refused here as drift of the same kind -- a
+  // package whose sites no shard holds, and a shard holding a package the census
+  // finds nothing in (it would certify sites that are gone).
+  const expectedShards = renderShards(census);
+  for (const [rel, expected] of expectedShards) {
+    const committed = shardTexts.get(rel);
+    if (committed === undefined) {
+      problems.push(
+        `[census-drift] the census has write call sites in the package ${rel} is the shard for, `
+        + 'and that shard is not committed -- those sites and their totals are certified nowhere.\n'
+        + '    Fix: node scripts/tenant-audit-census.mjs --write',
+      );
+      continue;
+    }
+    if (committed === expected) continue;
+    const diff = firstDifference(committed, expected);
+    problems.push(
+      `[census-drift] the committed census in ${rel} is not what the tree produces. `
+      + (diff
+        ? `First difference at line ${diff.line}:\n`
+          + `    committed : ${diff.committed}\n`
+          + `    census    : ${diff.expected}\n`
+        : '')
+      + '    Fix: node scripts/tenant-audit-census.mjs --write',
+    );
+  }
+  for (const rel of shardTexts.keys()) {
+    if (expectedShards.has(rel)) continue;
+    problems.push(
+      `[census-drift] ${rel} is committed under ${SHARD_DIR}/ but the census finds no write call `
+      + 'site and no undefended subtraction in that package -- it certifies sites that are not there.\n'
+      + '    Fix: node scripts/tenant-audit-census.mjs --write (it removes the shard)',
+    );
+  }
+
+  // ── B PROSE: no live total ─────────────────────────────────────────────────
+  for (const row of LIVE_TOTAL_PROSE_SHAPES) {
     const matches = [...prose.matchAll(new RegExp(row.pattern, 'g'))];
-    if (matches.length === 0) {
-      problems.push(
-        `[prose-pattern-dead] the page no longer states "${row.name}" in the shape this gate `
-        + `checks (${row.pattern}). A reworded page must not silently stop being checked -- `
-        + 'either restore the wording or update PROSE_COUNTS in this gate.',
-      );
-      continue;
-    }
-    if (matches.length > 1) {
-      problems.push(
-        `[prose-pattern-ambiguous] "${row.name}" matches ${matches.length} places in the page. `
-        + 'This gate checks one number per row; narrow the pattern.',
-      );
-      continue;
-    }
-    const stated = Number(matches[0][1]);
-    const actual = row.expected(census);
-    if (stated !== actual) {
-      problems.push(
-        `[prose-count] the page states ${stated} for "${row.name}"; the census says ${actual}. `
-        + 'The page is hand-written here -- a quoted number outliving its measurement is the '
-        + 'exact failure this artefact replaced.',
-      );
-    }
+    if (matches.length === 0) continue;
+    problems.push(
+      `[prose-total] the page's hand-written prose states a live census total again -- `
+      + `"${row.name}" (${matches.map((m) => JSON.stringify(m[0])).join(', ')}). The prose carries `
+      + 'no live total: every PR adding a write call site would rewrite it, so two such PRs '
+      + 'conflict on the page, and a quoted number outliving its measurement is the exact failure '
+      + 'this artefact replaced. Point the sentence at the figure `node '
+      + 'scripts/check-tenant-audit-census.mjs` prints instead.',
+    );
   }
 
   // ── B2 THE UNENFORCED PROSE FIGURES: present, never compared ───────────────
@@ -816,71 +772,78 @@ export function selfTest() {
   const census = runCensus();
   const page = readFileSync(join(ROOT, PAGE), 'utf8');
   const counts = readFileSync(join(ROOT, COUNTS), 'utf8');
-  const check = (p = page, c = counts) => checkPage(census, p, c);
+  const shards = readShardFiles(ROOT);
+  const check = (p = page, c = counts, sh = shards) => checkPage(census, p, c, sh);
+  /** The shard set with one shard's text replaced (or, for `null`, the shard removed). */
+  const withShard = (rel, text) => {
+    const next = new Map(shards);
+    if (text === null) next.delete(rel);
+    else next.set(rel, text);
+    return next;
+  };
+  const [firstShardPath, firstShard] = [...shards].find(([, text]) => text.includes('| `packages/')) ?? [];
 
   t('the committed artefacts are clean', check().length === 0, check().join(' | '));
 
   // ── A DRIFT ────────────────────────────────────────────────────────────────
-  // ⭐ A row deleted from the LEDGER -- "a site exists in code and no row names
-  // it", which is the direction that matters and the one a clean tree cannot show.
-  const countLines = counts.split('\n');
-  const firstRow = countLines.findIndex((l) => l.startsWith('| `packages/'));
-  t('a site that exists in code but has no row in the ledger is a finding',
+  // ⭐ A row deleted from a SHARD -- "a site exists in code and no row names it",
+  // which is the direction that matters and the one a clean tree cannot show.
+  const shardLines = (firstShard ?? '').split('\n');
+  const firstRow = shardLines.findIndex((l) => l.startsWith('| `packages/'));
+  t('a site that exists in code but has no row in its shard is a finding',
     firstRow !== -1
-    && check(page, [...countLines.slice(0, firstRow), ...countLines.slice(firstRow + 1)].join('\n'))
+    && check(page, counts, withShard(firstShardPath, [...shardLines.slice(0, firstRow), ...shardLines.slice(firstRow + 1)].join('\n')))
       .some((p) => p.startsWith('[census-drift]')));
 
-  // A count changed in the generated region -- the shape a hand-edit takes.
-  t('an edited count inside the page region is a finding',
-    check(page.replace(
-      `| write call sites on the application surface | **${census.totals.writeCallSites}** |`,
-      `| write call sites on the application surface | **${census.totals.writeCallSites + 1}** |`,
-    )).some((p) => p.startsWith('[census-drift]')));
+  // A line changed in the generated region -- the shape a hand-edit takes.
+  t('an edited line inside the page region is a finding',
+    check(page.replace('## The measurement', '## The measurement, edited')).some((p) => p.startsWith('[census-drift]')));
 
-  t('an edited total inside the ledger is a finding',
-    check(page, counts.replace(
-      `| Write call sites | ${census.totals.writeCallSites} |`,
-      `| Write call sites | ${census.totals.writeCallSites - 1} |`,
-    )).some((p) => p.startsWith('[census-drift]')));
+  // A package's total changed -- the shape a hand-edit of a shard takes.
+  const shardTotal = /^\| Write call sites \| (\d+) \|$/m;
+  t('an edited total inside a shard is a finding',
+    shardTotal.test(firstShard ?? '')
+    && check(page, counts, withShard(firstShardPath, firstShard.replace(shardTotal, (line, n) => `| Write call sites | ${Number(n) - 1} |`)))
+      .some((p) => p.startsWith('[census-drift]')));
+
+  // ⭐ The two shapes only a SHARDED ledger can take, each in the direction a
+  // clean tree cannot show: a package's sites certified nowhere, and a shard that
+  // certifies a package the census finds nothing in.
+  t('a package with sites and no committed shard is a finding',
+    check(page, counts, withShard(firstShardPath, null))
+      .some((p) => p.startsWith('[census-drift]') && p.includes(firstShardPath)));
+  const orphanPath = `${SHARD_DIR}/plugins/plugin-no-such-package.md`;
+  t('a shard for a package the census finds nothing in is a finding',
+    check(page, counts, withShard(orphanPath, firstShard ?? ''))
+      .some((p) => p.startsWith('[census-drift]') && p.includes(orphanPath)));
 
   // The markers themselves -- a page that lost its region must refuse, never pass.
   t('a page with no generated region refuses',
     check(page.replace(BEGIN_MARKER, '')).some((p) => p.startsWith('[no-region]')));
 
   // ── B PROSE ────────────────────────────────────────────────────────────────
-  // ⚠️ Anchored on the BOLD RUN alone, never on the sentence: the page is hard
-  // wrapped at 80 columns and "... argument this\ncannot read" spans two lines,
-  // so a sentence-shaped needle silently replaces NOTHING and the case then
-  // passes a clean page off as a drifted one. The gate matches with whitespace
-  // collapsed; this self-test edits the raw file, and the two are not the same text.
+  // ⭐ The prose carries no live total, so the direction a clean tree cannot show
+  // is one written BACK into it, in a shape it used to take. Inserted rather than
+  // edited: there is no live figure on a clean page to edit.
   battery('B PROSE');
-  const enforcedProse = (n) => `**${n} further sites**`;
-  t('a stale hand-written number in the prose is a finding',
-    check(page.replace(
-      enforcedProse(census.totals.tenancyEnabledContextUnreadable),
-      enforcedProse(census.totals.tenancyEnabledContextUnreadable - 1),
-    )).some((p) => p.startsWith('[prose-count]')));
-
-  t('a stale number in the DEVIATION table is a finding',
-    check(page.replace(
-      `| **${census.totals.writeCallSites}** |`,
-      `| **${census.totals.writeCallSites - 7}** |`,
-    )).some((p) => p.startsWith('[prose-count]') || p.startsWith('[census-drift]')));
-
-  // ⭐ The direction a clean tree cannot show: a page that stops SAYING the thing
-  // is not a page that passes. Rewording out of scope must red, or every prose
-  // rule can be retired by deleting a sentence.
-  t('a prose claim reworded out of the gate\'s reach is a finding, not a pass',
-    check(page.replace(
-      enforcedProse(census.totals.tenancyEnabledContextUnreadable),
-      '**many further sites**',
-    )).some((p) => p.startsWith('[prose-pattern-dead]')));
-
-  t('the "cite this figure" line is held to the census',
-    check(page.replace(
-      `Cite \`${census.totals.tenancyEnabledProvablyNoContext} / ${census.totals.writeCallSites}\``,
-      `Cite \`24 / ${census.totals.writeCallSites}\``,
-    )).some((p) => p.startsWith('[prose-count]')));
+  const t0 = census.totals;
+  const prosePlus = (sentence) => page.replace('## ⛔ What this instrument cannot decide',
+    `${sentence}\n\n## ⛔ What this instrument cannot decide`);
+  t('a live total written back into the prose is a finding',
+    check(prosePlus(`**${t0.tenantContextUnreadable} of the ${t0.writeCallSites} sites are spelled that way**.`))
+      .some((p) => p.startsWith('[prose-total]')));
+  t('a live total restated in the DEVIATION table is a finding',
+    check(prosePlus(`| 175 write call sites | quoted in the merged changeset | **${t0.writeCallSites}** |`))
+      .some((p) => p.startsWith('[prose-total]')));
+  t('the "cite this figure" line restated with live numbers is a finding',
+    check(prosePlus(`Cite \`${t0.tenancyEnabledProvablyNoContext} / ${t0.writeCallSites}\`, and say what it is.`))
+      .some((p) => p.startsWith('[prose-total]')));
+  // ⛔ ...and the control, without which the three above are equally passed by a
+  // rule that refuses any number at all: the dated history figures on the page
+  // are numbers too, and they are not findings.
+  t('⭐ CONTROL: a dated history figure in the prose is NOT a finding',
+    check(prosePlus('On 2026-08-31 that published **84 sites "carrying no tenant context at all"**.')).length === 0,
+    check(prosePlus('On 2026-08-31 that published **84 sites "carrying no tenant context at all"**.')).join(' | '));
 
   // ── ⭐ THE SPLIT ───────────────────────────────────────────────────────────
   // The one direction a clean tree cannot show, in BOTH directions at once: the
@@ -901,12 +864,13 @@ export function selfTest() {
     check(page, drift(counts, -17)).join(' | '));
 
   // ⛔ ...and the control, without which the case above only proves the gate is
-  // blind: a POPULATION figure one line away from it still fails.
-  t('⭐ CONTROL: a population count in the same table IS still a finding',
-    check(page.replace(
-      `| write call sites on the application surface | **${census.totals.writeCallSites}** |`,
-      `| write call sites on the application surface | **${census.totals.writeCallSites + 41}** |`,
-    )).some((p) => p.startsWith('[census-drift]')));
+  // blind: a line of the same block one away from the masked value still fails,
+  // and so does a POPULATION figure, which now lives in the package's shard.
+  t('⭐ CONTROL: a population count in a shard IS still a finding, beside a moved scale count',
+    shardTotal.test(firstShard ?? '')
+    && check(drift(page, 41), counts, withShard(firstShardPath,
+      firstShard.replace(shardTotal, (line, n) => `| Write call sites | ${Number(n) + 41} |`)))
+      .some((p) => p.startsWith('[census-drift]') && p.includes(firstShardPath)));
 
   // ⛔ "not enforced" must not decay into "not there".
   t('an unenforced row deleted from the artefact is a finding, not a pass',
@@ -1024,7 +988,7 @@ export function selfTest() {
   // ── refusals ───────────────────────────────────────────────────────────────
   battery('refusals');
   t('an empty census refuses rather than certifying the artefacts',
-    checkPage({ ...census, sites: [] }, page, counts).some((p) => p.startsWith('[empty-census]')));
+    checkPage({ ...census, sites: [] }, page, counts, shards).some((p) => p.startsWith('[empty-census]')));
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.
@@ -1051,11 +1015,12 @@ export function selfTest() {
   }
   console.log(
     `✓ check-tenant-audit-census self-test: ${cases.length} cases pass `
-    + '(drift on a dropped ledger row, on an edited page count, on an edited ledger '
-    + 'total and on a lost region; prose drift, prose reworded out of reach, and an '
-    + 'empty census -- plus the split in BOTH directions: a corpus-scale count and a '
-    + 'stale measurement date pass, while the population figure beside them, a deleted '
-    + 'unenforced row, an undated block and a reworded unenforced claim all fail).',
+    + '(drift on a dropped shard row, on an edited page region, on an edited shard '
+    + 'total, on a package with no shard, on a shard for a package with no sites and on a '
+    + 'lost region; a live total written back into the prose in three shapes while a dated '
+    + 'history figure passes, and an empty census -- plus the split in BOTH directions: a '
+    + 'corpus-scale count and a stale measurement date pass, while a shard\'s population '
+    + 'figure, a deleted unenforced row, an undated block and a reworded unenforced claim all fail).',
   );
   selfTestReachedVerdict = true;
   return 0;
@@ -1091,9 +1056,11 @@ function main(argv) {
   }
 
   const census = runCensus();
+  const shards = readShardFiles(ROOT);
   // ⭐ Check C first: `checkPage` certifies the artefacts AGAINST this census, so
   // a census that could not place one of its own sites is the prior question.
-  const problems = [...censusRefusals(census), ...checkPage(census, page, counts)];
+  const problems = [...censusRefusals(census), ...checkPage(census, page, counts, shards)];
+  printTotals(census);
   for (const p of problems) console.error(`::error::${p}`);
 
   if (problems.length > 0) {
@@ -1103,12 +1070,36 @@ function main(argv) {
   const t = census.totals;
   console.log(
     `✓ check-tenant-audit-census: OK -- ${t.writeCallSites} write call sites certified `
+    + `across ${renderShards(census).size} package shard(s) `
     + `(${t.staticallyDecidableObjectName} decidable; ${t.tenancyEnabledProvablyNoContext} tenancy-enabled `
     + `sites PROVABLY carry no tenant context, ${t.tenancyEnabledContextUnreadable} more unreadable), `
-    + `${PROSE_COUNTS.length} prose figures held to the census, `
+    + `no live total in the prose (${LIVE_TOTAL_PROSE_SHAPES.length} retired shapes), `
     + 'every write call site placed and every `UNTYPED_RECEIVERS` row matched.',
   );
   return 0;
+}
+
+/**
+ * ⭐ The census totals, printed -- because no committed file states them.
+ *
+ * The page and the ledger index carry no population figure and each shard
+ * carries only its own package's, so a total across packages is something only
+ * a RUN can say. Printed on every run, red or green, from the census this run
+ * took: the same rows each shard carries (`totalsRows`), summed by construction,
+ * plus the one line the page tells downstream cards to cite.
+ */
+function printTotals(census) {
+  const t = census.totals;
+  const rows = [...totalsRows(t), ...undefendedCountRows(census)];
+  const width = Math.max(...rows.map(([label]) => label.length));
+  console.log('tenant-audit census totals (printed here, committed nowhere):');
+  for (const [label, value] of rows) console.log(`  ${label.padEnd(width)}  ${value}`);
+  console.log(
+    `  cite: ${t.tenancyEnabledProvablyNoContext} / ${t.writeCallSites} -- the sites whose options argument `
+    + 'was READ and holds no tenant context, against a decidably tenancy-enabled object, out of every '
+    + `write call site; ${t.tenancyEnabledContextUnreadable} further tenancy-enabled sites have an options `
+    + 'argument the census cannot read, and are neither in nor out.',
+  );
 }
 
 if (isEntrypoint(import.meta.url)) process.exit(main(process.argv.slice(2)));

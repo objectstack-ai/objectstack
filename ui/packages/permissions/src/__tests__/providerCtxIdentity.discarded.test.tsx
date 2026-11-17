@@ -142,6 +142,7 @@ const ME: MePermissionsAuthenticatedResponse = {
   userId: 'u-1',
   tenantId: 't-1',
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['restricted'],
   permissionSets: ['ps-1'],
   systemPermissions: ['manage_app'],

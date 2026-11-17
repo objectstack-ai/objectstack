@@ -136,8 +136,11 @@ function catalogueOf(hook: Pick<Hook, 'refusals'>): Record<string, DeclaredRefus
   return refusals && typeof refusals === 'object' ? (refusals as Record<string, DeclaredRefusal>) : undefined;
 }
 
-/** The locale the service can answer in for `requested` — `resolveBundleLocale` against what it holds. */
-function negotiatedLocale(service: HookRefusalI18nService, requested: string): string {
+/**
+ * The locale the service can answer in for `requested` — `resolveBundleLocale`
+ * against what it holds. Shared with a hook's declared text (`hook-text.ts`).
+ */
+export function negotiatedLocale(service: HookRefusalI18nService, requested: string): string {
   if (typeof service.getLocales !== 'function') return requested;
   let available: unknown;
   try {
@@ -169,6 +172,31 @@ export function fillHookRefusalParams(
   params: Record<string, unknown> | undefined,
   logger?: { warn?: (...args: any[]) => void },
 ): string {
+  const result = renderHookTemplate(template, declared, params);
+  if (result.ok) return result.value;
+  logger?.warn?.(
+    `[BodyRunner] hook '${hookName}': its refusal sentence did not render (${result.error}), `
+      + 'so it is served as written.',
+  );
+  return template;
+}
+
+/** What {@link renderHookTemplate} answers: the filled sentence, or why it did not render. */
+export type HookTemplateRender = { ok: true; value: string } | { ok: false; error: string };
+
+/**
+ * One declared hook sentence with its `{{ NAME }}` holes filled from `params`:
+ * the engine and the scope rule {@link fillHookRefusalParams} uses (only the
+ * entry's declared names are in scope), answering a failure instead of choosing
+ * a fallback, so each caller states its own. Shared with a hook's declared text
+ * (#34374, `hook-text.ts`), which falls back from a translation that does not
+ * render to the declared sentence.
+ */
+export function renderHookTemplate(
+  template: string,
+  declared: readonly string[],
+  params: Record<string, unknown> | undefined,
+): HookTemplateRender {
   const scope: Record<string, unknown> = {};
   for (const name of declared) {
     scope[name] = params && Object.prototype.hasOwnProperty.call(params, name) ? params[name] : undefined;
@@ -179,12 +207,9 @@ export function fillHookRefusalParams(
   } catch (err: unknown) {
     result = { ok: false, error: { message: err instanceof Error ? err.message : String(err) } };
   }
-  if (result.ok) return String(result.value ?? '');
-  logger?.warn?.(
-    `[BodyRunner] hook '${hookName}': its refusal sentence did not render (${result.error?.message ?? 'unknown'}), `
-      + 'so it is served as written.',
-  );
-  return template;
+  return result.ok
+    ? { ok: true, value: String(result.value ?? '') }
+    : { ok: false, error: result.error?.message ?? 'unknown' };
 }
 
 /**

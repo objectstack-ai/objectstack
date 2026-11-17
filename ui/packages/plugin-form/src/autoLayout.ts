@@ -375,10 +375,15 @@ function declaredColumns(n: unknown): number | undefined {
 /**
  * One section's fields per row: its declared `columns` as written, else the
  * form's declared `columns` (what an undeclared section always filled), else
- * {@link UNDECLARED_SECTION_COLUMNS}.
+ * `undeclared` — {@link UNDECLARED_SECTION_COLUMNS} on every page host; the
+ * dialog passes its own count ({@link dialogUndeclaredColumns}).
  */
-export function sectionColumnsFor(sectionColumns: unknown, formColumns: unknown): number {
-  return declaredColumns(sectionColumns) ?? declaredColumns(formColumns) ?? UNDECLARED_SECTION_COLUMNS;
+export function sectionColumnsFor(
+  sectionColumns: unknown,
+  formColumns: unknown,
+  undeclared: number = UNDECLARED_SECTION_COLUMNS,
+): number {
+  return declaredColumns(sectionColumns) ?? declaredColumns(formColumns) ?? undeclared;
 }
 
 /**
@@ -387,14 +392,16 @@ export function sectionColumnsFor(sectionColumns: unknown, formColumns: unknown)
  *
  * @param formColumns    The form's DECLARED `columns` (`undefined` when none).
  * @param sectionColumns The DECLARED `columns` of every section the form draws.
+ * @param undeclared     The count an undeclared section draws (see {@link sectionColumnsFor}).
  */
 export function sectionedFormColumns(
   formColumns: unknown,
   sectionColumns: ReadonlyArray<unknown>,
+  undeclared: number = UNDECLARED_SECTION_COLUMNS,
 ): 1 | 2 | 3 | 4 {
   const widest = sectionColumns.length
-    ? Math.max(...sectionColumns.map((c) => sectionColumnsFor(c, formColumns)))
-    : UNDECLARED_SECTION_COLUMNS;
+    ? Math.max(...sectionColumns.map((c) => sectionColumnsFor(c, formColumns, undeclared)))
+    : undeclared;
   return (declaredColumns(formColumns) ?? widest) as 1 | 2 | 3 | 4;
 }
 
@@ -439,18 +446,22 @@ export interface SectionedGridLayout {
  * (objectui#12592): an undeclared section and an undeclared form resolve here,
  * through {@link sectionColumnsFor} and {@link sectionedFormColumns}, so a
  * section that declares nothing draws {@link UNDECLARED_SECTION_COLUMNS} per
- * row in the dialog and on every page host alike.
+ * row on every page host. The dialog alone passes `undeclared` — its own
+ * count for a field-heavy form ({@link dialogUndeclaredColumns}) — and every
+ * page host leaves it at the default, so their output is what it was.
  *
  * @param formColumns    The form's DECLARED `columns` (`undefined` when none).
  * @param sectionColumns The DECLARED `columns` of every section the form draws.
+ * @param undeclared     The count an undeclared section draws (see {@link sectionColumnsFor}).
  */
 export function sectionedGridLayout(
   formColumns: unknown,
   sectionColumns: ReadonlyArray<unknown>,
+  undeclared: number = UNDECLARED_SECTION_COLUMNS,
 ): SectionedGridLayout {
-  const grid = sectionedFormColumns(formColumns, sectionColumns);
+  const grid = sectionedFormColumns(formColumns, sectionColumns, undeclared);
   const density = (declared: unknown) =>
-    Math.min(sectionColumnsFor(declared, formColumns), grid);
+    Math.min(sectionColumnsFor(declared, formColumns, undeclared), grid);
   const fits = sectionColumns.every((c) => {
     const d = density(c);
     return d === 1 || d === grid;
@@ -536,6 +547,40 @@ export function sectionFormLayout(
 export function inferModalSize(columns: number): 'sm' | 'default' | 'lg' | 'xl' | 'full' {
   if (columns <= 1) return 'lg';
   return 'xl';
+}
+
+/**
+ * How many fields per row a DIALOG draws where its author declared no
+ * `columns` — on the form, and for a section on that section too
+ * (objectstack-ai/objectstack#34607). Dialog-only: every page host keeps
+ * {@link UNDECLARED_SECTION_COLUMNS} for a section and {@link inferColumns}
+ * for a flat form.
+ *
+ * The count is {@link inferColumns} of the fields the dialog lays out, so a
+ * field-heavy business form spreads across a wide dialog while a light one is
+ * never thinned out — with two bounds:
+ *
+ * - FLOOR two: the dialog's earlier fixed default (objectui#12521), so a form
+ *   of up to eight fields draws exactly what it drew before.
+ * - CAP by the dialog's size: three in a bounded dialog, four only in a
+ *   `full` one. The grid's tiers are container queries
+ *   ({@link CONTAINER_GRID_COLS}), and the bounded `xl` dialog's field
+ *   container already reaches the `@4xl` tier (`sm:max-w-5xl` is 64rem, less
+ *   the scroller's `sm:px-6` leaves 61rem, over `@4xl`'s 56rem), so a
+ *   four-wide grid would draw four columns there. A bounded dialog stops at
+ *   three; the fourth column is the `full` dialog's.
+ *
+ * Below the container's `@md` tier every count draws one column, so the
+ * phone sheet keeps its single column. A declared `columns` — `1` included —
+ * never reaches this function: it is drawn as written (the section-`columns`
+ * fork on objectui#12521, ruled 6204264665).
+ *
+ * @param fieldCount The number of fields the dialog lays out.
+ * @param modalSize  The dialog's effective size (authored or inferred).
+ */
+export function dialogUndeclaredColumns(fieldCount: number, modalSize: string): 2 | 3 | 4 {
+  const cap = modalSize === 'full' ? 4 : 3;
+  return Math.min(Math.max(UNDECLARED_SECTION_COLUMNS, inferColumns(fieldCount)), cap) as 2 | 3 | 4;
 }
 
 /**
