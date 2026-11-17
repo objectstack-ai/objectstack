@@ -2126,7 +2126,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.settings.sharingPublicReadWrite': '所有人都能看和改',
   'engine.studio.settings.sharingControlledByParent': '跟随所属的主记录',
   'engine.studio.settings.sharingDescUnset':
-    '未设置 —— 该对象无法发布(security-owd-unset)。运行时确实会回落为私有(ADR-0090 D1),但这条基线必须是显式作出的决定,而不是疏漏。请选择一个模型 —— 选私有的行为完全相同,区别在于它是有意选定的。',
+    '未设置 —— 该对象无法发布(security-owd-unset)。运行时确实会回落为「只有负责人能看」(ADR-0090 D1),但这条基线必须是显式作出的决定,而不是疏漏。请选择一项 —— 选「只有负责人能看」的行为完全相同,区别在于它是有意选定的。',
   'engine.studio.settings.sharingDescPrivate':
     '只有所有者(以及经岗位或共享规则授予的用户)能访问记录。此时读取 / 编辑权限仅作用于自己拥有的记录。',
   'engine.studio.settings.sharingDescPublicRead':
@@ -2247,7 +2247,7 @@ const STUDIO_ZH: Record<string, string> = {
   // [`7a90afdf9`] 新建对象对话框的第三项。此前只问两项,产出的对象会被发布门拒绝。
   'engine.studio.data.owdLabel': '谁能看到哪些记录',
   'engine.studio.data.owdHint':
-    '发布必填,之后可在“设置 → 记录共享模型”中修改。「私有」与未设置时运行时的实际行为一致。',
+    '发布必填,之后可在“设置 → 谁能看到哪些记录”中修改。「只有负责人能看」与未设置时运行时的实际行为一致。',
   'engine.studio.data.newObject': '新建对象',
   'engine.studio.data.readOnlyPackage': '此包为只读——请切换到或新建一个可写的包后再添加对象',
   'engine.studio.data.firstObjectTitle': '从第一个对象开始',

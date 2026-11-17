@@ -218,7 +218,7 @@ describe('PackageOwdOverviewPanel — read-only', () => {
     expect(screen.queryByTestId('owd-internal-crm_account')).toBeNull();
     // The value is still shown as text.
     const row = within(screen.getByTestId('owd-row-crm_account'));
-    expect(row.getByText(/Public read\/write/)).toBeTruthy();
+    expect(row.getByText(/Everyone can see and edit/)).toBeTruthy();
   });
 });
 

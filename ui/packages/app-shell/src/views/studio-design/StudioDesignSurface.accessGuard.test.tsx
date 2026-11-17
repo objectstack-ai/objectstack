@@ -205,13 +205,13 @@ describe('AccessPillar — unsaved matrix edits guard', () => {
 
     // Cancel keeps the matrix mounted.
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('owd-overview')).not.toBeInTheDocument();
 
     // Confirm swaps to the overview (matrix unmounts → guard resets).
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     expect(await screen.findByTestId('owd-overview')).toBeInTheDocument();
 
     // Back to a set: the discarded editor must NOT have left the guard armed.
@@ -236,7 +236,7 @@ describe('AccessPillar — unsaved matrix edits guard', () => {
 /** Swap the main panel to the (real) OWD overview and edit a row so the panel
  * reports dirty. Assumes the open matrix is clean, so the swap never prompts. */
 async function openAndDirtyTheOwd() {
-  fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
   await screen.findByTestId('owd-internal-a_account');
   // The dial is the shared Select (objectui#11865): open it and pick, as a user does.
   fireEvent.keyDown(screen.getByTestId('owd-internal-a_account'), { key: 'ArrowDown' });
@@ -270,7 +270,7 @@ describe('AccessPillar — unsaved OWD overview edits guard (#2600)', () => {
 
     // The discarded panel reset the guard on unmount — swapping back to the
     // overview must NOT prompt, and it reloads the untouched baseline.
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     expect(confirmSpy).toHaveBeenCalledTimes(2);
     await screen.findByTestId('owd-internal-a_account');
     expect(owdInternalValue()).toBe(OWD_UNSET);
@@ -280,7 +280,7 @@ describe('AccessPillar — unsaved OWD overview edits guard (#2600)', () => {
     await renderPillarOnSetA();
     await openAndDirtyTheOwd();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
 
     expect(confirmSpy).not.toHaveBeenCalled();
     // Not remounted — the unsaved edit is still visible.

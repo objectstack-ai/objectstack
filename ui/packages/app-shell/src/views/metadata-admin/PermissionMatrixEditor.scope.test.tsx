@@ -255,9 +255,9 @@ describe('PermissionMatrixEditor — private posture badge (ADR-0066 ④)', () =
     await screen.findByText('Account');
     // An authored OWD renders its value…
     const accountRow = screen.getByText('Account').closest('tr')!;
-    expect(accountRow.textContent).toContain('OWD Public read');
+    expect(accountRow.textContent).toContain('OWD Everyone can see');
     // …an unset OWD renders the fail-closed D1 default.
     const contactRow = screen.getByText('a_contact').closest('tr')!;
-    expect(contactRow.textContent).toContain('OWD Private (default)');
+    expect(contactRow.textContent).toContain('OWD Only the owner can see (default)');
   });
 });

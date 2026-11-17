@@ -92,7 +92,7 @@ describe('ObjectSettingsPanel — no default object inspector registered (#6846)
     expect(within(basics).getByText(NO_INSPECTOR)).toBeInTheDocument();
     // The sections that do not read the registry still render — the empty
     // state is scoped to one section, not a curtain over the whole panel.
-    expect(screen.getByText('Record sharing (OWD)')).toBeInTheDocument();
+    expect(screen.getByText('Who can see which records')).toBeInTheDocument();
     expect(screen.getByTestId('owd-internal-select')).toBeInTheDocument();
     // ⛔ The measured mechanism forbids promising recovery.
     expect(document.body.textContent ?? '').not.toMatch(/loading|try again/i);

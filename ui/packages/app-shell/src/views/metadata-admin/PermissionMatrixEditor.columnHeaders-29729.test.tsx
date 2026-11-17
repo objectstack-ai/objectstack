@@ -138,7 +138,7 @@ describe("Setup's sharing-model chip reads through the catalogue (objectstack#29
   it('zh names the sharing model in Chinese, with no bare OWD', async () => {
     mount('zh', 'setup');
     const chip = await screen.findByText(/^记录共享模型：/u, undefined, { timeout: 8000 });
-    expect(chip.textContent).toBe('记录共享模型：私有（默认）');
+    expect(chip.textContent).toBe('记录共享模型：只有负责人能看（默认）');
     expect(chip.textContent).not.toMatch(/OWD/u);
   });
 

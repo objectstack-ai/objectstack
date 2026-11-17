@@ -214,7 +214,7 @@ const findInSetHeader = (text: string) => waitFor(() => inSetHeader().getByText(
 
 /** Swap the main panel to the (real) OWD overview and edit a row. */
 async function dirtyTheOwdOverview() {
-  fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
   await screen.findByTestId('owd-internal-a_account');
   const owdPrivate = t('engine.studio.settings.sharingPrivate', 'en-US');
   fireEvent.keyDown(screen.getByTestId('owd-internal-a_account'), { key: 'ArrowDown' });
@@ -267,7 +267,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     await renderSurfaceOnAccess();
     // Swap the main panel to the (real) OWD overview and edit a row so the
     // panel's dirty report crosses AccessPillar into the surface guard.
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     await screen.findByTestId('owd-internal-a_account');
     // The dial is the shared Select (objectui#11865): open it and pick, as a user does.
     const owdPrivate = t('engine.studio.settings.sharingPrivate', 'en-US');

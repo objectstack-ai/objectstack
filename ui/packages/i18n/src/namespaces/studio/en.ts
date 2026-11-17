@@ -56,7 +56,7 @@ const STUDIO_EN: Record<string, string> = {
   'perm.bulk.read': 'Read only',
   'perm.bulk.crud': 'Read & write',
   'perm.bulk.all': 'All',
-  'perm.bulk.none': 'Clear',
+  'perm.bulk.none': 'None',
   'perm.bulk.allTip': 'Grant every column except Export, which is granted only by its own checkbox',
   // objectstack#26187 — the record-scope pickers (ADR-0057 D1 access depth).
   'perm.scope.unset': 'Not set',
@@ -2338,7 +2338,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.settings.sharingPublicReadWrite': 'Everyone can see and edit',
   'engine.studio.settings.sharingControlledByParent': 'Follows its parent record',
   'engine.studio.settings.sharingDescUnset':
-    'Not set — publishing this object is REFUSED (security-owd-unset). The runtime does fall back to Private (ADR-0090 D1), but the baseline has to be an authored decision, not an accident. Pick a model — Private is the same behaviour, chosen on purpose.',
+    'Not set — publishing this object is REFUSED (security-owd-unset). The runtime does fall back to “Only the owner can see” (ADR-0090 D1), but the baseline has to be an authored decision, not an accident. Pick one — “Only the owner can see” is the same behaviour, chosen on purpose.',
   'engine.studio.settings.sharingDescPrivate':
     'Only the owner (plus users granted via positions or sharing rules) can access a record. Read / Edit permissions then apply to owned records only.',
   'engine.studio.settings.sharingDescPublicRead':
@@ -2503,7 +2503,7 @@ const STUDIO_EN: Record<string, string> = {
   // exactly two things and produce an object the publish door refuses.
   'engine.studio.data.owdLabel': 'Who can see which records',
   'engine.studio.data.owdHint':
-    'Required to publish, and changeable later under Settings → Record sharing. Private matches what the runtime already does when no model is set.',
+    'Required to publish, and changeable later under Settings → Who can see which records. “Only the owner can see” matches what the runtime already does when nothing is set.',
   'engine.studio.data.newObject': 'New object',
   'engine.studio.data.readOnlyPackage': 'This package is read-only — switch to or create a writable package to add objects',
   'engine.studio.data.firstObjectTitle': 'Start with your first object',
