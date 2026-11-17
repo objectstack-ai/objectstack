@@ -47,6 +47,7 @@ import { HomeActionCenter, HomeContinue, HomeActivity, HomePendingDraftsRow, typ
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import { useHomeInbox } from '../../hooks/useHomeInbox.js';
 import { useLauncherApps } from '../../hooks/useLauncherApps.js';
+import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
 import { useNavigationContext } from '../../context/NavigationContext.js';
 import {
   appRouteSegment,
@@ -75,22 +76,6 @@ import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
-import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
-
-/**
- * Where Home draws its host's checklist: `top`, above the page's sections (a
- * desktop, or a page with no app yet), or `afterApps`, in the content column
- * right after the apps (a phone).
- */
-export type HomeChecklistPlacement = 'top' | 'afterApps';
-
-export interface HomePageProps {
-  /**
-   * The host's checklist, drawn where Home places it (see the module doc).
-   * Called on each render with the placement; it may draw nothing.
-   */
-  checklist?: (placement: HomeChecklistPlacement) => React.ReactNode;
-}
 
 /**
  * Which AI home CTAs to surface, driven by the live agent catalog (the single
@@ -367,17 +352,32 @@ function usePendingDraftsRow(t: (key: string, opts?: any) => string, language: s
   );
 }
 
+/**
+ * Where Home draws its host's checklist: `top`, above the page's sections (a
+ * desktop, or a page with no app yet), or `afterApps`, in the content column
+ * right after the apps (a phone).
+ */
+export type HomeChecklistPlacement = 'top' | 'afterApps';
+
+export interface HomePageProps {
+  /**
+   * The host's checklist, drawn where Home places it (see the module doc).
+   * Called on each render with the placement; it may draw nothing.
+   */
+  checklist?: (placement: HomeChecklistPlacement) => React.ReactNode;
+}
+
 /** Home's labels read each object they name by name (objectstack#29121). */
 const BY_NAME: NavTargetLabelOptions = { byName: true };
 
 export function HomePage({ checklist }: HomePageProps = {}) {
   const navigate = useNavigate();
-  // Phone or desktop decides where the checklist is mounted (module doc).
-  const phone = usePhoneViewport();
   const { t, language } = useObjectTranslation();
   const metadata = useMetadata();
   const { apps, loading } = metadata;
   const { recentItems } = useRecentItems();
+  // Phone or desktop decides where the checklist is mounted (module doc).
+  const phone = usePhoneViewport();
   // A recent entry stores identity; the rail labels it with this, on the
   // render, in the current language (objectui#11678).
   const recentLabel = useRecentItemLabel();
