@@ -77,6 +77,7 @@ import {
     BUILTIN_SYSTEM_FIELD_LABEL_LOCALES,
     translateObject,
     type ObjectLike,
+    type TranslateDocumentOptions,
     type TranslationBundle,
 } from '@objectstack/spec/system';
 
@@ -178,11 +179,14 @@ interface TranslatedSource {
     reads: Array<{ doc: Rec; fields: Map<string, Rec> }>;
 }
 
+type PatchBundles = NonNullable<TranslateDocumentOptions['patchBundles']>;
+
 function translatedSource(
     doc: Rec,
     locales: readonly string[],
     bundle: TranslationBundle | undefined,
     packagedBase: unknown,
+    patchBundles: PatchBundles | undefined,
 ): TranslatedSource {
     return {
         doc,
@@ -191,10 +195,13 @@ function translatedSource(
             // The read's own options: with the packaged base, a slot that
             // diverged from the packaged text is served untranslated in every
             // locale (ADR-0029 D9.2a), so it is no translation's source here
-            // either.
+            // either. [#33952] With the patch entries, a slot a code package's
+            // `fieldPatches` wrote reads that package's own translation, as
+            // the read serves it.
             const read = translateObject(doc as unknown as ObjectLike, bundle, {
                 locale,
                 ...(packagedBase !== undefined && packagedBase !== null ? { packagedBase } : {}),
+                ...(patchBundles !== undefined && patchBundles.length > 0 ? { patchBundles } : {}),
             }) as unknown as Rec;
             return { doc: read, fields: fieldMap(read) };
         }),
@@ -227,12 +234,28 @@ export function restoreTranslatedEchoes<T>(
          * for an object no package ships.
          */
         packagedBase?: unknown;
+        /**
+         * [#33952] The read's `patchBundles` (`TranslateDocumentOptions`):
+         * one entry per code package whose `fieldPatches` wrote a slot of
+         * this object, its patched base and its own translations. Passed to
+         * every read of every source, and each entry's patched base is a
+         * source of its own (after the stored row, before the platform's
+         * columns): with no stored row the source is the packaged base, which
+         * never carries a patch, so the patch text a read translated is
+         * explained only by the base that carries it. Absent when no code
+         * package patches the object or none translates its patch.
+         */
+        patchBundles?: PatchBundles;
     },
 ): { item: T; restored: RestoredTranslatedSlot[] } {
     const restored: RestoredTranslatedSlot[] = [];
     if (!isRec(item) || typeof item.name !== 'string') return { item, restored };
     const incoming = fieldMap(item);
-    const locales = translatedEchoLocales(args.bundle);
+    const patchBundles = args.patchBundles !== undefined && args.patchBundles.length > 0 ? args.patchBundles : undefined;
+    const locales = [...new Set([
+        ...translatedEchoLocales(args.bundle),
+        ...(patchBundles ?? []).flatMap((entry) => Object.keys((entry.bundle as Rec | undefined) ?? {})),
+    ])];
 
     const storedFields = fieldMap(args.source);
     const storedDoc: Rec = { name: item.name, fields: {} };
@@ -249,9 +272,23 @@ export function restoreTranslatedEchoes<T>(
     for (const [name, def] of Object.entries(injectedSystemColumnDefs(item))) {
         if (incoming.has(name)) (injectedDoc.fields as Rec)[name] = { ...def };
     }
-    const sources = [storedDoc, injectedDoc]
+    // Each patch entry's base, cut to the incoming fields its patch changed:
+    // a field it left as packaged is the stored row's or the packaged base's
+    // to explain, never a second source that could out-explain a tenant's own
+    // text on it.
+    const packagedFields = fieldMap(args.packagedBase);
+    const patchDocs: Rec[] = (patchBundles ?? []).map((entry) => {
+        const patchedFields = fieldMap(entry.patchedBase);
+        const doc: Rec = { name: item.name, fields: {} };
+        for (const name of incoming.keys()) {
+            const def = patchedFields.get(name);
+            if (def && JSON.stringify(def) !== JSON.stringify(packagedFields.get(name))) (doc.fields as Rec)[name] = { ...def };
+        }
+        return doc;
+    });
+    const sources = [storedDoc, ...patchDocs, injectedDoc]
         .filter((doc) => Object.keys(doc.fields as Rec).length > 0 || Object.keys(doc).length > 2)
-        .map((doc) => translatedSource(doc, locales, args.bundle, args.packagedBase));
+        .map((doc) => translatedSource(doc, locales, args.bundle, args.packagedBase, patchBundles));
     if (sources.length === 0) return { item, restored };
 
     /**

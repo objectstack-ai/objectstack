@@ -1262,6 +1262,8 @@ export class ObjectStackProtocolImplementation implements
             getMetaItem: (...a) => protocol.getMetaItem(...a),
             getMetaItems: (...a) => protocol.getMetaItems(...a),
             getOverlayRepo: (...a) => protocol.getOverlayRepo(...a),
+            getPackageTranslationBundle: (...a) => protocol.getPackageTranslationBundle(...a),
+            getPackagedFieldPatchBases: (...a) => protocol.getPackagedFieldPatchBases(...a),
             getPackagedObjectBase: (...a) => protocol.getPackagedObjectBase(...a),
             get getServicesRegistry() { return protocol.getServicesRegistry; },
             governServedObject: (...a) => protocol.governServedObject(...a),

@@ -1100,7 +1100,7 @@ export class ProtocolDiscoveryAndBasesFacet {
      * the packaged base is a registry lookup, so a degraded MetadataService
      * fails nothing here.
      */
-    static async restoreTranslatedObjectEchoes(host: Pick<ProtocolHost, 'getPackagedObjectBase' | 'registeredTranslationBundle'>, request: SaveMetaItemRequest,
+    static async restoreTranslatedObjectEchoes(host: Pick<ProtocolHost, 'getPackageTranslationBundle' | 'getPackagedFieldPatchBases' | 'getPackagedObjectBase' | 'registeredTranslationBundle'>, request: SaveMetaItemRequest,
             repo: SysMetadataRepository,
             ref: Parameters<SysMetadataRepository['get']>[0],
             mode: 'draft' | 'publish',): Promise<{ item: SaveMetaItemRequest['item']; restored: RestoredTranslatedSlot[] }> {
@@ -1125,10 +1125,21 @@ export class ProtocolDiscoveryAndBasesFacet {
                 packageId: request.packageId ?? null,
             },
         );
+        // [#33952] The read's `patchBundles` too: a slot a code package's
+        // `fieldPatches` wrote is served in that package's own translation, so
+        // the inverse translates with the same entries, read the way the REST
+        // exits read them (`patchTranslationBundlesOf`): one per patching
+        // package that carries a translation, highest precedence first.
+        const patchBundles: Array<{ patchedBase: unknown; bundle: TranslationBundle }> = [];
+        for (const entry of host.getPackagedFieldPatchBases(request.name)) {
+            const own = await host.getPackageTranslationBundle(entry.packageId);
+            if (own !== undefined) patchBundles.push({ patchedBase: entry.base, bundle: own });
+        }
         return restoreTranslatedEchoes(request.item, {
             source,
             bundle: host.registeredTranslationBundle(),
             packagedBase: packagedBase ?? undefined,
+            ...(patchBundles.length > 0 ? { patchBundles } : {}),
         });
     }
 
