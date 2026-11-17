@@ -4323,6 +4323,15 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     declaredBy: 'FieldSchema.conditionalFormatting[]',
     keys: () => shapeKeysOf(FieldSchema.shape.conditionalFormatting),
   },
+  {
+    // [#34905] A `required` field with its own `visibleWhen` that also sets
+    // `storage.notNull` draws a warning naming that key: the column refuses the
+    // null the write contract now admits on a record the predicate hides.
+    receiver: 'storage',
+    expected: ['notNull'],
+    declaredBy: 'FieldSchema.storage',
+    keys: () => shapeKeysOf(FieldSchema.shape.storage),
+  },
 ];
 
 /**
@@ -4362,7 +4371,13 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     // have hidden the new surface from this very scan.
     // `conditionalFormatting` joined in #22228 — the cell formatting rules,
     // read literally for the same reason.
-    expect(read).toEqual(['conditionalFormatting', 'expression', 'name', 'options', 'readonlyWhen', 'requiredWhen']);
+    // `required`, `storage` and `visibleWhen` joined in #34905 — a `required`
+    // field's own `visibleWhen` now decides whether the field is required on a
+    // write (ADR-0113 D1, amended), so its reads are checked here, and a
+    // `storage.notNull` beside the pair is warned.
+    expect(read).toEqual([
+      'conditionalFormatting', 'expression', 'name', 'options', 'readonlyWhen', 'required', 'requiredWhen', 'storage', 'visibleWhen',
+    ]);
     const declared = Object.keys(FieldSchema.shape);
     const tracked = TRACKED_UNDECLARED_READS.filter((t) => t.receiver === 'f').map((t) => t.key);
     expect(tracked).toEqual([]);

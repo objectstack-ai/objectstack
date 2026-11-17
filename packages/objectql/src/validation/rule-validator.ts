@@ -3542,8 +3542,7 @@ function evaluateRequiredWhenShown(
       const noActingUser = user === undefined && readsUserRoot(pred);
       opts.logger?.warn?.(
         `visibleWhen of required field '${name}' could not be evaluated `
-          + `(${noActingUser ? 'no acting user to bind current_user (system write)' : `${now.error!.kind}: ${String(now.error!.message).split('
-')[0]}`})`
+          + `(${noActingUser ? 'no acting user to bind current_user (system write)' : `${now.error!.kind}: ${String(now.error!.message).split('\n')[0]}`})`
           + ' — counted as shown, so the field stays required on this write',
         { field: name, reason: noActingUser ? 'no-acting-user' : 'predicate-fault', error: now.error },
       );
