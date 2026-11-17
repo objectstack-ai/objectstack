@@ -714,6 +714,7 @@ pnpm --filter @objectstack/scenarios skill-evals --dry-run      # the plan and t
 pnpm --filter @objectstack/scenarios skill-evals                # every case × 2 arms
 pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --repeats 3   # a touched skill
 pnpm --filter @objectstack/scenarios skill-evals --skills-from 18.5.0   # a published @objectstack/skills version's bundles and cases
+pnpm --filter @objectstack/scenarios skill-evals --regrade DIR  # re-draw a recorded round's verdicts from its records; no model call
 pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's own fixtures; no model call
 ```
 
@@ -730,8 +731,13 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
 - **Grading**: the answer is the result line's text, the reply a user reads. It passes when every `must_contain` token
   is in it and no `must_not_contain` token is. Tokens match as literal, case-sensitive substrings, and no model judges
   an answer. A turn whose init line shows the wrong arm is `invalid`: the with-skill arm does not list the bundle, or
-  the no-skill arm lists one. A turn with no answer is `error`: the process failed or timed out, or the result line is
-  not `success` (`error_max_turns` included). Both kinds are counted and named, and neither is in a denominator.
+  the no-skill arm lists one or launches one. A bundle whose `SKILL.md` sets `user-invocable: false` (`objectui`) is
+  never in the init line's `skills` list, though the model can launch it. Its with-skill turns are graded, and each
+  record's `armEvidence` says whether the turn launched the bundle (`launched`) or nothing in the stream shows it
+  (`not-shown`). A turn with no answer is `error`: the process failed or timed out, or the result line is not
+  `success` (`error_max_turns` included). Both kinds are counted and named, and neither is in a denominator.
+  `--regrade DIR` applies the current rules to a recorded round's answers and arm facts. A changed record keeps the
+  verdict its turn was first given as `regradedFrom`.
 - **Records**: by default the round goes to `docs/qa/platform-checklist/runs/skill-evals/ROUND/` (git-ignored), or to
   `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, the answer, the skills listed
   and launched, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
@@ -742,5 +748,7 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   reports `rejected` or a utilization at or above `--max-utilization` (default 0.9). The turns not run are recorded
   as not run, and the command exits 3.
 - **Cost and time**: the CLI's cost figure is notional under a subscription login, and nothing is billed per token.
-  A whole round (209 cases × 2 arms, `--concurrency 4`, Claude Code 2.1.326) took ROUND_MIN min in a Claude Code
-  cloud container and reported ROUND_COST USD notional. Turns take ROUND_TURN s each.
+  One whole round took 56 min in a Claude Code cloud container: 209 cases × 2 arms, `--concurrency 4`, Claude Code
+  2.1.326, the login's default model. The CLI reported 71 USD notional for it, 49 for the with-skill arm and 22 for
+  the no-skill arm. The median turn took 30 s with the skill and 24 s without. The round moved the login's seven-day
+  utilization from 0.45 to 0.56.

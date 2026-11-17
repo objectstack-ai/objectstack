@@ -45,6 +45,14 @@ export interface SkillEvalCatalog {
   root: string;
   /** Every bundle directory under the root (a `SKILL.md` beside it), sorted. */
   bundles: string[];
+  /**
+   * Bundles whose `SKILL.md` frontmatter says `user-invocable: false`. Claude
+   * Code leaves such a skill out of the init line's `skills` list while the
+   * model can still launch it (measured on 2.1.326: `objectui`, absent from
+   * every with-skill init line of a round, launched by 33 of its 34 turns), so
+   * the init line cannot show that it was installed.
+   */
+  unlistedBundles: string[];
   cases: SkillEvalCase[];
   refusals: SkillEvalRefusal[];
 }
@@ -121,7 +129,7 @@ export function parseEvalFile(bundle: string, file: string, text: string): { cas
 /** Every bundle under `root` and every case its `evals/*.json` hold. */
 export function loadSkillEvalCatalog(root: string): SkillEvalCatalog {
   if (!existsSync(root) || !statSync(root).isDirectory()) {
-    return { root, bundles: [], cases: [], refusals: [{ path: root, message: 'is not a directory of skill bundles' }] };
+    return { root, bundles: [], unlistedBundles: [], cases: [], refusals: [{ path: root, message: 'is not a directory of skill bundles' }] };
   }
   const bundles = readdirSync(root, { withFileTypes: true })
     .filter((d) => d.isDirectory() && existsSync(join(root, d.name, 'SKILL.md')))
@@ -142,7 +150,14 @@ export function loadSkillEvalCatalog(root: string): SkillEvalCatalog {
       refusals.push(...r.refusals);
     }
   }
-  return { root, bundles, cases, refusals };
+  const unlistedBundles = bundles.filter((b) => notUserInvocable(readFileSync(join(root, b, 'SKILL.md'), 'utf8')));
+  return { root, bundles, unlistedBundles, cases, refusals };
+}
+
+/** The `SKILL.md` frontmatter sets `user-invocable: false`. Pure over its input. */
+export function notUserInvocable(skillMd: string): boolean {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(skillMd);
+  return fm !== null && /^user-invocable:\s*false\s*$/m.test(fm[1]!);
 }
 
 /**

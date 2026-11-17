@@ -24,6 +24,8 @@
  *   --out DIR             where the round goes (default
  *                         docs/qa/platform-checklist/runs/skill-evals/ROUND, git-ignored)
  *   --dry-run             print the plan and both arms' argv; no login read, no model call
+ *   --regrade DIR         re-draw a recorded round's verdicts under this runner's rules,
+ *                         from the answers on its records; no login read, no model call
  *   --self-test           the runner's own fixtures, both directions; no model call
  *
  * Exit: 0 the round ran to its end (a measurement, whatever its pass rates);
@@ -34,16 +36,16 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { armArgs, ARMS } from './arms.js';
-import { loadSkillEvalCatalog, selectBundles } from './cases.js';
-import { executeRound, planRound, preflight, type SkillEvalRunRecord } from './run.js';
+import { loadSkillEvalCatalog, selectBundles, type SkillEvalCatalog } from './cases.js';
+import { executeRound, planRound, preflight, regradeRecord, type RoundStop, runRecordFile, type SkillEvalRunRecord } from './run.js';
 import { runSelfTest, selfTestReached } from './self-test.js';
-import { renderSummaryMarkdown, summariseRound } from './summary.js';
+import { renderSummaryMarkdown, type RoundSummary, summariseRound } from './summary.js';
 
 export const ROUND_RECORD_SCHEMA = 'skill-eval-round/1';
 
@@ -59,6 +61,7 @@ export interface SkillEvalArgs {
   effort?: string;
   bin: string;
   out?: string;
+  regrade?: string;
   dryRun: boolean;
   selfTest: boolean;
   help: boolean;
@@ -99,6 +102,7 @@ export function parseSkillEvalArgs(argv: readonly string[]): SkillEvalArgs {
     else if (flag === '--effort') a.effort = val();
     else if (flag === '--bin') a.bin = val();
     else if (flag === '--out') a.out = val();
+    else if (flag === '--regrade') a.regrade = val();
     else if (flag === '--dry-run') a.dryRun = true;
     else if (flag === '--self-test') a.selfTest = true;
     else if (flag === '--help' || flag === '-h') a.help = true;
@@ -145,10 +149,96 @@ function runnerSha(repo: string): string {
   return head.stdout.trim() + (dirty.stdout.trim() ? ' (with uncommitted changes under the runner or skills/)' : '');
 }
 
+export interface RoundRecord {
+  schema: typeof ROUND_RECORD_SCHEMA;
+  round: string;
+  runner: { repo: string; sha: string };
+  startedAt: string;
+  finishedAt: string;
+  wallMs: number;
+  skills: { source: string; bundles: string[]; allBundles: boolean };
+  driver: {
+    driver: 'claude-code-cli';
+    version: string;
+    authMethod: string;
+    apiBilled: false;
+    servedModels: string[];
+    requestedModel?: string;
+    requestedEffort?: string;
+    maxTurns: number;
+    caseTimeoutMs: number;
+    concurrency: number;
+    maxUtilization: number;
+  };
+  scope: { cases: number; arms: string[]; repeats: number; plannedTurns: number; ranTurns: number; notRunTurns: number };
+  stopped?: RoundStop;
+  /** Set by `--regrade`: when, by which runner, and how many verdicts now differ from the ones the turns were given. */
+  regraded?: { at: string; sha: string; changed: number };
+  summary: RoundSummary;
+}
+
+/** `round.json`, `summary.md` and `summary.github.md` into `outDir`, and the per-bundle table on stdout. */
+export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
+  writeFileSync(join(outDir, 'round.json'), JSON.stringify(round, null, 2) + '\n');
+  const { driver: d, scope } = round;
+  const wallMin = Math.round(round.wallMs / 6000) / 10;
+  const head = {
+    title: `Skill evals · ${round.skills.allBundles ? 'all bundles' : round.skills.bundles.join(', ')} × 2 arms × ${scope.repeats} rep${scope.repeats === 1 ? '' : 's'}`,
+    lines: [
+      `runner: ${round.runner.repo} ${round.runner.sha}`,
+      `skills: ${round.skills.source}`,
+      `driver: ${d.driver} ${d.version}, login \`${d.authMethod}\`, no API key; served ${d.servedModels.join(', ') || 'none'}; effort ${d.requestedEffort ?? 'CLI default'}`,
+      `turns: ${scope.ranTurns} of ${scope.plannedTurns} ran (${scope.cases} cases × 2 arms × ${scope.repeats}), ${d.concurrency} at once, --max-turns ${d.maxTurns}`,
+      `wall time: ${wallMin} min; notional cost the CLI reported: $${round.summary.reportedCostUsd} (subscription login, nothing billed)`,
+      ...(round.regraded ? [`regraded ${round.regraded.at} by runner ${round.regraded.sha}: ${round.regraded.changed} verdict(s) differ from the ones the turns were given, no model asked`] : []),
+    ],
+    ...(round.stopped ? { stopped: round.stopped } : {}),
+  };
+  writeFileSync(join(outDir, 'summary.md'), renderSummaryMarkdown(round.summary, head));
+  writeFileSync(join(outDir, 'summary.github.md'), renderSummaryMarkdown(round.summary, head, { forGitHub: true }));
+  console.log(`\n${renderSummaryMarkdown(round.summary, head).split('## Per case')[0]}`);
+  console.log(`round: ${join(outDir, 'round.json')} · summary: ${join(outDir, 'summary.md')}`);
+}
+
+/**
+ * `--regrade DIR`: re-draw every recorded turn's verdict under this runner's
+ * rules from the answer and arm facts on its record (no login read, no model
+ * asked), and rewrite the round's records and summary. The catalog must be the
+ * one the round ran on (`--skills-from` naming the same source).
+ */
+function regradeRound(dir: string, catalog: SkillEvalCatalog, sourceLabel: string): number {
+  const roundFile = join(dir, 'round.json');
+  if (!existsSync(roundFile)) throw new Error(`--regrade: ${dir} holds no round.json`);
+  const round = JSON.parse(readFileSync(roundFile, 'utf8')) as RoundRecord;
+  if (round.schema !== ROUND_RECORD_SCHEMA) throw new Error(`--regrade: ${roundFile} is not a \`${ROUND_RECORD_SCHEMA}\` record`);
+  if (round.skills.source !== sourceLabel) throw new Error(`--regrade: the round ran on ${round.skills.source}, not ${sourceLabel}; pass the same --skills-from`);
+  const cases = selectBundles(catalog, round.skills.bundles);
+  const byKey = new Map(cases.map((c) => [c.key, c]));
+  const view = { bundles: catalog.bundles, unlisted: catalog.unlistedBundles };
+  const runsDir = join(dir, 'runs');
+  const records: SkillEvalRunRecord[] = [];
+  let changed = 0;
+  for (const f of readdirSync(runsDir).filter((n) => n.endsWith('.json')).sort()) {
+    const rec = JSON.parse(readFileSync(join(runsDir, f), 'utf8')) as SkillEvalRunRecord;
+    const c = byKey.get(rec.key);
+    if (!c) throw new Error(`--regrade: ${f} records case \`${rec.key}\`, which the catalog no longer holds`);
+    const next = regradeRecord(rec, c, view);
+    if (next.regradedFrom !== undefined) changed += 1;
+    records.push(next);
+    writeFileSync(join(runsDir, f), JSON.stringify(next, null, 2) + '\n');
+  }
+  const ran = new Set(records.map((r) => runRecordFile({ case: byKey.get(r.key)!, arm: r.arm, repeat: r.repeat })));
+  const notRun = planRound(cases, round.scope.repeats).filter((j) => !ran.has(runRecordFile(j)));
+  // A round recorded before `allBundles` existed: read it off the catalog the regrade loaded.
+  const skills = { ...round.skills, allBundles: round.skills.allBundles ?? round.skills.bundles.length === catalog.bundles.length };
+  writeRoundOutputs(dir, { ...round, skills, regraded: { at: new Date().toISOString(), sha: runnerSha(repoRoot()), changed }, summary: summariseRound(cases, records, notRun) });
+  return 0;
+}
+
 const HELP = `skill-evals — run the published skills' eval cases on a with-skill and a no-skill arm
   pnpm --filter @objectstack/scenarios skill-evals [--skills a,b] [--skills-from workspace|VERSION] [--repeats N]
        [--concurrency N] [--max-turns N] [--case-timeout MIN] [--max-utilization F] [--model M] [--effort L]
-       [--bin PATH] [--out DIR] [--dry-run] [--self-test]
+       [--bin PATH] [--out DIR] [--dry-run] [--regrade DIR] [--self-test]
 See packages/qa/scenarios/README.md, "Running the published skills' eval cases".`;
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -169,7 +259,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   // The login guard first: a live round refuses an API-billed configuration before it reads or packs anything.
-  const pf = args.dryRun ? undefined : preflight(args.bin, process.env, undefined, args.effort);
+  const pf = args.dryRun || args.regrade ? undefined : preflight(args.bin, process.env, undefined, args.effort);
   const source = resolveSkillsSource(args.skillsFrom, repo);
   try {
     const catalog = loadSkillEvalCatalog(source.root);
@@ -177,6 +267,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       for (const r of catalog.refusals) console.error(`${r.path}: ${r.message}`);
       throw new Error(`${catalog.refusals.length} eval file or case refused under ${source.root}; the runner grades only cases it can read whole`);
     }
+    const catalogView = { bundles: catalog.bundles, unlisted: catalog.unlistedBundles };
+    if (args.regrade) return regradeRound(resolve(args.regrade), catalog, source.label);
     const cases = selectBundles(catalog, args.skills);
     const jobs = planRound(cases, args.repeats);
     const bundles = [...new Set(cases.map((c) => c.bundle))];
@@ -199,14 +291,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     const roundId = `${startedAt.toISOString().slice(0, 19).replace(/[:T]/g, '-')}-skill-evals`;
     const outDir = resolve(args.out ?? join(repo, 'docs', 'qa', 'platform-checklist', 'runs', 'skill-evals', roundId));
     mkdirSync(outDir, { recursive: true });
-    if (readdirSync(join(outDir)).some((f) => f === 'round.json')) throw new Error(`${outDir} already holds a round.json: pass a fresh --out`);
+    if (existsSync(join(outDir, 'round.json'))) throw new Error(`${outDir} already holds a round.json: pass a fresh --out`);
     console.log(`skill-evals: ${jobs.length} turn(s) (${cases.length} case(s) × ${ARMS.length} arms × ${args.repeats}), ${args.concurrency} at once, ${pf.version}, login ${pf.authMethod}`);
     console.log(`records: ${outDir}`);
 
     const exec = await executeRound(jobs, {
       bin: args.bin,
       skillsRoot: source.root,
-      catalogBundles: catalog.bundles,
+      catalog: catalogView,
       outDir,
       maxTurns: args.maxTurns,
       caseTimeoutMs: Math.round(args.caseTimeoutMin * 60_000),
@@ -217,23 +309,20 @@ export async function main(argv: readonly string[]): Promise<number> {
       onRecord: (r: SkillEvalRunRecord, done, total) => console.log(`[${done}/${total}] ${r.verdict.padEnd(7)} ${r.arm.padEnd(10)} ${r.key}${r.reason ? ` — ${r.reason}` : ''}`),
     });
     const finishedAt = new Date();
-    const summary = summariseRound(cases, exec.records, exec.notRun);
-    const servedModels = [...new Set(exec.records.map((r) => r.model).filter((m): m is string => !!m))].sort();
-    const wallMin = Math.round((finishedAt.getTime() - startedAt.getTime()) / 6000) / 10;
-    const round = {
+    const round: RoundRecord = {
       schema: ROUND_RECORD_SCHEMA,
       round: roundId,
       runner: { repo: 'objectstack-ai/objectstack', sha },
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       wallMs: finishedAt.getTime() - startedAt.getTime(),
-      skills: { source: source.label, bundles },
+      skills: { source: source.label, bundles, allBundles: bundles.length === catalog.bundles.length },
       driver: {
         driver: 'claude-code-cli',
         version: pf.version,
         authMethod: pf.authMethod,
         apiBilled: false,
-        servedModels,
+        servedModels: [...new Set(exec.records.map((r) => r.model).filter((m): m is string => !!m))].sort(),
         ...(args.model ? { requestedModel: args.model } : {}),
         ...(args.effort ? { requestedEffort: args.effort } : {}),
         maxTurns: args.maxTurns,
@@ -243,24 +332,9 @@ export async function main(argv: readonly string[]): Promise<number> {
       },
       scope: { cases: cases.length, arms: [...ARMS], repeats: args.repeats, plannedTurns: jobs.length, ranTurns: exec.records.length, notRunTurns: exec.notRun.length },
       ...(exec.stopped ? { stopped: exec.stopped } : {}),
-      summary,
+      summary: summariseRound(cases, exec.records, exec.notRun),
     };
-    writeFileSync(join(outDir, 'round.json'), JSON.stringify(round, null, 2) + '\n');
-    const head = {
-      title: `Skill evals · ${bundles.length === catalog.bundles.length ? 'all bundles' : bundles.join(', ')} × 2 arms × ${args.repeats} rep${args.repeats === 1 ? '' : 's'}`,
-      lines: [
-        `runner: objectstack-ai/objectstack ${sha}`,
-        `skills: ${source.label}`,
-        `driver: claude-code-cli ${pf.version}, login \`${pf.authMethod}\`, no API key; served ${servedModels.join(', ') || 'none'}; effort ${args.effort ?? 'CLI default'}`,
-        `turns: ${exec.records.length} of ${jobs.length} ran (${cases.length} cases × 2 arms × ${args.repeats}), ${args.concurrency} at once, --max-turns ${args.maxTurns}`,
-        `wall time: ${wallMin} min; notional cost the CLI reported: $${summary.reportedCostUsd} (subscription login, nothing billed)`,
-      ],
-      ...(exec.stopped ? { stopped: exec.stopped } : {}),
-    };
-    writeFileSync(join(outDir, 'summary.md'), renderSummaryMarkdown(summary, head));
-    writeFileSync(join(outDir, 'summary.github.md'), renderSummaryMarkdown(summary, head, { forGitHub: true }));
-    console.log(`\n${renderSummaryMarkdown({ ...summary, cases: [] }, head).split('## Per case')[0]}`);
-    console.log(`round: ${join(outDir, 'round.json')} · summary: ${join(outDir, 'summary.md')}`);
+    writeRoundOutputs(outDir, round);
     return exec.stopped ? 3 : 0;
   } finally {
     source.cleanup();

@@ -18,7 +18,7 @@ import { join } from 'node:path';
 
 import { ApiBillingRefusedError } from '../runner/driver.js';
 import { armArgs, prepareArmWorkdir } from './arms.js';
-import { loadSkillEvalCatalog, parseEvalFile, type SkillEvalCase } from './cases.js';
+import { loadSkillEvalCatalog, notUserInvocable, parseEvalFile, type SkillEvalCase } from './cases.js';
 import { type Grader, gradeAnswer } from './grade.js';
 import { judgeTurn, preflight, type SkillEvalRunRecord } from './run.js';
 import { summariseRound } from './summary.js';
@@ -39,13 +39,16 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   'judge: a with-skill turn whose init lists no bundle → INVALID': 1,
   'judge: a no-skill turn whose init lists a bundle → INVALID': 1,
   'judge: a turn ending error_max_turns → ERROR, out of the denominator': 1,
+  'judge: a no-skill turn launching a catalog bundle → INVALID': 1,
+  'judge: a with-skill turn on a bundle the init line never lists → graded, its evidence named': 1,
+  'reader: `user-invocable: false` frontmatter → a bundle the init line never lists': 1,
   'judge: a graded with-skill turn → its answer judged by the grader': 1,
   'guard: ANTHROPIC_API_KEY set → the round refuses to start': 1,
   'summary: no-skill ≥ with-skill is named; invalid turns stay out of the rate': 1,
 });
 
 /** The roster's own size, pinned: a deleted row takes its floor with it otherwise. */
-export const SELF_TEST_BATTERY_FLOOR = 17;
+export const SELF_TEST_BATTERY_FLOOR = 20;
 
 let selfTestReachedVerdict = false;
 /** Whether the last {@link runSelfTest} reached its verdict line. */
@@ -105,7 +108,7 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
   writeFileSync(join(fixtureRoot, 'demo-skill', 'evals', 'demo.json'), '{"evals":[]}');
 
   const judge = (c: SkillEvalCase, arm: 'with-skill' | 'no-skill', stdout: string): SkillEvalRunRecord =>
-    judgeTurn(c, arm, 1, exited(stdout), ['demo-skill', 'other-skill'], 'fixture', grade);
+    judgeTurn(c, arm, 1, exited(stdout), { bundles: ['demo-skill', 'other-skill', 'quiet-skill'], unlisted: ['quiet-skill'] }, 'fixture', grade);
 
   type Row = { label: keyof typeof SELF_TEST_BATTERIES | string; run: () => true | string };
   const rows: Row[] = [
@@ -207,11 +210,36 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
       },
     },
     {
+      label: 'judge: a no-skill turn launching a catalog bundle → INVALID',
+      run: () => {
+        const r = judge(fixtureCase(), 'no-skill', stream({ skills: [], invoked: 'quiet-skill', answer: GOOD }));
+        return r.verdict === 'invalid' ? true : `got ${r.verdict}`;
+      },
+    },
+    {
+      label: 'judge: a with-skill turn on a bundle the init line never lists → graded, its evidence named',
+      run: () => {
+        const c = fixtureCase({ bundle: 'quiet-skill', key: 'quiet-skill/demo#1' });
+        const launched = judge(c, 'with-skill', stream({ skills: ['debug'], invoked: 'quiet-skill', answer: GOOD }));
+        const silent = judge(c, 'with-skill', stream({ skills: ['debug'], answer: 'no idea' }));
+        return launched.verdict === 'pass' && launched.armEvidence === 'launched' && silent.verdict === 'fail' && silent.armEvidence === 'not-shown'
+          ? true
+          : `expected pass/launched then fail/not-shown, got ${launched.verdict}/${launched.armEvidence} then ${silent.verdict}/${silent.armEvidence}`;
+      },
+    },
+    {
+      label: 'reader: `user-invocable: false` frontmatter → a bundle the init line never lists',
+      run: () =>
+        notUserInvocable('---\nname: q\nuser-invocable: false\n---\nbody') && !notUserInvocable('---\nname: q\n---\nuser-invocable: false\n') && !notUserInvocable('---\nname: q\nuser-invocable: true\n---\n')
+          ? true
+          : 'the frontmatter reader misjudged `user-invocable`',
+    },
+    {
       label: 'judge: a graded with-skill turn → its answer judged by the grader',
       run: () => {
         const pass = judge(fixtureCase(), 'with-skill', stream({ skills: ['demo-skill'], invoked: 'demo-skill', answer: GOOD }));
         const fail = judge(fixtureCase(), 'with-skill', stream({ skills: ['demo-skill'], answer: 'no idea' }));
-        return pass.verdict === 'pass' && pass.skillsInvoked.join() === 'demo-skill' && fail.verdict === 'fail'
+        return pass.verdict === 'pass' && pass.skillsInvoked.join() === 'demo-skill' && pass.armEvidence === 'init-line' && fail.verdict === 'fail'
           ? true
           : `expected pass (Skill launched) then fail, got ${pass.verdict} [${pass.skillsInvoked.join()}] then ${fail.verdict}`;
       },

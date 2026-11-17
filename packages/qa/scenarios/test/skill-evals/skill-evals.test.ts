@@ -17,10 +17,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { ApiBillingRefusedError } from '../../src/runner/driver.js';
 import type { TurnProcessRun } from '../../src/runner/drivers/process.js';
 import { ARM_TOOLS, armArgs, prepareArmWorkdir } from '../../src/skill-evals/arms.js';
-import { loadSkillEvalCatalog, parseEvalFile, selectBundles, type SkillEvalCase } from '../../src/skill-evals/cases.js';
+import { loadSkillEvalCatalog, notUserInvocable, parseEvalFile, selectBundles, type SkillEvalCase } from '../../src/skill-evals/cases.js';
 import { main, parseSkillEvalArgs } from '../../src/skill-evals/cli.js';
 import { gradeAnswer } from '../../src/skill-evals/grade.js';
-import { executeRound, judgeTurn, planRound, preflight, rateLimitStop } from '../../src/skill-evals/run.js';
+import { executeRound, judgeTurn, planRound, preflight, rateLimitStop, regradeRecord } from '../../src/skill-evals/run.js';
 import { runSelfTest, SELF_TEST_BATTERIES, SELF_TEST_BATTERY_FLOOR, selfTestReached } from '../../src/skill-evals/self-test.js';
 import { renderSummaryMarkdown, summariseRound } from '../../src/skill-evals/summary.js';
 
@@ -192,7 +192,7 @@ describe('the arms: one fresh directory per turn, differing only in the bundle',
       const seen: Array<{ args: readonly string[]; cwd: string; input: string; skills: string[]; envKey: boolean; envEffort: boolean }> = [];
       const out = mkdtempSync(join(scratch, 'out-'));
       const exec = await executeRound(planRound(cases, 1), {
-        bin: 'claude', skillsRoot: root, catalogBundles: cat.bundles, outDir: out, maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
+        bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: out, maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
         runTurn: async (_bin, args, o) => {
           const skillsDir = join(o.cwd, '.claude', 'skills');
           const skills = existsSync(skillsDir) ? readdirSync(skillsDir) : [];
@@ -217,7 +217,7 @@ describe('the arms: one fresh directory per turn, differing only in the bundle',
     const root = writeCatalog();
     const cat = loadSkillEvalCatalog(root);
     const exec = await executeRound(planRound(cat.cases, 1), {
-      bin: 'claude', skillsRoot: root, catalogBundles: cat.bundles, outDir: mkdtempSync(join(scratch, 'out-')), maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
+      bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: mkdtempSync(join(scratch, 'out-')), maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
       runTurn: async () => exited(stream({ skills: ['alpha-skill'], answer: '$icontains', utilization: 0.95 })),
     });
     expect(exec.records).toHaveLength(1);
@@ -231,7 +231,7 @@ describe('the arms: one fresh directory per turn, differing only in the bundle',
 describe('judging a turn and summarising a round', () => {
   const c: SkillEvalCase = { bundle: 'alpha-skill', file: 'cases.json', id: 1, key: 'alpha-skill/cases#1', prompt: 'p', mustContain: ['$icontains'], mustNotContain: ['joins:'] };
   const judge = (arm: 'with-skill' | 'no-skill', stdout: string, run?: Partial<TurnProcessRun['process']>) =>
-    judgeTurn(c, arm, 1, { stdout, process: { elapsedMs: 1, exit: 0, timedOut: false, timeoutMs: 1, ...run } }, ['alpha-skill', 'beta-skill'], 't');
+    judgeTurn(c, arm, 1, { stdout, process: { elapsedMs: 1, exit: 0, timedOut: false, timeoutMs: 1, ...run } }, { bundles: ['alpha-skill', 'beta-skill'], unlisted: [] }, 't');
 
   it('pass / fail by the tokens; invalid when the arm is not the one meant; error when there is no answer', () => {
     expect(judge('with-skill', stream({ skills: ['alpha-skill'], answer: '$icontains' })).verdict).toBe('pass');
@@ -244,7 +244,7 @@ describe('judging a turn and summarising a round', () => {
 
   it('per bundle: each arm\'s rate over measured turns only, the with-skill failures, the cases where no-skill ≥ with-skill', () => {
     const d: SkillEvalCase = { ...c, id: 2, key: 'alpha-skill/cases#2' };
-    const rec = (k: SkillEvalCase, arm: 'with-skill' | 'no-skill', answer: string) => judgeTurn(k, arm, 1, exited(stream({ skills: arm === 'with-skill' ? ['alpha-skill'] : [], answer })), ['alpha-skill'], 't');
+    const rec = (k: SkillEvalCase, arm: 'with-skill' | 'no-skill', answer: string) => judgeTurn(k, arm, 1, exited(stream({ skills: arm === 'with-skill' ? ['alpha-skill'] : [], answer })), { bundles: ['alpha-skill'], unlisted: [] }, 't');
     const s = summariseRound(
       [c, d],
       [rec(c, 'with-skill', '$icontains'), rec(c, 'no-skill', 'nothing'), rec(d, 'with-skill', 'nothing'), rec(d, 'no-skill', '$icontains'), judge('with-skill', stream({ skills: ['debug'], answer: '$icontains' }))],
@@ -262,7 +262,7 @@ describe('judging a turn and summarising a round', () => {
   });
 
   it('spells angle brackets out for GitHub and escapes a pipe in a token cell', () => {
-    const s = summariseRound([{ ...c, mustContain: ['<ObjectChart', 'a|b'] }], [judgeTurn({ ...c, mustContain: ['<ObjectChart', 'a|b'] }, 'with-skill', 1, exited(stream({ skills: ['alpha-skill'], answer: 'x' })), ['alpha-skill'], 't')], []);
+    const s = summariseRound([{ ...c, mustContain: ['<ObjectChart', 'a|b'] }], [judgeTurn({ ...c, mustContain: ['<ObjectChart', 'a|b'] }, 'with-skill', 1, exited(stream({ skills: ['alpha-skill'], answer: 'x' })), { bundles: ['alpha-skill'], unlisted: [] }, 't')], []);
     const md = renderSummaryMarkdown(s, { title: 'T', lines: [] }, { forGitHub: true });
     expect(md).toContain('`(lt)ObjectChart` `a\\|b`');
     expect(md).not.toContain('<');
@@ -277,5 +277,39 @@ describe('the command line flags', () => {
     expect(() => parseSkillEvalArgs(['--max-utilization', '1.5'])).toThrow(/fraction/);
     expect(() => parseSkillEvalArgs(['--skils', 'a'])).toThrow(/unknown flag/);
     expect(() => parseSkillEvalArgs(['--out'])).toThrow(/needs a value/);
+  });
+});
+
+describe('a bundle the init line never lists (`user-invocable: false`), and --regrade', () => {
+  const quiet: SkillEvalCase = { bundle: 'quiet-skill', file: 'cases.json', id: 1, key: 'quiet-skill/cases#1', prompt: 'p', mustContain: ['$icontains'], mustNotContain: [] };
+  const view = { bundles: ['quiet-skill', 'alpha-skill'], unlisted: ['quiet-skill'] };
+
+  it('the reader names it from the SKILL.md frontmatter only', () => {
+    expect(notUserInvocable('---\nname: q\nuser-invocable: false\n---\n')).toBe(true);
+    expect(notUserInvocable('---\nname: q\n---\nuser-invocable: false\n')).toBe(false);
+    const root = writeCatalog();
+    writeFileSync(join(root, 'beta-skill', 'SKILL.md'), '---\nname: beta-skill\nuser-invocable: false\n---\n');
+    expect(loadSkillEvalCatalog(root).unlistedBundles).toEqual(['beta-skill']);
+  });
+
+  it('a with-skill turn on it is graded, with its evidence; a no-skill turn launching a catalog bundle is invalid', () => {
+    const r = judgeTurn(quiet, 'with-skill', 1, exited([stream({ skills: ['debug'] }).split('\n')[0], JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a', name: 'Skill', input: { skill: 'quiet-skill' } }] } }), ...stream({ skills: ['debug'], answer: '$icontains' }).split('\n').slice(1)].join('\n')), view, 't');
+    expect(r).toMatchObject({ verdict: 'pass', armEvidence: 'launched', skillsInvoked: ['quiet-skill'] });
+    expect(judgeTurn(quiet, 'with-skill', 1, exited(stream({ skills: ['debug'], answer: 'x' })), view, 't')).toMatchObject({ verdict: 'fail', armEvidence: 'not-shown' });
+    expect(judgeTurn({ ...quiet, bundle: 'alpha-skill', key: 'alpha-skill/cases#1' }, 'with-skill', 1, exited(stream({ skills: ['debug'], answer: '$icontains' })), view, 't').verdict).toBe('invalid');
+    const launchedInNoSkill = [stream({ skills: [] }).split('\n')[0], JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'a', name: 'Skill', input: { skill: 'quiet-skill' } }] } }), ...stream({ skills: [], answer: '$icontains' }).split('\n').slice(1)].join('\n');
+    expect(judgeTurn(quiet, 'no-skill', 1, exited(launchedInNoSkill), view, 't')).toMatchObject({ verdict: 'invalid', reason: 'the no-skill turn launched `quiet-skill`' });
+  });
+
+  it('--regrade re-draws a recorded verdict from the record alone and keeps what it was', () => {
+    const was = judgeTurn(quiet, 'with-skill', 1, exited(stream({ skills: ['debug'], answer: '$icontains' })), { bundles: view.bundles, unlisted: [] }, 't');
+    expect(was.verdict).toBe('invalid');
+    const now = regradeRecord(was, quiet, view);
+    expect(now).toMatchObject({ verdict: 'pass', armEvidence: 'not-shown', regradedFrom: 'invalid', answer: '$icontains' });
+    expect(now.reason).toBeUndefined();
+    // A second regrade keeps the verdict the turn was given, and drops it once the verdict is back to it.
+    expect(regradeRecord(now, quiet, view)).toMatchObject({ verdict: 'pass', regradedFrom: 'invalid' });
+    expect(regradeRecord(now, quiet, { bundles: view.bundles, unlisted: [] })).toMatchObject({ verdict: 'invalid' });
+    expect(regradeRecord(now, quiet, { bundles: view.bundles, unlisted: [] }).regradedFrom).toBeUndefined();
   });
 });

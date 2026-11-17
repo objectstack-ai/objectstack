@@ -43,6 +43,13 @@ export const RUN_RECORD_SCHEMA = 'skill-eval-run/1';
 
 export type RunVerdict = 'pass' | 'fail' | 'invalid' | 'error';
 
+/**
+ * How a with-skill turn shows its bundle was installed: `init-line` (listed),
+ * or, for a bundle the init line never lists, `launched` (the turn launched
+ * it) or `not-shown` (it did not, so nothing in the stream shows it).
+ */
+export type ArmEvidence = 'init-line' | 'launched' | 'not-shown';
+
 export interface RateLimitReading {
   status?: string;
   rateLimitType?: string;
@@ -60,6 +67,8 @@ export interface TurnStreamFacts {
   skillsInvoked: string[];
   /** The result line's `permission_denials` count. */
   permissionDenials?: number;
+  /** The tool each of those denials refused, in order. */
+  deniedTools?: string[];
   /** The last `rate_limit_event` of the stream. */
   rateLimit?: RateLimitReading;
 }
@@ -80,7 +89,10 @@ export function readStreamFacts(stdout: string): TurnStreamFacts {
       facts.initSkills = ev.skills.filter((s): s is string => typeof s === 'string');
     } else if (ev.type === 'result') {
       if (typeof ev.result === 'string') facts.answer = ev.result;
-      if (Array.isArray(ev.permission_denials)) facts.permissionDenials = ev.permission_denials.length;
+      if (Array.isArray(ev.permission_denials)) {
+        facts.permissionDenials = ev.permission_denials.length;
+        facts.deniedTools = ev.permission_denials.map((d) => (typeof d === 'object' && d !== null && typeof (d as Record<string, unknown>).tool_name === 'string' ? String((d as Record<string, unknown>).tool_name) : 'unknown'));
+      }
     } else if (ev.type === 'rate_limit_event' && typeof ev.rate_limit_info === 'object' && ev.rate_limit_info !== null) {
       const r = ev.rate_limit_info as Record<string, unknown>;
       facts.rateLimit = {
@@ -115,6 +127,10 @@ export interface SkillEvalRunRecord {
   verdict: RunVerdict;
   /** Why an `invalid` or `error` turn is out of the denominator. */
   reason?: string;
+  /** A with-skill turn's evidence that its bundle was installed. */
+  armEvidence?: ArmEvidence;
+  /** The verdict the turn was given when it ran, kept once a `--regrade` changes it. */
+  regradedFrom?: RunVerdict;
   /** `must_contain` tokens the answer lacks. */
   missing: string[];
   /** `must_not_contain` tokens the answer carries. */
@@ -128,6 +144,8 @@ export interface SkillEvalRunRecord {
   /** The tools the turn called, in order. */
   toolCalls: string[];
   permissionDenials?: number;
+  /** The tool each permission denial refused (a read outside the turn's directory is one). */
+  deniedTools?: string[];
   /** The model the turn was served (the init line's). */
   model?: string;
   numTurns?: number;
@@ -140,19 +158,90 @@ export interface SkillEvalRunRecord {
   startedAt: string;
 }
 
+/** What a turn's arm can be checked against: the catalog's bundles, and those its init line never lists. */
+export interface CatalogView {
+  bundles: readonly string[];
+  /** `user-invocable: false` bundles ({@link SkillEvalCatalog.unlistedBundles}). */
+  unlisted: readonly string[];
+}
+
+/** The reason an `error` record carries when the stream had no init line. */
+export const NO_INIT_LINE = 'the stream carries no init line, so the arm cannot be verified';
+
+/** The facts a verdict is drawn from: a live turn's, or a recorded one's (`--regrade`). */
+export interface VerdictFacts {
+  process: TurnProcess;
+  initSeen: boolean;
+  bundlesLoaded: readonly string[];
+  skillsInvoked: readonly string[];
+  resultSubtype?: string;
+  answer?: string;
+}
+
+export interface Verdict {
+  verdict: RunVerdict;
+  reason?: string;
+  missing: string[];
+  forbidden: string[];
+  armEvidence?: ArmEvidence;
+}
+
+/**
+ * Draw the verdict. Pure over its inputs.
+ *
+ * The with-skill arm is shown installed by the init line listing the bundle.
+ * A bundle the init line never lists (`user-invocable: false`) is graded on
+ * its answer, with `armEvidence` saying whether the turn launched it; a listed
+ * bundle absent from the line is `invalid`. The no-skill arm is `invalid` when
+ * its init line lists a catalog bundle or it launches one.
+ */
+export function verdictOf(c: SkillEvalCase, arm: Arm, f: VerdictFacts, catalog: CatalogView, grade: Grader = gradeAnswer): Verdict {
+  const none = { missing: [], forbidden: [] };
+  const p = f.process;
+  if (p.error || p.timedOut || p.exit !== 0) {
+    return { verdict: 'error', reason: p.error ? `the process failed: ${p.error}` : p.timedOut ? `killed by the ${p.timeoutMs} ms case timeout` : `the CLI exited ${String(p.exit)}${p.signal ? ` (${p.signal})` : ''}`, ...none };
+  }
+  if (!f.initSeen) return { verdict: 'error', reason: NO_INIT_LINE, ...none };
+  let armEvidence: ArmEvidence | undefined;
+  if (arm === 'with-skill') {
+    if (f.bundlesLoaded.includes(c.bundle)) armEvidence = 'init-line';
+    else if (catalog.unlisted.includes(c.bundle)) armEvidence = f.skillsInvoked.includes(c.bundle) ? 'launched' : 'not-shown';
+    else return { verdict: 'invalid', reason: `the with-skill turn's init line does not list \`${c.bundle}\``, ...none };
+  } else {
+    if (f.bundlesLoaded.length > 0) return { verdict: 'invalid', reason: `the no-skill turn's init line lists ${f.bundlesLoaded.map((b) => `\`${b}\``).join(', ')}`, ...none };
+    const launched = f.skillsInvoked.filter((s) => catalog.bundles.includes(s));
+    if (launched.length > 0) return { verdict: 'invalid', reason: `the no-skill turn launched ${launched.map((b) => `\`${b}\``).join(', ')}`, ...none };
+  }
+  const ev = armEvidence ? { armEvidence } : {};
+  if (f.resultSubtype !== 'success' || f.answer === undefined) {
+    return { verdict: 'error', reason: `no answer to grade: the result line is \`${f.resultSubtype ?? 'absent'}\``, ...none, ...ev };
+  }
+  const g = grade(f.answer, c);
+  return { verdict: g.pass ? 'pass' : 'fail', missing: g.missing, forbidden: g.forbidden, ...ev };
+}
+
+const applyVerdict = <T extends object>(base: T, v: Verdict) => ({
+  ...base,
+  verdict: v.verdict,
+  ...(v.reason ? { reason: v.reason } : {}),
+  missing: v.missing,
+  forbidden: v.forbidden,
+  ...(v.armEvidence ? { armEvidence: v.armEvidence } : {}),
+});
+
 /** Judge one finished turn. Pure over its inputs. */
 export function judgeTurn(
   c: SkillEvalCase,
   arm: Arm,
   repeat: number,
   run: TurnProcessRun,
-  catalogBundles: readonly string[],
+  catalog: CatalogView,
   startedAt: string,
   grade: Grader = gradeAnswer,
 ): SkillEvalRunRecord {
   const turn = parseStreamJson(run.stdout);
   const facts = readStreamFacts(run.stdout);
-  const bundlesLoaded = (facts.initSkills ?? []).filter((s) => catalogBundles.includes(s));
+  const bundlesLoaded = (facts.initSkills ?? []).filter((s) => catalog.bundles.includes(s));
   const base = {
     schema: RUN_RECORD_SCHEMA,
     key: c.key,
@@ -165,6 +254,7 @@ export function judgeTurn(
     skillsInvoked: facts.skillsInvoked,
     toolCalls: turn.toolCalls.map((t) => t.rawName),
     ...(facts.permissionDenials !== undefined ? { permissionDenials: facts.permissionDenials } : {}),
+    ...(facts.deniedTools?.length ? { deniedTools: facts.deniedTools } : {}),
     ...(turn.meta.model ? { model: turn.meta.model } : {}),
     ...(turn.meta.numTurns !== undefined ? { numTurns: turn.meta.numTurns } : {}),
     ...(turn.meta.resultSubtype ? { resultSubtype: turn.meta.resultSubtype } : {}),
@@ -175,30 +265,22 @@ export function judgeTurn(
     startedAt,
     ...(facts.answer !== undefined ? { answer: facts.answer } : {}),
   } as const;
-  const out = (verdict: RunVerdict, rest: { reason?: string; missing?: string[]; forbidden?: string[] } = {}): SkillEvalRunRecord => ({
-    ...base,
-    verdict,
-    ...(rest.reason ? { reason: rest.reason } : {}),
-    missing: rest.missing ?? [],
-    forbidden: rest.forbidden ?? [],
-  });
+  const v = verdictOf(c, arm, { process: run.process, initSeen: facts.initSkills !== undefined, bundlesLoaded, skillsInvoked: facts.skillsInvoked, ...(turn.meta.resultSubtype ? { resultSubtype: turn.meta.resultSubtype } : {}), ...(facts.answer !== undefined ? { answer: facts.answer } : {}) }, catalog, grade);
+  return applyVerdict(base, v);
+}
 
-  const p = run.process;
-  if (p.error || p.timedOut || p.exit !== 0) {
-    return out('error', { reason: p.error ? `the process failed: ${p.error}` : p.timedOut ? `killed by the ${p.timeoutMs} ms case timeout` : `the CLI exited ${String(p.exit)}${p.signal ? ` (${p.signal})` : ''}` });
-  }
-  if (facts.initSkills === undefined) return out('error', { reason: 'the stream carries no init line, so the arm cannot be verified' });
-  if (arm === 'with-skill' && !bundlesLoaded.includes(c.bundle)) {
-    return out('invalid', { reason: `the with-skill turn's init line does not list \`${c.bundle}\`` });
-  }
-  if (arm === 'no-skill' && bundlesLoaded.length > 0) {
-    return out('invalid', { reason: `the no-skill turn's init line lists ${bundlesLoaded.map((b) => `\`${b}\``).join(', ')}` });
-  }
-  if (turn.meta.resultSubtype !== 'success' || facts.answer === undefined) {
-    return out('error', { reason: `no answer to grade: the result line is \`${turn.meta.resultSubtype ?? 'absent'}\`` });
-  }
-  const g = grade(facts.answer, c);
-  return out(g.pass ? 'pass' : 'fail', { missing: g.missing, forbidden: g.forbidden });
+/**
+ * Re-draw a recorded turn's verdict under this runner's rules (`--regrade`):
+ * the answer and the arm facts are the record's, so no model is asked. A
+ * record whose verdict now differs from the one its turn was given keeps that
+ * first verdict as `regradedFrom`, across any number of regrades.
+ */
+export function regradeRecord(rec: SkillEvalRunRecord, c: SkillEvalCase, catalog: CatalogView, grade: Grader = gradeAnswer): SkillEvalRunRecord {
+  const { reason: _reason, armEvidence: _ev, regradedFrom: _was, ...rest } = rec;
+  const v = verdictOf(c, rec.arm, { process: rec.process, initSeen: rec.reason !== NO_INIT_LINE, bundlesLoaded: rec.bundlesLoaded, skillsInvoked: rec.skillsInvoked, ...(rec.resultSubtype ? { resultSubtype: rec.resultSubtype } : {}), ...(rec.answer !== undefined ? { answer: rec.answer } : {}) }, catalog, grade);
+  const out = applyVerdict(rest, v);
+  const asRun = rec.regradedFrom ?? rec.verdict;
+  return v.verdict === asRun ? out : { ...out, regradedFrom: asRun };
 }
 
 // ── Preflight ────────────────────────────────────────────────────────────────
@@ -267,7 +349,7 @@ export const runRecordFile = (j: { case: SkillEvalCase; arm: Arm; repeat: number
 export interface RoundOptions {
   bin: string;
   skillsRoot: string;
-  catalogBundles: readonly string[];
+  catalog: CatalogView;
   outDir: string;
   maxTurns: number;
   caseTimeoutMs: number;
@@ -322,7 +404,7 @@ export async function executeRound(jobs: readonly RoundJob[], opts: RoundOptions
       const startedAt = new Date().toISOString();
       try {
         const run = await runTurn(opts.bin, armArgs(dir.mcpConfigPath, opts), { cwd: dir.cwd, input: job.case.prompt, timeoutMs: opts.caseTimeoutMs, env });
-        const rec = judgeTurn(job.case, job.arm, job.repeat, run, opts.catalogBundles, startedAt);
+        const rec = judgeTurn(job.case, job.arm, job.repeat, run, opts.catalog, startedAt);
         records.push(rec);
         writeFileSync(join(runsDir, runRecordFile(job)), JSON.stringify(rec, null, 2) + '\n');
         opts.onRecord?.(rec, records.length, jobs.length);
