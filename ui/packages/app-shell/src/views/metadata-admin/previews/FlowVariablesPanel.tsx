@@ -38,7 +38,6 @@ export interface FlowVariableRow {
   isInput?: boolean;
   isOutput?: boolean;
   objectName?: string;
-  [key: string]: unknown;
 }
 
 interface FlowStepLike {
@@ -52,7 +51,7 @@ export interface FlowVariablesPanelProps {
   variables: FlowVariableRow[];
   /** The flow's steps and connections, read for the reference guard. */
   nodes: ReadonlyArray<FlowStepLike>;
-  edges?: ReadonlyArray<Record<string, unknown>>;
+  edges?: ReadonlyArray<{ condition?: unknown }>;
   /** Flow-level text that reads variables (`successMessage`, `errorMessage`). */
   flowText?: ReadonlyArray<unknown>;
   /** Absent: the read-only list. */
@@ -99,7 +98,7 @@ function readsName(value: unknown, name: string, depth = 0): boolean {
 export function flowVariableReaders(
   name: string,
   nodes: ReadonlyArray<FlowStepLike>,
-  edges: ReadonlyArray<Record<string, unknown>> = [],
+  edges: ReadonlyArray<{ condition?: unknown }> = [],
   flowText: ReadonlyArray<unknown> = [],
   locale?: string,
 ): string[] {
@@ -246,7 +245,7 @@ interface VariableRowProps {
   variable: FlowVariableRow;
   variables: FlowVariableRow[];
   nodes: ReadonlyArray<FlowStepLike>;
-  edges?: ReadonlyArray<Record<string, unknown>>;
+  edges?: ReadonlyArray<{ condition?: unknown }>;
   flowText?: ReadonlyArray<unknown>;
   write: (next: FlowVariableRow[]) => void;
   locale?: string;
@@ -262,9 +261,9 @@ function VariableRow({ index, variable: v, variables, nodes, edges, flowText, wr
   React.useEffect(() => setNameText(v.name ?? ''), [v.name]);
   React.useEffect(() => setDefaultText(formatDefault(v.defaultValue)), [v.defaultValue]);
 
-  const put = (patch: Partial<FlowVariableRow>, drop: ReadonlyArray<string> = []) => {
+  const put = (patch: Partial<FlowVariableRow>, drop: ReadonlyArray<keyof FlowVariableRow> = []) => {
     const row: FlowVariableRow = { ...v, ...patch };
-    for (const k of drop) delete row[k];
+    for (const k of drop) delete (row as unknown as Record<string, unknown>)[k];
     write(variables.map((x, i) => (i === index ? row : x)));
   };
   const readers = () => flowVariableReaders(v.name ?? '', nodes, edges, flowText, locale);
