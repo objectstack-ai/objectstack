@@ -345,16 +345,21 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
      *
      * The engine answers the way execution would answer. The engine's own
      * `where` admission runs: every door the verbs run, in their order, through
-     * the same functions. It stops before any driver is resolved or called.
+     * the same functions. It calls no driver. The one admission verdict that
+     * depends on the object's driver (a nested-relation condition on a read
+     * verb, refused up front on a driver that does not declare
+     * `DriverCapabilities.readableIdsLeaf`) is judged from that driver's
+     * DECLARED capabilities; an engine that routes the object to no driver
+     * (the authoring-time judge) does not judge it.
      * `{ ok: true }` means execution would admit the filter at the same point.
      * `{ ok: false, … }` carries the `code`, `status` and `message` execution
      * would have raised.
      *
-     * - **Nothing executes.** No driver, no hook, no middleware, no read. The
+     * - **Nothing executes.** No driver call, no hook, no middleware, no read. The
      *   member is synchronous, so a door that needs I/O cannot join it
      *   without a contract change.
      * - **What it judges is the engine's own admission.** Refusals that sit
-     *   below it are not judged: driver refusals, hooks, and the predicates
+     *   below it are not judged: a driver's own refusals, hooks, and the predicates
      *   middleware composes after admission (RLS, sharing, tenant scope).
      *   The judge sees the object's declared field map from the registry. For
      *   an object the registry does not know, the field-map doors answer
