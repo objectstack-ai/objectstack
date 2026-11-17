@@ -5298,6 +5298,8 @@ const en = {
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
+    openNextAfterDecision: 'Open next after deciding',
+    queueDone: 'No more pending requests in this list.',
     snapshotAsSubmitted: 'As submitted',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
