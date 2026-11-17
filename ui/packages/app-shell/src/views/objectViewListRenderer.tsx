@@ -225,6 +225,8 @@ export function useObjectViewListRenderer({
     // field drafted) makes a new wrapper, so the list re-reads its definition.
     const previewDrafts = usePreviewDrafts();
     const { getItem: getMetadataItem } = useMetadata();
+    const getMetadataItemRef = useRef(getMetadataItem);
+    getMetadataItemRef.current = getMetadataItem;
     const [unpublishedObjects, setUnpublishedObjects] = useState<ReadonlySet<string>>(() => new Set());
     const unpublishedReadsRef = useRef(new WeakMap<object, { revision: unknown; wrapped: DataSource }>());
     const previewDataSource = useCallback((ds: DataSource): DataSource => {
@@ -233,11 +235,11 @@ export function useObjectViewListRenderer({
         const wrapped = withUnpublishedObjectReads(
             ds,
             (name) => setUnpublishedObjects((prev) => (prev.has(name) ? prev : new Set(prev).add(name))),
-            (name) => getMetadataItem('object', name),
+            (name) => getMetadataItemRef.current('object', name),
         );
         unpublishedReadsRef.current.set(ds, { revision: objectDef, wrapped });
         return wrapped;
-    }, [objectDef, getMetadataItem]);
+    }, [objectDef]);
 
     const renderListView = useCallback(({ schema: listSchema, dataSource: rawDs, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
         const ds = previewDrafts && rawDs ? previewDataSource(rawDs) : rawDs;

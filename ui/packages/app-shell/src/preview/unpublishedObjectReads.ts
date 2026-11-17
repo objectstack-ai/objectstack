@@ -43,7 +43,7 @@
  * data reads never see a draft schema.
  */
 
-import { useMemo, useRef } from 'react';
+import { useRef } from 'react';
 import { answeredLoadFailure } from '@object-ui/react';
 import type { DataSource } from '@object-ui/types';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -116,16 +116,22 @@ export function usePreviewListDataSource<T extends DataSource | null | undefined
 ): T {
   const previewDrafts = usePreviewDrafts();
   const { getItem } = useMetadata();
+  // Read at call time, so neither callback's identity decides the wrapper's.
+  const getItemRef = useRef(getItem);
+  getItemRef.current = getItem;
   const unpublishedRef = useRef(onUnpublished);
   unpublishedRef.current = onUnpublished;
-  return useMemo(() => {
-    if (!previewDrafts || !ds) return ds;
-    return withUnpublishedObjectReads(
-      ds,
-      (name) => unpublishedRef.current(name),
-      (name) => getItem('object', name),
-    ) as T;
-    // `revision` is read for its identity only: see the doc above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewDrafts, ds, getItem, revision]);
+  // Cached on the inputs the wrapper is made of (the source and the payload
+  // `revision`), not on a memo's identity (ui/AGENTS.md #10).
+  const cache = useRef<{ ds: DataSource; revision: unknown; wrapped: DataSource } | null>(null);
+  if (!previewDrafts || !ds) return ds;
+  const held = cache.current;
+  if (held && held.ds === ds && held.revision === revision) return held.wrapped as T;
+  const wrapped = withUnpublishedObjectReads(
+    ds,
+    (name) => unpublishedRef.current(name),
+    (name) => getItemRef.current('object', name),
+  );
+  cache.current = { ds, revision, wrapped };
+  return wrapped as T;
 }
