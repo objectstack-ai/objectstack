@@ -709,7 +709,7 @@ describe('Flow designer — package label translations (flows.<flow>.label, appr
     vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })));
     const { container } = render(
       <I18nProvider instance={zhInstance()} persistLanguage={false}>
-        <FlowPreview draft={DRAFT} selection={null} onSelectionChange={() => {}} />
+        <FlowPreview type="flow" name="opportunity_approval" draft={DRAFT} selection={null} onSelectionChange={() => {}} />
       </I18nProvider>,
     );
     expect((container.querySelector('[data-node-id="manager_review"]') as HTMLElement).textContent).toContain('经理审核');

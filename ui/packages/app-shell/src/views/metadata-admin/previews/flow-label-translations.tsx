@@ -44,7 +44,7 @@ export function flowLabelTranslations(
   language: string,
 ): FlowLabelTranslations | undefined {
   if (!bundle || !flowName) return undefined;
-  const flowLabel = translateFlow({ name: flowName }, bundle, { locale: language }).label;
+  const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, { locale: language }).label;
   const approvals = bundle[language]?.flows?.[flowName]?.approvals;
   return {
     flowLabel: typeof flowLabel === 'string' && flowLabel ? flowLabel : undefined,
