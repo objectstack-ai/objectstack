@@ -67,10 +67,13 @@ const stlStack = defineStack({
   },
   objects: [named(TRIGGER), named(REC), named(NOTE), named(UNIT), named(DOOR), named(READ)],
   hooks: [
-    // The handler of the card's measurement. A `before*` hook, so the write
-    // door opens no unit of its own (#22782) and `ctx.api.transaction` really
-    // opens — and owns — one. The name's prefix picks the shape.
-    { name: 'stl_writer', object: TRIGGER, events: ['beforeInsert'],
+    // The handler of the card's measurement. A blocking `afterInsert` with
+    // `onError: 'log'` and no `condition`, so the write door opens no unit of
+    // its own (#22782, #22856) and `ctx.api.transaction` really opens — and
+    // owns — one. Not a `before*` hook: a `before*` hook declared in metadata
+    // opens the door's unit (#34412), and `ctx.api.transaction` would only
+    // join it. The name's prefix picks the shape.
+    { name: 'stl_writer', object: TRIGGER, events: ['afterInsert'], onError: 'log',
       handler: async (ctx: any) => {
         const name = String(ctx.input.data.name);
         if (name.startsWith('explicit')) {

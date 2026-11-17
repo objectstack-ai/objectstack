@@ -186,6 +186,10 @@ const capRemoved = (key: string, mechanism: string) =>
  * - `lockRows` — opt-IN for `DriverOptions.lockRows` on `find()`: the engine
  *   sends the lock request on a predicate delete's matched-row read only when
  *   the bit is set and the read runs inside a transaction.
+ * - `zonedDateBucketing` — opt-IN for a non-UTC reference zone on a date
+ *   bucket of `aggregate()` (ADR-0053 Phase 2 D2 as amended): the engine ANDs
+ *   it with method presence, because one driver class serves dialects with
+ *   and without a tz database.
  * - `readableIdsLeaf` — opt-IN for a nested-relation condition on a read
  *   verb: the engine plans it as a composed `ReadableIds` leaf (ADR-0139) on
  *   a driver that declares it, and refuses it up front (`INVALID_FILTER` /
@@ -404,6 +408,42 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * Optional; absence means `false`, like `batchSchemaSync`.
    */
   lockRows: z.boolean().optional().describe('`find()` honours `DriverOptions.lockRows` inside a transaction: no other writer changes a returned row behind the transaction (it waits, or one side fails) (absence = false: the engine sends no lock request)'),
+
+  /**
+   * `aggregate()` buckets a date `groupBy` item on the calendar of a named
+   * IANA zone, DST-correct, when the query it receives carries one
+   * (`DriverAggregateQuery.timezone`, `contracts/data-driver.ts`) — ADR-0053
+   * Phase 2 D2 as amended for #33697.
+   *
+   * What the engine does with it: `engine.aggregate` resolves the request's
+   * reference `timezone` through the runtime first (the `resolvedOptions()`
+   * name of an `Intl.DateTimeFormat`). A zone that resolves to `UTC` takes
+   * the UTC path every driver already serves. A zone that resolves to an
+   * area/location name (one containing `/`, such as `Asia/Taipei`, or
+   * `America/Chicago` for `CST`) is sent down WITH that resolved name when
+   * this bit is `true` and the driver has `aggregate()`; every other case
+   * (no bit, a name the runtime cannot resolve, an offset such as `+08:00`,
+   * an abbreviation that resolves to itself such as `EST5EDT`) keeps the
+   * in-memory aggregate (`applyInMemoryAggregation`), which answers it as it
+   * always has. The raw string never reaches a driver. Which spelling
+   * resolves to what is the runtime's tz data (the examples are as Node 22
+   * resolves them); the rule is the resolution, not the list.
+   *
+   * What a driver that declares it owes: its buckets equal the in-memory
+   * buckets (`bucketDateKey` in `@objectstack/core`) for that zone, on both
+   * sides of a DST change; the labels stay the `queryDateGranularity` output
+   * contract above; a `Field.date` (a timezone-naive calendar day) is never
+   * zone-shifted; the zone is a bound value, never SQL text; and a zone it
+   * cannot bucket is refused loudly, never read as UTC.
+   *
+   * Why a bit and not method presence: one driver class can serve dialects
+   * that differ here. `SqlDriver` declares it on PostgreSQL (`AT TIME ZONE`
+   * over the server's tz database) and not on SQLite, which has no tz
+   * database, nor on MySQL, SQL Server or Oracle.
+   *
+   * Optional; absence means `false`, like `aggregationFilter`.
+   */
+  zonedDateBucketing: z.boolean().optional().describe('`aggregate()` buckets a date groupBy on the calendar of the resolved IANA zone the engine sends (DriverAggregateQuery.timezone), DST-correct, equal to the in-memory buckets (absence = false: the engine buckets a non-UTC zone in memory)'),
 
   /**
    * This driver compiles (or, in process, evaluates) a composed `ReadableIds`

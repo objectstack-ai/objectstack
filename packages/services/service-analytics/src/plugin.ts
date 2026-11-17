@@ -117,7 +117,7 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  * property of the SQL driver family, not of every driver.
  */
 type DateBucketingDriver = {
-  dateBucketSql?(objectName: string, field: string, granularity: string): unknown;
+  dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): unknown;
 };
 
 /**
@@ -1432,13 +1432,20 @@ export class AnalyticsServicePlugin implements Plugin {
      * the engine's in-memory bucketing (it answers `null`), a throw. On
      * `undefined` the echo refuses the bucket (#21647): it prints a bucket in
      * no expression but the one answered here.
+     *
+     * [#33697] `timezone`, when given, is the resolved area/location zone the
+     * engine pushes a zoned bucket down with; the driver answers the zoned
+     * expression it groups by, or nothing where it buckets no zone (the engine
+     * buckets that zone in memory there).
      */
-    const dateBucketSql = (objectName: string, field: string, granularity: string): string | undefined => {
+    const dateBucketSql = (objectName: string, field: string, granularity: string, timezone?: string): string | undefined => {
       try {
         const svc = ctx.getService<DataEngineLike>('data');
         const driver = svc?.getDriverForObject?.(objectName) as DateBucketingDriver | undefined;
         if (typeof driver?.dateBucketSql !== 'function') return undefined;
-        const rendered = driver.dateBucketSql(objectName, field, granularity);
+        const rendered = timezone === undefined
+          ? driver.dateBucketSql(objectName, field, granularity)
+          : driver.dateBucketSql(objectName, field, granularity, timezone);
         return typeof rendered === 'string' && rendered !== '' ? rendered : undefined;
       } catch {
         return undefined;
