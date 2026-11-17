@@ -59,6 +59,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -112,8 +115,8 @@ describe('Data pillar Field properties on a read-only package — the reason rea
 
     const apiName = within(body).getByDisplayValue('priority');
     expect(apiName).toBeDisabled();
-    const remove = within(body).getByRole('button', { name: /^Remove/ });
-    expect(remove).toBeDisabled();
+    // objectstack#34794 — Remove is the header ⋯ menu's entry; the menu is disabled.
+    expect(within(body).getByTestId('field-more-menu')).toBeDisabled();
   });
 
   it('hovering the disabled controls opens a tooltip with the reason', async () => {
