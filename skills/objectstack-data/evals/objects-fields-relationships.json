@@ -362,6 +362,26 @@
           "defaultCurrency: 'USD'"
         ]
       }
+    },
+    {
+      "id": 21,
+      "prompt": "Our package `acme_billing` depends on HotCRM and already relabels its `crm_account` fields with `fieldPatches`: `industry` reads \"Sector\" and the `type` option `customer` reads \"Client\". Our zh-CN users still see that English text. Where do the Chinese strings go?",
+      "expected_output": "In `acme_billing`'s own translation bundle, registered on its `defineStack({ translations: [...] })`, under the same keys HotCRM translates its own text under: `'zh-CN': { objects: { crm_account: { fields: { industry: { label: '板块' }, type: { options: { customer: '委托方' } } } } } }` (a patched help text or description goes under the field's `help`). The package that ships the patch translates it: never edit HotCRM's translation files, and never redeclare the field in `fields` to carry a label. HotCRM's zh-CN translation of the text the patch replaced (\"Industry\") never applies to the patched label. A translation of the same key in the paired `hotcrm.custom` package still comes first on the `/meta` reads, and a locale `acme_billing` does not translate serves the patch text (`Sector`) as written.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "translations",
+          "'zh-CN'",
+          "crm_account",
+          "industry: { label:",
+          "options: { customer:"
+        ],
+        "must_not_contain": [
+          "industry: Field.",
+          "overrides:",
+          "name: 'crm_account'"
+        ]
+      }
     }
   ]
 }
