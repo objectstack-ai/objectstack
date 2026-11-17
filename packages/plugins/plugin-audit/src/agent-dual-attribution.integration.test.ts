@@ -449,6 +449,8 @@ describe('[#33694] an in-product AI write names the agent, the conversation and 
   const CONFIRMED_RECORD = 'c_ai_confirmed';
   const UNCONFIRMED_RECORD = 'c_ai_unconfirmed';
   const PERSON_RECORD = 'c_ai_person_control';
+  const CLIENT_MARKS_RECORD = 'c_ai_client_with_marks';
+  const BOTH_PERFORMERS_RECORD = 'c_ai_both_performers';
 
   let kernel: ObjectKernel;
   let driver: SqliteWasmDriver;
@@ -496,6 +498,19 @@ describe('[#33694] an in-product AI write names the agent, the conversation and 
       AUDITED_OBJECT,
       { id: PERSON_RECORD, full_name: 'Typed by the person' },
       { context: personCtx as any },
+    );
+    // No producer in the tree builds these two envelopes (each door sets only
+    // its own performer key, and the OAuth door no conversation or
+    // confirmation); they pin what the spec tells a reader of `performed_by`.
+    await engine.insert(
+      AUDITED_OBJECT,
+      { id: CLIENT_MARKS_RECORD, full_name: 'Client beside stray marks' },
+      { context: aiCtx({ clientId: CLIENT, conversationId: CONVERSATION, confirmationId: CONFIRMATION }) as any },
+    );
+    await engine.insert(
+      AUDITED_OBJECT,
+      { id: BOTH_PERFORMERS_RECORD, full_name: 'Both performers' },
+      { context: aiCtx({ clientId: CLIENT, agentId: AGENT, conversationId: CONVERSATION, confirmationId: CONFIRMATION }) as any },
     );
     await engine.update(
       AUDITED_OBJECT,
@@ -549,6 +564,16 @@ describe('[#33694] an in-product AI write names the agent, the conversation and 
       on_behalf_of: HUMAN,
       conversation_id: CONVERSATION,
     });
+  });
+
+  it('conversation_id / confirmation_id never ride beside an OAuth client id, so a client row carries only the pair', async () => {
+    const row = await ledgerRow(CLIENT_MARKS_RECORD, 'create');
+    expect(JSON.parse(String(row.metadata))).toEqual({ performed_by: CLIENT, on_behalf_of: HUMAN });
+  });
+
+  it('an envelope naming both performers is recorded as the OAuth client, without the agent\'s marks', async () => {
+    const row = await ledgerRow(BOTH_PERFORMERS_RECORD, 'create');
+    expect(JSON.parse(String(row.metadata))).toEqual({ performed_by: CLIENT, on_behalf_of: HUMAN });
   });
 
   it('an AI update of a record the person created is marked on the update row, and the person\'s own create row stays unmarked', async () => {

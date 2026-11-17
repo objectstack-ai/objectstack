@@ -2210,17 +2210,24 @@ export function installAuditWriters(
     // names the agent it ran, the conversation it ran in and, when the person
     // confirmed the call, the confirmation. The ruling reuses the existing
     // `performed_by` / `on_behalf_of` pair and adds no actor vocabulary, so the
-    // agent lands in `performed_by` exactly where an OAuth client does; the two
-    // ids are stamped together with the client. The /mcp OAuth door and the
-    // in-product path each set only their own key (`clientId` vs `agentId`),
-    // so one envelope never carries both; if one ever did, the OAuth client
-    // keeps the column it has always held.
+    // agent lands in `performed_by` exactly where an OAuth client does. The
+    // /mcp OAuth door and the in-product path each set only their own key
+    // (`clientId` vs `agentId`); if one envelope ever carried both, the OAuth
+    // client keeps the column it has always held.
+    //
+    // The conversation and the confirmation are the in-product path's own
+    // marks, so they are written ONLY when the in-product agent is the
+    // performer this row records — never beside an OAuth client id. That is
+    // what the spec promises a reader of `performed_by`, which holds either
+    // kind: `conversation_id` / `confirmation_id` come from the in-product
+    // path alone.
     const performedByAgentId: string | undefined = provenanceMark(ctx, 'performedByAgentId');
     const performedBy: string | undefined = performedByClientId ?? performedByAgentId;
-    const performedInConversationId: string | undefined = performedBy
+    const agentIsRecordedPerformer: boolean = !performedByClientId && performedByAgentId !== undefined;
+    const performedInConversationId: string | undefined = agentIsRecordedPerformer
       ? provenanceMark(ctx, 'performedByConversationId')
       : undefined;
-    const performedUnderConfirmationId: string | undefined = performedBy
+    const performedUnderConfirmationId: string | undefined = agentIsRecordedPerformer
       ? provenanceMark(ctx, 'performedByConfirmationId')
       : undefined;
     // The ADMINISTRATOR who made this write from an impersonation session. A
@@ -2373,10 +2380,10 @@ export function installAuditWriters(
     // connection acted.
     //
     // `conversation_id` / `confirmation_id` (#33694) ride ONLY beside a
-    // `performed_by`: the conversation the in-product AI performed the write
-    // in, and the pending item the person's approval decided for it. Each is
-    // present only when the producer stamped it — no confirmation key ⇒ the
-    // write needed none.
+    // `performed_by` naming the in-product agent: the conversation it
+    // performed the write in, and the pending item the person's approval
+    // decided for it. Each is present only when the producer stamped it — no
+    // confirmation key ⇒ the write needed none.
     if (performedBy || impersonatedBy || signInStamp || scimConnectionId) {
       auditRow.metadata = safeStringify({
         // A sign-in stamp names its event the way a `config_change` row does
