@@ -374,11 +374,14 @@ export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPa
       <ApprovalStepLine steps={request.flow_route?.steps} />
       {progress && <DecisionProgressIndicator progress={progress} eligibleApprovers={eligible} />}
       <PendingApprovers request={request} />
+      {/* The approver's band, the same one the business record page draws
+          (objectstack#34361). */}
       <DeclaredActionsBar
         objectName={SYS_APPROVAL_REQUEST_OBJECT}
         record={request}
         location={RECORD_APPROVAL_ACTION_LOCATION}
         onDone={handleDecided}
+        foldDecisions
       />
     </div>
   );

@@ -23,7 +23,8 @@
  *    leading with the outer write, and its unit rolls both rows back;
  *  - a code-registered hook (no unit opens): the same refusal, whose text says
  *    what stays written, and both rows are stored;
- *  - a `before*` hook: the same refusal, and the outer row was never written.
+ *  - a `before*` hook declared in metadata: the same refusal, the outer row was
+ *    never written, and the unit its chain opens rolls the hook's row back.
  *
  * Controls: a hook declared `onError: 'log'` does not fail the outer write; the
  * outer write's OWN refusal still answers `ERR_SUMMARY_RECOMPUTE` carrying its
@@ -183,13 +184,14 @@ describe('a hook\'s own ctx.api write that raises ERR_SUMMARY_RECOMPUTE never an
     expect(names(driver.rowsOf('line'))).toEqual(['from-afterInsert']);
   });
 
-  it('beforeInsert: the same refusal, and the outer row was never written', async () => {
+  it('beforeInsert (unit open): the same refusal, the outer row never written, the hook\'s row rolled back', async () => {
     const { engine, driver } = await makeEngine([hook(['beforeInsert'], writeLine)]);
     const err = await refusal(engine.insert('case', { name: 'c-1' }));
     expectHookStopped(err, 'The insert of "case" did not complete: its beforeInsert hook "line_writer" stopped.');
+    // A metadata-bound before* hook opens the door's unit (#34412), so the hook's own write rolls back with it.
+    expect([driver.begun.length, driver.rolledBack.length]).toEqual([1, 1]);
     expect(names(driver.rowsOf('case'))).toEqual(['existing']);
-    // No unit opens for a before* hook, so the hook's own write stays, as the text says.
-    expect(names(driver.rowsOf('line'))).toEqual(['from-beforeInsert']);
+    expect(driver.rowsOf('line')).toHaveLength(0);
   });
 
   it('CONTROL onError: \'log\': the hook\'s refusal is logged, and the outer insert answers its own row', async () => {
