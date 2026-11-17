@@ -2,7 +2,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppPlugin } from './app-plugin';
-import { appDefaultSeedLocale } from './seed-locale';
+import { appDefaultSeedLocale, resolveSeedLocaleForLoad } from './seed-locale';
+import { SeedLoaderService } from './seed-loader';
+import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
 import type { PluginContext } from '@objectstack/core';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
@@ -89,6 +91,7 @@ function createMetadata(): IMetadataService {
         account: { name: 'account', fields: { name: { type: 'text' } } },
         plan_zh: { name: 'plan_zh', fields: { name: { type: 'text' } } },
         plan_en: { name: 'plan_en', fields: { name: { type: 'text' } } },
+        price_book: { name: 'price_book', fields: { name: { type: 'text' } } },
     };
     return {
         getObject: vi.fn(async (name: string) => objects[name]),
@@ -506,5 +509,196 @@ describe('appDefaultSeedLocale (#30281)', () => {
         expect(appDefaultSeedLocale({ i18n: { defaultLocale: '  ' } })).toBeUndefined();
         expect(appDefaultSeedLocale({})).toBeUndefined();
         expect(appDefaultSeedLocale(undefined)).toBeUndefined();
+    });
+});
+
+/**
+ * `Seed.fallback` on every path that picks datasets by locale (ADR-0049: the
+ * key is honoured where a load filters, not only in the loader's own suite).
+ * A `zh-CN` and an `en` set of the standard price book, the `en` set marked
+ * `fallback: true`: an organization on `ja-JP`, which neither set names, gets
+ * the `en` set. Each path carries a control: the same sets UNMARKED give the
+ * `ja-JP` load no price book, which is the behaviour before the key existed.
+ */
+describe('Seed.fallback on the boot and install paths', () => {
+    const OLD_BUDGET = process.env.OS_INLINE_SEED_BUDGET_MS;
+    const OLD_MULTI = process.env.OS_MULTI_ORG_ENABLED;
+    const OLD_NODE_ENV = process.env.NODE_ENV;
+
+    const ZH = { object: 'price_book', externalId: 'name', mode: 'upsert', locale: ['zh-CN'], records: [{ name: '标准价格表' }] };
+    const EN = { object: 'price_book', externalId: 'name', mode: 'upsert', locale: ['en', 'en-US'], records: [{ name: 'Standard' }] };
+    const MARKED = [ZH, { ...EN, fallback: true }];
+    const UNMARKED = [ZH, EN];
+
+    let engine: IDataEngine;
+    let store: Record<string, any[]>;
+    let services: Map<string, unknown>;
+    let hooks: Map<string, Array<(payload: any) => any>>;
+    let logger: { info: any; warn: any; error: any; debug: any };
+    let settingFor: Record<string, { value: string; source: string }>;
+
+    beforeEach(() => {
+        process.env.OS_INLINE_SEED_BUDGET_MS = '60000';
+        delete process.env.OS_MULTI_ORG_ENABLED;
+        ({ engine, store } = createEngine());
+        services = new Map();
+        hooks = new Map();
+        logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+        settingFor = {};
+        services.set('settings', {
+            get: vi.fn(async (_ns: string, _key: string, ctx?: { tenantId?: string }) =>
+                settingFor[ctx?.tenantId ?? ''] ?? { value: 'en-US', source: 'default' }),
+        });
+    });
+    afterEach(() => {
+        if (OLD_BUDGET === undefined) delete process.env.OS_INLINE_SEED_BUDGET_MS;
+        else process.env.OS_INLINE_SEED_BUDGET_MS = OLD_BUDGET;
+        if (OLD_MULTI === undefined) delete process.env.OS_MULTI_ORG_ENABLED;
+        else process.env.OS_MULTI_ORG_ENABLED = OLD_MULTI;
+        if (OLD_NODE_ENV === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = OLD_NODE_ENV;
+    });
+
+    const ctx = (): PluginContext => ({
+        logger,
+        registerService: vi.fn((name: string, svc: unknown) => { services.set(name, svc); }),
+        getService: vi.fn((name: string) => {
+            if (name === 'objectql') return engine;
+            if (name === 'metadata') return createMetadata();
+            return services.get(name);
+        }),
+        getServices: vi.fn(() => services),
+        hook: vi.fn((event: string, fn: (payload: any) => any) => {
+            const list = hooks.get(event) ?? [];
+            list.push(fn);
+            hooks.set(event, list);
+        }),
+        trigger: vi.fn(),
+    }) as unknown as PluginContext;
+
+    const priceBooks = () => (store.price_book ?? []).map((r) => r.name).sort();
+    const app = (defaultLocale: string | undefined, data: unknown[]) => new AppPlugin({
+        id: 'com.example.fallback-app',
+        ...(defaultLocale ? { i18n: { defaultLocale } } : {}),
+        data,
+    });
+
+    describe('boot: filters on the app\'s i18n.defaultLocale', () => {
+        it('inline boot seed: a ja-JP app gets the fallback set', async () => {
+            await app('ja-JP', MARKED).start(ctx());
+            expect(priceBooks()).toEqual(['Standard']);
+        });
+
+        it('inline boot seed control: unmarked, a ja-JP app gets no price book', async () => {
+            await app('ja-JP', UNMARKED).start(ctx());
+            expect(priceBooks()).toEqual([]);
+        });
+
+        it('inline boot seed: a zh-CN app gets its own set, not the fallback', async () => {
+            await app('zh-CN', MARKED).start(ctx());
+            expect(priceBooks()).toEqual(['标准价格表']);
+        });
+
+        it('dev hot reload: a ja-JP app gets the fallback set; unmarked, none', async () => {
+            process.env.NODE_ENV = 'development';
+            const reload = async (data: unknown[]) => {
+                hooks = new Map();
+                ({ engine, store } = createEngine());
+                await app('ja-JP', []).start(ctx());
+                await hooks.get('metadata:reloaded')![0]!({ metadata: { objects: [{ name: 'price_book' }], data } });
+                return priceBooks();
+            };
+            expect(await reload(MARKED)).toEqual(['Standard']);
+            expect(await reload(UNMARKED)).toEqual([]);
+        });
+    });
+
+    describe('per-organization replay: filters on resolveSeedLocaleForLoad', () => {
+        const replayerOf = async (data: unknown[]) => {
+            process.env.OS_MULTI_ORG_ENABLED = 'true';
+            await app('en', data).start(ctx());
+            return services.get('seed-replayer') as (orgId: string, options?: { userId?: string }) => Promise<any>;
+        };
+
+        it('an organization whose Localization setting is ja-JP gets the fallback set; unmarked, none', async () => {
+            settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
+            await (await replayerOf(MARKED))('org_ja');
+            expect(priceBooks()).toEqual(['Standard']);
+
+            ({ engine, store } = createEngine());
+            await (await replayerOf(UNMARKED))('org_ja');
+            expect(priceBooks()).toEqual([]);
+        });
+
+        it('a founder whose language is es-ES gets the fallback set', async () => {
+            store.sys_user = [{ id: 'usr_es', locale: 'es-ES' }];
+            await (await replayerOf(MARKED))('org_new', { userId: 'usr_es' });
+            expect(priceBooks()).toEqual(['Standard']);
+        });
+    });
+
+    /**
+     * The install, sample-data reseed and restart heal build their request the
+     * way `marketplace-install-local-plugin.ts#runInlineSeed` does: the locale
+     * from `resolveSeedLocaleForLoad`, then `SeedLoaderRequestSchema.parse`,
+     * then `SeedLoaderService.load`. Reproduced here with the same three calls,
+     * one question per path.
+     */
+    describe('install, reseed and heal: resolveSeedLocaleForLoad → SeedLoaderService', () => {
+        const runInlineSeed = async (
+            data: unknown[],
+            question: { organizationId?: string; userId?: string; appDefaultLocale?: string },
+        ) => {
+            const host = ctx();
+            const seedLocale = await resolveSeedLocaleForLoad(host, { seeds: data, ...question });
+            const request = SeedLoaderRequestSchema.parse({
+                seeds: data,
+                config: {
+                    multiPass: true,
+                    ...(question.organizationId ? { organizationId: question.organizationId } : {}),
+                    ...(seedLocale ? { locale: seedLocale.locale } : {}),
+                },
+            });
+            return new SeedLoaderService(engine, createMetadata(), logger as any).load(request);
+        };
+
+        it('install: the organization\'s ja-JP setting gets the fallback set; unmarked, none', async () => {
+            settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
+            const marked = await runInlineSeed(MARKED, { organizationId: 'org_ja', userId: 'usr_x', appDefaultLocale: 'zh-CN' });
+            expect(marked.success).toBe(true);
+            expect(priceBooks()).toEqual(['Standard']);
+
+            ({ engine, store } = createEngine());
+            await runInlineSeed(UNMARKED, { organizationId: 'org_ja', userId: 'usr_x', appDefaultLocale: 'zh-CN' });
+            expect(priceBooks()).toEqual([]);
+        });
+
+        it('reseed: the reseeding user\'s es-ES language gets the fallback set', async () => {
+            store.sys_user = [{ id: 'usr_es', locale: 'es-ES' }];
+            await runInlineSeed(MARKED, { organizationId: 'org_1', userId: 'usr_es' });
+            expect(priceBooks()).toEqual(['Standard']);
+        });
+
+        it('heal: no organization and no user, the package\'s ja-JP default gets the fallback set', async () => {
+            await runInlineSeed(MARKED, { appDefaultLocale: 'ja-JP' });
+            expect(priceBooks()).toEqual(['Standard']);
+        });
+
+        it('two marked sets of one object refuse the load, writing nothing', async () => {
+            settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
+            const result = await runInlineSeed([{ ...ZH, fallback: true }, { ...EN, fallback: true }], { organizationId: 'org_ja' });
+            expect(result.success).toBe(false);
+            expect(result.errors.map((e) => e.field)).toEqual(['fallback']);
+            expect(store.price_book).toBeUndefined();
+        });
+
+        it('a marked set with no locale is refused when the request is parsed', () => {
+            const parsed = SeedLoaderRequestSchema.safeParse({
+                seeds: [{ object: 'price_book', fallback: true, records: [{ name: 'Standard' }] }],
+                config: { locale: 'ja-JP' },
+            });
+            expect(parsed.success).toBe(false);
+            expect(!parsed.success && parsed.error.issues[0]?.path).toEqual(['seeds', 0, 'fallback']);
+        });
     });
 });
