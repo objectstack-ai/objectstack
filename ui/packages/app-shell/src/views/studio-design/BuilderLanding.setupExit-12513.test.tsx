@@ -39,6 +39,13 @@ vi.mock('./packageCustomizations-io', () => ({
   fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
 }));
 
+// The package-less flow count the landing draws (objectstack#34715) is not under
+// test here: no flow belongs to no package, and no request leaves the file.
+vi.mock('./packageSurfaces', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./packageSurfaces')>();
+  return { ...mod, loadPackageLessSurfaces: vi.fn(async () => []) };
+});
+
 import * as landing from './BuilderLanding';
 
 const { BuilderLanding } = landing;

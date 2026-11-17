@@ -122,8 +122,22 @@ const shareOf = (stageCount: number): React.CSSProperties => ({ flexGrow: stageC
 // it lists every stage by its full name, and on a path that admits stage
 // changes each reachable stage there is the same press, behind the same gates,
 // as on the desktop rail. Nothing about the mode is authored: the viewport
-// picks it, as it picks the desktop rail. Geometry pinned in Chromium by
+// and the path's own width pick it (below). Geometry pinned in Chromium by
 // `e2e/record-path-phone-row.spec.ts`, which reads these constants.
+//
+// ── Which row draws: the viewport AND the path's width (objectstack#34696) ─
+//
+// The root is a Tailwind `@container`, the pattern `HeaderHighlight` and
+// `DetailSection` use for the same decision, and each row stacks a viewport
+// variant on a container one: the desktop row is `hidden sm:@sm:flex`, the
+// compact path `sm:@sm:hidden`. So the desktop row draws only when the
+// viewport is at least `sm` AND the path itself is at least `@sm` (24rem)
+// wide. Below `sm` nothing changes: the compact path, as above. At or above
+// `sm`, a full-width record page gives the path more than 24rem, so the wide
+// page keeps its desktop row; a narrow record drawer gives it less, so seven
+// stages are not cut to a letter each there. Pure CSS, so it is right on the
+// first paint with no measurement. Geometry pinned in Chromium by
+// `e2e/record-path-narrow-drawer-34696.spec.ts`, which reads both classes.
 const PHONE_RAIL_ROW_CLASS = 'flex w-full items-start gap-1';
 const PHONE_RAIL_SEGMENT_CLASS = 'flex-1 min-w-0';
 const PHONE_SUMMARY_CLASS =
@@ -688,10 +702,10 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
       : null;
 
   return (
-    <div className={cn('w-full', className)} {...designer}>
-      {/* Desktop: forward rail → optional lost-alt group */}
+    <div className={cn('@container w-full', className)} {...designer}>
+      {/* Desktop, at `sm` and a path of `@sm` or wider: forward rail → optional lost-alt group */}
       <div
-        className="hidden sm:flex w-full items-start gap-2"
+        className="hidden sm:@sm:flex w-full items-start gap-2"
         {...railAria}
       >
         <div className="flex min-w-0 items-start gap-1.5" style={shareOf(forwardStages.length)}>
@@ -759,8 +773,8 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
         )}
       </div>
 
-      {/* Mobile: compact path — rail segments, the summary line, then the stage list (PHONE_* constants above) */}
-      <div className="sm:hidden w-full" data-record-path-compact="">
+      {/* Mobile: compact path, also for any path narrower than `@sm` — rail segments, the summary line, then the stage list (PHONE_* constants above) */}
+      <div className="sm:@sm:hidden w-full" data-record-path-compact="">
         {/* The progress bar is decoration: the summary line and the stage
             list below carry every stage's name and state. */}
         <div aria-hidden="true" className={PHONE_RAIL_ROW_CLASS} data-record-path-rails="">
