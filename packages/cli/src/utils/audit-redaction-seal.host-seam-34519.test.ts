@@ -1,5 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+// check:test-source-alias: the util's reach names `@objectstack/service-settings` (through the mocked
+// `one-shot-settings.js`); its load is paid here, at collection, never inside a clocked case.
+import '@objectstack/service-settings';
 import { ObjectKernel } from '@objectstack/core';
 import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
 import { describe, expect, it, vi } from 'vitest';
