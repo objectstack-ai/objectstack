@@ -94,3 +94,28 @@ function resolveInsertEngine(
   if (typeof viaManager?.insert === 'function') return viaManager;
   return null;
 }
+
+/**
+ * The sign-up body field that admits a fixture account as one the
+ * deployment's own boot command provisions (the operator class), for a suite
+ * whose fixture needs a MEMBER rather than an invitee.
+ *
+ * A sign-up admitted by the invitation it presents is not bound into the
+ * deployment's organization while its address is unverified: it joins by
+ * accepting the invitation once verified (`settleMembership`,
+ * `auth-manager-membership-admission.ts`). A suite whose subject is not that
+ * path, and whose fixture user must already hold the Default Organization
+ * membership the reconciler writes at creation, enters through the operator
+ * door instead, which binds at creation like an account an administrator
+ * creates. `manager` is the `AuthManager` that will serve the sign-up; the
+ * ticket is staged on it for exactly this address.
+ */
+export function operatorProvisioningField(
+  manager: { stageOperatorProvisioning(email: string): string },
+  email: string,
+): Record<string, string> {
+  return { [OPERATOR_PROVISIONING_TICKET_FIELD]: manager.stageOperatorProvisioning(email) };
+}
+
+/** `AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD`, restated so this module imports nothing from the manager. */
+const OPERATOR_PROVISIONING_TICKET_FIELD = '__osOperatorProvisioningTicket';

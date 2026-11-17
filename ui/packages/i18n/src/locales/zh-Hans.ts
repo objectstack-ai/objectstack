@@ -566,6 +566,7 @@ const zh = {
         '此视图已分组，但其数据源未实现 queryGroupHeaders，因此无法统计分组。移除分组即可显示记录。',
       needsWholeRows:
         '分组需要全部记录，但此表格只收到其中一页，因此无法统计分组。请传入全部记录，或让表格从实现了 queryGroupHeaders 的数据源获取记录。',
+      draftOnly: '未按 {{fields}} 分组：它仅存在于草稿中，发布后才生效。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -961,6 +962,7 @@ const zh = {
     removeGroup: '删除',
     groupingUnstoredNotice: '无法按 {{fields}} 分组：它的值在显示时计算，并未存储。列表已暂不按它分组显示。',
     groupingUnstoredRemove: '从分组中移除',
+    draftOnlyQueryDropped: '未按 {{fields}} 筛选或排序：它仅存在于草稿中，发布后才生效。',
     inlineEditShort: '行内编辑',
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
   },
@@ -2509,7 +2511,7 @@ const zh = {
       unavailableRetry: '重试',
       unavailableHome: '返回首页',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手对话',
         resize: '调整对话宽度',
         collapse: '收起对话',
@@ -3034,6 +3036,10 @@ const zh = {
       missingToken: '验证链接缺少令牌。',
       emailMissing: '缺少邮箱地址',
       resendButton: '重新发送验证邮件',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        '您的邮箱地址尚未验证。请向 {{email}} 发送一封验证邮件，然后点击邮件中的链接以验证您的账户。',
+      sendButton: '发送验证邮件',
       resending: '发送中…',
       resent: '邮件已发送！请查看收件箱',
       resentSuccess: '验证邮件已发送！',
@@ -3698,7 +3704,7 @@ const zh = {
       securityBlockTitle: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_one: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_other: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
-      securityBlockWhere: '请在对象的“设置 → 记录共享模型”中修改后重新发布。',
+      securityBlockWhere: '请在对象的“设置 → 谁能看到哪些记录”中修改后重新发布。',
       flowChecksTitle: '发布前请先看 —— 发布检查会提出以下几点',
       securityRule: {
         owdUnset: '未声明记录共享模型（sharingModel）。运行时会按 private 处理，但这个基线必须是明确做出的决定。',

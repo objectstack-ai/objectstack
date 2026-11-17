@@ -36,7 +36,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { SysMember } from '@objectstack/platform-objects';
 import { AuthManager } from './auth-manager';
-import { inviteForAudienceGate } from './audience-gate-test-support';
+import { operatorProvisioningField } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -266,10 +266,12 @@ const post = (manager: AuthManager, path: string, body: unknown, cookie?: string
   );
 
 const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string) => {
-  // [#11739] default posture invite_only: fixture users beyond the first
-  // enter through the invitation carve-out (see audience-gate-test-support).
-  const invitationId = await inviteForAudienceGate(engine, email);
-  const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email, invitationId });
+  // [#11739] default posture invite_only: fixture users beyond the first are
+  // members, so they enter through the operator door, which binds at creation
+  // (`operatorProvisioningField`, audience-gate-test-support).
+  const res = await post(manager, '/sign-up/email', {
+    email, password: PASSWORD, name: email, ...operatorProvisioningField(manager, email),
+  });
   expect(res.status, await res.clone().text()).toBe(200);
   const user = (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === email);
   expect(user, `sign-up did not create ${email}`).toBeDefined();
@@ -364,6 +366,8 @@ describe('#7724 — removing a user is one unit of work that can actually comple
     expect(invitation).toBeDefined();
 
     const invitee = await signUp(manager, engine, 'invitee@example.com');
+    // Accepting needs a verified address (`invitation-acceptance-verified-address.test.ts`).
+    userRow(engine, invitee.userId)!.email_verified = true;
     const accept = await post(
       manager,
       '/organization/accept-invitation',

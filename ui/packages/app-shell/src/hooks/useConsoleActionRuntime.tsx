@@ -55,6 +55,7 @@ import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
+import { invitationVerifyEmailPromptPath, isAcceptNeedsVerifiedEmail } from '../console/organizations/orgErrorMessage.js';
 import {
   findDeclaredApiAction,
   isSameOriginApiTarget,
@@ -480,6 +481,16 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
             openEntitlementDialog(entitlementSpec);
             return { success: false };
           }
+          // objectstack#34706 — an invitation accept refused because the
+          // caller's address is unverified (the invitation inbox's
+          // `accept_invitation`): the next step is to verify, so hand over to
+          // the verification-mail screen as the accept page does, its link
+          // returning to that invitation's accept page. The screen owns the
+          // messaging, so no toast.
+          if (isAcceptNeedsVerifiedEmail(body)) {
+            navigate(invitationVerifyEmailPromptPath(user?.email, rowRecord?.id));
+            return { success: false };
+          }
           // A flow-backed endpoint's refused run reads its inner refusal, not
           // the node chain (objectstack#27487); a refusal naming fields carries
           // them for the param dialog to mark (objectstack#28289).
@@ -699,7 +710,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [dataSource, objApiName, objects, metadata, authFetch, activeOrganization, refresh, openEntitlementDialog, t, language]);
+  }, [dataSource, objApiName, objects, metadata, authFetch, activeOrganization, refresh, openEntitlementDialog, t, language, navigate, user?.email]);
 
   /**
    * Flow action handler — starts the flow through one of two doors

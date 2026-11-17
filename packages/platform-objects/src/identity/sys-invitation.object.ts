@@ -261,7 +261,8 @@ export const SysInvitation = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Accept an invitation addressed to the current user (the record), joining its organization with the invited role. Works only on a pending invitation sent to the caller\'s own email address.',
+          'Accept an invitation addressed to the current user (the record), joining its organization with the invited role. Works only on a pending invitation sent to the caller\'s own email address. '
+          + 'While this deployment delivers email, the caller\'s address must also be verified: an unverified caller is refused with EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION and nothing is written, so ask the human to verify their email address first, then accept.',
       },
     },
     {
