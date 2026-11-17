@@ -1804,13 +1804,9 @@ const DEFAULT_HTTP_INSTRUCTIONS =
  * chosen that tool (#34659 ruling D5 = A); the full procedure stays in the
  * tools' own descriptions and in the served skill (`DATASET_TOOL_LINES` in
  * `skill-md.ts`), which say the same thing: an exact name, label or synonym is
- * the only match, each word with one measure match answers (two such words
- * are two metrics), several are a question for the user, a word with
- * `candidates` is the same question and never a match (the ADR-0149 D3
- * amendment note), and none with no candidate falls back to the object tools
- * with the answer labelled. The published skill's step 2 rows say it too
- * (`skills/objectstack-ask/SKILL.md`). Sent only where both dataset tools
- * register ({@link datasetToolsServed}).
+ * the only match, one measure match answers, several are a question for the
+ * user, none falls back to the object tools with the answer labelled.
+ * Sent only where both dataset tools register ({@link datasetToolsServed}).
  */
 const DATASET_SELECTION_RULE =
   'For a question about a business number, look for a governed metric first: call list_datasets with the '
