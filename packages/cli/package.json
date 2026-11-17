@@ -96,6 +96,9 @@
       "secret": {
         "description": "Maintain stored secrets: report orphaned rows, re-wrap old ciphertext"
       },
+      "skills": {
+        "description": "Install, update and check the published ObjectStack skills catalog in your agent's skills directory"
+      },
       "storage": {
         "description": "Inspect stored files: report orphaned attachments"
       }
