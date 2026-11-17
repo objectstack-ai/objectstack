@@ -3050,6 +3050,18 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * The PACKAGED (code-layer) declaration of an IMPORT MAPPING, the fact
+     * `translateMapping` compares the served label against
+     * (`mappings.<name>.label`): a label a `.custom` override changed reads
+     * only the pair's translations, one it left alone reads the catalog
+     * (ADR-0146 D2). The mapping twin of {@link getPackagedBookBase},
+     * answered the same way. Returns `undefined` on the same uncertainties.
+     */
+    getPackagedMappingBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedMappingBase(protocolHost(this), name);
+    }
+
+    /**
      * [#30062, ADR-0146 D2] The base package a SERVED metadata document is the
      * declared override of, or `undefined` when it is none — read off the
      * envelope every read stamps on a pair's declaring row when it serves it as
