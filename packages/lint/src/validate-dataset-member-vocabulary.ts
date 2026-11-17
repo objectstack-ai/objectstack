@@ -44,6 +44,14 @@
  * advisory on the save response, never a refusal. Reads only the dataset's own
  * members, so it is safe on a pre- or post-parse stack and on the per-write
  * snapshot.
+ *
+ * Its reach ends at those doors. Metadata a plugin contributes at kernel
+ * start, such as the platform's System Overview datasets that plugin-auth
+ * registers through its runtime manifest (`datasets: SystemOverviewDatasets`),
+ * is neither an authored stack nor a publish-door write, so the advisory never
+ * reads it. A dataset the platform ships answers to its name and to its label
+ * as the platform's translation bundle gives it in the caller's locale, and to
+ * no synonym unless its source writes one.
  */
 
 import { collectionEntries } from './collection-entries.js';
