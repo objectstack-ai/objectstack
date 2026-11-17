@@ -62,7 +62,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 }));
 
 import { useHomeItemClaimed, type HomeItem } from '@object-ui/app-shell';
-import { FirstRunChecklist } from '../FirstRunChecklist';
+import { FirstRunChecklist, type FirstRunChecklistPlacement } from '../FirstRunChecklist';
 import { __resetBootPainted } from '../../../loadLocales';
 import type { Specifier } from '../types';
 
@@ -205,12 +205,16 @@ const ADMIN = ['setup.access', 'setup.write', 'manage_platform_settings'];
 const MEMBER = ['setup.access'];
 
 /** No default for `systemPermissions`: "not reported" must stay apart from the admin set. */
-function renderChecklist(systemPermissions: string[] | undefined, language = 'en') {
+function renderChecklist(
+  systemPermissions: string[] | undefined,
+  language = 'en',
+  placement?: FirstRunChecklistPlacement,
+) {
   return render(
     <MemoryRouter>
       <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
         <MePermissionsProvider initialPermissions={permissionsPayload(systemPermissions)}>
-          <FirstRunChecklist />
+          <FirstRunChecklist placement={placement} />
         </MePermissionsProvider>
       </I18nProvider>
     </MemoryRouter>,
@@ -1039,5 +1043,74 @@ describe('the host profile: a managed environment adds the first-app and first-r
     renderChecklist(ADMIN, 'zh');
     expect(within(await screen.findByTestId('first-run-checklist-row-first_app')).getByText('放进第一个应用')).toBeTruthy();
     expect(within(await screen.findByTestId('first-run-checklist-row-first_record')).getByText('添加第一条记录')).toBeTruthy();
+  });
+});
+
+describe('on a phone, after the apps, the card starts folded to one line (objectstack#34596)', () => {
+  const card = () => screen.getByTestId('first-run-checklist');
+  const progress = () => screen.getByTestId('first-run-checklist-progress').textContent;
+
+  it('one line: the title, the progress and Continue; no row is drawn and nothing is written', async () => {
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    await waitFor(() => expect(progress()).toBe('0 of 5 done'));
+    expect(card().getAttribute('data-folded')).toBe('true');
+    expect(within(card()).getByText('Get your system ready')).toBeTruthy();
+    expect(within(card()).queryAllByRole('listitem')).toHaveLength(0);
+    const go = screen.getByTestId('first-run-checklist-continue');
+    expect(go.textContent).toBe('Continue');
+    expect(go.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('first-run-checklist-dismiss')).toBeNull();
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('Continue opens the card in place with every row; the fold control closes it to one line again', async () => {
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    fireEvent.click(await screen.findByTestId('first-run-checklist-continue'));
+    expect(card().getAttribute('data-folded')).toBe('false');
+    expect(await screen.findByTestId('first-run-checklist-row-invite')).toBeTruthy();
+    const fold = screen.getByTestId('first-run-checklist-fold');
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(fold.getAttribute('aria-controls')).toBe(screen.getByRole('list').id);
+    expect(screen.getByTestId('first-run-checklist-dismiss')).toBeTruthy();
+    expect(progress()).toBe('0 of 5 done');
+
+    fireEvent.click(fold);
+    expect(card().getAttribute('data-folded')).toBe('true');
+    expect(screen.queryByTestId('first-run-checklist-row-invite')).toBeNull();
+    expect(progress()).toBe('0 of 5 done');
+  });
+
+  it('folding changes no completion rule: the folded line counts what the card counts, and a set workspace draws nothing', async () => {
+    localizationValues = {
+      locale: resolved('zh-CN', 'tenant'),
+      default_country: resolved('CN', 'tenant'),
+      timezone: resolved('Asia/Shanghai', 'tenant'),
+      currency: resolved('CNY', 'tenant'),
+    };
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    await waitFor(() => expect(progress()).toBe('3 of 5 done'));
+    cleanup();
+
+    AUTH.activeOrganization = { id: 'org_1', name: 'Acme' };
+    AUTH.getMembers.mockResolvedValue([{ id: 'm_1' }, { id: 'm_2' }]);
+    mailValues = { provider: resolved('smtp', 'global'), smtp_host: resolved('mx', 'global'), from_email: resolved('a@b.co', 'global') };
+    renderChecklist(ADMIN, 'en', 'afterApps');
+    await settle();
+    await waitFor(() => expect(AUTH.getMembers).toHaveBeenCalled());
+    await settle();
+    expect(screen.queryByTestId('first-run-checklist')).toBeNull();
+  });
+
+  it('zh: Continue reads in the reader language', async () => {
+    renderChecklist(ADMIN, 'zh', 'afterApps');
+    expect((await screen.findByTestId('first-run-checklist-continue')).textContent).toBe('继续');
+  });
+
+  it('CONTROL: above the page the card is drawn whole, with no Continue and no fold control', async () => {
+    renderChecklist(ADMIN, 'en', 'top');
+    expect(await screen.findByTestId('first-run-checklist-row-invite')).toBeTruthy();
+    expect(card().getAttribute('data-folded')).toBeNull();
+    expect(screen.queryByTestId('first-run-checklist-continue')).toBeNull();
+    expect(screen.queryByTestId('first-run-checklist-fold')).toBeNull();
   });
 });
