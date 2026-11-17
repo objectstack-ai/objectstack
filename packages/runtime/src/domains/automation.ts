@@ -4433,17 +4433,25 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // bit, and the flow's `status` is a second dimension it does
                 // not move, so "the write landed" and "the flow is on" are two
                 // facts. Read through `getFlowRuntimeStates`, the one reading
-                // `GET /_status` serves, so the two doors cannot disagree. A
-                // name two packages hold never reaches here (`toggleFlow`
-                // refuses it), so the name's row is the flow switched.
-                // A service that does not implement the read (or holds no
-                // row of the name) keeps the request echoed, the legacy answer; for the engine's own
-                // service that echo is true by construction, since it refuses
-                // switching on a flow its status keeps off.
+                // `GET /_status` serves, so the two doors cannot disagree.
+                // That reading names the switched flow only while the name
+                // has ONE row. A name two packages hold reaches here too: by
+                // its address, or bare with one served holder left, through
+                // `flowSlotView`, whose `toggleFlow` switches one slot while
+                // the engine still reads one row per slot under the bare
+                // name ([ADR-0150 D4], `getFlowRuntimeStates`). A row picked
+                // by name there may be the other holder's, so two or more
+                // rows read back nothing. Then, as for a service that does
+                // not implement the read or holds no row of the name, the
+                // request is echoed, the legacy answer; for the engine's own
+                // service (the only one with slots) that echo is true by
+                // construction, since every toggle entry refuses switching
+                // on a flow its status keeps off.
                 const svc = automationService as Pick<IAutomationService, 'getFlowRuntimeStates'>;
-                const state = typeof svc.getFlowRuntimeStates === 'function'
-                    ? svc.getFlowRuntimeStates().find((s) => s.name === name)
-                    : undefined;
+                const rows = typeof svc.getFlowRuntimeStates === 'function'
+                    ? svc.getFlowRuntimeStates().filter((s) => s.name === name)
+                    : [];
+                const state = rows.length === 1 ? rows[0] : undefined;
                 return { handled: true, response: deps.success({ name, enabled: state ? state.enabled : enabled }) };
             }
         }
