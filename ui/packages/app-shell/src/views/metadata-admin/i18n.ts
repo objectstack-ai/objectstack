@@ -210,12 +210,14 @@ export { isZhLocale, translateSchemaFieldLabel, translateSchemaFieldHelp } from 
 interface FlowFieldZh {
   label?: string;
   help?: string;
+  /** objectstack#34818 — a PROSE placeholder only; example literals stay English. */
+  placeholder?: string;
   /** The field's `unsetNotice` (objectui#11054). */
   unsetNotice?: string;
   /** select option value → zh label. */
   opts?: Record<string, string>;
-  /** objectList column key → zh label (+ nested option labels). */
-  cols?: Record<string, { label?: string; opts?: Record<string, string> }>;
+  /** objectList column key → zh label (+ prose placeholder, nested option labels). */
+  cols?: Record<string, { label?: string; placeholder?: string; opts?: Record<string, string> }>;
 }
 
 /**
@@ -293,9 +295,19 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     conditions: {
       label: '分支',
       help: '每个分支包含标签、CEL 表达式和目标节点。表达式为 “true” 的分支即默认 / else 路径。选择目标会接线该分支的出边(创建或更新),清空则断开该边。',
-      cols: { label: { label: '标签' }, expression: { label: '表达式' }, target: { label: '目标节点' } },
+      cols: {
+        label: { label: '标签', placeholder: '如 有商机' },
+        expression: { label: '表达式' },
+        target: { label: '目标节点', placeholder: '下一个节点' },
+      },
     },
     condition: { label: '单一条件', help: '旧的单分支条件(CEL)。建议使用上方“分支”;每条边的条件也可写在出边上。' },
+    // objectstack#34818 — was English in the zh panel.
+    mode: {
+      label: '分支方式',
+      help: '按出边条件分支时:「只走一条」按连线顺序只走第一条成立的连线(不设置即为此方式);「走所有成立的」走每一条成立的连线。都不成立时走默认连线。不能与上方“分支”同时使用。',
+      opts: { exclusive: '只走一条', inclusive: '走所有成立的' },
+    },
   },
   assignment: {
     assignments: { label: '赋值', help: '设置变量:每个键为一个变量,值为表达式或字面量。' },
@@ -391,7 +403,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
   approval: {
     approvers: {
       label: '审批人',
-      help: '谁可以处理此步骤。为节点的出边打上 “approve” 和 “reject” 标签。',
+      help: '谁可以处理此步骤。插入审批节点时会自带「通过」和「驳回」两条连线;请保留这两条,缺任一条时「问题」页签会提示。',
       cols: {
         type: {
           label: '类型',
@@ -404,10 +416,21 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
             manager: '上级',
             field: '字段',
             queue: '队列',
+            expression: '表达式(CEL)',
           },
         },
-        value: { label: '值' },
-        group: { label: '分组' },
+        value: { label: '值', placeholder: '按“类型”填写:用户、组织成员级别、岗位、团队、部门或字段' },
+        // objectstack#34818 — was English in the zh panel.
+        resolveAs: {
+          label: '解析为',
+          opts: {
+            user: '用户 ID(默认)',
+            department: '部门 ID → 部门成员',
+            position: '岗位名称 → 任职人员',
+            team: '团队 ID → 团队成员',
+          },
+        },
+        group: { label: '分组', placeholder: '如 法务 / 财务 —— 用于分组会签' },
       },
     },
     behavior: {
@@ -420,7 +443,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
         per_group: '分组会签(每组签核)',
       },
     },
-    minApprovals: { label: '最少审批数', help: '所需审批数 —— quorum 为总数,per_group 为每组。服务端会做钳制以防死锁。' },
+    minApprovals: { label: '最少审批数', help: '所需审批数 —— 「法定人数」方式下为总数,「分组会签」方式下为每组的数量。服务端会做钳制以防死锁。' },
     lockRecord: { label: '锁定记录', help: '此节点待处理期间锁定触发记录,禁止编辑。' },
     approvalStatusField: {
       label: '状态字段',
@@ -432,11 +455,21 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
       label: '超时动作',
       opts: { notify: '通知', reassign: '改派', auto_approve: '自动通过', auto_reject: '自动拒绝' },
     },
-    'escalation.escalateTo': { label: '升级至' },
+    'escalation.escalateTo': { label: '升级至', placeholder: '岗位名称或用户 ID' },
     'escalation.notifySubmitter': { label: '通知提交人' },
     maxRevisions: {
       label: '最多退回次数',
-      help: '请求自动拒绝前的最多退回修订次数(0 表示禁用退回)。需要一条 “revise” 出边才生效。',
+      help: '请求自动拒绝前的最多退回修订次数(0 表示禁用退回)。需要一条审批分支为「退回修改」的出边才生效。',
+    },
+    // objectstack#34818 — was English in the zh panel.
+    onEmptyApprovers: {
+      label: '没有解析出审批人时',
+      help: '进入节点时解析出的审批人为空怎么办。「自动通过」会让记录直接放行,请确认确实需要再选。',
+      opts: {
+        admin_rescue: '等待管理员接手(默认)',
+        fail: '节点失败(配置有误)',
+        auto_approve: '自动通过(直接放行!)',
+      },
     },
   },
   wait: {
