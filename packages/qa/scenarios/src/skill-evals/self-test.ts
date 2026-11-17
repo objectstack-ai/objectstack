@@ -17,10 +17,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ApiBillingRefusedError } from '../runner/driver.js';
-import { armArgs, prepareArmWorkdir } from './arms.js';
+import { armArgs, placeCaseFiles, prepareArmWorkdir } from './arms.js';
 import { loadSkillEvalCatalog, notUserInvocable, parseEvalFile, type SkillEvalCase } from './cases.js';
 import { type Grader, gradeAnswer } from './grade.js';
-import { judgeTurn, preflight, regradeRecords, type SkillEvalRunRecord } from './run.js';
+import { judgeTurn, planRound, preflight, regradeRecords, type SkillEvalRunRecord } from './run.js';
 import { summariseRound } from './summary.js';
 
 /** Row label → minimum cases registered. A row is a battery; deleting one must red. */
@@ -46,10 +46,18 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   'guard: ANTHROPIC_API_KEY set → the round refuses to start': 1,
   'summary: no-skill ≥ with-skill is named; invalid turns stay out of the rate': 1,
   'regrade: a case changed since the round → SET APART, never graded against the new text': 1,
+  'reader: a trigger case reads with no assertions; one carrying assertions → REFUSED': 1,
+  'reader: a `files` entry outside evals/files/ → REFUSED': 1,
+  'reader: a bundle whose trigger cases are all positive → REFUSED': 1,
+  'judge: a trigger case the turn loaded, by a Skill launch or a read → PASS; not loaded → FAIL': 1,
+  'judge: a should-not-trigger case the turn loaded → FAIL; left alone → PASS': 1,
+  'round: a trigger case runs on the with-skill arm only': 1,
+  'arms: a case\'s files land in the turn\'s project on both arms': 1,
+  'summary: trigger cases are tallied apart from the behaviour pass rates': 1,
 });
 
 /** The roster's own size, pinned: a deleted row takes its floor with it otherwise. */
-export const SELF_TEST_BATTERY_FLOOR = 21;
+export const SELF_TEST_BATTERY_FLOOR = 29;
 
 let selfTestReachedVerdict = false;
 /** Whether the last {@link runSelfTest} reached its verdict line. */
@@ -80,11 +88,12 @@ const fixtureCase = (over: Partial<SkillEvalCase> = {}): SkillEvalCase => ({
   ...over,
 });
 
-/** A minimal stream-json transcript: init (with `skills`), optional Skill call, result. */
-const stream = (o: { skills: string[]; answer?: string; subtype?: string; invoked?: string }): string =>
+/** A minimal stream-json transcript: init (with `skills`), optional Skill call, optional Read, result. */
+const stream = (o: { skills: string[]; answer?: string; subtype?: string; invoked?: string; read?: string }): string =>
   [
     { type: 'system', subtype: 'init', model: 'fixture-model', skills: o.skills, mcp_servers: [] },
     ...(o.invoked ? [{ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Skill', input: { skill: o.invoked } }] } }] : []),
+    ...(o.read ? [{ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'Read', input: { file_path: o.read } }] } }] : []),
     ...(o.answer !== undefined ? [{ type: 'assistant', message: { content: [{ type: 'text', text: o.answer }] } }] : []),
     { type: 'result', subtype: o.subtype ?? 'success', is_error: false, num_turns: 2, result: o.answer ?? '', total_cost_usd: 0.01, duration_ms: 10, permission_denials: [] },
   ]
@@ -278,6 +287,97 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
         return out.records.length === 0 && out.cases.length === 0 && out.setApart.changed.join() === c.key && same.records.length === 1 && same.setApart.changed.length === 0
           ? true
           : `expected the reworded case set apart and the unchanged one regraded, got ${out.records.length} regraded / set apart [${out.setApart.changed.join()}], then ${same.records.length} regraded`;
+      },
+    },
+    {
+      label: 'reader: a trigger case reads with no assertions; one carrying assertions → REFUSED',
+      run: () => {
+        const r = parseEvalFile('demo-skill', 't.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', should_trigger: false, files: [] }, { id: 2, prompt: 'p', should_trigger: true, assertions: { must_contain: ['x'] } }, { id: 3, prompt: 'p', should_trigger: 'yes' }] }));
+        return r.cases.length === 1 && r.cases[0]!.shouldTrigger === false && r.refusals.length === 2 ? true : `expected one trigger case and two refusals, got ${r.cases.length} case(s) [${r.cases.map((c) => String(c.shouldTrigger)).join()}], ${r.refusals.length} refusal(s)`;
+      },
+    },
+    {
+      label: 'reader: a `files` entry outside evals/files/ → REFUSED',
+      run: () => {
+        const bad = ['rules/x.md', 'evals/files/../SKILL.md', 'evals/files/', '/etc/passwd'].map((f) => parseEvalFile('demo-skill', 'f.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', files: [f], assertions: { must_contain: ['x'] } }] })));
+        const good = parseEvalFile('demo-skill', 'f.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', files: ['evals/files/src/a.ts'], assertions: { must_contain: ['x'] } }] }));
+        return bad.every((r) => r.cases.length === 0 && r.refusals.length === 1) && good.cases[0]?.files?.join() === 'evals/files/src/a.ts' ? true : `refused ${bad.filter((r) => r.refusals.length === 1).length} of 4 bad entries; the good one read as [${good.cases[0]?.files?.join() ?? 'refused'}]`;
+      },
+    },
+    {
+      label: 'reader: a bundle whose trigger cases are all positive → REFUSED',
+      run: () => {
+        writeFileSync(join(fixtureRoot, 'demo-skill', 'evals', 'triggers.json'), JSON.stringify({ evals: [{ id: 1, prompt: 'p', should_trigger: true }] }));
+        const one = loadSkillEvalCatalog(fixtureRoot);
+        writeFileSync(join(fixtureRoot, 'demo-skill', 'evals', 'triggers.json'), JSON.stringify({ evals: [{ id: 1, prompt: 'p', should_trigger: true }, { id: 2, prompt: 'q', should_trigger: false }] }));
+        const both = loadSkillEvalCatalog(fixtureRoot);
+        rmSync(join(fixtureRoot, 'demo-skill', 'evals', 'triggers.json'));
+        return one.refusals.length === 1 && both.refusals.length === 0 && both.cases.length === 2 ? true : `expected an all-positive set refused and a mixed one read, got ${one.refusals.length} then ${both.refusals.length} refusal(s)`;
+      },
+    },
+    {
+      label: 'judge: a trigger case the turn loaded, by a Skill launch or a read → PASS; not loaded → FAIL',
+      run: () => {
+        const c = fixtureCase({ shouldTrigger: true, mustContain: [], mustNotContain: [] });
+        const launched = judge(c, 'with-skill', stream({ skills: ['demo-skill'], invoked: 'demo-skill', answer: 'x' }));
+        const read = judge(c, 'with-skill', stream({ skills: ['demo-skill'], read: '/tmp/t/project/.claude/skills/demo-skill/SKILL.md', answer: 'x' }));
+        const otherRead = judge(c, 'with-skill', stream({ skills: ['demo-skill'], read: '/tmp/t/project/.claude/skills/demo-skill-two/SKILL.md', answer: 'x' }));
+        const none = judge(c, 'with-skill', stream({ skills: ['demo-skill'], answer: GOOD }));
+        return launched.verdict === 'pass' && launched.trigger?.loadedBy.join() === 'skill-tool' && read.verdict === 'pass' && read.trigger?.loadedBy.join() === 'read' && otherRead.verdict === 'fail' && none.verdict === 'fail'
+          ? true
+          : `expected pass/pass/fail/fail, got ${launched.verdict}/${read.verdict}/${otherRead.verdict}/${none.verdict}`;
+      },
+    },
+    {
+      label: 'judge: a should-not-trigger case the turn loaded → FAIL; left alone → PASS',
+      run: () => {
+        const c = fixtureCase({ shouldTrigger: false, mustContain: [], mustNotContain: [] });
+        const loaded = judge(c, 'with-skill', stream({ skills: ['demo-skill'], invoked: 'demo-skill', answer: 'x', subtype: 'error_max_turns' }));
+        const alone = judge(c, 'with-skill', stream({ skills: ['demo-skill'], answer: 'x' }));
+        const cut = judge(c, 'with-skill', stream({ skills: ['demo-skill'], answer: 'x', subtype: 'error_max_turns' }));
+        return loaded.verdict === 'fail' && alone.verdict === 'pass' && cut.verdict === 'error' ? true : `expected fail/pass/error, got ${loaded.verdict}/${alone.verdict}/${cut.verdict}`;
+      },
+    },
+    {
+      label: 'round: a trigger case runs on the with-skill arm only',
+      run: () => {
+        const jobs = planRound([fixtureCase(), fixtureCase({ id: 2, key: 'demo-skill/demo#2', shouldTrigger: true, mustContain: [] })], 1);
+        const onNoSkill = judge(fixtureCase({ shouldTrigger: true, mustContain: [] }), 'no-skill', stream({ skills: [], answer: 'x' }));
+        const arms = jobs.map((j) => `${String(j.case.id)}:${j.arm}`).join();
+        return arms === '1:with-skill,1:no-skill,2:with-skill' && onNoSkill.verdict === 'invalid' ? true : `planned [${arms}]; a no-skill trigger turn read ${onNoSkill.verdict}`;
+      },
+    },
+    {
+      label: 'arms: a case\'s files land in the turn\'s project on both arms',
+      run: () => {
+        mkdirSync(join(fixtureRoot, 'demo-skill', 'evals', 'files', 'src'), { recursive: true });
+        writeFileSync(join(fixtureRoot, 'demo-skill', 'evals', 'files', 'src', 'task.object.ts'), 'export {};\n');
+        const ok = (['with-skill', 'no-skill'] as const).every((arm) => {
+          const d = prepareArmWorkdir(arm, 'demo-skill', fixtureRoot);
+          placeCaseFiles(['evals/files/src'], 'demo-skill', fixtureRoot, d.cwd);
+          const placed = existsSync(join(d.cwd, 'src', 'task.object.ts')) && !existsSync(join(d.cwd, 'evals'));
+          rmSync(d.root, { recursive: true, force: true });
+          return placed;
+        });
+        rmSync(join(fixtureRoot, 'demo-skill', 'evals', 'files'), { recursive: true, force: true });
+        return ok ? true : 'a case file did not land at its path below evals/files/ on both arms';
+      },
+    },
+    {
+      label: 'summary: trigger cases are tallied apart from the behaviour pass rates',
+      run: () => {
+        const b = fixtureCase();
+        const pos = fixtureCase({ id: 2, key: 'demo-skill/demo#2', shouldTrigger: true, mustContain: [] });
+        const neg = fixtureCase({ id: 3, key: 'demo-skill/demo#3', shouldTrigger: false, mustContain: [] });
+        const s = summariseRound(
+          [b, pos, neg],
+          [judge(b, 'with-skill', stream({ skills: ['demo-skill'], answer: GOOD })), judge(pos, 'with-skill', stream({ skills: ['demo-skill'], answer: 'x' })), judge(neg, 'with-skill', stream({ skills: ['demo-skill'], invoked: 'demo-skill', answer: 'x' }))],
+          [],
+        );
+        const t = s.triggers.bundles[0];
+        return s.cases.length === 1 && s.totals.withSkill.pass === 1 && s.totals.withSkill.fail === 0 && t?.missedLoads.join() === pos.key && t.falseLoads.join() === neg.key && s.triggers.cases.length === 2
+          ? true
+          : `behaviour cases ${s.cases.length} (with-skill ${s.totals.withSkill.pass}/${s.totals.withSkill.fail}); missed [${t?.missedLoads.join() ?? ''}], false [${t?.falseLoads.join() ?? ''}]`;
       },
     },
   ];
