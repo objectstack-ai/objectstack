@@ -13,6 +13,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clocked window: the dispatcher's
+// reach loads `@objectstack/metadata` lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { mapDataError } from '@objectstack/types';
 
 import { actionBodyRunnerFactory } from './body-runner.js';
