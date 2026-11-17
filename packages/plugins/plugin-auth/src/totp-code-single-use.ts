@@ -98,6 +98,13 @@ const DEFAULT_DIGITS = 6;
  */
 export const NEVER_ACCEPTED_TOTP_CODE = '-';
 
+/**
+ * The request-body field `/two-factor/verify-totp` reads the TOTP code from
+ * (its body schema: `{ code, trustDevice? }`). Named, and written as a computed
+ * key below, because it is a one-time code, never an error code.
+ */
+const TOTP_CODE_BODY_FIELD = 'code';
+
 /** The identifier prefix of a spent-step reservation row in `sys_verification`. */
 export const SPENT_TOTP_STEP_IDENTIFIER_PREFIX = 'totp-step:';
 
@@ -197,7 +204,7 @@ async function enrolledSecret(ctx: any, userId: string): Promise<string | undefi
  * when its step is already spent.
  */
 export async function refuseSpentTotpStep(ctx: any): Promise<{ context: { body: Record<string, unknown> } } | void> {
-  const code = ctx?.body?.code;
+  const code = ctx?.body?.[TOTP_CODE_BODY_FIELD];
   if (typeof code !== 'string' || code === '') return;
 
   const totpOptions = ctx.context.getPlugin?.(TWO_FACTOR_PLUGIN_ID)?.options?.totpOptions;
@@ -223,7 +230,7 @@ export async function refuseSpentTotpStep(ctx: any): Promise<{ context: { body: 
     });
 
   if (!(await reserve(step))) {
-    return { context: { body: { ...ctx.body, code: NEVER_ACCEPTED_TOTP_CODE } } };
+    return { context: { body: { ...ctx.body, [TOTP_CODE_BODY_FIELD]: NEVER_ACCEPTED_TOTP_CODE } } };
   }
   for (let earlier = current - window; earlier < step; earlier++) await reserve(earlier);
 }
