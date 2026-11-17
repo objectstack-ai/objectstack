@@ -56,6 +56,11 @@ vi.mock('@object-ui/i18n/namespaces/marketplace', async (importOriginal) => {
 
 import { PackagesPage, type InstalledPackageRow } from './PackagesPage';
 import { t } from './i18n';
+// The page's package form reaches the CEL authoring helpers, which load these
+// two lazily; loaded here so their first load is paid at import, not inside a
+// test's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../runtime-config';
 // The designer rows (the page's own strings) and the marketplace catalogue
 // (the badge's words) are both fetched on demand; resident before any case so

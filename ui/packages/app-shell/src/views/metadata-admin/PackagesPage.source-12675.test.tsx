@@ -37,6 +37,11 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { PackagesPage, type InstalledPackageRow } from './PackagesPage';
 import { PACKAGE_SOURCES } from './packageSource';
+// The page's package form reaches the CEL authoring helpers, which load these
+// two lazily; loaded here so their first load is paid at import, not inside a
+// test's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { t, tFormat } from './i18n';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../runtime-config';
 
