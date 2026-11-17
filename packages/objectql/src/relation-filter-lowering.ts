@@ -79,6 +79,7 @@ import {
   type FilterCondition,
 } from '@objectstack/spec/data';
 import { invalidFilterError } from './filter-comparand-shape.js';
+import { driverCompilesReadableIdsLeaf, driverNameOf } from './relation-semi-join.js';
 import { isNoOperatorObject, provisionedNoOperatorObjectColumn } from './no-operator-object-door.js';
 
 /**
@@ -344,6 +345,41 @@ export function relationSemiJoinDriverRefusal(site: RelationFilterSite, context:
     + 'The filter was NOT applied and nothing was read. A driver that declares the readableIdsLeaf '
     + 'capability (the SQL drivers, the in-memory driver) runs it as one statement.',
   );
+}
+
+/**
+ * The verbs whose `where` reaches the engine's executor boundary, where a
+ * `ReadableIds` leaf is composed (ADR-0139 D2): a single-valued relation
+ * condition is served as a semi-join there. A write verb's `where`
+ * (`update`, `delete`) keeps the id read, under the cap.
+ */
+export const SEMI_JOIN_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
+
+/**
+ * [#33876] The up-front driver verdict on a `where`'s nested-relation
+ * conditions: on a read verb, the first single-valued site is refused
+ * ({@link relationSemiJoinDriverRefusal}) when the read's driver does not
+ * declare `DriverCapabilities.readableIdsLeaf`; `undefined` otherwise. The
+ * driver is read through `driverOf`, and only when a site could be refused.
+ *
+ * ONE function, called by execution (`lowerRelationConditions`, before any
+ * related read) and by the admission judge (`judgeWhereAdmission`, the body of
+ * `IObjectQLEngine.judgeFilter`), so the judge answers exactly what execution
+ * raises for the same filter on the same object.
+ */
+export function relationReadDriverRefusal(
+  object: string,
+  operation: string,
+  sites: readonly RelationFilterSite[],
+  driverOf: () => { readonly name?: unknown; readonly supports?: unknown } | undefined,
+): Error | undefined {
+  if (!SEMI_JOIN_READ_VERBS.has(operation)) return undefined;
+  const refused = sites.find((site) => !site.multiple);
+  if (refused === undefined) return undefined;
+  // Asked only when a site could be refused: the common path resolves no driver here.
+  const driver = driverOf();
+  if (driverCompilesReadableIdsLeaf(driver)) return undefined;
+  return relationSemiJoinDriverRefusal(refused, `${operation}('${object}')`, driverNameOf(driver));
 }
 
 /**

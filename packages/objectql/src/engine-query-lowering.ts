@@ -69,12 +69,11 @@ import {
   lowerRelationSite,
   RELATION_FILTER_ID_CAP,
   relationFilterCapError,
-  relationSemiJoinDriverRefusal,
+  relationReadDriverRefusal,
+  SEMI_JOIN_READ_VERBS,
   type RelationReplacement,
 } from './relation-filter-lowering.js';
 import {
-  driverCompilesReadableIdsLeaf,
-  driverNameOf,
   planRelationSemiJoinLeaf,
   RELATION_SCOPE_PLAN,
   type RelationScopePlan,
@@ -215,14 +214,6 @@ export async function resolveWhereTokens(
  * Returns `where` by reference when it holds no condition — the common path
  * reads nothing and allocates nothing beyond one walk.
  */
-/**
- * The verbs whose `where` reaches the engine's executor boundary, where a
- * `ReadableIds` leaf is composed (ADR-0139 D2): a single-valued relation
- * condition is served as a semi-join there. A write verb's `where`
- * (`update`, `delete`) keeps the id read, under the cap.
- */
-const SEMI_JOIN_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
-
 export async function lowerRelationConditions<W>(
   this: Pick<QueryLoweringHost, '_registry' | 'relatedSchemaOf' | 'find' | 'relationSemiJoinServes' | 'relationReadDriver'>,
   object: string,
@@ -237,16 +228,10 @@ export async function lowerRelationConditions<W>(
   const context = `${operation}('${object}')`;
   // [#33876] Judged for every site before any related read is planned or
   // run: on a read verb, a single-valued relation condition needs a driver
-  // that compiles the `ReadableIds` leaf, or it is refused here.
-  if (SEMI_JOIN_READ_VERBS.has(operation)) {
-    const refused = sites.find((site) => !site.multiple);
-    if (refused !== undefined) {
-      const driver = this.relationReadDriver(object);
-      if (!driverCompilesReadableIdsLeaf(driver)) {
-        throw relationSemiJoinDriverRefusal(refused, context, driverNameOf(driver));
-      }
-    }
-  }
+  // that compiles the `ReadableIds` leaf, or it is refused here. The
+  // admission judge asks the same function (`judgeWhereAdmission`).
+  const driverRefusal = relationReadDriverRefusal(object, operation, sites, () => this.relationReadDriver(object));
+  if (driverRefusal !== undefined) throw driverRefusal;
   const replacements: RelationReplacement[] = [];
   // The id read the engine has always run for a relation condition: the
   // related object read as the caller, `id` only, one id past the cap.
