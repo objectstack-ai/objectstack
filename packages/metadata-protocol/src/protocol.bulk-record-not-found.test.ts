@@ -43,6 +43,9 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { recordNotFoundError } from '@objectstack/core';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/lint';
 
 const SCHEMA = {
     name: 'showcase_task',

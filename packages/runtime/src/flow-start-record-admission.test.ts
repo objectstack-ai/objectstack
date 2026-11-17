@@ -39,6 +39,9 @@ import { buildEndpointExecutionContext, executeEndpointTarget } from './endpoint
 import { ApiEndpointSchema } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/metadata';
 
 const OBJECT = 'crm_case';
 const MEMBER = 'usr_member';
