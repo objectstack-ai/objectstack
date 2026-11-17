@@ -811,30 +811,85 @@ describe('import-users positions column — assigned in a second pass, as Setup 
     expect(payload(res).summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 0 });
   });
 
-  it('a host with no grant seam refuses a file that names positions, with nothing created — dry run too', async () => {
-    for (const dryRun of [false, true]) {
-      const h = makeHarness();
-      const res = await runAdminImportUsers(h.deps, makeRequest({
-        passwordPolicy: 'none', format: 'json', dryRun,
-        rows: [{ email: 'rep@x.co', name: 'Rep', positions: 'sales_rep' }],
-      }), ACTOR);
+  it('FROM control — a file naming positions on a host with no grant seam still answers 200 and creates every user', async () => {
+    // Measured on main before this column existed (PR #34531, Acceptance notes): the same file answered
+    // 200, created both users and dropped the cell. Anything less here would NARROW the door, so the
+    // users land exactly as they did, and only the positions are reported.
+    const h = makeHarness();
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json',
+      rows: [
+        { email: 'a@x.co', name: 'A', positions: 'sales_rep' },
+        { email: 'b@x.co', name: 'B', positions: 'sales_rep;area_manager' },
+      ],
+    }), ACTOR);
 
-      expect(res.status).toBe(501);
-      expect((res.body as any).error.code).toBe('NOT_IMPLEMENTED');
-      expect(h.createUser).not.toHaveBeenCalled();
-    }
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.created).toBe(2);
+    expect(data.summary.errors).toBe(0);
+    expect(h.createUser).toHaveBeenCalledTimes(2);
+    expect(data.rows.map((r: any) => [r.ok, r.action])).toEqual([[true, 'created'], [true, 'created']]);
   });
 
-  it('a caller whose own access does not resolve is refused 403, with nothing created', async () => {
+  it('a host with no grant seam reports every named position refused / NOT_IMPLEMENTED on its row', async () => {
+    const h = makeHarness();
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json',
+      rows: [
+        { email: 'a@x.co', name: 'A', positions: 'sales_rep' },
+        { email: 'b@x.co', name: 'B', positions: 'sales_rep;area_manager' },
+        { email: 'c@x.co', name: 'C' },
+      ],
+    }), ACTOR);
+
+    const data = payload(res);
+    expect(data.rows[0].positions).toEqual([{ position: 'sales_rep', outcome: 'refused', code: 'NOT_IMPLEMENTED' }]);
+    expect(data.rows[1].positions).toEqual([
+      { position: 'sales_rep', outcome: 'refused', code: 'NOT_IMPLEMENTED' },
+      { position: 'area_manager', outcome: 'refused', code: 'NOT_IMPLEMENTED' },
+    ]);
+    expect(data.rows[0].error).toContain('cannot assign positions');
+    expect(data.rows[0].code).toBeUndefined();
+    expect(data.rows[2].positions).toBeUndefined();
+    expect(data.rows[2].error).toBeUndefined();
+    expect(data.summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 3 });
+    expect(positionInserts(h.insert)).toHaveLength(0);
+  });
+
+  it('a caller whose own access does not resolve: every position refused / PERMISSION_DENIED, every user created', async () => {
     const h = makeHarness({ grant: 'no-context' });
     const res = await runAdminImportUsers(h.deps, makeRequest({
       passwordPolicy: 'none', format: 'json',
+      rows: [{ email: 'rep@x.co', name: 'Rep', positions: 'sales_rep;area_manager' }],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.created).toBe(1);
+    expect(data.summary.errors).toBe(0);
+    expect(h.userBy('rep@x.co')).toBeDefined();
+    expect(data.rows[0].ok).toBe(true);
+    expect(data.rows[0].positions).toEqual([
+      { position: 'sales_rep', outcome: 'refused', code: 'PERMISSION_DENIED' },
+      { position: 'area_manager', outcome: 'refused', code: 'PERMISSION_DENIED' },
+    ]);
+    expect(data.rows[0].error).toContain('could not be resolved');
+    expect(data.summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 2 });
+    expect(positionInserts(h.insert)).toHaveLength(0);
+  });
+
+  it('a dry run on a host with no grant seam answers as main did: 200, nothing written, no refusal', async () => {
+    const h = makeHarness();
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json', dryRun: true,
       rows: [{ email: 'rep@x.co', name: 'Rep', positions: 'sales_rep' }],
     }), ACTOR);
 
-    expect(res.status).toBe(403);
-    expect((res.body as any).error.code).toBe('PERMISSION_DENIED');
+    expect(res.status).toBe(200);
     expect(h.createUser).not.toHaveBeenCalled();
+    expect(payload(res).rows[0].positions).toBeUndefined();
+    expect(payload(res).summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 0 });
   });
 
   it('dryRun does not run the pass, and reports zeros', async () => {

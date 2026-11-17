@@ -124,11 +124,15 @@
  *    stands down for. The position catalog refusal, the ADR-0090 D12
  *    delegated-administration gate and the grant-holder membership refusal
  *    judge it exactly as they judge Setup's form.
- *  - **Settled before anything is written.** A request whose rows name a
- *    position on a host that cannot judge grants (no seam, no engine), or
- *    whose caller's own access cannot be resolved, is refused whole with
- *    nothing created — on a dry run too, so the preview does not promise what
- *    the write would refuse.
+ *  - **A host that cannot judge the grant costs the positions, never the
+ *    users.** On a host with no `createGrant` seam, or for a caller whose own
+ *    execution context does not resolve, every named position is reported
+ *    `refused` on its row — code `NOT_IMPLEMENTED` or `PERMISSION_DENIED`
+ *    respectively — and the users are created exactly as before this column
+ *    existed. ⛔ Not a whole-request refusal: before this column, the same
+ *    file answered `200` and created every user (the cell was dropped), so
+ *    refusing it whole would NARROW what this door accepts; the ruling's own
+ *    direction is "per-row error, the user is still created".
  *  - **Per row, per position.** `rows[].positions` lists each named position
  *    with its outcome: `assigned`, `already_assigned` (an upserted user who
  *    already holds it — a re-run batch is idempotent), `unresolved` (the
@@ -263,9 +267,9 @@ export interface IdentityImportDeps {
   /**
    * [#33113] What the `positions` column needs: the CALLING administrator's
    * execution context, under which each `sys_user_position` insert is judged
-   * as Setup's form is (see {@link AdminCreateGrantSeam}). Absent ⇒ a request
-   * whose rows name a position is refused 501 with nothing created; a request
-   * that names none never reads it.
+   * as Setup's form is (see {@link AdminCreateGrantSeam}). Absent ⇒ every
+   * named position is reported `refused` / `NOT_IMPLEMENTED` on its row and
+   * the users are still created; a request that names none never reads it.
    */
   createGrant?: AdminCreateGrantSeam;
   /** `error` receives, once, a failure answered with the generic message (`mapAuthApiError`). */
@@ -417,7 +421,10 @@ export type ImportManagerOutcome = 'linked' | 'unresolved' | SetUserManagerRefus
  * - `unresolved` — the catalog holds no position by that name;
  * - `refused` — any other refusal of the assignment; `code` is the refusal's
  *   own error code (e.g. `PERMISSION_DENIED`, or `VALIDATION_FAILED` for a
- *   user who is not a member of the assignment's organization).
+ *   user who is not a member of the assignment's organization). Also every
+ *   position of a request whose grants cannot be judged at all:
+ *   `NOT_IMPLEMENTED` (the host wires no grant seam) or `PERMISSION_DENIED`
+ *   (the caller's own access does not resolve).
  */
 export interface ImportPositionOutcome {
   position: string;
@@ -767,31 +774,32 @@ export async function runAdminImportUsers(
     return mapAuthApiError(error, 'import-users failed', deps.logger);
   }
 
-  // [#33113] Everything the position assignments need is settled BEFORE any
-  // row is written — create-user's order — so a host that cannot judge a
-  // grant, or a caller whose own access does not resolve, is refused with
-  // nothing created. On a dry run too: its preview must not promise a write
-  // the real run would refuse whole.
+  // [#33113] What the position assignments need, read once per request. A
+  // host that cannot judge a grant, or a caller whose own access does not
+  // resolve, does NOT refuse the import: the users land exactly as they did
+  // before this column existed, and each named position is reported refused
+  // on its row with the reason's code (see the second pass). Not read on a
+  // dry run, which assigns nothing.
   let grant: { engine: IdentityImportEngine; context: Record<string, unknown> } | undefined;
-  if (positionsWanted.some((w) => Array.isArray(w))) {
+  let grantBlocked: { code: 'NOT_IMPLEMENTED' | 'PERMISSION_DENIED'; message: string } | undefined;
+  if (!prepared.dryRun && positionsWanted.some((w) => Array.isArray(w))) {
     const seam = deps.createGrant;
+    const context = seam ? await seam.resolveActorContext() : undefined;
     if (!seam) {
-      return fail(
-        501,
-        'NOT_IMPLEMENTED',
-        `This server cannot assign positions while importing users, so no one was imported. Import the file `
-          + `without the ${POSITIONS_COLUMN} column, then assign positions on each user's record.`,
-      );
+      grantBlocked = {
+        code: 'NOT_IMPLEMENTED',
+        message: 'This server cannot assign positions while importing users, so this row\'s positions were not '
+          + 'assigned. The user landed; assign the positions on their record.',
+      };
+    } else if (!context) {
+      grantBlocked = {
+        code: 'PERMISSION_DENIED',
+        message: 'Your own access could not be resolved, so this row\'s positions could not be judged and were '
+          + 'not assigned. The user landed; assign the positions on their record.',
+      };
+    } else {
+      grant = { engine, context };
     }
-    const context = await seam.resolveActorContext();
-    if (!context) {
-      return fail(
-        403,
-        'PERMISSION_DENIED',
-        'Your own access could not be resolved, so the positions could not be judged and no one was imported.',
-      );
-    }
-    grant = { engine, context };
   }
 
   const protocol: ImportProtocolLike = {
@@ -1179,7 +1187,14 @@ export async function runAdminImportUsers(
         positionLinks.unresolved++;
         continue;
       }
-      // `grant` is set whenever any row names a position (settled above).
+      // Exactly one of `grant` / `grantBlocked` is set here (read above).
+      if (grantBlocked) {
+        const blocked = grantBlocked;
+        r.positions = wanted.map((position) => ({ position, outcome: 'refused' as const, code: blocked.code }));
+        positionLinks.refused += wanted.length;
+        if (r.error === undefined) r.error = blocked.message;
+        continue;
+      }
       const outcomes = await assignRowPositions(grant!, r.id, wanted, r.action === 'updated');
       r.positions = outcomes;
       const failed: string[] = [];
