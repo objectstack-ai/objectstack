@@ -552,7 +552,7 @@ export function actionRefusalsWithoutSandboxedBody(type: string, language: strin
     ? `\`type: '${type}'\`, which runs no code of the action's own`
     : language !== undefined
       ? `a \`${language}\` body`
-      : 'no `body` and no inline `target` function';
+      : 'no `body` (an inline `target` function `os build` could not lower leaves none)';
   return (
     "`refusals` is answered for a `type: 'script'` action's sandboxed `body` (`language: 'js'`) and for its inline "
     + `\`target\` function (which \`os build\` lowers to a \`js\` body), and this action has ${has}: nothing it runs `

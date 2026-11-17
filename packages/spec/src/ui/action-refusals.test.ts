@@ -60,7 +60,7 @@ describe('Action.refusals — the declared catalogue', () => {
   });
 
   it.each([
-    ['no body', { type: 'script' }, "no `body` and no inline `target` function"],
+    ['no body', { type: 'script' }, "no `body` (an inline `target` function `os build` could not lower leaves none)"],
     ['an expression body', { type: 'script', body: { language: 'expression', source: 'record.amount > 0' } }, 'a `expression` body'],
     ['a url action', { type: 'url', target: 'https://example.com' }, "`type: 'url'`"],
     ['a flow action', { type: 'flow', target: 'approve_invoice' }, "`type: 'flow'`"],

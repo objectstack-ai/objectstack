@@ -4462,7 +4462,7 @@ export function hookTextMessageKey(hookName: string, key: string): string {
 
 /**
  * Dot-notation i18n key for an action's declared refusal message (#34273,
- * `ActionSchema.refusals`) — the hook twin of {@link hookRefusalMessageKey},
+ * `ActionSchema.refusals`) — the action twin of {@link hookRefusalMessageKey},
  * at the address every action translation is read at
  * ({@link actionTranslationNode}):
  *
