@@ -665,6 +665,24 @@ describe('[#34206, ADR-0156 D5] at the bound the cache confirms before it recomp
         expect((await read(h)).item.label).toBe('Gadget');
     });
 
+    it('[#34554] the bucket a counter move opens ends its first bound one bound after the kept rows were read, not one bound after the move', async () => {
+        vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '600000'); // the row cache outlives every bound here
+        let now = 1_000_000;
+        vi.spyOn(Date, 'now').mockImplementation(() => now);
+        const rows = [storedObject('Widget')];
+        const h = harness(rows);
+        expect((await read(h)).item.label).toBe('Widget'); // the row cache is warm, its rows read at T
+        now += 20_000; // part of a bound later
+        rows[0] = storedObject('Gadget', '2026-11-16T01:00:00.000Z'); // a peer replica with no bridge
+        (h.registry.revision as number)++; // a local counter move opens a new bucket at T + 20 s
+        const rowReads = () => h.reads.filter((r) => r.op === 'find' && r.where.name === 'widget').length;
+        const before = rowReads();
+        expect((await read(h)).item.label).toBe('Widget'); // kept: the rows are less than a bound old
+        expect(rowReads()).toBe(before);
+        now = 1_000_000 + 30_001; // one bound after the rows were read, less than one after the move
+        expect((await read(h)).item.label).toBe('Gadget');
+    });
+
     it('a counter move retires the row cache once its rows are more than a bound old: a peer\'s write the row cache predates is in the new bucket\'s answer', async () => {
         vi.stubEnv('OS_METADATA_OVERLAY_CACHE_TTL_MS', '600000'); // the row cache outlives every bound here
         const clock = atBound();
