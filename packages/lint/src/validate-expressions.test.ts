@@ -6603,3 +6603,219 @@ describe('[#22227] settledWhen — the deadline settle predicate in the field-ru
     expect(issues.filter((i) => /master_detail/.test(i.message))).toEqual([]);
   });
 });
+
+// [#34451] A flow VALUE envelope (`update_record` / `create_record` `fields.*`,
+// `assignment` values) is typed with the object the run binds as `record`, for
+// the date-text verdict family alone: `timestamp(record.<date field>)` checks
+// clean as CEL and faults on the `YYYY-MM-DD` text on every run. The engine's
+// `registerFlow` refuses the same set (service-automation's
+// `assignment-value-envelope.test.ts`).
+describe('validateStackExpressions — flow value envelopes take the date-text family (#34451)', () => {
+  const LOAN = {
+    name: 'library_loan',
+    fields: {
+      borrow_date: { type: 'date' },
+      due_date: { type: 'date' },
+      picked_up_at: { type: 'datetime' },
+      title: { type: 'text' },
+    },
+  };
+  const MEASURED = "isoDate(timestamp(record.borrow_date) + duration('168h'))";
+  type Slot = 'update_record' | 'create_record' | 'assignment';
+  const envelope = (source: string) => ({ dialect: 'cel', source });
+  const nodeFor = (slot: Slot, source: string) =>
+    slot === 'assignment'
+      ? { id: 'n1', type: 'assignment', config: { assignments: { due: envelope(source) } } }
+      : {
+        id: 'n1', type: slot,
+        config: {
+          objectName: 'library_loan',
+          ...(slot === 'update_record' ? { filter: { id: envelope('record.id') } } : {}),
+          fields: { due_date: envelope(source) },
+        },
+      };
+  const stackWith = (slot: Slot, source: string, start: Record<string, unknown> = {
+    objectName: 'library_loan', triggerType: 'record-after-update',
+  }) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_due',
+      nodes: [{ id: 'start', type: 'start', config: start }, nodeFor(slot, source), { id: 'end', type: 'end' }],
+      edges: [{ id: 'e1', source: 'start', target: 'n1' }, { id: 'e2', source: 'n1', target: 'end' }],
+    }],
+  });
+  const SLOT_KEY: Record<Slot, string> = {
+    update_record: 'config.fields.due_date',
+    create_record: 'config.fields.due_date',
+    assignment: 'config.assignments.due',
+  };
+
+  it.each(['update_record', 'create_record', 'assignment'] as const)(
+    'refuses timestamp() over a date field in %s, alone or inside + duration(), naming the addDays shift',
+    (slot) => {
+      for (const source of [MEASURED, 'timestamp(record.borrow_date)']) {
+        const issues = validateStackExpressions(stackWith(slot, source));
+        expect(issues.map((i) => [i.severity, i.path]), source).toEqual([['error', `flows[0].nodes[1].${SLOT_KEY[slot]}`]]);
+        expect(issues[0].message).toContain('`timestamp(record.borrow_date)`');
+        expect(issues[0].message).toContain('`isoDate(addDays(record.borrow_date, N))`');
+      }
+    },
+  );
+
+  it('types a time-relative flow\'s envelope with the swept object', () => {
+    const issues = validateStackExpressions(stackWith('update_record', MEASURED, {
+      schedule: '0 * * * *', timeRelative: { object: 'library_loan', dateField: 'due_date', offsetDays: 1 },
+    }));
+    expect(issues.filter((i) => /isoDate\(addDays\(record\.borrow_date, N\)\)/.test(i.message))).toHaveLength(1);
+  });
+
+  it('CONTROL: a datetime field in the same envelope, and the taught shift, stay clean', () => {
+    for (const source of ["isoDate(timestamp(record.picked_up_at) + duration('168h'))", 'isoDate(addDays(record.borrow_date, 7))']) {
+      expect(validateStackExpressions(stackWith('update_record', source)), source).toEqual([]);
+    }
+  });
+
+  it('CONTROL: only the date-text family reaches the envelope — a text field in arithmetic stays silent here', () => {
+    // A flow condition over the same object gets the type-mismatch verdict; the envelope does not.
+    expect(validateStackExpressions(stackWith('update_record', 'record.title * 2'))).toEqual([]);
+    expect(validateStackExpressions(stackWith('update_record', 'record.due_date + 1'))).toEqual([]);
+  });
+
+  // The stand-downs: the typing holds only where the run's `record` IS a row
+  // of the typed object — a record-triggered flow or a sweep of it — and the
+  // flow binds no `record` of its own. Each CONTROL carries the refused source.
+  const REFUSED = 'timestamp(record.borrow_date)';
+
+  it('CONTROL: an inbound hook (api) start is not typed — zero findings', () => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      expect(validateStackExpressions(stackWith(slot, REFUSED, { objectName: 'library_loan', triggerType: 'api', secretRef: 'LOAN_HOOK_SECRET' })), slot).toEqual([]);
+    }
+  });
+
+  // No entrance of these hands the run a record, so the existing unbound-root
+  // refusal (#22565) already names every `record.` read in them — the bare
+  // `record.borrow_date` read included. The CONTROL is that `timestamp()` over
+  // it adds nothing: the findings are the bare read's, one for one.
+  it.each([
+    ['a start with no trigger (started by hand)', { objectName: 'library_loan' }],
+    ['a schedule', { objectName: 'library_loan', schedule: '0 * * * *' }],
+  ])('CONTROL: %s is not typed — no finding beyond the bare read\'s', (_label, start) => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      const shape = (source: string) => validateStackExpressions(stackWith(slot, source, start))
+        .map((i) => [i.severity, i.path, i.message.replace(/record\.borrow_date|borrow_date/g, 'X')]);
+      const refused = shape(REFUSED);
+      expect(refused, slot).toEqual(shape('record.borrow_date'));
+      expect(refused.some(([, , m]) => /addDays/.test(String(m))), slot).toBe(false);
+    }
+  });
+
+  it('CONTROL: a child flow a parent starts through `subflow` is not typed — zero findings', () => {
+    const stack = stackWith('update_record', REFUSED, { objectName: 'library_loan' });
+    stack.flows[0] = { ...stack.flows[0], name: 'loan_due_child' };
+    stack.flows.push({
+      name: 'loan_due_parent',
+      nodes: [
+        { id: 'start', type: 'start', config: { objectName: 'library_loan', triggerType: 'record-after-update' } },
+        { id: 'call', type: 'subflow', config: { flowName: 'loan_due_child' } } as never,
+        { id: 'end', type: 'end' },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
+    });
+    expect(validateStackExpressions(stack)).toEqual([]);
+  });
+
+  it('CONTROL: a record-triggered flow that declares a `record` variable is not typed — zero findings', () => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      const stack = stackWith(slot, REFUSED);
+      stack.flows[0] = { ...stack.flows[0], variables: [{ name: 'record', type: 'object' }] } as never;
+      expect(validateStackExpressions(stack), slot).toEqual([]);
+    }
+  });
+
+  // A binder node placed between the start and the slot node.
+  const withBinder = (stack: ReturnType<typeof stackWith>, binder: Record<string, unknown>) => {
+    const flow = stack.flows[0];
+    stack.flows[0] = {
+      ...flow,
+      nodes: [flow.nodes[0], binder as never, ...flow.nodes.slice(1)],
+      edges: [
+        { id: 'e0', source: 'start', target: String(binder.id) },
+        { id: 'e1', source: String(binder.id), target: 'n1' },
+        flow.edges[1],
+      ],
+    };
+    return stack;
+  };
+  const region = () => ({ nodes: [{ id: 'inner', type: 'assignment', config: { assignments: { note: envelope('1') } } }], edges: [] });
+  // Every row of the binder check other than shape 1 of `assignment`, each binding `record`.
+  // The legacy assignment shapes evaluate nothing, so they bind a literal.
+  const RECORD_BINDERS: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ['a get_record outputVariable', { id: 'fetch', type: 'get_record', config: { objectName: 'library_loan', limit: 1, outputVariable: 'record' } }],
+    ['a loop iteratorVariable', { id: 'each', type: 'loop', config: { collection: envelope('[1]'), iteratorVariable: 'record', body: region() } }],
+    ['a loop indexVariable', { id: 'each', type: 'loop', config: { collection: envelope('[1]'), iteratorVariable: 'row', indexVariable: 'record', body: region() } }],
+    ['a try_catch errorVariable', { id: 'guard', type: 'try_catch', config: { errorVariable: 'record', try: region(), catch: { nodes: [{ id: 'inner2', type: 'assignment', config: { assignments: { note: envelope('2') } } }], edges: [] } } }],
+    ['a node id', { id: 'record', type: 'assignment', config: { assignments: { note: envelope('1') } } }],
+    ['an assignment, shape 2 (array entries)', { id: 'rebind', type: 'assignment', config: { assignments: [{ variable: 'record', value: 'rebound' }] } }],
+    ['an assignment, shape 3 (no wrapper)', { id: 'rebind', type: 'assignment', config: { record: 'rebound' } }],
+  ];
+
+  it.each(RECORD_BINDERS)('CONTROL: a record-triggered flow binding `record` through %s is not typed — zero findings', (_label, binder) => {
+    expect(validateStackExpressions(withBinder(stackWith('update_record', REFUSED), binder))).toEqual([]);
+  });
+
+  // `previous`: the envelope reads it too, and a node rebinds it the same way.
+  // A DECLARED `previous` does not: `seedRunVariables` sets it over the
+  // declaration, so the declared row stays typed.
+  const PREVIOUS_REFUSED = 'timestamp(previous.borrow_date)';
+  it('reads through `previous` are refused on a record-triggered flow', () => {
+    const issues = validateStackExpressions(stackWith('update_record', PREVIOUS_REFUSED));
+    expect(issues.map((i) => [i.severity, i.path])).toEqual([['error', 'flows[0].nodes[1].config.fields.due_date']]);
+  });
+
+  it.each([
+    ['a get_record outputVariable', { id: 'fetch', type: 'get_record', config: { objectName: 'library_loan', limit: 1, outputVariable: 'previous' } }],
+    ['an assignment that builds it', { id: 'rebind', type: 'assignment', config: { assignments: { previous: envelope('{"borrow_date": "2026-01-01T00:00:00Z"}') } } }],
+  ])('CONTROL: a record-triggered flow binding `previous` through %s is not typed — zero findings', (_label, binder) => {
+    expect(validateStackExpressions(withBinder(stackWith('update_record', PREVIOUS_REFUSED), binder))).toEqual([]);
+  });
+
+  it('a DECLARED `previous` variable does not stand the typing down — the seed sets `previous` over it', () => {
+    const stack = stackWith('update_record', PREVIOUS_REFUSED);
+    stack.flows[0] = { ...stack.flows[0], variables: [{ name: 'previous', type: 'object' }] } as never;
+    expect(validateStackExpressions(stack).map((i) => i.path)).toEqual(['flows[0].nodes[1].config.fields.due_date']);
+  });
+
+  it('refuses a date field subtracted from another in an envelope (date-text-arithmetic)', () => {
+    const issues = validateStackExpressions(stackWith('update_record', 'record.due_date - record.borrow_date'));
+    expect(issues.map((i) => [i.severity, i.path])).toEqual([['error', 'flows[0].nodes[1].config.fields.due_date']]);
+  });
+
+  it('CONTROL: a sweep whose start names another object than the swept one is not typed — zero findings', () => {
+    const stack = stackWith('update_record', REFUSED, {
+      objectName: 'archive_loan', schedule: '0 * * * *', timeRelative: { object: 'library_loan', dateField: 'due_date', offsetDays: 1 },
+    });
+    stack.objects.push({ ...LOAN, name: 'archive_loan' });
+    expect(validateStackExpressions(stack)).toEqual([]);
+  });
+
+  it('CONTROL: a record-triggered flow whose assignment assigns `record` is not typed — zero findings', () => {
+    for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
+      const stack = stackWith(slot, REFUSED);
+      const flow = stack.flows[0];
+      stack.flows[0] = {
+        ...flow,
+        nodes: [
+          flow.nodes[0],
+          { id: 'rebind', type: 'assignment', config: { assignments: { record: envelope('{"borrow_date": "2026-01-01"}') } } } as never,
+          ...flow.nodes.slice(1),
+        ],
+        edges: [
+          { id: 'e0', source: 'start', target: 'rebind' },
+          { id: 'e1', source: 'rebind', target: 'n1' },
+          flow.edges[1],
+        ],
+      };
+      expect(validateStackExpressions(stack), slot).toEqual([]);
+    }
+  });
+});

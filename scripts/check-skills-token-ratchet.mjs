@@ -1673,6 +1673,29 @@ export const CEILINGS = new Map([
   ['skills/objectui/rules/composition.md', 1624],
   ['skills/objectui/rules/protocol.md', 4368],
   ['skills/objectui/rules/styling.md', 2699],
+
+  // ── the objectstack-ask skill joins the catalog — epic ruling 6940528935 (D5 A) ──
+  // A new published skill for a client that answers a business question over
+  // MCP: the governed-metric procedure (`list_datasets` -> `query_dataset` ->
+  // labelled fallback), which until now was written only in a tool description
+  // and the served `/mcp/skill` page. The row is an INITIAL measurement of the
+  // new file on the PR that adds it, pinned AT it — zero headroom, on the same
+  // terms as the objectui rows above. Its evals are unpriced (population 1b).
+  // No existing row moves: the two pointer lines to it land inside the
+  // headroom of `objectstack-ai/SKILL.md` and `objectstack-query/rules/aggregation.md`.
+  // Adding the row is the pricing act the header reserves to the maintainer;
+  // the PR that adds it is Tier H and lands only on the maintainer's approval.
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6085 / 4)
+  // 1457 -> 1522, re-measured on the same PR before it landed, after its
+  // contract review (record 6947390250) asked for three wording fixes in the
+  // step 2 table: rows 1 and 2 are judged per word, so a two-metric question
+  // computes both instead of asking back (ADR-0149 D3 rule 3, "answer to the
+  // word"); the `membersWithheld` row says members (measures or groupings),
+  // which is what the flag reports; the fallback row says one near form is not
+  // a match either. 5848 -> 6105 bytes (+257), less the 20-byte stamp line:
+  // 5828 -> 6085 priced bytes, ceil(6085 / 4) = 1522 (+65). Still the new
+  // file's own measurement, pinned AT it, zero headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1522],
 ]);
 
 /**

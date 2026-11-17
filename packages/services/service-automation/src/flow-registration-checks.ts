@@ -633,6 +633,72 @@ export function collectUndeclaredConfigKeys(
     }
 }
 
+/** The config keys whose value names a variable the node binds (`@objectstack/lint`'s `VARIABLE_NAME_CONFIG_KEYS`). */
+const VARIABLE_NAME_CONFIG_KEYS = ['iteratorVariable', 'indexVariable', 'errorVariable', 'outputVariable'] as const;
+/** The keys an `assignments` array entry names its target with, in `logic-nodes.ts`'s precedence. */
+const ASSIGNMENT_ENTRY_NAME_KEYS = ['variable', 'name', 'key'] as const;
+
+/**
+ * [#34451] The names the flow's NODES bind into the run's variable map, in any
+ * graph: a node id, a node's `outputVariable` / iterator / index / error
+ * variable, and an `assignment` target in any of its three shapes. These are
+ * rows 2-8 of `@objectstack/lint`'s `collectFlowVariableNames` (that package
+ * is not a dependency of this one, and the two doors must stand down on the
+ * same flows); row 1, `flow.variables`, is read by the caller, because
+ * `seedRunVariables` sets `previous` over a declared variable of that name and
+ * so only a node can rebind it.
+ */
+function flowNodeBoundNames(flow: FlowParsed): ReadonlySet<string> {
+    const names = new Set<string>();
+    for (const graph of collectFlowGraphs(flow)) {
+        for (const node of graph.nodes) {
+            if (!node || typeof node !== 'object') continue;
+            if (typeof node.id === 'string' && node.id) names.add(node.id);
+            const config = node.config;
+            if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+            const cfg = config as Record<string, unknown>;
+            for (const key of VARIABLE_NAME_CONFIG_KEYS) {
+                if (typeof cfg[key] === 'string' && cfg[key]) names.add(cfg[key] as string);
+            }
+            if (node.type !== 'assignment') continue;
+            const raw = cfg.assignments;
+            if (Array.isArray(raw)) {
+                // Shape 2: [{ variable | name | key, value }, …], the first name key present wins.
+                for (const item of raw) {
+                    if (!item || typeof item !== 'object') continue;
+                    const entry = item as Record<string, unknown>;
+                    const nameKey = ASSIGNMENT_ENTRY_NAME_KEYS.find((k) => typeof entry[k] === 'string' && entry[k]);
+                    if (nameKey) names.add(entry[nameKey] as string);
+                }
+            } else if (raw && typeof raw === 'object') {
+                // Shape 1: { <var>: <value>, … }.
+                for (const key of Object.keys(raw)) names.add(key);
+            } else {
+                // Shape 3: no wrapper — the config's own keys are the variable names.
+                for (const key of Object.keys(cfg)) names.add(key);
+            }
+        }
+    }
+    return names;
+}
+
+/**
+ * [#34451] Whether the flow itself rebinds a root the value-envelope typing
+ * reads — `record` by any row (a declared variable too, as ruled, though the
+ * seed sets `record` over it on a record-change or sweep entrance), `previous`
+ * by a node row only (the seed sets it over a declared one unconditionally).
+ * `celScope` spreads the run's variables over the scope an envelope reads, so
+ * a rebound root is what the envelope reads, not the bound row.
+ */
+function flowRebindsRunRowRoots(flow: FlowParsed): boolean {
+    const declared = (flow as { variables?: unknown }).variables;
+    if (Array.isArray(declared) && declared.some((v) => !!v && typeof v === 'object' && (v as { name?: unknown }).name === 'record')) {
+        return true;
+    }
+    const nodeBound = flowNodeBoundNames(flow);
+    return nodeBound.has('record') || nodeBound.has('previous');
+}
+
 /** The body of {@link AutomationEngine.validateFlowExpressions}, moved unedited; that method's docblock is its contract. */
 export function validateFlowExpressions(
     this: Pick<RegistrationCheckHost, 'logger' | 'objectSchemaResolver' | 'valueEnvelopeRefusals' | 'deriveTriggerBinding'>,
@@ -658,10 +724,12 @@ export function validateFlowExpressions(
     // start naming another object at publish, but a flow stored before it
     // still registers, and its advisory must speak of the scanned object.
     // Absent resolver / no object → the hint is undefined and only the fatal
-    // syntax/bare-ref pass runs (unchanged); the stored pass (`advisory:
-    // false`) never reads the hint, so it derives no binding.
+    // syntax/bare-ref pass runs (unchanged). The stored pass (`advisory:
+    // false`) never reads the advisory hint, but it does type the value
+    // envelopes below (#34451) — a refusal it must preview — so it derives the
+    // same binding.
     const startNode = flow.nodes.find((n) => n.type === 'start');
-    const bound = advisory && this.objectSchemaResolver ? this.deriveTriggerBinding(flowName, flow) : undefined;
+    const bound = this.objectSchemaResolver ? this.deriveTriggerBinding(flowName, flow) : undefined;
     const objectName = bound?.triggerType === 'time_relative'
         ? bound.binding.object
         : ((startNode?.config ?? {}) as Record<string, unknown>).objectName;
@@ -670,6 +738,29 @@ export function validateFlowExpressions(
             const s = this.objectSchemaResolver?.(objectName);
             return s ? { objectName, fields: s.fields, fieldTypes: s.fieldTypes, scope: 'flattened' as const } : undefined;
         })()
+        : undefined;
+
+    // [#34451] The value-envelope typing below holds only where the run's
+    // `record` IS a row of the typed object: a record-change trigger on it,
+    // or a time-relative sweep of it — the two kinds `@objectstack/lint`
+    // declares a proven outcome for on a flow condition — and only while the
+    // flow rebinds neither root the typing reads, `record` or `previous`
+    // ({@link flowRebindsRunRowRoots}: `celScope` resolves both through the
+    // variable spread, so an assigned or output one is what the envelope
+    // reads). Anywhere else (an inbound hook, a
+    // schedule, a flow started by a parent's `subflow` / `map` or by hand) the
+    // name holds what the entrance handed the run, and no verdict is given.
+    // `objectstack validate` stands down on the same set.
+    const startCfg = (startNode?.config ?? {}) as Record<string, unknown>;
+    const sweep = (startCfg.timeRelative ?? {}) as Record<string, unknown>;
+    const runBindsTypedRow = bound?.triggerType === 'record_change'
+        // The array form routes here only to be refused at bind: it never fires.
+        ? typeof startCfg.triggerType === 'string'
+        : bound?.triggerType === 'time_relative'
+            && typeof sweep.object === 'string'
+            && (typeof startCfg.objectName !== 'string' || startCfg.objectName === sweep.object);
+    const valueEnvelopeFieldTypes = runBindsTypedRow && !flowRebindsRunRowRoots(flow)
+        ? schemaHint?.fieldTypes
         : undefined;
 
     const check = (path: string, where: string, raw: unknown, useSchemaHint = true): void => {
@@ -890,8 +981,14 @@ export function validateFlowExpressions(
                 // envelope stored verbatim (a variable `notify` rendered as
                 // JSON, a record column holding the envelope object), with
                 // nothing said at any layer.
+                //
+                // [#34451] Typed with the bound object's field types where the
+                // run's `record` is that object's row (`valueEnvelopeFieldTypes`
+                // above), so the date-text family reaches the envelope — the
+                // same set `objectstack validate` refuses. Thrown, in both
+                // modes: the envelope faults on every run.
                 if (found.entry.role === 'value') {
-                    for (const refusal of this.valueEnvelopeRefusals(found.value)) {
+                    for (const refusal of this.valueEnvelopeRefusals(found.value, valueEnvelopeFieldTypes)) {
                         refuse(slotPath, slotWhere, refusal.message, refusal.source);
                     }
                     continue;
