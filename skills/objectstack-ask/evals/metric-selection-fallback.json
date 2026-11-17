@@ -54,11 +54,21 @@
     {
       "id": 6,
       "prompt": "用户问:「我们的毛利率是多少?」 `list_datasets({ terms: ['毛利率'] })` answers one dataset, `finance_summary` (label 财务汇总), with `membersWithheld: true`, `matches: []` and two listed measures, 营业收入 and 费用合计. What is your reply?",
-      "expected_output": "`membersWithheld: true` on 财务汇总 means it has measures this user may not read, so the reply says exactly that, in Chinese and naming the dataset by its label, as in 「财务汇总里有您无权查看的指标，毛利率可能是其中之一」. It never tells the user the metric is absent, and it shows the user no raw flag name. Nothing matched and the two listed measures (营业收入, 费用合计) are not readings of 毛利率, so no measure is selected and no governed figure is given; if it goes on to compute anything from the object tools, that answer opens with the 非指标口径 line.",
+      "expected_output": "`membersWithheld: true` on 财务汇总 means it has members (measures or groupings) this user may not read, and the metric asked for may be among them, so the reply says exactly that, in Chinese and naming the dataset by its label, as in 「财务汇总里有您无权查看的指标或分组，毛利率可能是其中之一」. It never tells the user the metric is absent, and it shows the user no raw flag name. Nothing matched and the two listed measures (营业收入, 费用合计) are not readings of 毛利率, so no measure is selected and no governed figure is given; if it goes on to compute anything from the object tools, that answer opens with the 非指标口径 line.",
       "files": [],
       "assertions": {
         "must_contain": ["财务汇总", "毛利率"],
         "must_not_contain": ["不存在"]
+      }
+    },
+    {
+      "id": 7,
+      "prompt": "用户问:「本月的营收和赢单率各是多少?」 You called `list_datasets({ terms: ['营收', '赢单率', '本月'] })`. The answer lists one dataset, `sales_analysis` (label 销售分析), with `matches: [{ term: '营收', member: 'measures.revenue', matchedOn: 'synonym' }, { term: '赢单率', member: 'measures.win_rate', matchedOn: 'label' }]`; no other dataset has a match. What do you do next, and how do you write the answer?",
+      "expected_output": "Each word matches exactly one measure (营收 names `revenue`, 赢单率 names `win_rate`), so these are two metrics, not two candidates for one word: both are computed and the user is not asked which one is meant. They share a dataset, so one `query_dataset` call does it: `datasetName: 'sales_analysis'`, a `selection` whose `measures` is `['revenue', 'win_rate']`, and a `selection.runtimeFilter` on the dataset's date dimension for this month. Writes the answer in Chinese with both figures, cites the source from the answer's `provenance` (as in 「指标：营收、赢单率（数据集：销售分析）」), and states the month it filtered to in words. It does not compute either figure from the object tools.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["query_dataset", "营收", "赢单率", "销售分析"],
+        "must_not_contain": ["aggregate_records", "非指标口径"]
       }
     }
   ]

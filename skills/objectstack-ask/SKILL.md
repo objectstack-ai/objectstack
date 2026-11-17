@@ -45,12 +45,12 @@ wrote its business definition) outranks a number you work out yourself.
 
 | What the answer shows | What you do |
 |:--|:--|
-| One measure matches | Compute it: step 3, with that dataset and measure. |
-| Several measures match (two members, or one word in two datasets) | Ask the user which one they mean. List each candidate's label, its dataset's label and its description. Do not pick one. |
+| Each word for a thing measured matches exactly one measure | Compute: step 3. Two words with one measure each ("营收和赢单率") are two metrics, not a choice: compute both, with one `query_dataset` per dataset. |
+| One word matches several measures, in one dataset or in two | Ask the user which one they mean. List each candidate's label, its dataset's label and its description. Do not pick one. |
 | Only a dimension matches | That is a grouping ("by stage"), not a number. You still need a measure match; without one, ask which number is meant. |
 | Nothing matches, and the word is a loose form of several listed measures | Ask the user which one they mean, listing the same three things. Do not pick one, and compute nothing yet. |
-| Nothing matches, and the listed measures do not offer several readings of the word | Step 4, and say in the answer that no governed metric was used. |
-| `membersWithheld: true` on a dataset | Say that it has measures you may not read. Do not say the metric does not exist. |
+| Nothing matches, and the listed measures do not offer several readings of the word | Step 4, and say in the answer that no governed metric was used. One near form is not a match either: it selects nothing. |
+| `membersWithheld: true` on a dataset | Say that it has members (measures or groupings) you may not read; the metric asked for may be among them. Do not say the metric does not exist. |
 
 The same answer lists every dataset you may query with all its measures,
 matched or not (a call without `terms` returns that catalogue too), so the

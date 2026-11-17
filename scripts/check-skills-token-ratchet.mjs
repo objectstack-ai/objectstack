@@ -1685,8 +1685,17 @@ export const CEILINGS = new Map([
   // headroom of `objectstack-ai/SKILL.md` and `objectstack-query/rules/aggregation.md`.
   // Adding the row is the pricing act the header reserves to the maintainer;
   // the PR that adds it is Tier H and lands only on the maintainer's approval.
-  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(5828 / 4)
-  ['skills/objectstack-ask/SKILL.md', 1457],
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6085 / 4)
+  // 1457 -> 1522, re-measured on the same PR before it landed, after its
+  // contract review (record 6947390250) asked for three wording fixes in the
+  // step 2 table: rows 1 and 2 are judged per word, so a two-metric question
+  // computes both instead of asking back (ADR-0149 D3 rule 3, "answer to the
+  // word"); the `membersWithheld` row says members (measures or groupings),
+  // which is what the flag reports; the fallback row says one near form is not
+  // a match either. 5848 -> 6105 bytes (+257), less the 20-byte stamp line:
+  // 5828 -> 6085 priced bytes, ceil(6085 / 4) = 1522 (+65). Still the new
+  // file's own measurement, pinned AT it, zero headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1522],
 ]);
 
 /**
