@@ -373,7 +373,14 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   );
   tabs.push(...panelTabs.withRecords);
   if (openBodyTable) tabs.push(openBodyTable);
-  if (hasTimeline) {
+  // 动态 comes after the panels' tabs, so it too waits off the row while their
+  // first set is out (every panel still pending): drawn at once, it would move
+  // when they land in front of it — the move the rule above keeps out
+  // (objectstack#28469, Target 2). Drawn when it is the active tab.
+  const firstPanelSetOut =
+    resolved.order.length > 0 && resolved.order.every((id) => counts.stateOf(id).kind === 'pending');
+  const timelineHeld = hasTimeline && firstPanelSetOut && activeTab !== RECORD_PAGE_TIMELINE_PANEL;
+  if (hasTimeline && !timelineHeld) {
     tabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: t('detail.timeline', { defaultValue: 'Activity' }), count: streamCount });
   }
   const hiddenTabs = resolved.hidden.map(panelTab);
@@ -381,8 +388,11 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     if (id === RECORD_TAB_OVERVIEW) onCloseEnlargedRelated?.();
     else onEnlargeRelated?.(id);
   };
+  // A held 动态 tab still counts toward drawing the row, so the row is there
+  // from the first paint (概览 alone while the set is out) and the page below
+  // it does not shift when the tabs land.
   const tabRow =
-    onEnlargeRelated && tabs.length + panelTabs.empty.length + hiddenTabs.length > 1 ? (
+    onEnlargeRelated && tabs.length + (timelineHeld ? 1 : 0) + panelTabs.empty.length + hiddenTabs.length > 1 ? (
       <RecordTabRow
         tabs={tabs}
         emptyTabs={panelTabs.empty}

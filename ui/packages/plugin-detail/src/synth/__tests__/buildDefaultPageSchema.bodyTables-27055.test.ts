@@ -53,8 +53,8 @@ const shape = (nodes: any[]) =>
 describe('body tables sit in the Details tab after the first section (objectstack#27055)', () => {
   it('splits the details around the body tables; side lists stay in Related', () => {
     const tabs = buildDefaultTabs(quoteDef, { sections: SECTIONS, related: [LINES, TASKS, SCHEDULE] });
-    // 动态 is second for every object (objectstack#27524, Target 5).
-    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'timeline', 'related']);
+    // 动态 is last for every object (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」).
+    expect(items(tabs).map((i: any) => i.value)).toEqual(['details', 'related', 'timeline']);
     expect(shape(items(tabs)[0].children)).toEqual([
       'details(Basic)',
       'table(quote_line_item)',

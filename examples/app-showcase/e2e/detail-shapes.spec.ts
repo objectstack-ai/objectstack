@@ -208,7 +208,8 @@ test('ungrouped + related-heavy: flat details and the related panels on Contoso'
   await expect(invoicesTable.getByRole('cell', { name: 'INV-1002', exact: true })).toBeVisible();
   await expect(projectsTable.getByRole('cell', { name: 'Data Platform', exact: true })).toBeVisible();
   const rightColumn = page.locator('[data-record-column="right"]');
-  await expect(rightColumn.locator(':scope > *').first()).toHaveAttribute('data-record-timeline-panel', '');
+  // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
+  await expect(rightColumn.locator(':scope > *').last()).toHaveAttribute('data-record-timeline-panel', '');
   await expect(rightColumn.getByRole('region', { name: /^(Invoices|Projects)$/ })).toHaveCount(0);
 
   // Ungrouped shape: the details body is flat — no fieldGroup section cards.
