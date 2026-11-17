@@ -2383,10 +2383,10 @@ export function ChatPane({
       resolveOutboundAgentText(convZh, key, vars),
     [convZh],
   );
-  // Read when a turn is prepared (objectstack#34461), without making the send
-  // callbacks change identity on every message.
-  const convZhRef = useRef(convZh);
-  convZhRef.current = convZh;
+  // The thread so far, read when a turn is prepared (objectstack#34461)
+  // without making the send callbacks change identity on every message.
+  const threadMessagesRef = useRef({ runtimeMessages, initialMessages });
+  threadMessagesRef.current = { runtimeMessages, initialMessages };
   const planApproveMessage = outboundText('planApproveMessage');
   const planApproveDefaultsMessage = outboundText('planApproveDefaultsMessage');
   // Same rule for the granular change-confirm card. It used to send a hard-coded
@@ -2472,7 +2472,10 @@ export function ChatPane({
       // all outbound text does: the turn's own words decide it, as they will
       // once the turn is in the thread; a turn with no words takes the
       // thread's language so far.
-      const zh = content.trim() ? isConversationZh([{ role: 'user', content }]) : convZhRef.current;
+      const thread = threadMessagesRef.current;
+      const zh = content.trim()
+        ? isConversationZh([{ role: 'user', content }])
+        : isConversationZh(thread.runtimeMessages) || isConversationZh(thread.initialMessages);
       const note = (key: AttachmentNoteKey, vars: Readonly<Record<string, string>>) =>
         resolveAttachmentNoteText(zh, key, vars);
       let merged = content;
