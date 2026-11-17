@@ -196,6 +196,8 @@ const ru = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Заполните поля формы, затем отправьте или отмените.",
+    sectionNav: "Разделы формы",
+    sectionNavErrors: "Поля для исправления: {{number}}",
     deniedDescription: "У вас нет прав на редактирование этого поля.",
     serverDefaultHint: "Задаётся автоматически при сохранении.",
     requiredForAction: "Обязательно для выполнения «{{action}}».",

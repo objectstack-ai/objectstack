@@ -191,6 +191,8 @@ const fr = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Remplissez les champs du formulaire, puis envoyez ou annulez.",
+    sectionNav: "Sections du formulaire",
+    sectionNavErrors: "Champs à corriger : {{number}}",
     deniedDescription: "Vous n'avez pas l'autorisation de modifier ce champ.",
     serverDefaultHint: "Défini automatiquement lors de l'enregistrement.",
     requiredForAction: "Requis pour exécuter « {{action}} ».",

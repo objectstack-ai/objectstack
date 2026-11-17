@@ -201,6 +201,8 @@ const zhHant = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: '填寫表單欄位,然後提交或取消。',
+    sectionNav: '表單分組',
+    sectionNavErrors: '待修正欄位：{{number}}',
     deniedDescription: '您沒有此欄位的編輯權限。',
     serverDefaultHint: '儲存時自動設定。',
     requiredForAction: '執行「{{action}}」時必填。',
