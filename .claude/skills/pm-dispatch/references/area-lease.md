@@ -33,7 +33,7 @@
   - `Pre-claim deps:` 卡点名的 `Blocked-by:`、「after #N」逐个已合;热文件照下文重叠检查。
   - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin
     测试;记录冲突,或路线改门的可见行为超出本卡裁决,同作不过。
-- 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;只 exit 1 才排队,3 补前提重跑。
+- 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;exit 1 排所列 PR 后,3 补前提重跑。
 - 认领照 `execution-duties.md` 派发原子对,同笔加 `lease:<区>`;`Branch:` 照 AGENTS.md 命名。
 - 认领后回读标签(SKILL.md 标签写四步):缺 `lease:` 或 `pm:dispatched` 即重挂;首推即开 draft PR。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
