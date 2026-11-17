@@ -2726,6 +2726,17 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
 const STICKY_OBJECT_CELL =
   'sticky left-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:hidden after:w-px after:bg-border group-data-[scrolled-x=true]/matrix:after:block';
 
+/**
+ * objectstack#34795 — the Studio matrix's bulk column, header and rows alike:
+ * pinned to the right edge of the scroll pane, so a row's "全选 · 只读 · 清空"
+ * stay in view when the matrix is wider than the pane. Its left edge is drawn
+ * by a pseudo-element, because a collapsed border does not travel with a
+ * sticky cell. A row tint is laid on as a background image, as on the Object
+ * column.
+ */
+const STICKY_BULK_CELL =
+  'sticky right-0 bg-background before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-border';
+
 /* ────────────────────────────────────────────────────────────────── */
 /* Subcomponent: PermissionTable                                      */
 /* ────────────────────────────────────────────────────────────────── */
@@ -3105,7 +3116,7 @@ function StudioObjectMatrix({
               {t(s.labelKey)}
             </th>
           ))}
-          <th className="w-56 border-l px-3 font-medium">
+          <th className={cn(STICKY_BULK_CELL, 'w-56 px-3 font-medium z-[1] bg-sidebar')}>
             <span className="sr-only">{t('perm.col.bulk')}</span>
           </th>
         </tr>
@@ -3313,7 +3324,13 @@ function StudioObjectRow({
             />
           </td>
         ))}
-        <td className="border-l px-3 py-1 align-middle">
+        <td
+          className={cn(
+            STICKY_BULK_CELL,
+            'px-3 py-1 align-middle z-[1]',
+            active && 'bg-gradient-to-r from-primary/5 to-primary/5',
+          )}
+        >
           <span className="flex items-center gap-1 whitespace-nowrap" data-testid={`perm-bulk-${o.name}`}>
             {bulk.map((b, i) => (
               <React.Fragment key={b.action}>
