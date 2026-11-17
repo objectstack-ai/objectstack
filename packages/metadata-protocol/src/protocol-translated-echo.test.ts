@@ -151,3 +151,36 @@ describe('[#29673] restoreTranslatedEchoes', () => {
         expect(restored.map((r) => r.path)).toEqual(['fields.renewed_from.relatedListTitle']);
     });
 });
+
+describe('[#33952] restoreTranslatedEchoes with the read\'s patchBundles', () => {
+    const catalog = { 'zh-CN': { objects: { crm_account: { fields: { name: { label: '名称' }, registration_number: { label: '注册号' } } } } } } as unknown as TranslationBundle;
+    const packagedBase = {
+        name: 'crm_account',
+        fields: { name: { type: 'text', label: 'Name' }, registration_number: { type: 'text', label: 'Registration No.' } },
+    };
+    const patchedBase = { ...packagedBase, fields: { ...packagedBase.fields, registration_number: { type: 'text', label: 'Tax ID' } } };
+    const patchBundles = [{
+        patchedBase,
+        bundle: { 'zh-CN': { objects: { crm_account: { fields: { registration_number: { label: '税号' } } } } } } as unknown as TranslationBundle,
+    }];
+    const body = (name: string, reg: string) => ({ name: 'crm_account', fields: { name: { type: 'text', label: name }, registration_number: { type: 'text', label: reg } } });
+
+    it('the patching package\'s translation of a patched slot is put back to the patch text, with or without a stored row carrying it', () => {
+        for (const source of [body('Name', 'Tax ID'), packagedBase]) {
+            const { item, restored } = restoreTranslatedEchoes(body('名称', '税号'), { source, bundle: catalog, packagedBase, patchBundles }) as any;
+            expect([item.fields.name.label, item.fields.registration_number.label]).toEqual(['Name', 'Tax ID']);
+            expect(restored.map((r: any) => r.path)).toContain('fields.registration_number.label');
+        }
+    });
+
+    it('a field the patch left as packaged is no patch source: a tenant\'s rename typed as the catalog string is kept', () => {
+        // The stored row renamed `name` to `Customer`; the read serves that untranslated, so `名称` is the author's.
+        const { item } = restoreTranslatedEchoes(body('名称', 'Tax ID'), { source: body('Customer', 'Tax ID'), bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.name.label).toBe('名称');
+    });
+
+    it('without patchBundles the patched slot\'s translation is no echo (the read before #33952 never served it)', () => {
+        const { item } = restoreTranslatedEchoes(body('Name', '税号'), { source: body('Name', 'Tax ID'), bundle: catalog, packagedBase }) as any;
+        expect(item.fields.registration_number.label).toBe('税号');
+    });
+});
