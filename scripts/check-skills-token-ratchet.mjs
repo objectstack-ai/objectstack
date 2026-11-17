@@ -909,7 +909,22 @@ export const CEILINGS = new Map([
   // zero headroom, ceiling +141, pinned AT the measurement. Standing ruling (2026-10-27,
   // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
   // ruling record 6513306068; seat widening record 6784270263.
-  ['skills/objectstack-data/rules/field-types.md', 3349],
+  // 3349 -> 3553 (#34201, 2026-11-16): § Lookup teaches the `lookupFilters`
+  // `{ $record: 'path' }` reference (a field of the record being edited, or one lookup
+  // hop), its six operators, the record-form-only resolution, the dropped entry on an
+  // empty value, `orEmpty: true`, and why a `$record` field is not also listed in
+  // `dependsOn`; the section's one example becomes a `price_book` lookup. +994 bytes.
+  // PAID DOWN FIRST by five same-file restatement cuts, 179 bytes (41 + 51 + 24 + 43 +
+  // 20): the `secret` row's "recommended type for credentials" (home: the `password`
+  // row, "Prefer `secret` for credentials"); the `autonumber` row's token-and-scope
+  // parenthetical, cut to a pointer, and its second `format` example (home: § Autonumber,
+  // the token table and the scope paragraph); rule 3's "Size it for readability, not as
+  // a ceiling" (home: the same rule's heading); the token table's "(minimum width)"
+  // (home: rule 3). `wc -c` = 14210 bytes -> ceil(14210 / 4) = 3553 tokens, zero
+  // headroom, ceiling +204, pinned AT the measurement. Standing ruling (2026-10-27,
+  // tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」; recognised path per
+  // ruling record 6513306068.
+  ['skills/objectstack-data/rules/field-types.md', 3553],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
   // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
