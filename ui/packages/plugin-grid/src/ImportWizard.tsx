@@ -1656,9 +1656,12 @@ const SavedMappingBar: React.FC<{
 
 /** Read-only summary of the chosen server mapping — source → target (transform)
  *  per fieldMapping entry. Names the transforms without re-running them. */
-const SavedMappingSummary: React.FC<{ mapping: SavedMapping }> = ({ mapping }) => {
+const SavedMappingSummary: React.FC<{ mapping: SavedMapping; fields: ImportWizardProps['fields'] }> = ({ mapping, fields }) => {
   const { t } = useImportTranslation();
-  const rows = summarizeSavedMapping(mapping);
+  const rows = useMemo(() => {
+    const labels = new Map(fields.map((f) => [f.name, f.label]));
+    return summarizeSavedMapping(mapping, (name) => labels.get(name) || name);
+  }, [mapping, fields]);
   return (
     <div data-testid="import-saved-mapping-summary">
       <p className="mb-2 flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
@@ -1748,7 +1751,7 @@ const StepMapping: React.FC<{
         writeModes={writeModes}
       />
       {activeMapping ? (
-        <SavedMappingSummary mapping={activeMapping} />
+        <SavedMappingSummary mapping={activeMapping} fields={fields} />
       ) : (
       <>
       <TemplateBar
@@ -2556,10 +2559,16 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
   const missingRequiredHintId = React.useId();
   const nextHeldByRequired = !mappingName && missingRequired.length > 0;
 
+  // A file loaded while a named mapping is active (Back, then a new file)
+  // keeps that mapping: the summary still shows it and the import still names
+  // it, so the preview grid is re-derived from it for the new headers, never
+  // auto-mapped — an auto-map the server will not apply left the preview
+  // blank whenever the source headers do not resemble the field names.
   const handleFileLoaded = useCallback((h: string[], r: string[][], fromCsvFile: boolean) => {
     setHeaders(h); setRows(r); setCsvFile(fromCsvFile);
-    setMapping(autoMapColumns(h, fields, r)); setCorrections({}); setStep('mapping');
-  }, [fields]);
+    setMapping(activeMapping ? savedMappingToDisplayIndexMap(activeMapping, h) : autoMapColumns(h, fields, r));
+    setCorrections({}); setStep('mapping');
+  }, [fields, activeMapping]);
 
   // cloud#797 Excel→App: when opened with a pre-loaded file (from the AI build
   // panel's attachment), parse it once and jump straight to mapping — no
