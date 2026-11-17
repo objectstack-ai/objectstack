@@ -76,10 +76,14 @@ window.matchMedia = ((query: string) => ({
   dispatchEvent: () => false,
 })) as unknown as typeof window.matchMedia;
 
-/** The language the provider resolved, read the way ChatPane reads it. */
-let probedLanguage: string | undefined;
-function LanguageProbe() {
-  probedLanguage = useObjectTranslation().language;
+/**
+ * The language the provider resolved, read the way ChatPane reads it, and
+ * reported from an effect: the lint rule forbids writing an outer variable
+ * during render, and `render()` flushes effects before it returns.
+ */
+function LanguageProbe({ onLanguage }: { onLanguage: (language: string | undefined) => void }) {
+  const { language } = useObjectTranslation();
+  React.useEffect(() => onLanguage(language), [language, onLanguage]);
   return null;
 }
 
@@ -90,10 +94,13 @@ const ZH_THREAD = [
 function renderPane(uiLocale: string, initialMessages: HydratedUIMessage[] = []) {
   cleanup();
   chatOptions = {};
-  probedLanguage = undefined;
+  let probedLanguage: string | undefined;
+  const onLanguage = (language: string | undefined) => {
+    probedLanguage = language;
+  };
   render(
     <I18nProvider config={{ defaultLanguage: uiLocale, detectBrowserLanguage: false }}>
-      <LanguageProbe />
+      <LanguageProbe onLanguage={onLanguage} />
       <MemoryRouter initialEntries={['/ai/build/conv-1']}>
         <ChatPane
           agents={[{ name: 'build', label: 'Builder' } as unknown as AgentDescriptor]}
