@@ -11,6 +11,7 @@ import {
   resolveEdgeScope,
   resolveFlowScope,
   triggerFieldRefs,
+  isPlatformField,
 } from './flow-scope';
 
 const tokens = (refs: ReadonlyArray<{ token: string }>) => refs.map((r) => r.token);
@@ -237,6 +238,42 @@ describe('triggerFieldRefs', () => {
       'record.status',
       'previous.status',
     ]);
+  });
+});
+
+// objectstack#34818 item 3 — the picker lists the business's own fields before
+// the platform's columns, and offers a labelled field BY its label (the token
+// rides beside it as the spelling).
+describe('triggerFieldRefs — business fields first, by label (objectstack#34818)', () => {
+  const fields = [
+    { name: 'organization_id', label: 'Organization', type: 'lookup' },
+    { name: 'created_at', label: 'Created at', type: 'datetime', system: true },
+    { name: 'meeting_date', label: 'Meeting date', type: 'date' },
+    { name: 'id', type: 'text' },
+    { name: 'topic', type: 'text' },
+  ];
+  const trigger = { objectName: 'o', fieldPrefix: 'record.', includePrevious: false };
+
+  it('orders business fields before platform columns, each part in catalog order', () => {
+    expect(tokens(triggerFieldRefs(trigger, fields))).toEqual([
+      'record.meeting_date',
+      'record.topic',
+      'record.organization_id',
+      'record.created_at',
+      'record.id',
+    ]);
+  });
+
+  it('names a labelled field by its label, and an unlabelled one by its token with its type', () => {
+    const refs = triggerFieldRefs(trigger, fields);
+    expect(refs.find((r) => r.token === 'record.meeting_date')).toMatchObject({ label: 'Meeting date', detail: undefined });
+    expect(refs.find((r) => r.token === 'record.topic')).toMatchObject({ label: 'record.topic', detail: 'text' });
+  });
+
+  it('isPlatformField reads the served system flag and the spec’s injected set', () => {
+    expect(isPlatformField({ name: 'created_at' })).toBe(true);
+    expect(isPlatformField({ name: 'owner_note', system: true })).toBe(true);
+    expect(isPlatformField({ name: 'meeting_date' })).toBe(false);
   });
 });
 

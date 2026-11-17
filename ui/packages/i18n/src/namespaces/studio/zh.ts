@@ -1231,6 +1231,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.flowEdge.labelHint': '例如 approve / reject',
   'engine.inspector.flowEdge.condition': '条件',
   'engine.inspector.flowEdge.conditionHint': 'CEL 表达式 —— 为真时走此连线',
+  'engine.inspector.flowEdge.conditionRows': '按字段填写',
+  'engine.inspector.flowEdge.conditionFormula': '公式',
+  'engine.inspector.flowEdge.conditionAdd': '+ 添加条件…',
+  'engine.inspector.flowEdge.conditionRowRefused': '有一行无法写成这条连线的条件，因此没有保存。请修改这一行，或切换到「公式」。',
+  'engine.inspector.flowEdge.conditionTooComplex': '这个条件超出了按字段填写能表示的范围，请继续用公式编辑。',
   'engine.inspector.flowEdge.isDefault': '默认分支（else）',
   'engine.inspector.flowEdge.hint': '当此连线的分支标签被选中、或其条件成立时，引擎会走这条连线。其余都不匹配时走默认分支。',
   'engine.inspector.flowEdge.remove': '删除连线',
@@ -3639,6 +3644,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowCanvas.edge.backEdge': '{source} ↩ {target}（回边）',
   'engine.flowCanvas.summary.branches': '{count} 个分支',
   'engine.flowCanvas.summary.approversOne': '{count} 位审批人',
+  'engine.flowCanvas.approvedEnd': '已通过',
+  'engine.flowCanvas.rejectedEnd': '已驳回',
   'engine.flowCanvas.summary.approversOther': '{count} 位审批人',
   'engine.flowCanvas.summary.unanimous': '全员',
   'engine.flowCanvas.summary.code': '代码',
@@ -3940,6 +3947,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.flowProblems.sourceExpression': '表达式',
   // objectui#11772 — one extra copy of a connection (see the en row).
   'engine.flowProblems.repeatedEdge': '连线 “{sourceName}”（{source}）→ “{targetName}”（{target}）重复;流程会为每一条副本各运行一次 “{targetName}”。请删除这条副本。',
+  'engine.flowProblems.approvalMissingOutcome': '审批「{name}」没有「{outcome}」出边，做出这个决定后流程无处可走。请从它连出一条连线，并把审批分支设为「{outcome}」。',
   // objectui#11905 — a refused connection (see the en rows).
   'engine.flowProblems.connectRefused.missingSource': '无法连线：此流程中没有节点 “{source}”。',
   'engine.flowProblems.connectRefused.missingTarget': '无法连线：此流程中没有节点 “{target}”。',

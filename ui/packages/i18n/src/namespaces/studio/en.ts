@@ -1390,6 +1390,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowEdge.labelHint': 'e.g. approve / reject',
   'engine.inspector.flowEdge.condition': 'Condition',
   'engine.inspector.flowEdge.conditionHint': 'CEL expression — taken when it evaluates true',
+  'engine.inspector.flowEdge.conditionRows': 'By field',
+  'engine.inspector.flowEdge.conditionFormula': 'Formula',
+  'engine.inspector.flowEdge.conditionAdd': '+ Add a condition…',
+  'engine.inspector.flowEdge.conditionRowRefused': "A row here cannot be written as this connection's condition, so nothing was saved. Change the row, or switch to Formula.",
+  'engine.inspector.flowEdge.conditionTooComplex': 'This condition goes beyond what the field rows can show. Keep editing it as a formula.',
   'engine.inspector.flowEdge.isDefault': 'Default branch (else)',
   'engine.inspector.flowEdge.hint': 'The engine follows this connection when its branch label is selected or its condition is met. The default branch is taken when no other matches.',
   'engine.inspector.flowEdge.remove': 'Remove connection',
@@ -4037,6 +4042,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.flowCanvas.edge.backEdge': '{source} ↩ {target} (back-edge)',
   'engine.flowCanvas.summary.branches': '{count} branches',
   'engine.flowCanvas.summary.approversOne': '{count} approver',
+  'engine.flowCanvas.approvedEnd': 'Approved',
+  'engine.flowCanvas.rejectedEnd': 'Rejected',
   'engine.flowCanvas.summary.approversOther': '{count} approvers',
   'engine.flowCanvas.summary.unanimous': 'all',
   'engine.flowCanvas.summary.code': 'code',
@@ -4391,6 +4398,7 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11772 — one extra copy of a connection (`edgeRouteKey`): the
   // engine follows every copy, so the target runs once per copy.
   'engine.flowProblems.repeatedEdge': 'Connection "{sourceName}" ({source}) → "{targetName}" ({target}) is repeated; the flow runs "{targetName}" once for each copy. Remove this copy.',
+  'engine.flowProblems.approvalMissingOutcome': 'Approval "{name}" has no "{outcome}" connection, so after that decision the flow has nowhere to go. Draw a connection out of it and set its approval branch to "{outcome}".',
   // objectui#11905 — why a connection between two existing nodes is refused,
   // shown by both doors that draw one: the canvas's connect handle and the
   // connection inspector's From / To (`edgeConnectionRefusal`).

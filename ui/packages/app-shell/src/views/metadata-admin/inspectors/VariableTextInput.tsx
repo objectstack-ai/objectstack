@@ -217,9 +217,24 @@ export function VariableTextInput({
                         onSelect={() => insert(ref.token)}
                         className="flex items-center justify-between gap-2"
                       >
-                        <span className="truncate font-mono text-xs">{formatToken(ref.token, mode)}</span>
-                        {ref.detail && (
-                          <span className="shrink-0 truncate text-[10px] text-muted-foreground">{ref.detail}</span>
+                        {/* objectstack#34818 item 3 — a reference offered BY a
+                            name (a field's label) shows that name as its main
+                            text and its spelling muted beside it; one with no
+                            name of its own shows the spelling, as it did. */}
+                        {ref.label && ref.label !== ref.token ? (
+                          <>
+                            <span className="truncate text-xs">{ref.label}</span>
+                            <span className="shrink-0 truncate font-mono text-[10px] text-muted-foreground">
+                              {formatToken(ref.token, mode)}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="truncate font-mono text-xs">{formatToken(ref.token, mode)}</span>
+                            {ref.detail && (
+                              <span className="shrink-0 truncate text-[10px] text-muted-foreground">{ref.detail}</span>
+                            )}
+                          </>
                         )}
                       </CommandItem>
                     ))}
