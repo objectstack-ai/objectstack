@@ -30,6 +30,9 @@ import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-li
 import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 import { PageHeaderPhoneContext, type PageHeaderPhoneFace } from '../index';
+// `react-page.tsx` (reached through `../index`) loads this dynamically; paying
+// its transform here keeps it out of any test's clocked window.
+import '@object-ui/react-runtime';
 
 function PageHeader({ schema }: { schema: unknown }) {
   const Component = ComponentRegistry.get('page:header');
