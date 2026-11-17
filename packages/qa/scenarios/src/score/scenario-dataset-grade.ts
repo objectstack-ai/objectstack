@@ -138,11 +138,12 @@ const OPTION_COUNT = new RegExp(
 const YEAR_FOLLOWERS = String.raw`(?:sales|earnings|revenues|profits|results|figures|numbers|totals|margins|costs|expenses|this|its|his|was|has|is|as|thus|plus|versus|across)`;
 
 /**
- * The year of a date (`through 2026-11-17`, `since 2026/11/17`) is not a year
- * written alone: left whole, the date is skipped by `numbersIn` as one; with
- * its year cut away, the month and day it leaves (`-11-17`) read as figures.
+ * The year of a date (`through 2026-11-17`, `in 2026-01-01T09:30Z`, `since
+ * 2026/11/17`) is not a year written alone: left whole, the date is skipped
+ * by `numbersIn` as one; with its year cut away, the month and day it leaves
+ * (`-11-17`) read as figures.
  */
-const NOT_A_DATE_YEAR = String.raw`(?!-\d{2}-\d{2}\b|/\d{1,2}/\d{1,2}\b)`;
+const NOT_A_DATE_YEAR = String.raw`(?!-\d{2}-\d{2}(?!\d)|/\d{1,2}/\d{1,2}(?!\d))`;
 
 /**
  * A year written alone (`revenue in 2025?`, 「2025 年的营收」): a 19xx/20xx

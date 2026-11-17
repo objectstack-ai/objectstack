@@ -139,12 +139,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   never its figure (`gradeDatasetQuestion`; card-level `gradeCardDatasetQuestion`), by the grader its expected route
   names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
   arguments the model sent decide nothing), `asked-back` (the reply asks, names every candidate by a word other than
-  the asked one, and states no figure; an option list's numbering, a count of the options it offers — `2 metrics`,
-  「2 个指标」 — and a year a time word or 年 marks are no figure, unless a counted noun follows it: `for 2031
-  orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
+  the asked one, and states no figure; an option list's numbering, an option named by its place — `option 2`, `the
+  3rd one`, 「第 1 个」 — a count of the options it offers — `2 metrics`, 「2 个指标」 — a date, and a year a time word
+  or 年 marks are no figure, unless a counted noun follows it: `for 2031 orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
   says the figure is not a governed metric: a closed word list, English and Chinese, in `labelsFallback`). Its notes
   say what the turn did on the way, ungraded: a loaded skill, no `list_datasets` call, the `candidates` a
-  `list_datasets` answer offered.
+  `list_datasets` answer offered. A grader whose rule has changed stamps its grade with `revision`
+  (`DATASET_GRADER_REVISIONS`, which says what each revision changed; absent ⇒ revision 1): `asked-back` is at 2.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -402,8 +403,11 @@ npx @objectstack/scenarios help                                      # the comma
 - **Dataset questions** (`orchestrate.ts`, `scorecard.ts`): a card's `run.datasetQuestions` are asked after its
   questions and before its operations, as the admin, each a fresh session honouring `--ask-repeats`, and graded by
   `scenario-dataset-grade.ts`. The record keeps each on the half (`datasetQuestions`: the grade, the turn), and the
-  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back 1/2 ·
-  fallback-labelled 1/1)`) only on a card that declares them. A run on a build whose app serves no datasets answers
+  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back rev 2 1/2 ·
+  fallback-labelled 1/1)`) only on a card that declares them. A grader graded past its first rule revision is named
+  with it (`rev 2`; the tally's `byGrader` entry carries `revision`), so a round graded before a rule change, which
+  shows none, is not read like for like with one after; a replay (`--driver recorded:F`) grades with the rules as
+  they are now. A run on a build whose app serves no datasets answers
   them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
   replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
   records that ask as not measured, never as failed.
