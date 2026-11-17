@@ -740,8 +740,8 @@ type WarnSink = { warn?: (message: string) => void };
  * (ADR-0049) for `get`, the read `GET /data/{target}/{id}` performs and the
  * operation the data door's `$expand` and the dataset door's labels ask of the
  * same target. It takes no caller: it judges the target's declaration, and
- * the read that follows is scoped by whichever reader `resolveLookupTitles` is
- * handed (the system for a summary's titles, the writer for a record label).
+ * the read that follows is in the WRITER's scope (see `resolveLookupTitles`),
+ * for a summary's titles and a record label alike.
  *
  * A refused target is not read, so the summary names its records by their
  * stored ids, the answer an unresolvable reference already gets. A declaration
@@ -802,7 +802,8 @@ function referenceIdsOf(value: any): string[] {
  * (`renderMilestoneSummary`), each from its own read plan.
  *
  * An id with no entry in the map — record deleted, object unregistered, title
- * field unresolvable — falls back to the raw id, which is what this function
+ * field unresolvable, or a record or title column the writer may not read —
+ * falls back to the raw id, which is what this function
  * returned before the branch existed. The change is therefore restore-invariant:
  * it can only replace an id with a title, never a title with an id.
  *
@@ -1808,18 +1809,22 @@ export function installAuditWriters(
    *
    * ## Whose read it is
    *
-   * `reader` scopes the read and is the caller's choice. The two summary
-   * branches hand it `api.sudo()`, as they always have. The record's own label
+   * The WRITER's: an activity row names a referenced record by a title the
+   * writer may read, else by its id. Every caller — the record's own label
    * ({@link planLabelLookupRead}, an object whose `nameField` is a reference)
-   * hands it the hook's own `api`, the WRITER's scope: the label is the title
-   * the record header shows a reader who may read the target, and a writer the
-   * security layer refuses the target, or serves it without its title column,
-   * gets no title it could not have read itself — the refusal throws into the
-   * catch below, the stripped column reads as no title, and the label keeps
-   * the stored value.
+   * and both summary branches — hands `writerApi` the hook's own `api`, the
+   * scope the write itself ran in, ⛔ never an elevated one. A title is the
+   * text the record header shows a reader who may read the target, so a
+   * writer the security layer refuses the target (its object, or the row by
+   * its row scope), or serves it without its title column, writes no title it
+   * could not have read itself: a refusal throws into the catch below, a row
+   * left out of the result is an id with no title, and a stripped column reads
+   * as no title. Each of those ids keeps its stored value, per id, so one read
+   * can title the ids the writer may read and leave the rest as ids. A system
+   * write reads as the system, which is the scope it wrote in.
    */
   const resolveLookupTitles = async (
-    reader: any,
+    writerApi: any,
     plan: Map<string, Set<string>>,
   ): Promise<Map<string, Map<string, string>> | undefined> => {
     if (plan.size === 0) return undefined;
@@ -1830,7 +1835,7 @@ export function installAuditWriters(
       if (!titleField) continue;
       const ids = Array.from(idSet);
       try {
-        const rows: any[] = await reader.object(objectName).find({
+        const rows: any[] = await writerApi.object(objectName).find({
           where: { id: { $in: ids } },
           fields: ['id', titleField],
           limit: ids.length,
@@ -2478,9 +2483,11 @@ export function installAuditWriters(
         //
         // The plan reads the same MASKED after-view the interpolation renders
         // from, so a credential field can no more become a read key here than
-        // it can reach the summary text.
+        // it can reach the summary text. The titles are read as the WRITER
+        // (see `resolveLookupTitles`): a token names a title the writer may
+        // read, else the stored id.
         const lookupTitles = await resolveLookupTitles(
-          api.sudo(),
+          api,
           planMilestoneTokenReads(milestone.template, summaryFields, afterView),
         );
         const rendered = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
@@ -2494,9 +2501,11 @@ export function installAuditWriters(
       } else {
         // [#7230] The read plan is built from the SAME masked views the summary
         // renders, and only reached once a milestone has declined — a write
-        // that changes no tracked reference field issues no read at all.
+        // that changes no tracked reference field issues no read at all. The
+        // titles are read as the WRITER (see `resolveLookupTitles`): each side
+        // of a change names a title the writer may read, else the stored id.
         const lookupTitles = await resolveLookupTitles(
-          api.sudo(),
+          api,
           planTrackedLookupReads(summaryFields, oldValue, newValue),
         );
         const tracked = renderTrackedChangeSummary(
