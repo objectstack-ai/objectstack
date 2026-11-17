@@ -8,7 +8,7 @@
 
 feat(hooks): a hook writes the sentences it declares in the organization's language
 
-Clause-②: no
+Clause-②: yes (widening) — a hook may now declare `texts` and its code may call `ctx.text`; translation bundles accept `hooks.<hook>.texts.<key>.message`; `@objectstack/core` exports `readOrganizationTextLocale`. Nothing that was accepted before is refused
 Metadata-protocol: added
 Skills-docs: follow-up #34546
 
