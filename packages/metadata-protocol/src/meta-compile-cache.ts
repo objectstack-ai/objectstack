@@ -79,9 +79,16 @@
  * bound while it runs wait for it, and its failure reaches all of them. A
  * bucket opened by a counter move takes no reading: its first bound ends at
  * a confirmation that drops its entries and takes the reading later bounds
- * renew on, so a local change costs no store read. Opening it retires the
- * overlay row cache, as a confirmation does, so its entries never carry
- * rows older than the bucket.
+ * renew on, so a local change costs no store read. Its first bound ends no
+ * later than one bound after the overlay row cache's current generation
+ * began (`readOverlayCacheGenerationSince`): every row set that cache holds
+ * was read since then, so no entry carries a row more than one bound old,
+ * and the row sets are kept. When that generation began more than a bound
+ * ago, opening the bucket retires the row cache, as a confirmation does. A
+ * counter move cannot make a stored row stale, so keeping the rows is what
+ * stops a list read that registers what is already registered (it moves
+ * `registry.revision`) from sending the list and item reads after it to
+ * the store (#34554).
  *
  * ⛔ A renewal is a claim about what was looked at (ADR-0156 D5). When the
  * confirmation cannot read one of those (the store cannot be read, the
@@ -125,7 +132,7 @@
 
 import { createHash } from 'node:crypto';
 import { isMissingTableError } from '@objectstack/metadata/errors';
-import { readOverlayCacheGeneration, retireMetaOverlayCache } from './meta-overlay-cache.js';
+import { readOverlayCacheGeneration, readOverlayCacheGenerationSince, retireMetaOverlayCache } from './meta-overlay-cache.js';
 import { metadataReadFailureError } from './protocol-client-failures.js';
 import { servedRowChangedAtOf, withServedRowChangedAt } from './served-row-changed-at.js';
 
@@ -419,13 +426,25 @@ export async function readThroughMetaCompileCache<T>(
     if (bucket === undefined || !sameStamp(bucket.stamp, stamp)) {
         // A new bucket opens its first bound without a reading: the first
         // confirmation drops its entries and takes the reading later bounds
-        // are renewed on, so a counter move costs no store read. It retires
-        // the overlay row cache first, as a confirmation does: what it
-        // compiles reads rows from now on, never rows that cache filled
-        // before a peer's write, so its entries are at most one bound old.
-        const overlay = retireMetaOverlayCache(engine);
-        if (overlay !== undefined) stamp = { ...stamp, overlay };
-        bucket = { stamp, mark: undefined, confirmedUntil: Date.now() + ttlMs, confirming: undefined, entries: new Map() };
+        // are renewed on, so a counter move costs no store read. What it
+        // compiles must carry no row more than one bound old. Every row set
+        // the overlay row cache holds was read since its generation began, so
+        // the bound ends one bound after that and the rows are kept; when
+        // that is already past, the row cache is retired, as a confirmation
+        // retires it, and the bound is a full one from now. [#34554] A counter
+        // move never makes a stored row stale: retiring here on every move
+        // sent the list read and the item reads after each hydration to the
+        // store.
+        const now = Date.now();
+        const since = readOverlayCacheGenerationSince(engine);
+        let confirmedUntil = now + ttlMs;
+        if (since !== undefined && since + ttlMs > now) {
+            confirmedUntil = since + ttlMs;
+        } else {
+            const overlay = retireMetaOverlayCache(engine);
+            if (overlay !== undefined) stamp = { ...stamp, overlay };
+        }
+        bucket = { stamp, mark: undefined, confirmedUntil, confirming: undefined, entries: new Map() };
         buckets.set(engine, bucket);
     }
     if (Date.now() >= bucket.confirmedUntil) {
