@@ -130,9 +130,11 @@ const ASSIGNMENT_RULE_OBJECT = 'sys_assignment_rule';
 const ASSIGNMENT_RULE_TYPE = 'assignment_rule';
 /**
  * How many objects' "is a record sitting in a queue?" reads run at once in
- * {@link OwnershipQueueService.objectsUsingQueues}: each is one indexed
- * `limit 1` read, bounded so a stack with many owned objects does not take
- * every connection of the pool for one session payload.
+ * {@link OwnershipQueueService.objectsUsingQueues}: each is one `limit 1`
+ * read (the `queue` column carries no index, so a read that finds nothing can
+ * scan the organization's rows of that object), bounded so a stack with many
+ * owned objects does not take every connection of the pool for one session
+ * payload.
  */
 const SITTING_READ_CONCURRENCY = 8;
 
@@ -427,34 +429,41 @@ export class OwnershipQueueService implements IOwnershipQueueService {
   async objectsUsingQueues(organizationId: string | null): Promise<string[]> {
     const engine = this.engine();
     if (!engine) return [];
-    const candidates = new Set(this.queueColumnObjects(engine));
+    const candidates = this.queueColumnObjects(engine);
     if (candidates.size === 0) return [];
     const out = new Set<string>();
     for (const object of await this.routedObjects(engine, organizationId)) {
       if (candidates.has(object)) out.add(object);
     }
-    const remaining = [...candidates].filter((object) => !out.has(object));
+    const remaining = [...candidates.keys()].filter((object) => !out.has(object));
     for (let i = 0; i < remaining.length; i += SITTING_READ_CONCURRENCY) {
       const batch = remaining.slice(i, i + SITTING_READ_CONCURRENCY);
-      const verdicts = await Promise.all(batch.map((object) => this.hasSittingRecord(engine, object, organizationId)));
+      const verdicts = await Promise.all(batch.map((object) => this.hasSittingRecord(engine, object, candidates.get(object) === true ? organizationId : null)));
       batch.forEach((object, k) => { if (verdicts[k]) out.add(object); });
     }
     return [...out].sort();
   }
 
-  /** The registered objects that carry the `queue` column with storage behind it. */
-  private queueColumnObjects(engine: OwnershipQueueEngine): string[] {
+  /**
+   * The registered objects that carry the `queue` column with storage behind
+   * it, each mapped to whether it also carries the tenant column
+   * (`organization_id`, the platform's or the author's). An object without it
+   * is read unscoped: filtering on a column the table lacks is refused by the
+   * driver, which would hide its queue filter for good.
+   */
+  private queueColumnObjects(engine: OwnershipQueueEngine): Map<string, boolean> {
     let all: unknown[] | undefined;
     try {
       all = engine.registry?.getAllObjects?.();
     } catch (err: any) {
       this.warnOnce('registry::objects', '[queue] the object registry could not be listed — no object is reported as using queues', { error: err?.message });
-      return [];
+      return new Map();
     }
-    const out: string[] = [];
+    const out = new Map<string, boolean>();
     for (const def of Array.isArray(all) ? all : []) {
       if (!isRecord(def) || typeof def.name !== 'string' || def.name === '') continue;
-      if (resolveInjectedColumnProvenance(def, 'queue') === 'injected-provisioned') out.push(def.name);
+      if (resolveInjectedColumnProvenance(def, 'queue') !== 'injected-provisioned') continue;
+      out.set(def.name, resolveInjectedColumnProvenance(def, 'organization_id') !== 'absent');
     }
     return out;
   }
@@ -504,7 +513,11 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     return out;
   }
 
-  /** Is a record of `object` in the organization sitting in a queue now: no owner, a queue set? */
+  /**
+   * Is a record of `object` sitting in a queue now: no owner, a queue set? In
+   * `organizationId` when given; `null` reads the object unscoped (no
+   * organization, or an object with no tenant column).
+   */
   private async hasSittingRecord(engine: OwnershipQueueEngine, object: string, organizationId: string | null): Promise<boolean> {
     try {
       const rows = await engine.find(object, {

@@ -927,6 +927,7 @@ describe('[#34602] OwnershipQueueService.objectsUsingQueues — the per-object q
     ledger?: Row[];
     withRuleObject?: boolean;
     failOn?: string[];
+    objects?: Row[];
   } = {}) {
     const engine = makeEngine({
       tables: {
@@ -949,7 +950,7 @@ describe('[#34602] OwnershipQueueService.objectsUsingQueues — the per-object q
       registry: {
         ...engine.registry,
         listItems: (type: string) => (type === 'assignment_rule' ? (opts.declaredRules ?? []) : listItems(type)),
-        getAllObjects: () => OBJECTS,
+        getAllObjects: () => opts.objects ?? OBJECTS,
       },
     });
   }
@@ -1024,6 +1025,24 @@ describe('[#34602] OwnershipQueueService.objectsUsingQueues — the per-object q
     const engine = engineWith({ withRuleObject: false });
     expect(await service(engine).objectsUsingQueues('org_a')).toEqual([]);
     expect(engine.reads).not.toContain('sys_assignment_rule');
+  });
+
+  it('an object with the queue column but no tenant column is read without an organization filter', async () => {
+    // `systemFields.tenant: false` keeps owner_id and queue but no organization_id: a filter on that
+    // column would be refused by a SQL driver, and the object's toggle would stay hidden for good.
+    const objects = [...OBJECTS, { name: 'glb_notice', systemFields: { tenant: false }, fields: {} }];
+    const rows = { glb_notice: [{ id: 'n1', owner_id: null, queue: 'notice_desk' }] };
+    const engine = engineWith({ rows, objects });
+    const wheres: Record<string, unknown>[] = [];
+    const find = engine.find;
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'glb_notice' || object === 'crm_case') wheres.push({ object, ...(options?.where ?? {}) });
+      return find(object, options);
+    };
+    expect(await service(engine).objectsUsingQueues('org_a')).toEqual(['glb_notice']);
+    expect(wheres.find((w) => w.object === 'glb_notice')).not.toHaveProperty('organization_id');
+    // A tenant-scoped object in the same call still reads in its organization.
+    expect(wheres.find((w) => w.object === 'crm_case')).toHaveProperty('organization_id', 'org_a');
   });
 
   it('a failed read leaves that object out, logged once — the other objects still answer', async () => {
