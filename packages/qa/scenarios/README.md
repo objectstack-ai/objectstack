@@ -497,7 +497,10 @@ npx @objectstack/scenarios help                                      # the comma
   A restore puts a removed seeded row back the same way. A lookup's target loads before its referrer. Where the card's declared
   lookups lead back to where they start — `department.manager → employee` with `employee.department → department`, or a
   self-lookup naming a later row — the seed loads in two passes: every row first with each lookup naming a row not in
-  yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
+  yet left out, then one update per row sets those (`seed.secondPass` in the record). That second pass sets only these
+  deferred cycle lookups: `data[]` carries a persona's user id (`owner_id`, a `user` field) as sent, and patching it
+  again would put a user-door update, with its update triggers and hooks, back on every seed row.
+  The side that waits is one the
   build left optional; a build that makes every side of a cycle `required` cannot be seeded, which the data contract
   states and the scorecard reports as a Build finding naming the cycle (the seed is still sent, so the record holds
   the app's own refusals). A refused row takes out what it feeds (`seedDependence` in `orchestrate.ts`): with its
