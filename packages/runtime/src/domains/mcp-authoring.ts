@@ -83,7 +83,8 @@ import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 export const OPEN_AUTHORING_READ_TOOL_NAMES = ['list_metadata_items', 'get_metadata_item', 'list_drafts'] as const;
 
 const PERMISSION_DENIED: ErrorCode = 'PERMISSION_DENIED';
-const INVALID_REQUEST: ErrorCode = 'INVALID_REQUEST';
+/** A malformed argument this door judges itself; a protocol refusal keeps its own code. */
+const VALIDATION_ERROR: ErrorCode = 'VALIDATION_ERROR';
 const RESOURCE_NOT_FOUND: ErrorCode = 'RESOURCE_NOT_FOUND';
 const SERVICE_UNAVAILABLE: ErrorCode = 'SERVICE_UNAVAILABLE';
 const INTERNAL_ERROR: ErrorCode = 'INTERNAL_ERROR';
@@ -317,7 +318,7 @@ export function createOpenAuthoringRegistry(opts: {
             const input = (toolCall.input && typeof toolCall.input === 'object' ? toolCall.input : {}) as Record<string, unknown>;
             const state = input.state;
             if (state !== undefined && !STATES.includes(state as ReadState)) {
-                return refuse(INVALID_REQUEST, '`state` is `active` or `draft`.', 400);
+                return refuse(VALIDATION_ERROR, '`state` is `active` or `draft`.', 400);
             }
 
             const protocol = await getProtocol();
@@ -326,7 +327,7 @@ export function createOpenAuthoringRegistry(opts: {
                     case 'list_metadata_items': {
                         if (typeof protocol?.getMetaItems !== 'function') return unavailable();
                         const type = requiredString(input.type);
-                        if (!type) return refuse(INVALID_REQUEST, 'Name the metadata type as `type`.', 400);
+                        if (!type) return refuse(VALIDATION_ERROR, 'Name the metadata type as `type`.', 400);
                         // A type the platform does not declare and this deployment holds
                         // nothing under is refused, as the `/meta` list refuses it, rather
                         // than answered an empty list.
@@ -344,7 +345,7 @@ export function createOpenAuthoringRegistry(opts: {
                         if (typeof protocol?.getMetaItem !== 'function') return unavailable();
                         const type = requiredString(input.type);
                         const name = requiredString(input.name);
-                        if (!type || !name) return refuse(INVALID_REQUEST, 'Name the item as `type` and `name`.', 400);
+                        if (!type || !name) return refuse(VALIDATION_ERROR, 'Name the item as `type` and `name`.', 400);
                         const read = await protocol.getMetaItem({
                             type,
                             name,
@@ -366,7 +367,7 @@ export function createOpenAuthoringRegistry(opts: {
                     case 'list_drafts': {
                         if (typeof protocol?.listDrafts !== 'function') return unavailable();
                         const pkg = input.package === undefined ? undefined : requiredString(input.package);
-                        if (input.package !== undefined && !pkg) return refuse(INVALID_REQUEST, '`package` is a package id.', 400);
+                        if (input.package !== undefined && !pkg) return refuse(VALIDATION_ERROR, '`package` is a package id.', 400);
                         // ADR-0131 D6: no organization, as the `/meta` drafts list; every
                         // draft is saved environment-wide.
                         const listed = await protocol.listDrafts(pkg ? { packageId: pkg } : {});
@@ -374,7 +375,7 @@ export function createOpenAuthoringRegistry(opts: {
                         return answer({ count: drafts.length, drafts });
                     }
                     default:
-                        return refuse(INVALID_REQUEST, `'${toolCall.toolName}' is not one of this registry's tools.`, 400);
+                        return refuse(VALIDATION_ERROR, `'${toolCall.toolName}' is not one of this registry's tools.`, 400);
                 }
             } catch (error) {
                 return refusalFromThrown(error);
