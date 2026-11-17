@@ -143,15 +143,25 @@ describe('the request page moves on after a decision (objectstack#34586)', () =>
     rerender(<Harness entry={fromQueue('r1', ['r1', 'r2'])} rows={{ ...rows, r1: { id: 'r1', status: 'approved', viewer: { can_act: false } } }} />);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(where()).toBe(pageOf('r1'));
-    // Turning it back on later moves nothing: the decision was seen while it was off.
-    fireEvent.click(box);
-    expect(box).toHaveAttribute('aria-checked', 'true');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(where()).toBe(pageOf('r1'));
     unmount();
 
     render(<Harness entry={fromQueue('r2', ['r1', 'r2'])} rows={rows} />);
     expect(within(screen.getByTestId('approval-queue-open-next')).getByRole('checkbox')).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('turning the switch back on after a decision it was off for moves nothing', async () => {
+    const rows = { r1: pending('r1'), r2: pending('r2') };
+    const { rerender } = render(<Harness entry={fromQueue('r1', ['r1', 'r2'])} rows={rows} />);
+    const box = within(screen.getByTestId('approval-queue-open-next')).getByRole('checkbox');
+    fireEvent.click(box);
+    rerender(<Harness entry={fromQueue('r1', ['r1', 'r2'])} rows={{ ...rows, r1: { id: 'r1', status: 'approved', viewer: { can_act: false } } }} />);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(where()).toBe(pageOf('r1'));
+
+    fireEvent.click(box);
+    expect(box).toHaveAttribute('aria-checked', 'true');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(where()).toBe(pageOf('r1'));
   });
 
   it('an action that leaves the request in the reader queue (more info asked) does not move', async () => {
