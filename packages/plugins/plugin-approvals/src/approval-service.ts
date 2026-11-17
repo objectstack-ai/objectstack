@@ -441,9 +441,16 @@ export interface ApprovalResumeSurface {
    * run a caller of `decide`/`resumeRecordedOutcome` was resuming. Optional:
    * an engine that predates this member simply never reports a bubbled
    * strand, exactly as before this card.
+   *
+   * [#34638] `innerRefusal` / `userMessage` are the refusal the PARENT's
+   * downstream step met, when it met one — carried onto
+   * {@link ResumeFailureReport} so the strand is told with its reason.
    */
-  takeSubflowParentStrand?(childRunId: string): { runId: string; repairable: boolean; error: string } | undefined;
+  takeSubflowParentStrand?(childRunId: string): SubflowParentStrandReport | undefined;
 }
+
+/** The subflow-parent strand {@link ApprovalResumeSurface.takeSubflowParentStrand} hands back. */
+type SubflowParentStrandReport = { runId: string; repairable: boolean; error: string } & ResumeRefusal;
 
 /** A run parked at a `map` node on one item, as {@link ApprovalResumeSurface.suspendedMapParentOf} answers it. */
 type BatchParent = { runId: string; flowName: string; nodeId: string; correlation?: string };
@@ -5928,7 +5935,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private async serviceResume(
     runId: string,
     signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string; impersonatedBy?: string },
-  ): Promise<{ runId: string; repairable: boolean; error: string } | undefined> {
+  ): Promise<SubflowParentStrandReport | undefined> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
     const reported = result as
       | ({ success?: boolean; code?: string; error?: string; status?: string } & ResumeRefusal)
@@ -5987,10 +5994,31 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * (#34579). A third sibling of {@link resumeCodeOf} and
    * {@link resumeStatusOf}: `code` says why a resume was refused, `status`
    * how the run ended, and this what the continuation's own data call was
-   * refused with. Only the stranded-decision envelope reads it.
+   * refused with. Read by the stranded-decision envelope and, on the success
+   * channel, by the recall door's own strand report (#34638).
    */
   private static resumeRefusalOf(err: unknown): ResumeRefusal {
     return (err as { resumeRefusal?: ResumeRefusal } | undefined)?.resumeRefusal ?? {};
+  }
+
+  /**
+   * [#34638] The {@link ResumeFailureReport} for a subflow PARENT that
+   * stranded behind a resume this door issued — built in ONE place for the
+   * three doors that read such a strand (`resumeRecordedOutcome`, `recall`,
+   * `resumeBatchOfRecalledItem`), so they cannot drift on what the report
+   * carries: the parent's `runId` and `repairable`, and the refusal the
+   * parent's downstream step met when it met one (`{}` otherwise, so a
+   * fault-stranded parent reports neither member).
+   */
+  private static parentStrandReport(strand: SubflowParentStrandReport): ResumeFailureReport {
+    return {
+      code: 'RESUME_FAILED',
+      runId: strand.runId,
+      status: 'stranded',
+      repairable: strand.repairable,
+      ...(strand.innerRefusal !== undefined ? { innerRefusal: strand.innerRefusal } : {}),
+      ...(strand.userMessage !== undefined ? { userMessage: strand.userMessage } : {}),
+    };
   }
 
   /**
@@ -6247,12 +6275,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
             `RESUME_FAILED: ${what} was recorded on request ${requestId} and its own flow run '${runId}' ` +
             `resumed, but the subflow parent above it — run '${bubbleStrand.runId}' — consumed its ` +
             `suspension and is now stranded: ${bubbleStrand.error}`,
-          resumeFailure: {
-            code: 'RESUME_FAILED',
-            runId: bubbleStrand.runId,
-            status: 'stranded',
-            repairable: bubbleStrand.repairable,
-          },
+          resumeFailure: ApprovalService.parentStrandReport(bubbleStrand),
         };
       }
       return { resumed: true };
@@ -6673,12 +6696,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
               `RESUME_FAILED: the recall was recorded on request ${requestId} and its own flow run ` +
               `'${runId}' resumed, but the subflow parent above it — run '${bubbleStrand.runId}' — ` +
               `consumed its suspension and is now stranded: ${bubbleStrand.error}`;
-            resumeFailure = {
-              code: 'RESUME_FAILED',
-              runId: bubbleStrand.runId,
-              status: 'stranded',
-              repairable: bubbleStrand.repairable,
-            };
+            resumeFailure = ApprovalService.parentStrandReport(bubbleStrand);
           }
         } catch (err: any) {
           resumeError = err?.message ?? String(err);
@@ -6706,7 +6724,14 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
             // legitimate by the member's own docblock ("An absent member means
             // no report was made, never that no run is stranded") and is what
             // `resumeRecordedOutcome` answers on those same exits.
-            resumeFailure = { code: 'RESUME_FAILED', runId, status: 'stranded', repairable: true };
+            //
+            // [#34638] …and it tells the refusal the continuation met, when
+            // it met one — the pair the decision doors' thrown envelope
+            // carries since #34579, under the same names; `{}` for a fault.
+            resumeFailure = {
+              code: 'RESUME_FAILED', runId, status: 'stranded', repairable: true,
+              ...ApprovalService.resumeRefusalOf(err),
+            };
             await this.journalStrandedContinuation(requestId, {
               branchLabel: APPROVAL_BRANCH_LABELS.reject,
               output: { decision: 'recall', requestId },
@@ -6800,7 +6825,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           `RESUME_FAILED: the recall was recorded on request ${requestId} and cancelled its run '${itemRunId}', ` +
           `and the batch run '${batchRunId}' above it resumed, but the subflow parent above that — run ` +
           `'${bubbleStrand.runId}' — consumed its suspension and is now stranded: ${bubbleStrand.error}`,
-        resumeFailure: { code: 'RESUME_FAILED', runId: bubbleStrand.runId, status: 'stranded', repairable: bubbleStrand.repairable },
+        resumeFailure: ApprovalService.parentStrandReport(bubbleStrand),
       };
     } catch (err: any) {
       const message = err?.message ?? String(err);
@@ -6812,7 +6837,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         resumeError: `the recall was recorded on request ${requestId} and cancelled its run '${itemRunId}', but ${at} failed: ${message}`,
         // Only the engine's own stranded exit is told in fields, as in `recall`.
         ...(batchRunId && ApprovalService.resumeStatusOf(err) === 'stranded'
-          ? { resumeFailure: { code: 'RESUME_FAILED' as const, runId: batchRunId, status: 'stranded' as const, repairable: true } }
+          ? {
+            resumeFailure: {
+              code: 'RESUME_FAILED' as const, runId: batchRunId, status: 'stranded' as const, repairable: true,
+              ...ApprovalService.resumeRefusalOf(err),
+            },
+          }
           : {}),
       };
     }
