@@ -30,14 +30,16 @@
  *
  * {@link issuedBeforeCredentialChange} is the only comparison: something
  * issued strictly before the account's credential change is refused. The
- * change's moment is {@link readCredentialChangedAt}: the later of
- * `sys_user.password_changed_at` (ADR-0069 D1) and the `updated_at` of the
- * account's local credential row (`sys_account`, provider `credential`). Every
- * door that writes the password writes that row, those that do not stamp
- * `password_changed_at` included (an administrator's
- * `/admin/set-user-password`, the texted-code reset, a first password). An
- * account with neither has never changed a local password, and nothing is
- * refused.
+ * change's moment is {@link readCredentialChangedAt}: the last time the
+ * account's local credential row (`sys_account`, provider `credential`) was
+ * written over, its `updated_at`. Every door that replaces a password writes
+ * that row — both reset doors, `/change-password`, an administrator's
+ * `/admin/set-user-password`, the one-step invitation door — whether or not it
+ * also stamps `sys_user.password_changed_at`. The row's creation is the
+ * account's first password, not a change: a row written over within
+ * {@link FIRST_CREDENTIAL_WINDOW_MS} of its creation reads as never written
+ * over, and an account with no local credential has never changed one. In
+ * either case nothing is refused.
  *
  * A token's issue time is the `iat` the vendor signs into it, whole seconds:
  * a token minted in the same second as the change, after it, is refused too.
@@ -119,25 +121,28 @@ function toMs(value: unknown): number | undefined {
 type ClockEngine = Pick<IDataEngine, 'findOne'>;
 
 /**
+ * How long after its creation a credential row's own write still counts as
+ * its creation: the row is written with a creation and an update stamp taken
+ * separately, and the first password is not a change.
+ */
+export const FIRST_CREDENTIAL_WINDOW_MS = 1_000;
+
+/**
  * The moment of the account's last credential change, in epoch ms, or
- * `undefined` when it has never had one. Throws when either record cannot be
+ * `undefined` when it has never had one. Throws when the record cannot be
  * read, so a caller refuses.
  */
 export async function readCredentialChangedAt(engine: ClockEngine, userId: string): Promise<number | undefined> {
-  const user = (await engine.findOne(SystemObjectName.USER, {
-    where: { id: userId },
-    fields: ['id', 'password_changed_at'],
-    context: SYSTEM_CTX,
-  } as never)) as { password_changed_at?: unknown } | null;
   const account = (await engine.findOne(SystemObjectName.ACCOUNT, {
     where: { user_id: userId, provider_id: 'credential' },
-    fields: ['id', 'updated_at'],
+    fields: ['id', 'created_at', 'updated_at'],
     context: SYSTEM_CTX,
-  } as never)) as { updated_at?: unknown } | null;
-  const moments = [toMs(user?.password_changed_at), toMs(account?.updated_at)].filter(
-    (ms): ms is number => ms !== undefined,
-  );
-  return moments.length > 0 ? Math.max(...moments) : undefined;
+  } as never)) as { created_at?: unknown; updated_at?: unknown } | null;
+  const created = toMs(account?.created_at);
+  const updated = toMs(account?.updated_at);
+  if (updated === undefined) return undefined;
+  if (created !== undefined && updated - created <= FIRST_CREDENTIAL_WINDOW_MS) return undefined;
+  return updated;
 }
 
 /** Whether `issuedAt` falls before `userId`'s credential change; a clock that cannot be read answers yes. */

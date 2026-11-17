@@ -22,7 +22,7 @@
  *  - a password sign-in during which the account's password changes is
  *    refused with what a wrong password answers, and leaves no session;
  *  - the predicate and the clock: nothing is before a change that never
- *    happened, and the clock is the later of the two records.
+ *    happened, and the clock is the last write over the credential row.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
@@ -258,9 +258,14 @@ async function stage(config: Record<string, unknown> = {}) {
   };
 }
 
-/** Move the wall clock past the next whole second, so a token minted next carries a later `iat` than the change. */
-function stepPastTheSecond() {
-  vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 2_000 });
+/**
+ * Move the wall clock two seconds on: past the window in which a credential
+ * row's write is still its creation, and past the whole second a token minted
+ * next carries as its `iat`.
+ */
+function advanceTheClock() {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(Date.now() + 2_000);
 }
 
 describe('an email-change link issued before a credential change answers what a link never issued answers', () => {
@@ -271,6 +276,7 @@ describe('an email-change link issued before a credential change answers what a 
     const neverIssued = await s.verifyEmail('a-token-never-issued');
     expect(neverIssued).toMatchObject({ status: 401, code: 'INVALID_TOKEN', opensSession: false });
 
+    advanceTheClock();
     expect(await s.reset(SECOND)).toEqual({ status: 200 });
 
     expect(await s.verifyEmail(before)).toEqual(neverIssued);
@@ -278,7 +284,7 @@ describe('an email-change link issued before a credential change answers what a 
     expect(await s.liveSessions()).toEqual([]);
 
     // The control: a link minted after the reset verifies and moves the address.
-    stepPastTheSecond();
+    advanceTheClock();
     const again = await s.signIn(EMAIL, SECOND);
     const after = await s.requestEmailChange(again.bearer!);
     expect(await s.verifyEmail(after)).toMatchObject({ status: 200 });
@@ -292,6 +298,7 @@ describe('an email-change link issued before a credential change answers what a 
     const neverIssued = await s.verifyEmail('a-token-never-issued', '/settings');
     expect(neverIssued.redirectError).toBe('INVALID_TOKEN');
 
+    advanceTheClock();
     expect(await s.reset(SECOND)).toEqual({ status: 200 });
 
     expect(await s.verifyEmail(before, '/settings')).toEqual(neverIssued);
@@ -304,6 +311,7 @@ describe('an email-change link issued before a credential change answers what a 
     const before = await s.requestEmailChange(user.bearer!);
     const neverIssued = await s.verifyEmail('a-token-never-issued');
 
+    advanceTheClock();
     const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, s.bearer(user.bearer!));
     expect(changed.status, await changed.clone().text()).toBe(200);
 
@@ -317,6 +325,7 @@ describe('an email-change link issued before a credential change answers what a 
     const before = await s.requestEmailChange(user.bearer!);
     const neverIssued = await s.verifyEmail('a-token-never-issued');
 
+    advanceTheClock();
     const set = await s.fire(
       '/admin/set-user-password',
       { userId: s.userId, newPassword: SECOND, mustChangePassword: false },
@@ -344,6 +353,7 @@ describe('a second-factor challenge opened before a credential change answers wh
     expect(opened.challenge, 'the password sign-in stops at the challenge').toBeTruthy();
     const neverOpened = await answer(await s.fire('/two-factor/verify-totp', { code: totp(secret) }));
 
+    advanceTheClock();
     expect(await s.reset(SECOND)).toEqual({ status: 200 });
 
     expect(await answer(await s.fire('/two-factor/verify-totp', { code: totp(secret) }, { cookie: opened.challenge! }))).toEqual(neverOpened);
@@ -466,18 +476,17 @@ describe('the predicate and its clock', () => {
     expect(issuedBeforeCredentialChange(Number.NaN, 1_000)).toBe(true);
   });
 
-  it('the clock is the later of password_changed_at and the credential row, and none without either', async () => {
-    const at = (iso?: string) => (iso ? { password_changed_at: iso, updated_at: iso } : null);
-    const engine = (user: unknown, account: unknown) => ({
-      findOne: async (object: string) => (object === 'sys_user' ? user : account),
-    });
-    expect(await readCredentialChangedAt(engine(null, null) as never, 'u')).toBeUndefined();
+  it('the clock is the last write over the credential row; its creation and no row are no change', async () => {
+    const engine = (account: unknown) => ({ findOne: async () => account });
+    const created = '2026-01-01T00:00:00.000Z';
+    expect(await readCredentialChangedAt(engine(null) as never, 'u')).toBeUndefined();
+    expect(await readCredentialChangedAt(engine({ created_at: created, updated_at: created }) as never, 'u')).toBeUndefined();
     expect(
-      await readCredentialChangedAt(engine(at('2026-01-01T00:00:00Z'), { updated_at: '2026-02-01T00:00:00Z' }) as never, 'u'),
-    ).toBe(Date.parse('2026-02-01T00:00:00Z'));
+      await readCredentialChangedAt(engine({ created_at: created, updated_at: '2026-01-01T00:00:00.900Z' }) as never, 'u'),
+    ).toBeUndefined();
     expect(
-      await readCredentialChangedAt(engine(at('2026-03-01T00:00:00Z'), { updated_at: '2026-02-01T00:00:00Z' }) as never, 'u'),
-    ).toBe(Date.parse('2026-03-01T00:00:00Z'));
+      await readCredentialChangedAt(engine({ created_at: created, updated_at: '2026-02-01T00:00:00.000Z' }) as never, 'u'),
+    ).toBe(Date.parse('2026-02-01T00:00:00.000Z'));
     await expect(
       readCredentialChangedAt({ findOne: async () => { throw new Error('down'); } } as never, 'u'),
     ).rejects.toThrow('down');
