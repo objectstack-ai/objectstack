@@ -26,7 +26,7 @@
  *  - with a `secondaryStorage` cache, an ended link answers what a link never
  *    issued answers from the cache's reads too;
  *  - a password write whose tokens cannot be ended does not land: the old
- *    password still signs in and the outstanding link is still live.
+ *    password stands and the outstanding link resets.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
@@ -401,7 +401,7 @@ describe('with a secondaryStorage cache, an ended link answers what a link never
 });
 
 describe('a password write whose reset tokens cannot be ended does not land', () => {
-  it('the old password still signs in and the outstanding link still resets', async () => {
+  it('the old password stands and the outstanding link resets', async () => {
     const s = await stage();
     const earlier = await s.requestLink();
     const { bearer } = await s.signIn(EMAIL, FIRST);

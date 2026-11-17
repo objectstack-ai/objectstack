@@ -118,7 +118,7 @@ type VerificationRow = { id?: unknown; identifier?: unknown };
  * End every outstanding password-reset token of `userId`: delete its rows, and
  * its cache entries when a cache is configured. Answers how many were ended.
  * Throws when a read or a delete fails, so the caller's write never lands
- * beside a token that is still live.
+ * beside a live token.
  */
 export async function endOutstandingResetTokens(
   engine: ResetTokenEngine,
