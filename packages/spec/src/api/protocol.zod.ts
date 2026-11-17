@@ -442,6 +442,18 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
     + 'ADR-0106 masking is unaffected — draft preview is admin-gated '
     + 'upstream, not by this schema.',
   ),
+  userTextLocales: z.array(z.string()).max(2).optional().describe(
+    'The locales the user-facing sentences of a served DRAFT\'s check findings are composed in, in ladder '
+    + 'order: the locale the request names, then the workspace default — the save request\'s member of the '
+    + 'same name, read the same way (each value against the platform locale table, whole and then one '
+    + 'subtag shorter at a time; a value that names no table language is passed over; `en` is the last '
+    + 'rung). Read only by the `state: \'draft\'` read, which folds what publishing the draft would say '
+    + 'into its `_diagnostics`: an advisory finding that carries a user sentence becomes a '
+    + '`_diagnostics.warnings[]` entry in that sentence. Stated by the door that holds the request (the '
+    + 'REST door and the dispatcher state `[ExecutionContext.locale, ExecutionContext.workspaceLocale]`), '
+    + 'never read from a query string. ABSENT ⇒ the sentences are composed in `en`. It selects a language '
+    + 'only: which row is read, and what the verdict is, do not depend on it.',
+  ),
 }));
 
 /**
