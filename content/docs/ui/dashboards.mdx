@@ -523,7 +523,10 @@ declares:
 dimensions: [
   // The dashboard's dateRange filters `close_date`, so a compare widget's
   // window arrives as the dimension "close_date".
-  { name: 'close_date', label: 'Close date', field: 'close_date', type: 'date' },
+  {
+    name: 'close_date', label: 'Close date', field: 'close_date', type: 'date',
+    synonyms: ['closing date', 'date closed'],
+  },
 ],
 ```
 

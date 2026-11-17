@@ -243,6 +243,10 @@ The reconciler:
 - **yields** to any membership that already exists (e.g. one created by an
   invitation, `add-member`, SSO provisioning, or a host hook) — it never
   creates a second membership;
+- does **not** bind, under the `invite_only` audience posture, a sign-up
+  admitted by the invitation it presents while the account's email address is
+  unverified: that account joins by accepting the invitation, which needs a
+  verified address ([Self-hosting](/docs/deployment/self-hosting));
 - binds only to an **unambiguous** target org — that is `tenancy.defaultOrgId()`,
   which returns the single-org default organization under `single` and `null`
   under any walled **request** (invitations, `add-member` and SSO provisioning

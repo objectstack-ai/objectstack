@@ -3031,6 +3031,10 @@ const zhHant = {
       missingToken: '驗證連結缺少令牌。',
       emailMissing: '缺少郵箱地址',
       resendButton: '重新發送驗證郵件',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        '您的郵箱地址尚未驗證。請向 {{email}} 傳送一封驗證郵件，然後點選郵件中的連結以驗證您的賬戶。',
+      sendButton: '傳送驗證郵件',
       resending: '傳送中…',
       resent: '郵件已傳送！請檢視收件箱',
       resentSuccess: '驗證郵件已傳送！',

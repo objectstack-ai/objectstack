@@ -445,7 +445,12 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
       if (typeof e?.target === 'string') seen.add(e.target);
     }
   }, [d.nodes, d.edges]);
-  const mintNodeId = React.useCallback(() => freshNodeId(nodes, edges, seenNodeIds.current), [nodes, edges]);
+  // `alsoTaken`: ids the same gesture minted before this one (an approval's
+  // outcome ends, objectstack#34818 item 4).
+  const mintNodeId = React.useCallback(
+    (alsoTaken: readonly string[] = []) => freshNodeId(nodes, edges, [...seenNodeIds.current, ...alsoTaken]),
+    [nodes, edges],
+  );
 
   const handleAddNode = React.useCallback(() => {
     if (!canEdit) return;
