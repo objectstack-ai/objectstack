@@ -134,6 +134,13 @@ beforeAll(async () => {
   await engine.syncSchemas();
   await engine.insert('sys_user', [ME, OTHER, AGENT, DELEGATOR].map((id) => ({ id, name: id, email: `${id}@abo.test` })), SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'ABO', slug: 'abo' }], SYS);
+  // The delegator's current membership (ADR-0093 D8.1: a delegation needs it)
+  // and its stored grant of the writer set, so a direct create on its behalf
+  // lands — the control the delegated body insert is compared with.
+  await engine.insert('sys_member', [{ id: 'mem_abo_delegator', user_id: DELEGATOR, organization_id: ORG, role: 'member' }], SYS);
+  await (engine as any).getDriver('sys_user_permission_set').create('sys_user_permission_set', {
+    id: 'ups_abo_delegator', user_id: DELEGATOR, permission_set: WRITER_SET.name, organization_id: ORG,
+  });
 
   let securityService: unknown;
   let sharing: SharingService | undefined;
@@ -251,15 +258,14 @@ describe('the guest invoker (ADR-0138 D1)', () => {
 describe('delegation (ADR-0090 D10)', () => {
   it('stamps the principal a direct create under the same envelope is stamped with', async () => {
     const id = nextId('delegated');
+    const direct = nextId('delegated_direct');
+    await engine.insert(NOTE, { id: direct, name: 'direct, delegated' }, { context: { ...DELEGATED } } as never);
     await bodyInsert(actionBody(DELEGATED), { id, name: 'by the agent' });
 
-    // Step 3.5's own reading for the same envelope, through the middleware
-    // that stamps a direct create: the envelope's `userId`, the agent.
-    const direct = { name: 'direct, delegated' } as Row;
-    await stampedByDirectCreate(DELEGATED, direct);
-
-    expect(direct.owner_id).toBe(AGENT);
-    expect((await stored(id))?.owner_id).toBe(direct.owner_id);
+    // Step 3.5 stamps a direct create under this envelope with its `userId`:
+    // the acting principal, the agent.
+    expect((await stored(direct))?.owner_id).toBe(AGENT);
+    expect((await stored(id))?.owner_id).toBe((await stored(direct))?.owner_id);
   });
 });
 
@@ -335,29 +341,3 @@ describe('a queue the body names (ADR-0142 D3)', () => {
     expect(row?.owner_id).toBe(ME);
   });
 });
-
-/**
- * The owner a DIRECT create under `envelope` is stamped with, read off the
- * row the middleware chain hands the driver: the engine's own insert under
- * the envelope, its stored row's owner copied back onto `row`. Under
- * delegation the direct create is refused further down the chain on this
- * rig (the delegator holds no membership), so the stamp is read where step
- * 3.5 writes it — on the payload — through a middleware registered after
- * the security plugin's.
- */
-async function stampedByDirectCreate(envelope: object, row: Row): Promise<void> {
-  const tag = `abo_probe_${++seq}`;
-  let seen: unknown;
-  let armed = true;
-  engine.registerMiddleware((async (opCtx: any, next: () => Promise<void>) => {
-    if (armed && opCtx.operation === 'insert' && opCtx.object === NOTE && opCtx.data?.name === tag) {
-      seen = opCtx.data.owner_id;
-      armed = false;
-      throw new Error('probe: stop before the write');
-    }
-    return next();
-  }) as never, { object: NOTE });
-  await engine.insert(NOTE, { name: tag }, { context: { ...envelope } } as never).catch(() => undefined);
-  armed = false;
-  row.owner_id = seen;
-}
