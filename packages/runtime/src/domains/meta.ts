@@ -105,6 +105,7 @@ import {
     translateMetaEnvelope,
     translateMetaList,
     wantsMetaItemLayers,
+    type MetaHolderItemReader,
     type MetaItemAnswer,
     type MetaItemAnswerSources,
     type MetaItemReadGateSources,
@@ -949,6 +950,27 @@ type LayeredReadWithDraft = (
 ) => ReturnType<MetaLayeredProtocol['getMetaItemLayered']>;
 
 /**
+ * [#34247] A holder's item, read at its own address (`?package=<holder>`), for
+ * {@link gateHolderNamingRefusal}. A protocol with no by-name read cannot
+ * answer it, so the read REJECTS: the gate fails closed and the transport
+ * answers that fault, never the refusal naming holders.
+ */
+function holderItemReader(
+    protocol: MetaDomainProtocol,
+    type: string,
+    name: string,
+    memberSelector: { member?: string },
+): MetaHolderItemReader {
+    return async (holder) => {
+        if (typeof protocol.getMetaItem !== 'function') {
+            throw new Error(`The protocol serves no by-name read, so the item "${name}" of type "${type}" cannot be read at package "${holder}" to judge its read gate.`);
+        }
+        const envelope = await protocol.getMetaItem({ type, name, packageId: holder, ...memberSelector });
+        return (envelope as { item?: unknown } | undefined)?.item;
+    };
+}
+
+/**
  * [#20478] Answer the layered view — `GET /meta/:type/:name/layers`, and the
  * deprecated `?layers=` flag on the item read: read the protocol's
  * `getMetaItemLayered` exactly as `RestServer`'s layered read reads it, hand the
@@ -1027,10 +1049,7 @@ async function answerMetaLayered(
             gated = await gateHolderNamingRefusal(
                 metaItemReadGateSources(deps, context, protocol, mayWriteItem),
                 pluralToSingular(type), name, STORED_VERSION_DOOR_POLICY, e,
-                // A holder's item, read at its own address.
-                async (holder) => (await protocol.getMetaItem({
-                    type, name, packageId: holder, ...memberSelector,
-                }) as { item?: unknown } | undefined)?.item,
+                holderItemReader(protocol, type, name, memberSelector),
             );
         } catch (fault: any) {
             return withHeaders(deps.errorFromThrown(fault, 500), headers);
@@ -2440,10 +2459,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         // `RestServer`'s question).
                         const gated = await gateHolderNamingRefusal(
                             metaItemReadGateSources(deps, _context, protocol), singularType, name, RENDERED_DOCUMENT_POLICY, e,
-                            // A holder's item, read at its own address.
-                            async (holder) => (await protocol.getMetaItem({
-                                type: singularType, name, packageId: holder, ...memberSelector,
-                            }) as { item?: unknown } | undefined)?.item,
+                            holderItemReader(protocol, singularType, name, memberSelector),
                         );
                         if (gated) return { handled: true, response: deps.error(gated.message, gated.status, { code: gated.code }) };
                         throw e;
