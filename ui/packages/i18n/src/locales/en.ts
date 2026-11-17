@@ -1513,6 +1513,8 @@ const en = {
     writeStrippedUnknownReason: 'Not applied by the server: {{fields}}',
     approvalPendingEditable: 'In approval · editable',
     approvalPendingTooltip: 'This record has a pending approval request; this step still allows editing',
+    approvalPending: 'In approval',
+    approvalPendingNotEditableTooltip: 'This record has a pending approval request',
     approvalProgress: 'Approvals — {{got}} of {{need}}',
     approvalProgressGroups: 'Sign-off — {{got}} of {{need}} groups',
     approvalProgressLabel: 'Approval progress',

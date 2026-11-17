@@ -1245,6 +1245,8 @@ const zh = {
     writeStrippedUnknownReason: '以下字段未被服务端写入：{{fields}}',
     approvalPendingEditable: '审批中 · 可编辑',
     approvalPendingTooltip: '该记录有待审批的请求，但当前审批节点仍允许编辑',
+    approvalPending: '审批中',
+    approvalPendingNotEditableTooltip: '该记录有待审批的请求',
     approvalProgress: '审批 — 已通过 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '会签 — 已完成 {{got}} / 共 {{need}} 个组',
     approvalProgressLabel: '审批进度',
