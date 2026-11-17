@@ -60,7 +60,7 @@ import {
 } from '@object-ui/core';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { ListViewSchema } from '@object-ui/types';
-import { ListView, LIST_DEFAULT_TRANSLATIONS } from '../ListView';
+import { ListView, LIST_DEFAULT_TRANSLATIONS, viewFilterRequiresOwner } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
 
 /**
@@ -1416,6 +1416,153 @@ describe('ListView.printButtonSemantics', () => {
       const cluster = container.querySelector('[data-print-hide]');
       expect(cluster).not.toBeNull();
       expect(cluster).toContainElement(screen.getByTestId('print-button'));
+    });
+  });
+});
+
+// ── ListView.queueToggleOwnerPin-34580 ──────────────────────────────────────
+
+/**
+ * objectstack#34580 — the "In a queue" toggle (ADR-0142 D3) is withheld on a
+ * view whose own filter requires `owner_id` to hold a value. The toggle AND-s
+ * `owner_id is_empty`, so beside `owner_id equals {current_user_id}` (HotCRM's
+ * "My Open Deals") it could only ever empty the list. A condition inside an OR
+ * group does not pin. Withheld, the toggle adds nothing to the query, and a
+ * view that offers it again shows it off.
+ *
+ * The toggle's own offer rules (the injected column, `hasAnyQueue`, storage)
+ * are pinned in `ListView.queueSittingFilter-25769.test.tsx`.
+ */
+describe('ListView.queueToggleOwnerPin-34580', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'opportunity_34580';
+  const USER = 'u_34580';
+  const OWNER_IS_ME = { field: 'owner_id', operator: 'equals', value: '{current_user_id}' };
+  const STAGE_OPEN = { field: 'stage', operator: 'not_in', value: ['closed_won', 'closed_lost'] };
+  /** HotCRM's "My Open Deals" filter, as the view stores it. */
+  const MY_OPEN_DEALS = [OWNER_IS_ME, STAGE_OPEN];
+  /** "All Opportunities": no owner condition. */
+  const ALL_OPEN = [STAGE_OPEN];
+
+  const makeDataSource = () =>
+    ({
+      find: vi.fn(async () => []),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => ({
+        name: OBJECT,
+        fields: {
+          name: { name: 'name', type: 'text' },
+          stage: { name: 'stage', type: 'select' },
+          owner_id: { name: 'owner_id', type: 'lookup' },
+          queue: { name: 'queue', type: 'text', system: true, hidden: true },
+        },
+      })),
+    }) as any;
+
+  const session: MePermissionsAuthenticatedResponse = {
+    authenticated: true,
+    userId: USER,
+    tenantId: 'org_34580',
+    hasAnyQueue: true,
+    positions: [],
+    permissionSets: ['member_default'],
+    objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    fields: {},
+  };
+
+  const tree = (dataSource: any, filter: unknown) => {
+    const schema = { type: 'list-view', objectName: OBJECT, columns: ['name', 'stage'], filter } as unknown as ListViewSchema;
+    return (
+      <SchemaRendererProvider dataSource={dataSource}>
+        <FilterScopeProvider currentUserId={USER}>
+          <MePermissionsProvider initialPermissions={session}>
+            <ListView schema={schema} dataSource={dataSource} />
+          </MePermissionsProvider>
+        </FilterScopeProvider>
+      </SchemaRendererProvider>
+    );
+  };
+
+  const lastFilter = (dataSource: any) => JSON.stringify(dataSource.find.mock.calls.at(-1)?.[1]?.$filter ?? null);
+  const QUEUE_SITTING = '["owner_id","is_empty",true],["queue","is_not_empty",true]';
+
+  /** A mount that renders no toggle: wait for the definition and a query built after it. */
+  async function settled(dataSource: any) {
+    await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+  }
+
+  afterEach(() => cleanup());
+
+  describe('viewFilterRequiresOwner — a top-level AND condition that needs a value', () => {
+    it('pins on equals, in and is_not_empty, in every filter shape the list lowers', () => {
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'equals', value: USER }, STAGE_OPEN])).toBe(true);
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'in', value: [USER, 'u2'] }])).toBe(true);
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'is_not_empty' }])).toBe(true);
+      expect(viewFilterRequiresOwner(['owner_id', '=', USER])).toBe(true);
+      expect(viewFilterRequiresOwner(['and', ['stage', '=', 'open'], ['and', ['owner_id', 'eq', USER]]])).toBe(true);
+      expect(viewFilterRequiresOwner([['stage', '=', 'open'], ['owner_id', 'isNotEmpty', true]])).toBe(true);
+      expect(viewFilterRequiresOwner({ owner_id: USER, stage: 'open' })).toBe(true);
+    });
+
+    it('does not pin inside an OR group, nor on a condition an unowned row can meet', () => {
+      expect(viewFilterRequiresOwner([{ or: [OWNER_IS_ME, { field: 'stage', operator: 'equals', value: 'new' }] }])).toBe(false);
+      expect(viewFilterRequiresOwner(['or', ['owner_id', '=', USER], ['stage', '=', 'new']])).toBe(false);
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'not_equals', value: USER }])).toBe(false);
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'is_empty' }])).toBe(false);
+      expect(viewFilterRequiresOwner(['owner_id', '=', null])).toBe(false);
+      expect(viewFilterRequiresOwner(['owner_id', 'in', [USER, null]])).toBe(false);
+      expect(viewFilterRequiresOwner(ALL_OPEN)).toBe(false);
+      expect(viewFilterRequiresOwner(undefined)).toBe(false);
+    });
+  });
+
+  describe('ListView — the toggle on a view that pins the owner (objectstack#34580)', () => {
+    it('"My Open Deals": no toggle, and the query carries no queue condition', async () => {
+      const dataSource = makeDataSource();
+      render(tree(dataSource, MY_OPEN_DEALS));
+      await settled(dataSource);
+      await waitFor(() => expect(lastFilter(dataSource)).toContain(USER));
+      expect(screen.queryByTestId('queue-sitting-filter')).toBeNull();
+      expect(lastFilter(dataSource)).not.toContain('is_empty');
+    });
+
+    it('"All Opportunities": the toggle, and pressing it still narrows to the rows sitting in a queue', async () => {
+      const dataSource = makeDataSource();
+      render(tree(dataSource, ALL_OPEN));
+      const toggle = await screen.findByTestId('queue-sitting-filter');
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      fireEvent.click(toggle);
+      await waitFor(() => expect(lastFilter(dataSource)).toContain(QUEUE_SITTING));
+      expect(lastFilter(dataSource)).toContain('closed_won');
+    });
+
+    it('an owner condition inside an OR group keeps the toggle', async () => {
+      const dataSource = makeDataSource();
+      render(tree(dataSource, [{ or: [OWNER_IS_ME, { field: 'stage', operator: 'equals', value: 'new' }] }]));
+      expect(await screen.findByTestId('queue-sitting-filter')).toBeTruthy();
+    });
+
+    it('switching views: a pressed toggle leaves no hidden filter on the pinned view, and comes back off', async () => {
+      const dataSource = makeDataSource();
+      const { rerender } = render(tree(dataSource, ALL_OPEN));
+      fireEvent.click(await screen.findByTestId('queue-sitting-filter'));
+      await waitFor(() => expect(lastFilter(dataSource)).toContain(QUEUE_SITTING));
+
+      rerender(tree(dataSource, MY_OPEN_DEALS));
+      await waitFor(() => expect(lastFilter(dataSource)).toContain(USER));
+      expect(screen.queryByTestId('queue-sitting-filter')).toBeNull();
+      expect(lastFilter(dataSource)).not.toContain('is_empty');
+
+      rerender(tree(dataSource, ALL_OPEN));
+      await waitFor(() => expect(lastFilter(dataSource)).not.toContain(USER));
+      const toggle = await screen.findByTestId('queue-sitting-filter');
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(lastFilter(dataSource)).not.toContain('is_empty');
     });
   });
 });

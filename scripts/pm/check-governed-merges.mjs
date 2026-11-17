@@ -9675,13 +9675,13 @@ async function selfTest() {
       sizeLimbFires(sizeVerdict(overSize, enqueued('undetermined', null))) === true &&
       sizeLiftFrom({ state: 'unapproved', approvals: [], enqueue: { state: 'authorized', login: '' } }) === null);
   assert('an-authorized-APPROVAL-is-the-lift-read-first-even-with-an-authorized-enqueue-beside-it',
-    sizeLiftFrom(authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }], { enqueue: { state: 'authorized', login: 'os-zhuang' } })).ruling === SIZE_LIFT_RULING);
+    sizeLiftFrom(authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }], { enqueue: { state: 'authorized', login: 'os-zhuang' } })).ruling === SIZE_LIFT_RULING);
   assert('an-approval-under-the-line-lifts-nothing-because-there-is-nothing-to-lift',
-    sizeVerdict({ additions: 10, deletions: 2 }, authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }])).lifted === null && sizeVerdict(null, authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }])).lifted === null);
-  const liftedGoverned = testVerdict(['AGENTS.md'], { repo: REPO, size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]) });
+    sizeVerdict({ additions: 10, deletions: 2 }, authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }])).lifted === null && sizeVerdict(null, authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }])).lifted === null);
+  const liftedGoverned = testVerdict(['AGENTS.md'], { repo: REPO, size: overSize, approval: authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }]) });
   assert('⭐ the-lift-moves-the-SIZE-limb-only-a-governed-PATH-still-lands-per-its-tier-and-a-FORK-head-is-untouched',
     liftedGoverned.governed === true && landsByHumanMerge(liftedGoverned) === true && liftedGoverned.size.lifted !== null &&
-      landsByHumanMerge(testVerdict(['x.ts'], { repo: REPO, size: overSize, approval: authorizedVerdict([{ login: 'hotlong', commitId: LIFT_SHA }]), fork: forkVerdict({ base: { repo: { full_name: 'o/r' } }, head: { repo: { full_name: 'f/r' } } }) })) === true);
+      landsByHumanMerge(testVerdict(['x.ts'], { repo: REPO, size: overSize, approval: authorizedVerdict([{ login: 'os-zhuang', commitId: LIFT_SHA }]), fork: forkVerdict({ base: { repo: { full_name: 'o/r' } }, head: { repo: { full_name: 'f/r' } } }) })) === true);
   assert('⭐ the-post-merge-sweep-hands-in-NO-approval-so-an-oversized-landing-is-STILL-listed',
     classifyCommit({ sha: 'b'.repeat(40), date: '2026-09-27T02:02:33Z', subject: 'feat!: retire the saved-report stack (#20125)' }, ['packages/x.ts'], GOVERNED_REPOS[0], { additions: 10764, deletions: 999 }) !== null);
   assert('and-the-not-lifted-words-name-BOTH-landings-the-authorized-approval-and-the-maintainers-merge',
@@ -11043,7 +11043,12 @@ async function selfTest() {
     // N10: a close is a ruling only by an authorized approver's hand.
     const now = Date.parse('2026-11-15T23:40:00Z');
     const closedCard = (number, close, more = {}) => ({ number, body: card(['- PR #50 — ruled row']), state_reason: 'completed', closed_at: '2026-11-12T00:00:00Z', close, ...more });
-    const approvers = ['os-zhuang', 'hotlong'];
+    // The approver list is the queue guard's own `GOVERNED_APPROVERS`, loaded exactly as the job loads it: no second
+    // literal list here to drift from the constant (2026-11-17 removed `hotlong` from it — 「hotlong 从批准账户中去掉，只保留
+    // os-zhuang」 — and that account's hand close is pinned below as ruling nothing).
+    const rulingAccounts = await loadAuditRulingAccounts();
+    const approvers = rulingAccounts.accounts;
+    assert('N10-the-approver-list-is-the-queue-guards-GOVERNED_APPROVERS-not-a-copy', rulingAccounts.available && approvers.join() === 'os-zhuang', JSON.stringify(rulingAccounts));
     const byHand = ruledAuditRows([closedCard(910, { actor: 'os-zhuang', commitId: null, app: null })], { now, approvers });
     assert('⭐ N10-an-approvers-hand-close-rules-its-rows', byHand.ruled.get('PR #50') === 910 && byHand.unruled.length === 0, JSON.stringify([...byHand.ruled]));
     for (const [name, c, more] of [
@@ -11052,22 +11057,23 @@ async function selfTest() {
       ['the-stale-bot', { actor: 'github-actions[bot]', commitId: null, app: null }, { state_reason: 'not_planned' }],
       ['an-unreadable-close-event', null, {}],
       ['a-duplicate-close', { actor: 'os-zhuang', commitId: null, app: null }, { state_reason: 'duplicate' }],
+      ['a-hand-close-by-the-account-removed-from-the-approvers-2026-11-17', { actor: 'hotlong', commitId: null, app: null }, {}],
     ]) {
       const r = ruledAuditRows([closedCard(911, c, more)], { now, approvers });
       assert(`⭐ N10-${name}-rules-nothing`, r.ruled.size === 0 && r.unruled[0]?.number === 911, JSON.stringify(r.unruled));
     }
     // Review S1: the app field is read by PRESENCE. An object (named or not) rules nothing, an absent key is an
     // unreadable event, and null (what the platform serves on every close today) leaves the login test to decide.
-    const viaApp = ruledAuditRows([closedCard(913, { actor: 'hotlong', commitId: null, app: { slug: 'claude' } }), closedCard(916, { actor: 'hotlong', commitId: null, app: {} })], { now, approvers });
-    assert('⭐ S1-a-close-with-an-app-object-named-or-not-rules-nothing', viaApp.ruled.size === 0 && viaApp.unruled.length === 2 && viaApp.unruled.every((u) => /closed through a GitHub App on hotlong/.test(u.why)), JSON.stringify(viaApp.unruled));
-    const noKey = ruledAuditRows([closedCard(917, { actor: 'hotlong', commitId: null })], { now, approvers });
+    const viaApp = ruledAuditRows([closedCard(913, { actor: 'os-zhuang', commitId: null, app: { slug: 'claude' } }), closedCard(916, { actor: 'os-zhuang', commitId: null, app: {} })], { now, approvers });
+    assert('⭐ S1-a-close-with-an-app-object-named-or-not-rules-nothing', viaApp.ruled.size === 0 && viaApp.unruled.length === 2 && viaApp.unruled.every((u) => /closed through a GitHub App on os-zhuang/.test(u.why)), JSON.stringify(viaApp.unruled));
+    const noKey = ruledAuditRows([closedCard(917, { actor: 'os-zhuang', commitId: null })], { now, approvers });
     assert('⭐ S1-a-close-event-without-the-app-key-is-unreadable-and-rules-nothing', noKey.ruled.size === 0 && /does not carry `performed_via_github_app`/.test(noKey.unruled[0]?.why ?? ''), JSON.stringify(noKey.unruled));
-    assert('S1-control-the-same-account-closing-with-a-null-app-rules', ruledAuditRows([closedCard(914, { actor: 'hotlong', commitId: null, app: null })], { now, approvers }).ruled.size === 1);
+    assert('S1-control-the-same-account-closing-with-a-null-app-rules', ruledAuditRows([closedCard(914, { actor: 'os-zhuang', commitId: null, app: null })], { now, approvers }).ruled.size === 1);
     assert('S1-the-job-passes-the-app-field-through-by-presence-not-by-name', /'performed_via_github_app' in last/.test(cardStep) && !/performed_via_github_app\?\.(slug|name)/.test(cardStep), cardStep.slice(0, 200));
     assert('N10-no-approver-list-rules-nothing', ruledAuditRows([closedCard(912, { actor: 'os-zhuang', commitId: null, app: null })], { now, approvers: [] }).ruled.size === 0);
 
     // N12: every ruled card counts, not only the newest.
-    const newerUnreadOnly = { number: 920, body: [`${AUDIT_CARD.unreadHeading} — 1`, '', '- PR #60 low-risk arm NOT MEASURED: x', '', `${AUDIT_CARD.footer} x`].join('\n'), state_reason: 'completed', closed_at: '2026-11-14T00:00:00Z', close: { actor: 'hotlong', commitId: null, app: null } };
+    const newerUnreadOnly = { number: 920, body: [`${AUDIT_CARD.unreadHeading} — 1`, '', '- PR #60 low-risk arm NOT MEASURED: x', '', `${AUDIT_CARD.footer} x`].join('\n'), state_reason: 'completed', closed_at: '2026-11-14T00:00:00Z', close: { actor: 'os-zhuang', commitId: null, app: null } };
     const older = closedCard(915, { actor: 'os-zhuang', commitId: null, app: null });
     const both = ruledAuditRows([newerUnreadOnly, older], { now, approvers });
     assert('⭐ N12-an-older-ruling-behind-a-newer-NOT-MEASURED-only-close-still-rules', both.ruled.get('PR #50') === 915 && !both.ruled.has('PR #60'), JSON.stringify([...both.ruled]));
