@@ -5,7 +5,7 @@ import {
   validateAiToolReferences as validateAiToolReferencesUnrecorded,
   AI_SKILL_TOOL_UNRESOLVED,
 } from './validate-ai-tool-references.js';
-import { PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
+import { MCP_FILE_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 import { explainRule } from './rule-explanations.js';
 
 // [#22161] Each finding is one verdict sentence; the reasoning it used to
@@ -243,6 +243,30 @@ describe('validate-ai-tool-references', () => {
   });
 
   /**
+   * [#34948] The MCP door's file pair. `@objectstack/mcp` registers `read_file`
+   * and `create_upload_link` and offers a skill bound to them over MCP, but no
+   * cloud package registers either, so they are not in the cloud registry: the
+   * rule reads them from `MCP_FILE_TOOL_NAMES`. While it did not, a skill bound
+   * to the tools it uses failed `os lint --strict`.
+   */
+  it('resolves the MCP door\'s file tools, read_file and create_upload_link (#34948)', () => {
+    const two = ['read_file', 'create_upload_link'];
+    expect(validateAiToolReferences({ skills: [{ name: 'receipts', tools: two }] })).toEqual([]);
+    // The list the rule reads is the one the door's conformance test holds
+    // equal to what it registers.
+    expect([...MCP_FILE_TOOL_NAMES].sort()).toEqual([...two].sort());
+
+    // The control: a third name shaped like the two and registered by nobody
+    // is still reported, so this pin fails on a universe widened too far.
+    const control = validateAiToolReferences({
+      skills: [{ name: 'receipts', tools: [...two, 'upload_file'] }],
+    });
+    expect(control).toHaveLength(1);
+    expect(control[0].path).toBe('skills[0].tools[2]');
+    expect(control[0].message).toContain('upload_file');
+  });
+
+  /**
    * The chat's confirmed record write (cloud#3565; it replaced cloud#3383's
    * `draft_record`): a skill naming `create_record` / `update_record` resolves;
    * a near name nobody registers does not, and neither does the retired name.
@@ -360,11 +384,12 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
     const entry = explainRule(AI_SKILL_TOOL_UNRESOLVED);
     expect(entry, 'no `os explain ai-skill-tool-unresolved` entry').toBeDefined();
     const text = entry!.paragraphs.join('\n');
-    // The three sources, the wildcard, the opt-in and the headless paths are
+    // The four sources, the wildcard, the opt-in and the headless paths are
     // each held to the rule by the cases above and the one below.
     for (const fact of [
       '`stack.tools`',
       '`PLATFORM_PROVIDED_TOOL_NAMES`',
+      '`MCP_FILE_TOOL_NAMES`',
       '`stack.actions` or any object\'s `actions`',
       'trailing-wildcard',
       '`ai.exposed: true` with an `ai.description` (ADR-0011)',

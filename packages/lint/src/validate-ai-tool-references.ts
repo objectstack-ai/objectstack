@@ -12,7 +12,11 @@
  *   1. the stack's own `stack.tools[]` names (the optional refinement layer);
  *   2. `PLATFORM_PROVIDED_TOOL_NAMES` — the curated registry of tools the
  *      cloud AI runtime registers at boot (spec owns the list; the owning
- *      cloud packages carry the conformance tests);
+ *      cloud packages carry the conformance tests) — and `MCP_FILE_TOOL_NAMES`,
+ *      the file tools the MCP door registers (`read_file`,
+ *      `create_upload_link`; `@objectstack/mcp` carries their conformance
+ *      test), kept out of the cloud registry so each of its groups stays the
+ *      exact set one cloud package registers;
  *   3. the materialised `action_<name>` family — one tool per declarative
  *      action (`stack.actions` ∪ every object's `actions`), the mechanism the
  *      built-in `actions_executor` subscribes to with `action_*`.
@@ -32,7 +36,11 @@
  * positives (6 references resolve via the registry).
  */
 
-import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
+import {
+  MCP_FILE_TOOL_NAMES,
+  PLATFORM_PROVIDED_TOOL_NAMES,
+  PLATFORM_TOOL_FAMILY_PREFIXES,
+} from '@objectstack/spec/system';
 
 import { recordsOf, suggestName } from './object-graph.js';
 
@@ -139,10 +147,11 @@ function materialisesAsTool(action: AnyRec): boolean {
 
 /**
  * The full set of tool names resolvable from this stack: declared tool
- * records ∪ the platform registry ∪ the materialised action family.
+ * records ∪ the platform registry ∪ the MCP door's file tools ∪ the
+ * materialised action family.
  */
 function collectToolUniverse(stack: AnyRec): Set<string> {
-  const universe = new Set<string>(PLATFORM_PROVIDED_TOOL_NAMES);
+  const universe = new Set<string>([...PLATFORM_PROVIDED_TOOL_NAMES, ...MCP_FILE_TOOL_NAMES]);
 
   for (const tool of recordsOf(stack.tools)) {
     const n = strName(tool.name);
