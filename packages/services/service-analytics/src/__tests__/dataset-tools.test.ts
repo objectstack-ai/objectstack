@@ -30,7 +30,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { AnalyticsService } from '../analytics-service.js';
 import { createDatasetTools, getDatasetToolDefinitions } from '../dataset-tools.js';
-import { composeDatasetSourceLine, datasetToolSentenceLocale } from '../dataset-next-step.js';
+import { DATASET_NEXT_STEP_PRECEDENCE, composeDatasetSourceLine, datasetToolSentenceLocale } from '../dataset-next-step.js';
 
 const ME = { userId: 'u_me', tenantId: 'org_a', locale: 'zh-CN' } as ExecutionContext;
 const ADMIN = { userId: 'u_admin', tenantId: 'org_a' } as ExecutionContext;
@@ -177,6 +177,14 @@ describe('the two AIToolDefinitions', () => {
     expect(defs[0].description).toMatch(/ask the user/i);
     expect(defs[0].description).toContain('非指标口径');
     expect(defs[1].description).toContain('provenance');
+  });
+
+  it('[#34919] says follow nextStep and cite sourceLine, and names the precedence the executor applies', () => {
+    const [list, query] = getDatasetToolDefinitions();
+    expect(list.description).toContain('nextStep');
+    expect(list.description).toContain(DATASET_NEXT_STEP_PRECEDENCE.join(', '));
+    expect(query.description).toContain('sourceLine');
+    expect(DATASET_NEXT_STEP_PRECEDENCE).toEqual(['several_measures', 'one_measure', 'candidates_only', 'no_measure']);
   });
 });
 

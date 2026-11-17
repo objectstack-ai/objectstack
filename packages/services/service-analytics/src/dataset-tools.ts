@@ -34,7 +34,7 @@ import {
   usableDeclaredMembers,
 } from './dataset-declared-members.js';
 import { findDatasetTermCandidates, matchDatasetTerms, type CandidateDataset } from './dataset-term-matcher.js';
-import { composeDatasetNextStep, composeDatasetSourceLine } from './dataset-next-step.js';
+import { DATASET_NEXT_STEP_PRECEDENCE, composeDatasetNextStep, composeDatasetSourceLine } from './dataset-next-step.js';
 
 /**
  * The dataset AI tools — `list_datasets` and `query_dataset` — defined once,
@@ -113,7 +113,9 @@ const LIST_DATASETS_DESCRIPTION =
   + 'dataset\'s `object`, add one line naming that dataset and its measures. A dimension match alone picks a '
   + 'grouping, not a number: a measure must still match. `membersWithheld` means some members exist that this '
   + 'caller may not see. When `terms` were sent the answer carries `nextStep`: the case of this rule your words are '
-  + 'in (`decision`), the words it is about (`terms`) and what to do, already written (`note`); follow `note`.';
+  + 'in (`decision`), the words it is about (`terms`) and what to do, already written (`note`); follow `note`. When '
+  + `the words are in different cases it reports the first of ${DATASET_NEXT_STEP_PRECEDENCE.join(', ')}, so a word `
+  + 'matching only a dimension never outranks a measure match.';
 
 const QUERY_DATASET_DESCRIPTION =
   'Run a selection (measures, optional dimensions, filter, time window, order, limit) against one saved business '

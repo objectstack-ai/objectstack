@@ -228,8 +228,18 @@ export function datasetToolSentenceLocale(locales: readonly (string | undefined)
   return 'en';
 }
 
-/** The decisions in reporting order: the first a term is in is the case `nextStep` reports. */
-const DECISION_PRECEDENCE: readonly DatasetNextStepDecision[] = ['several_measures', 'one_measure', 'candidates_only', 'no_measure'];
+/**
+ * The decisions in reporting order: the first a term is in is the case
+ * `nextStep` reports (the precedence above). `list_datasets`' description names
+ * this order from this constant, and the MCP `initialize` rule is pinned to it,
+ * so the order a client is told is the order the executor applies.
+ */
+export const DATASET_NEXT_STEP_PRECEDENCE: readonly DatasetNextStepDecision[] = Object.freeze([
+  'several_measures',
+  'one_measure',
+  'candidates_only',
+  'no_measure',
+]);
 
 interface TermReading {
   readonly term: string;
@@ -316,7 +326,7 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
   const unique = [...new Set(source.terms)];
   if (unique.length === 0) return undefined;
   const readings = unique.map((term) => readTerm(term, source.datasets, source.candidates));
-  const decision = DECISION_PRECEDENCE.find((d) => readings.some((r) => r.decision === d))!;
+  const decision = DATASET_NEXT_STEP_PRECEDENCE.find((d) => readings.some((r) => r.decision === d))!;
   const reported = readings.filter((r) => r.decision === decision);
   const copy = COPY[datasetToolSentenceLocale(source.locales)];
   const members = (ms: readonly NamedMember[]) => copy.list(ms.map(copy.member));
