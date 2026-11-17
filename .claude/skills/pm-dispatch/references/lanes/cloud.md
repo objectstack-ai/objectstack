@@ -7,7 +7,7 @@
 - 本车道为单车道仓执行座位,可分席 `repo:cloud#N`:在 cloud 仓认领、派发、L1 审核、落地。
 - cloud 卡首触归本车道,⛔ 不归分诊(`triage-duties.md` 日对账条);分诊只做下文兜底。
 - 卡线程派发令住项目文件的 `pm-orders/cloud/seatN/` 目录。
-- 范围:`objectstack-ai/cloud` 全仓;本仓 `domain:cloud`+`repo:cloud` 卡先转入该仓再做(多仓协调)。
+- 范围:cloud 全仓;本仓 `domain:cloud`+`repo:cloud` 卡认领前先转入,转法与例外照多仓协调规则 1。
 
 ## 常设承诺
 
