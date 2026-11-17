@@ -1,7 +1,7 @@
 ---
-'@objectstack/plugin-approvals': minor
-'@object-ui/app-shell': minor
-'@object-ui/i18n': minor
+'@objectstack/plugin-approvals': patch
+'@object-ui/app-shell': patch
+'@object-ui/i18n': patch
 ---
 
 feat(approvals): the approval request page shows the whole business record, not a six-field summary
