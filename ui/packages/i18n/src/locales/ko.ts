@@ -4714,7 +4714,7 @@ const ko = {
       securityBlockTitle: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_one: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_other: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
-      securityBlockWhere: '객체의 설정 → 레코드 공유에서 수정한 후 다시 게시하세요.',
+      securityBlockWhere: '객체의 설정 → 누가 어떤 레코드를 볼 수 있는지에서 수정한 후 다시 게시하세요.',
       flowChecksTitle: '게시하기 전에 확인하세요 — 게시 검사에서 다음 사항을 알립니다',
       securityRule: {
         owdUnset: '레코드 공유 기준(sharingModel)이 선언되지 않았습니다. 런타임은 private로 처리하지만 기준은 명시적으로 결정해야 합니다.',
