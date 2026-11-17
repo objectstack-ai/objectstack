@@ -26,9 +26,12 @@ export interface LiveMailTransportStatus {
    * The provider in use, machine-readable, for a reader that needs the answer
    * and not the banner's prose (the console's first-run checklist). The
    * settings `GET` route serves it as the page's `live.provider`, the shape the
-   * `ai` namespace's runtime states its provider in. Absent = not stated: the
-   * live transport is one the `provider` options cannot name (a host's own
-   * transport class), or the plugin cannot say where it came from.
+   * `ai` namespace's runtime states its provider in. A transport the host
+   * handed over that no `provider` option names (a host's own transport class,
+   * such as a hosted platform's mail channel) is stated as
+   * `{ value: null, source: 'environment' }`: in use, supplied by the host,
+   * named by no option. Absent = not stated: the plugin cannot say where the
+   * live transport came from.
    */
   values?: { provider: LiveMailProviderValue };
 }
@@ -45,8 +48,9 @@ export type LiveMailTransportOrigin = 'settings' | 'environment';
 
 /**
  * The `provider` key's value in the running system: one of its options, or
- * `null` when nothing delivers. Typed from the spec's served `live` entry, so a
- * change to that shape fails this package's type-check.
+ * `null` when nothing delivers (`none`) or when the host's own transport, which
+ * no option names, delivers (`environment`). Typed from the spec's served
+ * `live` entry, so a change to that shape fails this package's type-check.
  */
 export type LiveMailProviderValue = NonNullable<SettingsNamespacePayload['live']>[string];
 
@@ -335,8 +339,11 @@ function transportName(transport: IEmailTransport, copy: MailDeliveryCopy): stri
  *
  * `values.provider` states the provider in use: `{ value: null, source: 'none' }`
  * when nothing delivers, else the option naming the transport with the `origin`
- * the caller holds for it. With no `origin`, or a transport no option names, the
- * provider is not stated, which a reader tells from `none`.
+ * the caller holds for it. A transport no option names that came from the
+ * environment (the host handed it over) is `{ value: null, source: 'environment' }`:
+ * it delivers, and the spec's `live` entry reads in-use from `source`. With no
+ * `origin`, or a `settings` origin no option names, the provider is not stated,
+ * which a reader tells from `none`.
  */
 export function describeLiveMailTransport(
   source: LiveMailTransportSource,
@@ -356,5 +363,6 @@ export function describeLiveMailTransport(
   };
   const option = providerOptionOf(source.options.transport);
   if (option && origin) status.values = { provider: { value: option, source: origin } };
+  else if (!option && origin === 'environment') status.values = { provider: { value: null, source: 'environment' } };
   return status;
 }

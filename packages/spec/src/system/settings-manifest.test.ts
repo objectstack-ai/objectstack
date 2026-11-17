@@ -795,6 +795,9 @@ describe('SettingsNamespacePayloadSchema', () => {
     expect(parsed.live?.provider).toEqual({ value: 'openai', source: 'environment' });
     expect(SettingsNamespacePayloadSchema.parse({ ...aiPage, live: { provider: { value: null, source: 'none' } } }).live)
       .toEqual({ provider: { value: null, source: 'none' } });
+    // In use, supplied by the environment or host, named by no option (a host's own mail transport).
+    expect(SettingsNamespacePayloadSchema.parse({ ...aiPage, live: { provider: { value: null, source: 'environment' } } }).live)
+      .toEqual({ provider: { value: null, source: 'environment' } });
     expect(SettingsNamespacePayloadSchema.parse(aiPage).live).toBeUndefined();
   });
 
