@@ -816,6 +816,14 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'overrides',
     why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
   },
+  // #34655 — the default of the packaged-flow switch (ADR-0126 §4 amendment).
+  {
+    kind: 'omit',
+    type: 'flow',
+    path: ROOT_PATH,
+    key: 'defaultActive',
+    why: "a package's declaration, refused on every flow this form saves — the schema says a flow authored in the environment is switched by `status` and may not declare this key. The automation engine refuses it at registration on a flow no installed package ships, which is every flow the form writes, so a control would offer a value the save door always rejects. Like `skill.mcpPrompt`, its meaning also lives in its absence (unset ships the flow on, with no schema default), which a switch would draw as off. Authored in package source; an administrator's on/off for a packaged flow is the activation toggle, not this key",
+  },
   {
     kind: 'omit',
     type: 'email_template',

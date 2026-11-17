@@ -388,8 +388,10 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // prompt projection for a skill written for the in-product agents only.
     // [#34374] `hook` 23 → 24: the declared texts, `texts`, a hook's
     // sentences written into records in the organization's language.
+    // [#34655] `flow` 23 → 24: `defaultActive`, the default of the
+    // packaged-flow switch (a package ships the flow switched off).
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 83, flow: 23,
+        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 83, flow: 24,
         hook: 24, object: 50, page: 28, position: 14, report: 24, skill: 17, tool: 14,
     };
 
