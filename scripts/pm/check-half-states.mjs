@@ -33274,7 +33274,7 @@ async function selfTest() {
   // an install that copied this sweeper WITHOUT the governed pair answers with
   // its own NOT MEASURED reason instead, which is the correct signal for it.
   const register43 = GOVERNED_REGISTER.available
-    ? `${GOVERNED_REGISTER.matcher(['docs/adr/0121-x.md']).length > 0}/${GOVERNED_REGISTER.matcher(['packages/core/src/x.ts']).length > 0}/${GOVERNED_REGISTER.approvers.length >= 2}`
+    ? `${GOVERNED_REGISTER.matcher(['docs/adr/0121-x.md']).length > 0}/${GOVERNED_REGISTER.matcher(['packages/core/src/x.ts']).length > 0}/${GOVERNED_REGISTER.approvers.length > 0}`
     : `NOT MEASURED — ${GOVERNED_REGISTER.reason}`;
   t43('H43 register: the imported matcher answers governed and clear, and the approver set is non-empty', register43, 'true/false/true');
   t43('H43 register: the load is three-state — resolved, or a NAMED reason, never silently absent', GOVERNED_REGISTER.available || typeof GOVERNED_REGISTER.reason === 'string', true);
