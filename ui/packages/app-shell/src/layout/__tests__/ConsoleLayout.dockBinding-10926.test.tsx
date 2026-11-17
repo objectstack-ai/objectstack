@@ -16,6 +16,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The layout reaches `import('@objectstack/lint')` (the draft bar's publish
+// preflight); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { act, cleanup, render } from '@testing-library/react';
