@@ -39,7 +39,8 @@ describe('i18n extract — the `mappings` group', () => {
   it('`TranslationDataSchema` accepts a bundle written at the extracted paths', () => {
     const out = extractTranslations(config(), { locales: ['zh-CN'] });
     const zh = out.bundles['zh-CN'] as any;
-    expect(Object.keys(zh?.mappings ?? {}).sort()).toEqual(['contact_feed', 'lead_feed', 'unlabelled_feed']);
+    // A mapping with no label has no source text to scaffold.
+    expect(Object.keys(zh?.mappings ?? {}).sort()).toEqual(['contact_feed', 'lead_feed']);
     expect(TranslationDataSchema.safeParse({ mappings: zh.mappings }).success).toBe(true);
   });
 
