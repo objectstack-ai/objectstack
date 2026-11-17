@@ -1804,16 +1804,23 @@ const DEFAULT_HTTP_INSTRUCTIONS =
  * chosen that tool (#34659 ruling D5 = A); the full procedure stays in the
  * tools' own descriptions and in the served skill (`DATASET_TOOL_LINES` in
  * `skill-md.ts`), which say the same thing: an exact name, label or synonym is
- * the only match, one measure match answers, several are a question for the
- * user, none falls back to the object tools with the answer labelled.
- * Sent only where both dataset tools register ({@link datasetToolsServed}).
+ * the only match, each word with one measure match answers (two such words
+ * are two metrics), several are a question for the user, a word with
+ * `candidates` is the same question and never a match (the ADR-0149 D3
+ * amendment note), and none with no candidate falls back to the object tools
+ * with the answer labelled. The published skill's step 2 rows say it too
+ * (`skills/objectstack-ask/SKILL.md`). Sent only where both dataset tools
+ * register ({@link datasetToolsServed}).
  */
 const DATASET_SELECTION_RULE =
   'For a question about a business number, look for a governed metric first: call list_datasets with the '
   + 'question\'s business words. A word matches only when it equals a measure\'s or dimension\'s name, label or '
-  + 'synonym, never a similar word. One measure match: answer with query_dataset. Several matches: ask the user '
-  + 'which one they mean; do not pick. No match: fall back to query_records / aggregate_records and say the answer '
-  + 'is not from a governed metric.';
+  + 'synonym, never a similar word. Each word that matches exactly one measure: answer with query_dataset; two '
+  + 'such words are two metrics, so compute both. One word matching several measures: ask the user which one '
+  + 'they mean; do not pick. A word with no match but with candidates in the answer: ask the same way, listing '
+  + 'each candidate\'s label, dataset label and description; do not pick one or treat it as a match. No match '
+  + 'and no candidates: fall back to query_records / aggregate_records and say the answer is not from a governed '
+  + 'metric.';
 
 /**
  * [#34686] The published skills package an open server points a client to
