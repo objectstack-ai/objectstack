@@ -17,7 +17,7 @@ A package can now ship a flow switched off: declare `defaultActive: false` on th
 
 Only a flow a package ships has the packaged-flow switch, so:
 
-- registering a flow authored in the environment that declares `defaultActive` is refused (`VALIDATION_FAILED`, 400), with a sentence saying its switch is its `status` (`'obsolete'` to keep it off, `'active'` to arm it);
+- registering a flow authored in the environment that declares `defaultActive` is refused (the write doors answer `VALIDATION_FAILED`, 400), with a sentence saying its switch is its `status` (`'obsolete'` to keep it off, `'active'` to arm it);
 - `POST /api/v1/automation/:name/clone` drops `defaultActive` from the copy, which is written switched off by its own `status` as before;
 - an unmanaged install copies `defaultActive: false` as `status: 'obsolete'` (unless the status already disarms the flow) and drops the key, so the copy arrives switched off.
 

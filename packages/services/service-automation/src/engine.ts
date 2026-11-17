@@ -6275,19 +6275,18 @@ export class AutomationEngine implements IAutomationService {
      * loader's set holds the name ({@link packagedFlowOwner}, the question
      * the toggle door asks). Every other body is the environment's.
      *
-     * @throws `VALIDATION_FAILED` / 400; nothing is filed.
+     * @throws an `Error`, as every registration refusal does: the write
+     * doors answer it `VALIDATION_FAILED` / 400 (`registerAndSaveFlow` in
+     * `@objectstack/runtime`). Nothing is filed.
      */
     private refuseUnpackagedDefaultActive(name: string, parsed: FlowParsed, arm: FlowContender): void {
         if (parsed.defaultActive === undefined) return;
         if (arm.source !== 'runtime' || this.isPackagedFlow(name)) return;
-        throw Object.assign(
-            new Error(
-                `Flow '${name}' declares defaultActive, which is the default of the switch an administrator turns a ` +
-                    `PACKAGED flow on and off with, and '${name}' was authored in this deployment, not shipped by a ` +
-                    `package. A flow authored here is switched by its own status: remove defaultActive, and publish ` +
-                    `it with status 'obsolete' to keep it off or 'active' to arm it.`,
-            ),
-            { code: 'VALIDATION_FAILED', status: 400 },
+        throw new Error(
+            `Flow '${name}' declares defaultActive, which is the default of the switch an administrator turns a ` +
+                `PACKAGED flow on and off with, and '${name}' was authored in this deployment, not shipped by a ` +
+                `package. A flow authored here is switched by its own status: remove defaultActive, and publish ` +
+                `it with status 'obsolete' to keep it off or 'active' to arm it.`,
         );
     }
 

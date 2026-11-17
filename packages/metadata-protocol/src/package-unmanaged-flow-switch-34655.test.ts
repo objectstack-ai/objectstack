@@ -8,6 +8,8 @@
  * switched off (`status: 'obsolete'`) and without the key.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { copyUnmanagedFlowSwitch, planUnmanagedImport } from './package-unmanaged-install.js';

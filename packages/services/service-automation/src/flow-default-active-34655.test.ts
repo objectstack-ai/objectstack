@@ -213,14 +213,18 @@ describe('#34655 — a packaged flow declared `defaultActive: false` ships switc
         }
     });
 
-    it("`status` stays the author's: an `obsolete` flow switched on by an administrator still does not arm", async () => {
-        const { engine, isBound } = boot();
+    it("`status` stays the author's: an `obsolete` flow a row switches on still does not arm", async () => {
+        // The row is placed directly, the shape an earlier boot leaves; what
+        // the toggle door answers for such a flow is not this key's.
+        const store = new InMemoryFlowActivationStore();
+        await store.setActive({ name: 'retired', packageId: 'crm', active: true });
+        const { engine, isBound } = boot(store);
         engine.registerFlow('retired', packagedFlow('retired', { defaultActive: false, status: 'obsolete' }));
-
-        await engine.toggleFlow('retired', true);
+        await engine.hydrateFlowActivations();
 
         expect(isBound('retired')).toBe(false);
         expect(stateOf(engine, 'retired')).toMatchObject({ enabled: false });
+        expect((await engine.execute('retired')).code).toBe('FLOW_DISABLED');
     });
 
     it('a packaged caller of a subflow that ships off is held unarmed until the subflow is switched on', async () => {
@@ -249,7 +253,9 @@ describe('#34655 — a packaged flow declared `defaultActive: false` ships switc
 
 describe('#34655 — `defaultActive` is refused on a flow authored in the environment', () => {
     for (const value of [false, true]) {
-        it(`refuses \`defaultActive: ${value}\` on a flow no package ships, with VALIDATION_FAILED / 400, filing nothing`, async () => {
+        // The engine throws a plain Error, as every registration refusal does;
+        // the write doors answer it VALIDATION_FAILED / 400 (`registerAndSaveFlow`).
+        it(`refuses \`defaultActive: ${value}\` on a flow no package ships, naming its status as its switch, filing nothing`, async () => {
             const { engine } = boot();
             let thrown: unknown;
             try {
@@ -258,7 +264,6 @@ describe('#34655 — `defaultActive` is refused on a flow authored in the enviro
                 thrown = e;
             }
             expect(thrown).toBeInstanceOf(Error);
-            expect(thrown).toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
             expect((thrown as Error).message).toBe(
                 "Flow 'my_flow' declares defaultActive, which is the default of the switch an administrator turns a "
                     + "PACKAGED flow on and off with, and 'my_flow' was authored in this deployment, not shipped by a "
