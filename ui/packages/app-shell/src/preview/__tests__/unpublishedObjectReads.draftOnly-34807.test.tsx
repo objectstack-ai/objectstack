@@ -35,9 +35,10 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { attachObjectSortability, readObjectSortability } from '@object-ui/core';
 
 /** The overlay read the provider's `getItem('object', name)` answers in these cases. */
-const OVERLAY: { doc: unknown; getItem: ReturnType<typeof vi.fn> } = {
+type OverlayRead = (type: string, name: string) => Promise<unknown>;
+const OVERLAY: { doc: unknown; getItem: ReturnType<typeof vi.fn<OverlayRead>> } = {
   doc: null,
-  getItem: vi.fn(),
+  getItem: vi.fn<OverlayRead>(),
 };
 
 vi.mock('../../providers/MetadataProvider', async (importOriginal) => {
@@ -137,7 +138,7 @@ const LIST_PAGE: { dataSource: any; objects: any[] } = { dataSource: undefined, 
 
 beforeEach(() => {
   OVERLAY.doc = DRAFT_DOCUMENT;
-  OVERLAY.getItem = vi.fn(async () => OVERLAY.doc);
+  OVERLAY.getItem = vi.fn<OverlayRead>(async () => OVERLAY.doc);
   CAPTURED.dataSource = undefined;
   LIST_PAGE.dataSource = makeAdapter();
   LIST_PAGE.objects = [DRAFT_DOCUMENT];
