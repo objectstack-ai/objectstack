@@ -1590,6 +1590,9 @@ const ko = {
     },
     total: "합계",
     noDataSourceFor: "데이터 소스 없음:",
+    drillTooMany: '이 값과 관련된 레코드가 너무 많아 여기에 나열할 수 없습니다. 대시보드 필터 범위를 좁힌 후 다시 시도하세요.',
+    drillUnavailable: '이 값에 해당하는 레코드는 여기에서 나열할 수 없습니다.',
+    drillFailed: '이 값에 해당하는 레코드를 불러오지 못했습니다. 잠시 후 다시 시도하세요.',
     config: {
       breadcrumb: {
         dashboard: "대시보드",

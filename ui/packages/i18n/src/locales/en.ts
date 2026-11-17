@@ -1954,6 +1954,9 @@ const en = {
   dashboard: {
     total: 'Total',
     noDataSourceFor: 'No data source available for',
+    drillTooMany: 'Too many records are related to this value to list them here. Narrow the dashboard filters and try again.',
+    drillUnavailable: 'The records behind this value can’t be listed from here.',
+    drillFailed: 'The records behind this value couldn’t be loaded. Try again later.',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;

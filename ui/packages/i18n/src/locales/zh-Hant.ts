@@ -1606,6 +1606,9 @@ const zhHant = {
   dashboard: {
     total: '總計',
     noDataSourceFor: '沒有可用的資料來源：',
+    drillTooMany: '與該值關聯的記錄過多，無法在此列出。請縮小儀表盤篩選範圍後重試。',
+    drillUnavailable: '無法在此列出該值對應的記錄。',
+    drillFailed: '無法載入該值對應的記錄，請稍後重試。',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
