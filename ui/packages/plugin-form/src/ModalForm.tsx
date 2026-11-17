@@ -33,9 +33,11 @@ import {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
+  RecordTopBarButton,
   toast,
+  FormSectionNavContext,
 } from '@object-ui/components';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
 import { SchemaRenderer, useSafeFieldLabel, usePreviewMode } from '@object-ui/react';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
@@ -85,7 +87,9 @@ import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
 import { useInitialFieldFocus } from './initialFieldFocus';
+import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
 import { FormDirtyReportContext } from './formDirtyReport';
+import { useModalFormMaximized } from './modalMaximize';
 
 // Localized strings for the unsaved-changes guard and, since objectui#11039,
 // the form's own chrome (the default submit and cancel labels and the
@@ -116,6 +120,10 @@ const useDiscardTranslation = createSafeTranslation(
     // The heading of the fields no declared field group claims
     // (`deriveFieldGroupSections`' trailing bucket).
     'common.ungroupedSection': 'Other',
+    // The header's maximize / restore switch: the record drawer's own pair of
+    // keys and labels (objectstack-ai/objectstack#34604).
+    'detail.maximize': 'Maximize',
+    'detail.restoreSize': 'Restore size',
   },
   'form.discardTitle',
 );
@@ -366,6 +374,11 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // Upload-in-flight gate (objectui#10166): Save is refused, disabled and
   // EXPLAINED while a file/image widget below is still uploading.
   const uploadGate = useUploadGate();
+  // The section navigation between the header and the scrolling body
+  // (objectstack#34605): the form reports its visible sections, the dialog
+  // draws them where they stay in view while the body scrolls.
+  const sectionNav = useFormSectionNav();
+  const drawsSectionNav = (sectionNav.items?.length ?? 0) >= 2;
   const previewMode = usePreviewMode();
   const perms = usePermissions();
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
@@ -504,6 +517,12 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     ? effectiveSections.reduce((n, s) => n + (Array.isArray(s.fields) ? s.fields.length : 0), 0)
     : layoutPool.length;
 
+  // The header's maximize switch (objectstack-ai/objectstack#34604):
+  // maximized, the dialog is `full` whatever its authored or inferred size,
+  // and every reader of the size below — the width class and the undeclared
+  // column count — reads that effective size.
+  const { maximized, toggleMaximized } = useModalFormMaximized(schema.objectName);
+
   // The dialog's size when the author declared none (objectui#12521): bounded
   // — `lg` or `xl`, never `full` — and chosen from the declared grid and the
   // field count, so a short form is not stretched across a wide dialog. An
@@ -512,12 +531,13 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // size, so the size reads that floor and never the count it then bounds
   // (objectstack-ai/objectstack#34607).
   const effectiveModalSize = useMemo(() => {
+    if (maximized) return 'full';
     if (schema.modalSize) return schema.modalSize;
     const columns = effectiveSections?.length
       ? sectionedFormColumns(schema.columns, effectiveSections.map((s) => s.columns), DIALOG_DEFAULT_COLUMNS)
       : (clampColumns(schema.columns) ?? DIALOG_DEFAULT_COLUMNS);
     return inferModalSize(Math.min(columns, inferColumns(layoutFieldCount)));
-  }, [schema.modalSize, schema.columns, effectiveSections, layoutFieldCount]);
+  }, [maximized, schema.modalSize, schema.columns, effectiveSections, layoutFieldCount]);
 
   // The count an undeclared form or section draws in THIS dialog
   // (objectstack-ai/objectstack#34607): from the field count, bounded by the
@@ -535,6 +555,13 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   }, [formFields, objectSchema, flatColumns, schema.mode, effectiveSections]);
 
   const sizeClass = modalSizeClasses[effectiveModalSize] || modalSizeClasses.default;
+  // The content's height: a phone sheet is always the whole screen; from `sm`
+  // up the dialog grows with its body to a `90vh` cap, and maximized it fills
+  // `95dvh` — the height counterpart of the `full` size's `95vw` — so its body
+  // scroller, not the page, scrolls a long form.
+  const heightClass = maximized
+    ? 'h-[100dvh] sm:h-[95dvh] sm:max-h-[95dvh]'
+    : 'h-[100dvh] sm:h-auto sm:max-h-[90vh]';
 
   // Fetch object schema
   useEffect(() => {
@@ -1219,6 +1246,28 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     attemptClose(false);
   };
 
+  // The header's maximize / restore switch (objectstack-ai/objectstack#34604):
+  // the record drawer's control — its `RecordTopBarButton`, its lucide pair at
+  // its size, its labels — drawn just before the dialog's close (X), in both
+  // arms. The last child of the content, so it sits after the form in the tab
+  // order and right before the X, as the drawer orders them. From `sm` up
+  // only: the phone sheet already fills the screen. Toggling changes the
+  // content's classes and nothing else, so the form below stays mounted.
+  const maximizeButton = (
+    <RecordTopBarButton
+      label={maximized ? t('detail.restoreSize') : t('detail.maximize')}
+      onClick={toggleMaximized}
+      data-testid="modal-form-maximize"
+      className={cn('absolute top-2.5 hidden sm:inline-flex', showCloseButton ? 'right-9' : 'right-3')}
+    >
+      {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+    </RecordTopBarButton>
+  );
+  // The header keeps its title clear of the switch and the X from `sm` up.
+  // Its bottom rule is each arm's: the flat arm hands it to the section nav
+  // strip when one is drawn.
+  const headerClass = 'shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 sm:pr-20 pb-2';
+
   // Unsaved-changes guard — rendered INSIDE DialogContent so its portal
   // inherits the Dialog's Radix layer context (focus scope + dismissable
   // layer) through React. As a sibling of <Dialog> it had no such context, so
@@ -1258,10 +1307,11 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           showCloseButton={showCloseButton}
           onOpenAutoFocus={initialFieldFocus.onOpenAutoFocus}
           onCloseAutoFocus={initialFieldFocus.onCloseAutoFocus}
-          className={cn(sizeClass, 'flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden p-0', className, schema.className)}
+          className={cn(sizeClass, 'flex flex-col overflow-hidden p-0', heightClass, className, schema.className)}
+          data-maximized={maximized ? '' : undefined}
         >
           {(schema.title || schema.description) && (
-            <DialogHeader className="shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 pb-2 border-b">
+            <DialogHeader className={cn(headerClass, 'border-b')}>
               {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
               {schema.description ? (
                 <DialogDescription>{schema.description}</DialogDescription>
@@ -1312,6 +1362,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
             </Suspense>
           </div>
           {discardDialog}
+          {maximizeButton}
         </MobileDialogContent>
       </Dialog>
     );
@@ -1325,10 +1376,11 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
         showCloseButton={showCloseButton}
         onOpenAutoFocus={initialFieldFocus.onOpenAutoFocus}
         onCloseAutoFocus={initialFieldFocus.onCloseAutoFocus}
-        className={cn(sizeClass, 'flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden p-0', className, schema.className)}
+        className={cn(sizeClass, 'flex flex-col overflow-hidden p-0', heightClass, className, schema.className)}
+        data-maximized={maximized ? '' : undefined}
       >
         {(schema.title || schema.description) && (
-          <DialogHeader className="shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 pb-2 border-b">
+          <DialogHeader className={cn(headerClass, !drawsSectionNav && 'border-b')}>
             {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
             {schema.description ? (
               <DialogDescription>{schema.description}</DialogDescription>
@@ -1340,6 +1392,8 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           </DialogHeader>
         )}
 
+        <FormSectionNavContext.Provider value={sectionNav.sink}>
+        <FormSectionNav items={sectionNav.items} className="shrink-0 px-2 sm:px-4" />
         <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
           {/* Every upload widget below reports into this scope, however deep —
               a section, a tab, a subform row (objectui#10166). */}
@@ -1352,6 +1406,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
             </Suspense>
           </UploadGateProvider>
         </div>
+        </FormSectionNavContext.Provider>
 
         {/* Sticky footer — always visible action buttons */}
         {hasFooter && (
@@ -1406,6 +1461,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
             the Dialog content the conflict alert stacks as the topmost Radix
             layer, so its buttons receive clicks while the modal stays open. */}
         {conflictDialog}
+        {maximizeButton}
       </MobileDialogContent>
     </Dialog>
   );

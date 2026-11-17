@@ -196,6 +196,8 @@ const ru = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "Заполните поля формы, затем отправьте или отмените.",
+    sectionNav: "Разделы формы",
+    sectionNavErrors: "Поля для исправления: {{number}}",
     deniedDescription: "У вас нет прав на редактирование этого поля.",
     serverDefaultHint: "Задаётся автоматически при сохранении.",
     requiredForAction: "Обязательно для выполнения «{{action}}».",
@@ -2136,6 +2138,9 @@ const ru = {
           title: "Редактирование «{{app}}»",
           titleGeneric: "Редактировать это приложение",
           description: "Что нужно изменить? Я изменю это приложение на месте — добавлю поле, объект, представление или дашборд либо скорректирую существующее.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Спросите о данных этого приложения — количествах, списках и сводках — или скажите, что изменить, и я изменю приложение на месте: поле, объект, представление или дашборд.",
         },
       },
       clearConversation: "Очистить",
@@ -2340,6 +2345,11 @@ const ru = {
         resize: "Изменить размер чата",
         collapse: "Свернуть чат",
         maximize: "Открыть на всю страницу",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "История",
+        backToChat: "Вернуться к чату",
+        expand: "Развернуть",
+        restore: "Вернуть боковую панель",
         open: "Открыть ассистента",
         planAwaitingApproval: "Предложенный план ожидает вашего подтверждения",
       },
