@@ -7724,7 +7724,12 @@ export class AutomationEngine implements IAutomationService {
      *
      * @throws when the flow is unknown, when no package ships it
      *   (`RESOURCE_CONFLICT` / 409, before anything is written or changed),
-     *   when §7.3's subflow guard refuses in either direction, when the
+     *   when `enabled` is true and the flow's own definition's `status`
+     *   disables it (`RESOURCE_CONFLICT` / 409, before anything is written or
+     *   changed: this switch moves only the ledger bit, so the write would
+     *   leave the flow off while the caller read it as on; the refusal names
+     *   publishing the definition `active` — switching such a flow OFF still
+     *   records the choice), when §7.3's subflow guard refuses in either direction, when the
      *   durable suspended-run store cannot be listed while the disable guard
      *   judges a switched-off caller, or when the durable write fails — a
      *   reported flip that did not persist is the failure mode this whole leg
@@ -7762,6 +7767,7 @@ export class AutomationEngine implements IAutomationService {
         const host: ThisParameterType<typeof toggleFlow> = {
             flows: this.flows,
             refuseCustomerAuthoredToggle: (...a) => this.refuseCustomerAuthoredToggle(...a),
+            flowStatusDisabled: this.flowStatusDisabled,
             packagedFlowOwner: (...a) => this.packagedFlowOwner(...a),
             refuseEnableOntoDisabledSubflow: (...a) => this.refuseEnableOntoDisabledSubflow(...a),
             packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),

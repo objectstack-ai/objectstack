@@ -3328,7 +3328,7 @@ const STUDIO_EN: Record<string, string> = {
   // package list does not hold, and a pillar segment Studio has no pillar for.
   'engine.studio.notFound.package': 'Package not found. No package with the id "{id}" is installed here, so there is nothing to build in.',
   'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
-  'engine.studio.aiCopilot': 'AI copilot',
+  'engine.studio.aiCopilot': 'AI Assistant',
   // objectui#12725 — the Studio right slot: properties OR the copilot.
   'engine.studio.slot.label': 'Right panel',
   'engine.studio.slot.switchHint': 'Switch with ⌘. (Ctrl+.)',
@@ -3338,6 +3338,17 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.slot.planPending': 'a plan awaits your approval',
   'engine.studio.slot.pendingCount': '{count} awaiting your approval',
   'engine.studio.slot.openFullPage': 'Open full page',
+  // objectstack#34725 — the slot header's History button and its resize handle.
+  'engine.studio.slot.history': 'History',
+  'engine.studio.slot.resize': 'Resize the right panel',
+  // objectstack#34725 — the line over the Data canvas while the AI assistant's drafts are on it.
+  'engine.studio.copilotChanges.lineOne': 'The AI assistant just made {count} change',
+  'engine.studio.copilotChanges.line': 'The AI assistant just made {count} changes',
+  'engine.studio.copilotChanges.view': 'Review',
+  'engine.studio.copilotChanges.discardAll': 'Discard all unpublished changes',
+  'engine.studio.copilotChanges.discardConfirm': 'Discard every unpublished change in this package, yours included? This cannot be undone.',
+  'engine.studio.copilotChanges.discardFailed': 'Some changes could not be discarded: {items}.',
+  'engine.studio.copilotChanges.itemSeparator': ', ',
   'engine.studio.pillar.data': 'Data',
   'engine.studio.pillar.automations': 'Automations',
   'engine.studio.pillar.interfaces': 'Interfaces',
@@ -3642,7 +3653,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.draftMark.sourceItems': '{items}: {count} added as a draft by {agent} {when}',
   'engine.studio.draftMark.sourceItemsJustNow': '{items}: {count} added as a draft by {agent} just now',
   // objectstack#27176 — who drafted it: the copilot, or an agent through the MCP build door.
-  'engine.studio.draftMark.agent.copilot': 'the AI copilot',
+  'engine.studio.draftMark.agent.copilot': 'the AI assistant',
   'engine.studio.draftMark.agent.mcp': 'an MCP client',
   'engine.studio.draftMark.agent.mcpClient': 'the MCP client "{client}"',
   'engine.studio.draftMark.item': '"{label}"',
