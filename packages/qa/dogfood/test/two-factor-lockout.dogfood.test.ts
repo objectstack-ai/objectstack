@@ -47,7 +47,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { assertArmed, authSettingArmed } from './armed.js';
-import { secretFromTotpUri, totp } from './totp.js';
+import { freshTotp, secretFromTotpUri } from './totp.js';
 
 const SYS = { context: { isSystem: true } };
 const ADMIN_PASSWORD = 'admin123';
@@ -147,7 +147,7 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     // lockout bookkeeping. Confirm it through the SESSION path first — this
     // call is `isSignIn: false`, so it deliberately touches no counter.
     const confirmed = await stack.apiAs(token, 'POST', '/auth/two-factor/verify-totp', {
-      code: totp(secret),
+      code: await freshTotp(secret),
     });
     expect(confirmed.status, `verify-totp (enrolment): ${await confirmed.clone().text()}`).toBe(200);
   }, 120_000);
@@ -188,6 +188,10 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     return cookie;
   }
 
+  // Every correct code below comes from `freshTotp`: the server accepts a TOTP
+  // code once, so each sign-in needs a code from a later step than the last,
+  // and a case that needs one the clock has not reached yet waits for it (at
+  // most one 30 s period) — hence the longer timeouts on those cases.
   function verifyWithCookie(cookie: string, code: string): Promise<Response> {
     return stack.api('/auth/two-factor/verify-totp', {
       method: 'POST',
@@ -228,7 +232,7 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     expect(before.count, 'precondition: a non-zero failure count to clear').toBeGreaterThan(0);
 
     const cookie = await beginChallenge();
-    const ok = await verifyWithCookie(cookie, totp(secret));
+    const ok = await verifyWithCookie(cookie, await freshTotp(secret));
     expect(ok.status, `verify-totp (correct code): ${await ok.clone().text()}`).toBe(200);
 
     const after = await lockoutState();
@@ -237,7 +241,7 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
       'a successful verification must clear the budget — otherwise it counts non-consecutive failures and locks out a legitimate user',
     ).toBe(0);
     expect(after.lockedUntil ?? null).toBeNull();
-  });
+  }, 60_000);
 
   it('locks the account once the operator-configured budget is spent, and refuses even a correct code', async () => {
     // Two budgets stack here, and the test has to respect both. better-auth
@@ -286,12 +290,12 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     // The lock has to bite BEFORE the code is checked — otherwise it is not a
     // lockout, just a slower guess loop.
     const cookie = await beginChallenge();
-    const rejected = await verifyWithCookie(cookie, totp(secret));
+    const rejected = await verifyWithCookie(cookie, await freshTotp(secret));
     expect(
       rejected.status,
       `a locked account must refuse even a valid code: ${await rejected.clone().text()}`,
     ).toBe(429);
-  });
+  }, 60_000);
 
   it('lazily clears an expired lock on the next attempt', async () => {
     const before = await lockoutState();
@@ -315,13 +319,13 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     // columns: a driver that mishandled it would leave the user locked out
     // forever with no error anywhere.
     const cookie = await beginChallenge();
-    const ok = await verifyWithCookie(cookie, totp(secret));
+    const ok = await verifyWithCookie(cookie, await freshTotp(secret));
     expect(ok.status, `expired lock was not cleared: ${await ok.clone().text()}`).toBe(200);
 
     const after = await lockoutState();
     expect(after.lockedUntil ?? null, 'the expired lock must be cleared, not merely ignored').toBeNull();
     expect(after.count, 'clearing an expired lock must reset the failure budget too').toBe(0);
-  });
+  }, 60_000);
 
   // [#3690] The admin escape hatch. `Unlock Account` used to clear only
   // `sys_user`, so a user locked at the SECOND factor had no way out but to
@@ -333,7 +337,7 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
     // Take a fresh one through the full two-factor sign-in BEFORE re-locking —
     // afterwards there is no way to obtain one, which is exactly why the admin
     // escape hatch has to exist.
-    const bootstrap = await verifyWithCookie(await beginChallenge(), totp(secret));
+    const bootstrap = await verifyWithCookie(await beginChallenge(), await freshTotp(secret));
     expect(bootstrap.status, `sign-in for the admin session: ${await bootstrap.clone().text()}`).toBe(200);
     const adminSession = ((await bootstrap.json()) as { token?: string }).token;
     expect(adminSession, 'two-factor sign-in returned no session token').toBeTruthy();
@@ -364,7 +368,7 @@ describe('#3624 follow-up: better-auth 2FA lockout counts wrong codes', () => {
 
     // And the user can actually sign in again, which is the point of unlocking.
     const cookie = await beginChallenge();
-    const ok = await verifyWithCookie(cookie, totp(secret));
+    const ok = await verifyWithCookie(cookie, await freshTotp(secret));
     expect(ok.status, `still locked out after unlock: ${await ok.clone().text()}`).toBe(200);
-  });
+  }, 90_000);
 });
