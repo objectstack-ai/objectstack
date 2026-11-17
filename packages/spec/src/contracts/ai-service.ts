@@ -517,6 +517,10 @@ export interface ActionConfirmationRequiredDetails {
  *    - Elicited `accept`: the call dispatches as any admitted call does,
  *      exactly once, under the caller's permissions. The confirmation covers
  *      that one call: nothing is stored, and the next call is asked again.
+ *      For a `resume_run` call the accept is bound to the screen the run was
+ *      parked on when the person was asked: when the run has moved on to
+ *      another screen meanwhile, the resume is refused `409
+ *      RESOURCE_CONFLICT`, nothing resumes, and the run stays where it is.
  *    - Elicited `decline`: the person said no. Refused, reason `declined`;
  *      nothing runs. The caller does not retry unless the person asks again.
  *    - Elicited `cancel`: the person dismissed the question without choosing.
