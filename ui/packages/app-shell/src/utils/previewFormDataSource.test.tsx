@@ -1,0 +1,233 @@
+/**
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * The record form's data source under draft preview (objectstack#34807).
+ *
+ *   - In preview, `getObjectSchema` answers the published document plus each
+ *     field only the draft overlay declares, read-only and marked draft-only;
+ *     the adapter's sortability projection survives the copy.
+ *   - The real `ModalForm` (the console's global New/Edit modal) draws such a
+ *     field, and Save leaves it out of the create, a declared default included.
+ *   - CONTROL: outside preview the hook returns the adapter itself, so the form
+ *     reads the published document through one adapter read (objectui#13044)
+ *     and never draws the draft field.
+ */
+
+import '@testing-library/jest-dom/vitest';
+import * as React from 'react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, waitFor, cleanup, fireEvent, renderHook } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { registerAllFields } from '@object-ui/fields';
+import { ModalForm } from '@object-ui/plugin-form';
+import { MetadataNotFoundError } from '@object-ui/data-objectstack';
+import { PreviewModeProvider } from '../preview/PreviewModeContext';
+import { attachObjectSortability, readObjectSortability } from '@object-ui/core';
+import {
+  DRAFT_ONLY_FIELD_KEY,
+  createPreviewFormDataSource,
+  usePreviewFormDataSource,
+  withDraftOnlyFields,
+} from './previewFormDataSource';
+
+registerAllFields();
+
+const { GET_ITEM } = vi.hoisted(() => ({ GET_ITEM: { fn: null as null | ((type: string, name: string) => Promise<unknown>) } }));
+
+vi.mock('../providers/MetadataProvider', async (importOriginal) => {
+  const getItem = (type: string, name: string) => GET_ITEM.fn!(type, name);
+  return {
+    ...(await importOriginal<Record<string, unknown>>()),
+    useMetadata: () => ({ objects: [], loading: false, getItem }),
+  };
+});
+
+const PUBLISHED = {
+  name: 'tracker_task',
+  fields: { title: { type: 'text', label: 'Title' } },
+};
+const OVERLAY = {
+  name: 'tracker_task',
+  fields: {
+    title: { type: 'text', label: 'Task title' },
+    priority: { type: 'text', label: 'Priority', defaultValue: 'high' },
+  },
+};
+
+const makeAdapter = () => ({
+  getObjectSchema: vi.fn(async () => structuredClone(PUBLISHED)),
+  create: vi.fn(async () => ({ id: 'r1' })),
+  update: vi.fn(async () => ({ id: 'r1' })),
+  findOne: vi.fn(async () => ({ id: 'r1' })),
+});
+
+afterEach(() => {
+  cleanup();
+  GET_ITEM.fn = null;
+});
+
+type Doc = { name?: string; fields: Record<string, Record<string, unknown>> };
+
+describe('withDraftOnlyFields (objectstack#34807)', () => {
+  it('adds the draft-only field read-only and marked, keeps published definitions, and touches neither input', () => {
+    const overlay = structuredClone(OVERLAY);
+    const published = structuredClone(PUBLISHED);
+    const out = withDraftOnlyFields(published, overlay) as Doc;
+    expect(out.fields.priority).toEqual({
+      type: 'text', label: 'Priority', defaultValue: 'high', readonly: true, [DRAFT_ONLY_FIELD_KEY]: true,
+    });
+    expect(out.fields.title).toEqual({ type: 'text', label: 'Title' });
+    expect(overlay).toEqual(OVERLAY);
+    expect(published).toEqual(PUBLISHED);
+  });
+
+  it('the copy keeps the published sortability projection', () => {
+    const published = attachObjectSortability(structuredClone(PUBLISHED), { fields: { title: { sortable: false } } });
+    const out = withDraftOnlyFields(published, structuredClone(OVERLAY));
+    expect(readObjectSortability(out)).toEqual({ fields: { title: { sortable: false } } });
+  });
+
+  it('with no published document every overlay field is draft-only', () => {
+    const out = withDraftOnlyFields(null, structuredClone(OVERLAY)) as Doc;
+    expect(out.fields.title.readonly).toBe(true);
+    expect(out.fields.title.label).toBe('Task title');
+    expect(out.fields.priority[DRAFT_ONLY_FIELD_KEY]).toBe(true);
+  });
+
+  it('with no overlay document the published one is returned as is', () => {
+    const published = structuredClone(PUBLISHED);
+    expect(withDraftOnlyFields(published, null)).toBe(published);
+  });
+});
+
+describe('createPreviewFormDataSource (objectstack#34807)', () => {
+  it('answers the published document plus the draft-only field, read-only', async () => {
+    const adapter = makeAdapter();
+    const ds = createPreviewFormDataSource(adapter, async () => structuredClone(OVERLAY));
+    const schema = (await ds.getObjectSchema('tracker_task')) as Doc;
+    expect(schema.fields.priority.readonly).toBe(true);
+    expect(schema.fields.priority.label).toBe('Priority');
+    expect(schema.fields.title.label).toBe('Title');
+  });
+
+  it('a draft-only object (published read absent) answers the overlay with every field read-only', async () => {
+    const adapter = makeAdapter();
+    adapter.getObjectSchema.mockRejectedValueOnce(new MetadataNotFoundError('tracker_task'));
+    const ds = createPreviewFormDataSource(adapter, async () => structuredClone(OVERLAY));
+    const schema = (await ds.getObjectSchema('tracker_task')) as Doc;
+    expect(schema.fields.title.readonly).toBe(true);
+    expect(schema.fields.priority.readonly).toBe(true);
+  });
+
+  it('a published read that fails for another reason fails the read', async () => {
+    const adapter = makeAdapter();
+    const failure = new Error('connection refused');
+    adapter.getObjectSchema.mockRejectedValueOnce(failure);
+    const ds = createPreviewFormDataSource(adapter, async () => structuredClone(OVERLAY));
+    await expect(ds.getObjectSchema('tracker_task')).rejects.toBe(failure);
+  });
+
+  it('no overlay document: the adapter answer is returned as is', async () => {
+    const adapter = makeAdapter();
+    const ds = createPreviewFormDataSource(adapter, async () => null);
+    expect(await ds.getObjectSchema('tracker_task')).toEqual(PUBLISHED);
+  });
+
+  it('every other member is the adapter own, bound to it, with a stable identity', async () => {
+    class Adapter {
+      #writes = 0;
+      async getObjectSchema() { return PUBLISHED; }
+      async create(_object: string, data: Record<string, unknown>) { this.#writes += 1; return { id: `r${this.#writes}`, ...data }; }
+    }
+    const adapter = new Adapter();
+    const ds = createPreviewFormDataSource(adapter, async () => null);
+    expect(ds.create).toBe(ds.create);
+    expect(await ds.create('tracker_task', { title: 'a' })).toEqual({ id: 'r1', title: 'a' });
+    expect(ds).toBeInstanceOf(Adapter);
+  });
+});
+
+describe('usePreviewFormDataSource (objectstack#34807)', () => {
+  const wrap = (preview: boolean) => ({ children }: { children: React.ReactNode }) => (
+    <MemoryRouter>
+      <PreviewModeProvider force={preview}>{children}</PreviewModeProvider>
+    </MemoryRouter>
+  );
+
+  it('CONTROL: outside preview it is the adapter itself', () => {
+    const adapter = makeAdapter();
+    const { result } = renderHook(() => usePreviewFormDataSource(adapter), { wrapper: wrap(false) });
+    expect(result.current).toBe(adapter);
+  });
+
+  it('in preview it reads the object document through the metadata provider', async () => {
+    const adapter = makeAdapter();
+    const getItem = vi.fn(async () => structuredClone(OVERLAY));
+    GET_ITEM.fn = getItem;
+    const { result } = renderHook(() => usePreviewFormDataSource(adapter), { wrapper: wrap(true) });
+    expect(result.current).not.toBe(adapter);
+    await result.current!.getObjectSchema('tracker_task');
+    expect(getItem).toHaveBeenCalledWith('object', 'tracker_task');
+  });
+});
+
+describe('the global New modal under draft preview (objectstack#34807)', () => {
+  function Modal({ adapter }: { adapter: ReturnType<typeof makeAdapter> }) {
+    const ds = usePreviewFormDataSource(adapter);
+    return (
+      <ModalForm
+        schema={{
+          type: 'object-form',
+          formType: 'modal',
+          objectName: 'tracker_task',
+          mode: 'create',
+          open: true,
+          title: 'New task',
+          fields: ['title', 'priority'],
+        } as never}
+        dataSource={ds as never}
+      />
+    );
+  }
+  const renderModal = (preview: boolean, adapter: ReturnType<typeof makeAdapter>) =>
+    render(
+      <MemoryRouter>
+        <PreviewModeProvider force={preview}>
+          <Modal adapter={adapter} />
+        </PreviewModeProvider>
+      </MemoryRouter>,
+    );
+
+  it('draws the draft-only field, and Save leaves it out of the create', async () => {
+    const adapter = makeAdapter();
+    GET_ITEM.fn = async () => structuredClone(OVERLAY);
+    renderModal(true, adapter);
+    await waitFor(() => expect(screen.getByText('Priority')).toBeInTheDocument());
+
+    fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
+    fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(adapter.create).toHaveBeenCalledTimes(1));
+    const [object, payload] = adapter.create.mock.calls[0] as unknown as [string, Record<string, unknown>];
+    expect(object).toBe('tracker_task');
+    expect(payload).toMatchObject({ title: 'Ship it' });
+    expect(payload).not.toHaveProperty('priority');
+  });
+
+  it('CONTROL: outside preview the published document is read once and the draft field is absent', async () => {
+    const adapter = makeAdapter();
+    const getItem = vi.fn(async () => structuredClone(OVERLAY));
+    GET_ITEM.fn = getItem;
+    renderModal(false, adapter);
+    await waitFor(() => expect(screen.getByText('Title')).toBeInTheDocument());
+    expect(screen.queryByText('Priority')).not.toBeInTheDocument();
+    expect(adapter.getObjectSchema).toHaveBeenCalledTimes(1);
+    expect(adapter.getObjectSchema).toHaveBeenCalledWith('tracker_task');
+    expect(getItem).not.toHaveBeenCalled();
+  });
+});

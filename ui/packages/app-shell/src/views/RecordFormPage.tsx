@@ -66,6 +66,7 @@ import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { readRecordFormAiChanges, readRecordFormAiDraft } from '../utils/recordFormAiDraft.js';
+import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
 import { useAuth } from '@object-ui/auth';
 
 export interface RecordFormPageProps {
@@ -91,6 +92,11 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const dataSource = useAdapter();
+  // objectstack#34807 — under draft preview the form reads its object
+  // definition through the draft overlay (draft-only fields read-only); outside
+  // preview this is `dataSource` itself. Writes and the answer-warning claim
+  // below stay on the adapter.
+  const formDataSource = usePreviewFormDataSource(dataSource);
   const { objects, loading: metadataLoading } = useMetadata();
   const { t, language } = useObjectTranslation();
   const { objectLabel, objectPluralLabel } = useObjectLabel();
@@ -511,7 +517,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
                     onCancel: handleCancel,
                     ...formChrome,
                   }}
-                  dataSource={dataSource ?? undefined}
+                  dataSource={formDataSource ?? undefined}
                 />
               </SuggestedFieldsContext.Provider>
             </SuggestedFieldChangesContext.Provider>
