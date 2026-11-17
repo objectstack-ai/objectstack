@@ -372,6 +372,27 @@ export function readOverlayCacheGeneration(engine: unknown): number | undefined 
 }
 
 /**
+ * [#34206, ADR-0156 D5] Retire every row set this engine holds, from outside
+ * its write path, by advancing the generation the entries are stamped with.
+ * The shared compile cache (`meta-compile-cache.ts`) calls it each time it
+ * takes a reading of the store, so whatever it compiles under that reading
+ * reads rows at least as new as the reading: an entry here filled before
+ * another writer's change would otherwise feed a recompile the older rows,
+ * and that answer would then stand under the newer reading.
+ *
+ * ⛔ It does not move the engine's write epoch ({@link bumpWriteEpoch} does),
+ * which would retire the authorization cache that shares it. Returns the new
+ * generation, or `undefined` for an engine this cache does not cover.
+ */
+export function retireMetaOverlayCache(engine: unknown): number | undefined {
+  if (!engine || typeof engine !== 'object') return undefined;
+  const state = overlayWriteStates.get(engine);
+  if (!state) return undefined;
+  state.gen += 1;
+  return state.gen;
+}
+
+/**
  * [#13609] Bump the engine's write epoch from OUTSIDE this engine's own write
  * path — the structural sibling to {@link readWriteEpoch}, spelled the same
  * way and for the same reason: `@objectstack/metadata-protocol` must not

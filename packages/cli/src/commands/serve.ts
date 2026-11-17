@@ -6,7 +6,7 @@ import fs from 'fs';
 import net from 'net';
 import chalk, { chalkStderr } from 'chalk';
 import { stampDatasourceEnvCredentialsDefault } from '../utils/datasource-env-credentials-default.js';
-import { loadConfig, bundleConfigModule } from '../utils/config.js';
+import { loadConfig, bundleConfigModule, stopConfigBundler } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
@@ -2869,6 +2869,9 @@ export default class Serve extends Command {
         : flags.prebuilt
           ? { mod: await import(absolutePath.startsWith('/') ? `file://${absolutePath}` : absolutePath) }
           : await bundleConfigModule(absolutePath);
+      // The bundler's service child would otherwise outlive this process and
+      // be found in `os start`'s process group after `start` exits (#34337).
+      if (!useArtifactFallback && !flags.prebuilt) await stopConfigBundler();
 
       let config = mod.default || mod;
 

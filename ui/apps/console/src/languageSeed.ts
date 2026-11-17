@@ -75,14 +75,28 @@
  *
  * So, when the device holds no explicit choice, the read states
  * {@link pickPreferredLocale}'s answer as its `Accept-Language`: the browser's
- * language when `locale.supported` lists it, else `locale.default`. The
- * server's rungs are unchanged: a stored `sys_user.locale` still answers
- * first, and the stated language only decides the rung below it. Only when
- * discovery answers neither (it failed) does the browser's own header go out.
+ * language when `locale.supported` lists it. A stored `sys_user.locale` still
+ * answers first, and the stated language only decides the rung below it.
  * {@link loadPreferredLocale} reads discovery through the console's one shared
  * request, and `LocalizationFetchProvider`'s every-boot read states the same
  * value, so the two reads still share one request and the revalidation keeps
  * the cached seed on the same answer.
+ *
+ * ## A browser language the app does not ship states nothing (objectstack#34392)
+ *
+ * The same ruling puts the organization's `localization.locale` (Setup →
+ * Localization, or the first-run checklist's "Default language and country")
+ * between the browser's language and the app's declared default. Only the
+ * server holds that setting, and its deployment-default rung answers only a
+ * request that names no language the app lists. Stating `locale.default` here
+ * named one on every read, so the organization's language never decided a
+ * user who had chosen none.
+ *
+ * So the read states nothing when the browser's language is not in
+ * `locale.supported`, or when discovery fails. The browser's own header then
+ * goes out, and the server answers it only when the app lists that language;
+ * otherwise the organization's setting decides, then the app's declared
+ * default, then the server's floor.
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
@@ -138,7 +152,9 @@ async function fetchDiscovery(serverBase: string): Promise<unknown> {
 /**
  * The language a read with no explicit choice states (objectstack#33985,
  * ruling 6915665005): the browser's language when the app lists it in
- * `supported`, else the app's declared `appDefault`, else `undefined`.
+ * `supported`, else `undefined` — the read then states nothing, and the
+ * server's deployment default (the organization's language, then the app's
+ * declared default) decides (objectstack#34392).
  *
  * The browser's language is its top tag (`navigator.language`), the one tag
  * the server's own `Accept-Language` rung reads off a header. "Lists it" is
@@ -154,39 +170,36 @@ async function fetchDiscovery(serverBase: string): Promise<unknown> {
 export function pickPreferredLocale(
   browserTag: string | null | undefined,
   supported: readonly string[],
-  appDefault: string | undefined,
 ): string | undefined {
   const tag = typeof browserTag === 'string' ? browserTag.trim() : '';
-  return (tag ? resolveLocaleAmong(tag, supported) : undefined) ?? appDefault;
+  return tag ? resolveLocaleAmong(tag, supported) : undefined;
 }
 
-/** Discovery `locale`, read as the default and the supported list. */
-function readDiscoveryLocale(discovery: unknown): { appDefault?: string; supported: string[] } {
-  const locale = (discovery as { locale?: { default?: unknown; supported?: unknown } } | null)?.locale;
-  const value = locale?.default;
-  const supported = Array.isArray(locale?.supported)
+/** Discovery `locale.supported`, read as a list of non-empty tags. */
+function readSupportedLocales(discovery: unknown): string[] {
+  const locale = (discovery as { locale?: { supported?: unknown } } | null)?.locale;
+  return Array.isArray(locale?.supported)
     ? locale.supported.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
     : [];
-  return { appDefault: typeof value === 'string' && value.length > 0 ? value : undefined, supported };
 }
 
 /**
  * The language a read with no explicit choice states as its `Accept-Language`
- * ({@link pickPreferredLocale} over discovery `locale.supported` and
- * `locale.default`), or `undefined` when discovery answers neither.
+ * ({@link pickPreferredLocale} over discovery `locale.supported`), or
+ * `undefined` when the app does not list the browser's language or discovery
+ * fails.
  *
  * Started once per page-load and never rejects: the first call starts the
- * read, every later call shares it. A failed or unreadable discovery answers
- * `undefined`, and the reads that state it then send the browser's own header,
- * which is the console's behaviour without a served locale block.
+ * read, every later call shares it. On `undefined` the reads that state it
+ * send the browser's own header, which the server answers only when the app
+ * lists that language (objectstack#34392).
  */
 export function loadPreferredLocale(serverBase: string): Promise<string | undefined> {
   if (!preferredLocale) {
     preferredLocale = fetchDiscovery(serverBase).then(
       (discovery) => {
-        const { appDefault, supported } = readDiscoveryLocale(discovery);
         const browser = typeof navigator === 'undefined' ? undefined : navigator.language;
-        return pickPreferredLocale(browser, supported, appDefault);
+        return pickPreferredLocale(browser, readSupportedLocales(discovery));
       },
       () => undefined,
     );
@@ -241,9 +254,10 @@ async function fetchAndCacheSeed(serverBase: string): Promise<void> {
         credentials: 'include',
         headers: {
           Accept: 'application/json',
-          // A supported browser language, else the app's declared default,
-          // decides the rung below the user's own locale (objectstack#33985);
-          // discovery answering neither, the browser's own header goes.
+          // A supported browser language decides the rung below the user's
+          // own locale (objectstack#33985); otherwise the browser's own header
+          // goes, and the server's deployment default decides
+          // (objectstack#34392).
           ...(preferred ? { 'Accept-Language': preferred } : {}),
         },
       },
