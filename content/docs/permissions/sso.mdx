@@ -748,6 +748,11 @@ and no user is created. These sign-ins are unchanged:
 - the first human of a deployment that has none yet;
 - every sign-in under the `email_domain` or `open` posture.
 
+Admission is not acceptance: accepting an organization invitation needs a
+verified email address, and an account an SSO sign-in creates counts as
+verified only when the provider verified the address
+([Self-hosting](/docs/deployment/self-hosting)).
+
 To let a provider create accounts for everyone its IdP authenticates, as it did
 before this rule, turn on `allowJit` for that provider. With
 [domain verification](#domain-verification-opt-in) on, a provider still creates

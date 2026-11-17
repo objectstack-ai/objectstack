@@ -62,7 +62,6 @@ const BOOT_TIMEOUT = 180_000;
 const ORIGIN = 'http://localhost:3000';
 const API = '/api/v1';
 const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
-const ORG = 'org_pin_30848';
 const READER = { email: 'pin-30848-reader@example.invalid', password: 'Reader-Pass-123' };
 const EDITOR = { email: 'pin-30848-editor@example.invalid', password: 'Editor-Pass-123' };
 const OBJECT = 'pin_step';
