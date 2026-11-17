@@ -827,7 +827,7 @@ export class UpdateFacet {
            // Scope: the BY-ID branch only. A `multi: true` predicate update
            // that matches zero rows is legitimately "0 rows affected", not a
            // missing record — same line both siblings draw.
-           if (!priorRecord) throw recordNotFoundError(object, id);
+           if (!priorRecord) throw recordNotFoundError(object, id, opCtx.context);
            // Never fabricate: a row that is not there leaves `previous`
            // UNBOUND rather than `{}`/`null`, so a condition reading it
            // faults loudly instead of answering for a record nobody read

@@ -4345,7 +4345,9 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'outcome the action\'s own `outcomeMessages` declares; `resultDialog.title`, `.description` ' +
       'and `.acknowledge` an action that declares a `resultDialog` at all; ' +
       '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included; ' +
-      '`preflight.fields.PATH` the literal `path` of a declared preflight field, dots included. A ' +
+      '`preflight.fields.PATH` the literal `path` of a declared preflight field, dots included; ' +
+      '`resultDialog.columns.PATH.COLUMN` and `preflight.columns.PATH.COLUMN` a `format: \'table\'` ' +
+      'field\'s literal `path`, then the literal `path` of one of its `columns`. A ' +
       'bundle translates what the action declares and cannot add an outcome or a dialog.',
     'Not judged: a platform object in the registry, an object this stack only extends through ' +
       '`objectExtensions[]`, and a picklist it only extends through `picklistExtensions[]` — the ' +
