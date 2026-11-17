@@ -105,10 +105,11 @@ export function validateDatasetMemberVocabulary(stack: AnyRec): DatasetMemberVoc
           rule: DATASET_MEMBER_NO_VOCABULARY,
           where: `dataset "${datasetName}" ${kind} "${memberName}"`,
           path: `${path}.${key}[${at}]`,
+          // `where` names the dataset and the member; every door prints it before this sentence.
           message:
-            `${kind} "${memberName}" of dataset "${datasetName}" declares neither \`synonyms\` nor a ` +
-            '`description`, so it answers only to its own name and label: a question asked in a user\'s own ' +
-            `words will not find this governed ${kind}, and the answer comes from an ungoverned object query instead.`,
+            'declares neither `synonyms` nor a `description`, so it answers only to its own name and label: ' +
+            `a question asked in a user's own words will not find this governed ${kind}, and the answer ` +
+            'comes from an ungoverned object query instead.',
           hint:
             'Add `synonyms`, the words a person types for it, in the language your users ask in (every ' +
             'language in the one list), and a one-sentence `description` saying what it is in business ' +

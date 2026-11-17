@@ -100,10 +100,8 @@ describe('dataset member vocabulary · the rule', () => {
       [DATASET_MEMBER_NO_VOCABULARY, 'warning', 'datasets[0].measures[1]', 'dataset "acme_invoice_metrics" measure "total_amount"'],
     ]);
     for (const f of findings) {
-      // The sentence names its subjects and both keys; the fix names both keys too.
-      const member = /"([^"]+)"$/.exec(f.where)![1];
-      expect(f.message).toContain(`"${member}"`);
-      expect(f.message).toContain('"acme_invoice_metrics"');
+      // `where` names the dataset and the member (pinned above); the sentence
+      // and the fix both name the two keys.
       expect(f.message).toContain('`synonyms`');
       expect(f.message).toContain('`description`');
       expect(f.hint).toContain('`synonyms`');
