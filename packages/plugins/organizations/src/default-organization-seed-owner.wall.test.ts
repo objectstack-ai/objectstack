@@ -25,11 +25,13 @@
  * through its own moment rather than the walled replay's.
  *
  * The held list lives in the process, and the last leg restarts between the
- * seed and the person's sign-up to show that a restart loses nothing: the
- * durable holder is the seed declaration itself. An un-walled boot runs its
- * inline seed on every start; the replay meets the same unresolved person on
- * the row it landed on before, and holds it again. No second record of the
- * held references is kept.
+ * seed and the person's sign-up. For a keyed dataset (`mode` `ignore`, `upsert`
+ * or `update`) a restart loses nothing: the durable holder is the seed
+ * declaration itself. An un-walled boot runs its inline seed on every start;
+ * the replay matches the row it landed on before by its key, meets the same
+ * unresolved person there, and holds it again. No second record of the held
+ * references is kept. An `insert` or `replace` dataset matches no row on
+ * replay, so its first row is not held again; that leg is not pinned here.
  *
  * ## What is real
  *
@@ -305,11 +307,12 @@ describe('un-walled: a held seed person reference fills only the seed’s own ro
 });
 
 /**
- * A restart between the un-walled seed and the person's sign-up loses nothing.
- * The first process holds the reference in memory and stops before the person
- * exists. The second process boots cold over the same database file; its own
- * inline seed replays, meets the same NULL on the same row, and holds it again,
- * so the person's sign-up in the second process fills the row.
+ * A restart between the un-walled seed and the person's sign-up loses nothing
+ * for a keyed dataset (`mode: 'upsert'` here). The first process holds the
+ * reference in memory and stops before the person exists. The second process
+ * boots cold over the same database file; its own inline seed replays, matches
+ * the same row by its key, meets the same NULL there, and holds it again, so
+ * the person's sign-up in the second process fills the row.
  */
 describe('un-walled: a restart between the seed and the person’s sign-up still fills the seed’s person columns', () => {
   const env = legEnv([
