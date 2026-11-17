@@ -1226,7 +1226,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-analytics/src/__tests__/dataset-tools.test.ts, packages/services/service-analytics/src/__tests__/dataset-term-matcher.test.ts, packages/mcp/src/mcp-dataset-tools.test.ts, packages/mcp/src/list-datasets-candidates-34763.test.ts, packages/runtime/src/mcp-dataset-tools-bridge.test.ts; no live spec opens a keyed MCP session against the datasets"
+        "ref": "packages/services/service-analytics/src/__tests__/dataset-tools.test.ts, packages/services/service-analytics/src/__tests__/dataset-term-matcher.test.ts, packages/mcp/src/mcp-dataset-tools.test.ts, packages/runtime/src/mcp-dataset-tools-bridge.test.ts; no live spec opens a keyed MCP session against the datasets"
       },
       "source": [
         "docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md D2 and D3",

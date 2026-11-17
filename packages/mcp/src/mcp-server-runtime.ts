@@ -1805,9 +1805,15 @@ const DEFAULT_HTTP_INSTRUCTIONS =
  * tools' own descriptions and in the served skill's data loop
  * (`ASK_SKILL_DATA_LOOP`, generated from `skills/objectstack-ask/SKILL.md` and
  * rendered by `skill-md.ts`). All three hold an exact name, label or synonym as
- * the only match, one measure match as the answer, and several matches on one
- * word as a question for the user; the skill also asks before it falls back
- * when a word with no match is a loose form of several listed measures.
+ * the only match, one measure match as the answer (two words with one measure
+ * match each are two metrics, both computed), and several matches on one word
+ * as a question for the user. [#34763] A word with no match may come back with
+ * `list_datasets` `candidates` (the ADR-0149 D3 amendment note): the rule makes
+ * that the same question, listing each candidate's label, dataset label and
+ * description, never a pick and never a match, even for a single candidate;
+ * only a word with no match and no candidate falls back to the object tools,
+ * with the answer labelled. The skill's own loose-form rows predate
+ * `candidates` and are amended in its lane.
  * Sent only where both dataset tools register ({@link datasetToolsServed}).
  */
 const DATASET_SELECTION_RULE =
