@@ -6,7 +6,7 @@ import type {
     MetadataProtocol,
     PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, recordNotFoundError } from '@objectstack/core';
+import { IDataEngine, recordNotFoundError, type UserMessageCaller } from '@objectstack/core';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { resolveQueryReadLimits } from '@objectstack/types';
 import { type TenancyPosture } from '@objectstack/spec/security';
@@ -1265,6 +1265,8 @@ export class ObjectStackProtocolImplementation implements
             getMetaItem: (...a) => protocol.getMetaItem(...a),
             getMetaItems: (...a) => protocol.getMetaItems(...a),
             getOverlayRepo: (...a) => protocol.getOverlayRepo(...a),
+            getPackageTranslationBundle: (...a) => protocol.getPackageTranslationBundle(...a),
+            getPackagedFieldPatchBases: (...a) => protocol.getPackagedFieldPatchBases(...a),
             getPackagedObjectBase: (...a) => protocol.getPackagedObjectBase(...a),
             get getServicesRegistry() { return protocol.getServicesRegistry; },
             governServedObject: (...a) => protocol.governServedObject(...a),
@@ -3082,6 +3084,15 @@ export class ObjectStackProtocolImplementation implements
      */
     getPairTranslationBundle(basePackageId: string): Promise<TranslationBundle | undefined> {
         return ProtocolDiscoveryAndBasesFacet.getPairTranslationBundle(protocolHost(this), basePackageId);
+    }
+
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases} in `protocol-discovery-and-bases.ts` [#33952]. */
+    getPackagedFieldPatchBases(name: string): Array<{ packageId: string; base: unknown }> {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases(protocolHost(this), name);
+    }
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle} in `protocol-discovery-and-bases.ts` [#33952]. */
+    getPackageTranslationBundle(packageId: string): Promise<TranslationBundle | undefined> {
+        return ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle(protocolHost(this), packageId);
     }
 
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.packagedArtifactBase} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
@@ -5359,12 +5370,12 @@ export class ObjectStackProtocolImplementation implements
      * context carries no explicit `transaction`, so the probe rides the same
      * connection as the writes it guards.
      */
-    private assertRecordExists(object: string, id: string): Promise<void> {
+    private assertRecordExists(object: string, id: string, caller?: UserMessageCaller | null): Promise<void> {
         // [#25467 cut 4] The body moved to `protocol-record-reads.ts` (see `RecordReadHost`).
         const host: ThisParameterType<typeof assertRecordExists> = {
             probeRecord: (...a) => this.probeRecord(...a),
         };
-        return assertRecordExists.call(host, object, id);
+        return assertRecordExists.call(host, object, id, caller);
     }
 
     /**

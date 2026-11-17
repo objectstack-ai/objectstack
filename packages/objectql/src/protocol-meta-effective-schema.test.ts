@@ -621,3 +621,119 @@ describe('a zh-CN read of a field a code dependent adds, echoed back, is stored 
         });
     }
 });
+
+/**
+ * [#33952 door · a dependent's `fieldPatches` text] The `/meta` read serves a
+ * slot a CODE package's `fieldPatches` wrote in that package's own
+ * translation (`patchBundles`), so the save door's inverse must translate its
+ * source with the same option. A zh-CN read of the patched label, echoed back
+ * by Studio's PUT of the whole body, is stored as the patch text — over a
+ * stored overlay row that carries the patch text, and with no stored row —
+ * and an `en` read after it serves the patch text again, never the zh-CN
+ * translation. Were the door to translate without the option, `税号` would be
+ * stored as the tenant's own label and served in every locale.
+ */
+describe('[#33952] a zh-CN read of a patched field label, echoed back, is stored as the patch text', () => {
+    const OWNER = 'com.example.crm';
+    const DEPENDENT = 'com.example.blackcat';
+    /** The deployment catalog: the owner's translation of its own text, under the key the patch text shares. */
+    const bundle = { 'zh-CN': { objects: { crm_account: { fields: { name: { label: '名称' }, registration_number: { label: '注册号' } } } } } };
+    /** What the dependent ships for the text its patch writes. */
+    const dependentTranslations = [{ 'zh-CN': { objects: { crm_account: { fields: { registration_number: { label: '税号' } } } } } }];
+
+    /**
+     * The code layers: the owner, and the dependent's patch. Kept out of the
+     * registry the protocol writes into (a code package's object is sealed
+     * there); the protocol reaches them through the three accessors the read
+     * and the door both ask, seeded here as the sibling suite above seeds
+     * `getPackagedObjectBase`.
+     */
+    function hostWithCodeLayers() {
+        const layers = new SchemaRegistry({ multiTenant: false });
+        layers.logLevel = 'silent';
+        layers.installPackage({ id: OWNER, name: 'crm', version: '1.0.0' } as any, 'code');
+        layers.registerObject({
+            name: 'crm_account', label: 'Account', sharingModel: 'private',
+            fields: {
+                name: { name: 'name', type: 'text', label: 'Name' },
+                registration_number: { name: 'registration_number', type: 'text', label: 'Registration No.' },
+            },
+        } as any, OWNER);
+        layers.installPackage({ id: DEPENDENT, name: 'blackcat', version: '1.0.0' } as any, 'code');
+        layers.registerObject({ name: 'crm_account', fieldPatches: { registration_number: { label: 'Tax ID' } } } as any, DEPENDENT, undefined, 'extend', 200);
+        const host = makeHost(false);
+        const protocol: any = new ObjectStackProtocolImplementation(host.engine, () => new Map<string, any>([
+            ['i18n', { getLocales: () => Object.keys(bundle), getTranslations: (locale: string) => (bundle as any)[locale] }],
+        ]));
+        protocol.getPackagedObjectBase = (name: string) => (name === 'crm_account' ? layers.getPackagedObjectBase(name) : undefined);
+        protocol.getPackagedFieldPatchBases = (name: string) => layers.getPackagedFieldPatchBases(name);
+        protocol.getPackageTranslationBundle = async (id: string) => (id === DEPENDENT ? dependentTranslations[0] : undefined);
+        return { host, protocol, layers };
+    }
+
+    /** The read's own options, as the REST exits build them (`translateMetaDocument`). */
+    async function readOptions(protocol: any, locale: string) {
+        const patchBundles: any[] = [];
+        for (const entry of protocol.getPackagedFieldPatchBases('crm_account')) {
+            const own = await protocol.getPackageTranslationBundle(entry.packageId);
+            if (own) patchBundles.push({ patchedBase: entry.base, bundle: own });
+        }
+        return { locale, packagedBase: protocol.getPackagedObjectBase('crm_account'), ...(patchBundles.length ? { patchBundles } : {}) };
+    }
+
+    const storedOf = (host: ReturnType<typeof makeHost>) =>
+        JSON.parse(Array.from(host.rows.values()).find((r) => r.name === 'crm_account' && r.state === 'active')!.metadata);
+
+    for (const withStoredRow of [true, false]) {
+        it(`stores 'Tax ID', ${withStoredRow ? 'over a stored row that carries the patch text' : 'with no stored row'}, and an en read serves it`, async () => {
+            const { host, protocol, layers } = hostWithCodeLayers();
+            const folded: any = structuredClone(layers.getObject('crm_account') as any);
+            for (const k of Object.keys(folded)) if (k.startsWith('_')) delete folded[k];
+            expect(folded.fields.registration_number.label).toBe('Tax ID');
+            const served: any = withStoredRow
+                ? { name: 'crm_account', label: 'Account', sharingModel: 'private', fields: { name: folded.fields.name, registration_number: folded.fields.registration_number } }
+                : folded;
+            if (withStoredRow) {
+                await host.engine.insert('sys_metadata', {
+                    type: 'object', name: 'crm_account', organization_id: null, package_id: null, state: 'active', metadata: JSON.stringify(served),
+                });
+            }
+            const echo: any = translateMetadataDocument('object', structuredClone(served), bundle as any, await readOptions(protocol, 'zh-CN'));
+            // The precondition: the read serves the patched label in the dependent's zh-CN.
+            expect(echo.fields.registration_number.label).toBe('税号');
+
+            await protocol.saveMetaItem({ type: 'object', name: 'crm_account', item: echo, mode: 'publish' } as any);
+
+            const stored = storedOf(host);
+            expect(stored.fields.registration_number.label).toBe('Tax ID');
+            const en: any = translateMetadataDocument('object', structuredClone(stored), bundle as any, await readOptions(protocol, 'en'));
+            expect(en.fields.registration_number.label).toBe('Tax ID');
+        });
+    }
+
+    // [#34836 S1] A tenant row that typed the patching package's translation
+    // over the patched slot owns that text: the read serves `税号` in every
+    // locale, so a whole-body save in another locale carries it back and must
+    // store it as it came, the unrelated edit beside it included.
+    it("keeps a stored '税号' typed over the patched slot through an en whole-body save with an unrelated edit", async () => {
+        const { host, protocol, layers } = hostWithCodeLayers();
+        const folded: any = structuredClone(layers.getObject('crm_account') as any);
+        const row: any = {
+            name: 'crm_account', label: 'Account', sharingModel: 'private',
+            fields: { name: folded.fields.name, registration_number: { ...folded.fields.registration_number, label: '税号' } },
+        };
+        await host.engine.insert('sys_metadata', {
+            type: 'object', name: 'crm_account', organization_id: null, package_id: null, state: 'active', metadata: JSON.stringify(row),
+        });
+        const echo: any = translateMetadataDocument('object', structuredClone(row), bundle as any, await readOptions(protocol, 'en'));
+        // The precondition: the en read serves the tenant's text as written.
+        expect(echo.fields.registration_number.label).toBe('税号');
+        echo.fields.name.label = 'Account Name';
+
+        await protocol.saveMetaItem({ type: 'object', name: 'crm_account', item: echo, mode: 'publish' } as any);
+
+        const stored = storedOf(host);
+        expect(stored.fields.registration_number.label).toBe('税号');
+        expect(stored.fields.name.label).toBe('Account Name');
+    });
+});

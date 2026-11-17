@@ -49,7 +49,7 @@ import { ObjectKernel, assembleExecutionContext, type Plugin, type PluginContext
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
-import { AuthPlugin } from '@objectstack/plugin-auth';
+import { AuthManager, AuthPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
@@ -269,16 +269,22 @@ beforeAll(async () => {
         statements.getStore()?.push(String(q?.sql ?? ''));
     });
     const owner = await personContext(await signIn(OWNER));
-    // The default audience posture is invite_only: the member enters the
-    // owner's organization through a pending invitation.
-    await engine.insert('sys_invitation', {
-        id: 'inv_pin_33179', email: MEMBER.email, status: 'pending', organization_id: owner.tenantId,
-        role: 'member', inviter_id: owner.userId, expires_at: new Date(Date.now() + 3_600_000),
-    }, { context: { isSystem: true } });
-    const signUp = await app.request(`${ORIGIN}${API}/auth/sign-up/email`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...MEMBER, invitationId: 'inv_pin_33179' }),
-    });
+    // The default audience posture is invite_only. The member is bound to the
+    // owner's organization at creation through the operator door — the ticket
+    // the stack's own auth manager stages for exactly this address. A sign-up
+    // admitted by the invitation it presents joins no organization until it
+    // verifies its address and accepts.
+    const auth: any = await kernel.getServiceAsync('auth');
+    const ticket = auth.stageOperatorProvisioning(MEMBER.email);
+    let signUp: Response;
+    try {
+        signUp = await app.request(`${ORIGIN}${API}/auth/sign-up/email`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...MEMBER, [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: ticket }),
+        });
+    } finally {
+        auth.clearOperatorProvisioning(MEMBER.email);
+    }
     expect(signUp.status, await signUp.clone().text()).toBe(200);
     const member = await personContext(await signIn(MEMBER));
     callers = { owner, member, ownerAgent: agentFor(owner), memberAgent: agentFor(member) };

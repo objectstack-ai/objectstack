@@ -263,6 +263,19 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "معلّق بالفعل، أُبلغ مجددًا",
             "summary.failed": "لم تتم الإضافة",
             rows: "النتيجة لكل صف"
+          },
+          columns: {
+            rows: {
+              row: "الصف",
+              email: "البريد الإلكتروني",
+              ok: "نجح",
+              alreadyPending: "معلّق بالفعل، أُبلغ مجددًا",
+              "host.notified": "أُبلغت المؤسسة المستضيفة",
+              "host.reason": "سبب عدم الإبلاغ",
+              "error.message": "لم تتم الإضافة بسبب",
+              notApplied: "لم يُطبَّق (اضبطه في السجل)",
+              managerError: "المدير"
+            }
           }
         }
       },

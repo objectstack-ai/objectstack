@@ -289,10 +289,14 @@ between a governed metric and an object query, because a client reads a tool's
 description only after it has chosen that tool. Where both dataset tools are
 registered for the connection, the instructions say: look for a governed metric
 first by calling `list_datasets` with the question's business words; a word
-matches only when it equals a name, label or synonym; one measure match is
-answered with `query_dataset`; several matches are a question for the user; no
-match falls back to `query_records` / `aggregate_records`, saying the answer is
-not from a governed metric. A token without `data:read` gets neither tool and no
+matches only when it equals a name, label or synonym; each word with exactly one
+measure match is answered with `query_dataset`, and two such words are two
+metrics computed both; several matches are a question for the user; a word with
+no match but with `candidates` in the answer (members offered as possible
+readings) is the same question, listing each candidate's label, dataset label
+and description, and is never treated as a match; no match and no candidates
+falls back to `query_records` / `aggregate_records`, saying the answer is not
+from a governed metric. A token without `data:read` gets neither tool and no
 such sentence.
 
 The instructions also name the published skills package and the version to

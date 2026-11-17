@@ -31,7 +31,7 @@ import { assertAudienceConfig, decideAudienceAdmission, resolveAudience } from '
 import { CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed';
 import { SSO_ONLY_REFUSAL_MESSAGES } from './sso-only-local-password';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
-import { inviteForAudienceGate } from './audience-gate-test-support';
+import { inviteForAudienceGate, operatorProvisioningField } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const PASSWORD = 'S3cure!Passw0rd-25083';
@@ -154,9 +154,13 @@ async function produceStagedRows() {
     member: 'member.25083@example.com',
     idp: 'idp.25083@example.com',
   } as const;
+  // Members bound at creation: the operator door (`operatorProvisioningField`),
+  // since a sign-up admitted by the invitation it presents joins no
+  // organization until it accepts.
   for (const email of Object.values(emails)) {
-    const invitationId = await inviteForAudienceGate(manager, email);
-    const res = await direct('/sign-up/email', { email, password: PASSWORD, name: email, invitationId });
+    const res = await direct('/sign-up/email', {
+      email, password: PASSWORD, name: email, ...operatorProvisioningField(manager, email),
+    });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
   }
 
@@ -966,6 +970,10 @@ describe('on a cloud-managed environment, membership and its tiers are managed b
     expect(issued.status, `fixture: the invitation is issued while unmanaged — ${issued.text}`).toBe(200);
     const [invitation] = s.invitationsOf(email);
     expect(invitation?.status, 'fixture: the invitation is pending').toBe('pending');
+    // The invitee's address is verified, so only the posture decides: accepting
+    // or declining an invitation needs a verified address
+    // (`invitation-acceptance-verified-address.test.ts`).
+    s.users().find((u) => String(u.id) === s.ids.member)!.email_verified = true;
     return String(invitation.id);
   };
 

@@ -129,6 +129,14 @@ reason.
 - **Every read serves it.** The patch is applied in the same merge as the other keys,
   after the additive ones, and the list, the by-name read and the layered view agree.
   Uninstalling the extension serves the owner's text again.
+- **Translate it in your own package.** A patched label, help text, description or
+  option label is translated from the `translations` of the package that ships the
+  patch, and from its translation rows, under the same keys as the owner's text:
+  `objects.crm_account.fields.industry.label`, `….help` for the help text (the
+  description when the field has none), `….options.customer` for an option. The owner's
+  translation of the text the patch replaced never applies to it. On the `/meta` reads
+  a pair `.custom` translation of that key still comes first, and a locale your package does not
+  translate serves the patch's text as written.
 - **It reaches the owner's own fields only.** A field another extension adds — or one
   your own extension adds in `fields` — is not a patch target, whatever the
   priorities: set that field's text where it is declared. The install door and
