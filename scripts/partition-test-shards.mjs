@@ -132,11 +132,10 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 // asks the matrix instead of keeping a copy, and an unreadable matrix fails
 // the import rather than falling back to a remembered count. ci.yml spells it
 // twice more (`--shard N/M` and the attestation's `--total`); the self-test
-// below reads those back. scripts/ci/select-shard-timings-run.mjs keeps a
-// count of its own (8, the width its self-test fixtures are written at), but
-// only as its matchers' default: the timings refresh judges
-// each run at the width that run's own `Test Core (N/M)` jobs carry, so a
-// resize leaves the runs from before it readable (#25376).
+// below reads those back. scripts/ci/select-shard-timings-run.mjs reads the
+// same matrix for its matchers' default (#34710), and only that: the timings
+// refresh judges each run at the width that run's own `Test Core (N/M)` jobs
+// carry, so a resize leaves the runs from before it readable (#25376).
 //
 // WHY EIGHT (#25376, 6 -> 8). On the committed dataset (the 2026-10-23
 // refresh), bins of predicted test windows, the CLI cut into its 3 slices:
