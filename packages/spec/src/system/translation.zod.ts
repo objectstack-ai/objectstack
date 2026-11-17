@@ -2099,6 +2099,7 @@ const appTranslationDataShape = () => ({
    *
    *   hooks.<hook_name>.refusals.<CODE>.message                      (a declared refusal, `HookSchema.refusals`)
    *   hooks.<hook_name>.refusals.<CODE>.reasons.<REASON>.message     (a declared reason under it, #33214)
+   *   hooks.<hook_name>.texts.<key>.message                          (a declared text, `HookSchema.texts`, #34374)
    *
    * A hook's business refusal ("A current clean version is required before
    * signing.") is the sentence a user reads most often when an app says "not
@@ -2127,17 +2128,26 @@ const appTranslationDataShape = () => ({
    * posture (translated before it is rendered). A sentence whose entry declares
    * no `params` is plain text and nothing in it is filled.
    *
+   * **A declared text is picked in the organization's language (#34374,
+   * ruling 6913660232 parameter 7).** A sentence a hook writes into a record
+   * (`HookSchema.texts`) is answered by `ctx.text(key, params)` through
+   * `hookTextMessageKey(hook, key)` in the ORGANIZATION's language — the
+   * Localization setting when somebody set it, else the app's
+   * `i18n.defaultLocale` — never the caller's; the declared sentence on a miss,
+   * its holes filled after, as for a refusal.
+   *
    * `objectstack validate` refuses a key over an unknown hook, a code the hook's
-   * `refusals` does not declare, or a reason that code does not declare.
+   * `refusals` does not declare, a reason that code does not declare, or a text
+   * key the hook's `texts` does not declare.
    */
   hooks: z.record(z.string(), strictObject({
     surface: 'this hook translation',
     history: TRANSLATION_HISTORY,
-    aliases: { refusal: 'refusals', errors: 'refusals', messages: 'refusals' },
+    aliases: { refusal: 'refusals', errors: 'refusals', messages: 'refusals', text: 'texts', sentences: 'texts' },
     guidance: {
       label:
-        'A hook has no translated label — the one string of a hook a user reads is a refusal. Translate '
-        + '`refusals.<CODE>.message`.',
+        'A hook has no translated label — the strings of a hook a user reads are its refusals and the texts it '
+        + 'writes into records. Translate `refusals.<CODE>.message` or `texts.<key>.message`.',
     },
   }, {
     refusals: z.record(z.string(), strictObject({
@@ -2165,6 +2175,21 @@ const appTranslationDataShape = () => ({
         ),
       })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),
     })).optional().describe("Refusal translations keyed by the code the hook's `refusals` declares"),
+    // [#34374] A declared text's sentence, picked in the organization's language.
+    texts: z.record(z.string(), strictObject({
+      surface: 'this hook text translation',
+      history: TRANSLATION_HISTORY,
+      // The spellings `HookTextSchema` renames onto its own `message`.
+      aliases: { text: 'message', template: 'message', value: 'message', description: 'message' },
+    }, {
+      // The declared message's own form — plain text, or a template over the
+      // entry's declared `params`; an empty string is the untranslated
+      // skeleton slot `os i18n extract` writes (the declared message is served).
+      message: z.string().optional().describe(
+        "Translated sentence of a hook's declared text — written into the record in the organization's language in "
+        + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
+      ),
+    })).optional().describe("Text translations keyed by the key the hook's `texts` declares"),
   })).optional().describe('Hook translations keyed by hook name'),
 
   /**

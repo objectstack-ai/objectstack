@@ -274,10 +274,14 @@ export function publishedItemReader(
             const address = protocol.resolveCallerPackageAddress({ type, name, callerPackageId: publishingPackageId });
             if (address.kind === 'package') packageId = address.packageId;
         }
-        const wrapper = (await protocol.getMetaItem({ type, name, ...(packageId !== undefined ? { packageId } : {}) })) as
+        const envelope = (await protocol.getMetaItem({ type, name, ...(packageId !== undefined ? { packageId } : {}) })) as
             | { item?: unknown }
             | undefined;
-        return wrapper?.item ?? wrapper ?? undefined;
+        // [#34560] The by-name read answers a missing item with its envelope,
+        // `item` empty, never `undefined`: the body is the envelope's `item`
+        // alone, so a dataset nothing holds reads as no body (the widget
+        // plane's dangling-dataset skip), never as the envelope itself.
+        return envelope?.item;
     };
 }
 

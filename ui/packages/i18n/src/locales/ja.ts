@@ -189,6 +189,8 @@ const ja = {
     // objectui#4024 — the create/edit dialog's `sr-only` accessible
     // description, used when the form declares no `description` of its own.
     dialogDescriptionFallback: "フォームの項目を入力してから、送信またはキャンセルしてください。",
+    sectionNav: "フォームのセクション",
+    sectionNavErrors: "修正が必要な項目: {{number}}",
     deniedDescription: "このフィールドを編集する権限がありません。",
     serverDefaultHint: "保存時に自動で設定されます。",
     requiredForAction: "「{{action}}」の実行に必須です。",
@@ -1918,6 +1920,7 @@ const ja = {
       passwordsNote: "仮パスワード — 一度だけ表示され、保存されません。今すぐ保存してください。各ユーザーは初回サインイン時に変更する必要があります。",
       passwordsMore: "以降のエントリは省略されました — ダウンロードをご利用ください。",
       positionsHint: "役職：役職のマシン名の列をマッピングできます（複数は「;」で区切ります）。各役職は Setup と同じルールで割り当てられます。存在しない役職や割り当て権限のない役職はその行にエラーとして表示され、ユーザーは作成されます。",
+      managerHint: "上司：各ユーザーの上司を示す列をマッピングできます（メールアドレス、電話番号ログインが有効な場合は電話番号）。上司はすべての行の取り込み後に関連付けられるため、ファイルの後方にいる上司も有効です。見つからない、または関連付けできない上司はその行にエラーとして表示され、ユーザーは作成されます。",
       passwordsDownload: "CSV をダウンロード",
     },
     ai: {
@@ -2019,6 +2022,9 @@ const ja = {
           title: "「{{app}}」を編集中",
           titleGeneric: "このアプリを編集",
           description: "何を変更しますか？このアプリをその場で変更します — 項目、オブジェクト、ビュー、ダッシュボードの追加や、既存部分の調整ができます。",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "このアプリのデータについて質問するか（件数、一覧、要約）、変更したい点を伝えてください。項目、オブジェクト、ビュー、ダッシュボードをその場で変更します。",
         },
       },
       clearConversation: "クリア",
@@ -2211,6 +2217,11 @@ const ja = {
         resize: "チャットのサイズを変更",
         collapse: "チャットを折りたたむ",
         maximize: "フルページで開く",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "履歴",
+        backToChat: "チャットに戻る",
+        expand: "展開",
+        restore: "サイドパネルに戻す",
         open: "アシスタントを開く",
         planAwaitingApproval: "提案されたプランが承認待ちです",
       },
@@ -2683,6 +2694,10 @@ const ja = {
       launcherLabel: "アプリランチャー",
       menuLabel: "アプリナビゲーション",
       menuEmpty: "このアプリには開けるナビゲーション項目がありません。",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "アプリのメニューバー",
+      searchMenu: "メニューを検索",
+      phoneBarHint: "星を付けた項目が下部バーに表示されます（先頭の 4 件）。",
       itemMenu: "{{name}} のその他の操作",
       openInNewTab: "新しいタブで開く",
       copyLink: "リンクをコピー",
@@ -3768,6 +3783,8 @@ const ja = {
     viewApprovals: "承認を表示",
     noPendingApprovals: "承認待ちはありません",
     openApprovalsInbox: "承認ボックスを開く",
+    needsYou: "あなたの対応が必要",
+    viewApprovalDetails: "詳細を表示",
     badgeTotal: "合計 {{total}} 件",
     badgeNotifications: "未読トピック {{count}} 件",
     badgeNotifications_one: "未読トピック {{count}} 件",
@@ -4367,6 +4384,13 @@ const ja = {
     openNextAfterDecision: '決定後に次を開く',
     queueDone: 'このリストの保留中のリクエストはすべて処理済みです。',
     snapshotAsSubmitted: '申請時の内容',
+    snapshotChanged: '変更あり',
+    snapshotCurrentValue: '現在の値',
+    snapshotOpenRecord: 'レコードを開く',
+    snapshotCurrentUnreadable: '現在のレコードを読み取れないため、申請後の変更は表示されません。',
+    snapshotChildCurrent: '現在の値：申請時の明細行は保存されていません。',
+    progressTitle: '承認の進捗',
+    attachmentsTitle: '添付ファイル',
     attachmentChip: '添付ファイル',
     attachmentOpenFailed: '添付ファイルを開けませんでした。もう一度お試しください',
     approveOneTitle: '「{{title}}」を承認しますか？',
