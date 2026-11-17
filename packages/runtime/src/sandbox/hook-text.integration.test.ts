@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { createMemoryI18n } from '@objectstack/core';
-import type { EngineInsertOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
+import type { DataEngineInsertOptions, EngineQueryOptions, EngineUpdateOptions } from '@objectstack/spec/data';
 import { hookBodyRunnerFactory, withInProcessHookTitle } from './body-runner.js';
 import { hookRefusalI18nReader } from './hook-refusal-catalogue.js';
 import { QuickJSScriptRunner } from './quickjs-runner.js';
@@ -153,7 +153,7 @@ describe('#34374 — a hook writes its declared text in the organization\'s lang
   /** Qualify a lead as a caller whose own language is en-US, in organization `org_a`; answer the stored task subjects. */
   async function qualify(ql: ObjectQL, name: string): Promise<string[]> {
     const context = { userId: 'u_probe', isSystem: true, tenantId: 'org_a', locale: 'en-US' };
-    const asCaller: EngineInsertOptions = { context };
+    const asCaller: DataEngineInsertOptions = { context };
     const lead: any = await ql.insert(LEAD.name, { name, status: 'new' }, asCaller);
     // The update carries the name, so the hook reads it from its own input.
     const qualifyIt: EngineUpdateOptions = { context, where: { id: lead.id } };
