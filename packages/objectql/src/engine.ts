@@ -1236,6 +1236,12 @@ export class ObjectQL implements IObjectQLEngine {
    * is the one place every refusal passes that holds the host's logger. It is
    * `info`, not `warn`: the refusal is handed to the caller, and nothing is
    * degraded (AGENTS.md "Degradation log levels").
+   *
+   * [#34724, ruling 6944409840] There are two sentences. An app's action is
+   * turned on again on the action in Studio. A platform action (its ledger
+   * row names a package whose installed manifest has scope `system` or
+   * `cloud`) has no switch in Studio, so its sentence names the activation
+   * door instead.
    */
   describeDisabledAction(actionName: string): string {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).

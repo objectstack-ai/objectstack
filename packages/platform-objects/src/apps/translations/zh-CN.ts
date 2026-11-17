@@ -38,7 +38,6 @@ export const zhCN: TranslationData = {
       navigation: {
         group_overview: { label: '总览' },
         group_apps: { label: '应用' },
-        nav_packaged_actions: { label: '打包动作' },
         nav_marketplace_browse: { label: '浏览应用市场' },
         nav_marketplace_installed: { label: '已安装应用' },
         nav_cloud_connection: { label: '云连接' },

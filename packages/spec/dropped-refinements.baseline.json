@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 269,
-    "droppedRefinementSites": 1122,
+    "publishedSchemasWithDroppedRefinements": 270,
+    "droppedRefinementSites": 1135,
     "refinementSitesThatDidProject": 728,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -106,6 +106,7 @@
         "manifest.actions.element.in.onSuccess",
         "manifest.actions.element.in.params.element.in",
         "manifest.actions.element.in.preflight.fields.element",
+        "manifest.actions.element.in.refusals.valueType",
         "manifest.actions.element.in.resultDialog.fields.element",
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
@@ -291,6 +292,7 @@
         "data.options[1].manifest.actions.element.in.onSuccess",
         "data.options[1].manifest.actions.element.in.params.element.in",
         "data.options[1].manifest.actions.element.in.preflight.fields.element",
+        "data.options[1].manifest.actions.element.in.refusals.valueType",
         "data.options[1].manifest.actions.element.in.resultDialog.fields.element",
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
@@ -444,6 +446,7 @@
         "options[1].manifest.actions.element.in.onSuccess",
         "options[1].manifest.actions.element.in.params.element.in",
         "options[1].manifest.actions.element.in.preflight.fields.element",
+        "options[1].manifest.actions.element.in.refusals.valueType",
         "options[1].manifest.actions.element.in.resultDialog.fields.element",
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
@@ -536,6 +539,7 @@
         "data.packages.element.options[1].manifest.actions.element.in.onSuccess",
         "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
         "data.packages.element.options[1].manifest.actions.element.in.preflight.fields.element",
+        "data.packages.element.options[1].manifest.actions.element.in.refusals.valueType",
         "data.packages.element.options[1].manifest.actions.element.in.resultDialog.fields.element",
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
@@ -626,6 +630,7 @@
         "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
         "data.actions.element.in.preflight.fields.element",
+        "data.actions.element.in.refusals.valueType",
         "data.actions.element.in.resultDialog.fields.element"
       ]
     },
@@ -637,6 +642,7 @@
         "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
         "data.actions.element.in.preflight.fields.element",
+        "data.actions.element.in.refusals.valueType",
         "data.actions.element.in.resultDialog.fields.element",
         "data.defaultRowScope",
         "data.fieldGroups",
@@ -1148,6 +1154,7 @@
         "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
         "actions.element.in.preflight.fields.element",
+        "actions.element.in.refusals.valueType",
         "actions.element.in.resultDialog.fields.element",
         "defaultRowScope",
         "fieldGroups",
@@ -1390,6 +1397,7 @@
         "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
         "actions.element.in.preflight.fields.element",
+        "actions.element.in.refusals.valueType",
         "actions.element.in.resultDialog.fields.element"
       ]
     },
@@ -1515,6 +1523,7 @@
         "operations.element.options[3].object.actions.element.in.onSuccess",
         "operations.element.options[3].object.actions.element.in.params.element.in",
         "operations.element.options[3].object.actions.element.in.preflight.fields.element",
+        "operations.element.options[3].object.actions.element.in.refusals.valueType",
         "operations.element.options[3].object.actions.element.in.resultDialog.fields.element",
         "operations.element.options[3].object.defaultRowScope",
         "operations.element.options[3].object.fieldGroups",
@@ -1541,6 +1550,7 @@
         "object.actions.element.in.onSuccess",
         "object.actions.element.in.params.element.in",
         "object.actions.element.in.preflight.fields.element",
+        "object.actions.element.in.refusals.valueType",
         "object.actions.element.in.resultDialog.fields.element",
         "object.defaultRowScope",
         "object.fieldGroups",
@@ -1599,6 +1609,7 @@
         "options[3].object.actions.element.in.onSuccess",
         "options[3].object.actions.element.in.params.element.in",
         "options[3].object.actions.element.in.preflight.fields.element",
+        "options[3].object.actions.element.in.refusals.valueType",
         "options[3].object.actions.element.in.resultDialog.fields.element",
         "options[3].object.defaultRowScope",
         "options[3].object.fieldGroups",
@@ -1737,6 +1748,7 @@
         "in.onSuccess",
         "in.params.element.in",
         "in.preflight.fields.element",
+        "in.refusals.valueType",
         "in.resultDialog.fields.element"
       ]
     },
@@ -2204,6 +2216,11 @@
       "sites": [
         "filter.element",
         "filter.element.options[0]"
+      ]
+    },
+    "ui/ActionRefusal": {
+      "sites": [
+        ""
       ]
     }
   }
