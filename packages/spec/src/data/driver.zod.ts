@@ -404,6 +404,8 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * Optional; absence means `false`, like `batchSchemaSync`.
    */
   lockRows: z.boolean().optional().describe('`find()` honours `DriverOptions.lockRows` inside a transaction: no other writer changes a returned row behind the transaction (it waits, or one side fails) (absence = false: the engine sends no lock request)'),
+
+  /**
    * This driver compiles (or, in process, evaluates) a composed `ReadableIds`
    * leaf (ADR-0139 D1/D3): `field IN (SELECT id FROM <related> WHERE <scope>
    * AND <tenant wall>)` as one statement on the SQL family, a read of the
