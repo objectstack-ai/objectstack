@@ -21,7 +21,7 @@
  * its pins are the `[#34973]` describes at the end of this file.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SqlDriver } from './sql-driver.js';
 import { isInPlaceSchemaWork } from './schema-drift.js';
@@ -107,9 +107,11 @@ async function legacyBooleanDatabase(): Promise<{ driver: SqlDriver; info: Logge
   for (const [id, flag, live] of CONV_ROWS) await knex(CONV).insert({ id, label: id, flag, live });
   const info: Logged[] = [];
   const warn: Logged[] = [];
-  const logger = (driver as any).logger;
-  vi.spyOn(logger, 'info').mockImplementation((msg: string, meta?: any) => { info.push({ msg, meta }); });
-  vi.spyOn(logger, 'warn').mockImplementation((msg: string, meta?: any) => { warn.push({ msg, meta }); });
+  // The default sink has no `info`; this instance gets one that records both.
+  (driver as any).logger = {
+    info: (msg: string, meta?: any) => { info.push({ msg, meta }); },
+    warn: (msg: string, meta?: any) => { warn.push({ msg, meta }); },
+  };
   return { driver, info, warn };
 }
 
@@ -135,8 +137,7 @@ describe('[#34973] driver-sql — boot converges legacy text booleans to 1 / 0 (
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
-    await driver.disconnect();
+    await driver?.disconnect();
   });
 
   it('before the step, = false misses the text false and = true misses the text true', async () => {
@@ -239,12 +240,11 @@ describe('[#34973] driver-sql — text that names no boolean is withheld and war
       { id: 'text_false', flag: 'false' },
     ]);
     warn = [];
-    vi.spyOn((driver as any).logger, 'warn').mockImplementation((msg: string, meta?: any) => { warn.push({ msg, meta }); });
+    (driver as any).logger = { warn: (msg: string, meta?: any) => { warn.push({ msg, meta }); } };
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
-    await driver.disconnect();
+    await driver?.disconnect();
   });
 
   it('never rewrites the other text, converts the canonical text, and warns once with the count', async () => {
@@ -275,8 +275,7 @@ describe('[#34973] driver-sql — os migrate plan previews the boolean convergen
   });
 
   afterEach(async () => {
-    vi.restoreAllMocks();
-    await driver.disconnect();
+    await driver?.disconnect();
   });
 
   it('counts the rows as normalize_boolean_storage, in place, and writes nothing', async () => {
