@@ -165,7 +165,7 @@ describe('@mention notifications reach only mentioned users who can read the com
   const comment = async (taskId: string, mentions: unknown[]) => {
     emits.length = 0;
     await post(taskId, mentions);
-    return emits.filter((e) => e.topic === 'collab.mention');
+    return emits.filter((e) => (e.topic === 'collab.mention' && !e.channels));
   };
   /** `user`'s own read of the comment `commentId`, in the envelope the request path gives them. */
   const readCommentAs = (user: { id: string }, positions: string[], commentId: string) =>
@@ -472,7 +472,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         { thread_id: `${TASK}:${taskId}`, body: `note ${seq}`, mentions: JSON.stringify(mentions) },
         { context: authorContext(), onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); } } as any,
       );
-      return { row, told, events: emits.filter((e) => e.topic === 'collab.mention') };
+      return { row, told, events: emits.filter((e) => (e.topic === 'collab.mention' && !e.channels)) };
     };
     /** Edit `commentId` as ALICE with a listener on THIS write's options. */
     const editTold = async (commentId: string, data: Record<string, unknown>) => {
@@ -483,7 +483,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         context: authorContext(),
         onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
       } as any);
-      return { told, events: emits.filter((e) => e.topic === 'collab.mention') };
+      return { told, events: emits.filter((e) => (e.topic === 'collab.mention' && !e.channels)) };
     };
 
     it('a create hands the withheld users\' ids, in the order named, to its own listener once; the reader is still notified', async () => {
@@ -536,7 +536,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
       } as any);
       expect(nested).toBe(false); // the nested comment WAS written, and its gate DID withhold BOB …
-      expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
+      expect(emits.filter((e) => (e.topic === 'collab.mention' && !e.channels))).toEqual([]);
       expect(told).toEqual([]); // … but the outer write was told nothing.
     });
 
@@ -576,7 +576,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         context: carol,
         onMentionsWithheld: (ids: readonly string[]) => { told.push([...ids]); },
       } as any);
-      const events = emits.filter((e) => e.topic === 'collab.mention');
+      const events = emits.filter((e) => (e.topic === 'collab.mention' && !e.channels));
       // ALICE, the author, is now a recipient like anyone else; CAROL, who added the mentions, is not.
       expect(audiences(events)).toEqual([[ALICE.id]]);
       expect(events[0]).toMatchObject({ actorId: CAROL.id, payload: { actorName: CAROL.id } });
@@ -592,7 +592,7 @@ describe('@mention notifications reach only mentioned users who can read the com
         { context: authorContext(), onMentionsWithheld: () => { throw new Error('listener fault'); } } as any,
       );
       expect(row.id).toBeTruthy();
-      expect(audiences(emits.filter((e) => e.topic === 'collab.mention'))).toEqual([[CAROL.id]]);
+      expect(audiences(emits.filter((e) => (e.topic === 'collab.mention' && !e.channels)))).toEqual([[CAROL.id]]);
     });
   });
 });

@@ -51,6 +51,14 @@ export default defineConfig({
         find: /^@objectstack\/driver-sqlite-wasm$/,
         replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),
       },
+      // The real messaging service `mention-email.integration.test.ts` boots:
+      // the @mention e-mail's dedup window, preference filter and template are
+      // messaging's, so the suite's verdict is about the checkout, not
+      // service-messaging's dist build state (`pnpm check:test-source-alias`).
+      {
+        find: /^@objectstack\/service-messaging$/,
+        replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts'),
+      },
       // [#10101] The shared platform-row resolver's home — aliased to source
       // so the suite's verdict is about the checkout, not metadata-core's
       // dist build state (`pnpm check:test-source-alias`).

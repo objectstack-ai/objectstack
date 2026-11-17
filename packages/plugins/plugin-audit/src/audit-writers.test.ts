@@ -1379,7 +1379,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       getLocale,
       getMessaging: () => ({
         emit: async (e: any) => {
-          if (e.topic === 'collab.mention') titles.push(e.payload.title);
+          if ((e.topic === 'collab.mention' && !e.channels)) titles.push(e.payload.title);
           return {};
         },
       }),
@@ -1495,7 +1495,7 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
       },
       session: { organizationId: 'org-1', userId: 'user-1' },
     });
-    const mention = emits.find((e) => e.topic === 'collab.mention');
+    const mention = emits.find((e) => (e.topic === 'collab.mention' && !e.channels));
     expect(mention).toBeDefined();
     expect(mention.audience).toEqual(['user-2']);
     expect(mention.payload.title).toBe('Alice 提到了你');
@@ -2667,7 +2667,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
       session: { organizationId: 'org-1', userId: 'user-1' },
     });
 
-    const mention = emits.find((e) => e.topic === 'collab.mention');
+    const mention = emits.find((e) => (e.topic === 'collab.mention' && !e.channels));
     expect(mention).toBeDefined();
     expect(mention.organizationId).toBe('org-1');
   });
@@ -2681,7 +2681,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
       session: {},
     });
 
-    expect(emits.find((e) => e.topic === 'collab.mention')?.organizationId).toBe('org-2');
+    expect(emits.find((e) => (e.topic === 'collab.mention' && !e.channels))?.organizationId).toBe('org-2');
   });
 
   // The writer never decides who may see a mention on its own: with no
@@ -2693,7 +2693,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
       getMessaging: () => ({ emit: async (e: any) => { emits.push(e); return {}; } }),
     });
     await fire('afterInsert', { ...aComment(), session: { organizationId: 'org-1', userId: 'user-1' } });
-    expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
+    expect(emits.filter((e) => (e.topic === 'collab.mention' && !e.channels))).toEqual([]);
   });
 
   it('emits no @mention notification when the recipient gate fails', async () => {
@@ -2706,7 +2706,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
       },
     });
     await fire('afterInsert', { ...aComment(), session: { organizationId: 'org-1', userId: 'user-1' } });
-    expect(emits.filter((e) => e.topic === 'collab.mention')).toEqual([]);
+    expect(emits.filter((e) => (e.topic === 'collab.mention' && !e.channels))).toEqual([]);
   });
 
   it('emits only to the recipients the gate admits, with the record as the gate\'s input', async () => {
@@ -2732,7 +2732,7 @@ describe('audit writers — the writer reads the session key the engine emits (#
         onWithheld: expect.any(Function),
       },
     ]);
-    expect(emits.filter((e) => e.topic === 'collab.mention').map((e) => e.audience)).toEqual([['user-2']]);
+    expect(emits.filter((e) => (e.topic === 'collab.mention' && !e.channels)).map((e) => e.audience)).toEqual([['user-2']]);
   });
 });
 

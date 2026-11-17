@@ -31,7 +31,7 @@ vi.mock('./audit-writers.js', async (importOriginal) => {
         ...opts,
         getMessaging: () => ({
           emit: async (e: any) => {
-            if (e.topic === 'collab.mention') mentionTitles.push(String(e.payload?.title));
+            if ((e.topic === 'collab.mention' && !e.channels)) mentionTitles.push(String(e.payload?.title));
             return {};
           },
         }),
