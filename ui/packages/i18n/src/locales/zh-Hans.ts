@@ -1961,6 +1961,10 @@ const zh = {
       launcherLabel: '应用启动台',
       menuLabel: '应用导航',
       menuEmpty: '此应用没有你可以打开的导航项。',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: '应用菜单栏',
+      searchMenu: '搜索菜单',
+      phoneBarHint: '点星标把菜单项固定到底部栏，底部栏显示前 4 个。',
       itemMenu: '{{name}} 的更多操作',
       openInNewTab: '在新标签页打开',
       copyLink: '复制链接',

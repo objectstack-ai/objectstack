@@ -2747,6 +2747,10 @@ const pt = {
       launcherLabel: "Iniciador de aplicativos",
       menuLabel: "Navegação do aplicativo",
       menuEmpty: "Este aplicativo não tem entradas de navegação que você possa abrir.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "Barra de menu do aplicativo",
+      searchMenu: "Pesquisar no menu",
+      phoneBarHint: "Marque uma entrada com a estrela para colocá-la na barra inferior. A barra mostra as quatro primeiras.",
       itemMenu: "Mais ações para {{name}}",
       openInNewTab: "Abrir em nova aba",
       copyLink: "Copiar link",

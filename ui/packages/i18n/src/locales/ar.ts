@@ -2956,6 +2956,10 @@ const ar = {
       launcherLabel: "مشغّل التطبيقات",
       menuLabel: "تنقّل التطبيق",
       menuEmpty: "لا توجد في هذا التطبيق عناصر تنقّل يمكنك فتحها.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "شريط قائمة التطبيق",
+      searchMenu: "البحث في القائمة",
+      phoneBarHint: "ضع نجمة على عنصر لإضافته إلى الشريط السفلي. يعرض الشريط أول أربعة عناصر.",
       itemMenu: "المزيد من الإجراءات لـ {{name}}",
       openInNewTab: "فتح في علامة تبويب جديدة",
       copyLink: "نسخ الرابط",

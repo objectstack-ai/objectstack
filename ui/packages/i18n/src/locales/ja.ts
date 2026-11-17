@@ -2684,6 +2684,10 @@ const ja = {
       launcherLabel: "アプリランチャー",
       menuLabel: "アプリナビゲーション",
       menuEmpty: "このアプリには開けるナビゲーション項目がありません。",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "アプリのメニューバー",
+      searchMenu: "メニューを検索",
+      phoneBarHint: "星を付けた項目が下部バーに表示されます（先頭の 4 件）。",
       itemMenu: "{{name}} のその他の操作",
       openInNewTab: "新しいタブで開く",
       copyLink: "リンクをコピー",

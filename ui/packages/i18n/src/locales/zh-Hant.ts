@@ -1961,6 +1961,10 @@ const zhHant = {
       launcherLabel: '應用啟動臺',
       menuLabel: '應用導航',
       menuEmpty: '此應用沒有你可以開啟的導航項。',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: '應用選單欄',
+      searchMenu: '搜尋選單',
+      phoneBarHint: '點星標把選單項固定到底部欄，底部欄顯示前 4 個。',
       itemMenu: '{{name}} 的更多操作',
       openInNewTab: '在新標籤頁開啟',
       copyLink: '複製連結',

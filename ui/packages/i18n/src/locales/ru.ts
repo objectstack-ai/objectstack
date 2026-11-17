@@ -2827,6 +2827,10 @@ const ru = {
       launcherLabel: "Панель приложений",
       menuLabel: "Навигация приложения",
       menuEmpty: "В этом приложении нет доступных для открытия элементов навигации.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "Панель меню приложения",
+      searchMenu: "Поиск в меню",
+      phoneBarHint: "Отметьте пункт звёздочкой, чтобы добавить его на нижнюю панель. На панели показываются первые четыре.",
       itemMenu: "Другие действия для {{name}}",
       openInNewTab: "Открыть в новой вкладке",
       copyLink: "Копировать ссылку",

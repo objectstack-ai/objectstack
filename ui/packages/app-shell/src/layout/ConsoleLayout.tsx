@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '@object-ui/layout';
-import { useIsMobile } from '@object-ui/components';
+import { cn, useIsMobile } from '@object-ui/components';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 
 // Lightweight FAB stub — the heavy chat chunk graph (plugin-chatbot,
@@ -137,6 +137,19 @@ export function isRecordPagePath(pathname: string): boolean {
   return /^\/apps\/[^/]+\/[^/]+\/record\/[^/]+(?:\/page\/[^/]+)?\/?$/.test(pathname);
 }
 
+/**
+ * Does `pathname` keep the phone's bottom menu bar off (objectstack#34594)? A
+ * record page (its bottom edge is the record's action bar) and a record form,
+ * create (`/apps/APP/OBJECT/new`) or edit (`.../record/ID/edit`), whose bottom
+ * edge is its submit buttons. Every other app route draws the bar.
+ */
+export function hidesPhoneNavBar(pathname: string): boolean {
+  return (
+    isRecordPagePath(pathname) ||
+    /^\/apps\/[^/]+\/[^/]+\/(?:new|record\/[^/]+\/edit)\/?$/.test(pathname)
+  );
+}
+
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {
   useResponsiveSidebar();
@@ -196,6 +209,10 @@ export function ConsoleLayout({
   // page draws its phone face at, so the two never disagree for a frame.
   const phone = usePhoneViewport();
   const recordPageOwnsTopBar = phone && isRecordPagePath(location.pathname);
+  // objectstack#34594 — on a phone the app's menu is a bar along the bottom
+  // edge, except where that edge belongs to a record's actions or a form's
+  // submit buttons. The route slot leaves the bar's height free at its end.
+  const phoneNavBar = phone && !hidesPhoneNavBar(location.pathname);
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object
   // and record id of a record page, the dashboard, report or page. Read off the
@@ -270,6 +287,7 @@ export function ConsoleLayout({
            activeAppName={activeAppName}
            onAppChange={onAppChange}
            railOverlay
+           phoneNavBar={phoneNavBar}
          />
       }
       showHeader={!recordPageOwnsTopBar}
@@ -291,7 +309,16 @@ export function ConsoleLayout({
       // overflowed the inset by the banner's height: a second scroller over
       // the table's, the record-count footer below the fold. The phone keeps
       // block layout.
-      className="!p-0 overflow-y-auto overflow-x-hidden bg-muted/5 lg:flex lg:flex-col"
+      //
+      // objectstack#34594 — while the phone menu bar is drawn, the inset keeps
+      // the bar's height (h-12 plus the safe area) free at its bottom: a page
+      // that bounds itself to the inset ends above the bar (the inset's
+      // content box is that much shorter), and a taller page scrolls its last
+      // row out from under the bar (a scroll container's end padding scrolls).
+      className={cn(
+        '!p-0 overflow-y-auto overflow-x-hidden bg-muted/5 lg:flex lg:flex-col',
+        phoneNavBar && '!pb-[calc(3rem+env(safe-area-inset-bottom))]',
+      )}
       rightRail={
         dockEnabled && dock.expanded && !isMobile ? (
           <ChatDockPanel

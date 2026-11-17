@@ -2748,6 +2748,10 @@ const fr = {
       launcherLabel: "Lanceur d'applications",
       menuLabel: "Navigation de l'application",
       menuEmpty: "Cette application n'a aucune entrée de navigation que vous pouvez ouvrir.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "Barre de menu de l'application",
+      searchMenu: "Rechercher dans le menu",
+      phoneBarHint: "Ajoutez une étoile à une entrée pour la placer dans la barre du bas. La barre affiche les quatre premières.",
       itemMenu: "Plus d'actions pour {{name}}",
       openInNewTab: "Ouvrir dans un nouvel onglet",
       copyLink: "Copier le lien",
