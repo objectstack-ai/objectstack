@@ -2739,8 +2739,16 @@ ComponentRegistry.register('form',
     // offending tab can each select a trigger scrolled out of view. Only the
     // strip's own `scrollLeft` moves, never an outer scroller, and a strip
     // that fits (every desktop strip) is left untouched.
+    //
+    // A LAYOUT effect, so the scroll lands in the same commit that marks the
+    // new trigger active. As a passive effect it ran a task later whenever the
+    // activation came from a non-discrete update — the failed-submit jump is
+    // one: react-hook-form validates asynchronously — so for that window the
+    // active tab was painted, and observable, while still scrolled out of the
+    // strip (objectstack#34782). It measures layout and writes `scrollLeft`
+    // before paint, which is what a layout effect is for.
     const fieldTabListRef = React.useRef<HTMLDivElement>(null);
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
       const list = fieldTabListRef.current;
       if (!list || activeFieldTab === undefined || list.scrollWidth <= list.clientWidth) return;
       const trigger = list.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
