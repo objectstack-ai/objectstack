@@ -352,6 +352,9 @@ export {
   type FieldColorDefinition,
 } from './utils/record-color.js';
 export * from './utils/export-filename.js';
+// The one shape of a CSV file the Console builds in the browser: a leading
+// UTF-8 byte-order mark, so Excel opens non-ASCII text readably.
+export * from './utils/csv-blob.js';
 // Named, not `export *`: the module's `reset*` helper is test-only and stays off
 // the public barrel (objectui#13453); in-repo tests import it from the module.
 export {
