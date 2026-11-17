@@ -285,11 +285,10 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     expect(devI18nPluginOptions(stack)).toEqual({ defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN' });
   });
 
-  it('a dependency CYCLE between two packages throws a BARE Error — no `code`, no `status`', () => {
-    // Documented under @throws because it is the one refusal here that does not
-    // carry the ADR-0112 envelope: it comes from `resolvePluginOrder`, the
-    // platform's one topological sorter, not from the artifact gate. A caller
-    // matching on `code` alone would miss it — `DevPlugin`'s catch does not.
+  it('a dependency CYCLE between two packages is refused with the envelope: 422 CYCLIC_ARTIFACT_PACKAGES naming the cycle', () => {
+    // The sorter's verdict, answered by the artifact gate in the ADR-0112
+    // envelope its sibling refusals carry, so a caller matching on `code` sees
+    // it like the rest.
     const cyclic = {
       manifest: { id: 'com.example.a', name: 'A', version: '1.0.0', type: 'app' },
       packages: [
@@ -297,16 +296,16 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
         { manifest: { id: 'com.example.b', name: 'B', version: '1.0.0', type: 'module', dependencies: { 'com.example.a': '^1.0.0' } } },
       ],
     };
-    let caught: (Error & { code?: unknown; status?: unknown }) | undefined;
+    let caught: (Error & { code?: unknown; status?: unknown; details?: unknown }) | undefined;
     try {
       devI18nPluginOptions(cyclic);
     } catch (err) {
-      caught = err as Error & { code?: unknown; status?: unknown };
+      caught = err as Error & { code?: unknown; status?: unknown; details?: unknown };
     }
     expect(caught).toBeInstanceOf(Error);
-    expect(caught?.message).toContain('Circular dependency detected');
-    expect(caught?.code).toBeUndefined();
-    expect(caught?.status).toBeUndefined();
+    expect(caught?.code).toBe('CYCLIC_ARTIFACT_PACKAGES');
+    expect(caught?.status).toBe(422);
+    expect(caught?.details).toEqual({ cycle: ['com.example.a', 'com.example.b', 'com.example.a'] });
   });
 
   it('an EMPTY top-level `translations` is not an answer — `packages[]` supplies it', () => {
