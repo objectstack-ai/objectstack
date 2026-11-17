@@ -2019,6 +2019,9 @@ const ja = {
           title: "「{{app}}」を編集中",
           titleGeneric: "このアプリを編集",
           description: "何を変更しますか？このアプリをその場で変更します — 項目、オブジェクト、ビュー、ダッシュボードの追加や、既存部分の調整ができます。",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "このアプリのデータについて質問するか（件数、一覧、要約）、変更したい点を伝えてください。項目、オブジェクト、ビュー、ダッシュボードをその場で変更します。",
         },
       },
       clearConversation: "クリア",
@@ -2211,6 +2214,11 @@ const ja = {
         resize: "チャットのサイズを変更",
         collapse: "チャットを折りたたむ",
         maximize: "フルページで開く",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "履歴",
+        backToChat: "チャットに戻る",
+        expand: "展開",
+        restore: "サイドパネルに戻す",
         open: "アシスタントを開く",
         planAwaitingApproval: "提案されたプランが承認待ちです",
       },

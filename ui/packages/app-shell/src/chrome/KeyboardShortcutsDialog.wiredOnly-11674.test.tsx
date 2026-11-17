@@ -52,6 +52,8 @@ vi.mock('../layout/ChatDock', () => ({
     width: 420,
     dragging: false,
     maximized: false,
+    fullWindow: false,
+    setFullWindow: vi.fn(),
     toggle: () => {},
     expand: () => {},
     collapse: () => {},

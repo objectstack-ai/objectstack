@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { agentEmptyState, buildAgentSuggestions } from '../AiChatPage';
+import { agentEmptyState, buildAgentSuggestions, editAppDataSuggestions } from '../AiChatPage';
 
 // Identity translator: returns the defaultValue, interpolating `{{app}}` so the
 // edit-mode named title can be asserted. Lets us test the branching without the
@@ -71,5 +71,23 @@ describe('buildAgentSuggestions — magic vs edit starters', () => {
     const s = buildAgentSuggestions('ask', 'Ask', t, true);
     expect(s.join(' ')).toMatch(/How many users/);
     expect(s.join(' ')).not.toMatch(/Add a field/);
+  });
+});
+
+// objectstack#34608 — a builder editing an app is offered both halves, as the
+// ruling put it:「问数据，或者让我改这个应用」. The empty state names data
+// questions as well as changes, and the starters lead with data questions.
+describe('edit mode offers data questions as well as changes (objectstack#34608)', () => {
+  it('the edit-mode description names asking about the data and changing the app', () => {
+    const s = agentEmptyState(t, 'build', { appLabel: 'Tiny Todo' });
+    expect(s.description).toMatch(/ask about this app’s data/i);
+    expect(s.description).toMatch(/counts, lists and summaries/i);
+    expect(s.description).toMatch(/change/i);
+  });
+
+  it('editAppDataSuggestions are data questions, drawn from the ask agent’s starters', () => {
+    const s = editAppDataSuggestions(t);
+    expect(s.length).toBeGreaterThanOrEqual(2);
+    for (const line of s) expect(line).not.toMatch(/^Add /);
   });
 });

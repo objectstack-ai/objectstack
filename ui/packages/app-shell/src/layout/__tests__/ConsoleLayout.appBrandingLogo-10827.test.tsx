@@ -118,6 +118,8 @@ vi.mock('../ChatDock', () => ({
     width: 420,
     dragging: false,
     maximized: false,
+    fullWindow: false,
+    setFullWindow: vi.fn(),
     toggle: vi.fn(),
     expand: vi.fn(),
     collapse: vi.fn(),
@@ -128,7 +130,6 @@ vi.mock('../ChatDock', () => ({
   ChatDockPanel: () => null,
   ChatDockMobileSheet: () => null,
 }));
-vi.mock('../ConsoleChatbotFab', () => ({ ConsoleChatbotFab: () => null }));
 vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: () => null }));
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));

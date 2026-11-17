@@ -2075,6 +2075,9 @@ const es = {
           title: "Editando «{{app}}»",
           titleGeneric: "Editar esta aplicación",
           description: "¿Qué desea cambiar? Modifico esta aplicación sobre la marcha — añadir un campo, un objeto, una vista o un panel, o ajustar lo que ya existe.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Pregunta por los datos de esta app —recuentos, listas y resúmenes— o dime qué cambiar y modificaré la app al momento: un campo, un objeto, una vista o un panel.",
         },
       },
       clearConversation: "Borrar",
@@ -2273,6 +2276,11 @@ const es = {
         resize: "Redimensionar el chat",
         collapse: "Contraer el chat",
         maximize: "Abrir como página completa",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Historial",
+        backToChat: "Volver al chat",
+        expand: "Expandir",
+        restore: "Restaurar panel lateral",
         open: "Abrir el asistente",
         planAwaitingApproval: "Un plan propuesto espera su aprobación",
       },

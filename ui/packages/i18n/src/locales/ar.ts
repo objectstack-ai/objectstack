@@ -2240,6 +2240,9 @@ const ar = {
           title: "تحرير «{{app}}»",
           titleGeneric: "تحرير هذا التطبيق",
           description: "ما الذي تريد تغييره؟ سأعدّل هذا التطبيق في مكانه — إضافة حقل أو كائن أو عرض أو لوحة معلومات، أو تعديل ما هو موجود.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "اسأل عن بيانات هذا التطبيق — الأعداد والقوائم والملخصات — أو أخبرني بما تريد تغييره، وسأعدّل التطبيق في مكانه: حقل أو كائن أو عرض أو لوحة معلومات.",
         },
       },
       clearConversation: "مسح",
@@ -2456,6 +2459,11 @@ const ar = {
         resize: "تغيير حجم المحادثة",
         collapse: "طي المحادثة",
         maximize: "فتح كصفحة كاملة",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "السجل",
+        backToChat: "العودة إلى المحادثة",
+        expand: "توسيع",
+        restore: "استعادة اللوحة الجانبية",
         open: "فتح المساعد",
         planAwaitingApproval: "خطة مقترحة بانتظار موافقتك",
       },

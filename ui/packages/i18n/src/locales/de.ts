@@ -2017,6 +2017,9 @@ const de = {
           title: "„{{app}}“ wird bearbeitet",
           titleGeneric: "Diese App bearbeiten",
           description: "Was möchten Sie ändern? Ich passe diese App direkt an — ein Feld, Objekt, eine Ansicht oder ein Dashboard hinzufügen oder Vorhandenes anpassen.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Fragen Sie nach den Daten dieser App – Anzahlen, Listen und Zusammenfassungen – oder sagen Sie mir, was ich ändern soll, und ich passe die App direkt an: ein Feld, ein Objekt, eine Ansicht oder ein Dashboard.",
         },
       },
       clearConversation: "Leeren",
@@ -2209,6 +2212,11 @@ const de = {
         resize: "Chatbreite anpassen",
         collapse: "Chat einklappen",
         maximize: "Als ganze Seite öffnen",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Verlauf",
+        backToChat: "Zurück zum Chat",
+        expand: "Erweitern",
+        restore: "Seitenleiste wiederherstellen",
         open: "Assistent öffnen",
         planAwaitingApproval: "Ein vorgeschlagener Plan wartet auf Ihre Freigabe",
       },

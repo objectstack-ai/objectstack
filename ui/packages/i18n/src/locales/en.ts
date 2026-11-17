@@ -2758,6 +2758,9 @@ const en = {
           titleGeneric: 'Edit this app',
           description:
             'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         },
       },
       clearConversation: 'Clear',
@@ -2970,6 +2973,11 @@ const en = {
         resize: 'Resize chat',
         collapse: 'Collapse chat',
         maximize: 'Open full page',
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: 'History',
+        backToChat: 'Back to chat',
+        expand: 'Expand',
+        restore: 'Restore side panel',
         open: 'Open assistant',
         // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
         planAwaitingApproval: 'A proposed plan is waiting for your approval',

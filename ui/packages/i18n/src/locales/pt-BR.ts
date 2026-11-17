@@ -2070,6 +2070,9 @@ const pt = {
           title: "Editando “{{app}}”",
           titleGeneric: "Editar este aplicativo",
           description: "O que você quer mudar? Eu altero este aplicativo no lugar — adicionar um campo, objeto, visão ou painel, ou ajustar o que já existe.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Pergunte sobre os dados deste app — contagens, listas e resumos — ou diga o que mudar, e eu modifico o app na hora: um campo, um objeto, uma visualização ou um painel.",
         },
       },
       clearConversation: "Limpar",
@@ -2268,6 +2271,11 @@ const pt = {
         resize: "Redimensionar a conversa",
         collapse: "Recolher a conversa",
         maximize: "Abrir como página inteira",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Histórico",
+        backToChat: "Voltar ao chat",
+        expand: "Expandir",
+        restore: "Restaurar painel lateral",
         open: "Abrir o assistente",
         planAwaitingApproval: "Um plano proposto aguarda sua aprovação",
       },

@@ -2017,6 +2017,9 @@ const ko = {
           title: "“{{app}}” 편집 중",
           titleGeneric: "이 앱 편집",
           description: "무엇을 바꿀까요? 이 앱을 그 자리에서 수정합니다 — 필드, 객체, 뷰, 대시보드를 추가하거나 기존 내용을 조정할 수 있습니다.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "이 앱의 데이터(건수, 목록, 요약)를 물어보거나 바꿀 점을 알려 주세요. 필드, 개체, 뷰, 대시보드를 그 자리에서 수정합니다.",
         },
       },
       clearConversation: "지우기",
@@ -2209,6 +2212,11 @@ const ko = {
         resize: "채팅 크기 조정",
         collapse: "채팅 접기",
         maximize: "전체 페이지로 열기",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "기록",
+        backToChat: "채팅으로 돌아가기",
+        expand: "펼치기",
+        restore: "사이드 패널로 복원",
         open: "어시스턴트 열기",
         planAwaitingApproval: "제안된 계획이 승인을 기다리고 있습니다",
       },
