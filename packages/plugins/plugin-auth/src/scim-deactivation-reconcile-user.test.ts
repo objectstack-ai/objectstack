@@ -78,8 +78,8 @@
  *      user's local password (`scim-deactivation-password-removal.ts`) and
  *      nothing else; the re-activation that lifts the directory's ban
  *      removes any local password left before it lifts the ban, so it
- *      restores no credential from before it, for a user deactivated before
- *      this rule too (seeded directly); an administrator's ban and unban, an
+ *      restores no credential from before it, whatever the deactivation left
+ *      in place (seeded directly); an administrator's ban and unban, an
  *      `active: true` over an administrator's ban, an active write for a user
  *      who is not banned and a user with no password are controls that remove
  *      nothing; a refused last-administrator deactivation attempts no
@@ -1623,14 +1623,14 @@ describe('a directory deactivation removes the user\'s local password, and a re-
     expect(isBanned(await userRow(h, quinn.email))).toBe(false);
   }, 60_000);
 
-  it('(k) a re-activation after a directory deactivation restores no credential from before it, for a user deactivated before this rule too', async () => {
+  it('(k) a re-activation after a directory deactivation restores no credential from before it, whatever the deactivation left in place', async () => {
     const h = await boot();
     const vic = await provision(h, 'vic');
     await attachPassword(h, vic);
     await attachSsoLink(h, vic);
-    // The state a directory deactivation left before this rule, written
-    // directly and not through the removal: the SCIM source inactive, the user
-    // banned with the directory's reason, and the local password in place.
+    // A directory deactivation's state, written directly and not through the
+    // removal: the SCIM source inactive, the user banned with the directory's
+    // reason, and a local password in place.
     await h.engine.update(
       'sys_user',
       { id: vic.userId, banned: true, ban_reason: SCIM_DEACTIVATION_BAN_REASON, ban_expires: null },
