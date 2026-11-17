@@ -634,7 +634,24 @@ export const CEILINGS = new Map([
   // priced text is 27611 bytes -> ceil(27611 / 4) = 6903; the ceiling moves +42,
   // the measured remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27611 / 4)
-  ['skills/objectstack-automation/SKILL.md', 6903],
+  // 6903 -> 6992 (2026-11-17, card #34655, its Done-when "Document it in the
+  // automation skill", ruled into the same PR by the area): one paragraph under
+  // "A flow an installed package ships" teaches `defaultActive: false` — the
+  // flow ships unarmed (`_status` `enabled: false`) until an administrator turns
+  // the packaged-flow switch on, that choice outlives restart / upgrade /
+  // reinstall, `status: 'obsolete'` disarms past the switch, and a flow
+  // authored in the deployment is refused the key. Raise path the standing
+  // ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  // NOTHING PAID DOWN: the file was read whole for a restatement of the
+  // activation switch, its default or `status` as a switch and none exists —
+  // the paragraph points at the switch the preceding paragraph introduces
+  // rather than restating it. Arithmetic in priced bytes (stamp line
+  // excluded), against `main`'s 27611 (headroom 0): the diff adds 357 bytes
+  // and removes none, so the LANDED priced text is 27968 bytes ->
+  // ceil(27968 / 4) = 6992; the ceiling moves +89, the measured addition only.
+  // Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27968 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6992],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
