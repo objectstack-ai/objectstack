@@ -1,6 +1,7 @@
 ---
 '@objectstack/plugin-auth': minor
 '@object-ui/app-shell': patch
+'@objectstack/runtime': patch
 ---
 
 fix(plugin-auth,app-shell)!: while mail is live, accepting an invitation needs a verified address
@@ -21,3 +22,5 @@ Skills-docs: none — `git grep` of `skills/` finds no page that teaches accepti
 **Who moves.** A person in that state verifies their address (the Console's accept page takes them to the screen that sends the mail), then accepts; an API client that accepts for its user does the same, through `POST /api/v1/auth/send-verification-email`. An invitee who opens the invitation mail's own link is not affected: that link verifies the address as it accepts.
 
 **Unchanged.** Every deployment without a live mail transport (no email service, or the log transport), where nothing could verify an address, so acceptance stays open to an unverified address; `get-invitation`, `list-user-invitations` and `reject-invitation`, which write no membership; the one-step door `POST /api/v1/auth/organization/accept-invitation-one-step`; and a verified session everywhere. better-auth's `requireEmailVerificationOnInvitation` stays declared `false`: it governs reading and declining too, and is read once at boot.
+
+`@objectstack/runtime` carries only the dispatcher error-vocabulary row that classifies the vendor code above as foreign vocabulary; nothing it runs changes.
