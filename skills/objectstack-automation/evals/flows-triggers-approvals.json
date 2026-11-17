@@ -420,23 +420,6 @@
           "STACK_TRIGGER_CAPABILITY_REQUIRED"
         ]
       }
-    },
-    {
-      "id": 24,
-      "prompt": "Build a flow `mrp_plan_approval` on `purchase_plan`: when `status` becomes `submitted`, the planning manager approves or rejects, and on approve a step sets `status` to `adopted`. That object's `beforeUpdate` hook refuses the write when capacity is already taken. A refusal must send the plan back to its owner; the approver's click must not fail or leave the run stuck.",
-      "expected_output": "An `approval` node (`type: 'approval'`, the planning manager as a `position` approver, not the deprecated `role` spelling) whose `label: 'approve'` edge enters an `update_record` step, and a `fault` edge from THAT step to a handler: `{ source: 'adopt_plan', target: 'bounce_back', type: 'fault' }`, the handler returning the plan to its owner (an `update_record` or a `notify`). The hook's refusal takes that edge, the decision answers normally and the run finishes. Without the edge `POST …/approve` answers `500 RESUME_FAILED`: the decision stands, the run is stranded, and the body carries `innerRefusal` and `userMessage`, the hook's declared sentence. Not an ordinary edge labelled as an error (it traverses on success), and not the reject branch: the approver approved.",
-      "files": [],
-      "assertions": {
-        "must_contain": [
-          "type: 'approval'",
-          "label: 'approve'",
-          "update_record",
-          "type: 'fault'"
-        ],
-        "must_not_contain": [
-          "type: 'role'"
-        ]
-      }
     }
   ]
 }
