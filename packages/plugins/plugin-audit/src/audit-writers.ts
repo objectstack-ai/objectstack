@@ -470,14 +470,6 @@ const NOISE_FIELDS = new Set<string>([
 export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objectstack/metadata-core';
 
 /**
- * Action name produced from a HookContext.event string.
- *
- * [#21155] Typed by the ledger's record-write vocabulary: these are the rows
- * whose snapshots are a parent record's field map, and the read side
- * (`audit-log-field-redaction.ts`) narrows exactly those. A new record-write
- * action does not compile until that list names it.
- */
-/**
  * [#33694] The `sys_audit_log.metadata` keys that ride beside `performed_by` /
  * `on_behalf_of` when the in-product AI performed a record write for a person:
  * the AI conversation it ran in, and the pending item the person's approval
@@ -499,6 +491,14 @@ function provenanceMark(
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+/**
+ * Action name produced from a HookContext.event string.
+ *
+ * [#21155] Typed by the ledger's record-write vocabulary: these are the rows
+ * whose snapshots are a parent record's field map, and the read side
+ * (`audit-log-field-redaction.ts`) narrows exactly those. A new record-write
+ * action does not compile until that list names it.
+ */
 function actionFor(event: string): LedgerRecordWriteAction | null {
   if (event === 'afterInsert') return 'create';
   if (event === 'afterUpdate') return 'update';
