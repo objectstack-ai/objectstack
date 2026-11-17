@@ -18,6 +18,7 @@
  */
 import type { ChatFilePart } from '@object-ui/plugin-chatbot';
 import type { UploadResult } from '@object-ui/types';
+import { joinAttachmentNames, resolveAttachmentNoteText, type AttachmentNoteKey } from './outboundAgentText.js';
 
 /** The upload a turn's files go through: the console's `useUpload().upload`. */
 export type ChatAttachmentUpload = (file: File) => Promise<UploadResult>;
@@ -105,27 +106,20 @@ export async function uploadChatAttachments(
   return outcome;
 }
 
-const names = (files: readonly File[]) => files.map((f) => f.name).join('、');
-
 /**
  * The lines the turn's text carries about its non-spreadsheet files: which
  * were sent as files, and which were not and why. Empty when there were none.
+ * In the conversation's language (objectstack#34461): Chinese for a Chinese
+ * conversation, English for any other.
  */
-export function chatAttachmentNotes(outcome: ChatAttachmentOutcome): string {
+export function chatAttachmentNotes(outcome: ChatAttachmentOutcome, conversationIsZh: boolean): string {
+  const names = (files: readonly File[]) => joinAttachmentNames(conversationIsZh, files.map((f) => f.name));
+  const note = (key: AttachmentNoteKey, files: readonly File[]) =>
+    resolveAttachmentNoteText(conversationIsZh, key, { count: String(files.length), names: names(files) });
   const lines: string[] = [];
-  if (outcome.sent.length > 0) {
-    lines.push(`(用户附上了 ${outcome.sent.length} 个文件:${names(outcome.sent)} — 已作为文件随本条消息发送。)`);
-  }
-  if (outcome.tooLarge.length > 0) {
-    lines.push(`(以下附件超过 10 MB 上限,未上传,内容未读取:${names(outcome.tooLarge)}。)`);
-  }
-  if (outcome.unsupported.length > 0) {
-    lines.push(
-      `(以下附件的类型暂不支持读取,未上传,内容未读取:${names(outcome.unsupported)} — 当前支持表格(Excel/CSV)、图片(PNG/JPEG/GIF/WebP)与 PDF。)`,
-    );
-  }
-  if (outcome.failed.length > 0) {
-    lines.push(`(以下附件上传失败,内容未读取:${names(outcome.failed)}。)`);
-  }
+  if (outcome.sent.length > 0) lines.push(note('filesSent', outcome.sent));
+  if (outcome.tooLarge.length > 0) lines.push(note('filesTooLarge', outcome.tooLarge));
+  if (outcome.unsupported.length > 0) lines.push(note('filesUnsupported', outcome.unsupported));
+  if (outcome.failed.length > 0) lines.push(note('filesUploadFailed', outcome.failed));
   return lines.map((line) => `\n\n${line}`).join('');
 }

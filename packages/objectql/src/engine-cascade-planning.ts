@@ -55,6 +55,7 @@ import {
   statesDeleteSemantics,
 } from './engine-top-level.js';
 import { isExternalDriverFloor } from './external-driver-floor.js';
+import { forgetCollectedProbes, takeCollectedProbe } from './engine-delete-cascade.js';
 import type { CascadeDeleteSet } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
@@ -520,6 +521,14 @@ export class CascadePlanningFacet {
    * and before the walk deletes or clears anything, so the snapshot reads every
    * row as it stood. Never called for a member that joins a cascade already in
    * progress: such a row belongs to its root's entry.
+   *
+   * [ruling 6893104201 c1] Nothing between the collection and the walk writes,
+   * so the walk takes the collection's answer to each probe it repeats before
+   * its own first write ({@link takeCollectedProbe}), rather than reading the
+   * same rows again. The snapshot keeps its own read: it reads the rows raw,
+   * through the driver, and the probe's rows come through the engine's read
+   * (formula values, file references, hooks), so they are not the values a
+   * restore must write back.
    */
   static async cascadeDeleteRelations(this: Pick<CascadePlanningHost, '_registry' | 'cascadeDeleteSets' | 'collectCascadeDeleteSet' | 'refuseRestrictsInsideOwnCascade' | 'walkReferencingRelations'>, object: string, ids: ReadonlyArray<string | number>, context?: ExecutionContext, depth = 0, onCollected?: (set: CascadeDeleteSet) => Promise<void>): Promise<void> {
     const roots: Array<string | number> = [];
@@ -993,7 +1002,11 @@ export class CascadePlanningFacet {
 
         // [#27004] One probe per batch of the set; each record then takes its
         // own rows, in the set's order.
-        const referencing = await this.probeReferencingRowsOfSet(childName, fieldName, fdef, ids, context);
+        // [ruling 6893104201 c1] …or none: before the walk's first write, the
+        // collection walk's answer to this same probe is still the answer, so
+        // it is taken instead of read again (takeCollectedProbe).
+        const referencing = takeCollectedProbe(cascadeSet, object, childName, fieldName, ids) ??
+          await this.probeReferencingRowsOfSet(childName, fieldName, fdef, ids, context);
         const clearedKey = cascadeMemberKey(childName, fieldName);
         let cleared = cascadeSet.cleared.get(clearedKey);
         if (!cleared) { cleared = new Set(); cascadeSet.cleared.set(clearedKey, cleared); }
@@ -1136,6 +1149,9 @@ export class CascadePlanningFacet {
                   object, id: String(id), referencingObject: childName, referencingId: String(depId), field: fieldName,
                 },
               } as ExecutionContext;
+              // [ruling 6893104201 c1] The walk's first write: its hooks may
+              // write a row a later probe must see.
+              forgetCollectedProbes(cascadeSet);
               if (multiValued) {
                 // The FK is a SET, so `set_null` clears the deleted MEMBER, not
                 // the slot: filter the stored array and write what remains.
@@ -1178,7 +1194,11 @@ export class CascadePlanningFacet {
           // [#27004] Every row outside the set has had `id` cleared from it.
           cleared.add(String(id));
         }
-        if (cascaded.length > 0) await deleteCascadedChildren(this, childName, cascaded, context, cascadeSet);
+        if (cascaded.length > 0) {
+          // [ruling 6893104201 c1] A write, and the children's hooks run with it.
+          forgetCollectedProbes(cascadeSet);
+          await deleteCascadedChildren(this, childName, cascaded, context, cascadeSet);
+        }
       }
     }
   }

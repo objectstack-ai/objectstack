@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Plugin, PluginContext } from '@objectstack/core';
+import { isServiceNotRegisteredError, type Plugin, type PluginContext } from '@objectstack/core';
 import {
   effectiveTenancyPosture,
   resolveLocalizationContext,
@@ -835,8 +835,9 @@ export class AuditPlugin implements Plugin {
    * Start the audit sealer (ADR-0154 D3) over the engine's storage. The
    * signer and the sink are resolved per pass from the `audit.checkpointSigner`
    * and `audit.checkpointSink` slots (D11), the signer falling back to the
-   * default local key of D6; the `cluster` service, when registered, holds the
-   * `audit.sealer` lock. An engine without the storage surface the sealer
+   * default local key of D6 only when no host signer is registered; the
+   * `cluster` service, when registered, holds the `audit.sealer` lock. A seam
+   * that is registered but fails to resolve stops the pass (#34280). An engine without the storage surface the sealer
    * reads (a test double) starts no sealer, and neither does a one-shot
    * command's boot (`armSealer: false`).
    */
@@ -848,19 +849,13 @@ export class AuditPlugin implements Plugin {
     const option = this.options.cryptoProvider ?? this.hostCryptoProvider;
     const crypto = typeof option === 'function' ? option() : option;
     const localSigner = crypto ? new LocalCheckpointSigner({ engine: sealEngine, crypto }) : undefined;
-    const optional = <T>(name: string): T | undefined => {
-      try {
-        return ctx.getService<T>(name) ?? undefined;
-      } catch {
-        return undefined;
-      }
-    };
+    const seam = hostSeamResolver(ctx);
     this.sealer = new AuditSealer({
       engine: sealEngine,
       ...(crypto ? { crypto } : {}),
-      signer: () => optional<IAuditCheckpointSigner>(AUDIT_CHECKPOINT_SIGNER_SERVICE) ?? localSigner,
-      sink: () => optional<IAuditCheckpointSink>(AUDIT_CHECKPOINT_SINK_SERVICE),
-      cluster: () => optional<IClusterService>('cluster'),
+      signer: async () => (await seam<IAuditCheckpointSigner>(AUDIT_CHECKPOINT_SIGNER_SERVICE)) ?? localSigner,
+      sink: () => seam<IAuditCheckpointSink>(AUDIT_CHECKPOINT_SINK_SERVICE),
+      cluster: () => seam<IClusterService>('cluster'),
       logger: ctx.logger,
     });
     this.sealer.start();
@@ -1102,4 +1097,40 @@ function tenancyServiceResolver(ctx: PluginContext): TenancyServiceResolver | un
     | undefined;
   if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
   return () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy');
+}
+
+/**
+ * #34280: how the sealer reaches a host seam (`audit.checkpointSigner`,
+ * `audit.checkpointSink`, `cluster`), as three states, not two. Never
+ * registered ⇒ `undefined`, and the sealer uses its stand-in (the local
+ * signer, no export, the in-process lock). Registered and resolved ⇒ the
+ * service. Registered and NOT resolvable — a factory that throws, a KMS client
+ * that cannot start — ⇒ the rejection, which stops the pass instead of
+ * silently signing with the local key.
+ *
+ * The kernel's async accessor draws that line with the branded "never
+ * registered" rejection (`isServiceNotRegisteredError`), ⛔ not message text,
+ * and it also builds a factory-registered seam, which the sync accessor
+ * refuses ("is async"). A host with no async accessor (`LiteKernel`) has no
+ * factories, so "not registered" is the only fault its sync accessor reports.
+ */
+function hostSeamResolver(ctx: PluginContext): <T>(name: string) => Promise<T | undefined> {
+  return async <T>(name: string): Promise<T | undefined> => {
+    const kernel = ctx.getKernel?.() as
+      | { getServiceAsync?: <S>(name: string, scopeId?: string) => Promise<S> }
+      | undefined;
+    if (kernel && typeof kernel.getServiceAsync === 'function') {
+      try {
+        return (await kernel.getServiceAsync<T>(name)) ?? undefined;
+      } catch (err) {
+        if (isServiceNotRegisteredError(err)) return undefined;
+        throw err;
+      }
+    }
+    try {
+      return ctx.getService<T>(name) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
 }
