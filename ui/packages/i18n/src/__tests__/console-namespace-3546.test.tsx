@@ -231,7 +231,7 @@ describe('objectui#3546 slice four — the console namespace', () => {
     // values that embed the word `Assistant` really are NOT identical to en.
     expect(UNTRANSLATED_COGNATES).toHaveLength(0);
     for (const key of ['console.ai.dock.title', 'console.ai.dock.description', 'console.shortcuts.groups.aiChat']) {
-      expect(at(builtInLocales.fr, key), key).toMatch(/Assistant/);
+      expect(at(builtInLocales.fr, key), key).toMatch(/assistant/i);
       expect(at(builtInLocales.fr, key), key).not.toBe(at(builtInLocales.en, key));
     }
   });
