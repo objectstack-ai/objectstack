@@ -762,7 +762,11 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
             !ai.done
               ? t('console.firstRunChecklist.aiProvider.todo')
               : ai.source === 'environment'
-                ? t('console.firstRunChecklist.aiProvider.doneEnvironment', { provider })
+                ? provider
+                  ? t('console.firstRunChecklist.aiProvider.doneEnvironment', { provider })
+                  : // In use, handed over by the host, and named by no option:
+                    // there is no provider name to put in the sentence.
+                    t('console.settingsView.aiProviderManaged')
                 : t('console.firstRunChecklist.aiProvider.doneSettings', { provider })
           }
           action={
