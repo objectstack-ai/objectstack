@@ -123,6 +123,8 @@ async function boot(dir: string, driver: ReturnType<typeof fakeDriver>) {
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
     await plugin.start(ctx as any);
     await hooks.get('kernel:ready')?.();
+    // The door registers its own plugin manifest at boot; only the install's registrations count.
+    register.mockClear();
     return {
         install: (reqBody: Row) => rawApp.routes.get(`POST ${ROUTE}`)!(makeC(reqBody)),
         register,
