@@ -121,3 +121,61 @@ describe('#24536 — the per-source program cache answers every row as a fresh p
     for (let i = 0; i < 3; i++) expect(celEngine.evaluate(expr, { record: { a: 1 } })).toEqual(first);
   });
 });
+
+/**
+ * #34756 — the typed CHECK envs (`firstTypeMismatch`, `firstDateTextVerdict`,
+ * `firstDateTextCall`) are built once per input, not once per call.
+ *
+ * The runtime authoring gate runs these over every expression of the whole
+ * stack on each metadata publish. Measured on the showcase before the change:
+ * 903 env builds for 97 distinct inputs per object publish, about 0.5 s of the
+ * publish request on an idle box.
+ */
+describe('#34756 — one typed check env per input, not one per call', () => {
+  const RECORD = { name: 'string', due: 'timestamp', ok: 'bool' } as const;
+
+  it('repeated checks of one field map build no new environment', async () => {
+    const { firstTypeMismatch, firstDateTextVerdict, firstDateTextCall } = await import('./cel-engine');
+    const sources = ['record.name > 3', 'record.due < record.name', 'record.ok + 1', 'record.name == "x"'];
+    const run = () => {
+      for (const s of sources) {
+        firstTypeMismatch(s, RECORD);
+        firstTypeMismatch(s.replace(/record\./g, ''), RECORD, 'flattened');
+        firstDateTextVerdict(s, RECORD);
+        firstDateTextCall(s, RECORD);
+      }
+    };
+    // Positive control: the first pass builds the envs it needs.
+    expect(built(run)).toBeGreaterThan(0);
+    expect(built(() => { for (let i = 0; i < 20; i++) run(); })).toBe(0);
+  });
+
+  it('the field types are part of the key: the same source keeps each map\'s own verdict', async () => {
+    const { firstTypeMismatch } = await import('./cel-engine');
+    const source = 'record.score > 3';
+    for (let i = 0; i < 3; i++) {
+      expect(firstTypeMismatch(source, { score: 'string' })).toMatchObject({
+        operator: '>', celType: 'string', category: 'type-mismatch', field: 'score',
+      });
+      expect(firstTypeMismatch(source, { score: 'dyn' })).toBeNull();
+      expect(firstTypeMismatch(source, { score: 'bool' })).toMatchObject({ celType: 'bool', field: 'score' });
+    }
+  });
+
+  it('the scope and temporal typing are part of the key too', async () => {
+    const { firstTypeMismatch, firstDateTextVerdict } = await import('./cel-engine');
+    const fields = { d: 'timestamp' } as const;
+    for (let i = 0; i < 3; i++) {
+      // A date field minus a number: refused under the Timestamp typing…
+      expect(firstTypeMismatch('record.d + 1', fields)).toMatchObject({ category: 'date-arith' });
+      // …and read through the same field map in flattened scope, bare.
+      expect(firstTypeMismatch('d + 1', fields, 'flattened')).toMatchObject({ category: 'date-arith' });
+      // The record scope does not bind a bare name, so there is nothing typed to fault.
+      expect(firstTypeMismatch('d + 1', fields)).toBeNull();
+      // The same map and scope under the date-text typing: the operand is the field's text.
+      expect(firstTypeMismatch('record.d + 1', fields)).toMatchObject({ operands: 'google.protobuf.Timestamp + int' });
+      expect(firstDateTextVerdict('record.d + 1', fields)).toMatchObject({ kind: 'fault', operands: 'DateText + int' });
+      expect(firstDateTextVerdict('record.d < "2026-01-01"', fields)).toMatchObject({ kind: 'type', type: 'bool' });
+    }
+  });
+});

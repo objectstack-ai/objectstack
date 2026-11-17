@@ -1088,7 +1088,9 @@ const MACRO_NAMES: ReadonlySet<string> = new Set(['all', 'exists', 'exists_one',
  *                    conditions). Unlisted identifiers stay `dyn`
  *                    (`unlistedVariablesAreDyn: true`) so a flow variable never
  *                    faults — only a typed field misused does.
- * Built per call — cheap, and only used at build time.
+ *
+ * Memoized on its inputs ({@link TYPED_ENV_CACHE}): the env is a pure function
+ * of them and every caller only parses and checks against it.
  */
 function buildTypedEnv(
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
@@ -1102,6 +1104,54 @@ function buildTypedEnv(
    * reads the field.
    */
   recordRootTypes?: Readonly<Record<string, FieldCelType>>,
+): Environment {
+  const key = JSON.stringify([scope, temporal, fieldCelTypes, recordRootTypes ?? null]);
+  const cached = TYPED_ENV_CACHE.get(key);
+  if (cached) {
+    // Least-recently-used order: a hit moves to the young end.
+    TYPED_ENV_CACHE.delete(key);
+    TYPED_ENV_CACHE.set(key, cached);
+    return cached;
+  }
+  const env = createTypedEnv(fieldCelTypes, scope, temporal, recordRootTypes);
+  TYPED_ENV_CACHE.set(key, env);
+  if (TYPED_ENV_CACHE.size > TYPED_ENV_CACHE_LIMIT) {
+    TYPED_ENV_CACHE.delete(TYPED_ENV_CACHE.keys().next().value as string);
+  }
+  return env;
+}
+
+/**
+ * [#34756] The typed check envs {@link buildTypedEnv} has built, keyed on its
+ * inputs, least recently used first.
+ *
+ * Building one is not cheap: a fresh cel-js `Environment` clones the global
+ * registry and then registers the whole stdlib, the null comparisons and the
+ * temporal overloads one signature at a time. The runtime authoring gate runs
+ * the expression passes over the WHOLE stack on every metadata publish, and
+ * each expression asks for up to three of these envs. Measured on the
+ * showcase (one object publish): 903 builds for 97 distinct inputs, about
+ * 0.5 s of the publish request on an idle box, before this cache.
+ *
+ * Sharing an env is sound because nothing registers on one after it is built:
+ * every caller only `parse`s and `check`s against it, and neither changes
+ * what the env declares. ⛔ A new caller that registers on the returned env
+ * would leak that declaration into every later check with the same inputs —
+ * build a fresh one with {@link createTypedEnv} instead.
+ *
+ * Bounded so a long-lived process that sees many distinct field maps keeps a
+ * fixed footprint; the limit sits well above the distinct inputs one gate
+ * pass over the showcase asks for (97).
+ */
+const TYPED_ENV_CACHE = new Map<string, Environment>();
+const TYPED_ENV_CACHE_LIMIT = 512;
+
+/** {@link buildTypedEnv}'s uncached body: a fresh env for these inputs. */
+function createTypedEnv(
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened',
+  temporal: TemporalTyping,
+  recordRootTypes: Readonly<Record<string, FieldCelType>> | undefined,
 ): Environment {
   // `temporal` picks what a `date`/`datetime` field is declared as — see
   // {@link TemporalTyping}.
