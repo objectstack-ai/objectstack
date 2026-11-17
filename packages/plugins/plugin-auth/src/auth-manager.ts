@@ -2444,7 +2444,6 @@ export class AuthManager {
       getEmailService: (...a) => this.getEmailService(...a),
       getMcpResourceUrl: (...a) => this.getMcpResourceUrl(...a),
       getApi: (...a) => this.getApi(...a),
-      isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoOnlyMode: (...a) => this.isSsoOnlyMode(...a),
       get jwtSigningFailureReported() { return readJwtSigningFailureReported(); },
@@ -2720,9 +2719,11 @@ export class AuthManager {
   private settleMembership(userId: unknown): Promise<ReconcileOutcome | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy'> = {
+    const host: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy' | 'hasStagedInvitationAdmissions' | 'isStagedInvitationAdmission'> = {
       get config() { return readConfig(); },
       getMembershipPolicy: (...a) => this.getMembershipPolicy(...a),
+      hasStagedInvitationAdmissions: (...a) => this.hasStagedInvitationAdmissions(...a),
+      isStagedInvitationAdmission: (...a) => this.isStagedInvitationAdmission(...a),
     };
     return settleMembership.call(host, userId);
   }
@@ -2832,6 +2833,19 @@ export class AuthManager {
   private pendingOwnerVerifiedStamps = new Map<string, { stagedAtMs: number }>();
 
   private static readonly OWNER_STAMP_STAGE_TTL_MS = 10 * 60 * 1000;
+
+  /**
+   * Sign-ups the admission gate admitted by the invitation they PRESENT (under
+   * `invite_only`), staged for the membership settle — same shape and lifetime
+   * discipline as {@link pendingSelfRegistrationGrants} (keyed by lowercased
+   * email, pruned by age). Read, never consumed: both settle seams (the first
+   * session and `user.create.after`) ask it about the same creation and must
+   * answer alike. `settleMembership` (`auth-manager-membership-admission.ts`)
+   * states the rule it serves.
+   */
+  private pendingInvitationAdmissions = new Map<string, { stagedAtMs: number }>();
+
+  private static readonly INVITATION_ADMISSION_STAGE_TTL_MS = 10 * 60 * 1000;
 
   /**
    * [#14157] Addresses the deployment's OWN boot command is provisioning right
@@ -2988,7 +3002,7 @@ export class AuthManager {
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
+    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageInvitationAdmission' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       enterpriseOAuthProviderIds: (...a) => this.enterpriseOAuthProviderIds(...a),
@@ -2998,6 +3012,7 @@ export class AuthManager {
       isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       selfRegistrationSetResolvable: (...a) => this.selfRegistrationSetResolvable(...a),
+      stageInvitationAdmission: (...a) => this.stageInvitationAdmission(...a),
       stageOwnerVerifiedStamp: (...a) => this.stageOwnerVerifiedStamp(...a),
       stageSelfRegistrationGrant: (...a) => this.stageSelfRegistrationGrant(...a),
     };
@@ -3408,6 +3423,31 @@ export class AuthManager {
     const cutoff = Date.now() - AuthManager.OWNER_STAMP_STAGE_TTL_MS;
     for (const [key, value] of this.pendingOwnerVerifiedStamps) {
       if (value.stagedAtMs < cutoff) this.pendingOwnerVerifiedStamps.delete(key);
+    }
+  }
+
+  /** Stage a sign-up the admission gate admitted by the invitation it presents. */
+  private stageInvitationAdmission(email: string): void {
+    this.prunePendingInvitationAdmissions();
+    this.pendingInvitationAdmissions.set(email.trim().toLowerCase(), { stagedAtMs: Date.now() });
+  }
+
+  /** Is any sign-up admitted by a presented invitation staged now? */
+  private hasStagedInvitationAdmissions(): boolean {
+    this.prunePendingInvitationAdmissions();
+    return this.pendingInvitationAdmissions.size > 0;
+  }
+
+  /** Was the sign-up of this address admitted by the invitation it presented? Not consumed. */
+  private isStagedInvitationAdmission(email: string): boolean {
+    this.prunePendingInvitationAdmissions();
+    return this.pendingInvitationAdmissions.has(email.trim().toLowerCase());
+  }
+
+  private prunePendingInvitationAdmissions(): void {
+    const cutoff = Date.now() - AuthManager.INVITATION_ADMISSION_STAGE_TTL_MS;
+    for (const [key, value] of this.pendingInvitationAdmissions) {
+      if (value.stagedAtMs < cutoff) this.pendingInvitationAdmissions.delete(key);
     }
   }
 

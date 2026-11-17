@@ -1,10 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#16569] `GET /organization/list-user-invitations` honours the declared
-// `requireEmailVerificationOnInvitation`, exactly as `accept-invitation`,
-// `reject-invitation` and `get-invitation` do. The platform declares it
-// `true`: a session whose address is not verified can neither list, read,
-// accept nor decline an invitation, so the listing never hands it an id.
+// [#16569] `GET /organization/list-user-invitations` needs a verified email
+// address, on every deployment: a session whose address is not verified is
+// refused, as it is at accept and decline, so the listing never hands it an
+// invitation's id. `get-invitation` alone stays open to the recipient.
 //
 // These run the REAL better-auth pipeline through a REAL `AuthManager` — the
 // organization plugin, the audience-gate invitation carve-out, the membership
@@ -35,8 +34,7 @@ import { inviteForAudienceGate } from './audience-gate-test-support';
 import {
   EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION,
   LIST_USER_INVITATIONS_PATH,
-  applyDeclaredInvitationVerificationToListing,
-  listingRequiresVerifiedEmail,
+  requireVerifiedAddressOnListing,
 } from './list-user-invitations-verification';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
@@ -266,7 +264,7 @@ const verify = (engine: MemoryEngine, userId: string) => {
   user!.email_verified = true;
 };
 
-describe('the invitation inbox and its three siblings require a verified address, as the platform declares', () => {
+describe('the invitation inbox requires a verified address, as accept and decline do; reading an invitation does not', () => {
   beforeEach(() => {
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -276,7 +274,7 @@ describe('the invitation inbox and its three siblings require a verified address
     vi.restoreAllMocks();
   });
 
-  it('a session whose address is not verified is refused by the listing, accept, reject and get-invitation alike', async () => {
+  it('a session whose address is not verified is refused by the listing, accept and reject alike, and can read the invitation', async () => {
     const { engine, manager, b, bDefault, bPartner } = await bootInbox();
     const refused = async (res: Response, code: string) => {
       const text = await res.clone().text();
@@ -288,10 +286,8 @@ describe('the invitation inbox and its three siblings require a verified address
     const listed = await refused(await get(manager, LIST_USER_INVITATIONS_PATH, b.cookie), EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION.code);
     expect(listed).not.toContain(bDefault.id);
     expect(listed).not.toContain(bPartner.id);
-    await refused(
-      await get(manager, `/organization/get-invitation?id=${bPartner.id}`, b.cookie),
-      EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION.code,
-    );
+    const read = await get(manager, `/organization/get-invitation?id=${bPartner.id}`, b.cookie);
+    expect(read.status, await read.clone().text()).toBe(200);
     await refused(
       await post(manager, '/organization/reject-invitation', { invitationId: bPartner.id }, b.cookie),
       'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
@@ -380,27 +376,7 @@ describe('the invitation inbox and its three siblings require a verified address
   });
 });
 
-describe('#16569 — listingRequiresVerifiedEmail honours ONLY the declared option', () => {
-  it('declared false → not required', () => {
-    expect(listingRequiresVerifiedEmail({ requireEmailVerificationOnInvitation: false })).toBe(false);
-  });
-
-  it('declared true → required, as the platform declares it and as the vendor answers', () => {
-    expect(listingRequiresVerifiedEmail({ requireEmailVerificationOnInvitation: true })).toBe(true);
-  });
-
-  it('undeclared → required: the vendor\'s own list-route posture, never a re-derivation of its id-generation heuristic', () => {
-    expect(listingRequiresVerifiedEmail({})).toBe(true);
-    expect(listingRequiresVerifiedEmail({ requireEmailVerificationOnInvitation: undefined })).toBe(true);
-  });
-
-  it('a non-boolean is not a declaration → required (fail closed)', () => {
-    expect(listingRequiresVerifiedEmail({ requireEmailVerificationOnInvitation: 'false' as any })).toBe(true);
-    expect(listingRequiresVerifiedEmail({ requireEmailVerificationOnInvitation: 0 as any })).toBe(true);
-  });
-});
-
-describe('#16569 — the rebuilt endpoint is the vendor\'s contract with one predicate changed', () => {
+describe('#16569 — the rebuilt endpoint is the vendor\'s contract, carrying the verified-address rule itself', () => {
   it('replaces the endpoint IN PLACE, under the vendor\'s key, from the vendor\'s own options object', async () => {
     const { organization } = await import('better-auth/plugins/organization');
     const options = { requireEmailVerificationOnInvitation: false as const };
@@ -409,7 +385,7 @@ describe('#16569 — the rebuilt endpoint is the vendor\'s contract with one pre
     expect(vendor?.path).toBe(LIST_USER_INVITATIONS_PATH);
     const keysBefore = Object.keys(plugin.endpoints).sort();
 
-    await expect(applyDeclaredInvitationVerificationToListing(plugin, options)).resolves.toBe(true);
+    await expect(requireVerifiedAddressOnListing(plugin, options)).resolves.toBe(true);
 
     const rebuilt = plugin.endpoints.listUserInvitations;
     expect(rebuilt).not.toBe(vendor);
@@ -431,7 +407,7 @@ describe('#16569 — the rebuilt endpoint is the vendor\'s contract with one pre
 
   it('a plugin without the endpoint is left untouched and reported (the vendor-drift door)', async () => {
     const plugin = { id: 'organization', endpoints: { listInvitations: { path: '/organization/list-invitations', options: {} } } };
-    await expect(applyDeclaredInvitationVerificationToListing(plugin, {})).resolves.toBe(false);
+    await expect(requireVerifiedAddressOnListing(plugin, {})).resolves.toBe(false);
     expect(Object.keys(plugin.endpoints)).toEqual(['listInvitations']);
   });
 
@@ -447,7 +423,7 @@ describe('#16569 — the rebuilt endpoint is the vendor\'s contract with one pre
 });
 
 // ---------------------------------------------------------------------------
-// The vendor still has the defect — the pin that retires this module
+// The vendor handler as it stands — the pin that sees an upstream change
 // ---------------------------------------------------------------------------
 
 /**
@@ -479,7 +455,7 @@ const require_ = createRequire(join(PKG, 'probe.js'));
 const VENDOR_DIST = dirname(require_.resolve('better-auth'));
 const CRUD_INVITES = join(VENDOR_DIST, 'plugins', 'organization', 'routes', 'crud-invites.mjs');
 
-describe('#16569 — vendor pin: better-auth\'s listUserInvitations still refuses unconditionally', () => {
+describe('#16569 — vendor pin: better-auth\'s listUserInvitations refuses unconditionally, and its siblings read the option', () => {
   const source = readFileSync(CRUD_INVITES, 'utf8');
   const start = source.indexOf('const listUserInvitations = ');
   const listing = start >= 0 ? source.slice(start) : '';
@@ -494,8 +470,8 @@ describe('#16569 — vendor pin: better-auth\'s listUserInvitations still refuse
     const siblingCalls = source.slice(0, start).match(/shouldRequireVerifiedEmailForInvitationIdAction\(\{/g) ?? [];
     expect(siblingCalls).toHaveLength(3);
     // The listing: the unconditional refusal, verbatim. When upstream makes
-    // this line read the option, this pin goes red and
-    // `list-user-invitations-verification.ts` is what should be deleted.
+    // this line read the option, this pin goes red: the rebuild then is what
+    // keeps the inbox closed under the platform's `false` declaration.
     expect(listing).toMatch(
       /if \(session && !session\.user\.emailVerified\) throw APIError\.from\("FORBIDDEN", ORGANIZATION_ERROR_CODES\.EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION\);/,
     );

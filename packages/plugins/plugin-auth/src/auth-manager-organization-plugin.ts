@@ -81,12 +81,12 @@ import {
 import { buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { resolveInvitationLimitOption } from './invitation-limit.js';
-import { refuseUnverifiedAcceptWhileMailIsLive } from './invitation-accept-verified-email.js';
+import { refuseUnverifiedInvitationAnswer } from './invitation-accept-verified-email.js';
 import { invitationAcceptPath } from './invitation-link-action.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { blankInvitationRoleRefusal } from './invite-role-not-found-code.js';
 import { invitationRoleLabel } from './invitation-role-label.js';
-import { applyDeclaredInvitationVerificationToListing } from './list-user-invitations-verification.js';
+import { requireVerifiedAddressOnListing } from './list-user-invitations-verification.js';
 import { resolveMembershipLimitOption } from './membership-limit.js';
 import { withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { isDefaultOrganizationTarget, removeOrganizationAuthStructure } from './organization-delete.js';
@@ -109,7 +109,6 @@ export interface OrganizationPluginHost {
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
-  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   multiOrgPostureEffective: AuthManager['multiOrgPostureEffective'];
   orgRolesMap: AuthManager['orgRolesMap'];
   resolveMembershipRole: AuthManager['resolveMembershipRole'];
@@ -195,14 +194,13 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     // 404 and the section silently breaks.
     teams: { enabled: true },
     // The vendor's switch governs accept, reject and get-invitation
-    // together, and is read once, at boot. Declared off here: on a
-    // deployment with no live mail nothing can ever verify an address, so
-    // turning it on would dead-end every invite flow with FORBIDDEN
-    // EMAIL_VERIFICATION_REQUIRED…. [#34272] Where mail IS live, the
-    // accept door alone still refuses an unverified session, asked per
-    // request by `beforeAcceptInvitation` below
-    // (`invitation-accept-verified-email.ts`); reading and declining an
-    // invitation stay open, as does every door while mail is not live.
+    // together, and is read once, at boot. Declared off here so that
+    // get-invitation stays open: the accept page names the invitation before
+    // the person verifies. Accepting and declining still need a verified
+    // address, on every deployment: `beforeAcceptInvitation` and
+    // `beforeRejectInvitation` below refuse an unverified session
+    // (`invitation-accept-verified-email.ts`), and the listing refuses it
+    // too (`list-user-invitations-verification.ts`).
     requireEmailVerificationOnInvitation: false,
     // Cap how many orgs a user can CREATE (OS_ORG_LIMIT). Counts only orgs
     // the user OWNS (role=owner) — never orgs they were merely invited into —
@@ -431,15 +429,22 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
           });
         }
       },
-      // [#34272] While mail is live, an unverified session may not accept:
-      // the address it holds was never proven to be the invitee's mailbox.
-      // Fired by the vendor inside the accept endpoint, after its recipient
-      // and expiry checks and before anything is written, with the
-      // `session.user` its own verification check reads. A no-op while mail
-      // is not live. `invitation-accept-verified-email.ts` states the rule.
+      // An unverified session may neither accept nor decline: the address it
+      // holds was never proven to be the invitee's mailbox. Fired by the
+      // vendor inside each endpoint, after its recipient and expiry checks
+      // and before anything is written, with the `session.user` its own
+      // verification check reads. Asked on every deployment, whatever the
+      // state of its mail transport. `invitation-accept-verified-email.ts`
+      // states the rule.
       beforeAcceptInvitation: async ({ user }: any) => {
-        await refuseUnverifiedAcceptWhileMailIsLive(user, {
-          isEmailDeliveryLive: () => this.isEmailDeliveryLive(),
+        await refuseUnverifiedInvitationAnswer(user, {
+          verificationRequired:
+            organizationPlugin?.$ERROR_CODES
+              ?.EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION,
+        });
+      },
+      beforeRejectInvitation: async ({ user }: any) => {
+        await refuseUnverifiedInvitationAnswer(user, {
           verificationRequired:
             organizationPlugin?.$ERROR_CODES
               ?.EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION,
@@ -717,14 +722,12 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
   } satisfies OrganizationOptions;
   const organizationPlugin: any = organization(organizationOptions);
 
-  // [#16569] `GET /organization/list-user-invitations` — make the vendor's
-  // listing honour the `requireEmailVerificationOnInvitation: false`
-  // declared above, the way `accept-invitation`, `reject-invitation` and
-  // `get-invitation` already do. better-auth 1.7.2's `listUserInvitations`
-  // refuses every unverified session UNCONDITIONALLY (it never reads the
-  // option), so on exactly the no-mailer deployment the declaration exists
-  // for, an invitee could accept an invitation but never list it and the
-  // SDK's `organizations.invitations.listMine()` inbox was empty-by-403.
+  // [#16569] `GET /organization/list-user-invitations` — the listing needs a
+  // verified address, on every deployment, whatever the option above says:
+  // a session whose address is not verified is refused, so the listing never
+  // hands it an invitation's id. better-auth's own `listUserInvitations`
+  // refuses that session today without reading the option; the rebuild makes
+  // the rule this plugin's, so no vendor change to that handler can open it.
   // Rebuilt IN PLACE on this plugin's own endpoints record — the same
   // shape as `applyPlatformAdminImpersonation` above, for the same reasons
   // (one owner for the path; every hook keyed on it still fires; the
@@ -733,24 +736,20 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
   // .listUserInvitations(sessionEmail)`: no second definition of which
   // rows a session may see. `list-user-invitations-verification.ts`
   // carries the full reading.
-  const listingRewired = await applyDeclaredInvitationVerificationToListing(
+  const listingRewired = await requireVerifiedAddressOnListing(
     organizationPlugin,
     organizationOptions,
   );
   if (!listingRewired) {
-    // The vendor renamed or dropped the endpoint. Say so loudly: the
-    // route then falls back to the vendor's own handler, which refuses
-    // every unverified session — an empty inbox, not an open door.
-    // `warn`, not `error` (AGENTS.md → Degradation log levels): the
-    // system is VISIBLY smaller — the inbox answers a 403 the caller sees
-    // — and nothing claims a persistence it did not perform.
+    // The vendor renamed or dropped the endpoint. Say so loudly: whatever
+    // the vendor now serves for the inbox does not carry this plugin's rule.
+    // `warn`, not `error` (AGENTS.md → Degradation log levels): nothing
+    // claims a persistence it did not perform.
     console.warn(
       '[AuthManager] better-auth\'s organization plugin no longer exposes a ' +
       '`listUserInvitations` endpoint at /organization/list-user-invitations, ' +
-      'so the declared `requireEmailVerificationOnInvitation` could NOT be ' +
-      'applied to the invitation inbox. Unverified users will be refused ' +
-      '(403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION) until ' +
-      'list-user-invitations-verification.ts is updated for the new vendor shape.',
+      'so the invitation inbox could NOT be held to a verified address by ' +
+      'list-user-invitations-verification.ts; update it for the new vendor shape.',
     );
   }
   return organizationPlugin;

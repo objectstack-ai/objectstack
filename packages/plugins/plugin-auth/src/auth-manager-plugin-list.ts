@@ -123,7 +123,6 @@ export interface PluginListHost {
   getEmailService: AuthManager['getEmailService'];
   getMcpResourceUrl: AuthManager['getMcpResourceUrl'];
   getApi: AuthManager['getApi'];
-  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   isSsoOnlyMode: AuthManager['isSsoOnlyMode'];
   jwtSigningFailureReported: AuthManager['jwtSigningFailureReported'];
@@ -294,7 +293,6 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
         getDataEngine: (...a) => this.getDataEngine(...a),
         getEmailService: (...a) => this.getEmailService(...a),
-        isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
         multiOrgPostureEffective: (...a) => this.multiOrgPostureEffective(...a),
         get orgRolesMap() { return readOrgRolesMap(); },
         set orgRolesMap(v) { writeOrgRolesMap(v); },

@@ -217,6 +217,15 @@ export function AcceptInvitationPage() {
     };
   }, [invitationId, isAuthenticated, getInvitation, t]);
 
+  // The verification-mail screen for this account's address, whose link
+  // brings the person back to this page to answer the invitation.
+  const toVerifyEmailPrompt = () => {
+    const sp = new URLSearchParams();
+    if (user?.email) sp.set('email', user.email);
+    sp.set('redirect', location.pathname + location.search);
+    navigate(`/verify-email-prompt?${sp.toString()}`);
+  };
+
   const handleAccept = async () => {
     if (!invitation || !invitationId) return;
     setIsAccepting(true);
@@ -225,15 +234,10 @@ export function AcceptInvitationPage() {
       await switchOrganization(invitation.organizationId).catch(() => null);
       setJoined(true);
     } catch (err) {
-      // objectstack#34272 — while the deployment delivers mail, an address that
-      // was never verified may not accept. The next step is to verify it, so
-      // the page hands over to the verification-mail screen for this account's
-      // address, whose link brings the person back here to accept.
+      // An address that was never verified may not accept. The next step is
+      // to verify it, so the page hands over to the verification-mail screen.
       if (isAcceptNeedsVerifiedEmail(err)) {
-        const sp = new URLSearchParams();
-        if (user?.email) sp.set('email', user.email);
-        sp.set('redirect', location.pathname + location.search);
-        navigate(`/verify-email-prompt?${sp.toString()}`);
+        toVerifyEmailPrompt();
         return;
       }
       // objectui#4474 — the card's site 5: a wrong recipient produced better-auth's
@@ -293,6 +297,11 @@ export function AcceptInvitationPage() {
       toast.success(t('organization.accept.declined', { defaultValue: 'Invitation declined' }));
       navigate('/organizations');
     } catch (err) {
+      // Declining needs a verified address too: the same hand-over as accept.
+      if (isAcceptNeedsVerifiedEmail(err)) {
+        toVerifyEmailPrompt();
+        return;
+      }
       toast.error(
         resolveOrgErrorMessage(err, t, {
           key: 'organization.accept.declineFailed',
