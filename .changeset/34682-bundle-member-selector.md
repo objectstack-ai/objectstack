@@ -1,11 +1,17 @@
 ---
 '@objectstack/metadata-protocol': patch
+'@objectstack/spec': patch
 ---
 
-fix(metadata-protocol): the read naming no bundle member addresses the canonical member alone, as `?member=en-US` and `/published` do
+fix(metadata-protocol)!: the read naming no bundle member addresses the canonical member alone, as `?member=en-US` and `/published` do
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: none
+Skills-docs: none — no page under `skills/**` or `content/docs/**` teaches the read naming no member of a bundle that has no canonical member; `content/docs/references` prints the selector sentence this change now follows, and the ADR-0146 paragraph of `skills/objectstack-platform/SKILL.md` names members only at a base or a package address. No taught sentence moves.
+
+<!-- adr-0087: registered bundle-without-canonical-member-bare-read-absent -->
+
+**BREAKING**: for a bundled name with no canonical member, the read naming no member (`GET /meta/TYPE/NAME`), `/layers` naming none and the execution read naming none move from serving another member (200) to `404 RESOURCE_NOT_FOUND` (the execution read: `null`). Name the member (`?member=fr-FR`) to read it, as before.
 
 The by-name doors' member selector reads a request naming no member as the canonical one (`en-US` for `email_template`), and naming the canonical value is the same request. That is the selector's declared contract (`GetMetaItemRequest.member`). For a bundle with no canonical member, the two requests got different answers:
 
