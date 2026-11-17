@@ -434,6 +434,16 @@ export interface EvaluateRulesOptions {
    */
   permissions?: EvalPermissions;
   /**
+   * [ADR-0113 D1, as amended] The object's `formula` fields computed over a
+   * record, as a read computes them: a `formula` is never on the write path
+   * (computed on read, never stored), so a required field's `visibleWhen` that
+   * reads one is judged on the value this returns, the value the form sees.
+   * `faulted` names each formula that could not be computed on that record.
+   * Absent: a predicate that reads a formula field cannot be evaluated, and
+   * counts as shown.
+   */
+  formulaValues?: (record: Record<string, unknown>) => { record: Record<string, unknown>; faulted: ReadonlySet<string> };
+  /**
    * [#4977] The master-detail header this write's field `requiredWhen`
    * predicates read as `parent` — the SAME binding, resolved by the SAME engine
    * helpers, that #4889 gave `readonlyWhen`. Only the engine owns a driver, so
@@ -3467,14 +3477,36 @@ export function nullPreviousReadDetail(
 type ShownVerdict = 'shown' | 'hidden' | 'fault';
 
 /**
+ * The `formula` fields a required field's `visibleWhen` reads through `record`
+ * or `previous`, by the platform's one member reader. A predicate whose reads
+ * cannot be named counts as reading every formula field the object declares.
+ */
+function formulaReadsOf(pred: string | Expression, fields: Record<string, ConditionalFieldDef>): string[] {
+  const formulaFields = Object.keys(fields).filter((name) => fields[name]?.type === 'formula');
+  if (formulaFields.length === 0) return [];
+  const expr = toExpression(pred) as { dialect?: string; source?: unknown };
+  if (typeof expr?.source !== 'string' || (expr.dialect !== undefined && expr.dialect !== 'cel')) return formulaFields;
+  const reads = new Set<string>();
+  for (const root of ['record', 'previous']) {
+    const analysis = analyzeRelationshipTraversals(expr.source, root);
+    if (!analysis) return formulaFields;
+    for (const name of analysis.bareFields) reads.add(name);
+    for (const name of analysis.traversals.keys()) reads.add(name);
+  }
+  return formulaFields.filter((name) => reads.has(name));
+}
+
+/**
  * [ADR-0113 D1, as amended] A field that declares `required: true` AND its own
  * `visibleWhen` is required WHEN SHOWN. The engine's write path leaves its
  * presence to this function (`validateRecordInScope`'s `'deferred'` scope), and
  * this function judges it from the field's visibility on the write:
  *
- * - **Hidden** — the predicate is cleanly FALSE on the merged record: the
- *   requirement is waived for this write. A record outside the condition can be
- *   created and edited, and the form's clear-on-hide `null` is accepted.
+ * - **Hidden** — the predicate evaluates cleanly to anything but TRUE on the
+ *   merged record (FALSE, or a `null` such as an unset boolean): the
+ *   requirement is waived for this write, as the form hides the field for
+ *   exactly those values. A record outside the condition can be created and
+ *   edited, and the form's clear-on-hide `null` is accepted.
  * - **Shown** — cleanly TRUE: the non-regression invariant `requiredWhen` uses,
  *   with the visibility predicate as the condition. Refused iff the merged
  *   record is empty AND the prior record complied (hidden there, or holding a
@@ -3484,7 +3516,8 @@ type ShownVerdict = 'shown' | 'hidden' | 'fault';
  *   (the exact rule, not D1's no-prior-read over-approximation).
  * - **Fault** — the predicate could not be evaluated (an undeclared key, a read
  *   through a reference, a root this write does not bind, a system write with
- *   no acting user under a `current_user` predicate): it COUNTS AS SHOWN, and
+ *   no acting user under a `current_user` predicate, a `formula` field that
+ *   cannot be computed on the record): it COUNTS AS SHOWN, and
  *   the field falls back to exactly the unconditional `required` it carried
  *   before this amendment — an insert must provide it, an update may not clear
  *   it. Never the `requiredWhen` fault arm (ADR-0137 D2 refuses the write):
@@ -3495,8 +3528,12 @@ type ShownVerdict = 'shown' | 'hidden' | 'fault';
  * The scope is the one the client's form binds for a field predicate, as far as
  * the server can bind it: `record` (the merged record), `previous`, the acting
  * user as `current_user` (and its ADR-0068 aliases) with the permission map the
- * option gate reads, and `parent` where the engine resolved a header. So a
- * role-gated field is judged per writer. `features`, `app` and `page` are never
+ * option gate reads, and `parent` where the engine resolved a header. A
+ * `formula` field the predicate reads is computed over the record first
+ * (`opts.formulaValues`, the read path's plan), because it is never on the
+ * write path. So a role-gated field is judged per writer; the lint refuses
+ * `current_user` in a field `visibleWhen` at authoring, so only older stored
+ * metadata reaches that binding. `features`, `app` and `page` are never
  * bound server-side; `objectstack validate` and the object save door already
  * refuse them in a field `visibleWhen` (`FIELD_RULE_BOUND_ROOTS` in
  * `@objectstack/lint`), so only older stored metadata reaches the fault arm
@@ -3525,13 +3562,32 @@ function evaluateRequiredWhenShown(
     prior: PreviousBinding,
     extra: Record<string, unknown> | undefined,
   ): { verdict: ShownVerdict; error?: { kind: string; message: string } } => {
+    // A `formula` field is not on the write path: judge the predicate on the
+    // computed value, and count a formula that cannot be computed as a fault.
+    const formulas = formulaReadsOf(pred, fields);
+    if (formulas.length > 0) {
+      if (!opts.formulaValues) {
+        return { verdict: 'fault', error: { kind: 'formula', message: `reads the formula field ${formulas.map((f) => `'${f}'`).join(', ')}, which this write path does not compute` } };
+      }
+      const now = opts.formulaValues(record);
+      const then = prior ? opts.formulaValues(prior) : undefined;
+      const faulted = formulas.filter((f) => now.faulted.has(f) || (then?.faulted.has(f) ?? false));
+      if (faulted.length > 0) {
+        return { verdict: 'fault', error: { kind: 'formula', message: `reads the formula field ${faulted.map((f) => `'${f}'`).join(', ')}, which could not be computed on this record` } };
+      }
+      record = now.record;
+      prior = then ? then.record as PreviousBinding : prior;
+    }
     const res = ExpressionEngine.evaluate<boolean>(toExpression(pred), {
       ...ruleScope(record, prior, extra),
       user,
       permissions: opts.permissions,
     });
     if (!res.ok) return { verdict: 'fault', error: res.error };
-    return { verdict: res.value === false ? 'hidden' : 'shown' };
+    // Only a clean TRUE shows the field, as the form reads it and as the
+    // `requiredWhen` loop holds its condition: FALSE, null or any other value
+    // hides it.
+    return { verdict: res.value === true ? 'shown' : 'hidden' };
   };
   for (const [name, def] of Object.entries(fields)) {
     if (!requiredWhenShown(def)) continue;

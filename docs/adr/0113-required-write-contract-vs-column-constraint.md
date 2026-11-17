@@ -277,8 +277,11 @@ D1), so it now judges the requirement the way the form shows it.
 **The rule.** For a field with `required: true` and its own `visibleWhen`
 (`evaluateRequiredWhenShown`, `packages/objectql/src/validation/rule-validator.ts`):
 
-1. **Hidden** — the predicate is cleanly FALSE on the merged record (stored row
-   with the write over it): the requirement does not apply to this write. *Widening.*
+1. **Hidden** — the predicate evaluates cleanly to anything but TRUE on the
+   merged record (stored row with the write over it): FALSE, or a `null` such as
+   an unset boolean under `visibleWhen: record.is_vip`. The requirement does not
+   apply to this write. This is the form's reading: it shows a field only for a
+   clean TRUE, and `requiredWhen` holds its condition only on TRUE. *Widening.*
 2. **Shown** — cleanly TRUE: D1's non-regression invariant with the predicate as
    the condition, judged against the prior record the engine now reads for such
    a field. A write that reveals the field empty is refused; a row already shown
@@ -287,7 +290,8 @@ D1), so it now judges the requirement the way the form shows it.
    moves a record into the condition without filling the field was accepted
    before this amendment and is refused now — on a flow, a bulk update (one such
    row refuses the batch), an import or an API PATCH alike.
-3. **Fault** — the predicate cannot be evaluated: it **counts as shown**, and the
+3. **Fault** — the predicate cannot be evaluated (including a `formula` field it
+   reads that cannot be computed on the record): it **counts as shown**, and the
    field takes exactly the unconditional rule above (an insert must provide it,
    an update may not clear it). The write is not refused for the fault itself:
    this is not ADR-0137 D2's field-rule arm, because the fault costs only the
@@ -299,7 +303,17 @@ D1), so it now judges the requirement the way the form shows it.
 gate reads) and `parent` where the write resolves a header. Binding the user
 makes the requirement depend on who writes, which is what "required when shown"
 means for a role-gated field; a system write with no acting user takes the fault
-arm. `features`, `app` and `page` are never bound on the server.
+arm. The lint refuses `current_user` in a field `visibleWhen` at authoring (see
+the fence below), so that binding serves older stored metadata. `features`,
+`app` and `page` are never bound on the server.
+
+**A `formula` field the predicate reads.** A formula is computed on read and is
+never on the write path, so the stored row and the payload do not hold it. The
+engine computes the object's formulas over the merged record and over the prior
+record with the read path's own plan before it evaluates the predicate, so the
+predicate sees the value the form shows. A formula that cannot be computed there
+(it faults, reads through a reference, or calls `label()`) makes the predicate a
+fault, which counts as shown.
 
 **Author-time fence (narrowed from the ruling's item 4).** The ruling asked for a
 warning on `required` + `visibleWhen` reading roots the server cannot bind. That
@@ -333,5 +347,14 @@ either of them writes is then judged by this rule.
 
 **Other readers left as they are.** The import template, the action parameter
 schema and the MCP field descriptions still describe such a field as required.
-ADR-0124 D4 allows a client hint stricter than the server, so they are listed
-here rather than changed.
+The seed loader's early required warning (`requiredOnInsertByObject`) is now an
+approximation for such a field: it warns where the write may waive. ADR-0124 D4
+allows a client hint stricter than the server, so they are listed here rather
+than changed.
+
+**Where the refusal comes from.** The record walk no longer judges such a field;
+the rule pass does, after the hooks, the strips and (on a non-system write) the
+reference check. A write with one fault gets the same `required` code and
+sentence. A write with several faults may name fewer of them in one `400`, or
+answer a dangling reference first, and a `beforeUpdate` hook runs before the
+refusal and may fill the field.

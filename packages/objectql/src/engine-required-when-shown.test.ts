@@ -186,6 +186,33 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
       },
     } as any, 'test-package');
     engine.registry.registerObject({
+      name: 'rws_formula',
+      fields: {
+        amount: { type: 'number' },
+        // Computed on read, never stored from the write payload.
+        risk_level: { type: 'formula', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
+        review_note: { type: 'text', required: true, visibleWhen: "record.risk_level == 'high'" },
+      },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'rws_formula_fault',
+      fields: {
+        amount: { type: 'number' },
+        // An author typo inside the formula: it cannot be computed on any row.
+        risk_level: { type: 'formula', expression: "record.amout > 100 ? 'high' : 'low'", returnType: 'text' },
+        review_note: { type: 'text', required: true, visibleWhen: "record.risk_level == 'high'" },
+      },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'rws_flag',
+      fields: {
+        title: { type: 'text' },
+        is_vip: { type: 'boolean' },
+        // A bare-boolean predicate: an unset flag is null, not FALSE.
+        perk_note: { type: 'text', required: true, visibleWhen: 'record.is_vip' },
+      },
+    } as any, 'test-package');
+    engine.registry.registerObject({
       name: 'rws_plain',
       fields: {
         title: { type: 'text' },
@@ -341,6 +368,57 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
       expect(needsPriorRecord({ fields: { code: { required: true } as any } })).toBe(false);
       expect(needsPriorRecord({ fields: { note: { visibleWhen: "record.a == 'b'" } as any } })).toBe(false);
       expect(needsPriorRecord({ fields: { note: { required: true, visibleWhen: "record.a == 'b'" } as any } })).toBe(true);
+    });
+  });
+
+  // ── (f) a predicate over a formula field reads the value the form sees ───
+  describe('(f) a predicate that reads a formula field is judged on the computed value', () => {
+    it('an INSERT inside the condition without the field is refused', async () => {
+      const err = await refusalOf(() => engine.insert('rws_formula', { amount: 500 }, ADMIN));
+      expectRequired(err, 'review_note');
+      expect(rows('rws_formula')).toHaveLength(0);
+    });
+
+    it('an INSERT outside the condition is accepted without the field', async () => {
+      await engine.insert('rws_formula', { amount: 50 }, ADMIN);
+      expect(rows('rws_formula')).toHaveLength(1);
+    });
+
+    it('an UPDATE that moves the computed value into the condition without the field is refused', async () => {
+      const { id } = await engine.insert('rws_formula', { amount: 50 }, ADMIN);
+      const err = await refusalOf(() => engine.update('rws_formula', { id, amount: 500 }, ADMIN));
+      expectRequired(err, 'review_note');
+      expect(storeFor('rws_formula').get(id)?.amount).toBe(50);
+    });
+
+    it('a dry run judges the computed value the same way', async () => {
+      const inside = await engine.validate('rws_formula', { amount: 500 }, { mode: 'insert' } as any);
+      expect(inside.results?.[0]?.valid).toBe(false);
+      expect(inside.results?.[0]?.errors).toEqual([expect.objectContaining({ field: 'review_note', code: 'required' })]);
+      const outside = await engine.validate('rws_formula', { amount: 50 }, { mode: 'insert' } as any);
+      expect(outside.results?.[0]?.valid).toBe(true);
+    });
+
+    it('a formula that cannot be computed counts as shown, and the fault is logged', async () => {
+      const err = await refusalOf(() => engine.insert('rws_formula_fault', { amount: 50 }, ADMIN));
+      expectRequired(err, 'review_note');
+      const warn = logger.lines.find((l: any) => l.level === 'warn' && /review_note/.test(l.msg) && /counted as shown/.test(l.msg));
+      expect(warn?.msg).toMatch(/risk_level/);
+      expect(warn?.meta).toMatchObject({ field: 'review_note', reason: 'predicate-fault' });
+    });
+  });
+
+  // ── (g) only a clean TRUE shows the field (the form's reading) ───────────
+  describe('(g) a clean value that is not TRUE hides the field, as the form reads it', () => {
+    it('an unset boolean (null) hides the field: an INSERT without it is accepted, nothing logged', async () => {
+      await engine.insert('rws_flag', { title: 'plain' }, ADMIN);
+      expect(rows('rws_flag')).toHaveLength(1);
+      expect(logger.lines.filter((l: any) => l.level === 'warn' && /perk_note/.test(l.msg))).toHaveLength(0);
+    });
+
+    it('TRUE shows it: an INSERT without it is refused', async () => {
+      const err = await refusalOf(() => engine.insert('rws_flag', { title: 'vip', is_vip: true }, ADMIN));
+      expectRequired(err, 'perk_note');
     });
   });
 });

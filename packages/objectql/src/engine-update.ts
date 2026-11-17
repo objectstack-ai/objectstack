@@ -66,7 +66,7 @@ import { ENGINE_UPDATE_REJECT_MESSAGE, engineUpdateDispatchRejectError, resolveE
 import type { EngineUpdateDispatchData, EngineUpdateDispatchInput } from './engine-update-dispatch.js';
 import {
   ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyStoredExpressionsToPatch,
-  computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, hydrateWriteFormulas,
+  computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, formulaValuesFor, hydrateWriteFormulas,
   lowerWhereFilterArray, masterIdOf, planStoredExpressions, rejectUnknownEngineOptions,
   replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
   stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, writeFailureLogMeta,
@@ -1626,7 +1626,7 @@ export class UpdateFacet {
                  async () => [priorRecord],
                );
                if (referencesFirst) await checkReferences();
-               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
+               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate, formulaValues: formulaValuesFor(updateSchema, opCtx.context, permissionsForUpdate) }), this.logger, object);
                if (!referencesFirst) await checkReferences();
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
@@ -2078,7 +2078,7 @@ export class UpdateFacet {
                if (rulesNeedRows) {
                    for (const row of priorRows ?? []) {
                        try {
-                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions }), this.logger, object);
+                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions, formulaValues: formulaValuesFor(updateSchema, opCtx.context, bulkPermissions) }), this.logger, object);
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -2094,7 +2094,7 @@ export class UpdateFacet {
                    // every such object down the per-row branch above, where the
                    // binding is supplied. This branch only ever runs for the
                    // rule families that never read a header.
-                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions }), this.logger, object);
+                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions, formulaValues: formulaValuesFor(updateSchema, opCtx.context, bulkPermissions) }), this.logger, object);
                }
                if (!referencesFirst) await checkReferences();
                // `updateMany` presence is part of the ladder verdict resolved above.

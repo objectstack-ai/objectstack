@@ -3049,6 +3049,42 @@ async function hydrateWriteFormulas(
 }
 
 /**
+ * [ADR-0113 D1, as amended] The `formula` fields computed over a record for
+ * the rule validator's `formulaValues`: a required field's `visibleWhen` that
+ * reads a formula is judged on the value a read would serve, the value the
+ * form shows. The SAME plan and evaluation a read uses, over a copy of the
+ * record; the plan is built on the first call, so a write whose predicates
+ * read no formula pays nothing. No hop is resolved and no option label is
+ * read here, so a formula that needs either faults, and the predicate counts
+ * as shown. `undefined` when the object declares no formula.
+ */
+function formulaValuesFor(
+  schema: any,
+  execCtx: ExecutionContext | undefined,
+  permissions: EvalPermissions | undefined,
+): ((record: Record<string, unknown>) => { record: Record<string, unknown>; faulted: ReadonlySet<string> }) | undefined {
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object') return undefined;
+  const formulaNames = Object.keys(fields).filter((name) => fields[name]?.type === 'formula');
+  if (formulaNames.length === 0) return undefined;
+  let plan: FormulaPlanEntry[] | null | undefined;
+  return (record) => {
+    if (plan === undefined) {
+      try {
+        plan = planFormulaProjection(schema, undefined).plan;
+      } catch {
+        plan = null;
+      }
+    }
+    if (plan === null) return { record, faulted: new Set(formulaNames) };
+    const copy: Record<string, unknown> = { ...record };
+    const faulted = new Set<string>();
+    applyFormulaPlan(plan, [copy], execCtx, permissions, (name) => { faulted.add(name); });
+    return { record: copy, faulted };
+  };
+}
+
+/**
  * [#24619] The stored computed fields: every field that is NOT a `formula`
  * and declares an `expression`. Such a field has a column, so a summary can
  * roll it up (a summary aggregates stored columns, never an on-read formula),
@@ -5235,7 +5271,7 @@ export {
   assertDispatchableHookEvent, assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable,
   assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects, assertValidHookObject,
   assertValidUnscopedMultiWriteFlag, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
-  deleteWalkTargetOf, describeNonFilterWhere, emptySearchSetError, formulaPlanEntry, handBackWithheldInsertReadonly,
+  deleteWalkTargetOf, describeNonFilterWhere, emptySearchSetError, formulaPlanEntry, formulaValuesFor, handBackWithheldInsertReadonly,
   hydrateWriteFormulas, isWhereFilterObject, judgeWhereAdmission, noteRegistrationStamp,
   organizationPredicateDeleteRefusal, planFormulaProjection, planStoredExpressions, readStoredAutonumberCounter,
   recomputeAutonumberReaders, refuseSearchOverrideNamingNoField, refuseSearchOverrideNamingNoSearchableField,

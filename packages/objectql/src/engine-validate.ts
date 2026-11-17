@@ -50,6 +50,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { validateRecordInScope, normalizeBlankTypedValues, normalizeNumericStringValues, ValidationError, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import { evaluateValidationRules, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { formulaValuesFor } from './engine-top-level.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, RecordCurrencyCodeRequiredError, touchesRecordCurrency } from './validation/record-currency-code.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
@@ -638,6 +639,7 @@ export async function validate(
         previousParent: previewParents?.previousParents[i],
         related: batchSummaries ? batchSummaries.overlay(previewRelatedForRow(judgedViews[i])) : previewRelatedForRow(judgedViews[i]),
         permissions: previewPermissionsFor(row),
+        formulaValues: formulaValuesFor(schemaForValidation, options?.context, previewPermissionsFor(row)),
       }));
       if (previewReferences && !referencesFirst) {
         await this.assertReferencesResolve(schemaForValidation, row, rawRows[i], options?.context, messages);
