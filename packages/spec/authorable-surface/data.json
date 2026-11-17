@@ -221,6 +221,7 @@
     "data/DriverCapabilities:transactionsUnsupported",
     "data/DriverCapabilities:update [RETIRED]",
     "data/DriverCapabilities:vectorSearch [RETIRED]",
+    "data/DriverCapabilities:zonedDateBucketing",
     "data/DriverConfig:capabilities",
     "data/DriverConfig:connectionString",
     "data/DriverConfig:name",
