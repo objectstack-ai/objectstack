@@ -22,7 +22,6 @@ import {
   isAcceptNeedsVerifiedEmail,
   resolveInvitationLookupMessage,
   resolveOrgErrorMessage,
-  verifyEmailPromptPath,
 } from '../orgErrorMessage.js';
 import { resolveRootUrl } from '../resolveHomeUrl.js';
 
@@ -231,7 +230,10 @@ export function AcceptInvitationPage() {
       // the page hands over to the verification-mail screen for this account's
       // address, whose link brings the person back here to accept.
       if (isAcceptNeedsVerifiedEmail(err)) {
-        navigate(verifyEmailPromptPath(user?.email, location.pathname + location.search));
+        const sp = new URLSearchParams();
+        if (user?.email) sp.set('email', user.email);
+        sp.set('redirect', location.pathname + location.search);
+        navigate(`/verify-email-prompt?${sp.toString()}`);
         return;
       }
       // objectui#4474 — the card's site 5: a wrong recipient produced better-auth's
