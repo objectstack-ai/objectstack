@@ -91,3 +91,9 @@ export type { StoredObjectExtension } from './object-graph.js';
 // `RuntimeAuthoringIssueSchema.userMessage`.
 export { findingUserMessage } from './finding-user-text.js';
 export type { UserTextParams } from './finding-user-text.js';
+// [ruling record 6929121584] The same ladder for a producer that keeps its own
+// catalog beside its own findings: the post-publish build probes in
+// `@objectstack/metadata-protocol` compose `RuntimeBuildIssueSchema.userMessage`
+// through it. One ladder for every producer of platform-composed user text.
+export { renderUserText, userTextLocaleOf } from './finding-user-text.js';
+export type { UserTextEntry } from './finding-user-text.js';

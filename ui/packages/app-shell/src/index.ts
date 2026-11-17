@@ -98,6 +98,9 @@ export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './util
 // the record, or to a page about it, opens under), as opposed to which app
 // hosts an app-independent page. `./utils/objectHostApp` is the contract.
 export { objectHostAppSegment } from './utils/objectHostApp.js';
+// objectstack#34586 — the history state the approvals inbox opens a request
+// with, so its page steps the reader's pending queue and moves on after a decision.
+export { approvalQueueState } from './views/approval-decision/approvalQueueAdvance.js';
 // Which apps are the platform's own code-loaded built-ins (`com.objectstack.*`),
 // one criterion for the AI switcher and the console's first-run checklist.
 export { isPlatformBuiltinApp } from './utils/platformApp.js';

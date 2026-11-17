@@ -10059,8 +10059,8 @@ export class ObjectStackProtocolImplementation implements
      * return type means updating the schema and its two conformance suites
      * (`packages/objectql/src/publish-package-drafts-response-conformance.test.ts`,
      * `packages/runtime/src/domains/packages-publish-drafts-response-conformance.test.ts`)
-     * in the same PR. `probes` is deliberately opaque in the declaration —
-     * upgrade it only on a consumer-driven card (#9406 ruling).
+     * in the same PR. `probes` is modeled there (`BuildProbeReportSchema`,
+     * ruling record 6929121584); `build-probes.ts` re-exports its types.
      */
     async publishPackageDrafts(request: {
         packageId: string;
