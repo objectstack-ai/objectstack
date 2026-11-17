@@ -40,6 +40,9 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
+
 import { hashApiKey } from '@objectstack/core';
 
 import { HttpDispatcher, type HttpProtocolContext } from '../http-dispatcher.js';
