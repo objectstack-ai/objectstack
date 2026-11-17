@@ -11,7 +11,7 @@ Skills-docs: none — no page under `skills/**` or `content/docs/**` teaches the
 
 <!-- adr-0087: registered bundle-without-canonical-member-bare-read-absent -->
 
-**BREAKING**: for a bundled name with no canonical member, the read naming no member (`GET /meta/TYPE/NAME`), `/layers` naming none and the execution read naming none move from serving another member (200) to `404 RESOURCE_NOT_FOUND` (the execution read: `null`). Name the member (`?member=fr-FR`) to read it, as before.
+**BREAKING**: for a bundled name with no canonical member, the read naming no member (`GET /meta/TYPE/NAME`, with or without `?package=`), `/layers` naming none and the execution read naming none move from serving another member (200) to `404 RESOURCE_NOT_FOUND` (the execution read: `null`). Name the member (`?member=fr-FR`) to read it, as before.
 
 The by-name doors' member selector reads a request naming no member as the canonical one (`en-US` for `email_template`), and naming the canonical value is the same request. That is the selector's declared contract (`GetMetaItemRequest.member`). For a bundle with no canonical member, the two requests got different answers:
 

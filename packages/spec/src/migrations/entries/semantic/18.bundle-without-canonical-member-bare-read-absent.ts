@@ -17,7 +17,8 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'bundle-without-canonical-member-bare-read-absent',
   surface:
-    'GET /api/v1/meta/TYPE/NAME and GET /api/v1/meta/TYPE/NAME/layers naming no bundle member, and the execution read '
+    'GET /api/v1/meta/TYPE/NAME (with or without ?package=) and GET /api/v1/meta/TYPE/NAME/layers naming no bundle '
+    + 'member, and the execution read '
     + 'naming none, for a bundled metadata name (an email_template) that no layer ships or stores in its canonical '
     + 'member (en-US): they served another member of the bundle (status 200), and a bundle stored only as a '
     + 'non-canonical row answered 404 before a restart and served that row after one. ?member=CANONICAL and '
