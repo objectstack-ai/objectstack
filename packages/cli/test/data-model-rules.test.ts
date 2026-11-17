@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authoringRulesFor, lintDataModel, lintUniqueDeclarations, lintUnscopedDeclaredIndexes, lintLegacyOrganizationComposites } from '@objectstack/lint';
+import { authoringRulesFor, lintDataModel, lintInlineEditBulk, lintUniqueDeclarations, lintUnscopedDeclaredIndexes, lintLegacyOrganizationComposites, runAuthoringRules } from '@objectstack/lint';
 import { FieldSchema } from '@objectstack/spec/data';
 import { lintConfig } from '../src/commands/lint';
 
@@ -87,11 +87,12 @@ describe('lintDataModel — relationships', () => {
   });
 });
 
-// R5b — the parent's form saves parent + inline children in ONE cross-object
+// The parent's form saves parent + inline children in ONE cross-object
 // `/api/v1/batch`, which gates every op as `bulk` on the op's own object. A
 // declared `enable.apiMethods` without `bulk` on either side is warned about,
 // naming the object to edit and the value to add; an undeclared list is open.
-describe('lintDataModel — relationship/inline-edit-needs-bulk', () => {
+// A registry rule (`lintInlineEditBulk`), so all three commands report it.
+describe('lintInlineEditBulk — relationship/inline-edit-needs-bulk', () => {
   const RULE = 'relationship/inline-edit-needs-bulk';
   const OPEN = ['get', 'list', 'create', 'update', 'delete'];
   const budget = (enable?: unknown) => ({ name: 'project_budget', ...(enable ? { enable } : {}), fields: { title: { type: 'text' } } });
@@ -103,13 +104,14 @@ describe('lintDataModel — relationship/inline-edit-needs-bulk', () => {
       amount: { type: 'currency' },
     },
   });
-  const hits = (objects: any[]) => lintDataModel(objects).filter((i) => i.rule === RULE);
+  const hits = (objects: any[]) => lintInlineEditBulk(objects).filter((i) => i.rule === RULE);
 
   it.each([true, 'grid', 'form'])('warns on the parent when inlineEdit is %s and its apiMethods omit bulk', (inlineEdit) => {
     const [issue, ...rest] = hits([budget({ apiMethods: OPEN }), line(inlineEdit)]);
     expect(rest).toEqual([]);
     expect(issue?.severity).toBe('warning');
     expect(issue?.path).toBe('objects[0].enable.apiMethods');
+    expect(issue?.where).toBe('object "project_budget"');
     expect(issue?.fix).toBe("add 'bulk' to project_budget.enable.apiMethods");
     expect(issue?.message).toContain('OBJECT_API_METHOD_NOT_ALLOWED');
   });
@@ -135,6 +137,19 @@ describe('lintDataModel — relationship/inline-edit-needs-bulk', () => {
     expect(hits([budget(), line('grid')])).toEqual([]);
     expect(hits([budget({ apiMethods: OPEN }), line(undefined)])).toEqual([]);
     expect(hits([budget({ apiMethods: OPEN }), line(false)])).toEqual([]);
+  });
+
+  it('reaches os lint, os validate and os build through the registry, as a warning, once', () => {
+    const objects = [budget({ apiMethods: OPEN }), line('grid')];
+    for (const command of ['lint', 'validate', 'build'] as const) {
+      expect(authoringRulesFor(command).map((r) => r.name), command).toContain('lintInlineEditBulk');
+      const found = runAuthoringRules(command, { normalized: { objects }, parsed: { objects } }).filter((f) => f.rule === RULE);
+      expect(found.map((f) => [f.severity, f.path, f.hint]), command).toEqual([
+        ['warning', 'objects[0].enable.apiMethods', "add 'bulk' to project_budget.enable.apiMethods"],
+      ]);
+    }
+    // Not a second copy in `os lint`'s best-practice sweep.
+    expect(lintDataModel(objects).filter((i) => i.rule === RULE)).toEqual([]);
   });
 });
 

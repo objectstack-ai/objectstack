@@ -1203,6 +1203,7 @@ export {
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
+  lintInlineEditBulk,
   lintDataModel,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
@@ -1214,6 +1215,7 @@ export {
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
 

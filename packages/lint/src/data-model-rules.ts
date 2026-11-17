@@ -268,8 +268,62 @@ export const RELATIONSHIP_MASTER_DETAIL_REQUIRED = 'relationship/master-detail-r
 /** The rule id R3 reports under (`master_detail` without `deleteBehavior`). */
 export const RELATIONSHIP_DELETE_BEHAVIOR = 'relationship/delete-behavior';
 
-/** R5b — an inline-edited relationship whose parent or child withholds `bulk`. */
-const RELATIONSHIP_INLINE_EDIT_NEEDS_BULK = 'relationship/inline-edit-needs-bulk';
+/** The rule id {@link lintInlineEditBulk} reports under. */
+export const RELATIONSHIP_INLINE_EDIT_NEEDS_BULK = 'relationship/inline-edit-needs-bulk';
+
+/**
+ * An inline-edited relationship whose parent or child withholds `bulk`.
+ *
+ * The parent's form saves an `inlineEdit` child's rows together with the parent
+ * in ONE cross-object `/api/v1/batch` (ADR-0035), and that route gates EVERY op
+ * as `bulk` plus its own write on the op's own object
+ * (`packages/rest/src/batch-routes.ts`). So a parent or child whose DECLARED
+ * `enable.apiMethods` omits `bulk` gets a form that renders and fills, then is
+ * refused 405 `OBJECT_API_METHOD_NOT_ALLOWED` on save. An undeclared
+ * `apiMethods` is unrestricted, so the spec's own resolver decides, never a
+ * copy of its table.
+ *
+ * A registry rule (`AUTHORING_RULES`), not a `lintDataModel` member: it
+ * forecasts a refusal at run time rather than nudging a style, so `os lint`,
+ * `os validate` and `os build` all report it. Advisory: a warning that refuses
+ * nothing. One finding per object, however many inline children name it.
+ */
+export function lintInlineEditBulk(objects: any[]): LocatedLintIssue[] {
+  const issues: LocatedLintIssue[] = [];
+  if (!Array.isArray(objects)) return issues;
+  const indexByName = new Map<string, number>();
+  objects.forEach((o, j) => {
+    if (typeof o?.name === 'string' && !indexByName.has(o.name)) indexByName.set(o.name, j);
+  });
+  const reported = new Set<string>();
+  for (const child of objects) {
+    if (!child?.name) continue;
+    for (const { name: fieldName, def } of fieldEntries(child.fields)) {
+      if (!RELATIONSHIP_TYPES.has(def?.type)) continue;
+      if (def.inlineEdit !== true && def.inlineEdit !== 'grid' && def.inlineEdit !== 'form') continue;
+      const parent = refOf(def);
+      if (!parent) continue;
+      for (const target of [parent, child.name]) {
+        const j = indexByName.get(target);
+        if (j === undefined || reported.has(target)) continue;
+        if (isApiOperationAllowed(resolveEffectiveApiMethods(objects[j]?.enable), 'bulk')) continue;
+        reported.add(target);
+        issues.push({
+          severity: 'warning',
+          rule: RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
+          where: objectWhere(objects[j]),
+          message:
+            `inlineEdit on "${child.name}.${fieldName}" saves ${parent} and its ${child.name} rows in one ` +
+            `/api/v1/batch, which needs 'bulk' on every object in it; "${target}" declares ` +
+            `enable.apiMethods without 'bulk', so that save is refused 405 OBJECT_API_METHOD_NOT_ALLOWED`,
+          path: `objects[${j}].enable.apiMethods`,
+          fix: `add 'bulk' to ${target}.enable.apiMethods`,
+        });
+      }
+    }
+  }
+  return issues;
+}
 
 /**
  * The rule id R13 reports under: a roll-up whose child field the function
@@ -934,13 +988,6 @@ export function lintDataModel(objects: any[]): LintIssue[] {
     }
   }
 
-  // R5b's lookup: object name → its index (the path names the object to edit),
-  // and the objects it has already reported, so a parent with several inline
-  // children is reported once.
-  const indexByName = new Map<string, number>();
-  objects.forEach((o, j) => { if (o?.name && !indexByName.has(o.name)) indexByName.set(o.name, j); });
-  const bulkReported = new Set<string>();
-
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
     if (!obj?.name) continue;
@@ -1106,34 +1153,6 @@ export function lintDataModel(objects: any[]): LintIssue[] {
             message: `"${obj.name}" looks like line items of ${parent}; consider inlineEdit: true on "${fieldName}" so it is entered inline within the ${parent} form`,
             path: `${fieldPath}.inlineEdit`,
             fix: 'inlineEdit: true',
-          });
-        }
-      }
-
-      // R5b — an inline-edited child is saved with its parent in ONE
-      // cross-object `/api/v1/batch` (ADR-0035), and that route gates EVERY op
-      // as `bulk` plus its own write on the op's own object
-      // (`packages/rest/src/batch-routes.ts`). So a parent or child whose
-      // DECLARED `enable.apiMethods` omits `bulk` gets a form that renders and
-      // fills, then is refused 405 `OBJECT_API_METHOD_NOT_ALLOWED` on save.
-      // Undeclared `apiMethods` is unrestricted, so the spec's own resolver
-      // decides, never a copy of its table. A warning: it refuses nothing.
-      if (def.inlineEdit === true || def.inlineEdit === 'grid' || def.inlineEdit === 'form') {
-        for (const target of [parent, obj.name]) {
-          const j = indexByName.get(target);
-          if (j === undefined || bulkReported.has(target)) continue;
-          const enable = objects[j]?.enable;
-          if (isApiOperationAllowed(resolveEffectiveApiMethods(enable), 'bulk')) continue;
-          bulkReported.add(target);
-          issues.push({
-            severity: 'warning',
-            rule: RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
-            message:
-              `inlineEdit on "${obj.name}.${fieldName}" saves ${parent} and its ${obj.name} rows in one ` +
-              `/api/v1/batch, which needs 'bulk' on every object in it; "${target}" declares ` +
-              `enable.apiMethods without 'bulk', so that save is refused 405 OBJECT_API_METHOD_NOT_ALLOWED`,
-            path: `objects[${j}].enable.apiMethods`,
-            fix: `add 'bulk' to ${target}.enable.apiMethods`,
           });
         }
       }

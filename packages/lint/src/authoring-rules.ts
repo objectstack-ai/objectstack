@@ -169,6 +169,7 @@ import {
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
+  lintInlineEditBulk,
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -2471,6 +2472,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       'twice. This is coverage recorded, not coverage missing: all three commands report the rule.',
     run: (stack) =>
       lintLegacyOrganizationComposites(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
+  // An inline-edited relationship whose parent or child declares
+  // `enable.apiMethods` without `bulk` (`relationship/inline-edit-needs-bulk`).
+  // The parent's form saves the rows in one cross-object `/api/v1/batch`, which
+  // asks every object in it for `bulk`, so the form fills and then 405s on save.
+  // Registered rather than left in `lintDataModel`: it forecasts a refusal at run
+  // time, not a style nudge, so all three commands report it. Advisory: a
+  // warning that refuses nothing and never fails `os build`.
+  {
+    name: 'lintInlineEditBulk',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
+    run: (stack) =>
+      lintInlineEditBulk(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.where,
