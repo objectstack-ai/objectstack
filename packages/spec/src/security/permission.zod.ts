@@ -1032,6 +1032,21 @@ const FIELD_PERMISSION_WHEN_ON_READABLE =
   + 'on every row, declare `readable: false` on an entry without `when`.';
 
 /**
+ * [#34664] The two sentences an acknowledged roll-up read is refused with.
+ * Module-private for the reason {@link ADMIN_SCOPE_BUSINESS_UNIT_BLANK} gives.
+ */
+const FIELD_PERMISSION_ROLLUP_REASON_BLANK =
+  'A blank `rollupSourceUnreadableReason` acknowledges nothing: write why holders of this set may read the '
+  + 'roll-up summary although they cannot read the child data it aggregates, or remove the key so `os lint` '
+  + 'keeps reporting the `security-rollup-source-unreadable` warning.';
+
+const FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN =
+  'A `rollupSourceUnreadableReason` acknowledges that holders of this set READ a roll-up summary over child data '
+  + 'they cannot read, so it is refused beside `readable: false`: that entry declares no read of the column, so there '
+  + 'is nothing to acknowledge. Keep `readable: true` (the default) to acknowledge the read, or remove the reason to keep the '
+  + 'column hidden.';
+
+/**
  * Field Level Security (FLS)
  *
  * [Ruling of record 6408558941, letter A — ADR-0066 ⑧ note of 2026-10-26] An
@@ -1055,6 +1070,20 @@ const FIELD_PERMISSION_WHEN_ON_READABLE =
  * at parse time — a per-row read lock the runtime would not deliver. The
  * cross-key rule is a refinement, declared as a dropped-refinement site; the
  * published JSON Schema states it in `when`'s description.
+ *
+ * [#34664] `rollupSourceUnreadableReason` is read at AUTHORING time only, by
+ * `os lint`'s `security-rollup-source-unreadable` rule: on the set's entry for
+ * a `summary` column it acknowledges a meant pair — this set reads the roll-up
+ * although it cannot read the child data the roll-up aggregates — and turns
+ * that one finding (this set × this column) into an `info` note quoting the
+ * reason. The runtime reads no part of the KEY, and the server never sends it
+ * on the permission responses that reuse this shape. The ENTRY that carries it
+ * is an ordinary declaring entry, though: it votes `readable: true` (its
+ * default) in the field merge, where only declaring sets vote and the most
+ * permissive vote wins, so on a set that had no entry for the column, adding
+ * one to carry the reason restores the column for holders whose other sets mask
+ * it. A blank reason, and a reason beside `readable: false` (the entry declares
+ * no read, so there is nothing to acknowledge), are refused at parse time.
  */
 export const FieldPermissionSchema = lazySchema(() => strictObject(
   {
@@ -1117,6 +1146,29 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
       + 'reads) holds the row: it judges the condition on the stored row exactly as the write gate does on an update '
       + 'of that row, so a lock that applies only from a stage onward disables the field only on the rows it names.',
     ),
+  /**
+   * [#34664] Why this set is MEANT to read a roll-up summary over child data it
+   * cannot read. Authoring-time only: `os lint` reads it on the set's entry for
+   * a `summary` column and reports `security-rollup-source-unreadable` for that
+   * set and column as an `info` note quoting the reason, instead of a warning
+   * `--strict` fails on. The runtime does not read the key; the entry carrying
+   * it votes `readable: true` in the field merge like any declaring entry.
+   */
+  rollupSourceUnreadableReason: z.string()
+    .refine(NON_BLANK_STRING, { message: FIELD_PERMISSION_ROLLUP_REASON_BLANK })
+    .optional()
+    .describe(
+      'Authoring-time acknowledgement, read only by `os lint` (the runtime does not read it): why holders of this '
+      + 'set are meant to read this roll-up `summary` column although the set cannot read the child object, the '
+      + 'aggregated child field or a child field the roll-up\'s `filter` tests (e.g. \'Service staff read account '
+      + 'totals but not invoice rows\'). Declared on the set\'s entry for the summary column, it turns that set\'s '
+      + '`security-rollup-source-unreadable` warning for the column into an `info` note quoting the reason, so '
+      + '`os lint --strict` passes; every other finding is unchanged. The runtime does not read the key, but the entry '
+      + 'that carries it is an ordinary declaring entry: it votes `readable: true` in the field merge (only declaring '
+      + 'sets vote, and the most permissive vote wins), so on a set that had no entry for the column, adding one to '
+      + 'carry the reason restores the column for holders whose other sets mask it. A blank reason is refused, and so '
+      + 'is a reason beside `readable: false`, an entry that declares no read to acknowledge.',
+    ),
 }).refine(
   // The cross-key rule: a condition reaches the edit vote only, so an entry
   // that conditions a read lock is refused rather than enforced row-blind
@@ -1127,6 +1179,12 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
   // dropped-refinements ledger.
   (p) => p.when === undefined || p.readable !== false,
   { message: FIELD_PERMISSION_WHEN_ON_READABLE, path: ['when'] },
+).refine(
+  // [#34664] The acknowledgement names a READ of the roll-up; beside a mask
+  // there is no read, so the declaration would promise nothing. Refused
+  // rather than ignored, the same shape as the `when` rule above.
+  (p) => p.rollupSourceUnreadableReason === undefined || p.readable !== false,
+  { message: FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN, path: ['rollupSourceUnreadableReason'] },
 ));
 
 /**

@@ -361,4 +361,56 @@ describe('[#25573] excludeSubmitter keeps the submitter from approving their own
       expect(moved.request.pending_approvers).toEqual(['u_sub']);
     });
   });
+
+  // [Maintainer ruling 2026-11-17, option B] The administrator override is
+  // never the means by which its actor takes a slot on their own request. On
+  // the same real engine and directory: `u_sub` holds `category_manager` and
+  // `treasury` alone and shares `buyer` with `u_alice`; `procurement_director`
+  // is `u_dir`'s. The submitter acts here as an organization administrator.
+  describe('the override reassign and the submitter', () => {
+    const submitterAdmin = {
+      userId: 'u_sub', tenantId: ORG,
+      positions: ['category_manager', 'buyer', 'treasury'], permissions: ['organization_admin'],
+    } as any;
+    const otherAdmin = as('u_owner', ORG, ['organization_admin']);
+    const BY_SUBMITTER =
+      /^VALIDATION_FAILED: cannot reassign to '.+' — (it names the request's submitter|the request's submitter holds position '.+'), and a reassign the submitter makes through the administrator override/;
+    const slateOf = async (id: string) => (await svc.getRequest(id, SYSTEM))?.pending_approvers;
+
+    it('refuses every slot the submitter-administrator could take: their id, their email, a position only they hold, and a position they share', async () => {
+      const row = await open('own_override', [{ type: 'user', value: 'u_bob' }]);
+      for (const to of ['u_sub', 'u_sub@example.com', 'position:treasury', 'position:buyer']) {
+        await expect(svc.reassign(row.id, { actorId: 'u_sub', to } as any, submitterAdmin), to)
+          .rejects.toThrow(BY_SUBMITTER);
+      }
+      expect(await slateOf(row.id)).toEqual(['u_bob']);
+      expect((await actionsOf(row.id)).map((a) => a.action)).toEqual(['submit']);
+    });
+
+    it('refuses the shared position to the submitter-administrator with excludeSubmitter on too', async () => {
+      const row = await open('own_override_on', [{ type: 'user', value: 'u_bob' }], ON);
+      await expect(svc.reassign(row.id, { actorId: 'u_sub', to: 'position:buyer' } as any, submitterAdmin))
+        .rejects.toThrow(BY_SUBMITTER);
+      expect(await slateOf(row.id)).toEqual(['u_bob']);
+    });
+
+    it('refuses a different administrator\'s override reassign to a position only the submitter holds', async () => {
+      const row = await open('other_override_only', [{ type: 'user', value: 'u_bob' }]);
+      await expect(svc.reassign(row.id, { actorId: 'u_owner', to: 'position:treasury' } as any, otherAdmin))
+        .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'position:treasury' — the only holder of position 'treasury' in this request's organization is the request's submitter, and a reassign made through the administrator override/);
+      expect(await slateOf(row.id)).toEqual(['u_bob']);
+    });
+
+    it('CONTROL: a different administrator may override-reassign to a position the submitter shares with others', async () => {
+      const row = await open('other_override_shared', [{ type: 'user', value: 'u_bob' }]);
+      const moved = await svc.reassign(row.id, { actorId: 'u_owner', to: 'position:buyer' } as any, otherAdmin);
+      expect(moved.request.pending_approvers).toEqual(['position:buyer']);
+    });
+
+    it('CONTROL: the submitter-administrator may override-reassign to a position they do not hold', async () => {
+      const row = await open('own_override_elsewhere', [{ type: 'user', value: 'u_bob' }]);
+      const moved = await svc.reassign(row.id, { actorId: 'u_sub', to: 'position:procurement_director' } as any, submitterAdmin);
+      expect(moved.request.pending_approvers).toEqual(['position:procurement_director']);
+    });
+  });
 });

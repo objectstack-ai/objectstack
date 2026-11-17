@@ -106,7 +106,7 @@ vi.mock('../../console/ai/PendingDraftsBar', () => ({ PendingDraftsBar: () => nu
 vi.mock('../../console/ai/ConversationsSidebar', () => ({
   ConversationsSidebar: () => <div data-testid="sidebar" />,
 }));
-vi.mock('../../console/ai/LiveCanvas', () => ({ LiveCanvas: () => null }));
+
 
 import { I18nProvider } from '@object-ui/i18n';
 import { ChatDockMobileSheet, ChatDockPanel, type ChatDockState } from '../ChatDock';
@@ -195,14 +195,11 @@ function dockState(): ChatDockState {
     expanded: true,
     width: 420,
     dragging: false,
-    maximized: false,
     fullWindow: false,
     setFullWindow: vi.fn(),
     toggle: vi.fn(),
     expand: vi.fn(),
     collapse: vi.fn(),
-    maximize: vi.fn(),
-    restore: vi.fn(),
     onResizePointerDown: vi.fn(),
   };
 }

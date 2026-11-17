@@ -40,8 +40,25 @@ vi.mock('./packages-io', async (importOriginal) => {
   };
 });
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
-vi.mock('./packageCustomizations-io', () => ({
-  fetchPackageCustomizationCounts: vi.fn(async (id: string) => counts.byId[id] ?? { customized: 0, switchedOff: 0 }),
+vi.mock('./packageCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./packageCustomizations-io')>()),
+  // A served answer whose lists are as long as the counts asked for: `customized` view overrides, `switchedOff` flows.
+  fetchPackageCustomizations: vi.fn(async (id: string) => {
+    const { customized, switchedOff } = counts.byId[id] ?? { customized: 0, switchedOff: 0 };
+    return {
+      packageId: id,
+      overrides: Array.from({ length: customized }, (_, i) => ({ type: 'view', name: `view_${i}` })),
+      extensions: [],
+      switchedOff: Array.from({ length: switchedOff }, (_, i) => ({ type: 'flow', name: `flow_${i}` })),
+      contributions: [],
+      counts: { overrides: customized, extensions: 0, switchedOff, contributions: 0 },
+    };
+  }),
+}));
+// The panel's label read (objectstack#34714) is not under test here: rows keep their names.
+vi.mock('./landingCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./landingCustomizations-io')>()),
+  loadCustomizationLabels: vi.fn(async () => ({})),
 }));
 vi.mock('./packageSurfaces', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./packageSurfaces')>();
@@ -102,7 +119,7 @@ describe('Studio landing: ordered by what the author came to do (objectstack#347
     renderLanding();
 
     await screen.findByText('HotCRM');
-    expect(headings()).toEqual(['Installed apps', 'Your own apps', 'Outside any app']);
+    expect(headings()).toEqual(['Installed apps', 'Customizations in this environment', 'Your own apps', 'Outside any app']);
     const installed = screen.getByTestId('studio-landing-installed');
     // DOM order: each installed card precedes the author's own card.
     const own = screen.getByTestId('studio-landing-own');

@@ -268,10 +268,25 @@ describe('form renderer — fieldTabs strip at phone width (objectstack#34615)',
   it('a failed submit that jumps to an off-screen tab scrolls it into view, error dot and all', async () => {
     renderFive();
     const writes = layOutStrip(true);
+    // The jump is a non-discrete update (validation is async), so a scroll left
+    // to a passive effect lands a task after the commit that activates the tab
+    // — painted off-screen meanwhile, and racing this test's `waitFor`
+    // (objectstack#34782). Read the strip at that commit: a mutation observer
+    // runs in the microtask straight after it, before any later task.
+    const trigger = tab(/Activity/);
+    let writesAtActivation: number[] | undefined;
+    const activation = new MutationObserver(() => {
+      if (writesAtActivation === undefined && trigger.getAttribute('data-state') === 'active') {
+        writesAtActivation = [...writes];
+      }
+    });
+    activation.observe(trigger, { attributes: true, attributeFilter: ['data-state'] });
     submit();
     await waitFor(() => expect(tab(/Activity/)).toHaveAttribute('data-state', 'active'));
+    activation.disconnect();
     expect(tab(/Activity/)).toHaveAttribute('data-error', 'true');
     expect(tab(/Activity/).querySelector('.bg-destructive'), 'the error dot rides on the trigger').not.toBeNull();
+    expect(writesAtActivation, 'scrolled in the same commit that marks the tab active').toEqual([620 - 359]);
     expect(writes).toEqual([620 - 359]);
   });
 
