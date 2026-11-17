@@ -93,6 +93,12 @@ export const ENDED_EMAIL_CHANGE_TOKEN = 'ended-by-a-credential-change';
 /** The context keys the before-hook leaves for the after-hook. */
 const SIGN_IN_READING = '__osSignInCredentialReading';
 
+/** The context key under which the before-hook leaves the account a reset door sets the password of. */
+export const RESET_DOOR_SUBJECT = '__osResetDoorUserId';
+
+/** better-auth's two reset doors (`resetCredentialPassword`), which end the sessions before the write. */
+export const RESET_DOOR_PATHS: ReadonlySet<string> = new Set(['/reset-password', '/phone-number/reset-password']);
+
 /**
  * The one comparison: `issuedAtMs` falls before the account's credential
  * change. Nothing is before a change that never happened; an issue time that
