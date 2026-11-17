@@ -471,7 +471,7 @@ export function withdrawFlow(this: Pick<FlowDefinitionsHost, 'deactivateFlowTrig
 }
 
 /** The body of {@link AutomationEngine.hydrateFlowActivations}, moved unedited; that method's docblock is its contract. */
-export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'flowActivationStore' | 'flowLedgerDisabled' | 'flows' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers' | 'flowSlotKeysOf'>): Promise<string[]> {
+export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'flowActivationStore' | 'flowLedgerDisabled' | 'flows' | 'activateFlowTrigger' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers' | 'flowSlotKeysOf'>): Promise<string[]> {
     if (!this.flowActivationStore) return [];
     const rows = await this.flowActivationStore.list();
     const disabled: string[] = [];
@@ -506,7 +506,23 @@ export async function hydrateFlowActivations(this: Pick<FlowDefinitionsHost, 'fl
     // them then), so this changes nothing there; a host whose trigger was
     // registered before the pull would otherwise keep a caller armed onto
     // a subflow this read has just switched off.
+    // [#34655, ADR-0126 §4 amendment] A row switching a flow ON matters when
+    // its package ships it off (`defaultActive: false`): the pull registered
+    // it unarmed, and only this read says an administrator turned it on. A
+    // host whose trigger was registered before the pull would otherwise keep
+    // it unarmed for the life of the process. Through the arming gate, which
+    // is idempotent and still declines a flow its status disarms.
+    const switchedOn: string[] = [];
+    for (const row of rows) {
+        if (!row.active) continue;
+        for (const key of this.flowSlotKeysOf(row.name)) {
+            if (!this.flows.has(key) || this.flowLedgerDisabled.has(key) || switchedOn.includes(key)) continue;
+            this.activateFlowTrigger(key);
+            switchedOn.push(key);
+        }
+    }
     for (const name of disabled) this.rejudgeSubflowCallers(name);
+    for (const name of switchedOn) this.rejudgeSubflowCallers(name);
     return disabled;
 }
 

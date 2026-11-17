@@ -170,12 +170,20 @@ export const FLOW_CLONE_MUTATED_FIELDS = ['name', 'label', 'status'] as const;
  * base does not ship, and the save gate refuses it (`403 NOT_OVERRIDABLE`).
  * New similar writes the pair's own item: it copies what the source serves
  * (the override's definition) and overrides nothing.
+ *
+ * [#34655, ADR-0126 §4] `defaultActive` is named for `protection`'s reason:
+ * it is the default of the switch only a flow a PACKAGE ships has (the
+ * activation ledger), and the engine refuses it on any other flow. The copy
+ * is a writable package's flow, switched by its own `status`, which the clone
+ * already sets ({@link FLOW_CLONE_STATUS}), so dropping it moves nothing: a
+ * copy that kept it would be refused over a key the admin never sent.
  */
 export const FLOW_CLONE_DROPPED_KEYS: readonly string[] = Object.freeze([
     ...METADATA_READ_DECORATIONS,
     ...Object.keys(MetadataProtectionFields),
     'protection',
     ...Object.keys(OverrideDeclarationFields),
+    'defaultActive',
 ]);
 
 /**

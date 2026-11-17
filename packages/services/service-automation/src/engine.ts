@@ -3104,6 +3104,12 @@ export class AutomationEngine implements IAutomationService {
                 { flow: name, holders },
             );
         },
+        // [#34655, ADR-0126 §4] With no row deciding, the package's default:
+        // a flow shipped `defaultActive: false` is off until an administrator
+        // switches it on. Read off the body armed under the key, so an
+        // upgrade that changes the default moves an installation no one
+        // switched. Only a packaged flow can carry the key ({@link registerFlow}).
+        shipsOff: (key) => this.flows.get(key)?.defaultActive === false,
     });
     /**
      * The durable ledger behind {@link flowLedgerDisabled}. `null` until a host
@@ -5626,6 +5632,12 @@ export class AutomationEngine implements IAutomationService {
             ?? (definition !== null && typeof definition === 'object' ? this.flowArms.get(definition) : undefined)
             ?? { source: 'runtime' };
         const parsed = this.judgeFlowRegistration(name, definition);
+        // [#34655, ADR-0126 §4] `defaultActive` is the default of the
+        // packaged-flow switch, and only a flow a package ships has that
+        // switch ({@link refuseCustomerAuthoredToggle} asks the same
+        // question). Asked before anything is filed, so a refused body leaves
+        // nothing behind.
+        this.refuseUnpackagedDefaultActive(name, parsed, arm);
 
         // ADR-0018 §M1 — node types are validated against the live action
         // registry, but NOT here: the check moved to the moment the vocabulary
@@ -6252,6 +6264,34 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#34655, ADR-0126 §4] Refuse a body that declares `defaultActive` for a
+     * flow no package ships. The key is the default of the packaged-flow
+     * switch (the activation ledger), and a flow authored in this deployment
+     * has no such switch: its switch is its own `status`, so the key could
+     * only be a declaration the engine does not honour.
+     *
+     * A body is packaged when the registration names a package arm
+     * (`package` / `override`, the boot pull and the protocol syncs) or the
+     * loader's set holds the name ({@link packagedFlowOwner}, the question
+     * the toggle door asks). Every other body is the environment's.
+     *
+     * @throws `VALIDATION_FAILED` / 400; nothing is filed.
+     */
+    private refuseUnpackagedDefaultActive(name: string, parsed: FlowParsed, arm: FlowContender): void {
+        if (parsed.defaultActive === undefined) return;
+        if (arm.source !== 'runtime' || this.isPackagedFlow(name)) return;
+        throw Object.assign(
+            new Error(
+                `Flow '${name}' declares defaultActive, which is the default of the switch an administrator turns a ` +
+                    `PACKAGED flow on and off with, and '${name}' was authored in this deployment, not shipped by a ` +
+                    `package. A flow authored here is switched by its own status: remove defaultActive, and publish ` +
+                    `it with status 'obsolete' to keep it off or 'active' to arm it.`,
+            ),
+            { code: 'VALIDATION_FAILED', status: 400 },
+        );
+    }
+
+    /**
      * [ADR-0150 D3] Attach the reader over the one package-scoped resolver
      * ({@link FlowNameResolver}). The automation plugin calls this at `init()`
      * with a reader that asks the ObjectQL registry at question time, never at
@@ -6833,6 +6873,7 @@ export class AutomationEngine implements IAutomationService {
             get flowActivationStore() { return readFlowActivationStore(); },
             flowLedgerDisabled: this.flowLedgerDisabled,
             flows: this.flows,
+            activateFlowTrigger: (...a) => this.activateFlowTrigger(...a),
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
             rejudgeSubflowCallers: (...a) => this.rejudgeSubflowCallers(...a),
             flowSlotKeysOf: (...a) => this.flowSlotKeysOf(...a),
@@ -6846,7 +6887,9 @@ export class AutomationEngine implements IAutomationService {
      *
      * `flowStatusDisabled` is the authoring state (`obsolete` / `invalid`),
      * owned by the definition. `flowLedgerDisabled` is the installation's
-     * activation choice (ADR-0126 §4), owned by `sys_metadata_activation`.
+     * activation choice (ADR-0126 §4), owned by `sys_metadata_activation`;
+     * with no row deciding, it is the package's default, which a packaged
+     * flow may declare off (`defaultActive: false`, #34655).
      * Either one disarms; neither can override the other, because they answer
      * different questions and an "override" would mean one silently undoing a
      * decision it does not own.
@@ -6870,7 +6913,16 @@ export class AutomationEngine implements IAutomationService {
      * (AGENTS.md "Degradation log levels").
      */
     private describeDisabledFlow(flowName: string): string {
-        if (this.flowLedgerDisabled.has(flowName)) {
+        if (this.flowLedgerDisabled.offByDefault(flowName)) {
+            // [#34655] No row: the package ships it off and no administrator
+            // has switched it on here.
+            this.logger.info(
+                `FLOW_DISABLED: packaged flow '${flowName}' refused — its package ships it switched off ` +
+                    '(defaultActive: false) and the activation ledger (sys_metadata_activation) holds no row ' +
+                    'switching it on.',
+                { flow: flowName, refusal: 'FLOW_DISABLED' },
+            );
+        } else if (this.flowLedgerDisabled.has(flowName)) {
             this.logger.info(
                 `FLOW_DISABLED: packaged flow '${flowName}' refused — it is switched off in the activation ledger ` +
                     '(sys_metadata_activation, ADR-0126 §7.2).',

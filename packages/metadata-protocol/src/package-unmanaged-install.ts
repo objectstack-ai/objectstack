@@ -146,7 +146,11 @@ export interface UnmanagedImportItem {
     name: string;
     /** The manifest key it came from. */
     key: string;
-    /** The body as the package declared it, less its protection lock in either spelling ({@link stripUnmanagedImportLock}). */
+    /**
+     * The body as the package declared it, less its protection lock in either
+     * spelling ({@link stripUnmanagedImportLock}), and a flow's
+     * `defaultActive` copied as its `status` ({@link copyUnmanagedFlowSwitch}).
+     */
     body: Record<string, unknown>;
     /** The view names a container expands into (empty for every other item). */
     expands: readonly string[];
@@ -283,6 +287,30 @@ export function stripUnmanagedImportLock(
             ...(typeof reason === 'string' ? { reason } : {}),
         },
     };
+}
+
+/**
+ * [#34655, ADR-0126 §4] A flow's `defaultActive`, copied as the switch the
+ * copy has. The key is the default of the packaged-flow switch (the
+ * activation ledger), and a copy is the environment's own flow, switched by
+ * its `status`: the engine refuses the key on such a flow. So the copy keeps
+ * what the package shipped, in the copy's own switch:
+ *  - `defaultActive: false` → `status: 'obsolete'` (switched off, as Studio's
+ *    switch writes it), unless the status already disarms the flow
+ *    (`obsolete` / `invalid`), which is kept;
+ *  - `defaultActive: true` → dropped, the status as declared.
+ *
+ * A value that is not a boolean is handed on untouched, so the save door
+ * judges the body as the package declared it and refuses it. Returns the SAME
+ * body when there is nothing to copy.
+ */
+export function copyUnmanagedFlowSwitch(type: string, body: Record<string, unknown>): Record<string, unknown> {
+    if (type !== 'flow' || typeof body.defaultActive !== 'boolean') return body;
+    const { defaultActive, ...rest } = body;
+    if (defaultActive === false && rest.status !== 'obsolete' && rest.status !== 'invalid') {
+        rest.status = 'obsolete';
+    }
+    return rest;
 }
 
 /** One reason a body cannot be imported, naming the key that carries it. */
@@ -563,7 +591,8 @@ export function planUnmanagedImport(
             item.type, item.name, item.body, options.protectionDeclarationOf(item.type),
         );
         if (stripped) strippedLocks.push(stripped);
-        return body === item.body ? item : { ...item, body };
+        const copied = copyUnmanagedFlowSwitch(item.type, body);
+        return copied === item.body ? item : { ...item, body: copied };
     });
 
     // [#30794] ⭐ THE RENAME RUNS AFTER THE VIEW CONTAINERS ARE EXPANDED, through
