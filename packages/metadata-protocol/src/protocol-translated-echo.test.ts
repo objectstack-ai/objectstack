@@ -222,6 +222,15 @@ describe('[#34836] a patch entry answers a slot its patch changed, and only wher
         expect(item.fields.registration_number.description).toBe('注册号说明');
     });
 
+    it('a stored empty string on the patched slot is no text of its own: the patch text the fold serves over it is put back', () => {
+        // The fold applies the patch over `''` (scalarOverridesPackagedBase is false for it), so the read serves `Tax ID`.
+        const source = row({ label: '', description: 'Registration number' });
+        const echo = read(row({ label: 'Tax ID', description: 'Registration number' }), 'zh-CN');
+        expect(echo.fields.registration_number.label).toBe('税号');
+        const { item } = restoreTranslatedEchoes(echo, { source, bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.registration_number.label).toBe('Tax ID');
+    });
+
     it('a slot the patch left alone is no patch source even where the stored row does not declare the field', () => {
         const source = { name: 'crm_account', fields: { name: { type: 'text', label: 'Name' } } };
         const { item, restored } = restoreTranslatedEchoes(row({ label: 'Tax ID', description: '注册号说明' }), { source, bundle: catalog, packagedBase, patchBundles }) as any;

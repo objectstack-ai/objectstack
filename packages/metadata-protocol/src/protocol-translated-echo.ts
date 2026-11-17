@@ -75,6 +75,7 @@ import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import { injectedSystemColumnDefs } from '@objectstack/spec/data';
 import {
     BUILTIN_SYSTEM_FIELD_LABEL_LOCALES,
+    scalarOverridesPackagedBase,
     translateObject,
     type ObjectLike,
     type TranslateDocumentOptions,
@@ -157,8 +158,12 @@ function optionKey(option: unknown): string | undefined {
     return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : undefined;
 }
 
+function optionOf(options: unknown, key: string): Rec | undefined {
+    return Array.isArray(options) ? (options.find((o) => optionKey(o) === key) as Rec | undefined) : undefined;
+}
+
 function optionLabel(options: unknown, key: string): unknown {
-    return Array.isArray(options) ? (options.find((o) => optionKey(o) === key) as Rec | undefined)?.label : undefined;
+    return optionOf(options, key)?.label;
 }
 
 /**
@@ -252,10 +257,11 @@ export function restoreTranslatedEchoes<T>(
          * [#34836] A patch entry is asked for a slot only where its patch
          * changed that slot (a patch of `label` explains nothing about the
          * field's `description` or options), and only where the stored row
-         * does not declare the slot or carries the packaged text there. A
-         * stored slot with text of its own is the tenant's: the read serves
-         * it as written in every locale, so a save carrying it back keeps it,
-         * even when it equals the patching package's translation.
+         * does not declare the slot, carries the packaged text there, or
+         * holds an empty string. A stored slot with text of its own is the
+         * tenant's: the read serves it as written in every locale, so a save
+         * carrying it back keeps it, even when it equals the patching
+         * package's translation.
          */
         patchBundles?: PatchBundles;
     },
@@ -315,12 +321,21 @@ export function restoreTranslatedEchoes<T>(
      *
      * [#34836] A patch entry answers a slot only where its patch changed that
      * slot against the packaged base, and only where the stored row does not
-     * declare the slot or carries the packaged text there: a stored slot with
-     * text of its own (`税号` typed over the patched `Tax ID`) is the tenant's,
-     * served as written in every locale, never the patching package's
-     * translation coming back.
+     * override the packaged text there: a stored slot with text of its own
+     * (`税号` typed over the patched `Tax ID`) is the tenant's, served as
+     * written in every locale, never the patching package's translation
+     * coming back. "Overrides" is the fold's own question, asked through
+     * `packagedOwner` (the packaged field, option or object that holds the
+     * slot, and its key) by {@link scalarOverridesPackagedBase}, ⛔ never a
+     * second copy: the fold applies the patch over a stored slot that is
+     * unset, equal to the packaged text or an empty string, so the read
+     * serves the patch text there and its translation comes back.
      */
-    const sourceOf = (value: unknown, pick: (doc: Rec, fields: Map<string, Rec>) => unknown): { to: unknown } | null => {
+    const sourceOf = (
+        value: unknown,
+        pick: (doc: Rec, fields: Map<string, Rec>) => unknown,
+        packagedOwner: () => { base: unknown; key: string },
+    ): { to: unknown } | null => {
         if (typeof value !== 'string') return null;
         for (const source of sources) {
             const original = pick(source.doc, source.fields);
@@ -328,8 +343,9 @@ export function restoreTranslatedEchoes<T>(
             if (source.kind === 'patch') {
                 const packaged = pick(packagedView.doc, packagedView.fields);
                 if (original === packaged || (unset(original) && unset(packaged))) continue;
+                const { base, key } = packagedOwner();
                 const stored = pick(storedView.doc, storedView.fields);
-                if (!unset(stored) && stored !== packaged) continue;
+                if (scalarOverridesPackagedBase(base, key as Parameters<typeof scalarOverridesPackagedBase>[1], stored)) continue;
             }
             if (source.reads.some((read) => {
                 const translated = pick(read.doc, read.fields);
@@ -341,7 +357,7 @@ export function restoreTranslatedEchoes<T>(
 
     let nextItem: Rec = item;
     for (const slot of OBJECT_TEXT_SLOTS) {
-        const hit = sourceOf(item[slot], (doc) => (typeof doc[slot] === 'string' ? doc[slot] : NOT_DECLARED));
+        const hit = sourceOf(item[slot], (doc) => (typeof doc[slot] === 'string' ? doc[slot] : NOT_DECLARED), () => ({ base: args.packagedBase, key: slot }));
         if (!hit || typeof hit.to !== 'string') continue;
         restored.push({ path: slot, from: item[slot] as string, to: hit.to });
         nextItem = nextItem === item ? { ...item } : nextItem;
@@ -356,7 +372,7 @@ export function restoreTranslatedEchoes<T>(
             const hit = sourceOf(field[slot], (_doc, fields) => {
                 const f = fields.get(name);
                 return f ? f[slot] : NOT_DECLARED;
-            });
+            }, () => ({ base: packagedFields.get(name), key: slot }));
             if (!hit) continue;
             restored.push({ path: `fields.${name}.${slot}`, from: field[slot] as string, to: hit.to as string | undefined });
             next = next === field ? { ...field } : next;
@@ -371,7 +387,7 @@ export function restoreTranslatedEchoes<T>(
                 const hit = sourceOf(option.label, (_doc, fields) => {
                     const f = fields.get(name);
                     return f ? optionLabel(f.options, key) ?? NOT_DECLARED : NOT_DECLARED;
-                });
+                }, () => ({ base: optionOf(packagedFields.get(name)?.options, key), key: 'label' }));
                 if (!hit || typeof hit.to !== 'string') return;
                 restored.push({ path: `fields.${name}.options[${key}].label`, from: option.label as string, to: hit.to });
                 options ??= [...(field.options as unknown[])];
