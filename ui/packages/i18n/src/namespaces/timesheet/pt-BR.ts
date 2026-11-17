@@ -24,6 +24,7 @@ const pt = {
     multipleRecords: 'Este dia tem mais de um registro. Edite-os na lista.',
     invalidNumber: 'Digite um número',
     saveFailed: 'Não salvo: {{message}}',
+    notAllowed: 'Você não tem permissão para fazer esta alteração.',
     loadFailed: 'Não foi possível carregar esta semana.',
     rowIncomplete: 'Preencha primeiro todos os campos da linha.',
     cellLabel: '{{row}}, {{day}}',

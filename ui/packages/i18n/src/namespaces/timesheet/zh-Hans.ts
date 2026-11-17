@@ -24,6 +24,7 @@ const zh = {
     multipleRecords: '这一天有多条记录，请在列表中编辑。',
     invalidNumber: '请输入数字',
     saveFailed: '未保存：{{message}}',
+    notAllowed: '您没有进行此更改的权限。',
     loadFailed: '无法加载本周数据。',
     rowIncomplete: '请先填写每个行字段。',
     cellLabel: '{{row}}，{{day}}',

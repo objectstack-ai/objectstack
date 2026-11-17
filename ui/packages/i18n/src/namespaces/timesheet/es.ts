@@ -24,6 +24,7 @@ const es = {
     multipleRecords: 'Este día tiene más de un registro. Edítalos en la lista.',
     invalidNumber: 'Introduce un número',
     saveFailed: 'No guardado: {{message}}',
+    notAllowed: 'No tiene permiso para realizar este cambio.',
     loadFailed: 'No se pudo cargar esta semana.',
     rowIncomplete: 'Rellena primero todos los campos de la fila.',
     cellLabel: '{{row}}, {{day}}',

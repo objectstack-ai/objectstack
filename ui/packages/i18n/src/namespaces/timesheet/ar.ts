@@ -24,6 +24,7 @@ const ar = {
     multipleRecords: 'يحتوي هذا اليوم على أكثر من سجل واحد. عدّلها في القائمة.',
     invalidNumber: 'أدخل رقمًا',
     saveFailed: 'لم يتم الحفظ: {{message}}',
+    notAllowed: 'ليس لديك إذن لإجراء هذا التغيير.',
     loadFailed: 'تعذر تحميل هذا الأسبوع.',
     rowIncomplete: 'املأ جميع حقول الصف أولاً.',
     cellLabel: '{{row}}، {{day}}',

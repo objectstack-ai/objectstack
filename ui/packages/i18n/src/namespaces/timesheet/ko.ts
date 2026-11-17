@@ -24,6 +24,7 @@ const ko = {
     multipleRecords: '이 날에는 레코드가 여러 개 있습니다. 목록에서 편집하세요.',
     invalidNumber: '숫자를 입력하세요',
     saveFailed: '저장되지 않음: {{message}}',
+    notAllowed: '이 변경을 할 권한이 없습니다.',
     loadFailed: '이번 주를 불러올 수 없습니다.',
     rowIncomplete: '먼저 모든 행 필드를 입력하세요.',
     cellLabel: '{{row}}, {{day}}',

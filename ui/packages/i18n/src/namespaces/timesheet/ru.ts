@@ -24,6 +24,7 @@ const ru = {
     multipleRecords: 'В этот день несколько записей. Измените их в списке.',
     invalidNumber: 'Введите число',
     saveFailed: 'Не сохранено: {{message}}',
+    notAllowed: 'У вас нет прав на это изменение.',
     loadFailed: 'Не удалось загрузить эту неделю.',
     rowIncomplete: 'Сначала заполните все поля строки.',
     cellLabel: '{{row}}, {{day}}',

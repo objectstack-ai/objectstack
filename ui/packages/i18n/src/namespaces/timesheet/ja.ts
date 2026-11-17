@@ -24,6 +24,7 @@ const ja = {
     multipleRecords: 'この日には複数のレコードがあります。一覧で編集してください。',
     invalidNumber: '数値を入力してください',
     saveFailed: '保存されていません: {{message}}',
+    notAllowed: 'この変更を行う権限がありません。',
     loadFailed: '今週のデータを読み込めませんでした。',
     rowIncomplete: '先にすべての行フィールドを入力してください。',
     cellLabel: '{{row}}、{{day}}',

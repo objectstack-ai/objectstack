@@ -21,6 +21,7 @@ const zhHant = {
     multipleRecords: '這一天有多條記錄，請在列表中編輯。',
     invalidNumber: '請輸入數字',
     saveFailed: '未儲存：{{message}}',
+    notAllowed: '您沒有進行此更改的權限。',
     loadFailed: '無法載入本週資料。',
     rowIncomplete: '請先填寫每個行欄位。',
     cellLabel: '{{row}}，{{day}}',

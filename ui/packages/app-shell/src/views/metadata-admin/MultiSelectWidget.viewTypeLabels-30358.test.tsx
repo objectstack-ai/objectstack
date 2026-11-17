@@ -79,6 +79,8 @@ describe('allowedVisualizations chips read the view-type words (objectstack#3035
       'Map',
       'Chart',
       'Tree',
+      // #34382 added the tenth view type.
+      'Timesheet',
     ]);
   });
 

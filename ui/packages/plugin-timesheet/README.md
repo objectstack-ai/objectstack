@@ -61,6 +61,13 @@ declare const dataSource: DataSource;
   it `delete`s it. Hooks, validation and permissions judge each cell; a refusal
   stays on the cell with the server's message and the typed text, and Enter retries.
   Every write is announced with `notifyDataChanged`, which re-reads the week.
+- **Grants.** The console offers each write only to a caller who may make it,
+  through the affordance-to-grant map in `@object-ui/core`: an empty cell and
+  **Add row** need `gridAddRow` (create), a new value in a filled cell needs
+  `listInlineEdit` (update, plus the value field's write permission), and
+  clearing it needs `rowDelete` (delete). A cell no granted write can change is
+  read-only, and a write the caller may not make stays on its cell with a
+  message instead of being sent. With no permission provider all three are open.
 - **Multi-record cells** show their sum and are read-only.
 - **Week.** Starts on the display locale's first day (`firstDayOfWeek`), with
   previous / this / next navigation. Row, day and week totals are always shown.

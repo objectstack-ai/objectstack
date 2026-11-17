@@ -30,6 +30,7 @@ timesheet: {
 
 - Typing into an empty cell creates a record carrying the row's field values, the day and the number. Changing a cell updates that record, and clearing it deletes the record. Each cell is one call on the record API, so hooks, validation rules and permissions judge it; a refusal stays on that cell with the server's message.
 - A cell holding several records shows their sum and is read-only.
+- The grid offers each write only to a caller who may make it (the affordance-to-grant map's `gridAddRow`, `listInlineEdit` with the value field's write permission, and `rowDelete`). A cell no granted write can change is read-only, and **Add row** needs the create grant. An interface page's list block relays the view's `timesheet` block.
 - The week starts on the viewer's locale first day, with previous / this / next navigation. Row, day and week totals are always shown.
 - **Add row** asks for the row field values first; typing a day then creates the record. The view's `filter` applies to the week's query.
 - A `timesheet` view with an incomplete block shows "Timesheet configuration required", and `os validate` warns with `view/layout-without-binding`. `view/list-view-field-refs` checks the three field names.

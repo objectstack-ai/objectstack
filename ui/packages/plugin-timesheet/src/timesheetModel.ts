@@ -286,6 +286,37 @@ export function planCellWrite(
   return { kind: 'update', id, data: { [binding.valueField]: next } };
 }
 
+/**
+ * Which of a cell's three writes the caller may make. The view resolves each
+ * from a row of the affordance-to-grant map (`resolveAffordance` in
+ * `@object-ui/core`, objectui#12082); with no permission provider all three
+ * read open.
+ */
+export interface CellWriteGrants {
+  create: boolean;
+  update: boolean;
+  delete: boolean;
+}
+
+/**
+ * Whether a cell offers an input: an empty cell when the caller may create, a
+ * one-record cell when they may update or clear it, and a cell holding
+ * several records never.
+ */
+export function cellEditable(cell: TimesheetCell, grants: CellWriteGrants): boolean {
+  if (cell.records.length > 1) return false;
+  if (cell.records.length === 0) return grants.create;
+  return grants.update || grants.delete;
+}
+
+/** Whether the caller may make a planned write. A plan that writes nothing needs no grant. */
+export function writeGranted(write: CellWrite, grants: CellWriteGrants): boolean {
+  if (write.kind === 'create') return grants.create;
+  if (write.kind === 'update') return grants.update;
+  if (write.kind === 'delete') return grants.delete;
+  return true;
+}
+
 /** Whether every row field holds a value — the add-row form's gate. */
 export function rowValuesComplete(values: Record<string, unknown>, rowFields: readonly string[]): boolean {
   return rowFields.every((f) => {

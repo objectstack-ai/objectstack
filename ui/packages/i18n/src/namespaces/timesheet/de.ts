@@ -24,6 +24,7 @@ const de = {
     multipleRecords: 'Dieser Tag enthält mehr als einen Datensatz. Bearbeiten Sie sie in der Liste.',
     invalidNumber: 'Geben Sie eine Zahl ein',
     saveFailed: 'Nicht gespeichert: {{message}}',
+    notAllowed: 'Sie haben keine Berechtigung für diese Änderung.',
     loadFailed: 'Diese Woche konnte nicht geladen werden.',
     rowIncomplete: 'Füllen Sie zuerst alle Zeilenfelder aus.',
     cellLabel: '{{row}}, {{day}}',

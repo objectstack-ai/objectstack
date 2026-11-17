@@ -558,6 +558,12 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       // is relayed: the spec retired it (#25923) and `ListView` reads none.
       ...(view.tree !== undefined ? { tree: view.tree } : {}),
       ...(view.chart !== undefined ? { chart: view.chart } : {}),
+      // #34382 — a `type: 'timesheet'` view's `timesheet` block
+      // (`{ rowFields, dateField, valueField }`), carried whole like the two
+      // above for the same reason: `ListView`'s timesheet branch draws nothing
+      // but its configuration notice without it, and no page-derived default
+      // can guess which fields make the rows, the day and the value.
+      ...(view.timesheet !== undefined ? { timesheet: view.timesheet } : {}),
 
       // Presentation policy — the page layer (ADR-0047).
       userFilters: cfg.userFilters ?? view.userFilters,

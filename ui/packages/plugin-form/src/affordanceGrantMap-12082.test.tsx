@@ -887,6 +887,14 @@ const WRITE_SITES: Record<string, WriteSite> = {
     mapped(['recordEdit'], RECORD_PANEL),
   'packages/plugin-kanban/src/ObjectKanban.tsx :: ObjectKanban > renderRecordOverlay > onDelete :: delete':
     mapped(['recordDelete'], DETAIL_VIEW),
+  // ── plugin-timesheet ── (#34382: typing into an empty cell creates, retyping
+  // a one-record cell updates its value field, clearing it deletes the record)
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: create':
+    mapped(['gridAddRow'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: update':
+    mapped(['listInlineEdit'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
+  'packages/plugin-timesheet/src/ObjectTimesheet.tsx :: TimesheetGridView > writeCell :: delete':
+    mapped(['rowDelete'], 'packages/plugin-timesheet/src/ObjectTimesheet.tsx'),
   // ── plugin-view ──
   'packages/plugin-view/src/ObjectView.tsx :: ObjectView > onClick :: delete':
     mapped(['rowDelete'], OBJECT_GRID),

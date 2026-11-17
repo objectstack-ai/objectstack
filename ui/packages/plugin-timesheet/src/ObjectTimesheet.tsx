@@ -72,12 +72,16 @@ import {
   buildExpandFields,
   mergeFilterNodes,
   nonGridRowCeilingQuery,
+  resolveAffordance,
+  resolveFieldAffordance,
   type NonGridCeilingResult,
+  type SchemaLike,
 } from '@object-ui/core';
 import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import {
   addDays,
   buildTimesheetRows,
+  cellEditable,
   parseCellInput,
   planCellWrite,
   recordIdOf,
@@ -87,7 +91,9 @@ import {
   startOfWeek,
   weekDays,
   weekQueryBounds,
+  writeGranted,
   fromDayKey,
+  type CellWriteGrants,
   type TimesheetBinding,
   type TimesheetCell,
   type TimesheetRow,
@@ -109,6 +115,7 @@ const TIMESHEET_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'timesheet.multipleRecords': 'This day holds more than one record. Edit them in the list.',
   'timesheet.invalidNumber': 'Enter a number',
   'timesheet.saveFailed': 'Not saved: {{message}}',
+  'timesheet.notAllowed': "You don't have permission to make this change.",
   'timesheet.loadFailed': 'This week could not be loaded.',
   'timesheet.rowIncomplete': 'Fill in every row field first.',
   'timesheet.cellLabel': '{{row}}, {{day}}',
@@ -293,6 +300,25 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
   const rowName = (row: TimesheetRow): string =>
     binding.rowFields.map((f) => displayText(row.values[f])).filter(Boolean).join(' · ');
 
+  // objectui#12082 — each cell write is a row of the affordance-to-grant map
+  // (`resolveAffordance` in `@object-ui/core`), asked of the object the grid
+  // writes: typing into an empty cell creates a record inline, as a grid's
+  // add-record row does (`gridAddRow`); retyping a one-record cell is an
+  // in-cell edit of the value field (`listInlineEdit`, with that field's write
+  // question); clearing it deletes the record (`rowDelete`). A cell no granted
+  // write can change renders read-only, Add row is offered only to a caller
+  // who may create, and a write the caller may not make is refused with a
+  // message before it goes out. With no permission provider every row reads
+  // open.
+  const writeSource = { objectSchema: (objectSchema ?? null) as SchemaLike | null, objectName, perms };
+  const grants: CellWriteGrants = {
+    create: resolveAffordance('gridAddRow', writeSource).allowed,
+    update:
+      resolveAffordance('listInlineEdit', writeSource).allowed &&
+      resolveFieldAffordance('listInlineEdit', perms, objectName, binding.valueField),
+    delete: resolveAffordance('rowDelete', writeSource).allowed,
+  };
+
   const writeCell = async (row: TimesheetRow, day: string, cell: TimesheetCell, text: string) => {
     const id = cellId(row.key, day);
     const parsed = parseCellInput(text);
@@ -303,6 +329,10 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
     const write = planCellWrite(binding, row, day, cell, parsed, fieldDef(binding.dateField)?.type);
     if (write.kind === 'none' || write.kind === 'readonly' || !dataSource) {
       setDrafts(({ [id]: _dropped, ...rest }) => rest);
+      return;
+    }
+    if (!writeGranted(write, grants)) {
+      setDrafts((d) => ({ ...d, [id]: { text, error: t('timesheet.notAllowed') } }));
       return;
     }
     setDrafts((d) => ({ ...d, [id]: { text, saving: true } }));
@@ -368,16 +398,18 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
         <span className="text-sm font-medium" data-testid="timesheet-range">
           {`${rangeFormat.format(fromDayKey(weekStart))} – ${rangeFormat.format(fromDayKey(addDays(weekStart, 6)))}`}
         </span>
-        <Button
-          variant="outline"
-          size="sm"
-          className="ml-auto gap-1"
-          data-testid="timesheet-add-row"
-          onClick={() => setAdding(true)}
-        >
-          <Plus className="h-4 w-4" />
-          {t('timesheet.addRow')}
-        </Button>
+        {grants.create && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto gap-1"
+            data-testid="timesheet-add-row"
+            onClick={() => setAdding(true)}
+          >
+            <Plus className="h-4 w-4" />
+            {t('timesheet.addRow')}
+          </Button>
+        )}
       </div>
 
       {records === null ? (
@@ -426,16 +458,17 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
                     const cell = row.cells[day];
                     const id = cellId(row.key, day);
                     const label = t('timesheet.cellLabel', { row: name, day: dayHeading.format(fromDayKey(day)) });
-                    if (cell.records.length > 1) {
+                    if (!cellEditable(cell, grants)) {
+                      const shown = cell.records.length > 0 ? numberFormat.format(cell.sum) : '';
                       return (
                         <td key={day} className="px-2 py-1 text-right">
                           <span
-                            className="inline-block w-full rounded px-2 py-1 text-muted-foreground"
-                            title={t('timesheet.multipleRecords')}
-                            aria-label={`${label}: ${numberFormat.format(cell.sum)}`}
+                            className="inline-block min-h-[1.75rem] w-full rounded px-2 py-1 text-muted-foreground"
+                            title={cell.records.length > 1 ? t('timesheet.multipleRecords') : undefined}
+                            aria-label={shown ? `${label}: ${shown}` : label}
                             data-testid="timesheet-cell-readonly"
                           >
-                            {numberFormat.format(cell.sum)}
+                            {shown}
                           </span>
                         </td>
                       );

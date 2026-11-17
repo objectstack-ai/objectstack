@@ -24,6 +24,7 @@ const en = {
     multipleRecords: 'This day holds more than one record. Edit them in the list.',
     invalidNumber: 'Enter a number',
     saveFailed: 'Not saved: {{message}}',
+    notAllowed: "You don't have permission to make this change.",
     loadFailed: 'This week could not be loaded.',
     rowIncomplete: 'Fill in every row field first.',
     cellLabel: '{{row}}, {{day}}',

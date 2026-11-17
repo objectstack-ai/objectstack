@@ -24,6 +24,7 @@ const fr = {
     multipleRecords: 'Ce jour contient plus d’un enregistrement. Modifiez-les dans la liste.',
     invalidNumber: 'Saisissez un nombre',
     saveFailed: 'Non enregistré : {{message}}',
+    notAllowed: "Vous n'avez pas l'autorisation d'effectuer cette modification.",
     loadFailed: 'Impossible de charger cette semaine.',
     rowIncomplete: 'Renseignez d\'abord tous les champs de la ligne.',
     cellLabel: '{{row}}, {{day}}',
