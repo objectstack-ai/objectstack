@@ -29,6 +29,9 @@
 import { describe, expect, it } from 'vitest';
 import { dateFieldValue, dayKeyOf, weekQueryBounds } from '../timesheetModel';
 
+// This package's test config carries no Node types; the pin reads and writes the zone.
+declare const process: { env: Record<string, string | undefined> };
+
 const DRIVEN = process.env.OBJECTUI_DATE_ZONE_CHILD === '1';
 
 /** UTC+13 in November — New Zealand daylight time, the card's worst case. */
