@@ -118,7 +118,7 @@ describe('[#33952] a package installed through registerApp keeps its translation
       objectExtensions: [{ extend: OBJ, fieldPatches: { registration_number: { label: 'Tax ID', description: 'Unified social credit code.' } } }],
       translations: DEP_TRANSLATIONS,
     });
-    expect((ql.registry as SchemaRegistry).getPackage(DEP_PKG)?.manifest?.translations).toEqual(DEP_TRANSLATIONS);
+    expect(((ql.registry as SchemaRegistry).getPackage(DEP_PKG)?.manifest as any)?.translations).toEqual(DEP_TRANSLATIONS);
 
     // The protocol over this registry; no stored rows (the row read finds nothing).
     const engine: any = { registry: ql.registry, async find() { return []; }, async findOne() { return null; } };
