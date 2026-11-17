@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 322 |
-| Object name statically decidable | 226 |
+| Write call sites | 323 |
+| Object name statically decidable | 227 |
 | Object name chosen at run time | 96 |
-| Against a tenancy-enabled object | 219 |
+| Against a tenancy-enabled object | 220 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 250 |
+| Threading a tenant context | 251 |
 | Provably carrying none | 13 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 59 |
 | …and decidably tenancy-enabled | 32 |
 | Threading a decidably elevated context | 181 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 128 |
+| Threading a context of undecidable elevation | 129 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-17 at `35f918fbf`.
+Measured on 2026-11-17 at `5a448780c`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1186 |
+| tracked non-test sources scanned | 1189 |
 | engine-shaped types recognised | 143 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 325 |
+| same-named calls subtracted as non-engine | 326 |
 
 ## Every site
 
@@ -138,6 +138,7 @@ Measured on 2026-11-17 at `35f918fbf`.
 | `packages/plugins/plugin-audit/src/stored-metadata-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/admin-import-users.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/admin-import-users.ts` | `update` | `sys_user` | enabled | options unreadable | 2 |
+| `packages/plugins/plugin-auth/src/admin-import-users.ts` | `insert` | `sys_user_position` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/admin-set-user-manager.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `update` | `sys_user` | enabled | elevated | 1 |

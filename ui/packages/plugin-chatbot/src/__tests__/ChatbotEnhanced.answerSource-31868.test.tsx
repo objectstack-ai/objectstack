@@ -196,12 +196,52 @@ describe('objectstack#31868 — the "How this was computed" block', () => {
   });
 });
 
+describe('objectstack#33824 — the access line follows scope: all_records draws none', () => {
+  /** SOURCE as a producer answers it when getReadFilter answered undefined for the caller. */
+  const ALL_RECORDS = { ...SOURCE, scope: 'all_records' };
+  const allRecordsTurn = () =>
+    toolPart('t1', 'aggregate_data', wrapped({ rows: [{ owner: 'u1', amount: 1 }], source: ALL_RECORDS }));
+
+  it('a block whose scope is all_records is on contract and lifts whole', () => {
+    expect(ObjectQuerySourceSchema.safeParse(ALL_RECORDS).success).toBe(true);
+    expect(detectAnswerSource(wrapped({ rows: [], source: ALL_RECORDS }))).toEqual(ALL_RECORDS);
+  });
+
+  it('all_records draws the block and its rows, and no access line', () => {
+    renderTurn([allRecordsTurn()]);
+    openBlock();
+    expect(screen.getByTestId('answer-source-section')).toHaveTextContent('Opportunities');
+    expect(screen.getByTestId('answer-source-records')).toHaveTextContent(/^7$/);
+    expect(screen.queryByTestId('answer-source-scope')).toBeNull();
+    expect(screen.getByTestId('answer-source')).not.toHaveTextContent('Only records visible to you');
+  });
+
+  it('visible_to_you still draws its access line', () => {
+    renderTurn([withSource()]);
+    openBlock();
+    expect(screen.getByTestId('answer-source-scope')).toHaveTextContent('Only records visible to you');
+  });
+
+  it('the shipped zh pack draws no access line for all_records', async () => {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
+        <ChatbotEnhanced messages={[question, turn([allRecordsTurn()])]} />
+      </I18nProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '计算方式' }));
+    expect(screen.getByTestId('answer-source-section')).toHaveTextContent('记录7');
+    expect(screen.queryByTestId('answer-source-scope')).toBeNull();
+    expect(screen.getByTestId('answer-source')).not.toHaveTextContent('仅包含你可见的记录');
+  });
+});
+
 describe('the source block is read through the published contract (ObjectQuerySourceSchema)', () => {
   /** A block the schema refuses; each one is otherwise SOURCE, which the schema accepts. */
   const offContract: Array<[string, Record<string, unknown>]> = [
     ['an orderBy direction outside asc | desc', { ...SOURCE, orderBy: [{ field: 'amount', order: 'ASC' }] }],
     ['an aggregation function the query dialect does not name', { ...SOURCE, aggregations: [{ function: 'median', field: 'amount' }] }],
-    ['a scope other than visible_to_you', { ...SOURCE, scope: 'all_records' }],
+    ['a scope outside visible_to_you | all_records', { ...SOURCE, scope: 'everyone' }],
+    ['no scope', { ...SOURCE, scope: undefined }],
     ['no line', { ...SOURCE, line: undefined }],
   ];
 

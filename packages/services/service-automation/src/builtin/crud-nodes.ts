@@ -38,6 +38,7 @@ import { resolveValueSlot, resolveValueSlotMap } from './value-slot-map.js';
 import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { resolveRunDataContext, stampSystemInsertOwner } from '../runtime-identity.js';
+import { dryRunDataEngine } from '../dry-run.js';
 import { refusalCarriedBy } from '../inner-refusal.js';
 import { staleSummaryAnswerLines, staleSummaryRefusalOrThrow } from '@objectstack/types';
 
@@ -615,11 +616,17 @@ function storedMetadataWriteRefusal(
  */
 export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext): void {
         const getData = (): IDataEngine | undefined => {
+            let real: IDataEngine | undefined;
             try {
-                return ctx.getService<IDataEngine>('data') ?? ctx.getService<IDataEngine>('objectql');
+                real = ctx.getService<IDataEngine>('data') ?? ctx.getService<IDataEngine>('objectql');
             } catch {
-                return undefined;
+                real = undefined;
             }
+            // [#33661] Inside a dry run (`AutomationEngine.dryRun`) the node
+            // reaches the dry run's stand-in: live reads, simulated writes.
+            // Outside one this is `undefined` and the node reaches `real`.
+            const dry = dryRunDataEngine(real, () => ctx.getService('security')) as IDataEngine | undefined;
+            return dry ?? real;
         };
 
         // ── get_record ────────────────────────────────────────

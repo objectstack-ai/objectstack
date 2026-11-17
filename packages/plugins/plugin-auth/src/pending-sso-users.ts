@@ -100,6 +100,7 @@ import {
 import { applyUserManagerLink, type SetUserManagerEngine } from './admin-set-user-manager.js';
 import type { AddMemberCapableApi } from './organization-add-member.js';
 import { readJsonRequestBody } from './request-json-body.js';
+import { readNameList } from './name-list-cell.js';
 import { authSystemWriteContext } from './auth-actor-attribution.js';
 import {
   isPendingSsoSource,
@@ -186,20 +187,6 @@ type AddOutcome =
 const ADD_KEYS = new Set(['email', 'name', 'positions', 'permissionSets', 'manager']);
 const ADD_FIELD_NAMES = { positions: 'positions', permissionSets: 'permissionSets', manager: 'manager' } as const;
 const IMPORT_FIELD_NAMES = { positions: 'positions', permissionSets: 'permission_sets', manager: 'manager_id' } as const;
-
-/** A list cell: an array of names, or one `;`-separated string. Empty entries are dropped. */
-function readNameList(raw: unknown, label: string): string[] | string {
-  if (raw === undefined || raw === null || raw === '') return [];
-  const parts = typeof raw === 'string' ? raw.split(';') : Array.isArray(raw) ? raw : undefined;
-  if (!parts) return `${label} must be a list of machine names`;
-  const out: string[] = [];
-  for (const part of parts) {
-    if (typeof part !== 'string') return `${label} must be a list of machine names`;
-    const name = part.trim();
-    if (name && !out.includes(name)) out.push(name);
-  }
-  return out;
-}
 
 /** Read one person from the add body or an import row. A string answer is the refusal sentence. */
 function readPerson(

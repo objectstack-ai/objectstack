@@ -108,6 +108,7 @@ export interface SecurityServiceHost {
   readonly tenancyPosture: SecurityPlugin['tenancyPosture'];
   canExport: SecurityPlugin['canExport'];
   canReadObject: SecurityPlugin['canReadObject'];
+  canWriteObject: SecurityPlugin['canWriteObject'];
   checkAuthoredRowWrite: SecurityPlugin['checkAuthoredRowWrite'];
   checkControlledByParentWrite: SecurityPlugin['checkControlledByParentWrite'];
   declareEveryone: SecurityPlugin['declareEveryone'];
@@ -127,7 +128,7 @@ export interface SecurityServiceHost {
 
 /** The `security` service registration `SecurityPlugin#start` runs; the comment above its call there is its contract. */
 export function registerSecurityService(
-  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
+  this: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'baselinePermissionSets' | 'bootstrapPermissionSets' | 'canExport' | 'canReadObject' | 'canWriteObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'epoch' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'platformBaselineSets' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'>,
   ctx: PluginContext,
   ql: IObjectQLEngine,
   metadata: IMetadataService,
@@ -407,6 +408,12 @@ export function registerSecurityService(
     const registeredSecurityService = Object.assign(securityService, {
       getMetadataReadableFields: (object: string, context?: any) =>
         this.getMetadataReadableFields(object, context),
+      // [#33661] The object-level write check (insert or update) a flow dry
+      // run asks for each simulated write (`IAutomationService.dryRun`,
+      // "canWriteObject is a method of plugin-security's service"). The same
+      // method the engine's write-gate probe calls; ⛔ not a second decision.
+      canWriteObject: (object: string, operation: 'insert' | 'update', context?: any, data?: unknown) =>
+        this.canWriteObject(object, operation, context, data),
       // [#21729] The ownership-floor alternate seam — how a plugin that
       // installs a tighter row gate stops the platform's `created_by` floor
       // pre-empting it, registered beside that gate and nowhere else. Same
