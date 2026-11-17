@@ -255,7 +255,7 @@ describe('AiChatPage — turns reach the agent in the order sent, while attachme
       pending.get('receipt.png')!.reject(new Error('Upload completion failed (500)'));
     });
     await waitFor(() => expect(state.sent.length).toBe(2), { timeout: 4000 });
-    expect(userText(1)).toMatch(/上传失败,内容未读取:receipt\.png/);
+    expect(userText(1)).toMatch(/failed to upload, and their content was not read: receipt\.png/);
     await waitFor(() => expect(state.pane?.isLoading).toBe(false), { timeout: 4000 });
   });
 
