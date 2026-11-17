@@ -4,13 +4,21 @@ import { BUILTIN_OPERATION_MESSAGES, renderOperationMessage, resolveBundleLocale
 
 /**
  * [#34699] Whose language a refusal's `userMessage` is in: the operation's
- * execution context, or any value carrying its two locale fields.
+ * execution context, or any object carrying its two locale fields —
+ * `locale` (the request's own, `ExecutionContext.locale`) and
+ * `workspaceLocale` (the workspace default, the ladder's second rung).
+ *
+ * Typed `object`, not an interface of two optional fields: the contexts that
+ * reach producers (engine, hook and middleware contexts, test callers) mostly
+ * declare neither field, and TypeScript refuses such a value for an all-optional
+ * type it shares no property with. The fields are read defensively instead: a
+ * rung that is not a non-empty string the catalog carries is skipped.
  */
-export interface UserMessageCaller {
-    /** The request's own locale (`ExecutionContext.locale`). */
-    readonly locale?: string;
-    /** The workspace default (`ExecutionContext.workspaceLocale`), the ladder's second rung. */
-    readonly workspaceLocale?: string;
+export type UserMessageCaller = object;
+
+interface CallerLocales {
+    readonly locale?: unknown;
+    readonly workspaceLocale?: unknown;
 }
 
 /**
@@ -28,7 +36,8 @@ export interface UserMessageCaller {
  * `renderOperationMessage` with its `translate` instead.
  */
 export function operationUserMessage(messageKey: string, caller?: UserMessageCaller | null): string {
-    const locale = [caller?.locale, caller?.workspaceLocale].find(
+    const rungs = caller as CallerLocales | null | undefined;
+    const locale = [rungs?.locale, rungs?.workspaceLocale].find(
         (candidate): candidate is string =>
             typeof candidate === 'string' &&
             candidate.length > 0 &&
