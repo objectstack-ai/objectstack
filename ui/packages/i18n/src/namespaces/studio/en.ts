@@ -4581,6 +4581,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.category.positions': 'Positions',
   'engine.translationPreview.category.permissions': 'Permission Sets',
   'engine.translationPreview.category.books': 'Doc Books',
+  'engine.translationPreview.category.mappings': 'Import Mappings',
   'engine.translationPreview.category.metadataForms': 'Metadata Forms',
   'engine.translationPreview.category.settingsCommon': 'Settings UI',
   'engine.translationPreview.coverage': 'Category coverage:',

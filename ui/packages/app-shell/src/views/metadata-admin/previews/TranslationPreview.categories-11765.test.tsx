@@ -79,6 +79,7 @@ const ONE_ENTRY: Record<string, { data: Record<string, unknown>; key: string; ro
     key: 'crm_manual',
     row: () => keys(2),
   },
+  mappings: { data: { lead_feed: { label: 'Import des pistes' } }, key: 'lead_feed', row: () => keys(1) },
   metadataForms: { data: { object: { label: 'Objet' } }, key: 'object', row: () => keys(1) },
   // `settingsCommon` is one strict object, not a record of author-named nodes:
   // its members (`sourceLabels`) are what the card counts and samples.

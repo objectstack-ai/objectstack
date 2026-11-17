@@ -1499,5 +1499,10 @@ export const ShowcaseTranslationBundle = {
         },
       },
     },
+    // The named import mapping, as the import wizard offers it by name.
+    // Counted by `check-i18n-coverage` like the groups above (#34939).
+    mappings: {
+      showcase_inquiry_feed: { label: '询盘导入（营销 CSV）' },
+    },
   },
 };
