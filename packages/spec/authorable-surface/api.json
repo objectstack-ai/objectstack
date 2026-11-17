@@ -384,6 +384,7 @@
     "api/CreateFlowRequest:_packageId",
     "api/CreateFlowRequest:_packageVersion",
     "api/CreateFlowRequest:_provenance",
+    "api/CreateFlowRequest:defaultActive",
     "api/CreateFlowRequest:description",
     "api/CreateFlowRequest:edges",
     "api/CreateFlowRequest:errorHandling",

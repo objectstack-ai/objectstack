@@ -355,6 +355,7 @@ import {
   useSurfaceDeepLink,
   useSurfaceDeepLinkCapture,
   useSurfaceDeepLinkMirror,
+  useSurfaceActionDeepLink,
   resolveSurfaceDeepLink,
   type SurfaceTarget,
 } from './useSurfaceDeepLink.js';
@@ -5760,6 +5761,10 @@ export function DataPillar({
     }
     setFieldSel({ kind: target.kind, id: target.id });
   };
+  // objectstack#34724 — `?surface=object:<name>&action=<action>` opens the
+  // deep-linked object's Actions view on that action (Studio's landing links a
+  // switched-off action that lives in its object's `actions[]` here).
+  useSurfaceActionDeepLink(initialSurface, current, (name) => showObjTarget({ kind: 'action', id: name }));
   // objectstack#26730 — a refusal's "Show me" also ends on the input it names:
   // in the field inspector, or in the actions panel for an action.
   const fieldInspectorBodyRef = React.useRef<HTMLDivElement>(null);
@@ -8107,6 +8112,32 @@ export function DataPillar({
 // objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.
 export { FlowStatusDot, type NewFlowTrigger };
 
+/**
+ * objectstack#34818 — the names of the flows that have a published version in
+ * these scopes: the published list (`list()` serves no drafts). Any failed read
+ * answers `null`, "unknown", so the Runs tab keeps its sentence that names both
+ * causes rather than claim the flow was never published.
+ */
+async function readPublishedFlowNames(
+  client: Pick<MetadataClient, 'listResponse'>,
+  scopes: ReadonlyArray<string | null>,
+): Promise<ReadonlySet<string> | null> {
+  try {
+    const answers = await Promise.all(
+      scopes.map((packageId) => client.listResponse<Record<string, unknown>>('flow', packageId === null ? {} : { packageId })),
+    );
+    const names = new Set<string>();
+    for (const answer of answers) {
+      for (const item of answer?.items ?? []) {
+        if (item && typeof item.name === 'string' && item.name) names.add(item.name);
+      }
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
 /** Automations pillar — flows: list → FlowPreview (default OFF / review-then-enable). */
 export function AutomationsPillar({
   packageId: railPackageId,
@@ -8392,6 +8423,10 @@ export function AutomationsPillar({
   // list's `registrations` (served beside the items, keyed by name). A flow
   // with no entry is one no engine judged, which reads as before.
   const [flowRegistrations, setFlowRegistrations] = React.useState<Record<string, FlowRegistration>>({});
+  // objectstack#34818 — the flows of the rail's scope that have a published
+  // version, so the Runs tab can tell "not published yet" from "the engine is
+  // not answering". `null` until read, and after a failed read: unknown.
+  const [publishedFlowNames, setPublishedFlowNames] = React.useState<ReadonlySet<string> | null>(null);
   // objectui#12454 — the rail groups flows by the object each is about and
   // marks each with its trigger kind, both read off the flow's definition as
   // served (`flowGrouping.ts`), with the scope's objects naming the groups.
@@ -8460,7 +8495,7 @@ export function AutomationsPillar({
                 readFlowDefinitions(client, pairId),
                 readObjectLabels(client, pairId, locale),
               ]);
-        const [baseItems, registrations, definitions, objects, pair] = await Promise.all([
+        const [baseItems, registrations, definitions, objects, pair, publishedNames] = await Promise.all([
           packageId === null
             ? loadPackageLessSurfaces(client, 'flow', locale)
             : loadPackageSurfaces(client, 'flow', packageId, locale),
@@ -8468,10 +8503,12 @@ export function AutomationsPillar({
           readFlowDefinitions(client, packageId),
           readObjectLabels(client, packageId, locale),
           readPair().catch(() => null),
+          readPublishedFlowNames(client, [packageId, ...(pairId === null ? [] : [pairId])]),
         ]);
         if (cancelled) return;
         const items: Surface[] = withPairItems<Surface>(baseItems, pair?.[0] ?? [], pairId);
         setFlows(items);
+        setPublishedFlowNames(publishedNames);
         setFlowRegistrations(pair ? { ...pair[1], ...registrations } : registrations);
         setFlowDefinitions(pair ? new Map([...pair[2], ...definitions]) : definitions);
         setObjectLabels(pair ? new Map([...pair[3], ...objects]) : objects);
@@ -8665,10 +8702,14 @@ export function AutomationsPillar({
 
   // objectui#5813 — local dirty flag: auto-save arms only after a real edit.
   const [autoDirty, setAutoDirty] = React.useState(false);
+  // objectstack#34818 — the flow whose last autosave landed with nothing edited
+  // since: its header row says 已保存 in place of a toast. The next edit clears it.
+  const [flowSavedFor, setFlowSavedFor] = React.useState<string | null>(null);
   const onPatch = React.useCallback(
     (patch: Record<string, unknown>) => {
       setDraft((d) => ({ ...d, ...patch }));
       setAutoDirty(true);
+      setFlowSavedFor(null);
     },
     [],
   );
@@ -8676,6 +8717,12 @@ export function AutomationsPillar({
     if (!current) return;
     setSaving('draft');
     setError(null);
+    // objectstack#34818 — a landed autosave raises no toast (the header says
+    // 已保存); a failed one does, once per flow, beside its refusal strip.
+    const announceFailed = () =>
+      toast.error(tFormat('engine.studio.flowSaveFailed', locale, { item: current.label || current.name }), {
+        id: `studio-draft-failed:flow:${current.name}`,
+      });
     try {
       // objectstack#28570 — a read-only base's flow is saved into the pair the
       // ensure door answers, under its own name, declaring the override. A
@@ -8689,11 +8736,13 @@ export function AutomationsPillar({
           pair = await pairForFlow(custom, current.name);
         } catch (e) {
           setError(plainRefusal(e));
+          announceFailed();
           return;
         }
         const declared = overrideDraftBody(draft, custom.base, custom.basedOn);
         if (declared === null) {
           setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          announceFailed();
           return;
         }
         // The buffer was read at another package (the base, before its pair
@@ -8721,13 +8770,19 @@ export function AutomationsPillar({
       // objectstack#26858 — the stored draft carries its own verdict now.
       rereadFlowVerdict(current.name, target.packageId);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
-      if (sent.unmoved()) setAutoDirty(false);
-      // objectstack#28984 — named as the rail names the flow.
-      announceDraftSaved({ type: 'flow', name: current.name }, current.label, locale);
+      // objectstack#34818 — and only then does the header say 已保存: an edit
+      // made in flight is not saved yet. The header row names the flow, which
+      // is what ruling 6545938831 ② on #28345 asks of write feedback, so the
+      // flow pillar raises no "Draft of X saved" toast (seat ruling 6954475081).
+      if (sent.unmoved()) {
+        setAutoDirty(false);
+        setFlowSavedFor(current.name);
+      }
       onDraftSaved?.({ type: 'flow', name: current.name });
     } catch (e) {
       // objectui#11785 — read against `draft`, the body this save sent.
       setError(flowSaveRefusal(e, draft, locale));
+      announceFailed();
     } finally {
       setSaving(false);
     }
@@ -9013,6 +9068,12 @@ export function AutomationsPillar({
   React.useEffect(() => {
     if (flowSelectionKey && showSlotProps) showSlotProps();
   }, [flowSelectionKey, showSlotProps]);
+  // objectstack#34818 — Debug takes the Configuration's place in the slot, so
+  // opening it shows the properties half, where the simulator is drawn.
+  const flowDebugOpen = flowSection === 'debug';
+  React.useEffect(() => {
+    if (flowDebugOpen && showSlotProps) showSlotProps();
+  }, [flowDebugOpen, showSlotProps]);
   React.useEffect(() => {
     if (!inSlot || !flowSelectionKey) return;
     const onKey = (e: KeyboardEvent) => {
@@ -9541,6 +9602,21 @@ export function AutomationsPillar({
                     {t('engine.studio.autoSaving', locale)}
                   </span>
                 )}
+                {/* objectstack#34818 — the landed autosave, said in the flow's own
+                    title row instead of a toast; read aloud with the flow's name. */}
+                {saving !== 'draft' && current && flowSavedFor === current.name && (
+                  <span
+                    role="status"
+                    className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
+                    data-testid="auto-autosaved"
+                  >
+                    <Check className="h-3 w-3" aria-hidden="true" />
+                    <span aria-hidden="true">{t('engine.studio.autoSaved', locale)}</span>
+                    <span className="sr-only">
+                      {tFormat('engine.studio.flowSavedNamed', locale, { item: current.label || current.name })}
+                    </span>
+                  </span>
+                )}
                 {/* objectstack#28570 — Customize unlocks the flow's editors; nothing is saved until an edit. */}
                 {current && flowLoaded && flowCustomizable && !flowUnlocked && !flowInPair && (
                   <StudioCustomizeButton
@@ -9723,7 +9799,14 @@ export function AutomationsPillar({
                     {/* objectui#12454 — the header holds the meta and the tabs, so the
                         preview shows the open tab's section and draws no bar of its own. */}
                     <FlowPreviewChromeProvider
-                      value={{ section, onSectionChange: setFlowSection, onProblemsChange: setProblemTally }}
+                      value={{
+                        section,
+                        onSectionChange: setFlowSection,
+                        onProblemsChange: setProblemTally,
+                        published: current && publishedFlowNames ? publishedFlowNames.has(current.name) : undefined,
+                        // objectstack#34818 — in the right slot, Debug draws the simulator there.
+                        debugTarget: inSlot && section === 'debug' ? slot.propsTarget : null,
+                      }}
                     >
                       {React.createElement(Preview, {
                         type: current.type,
@@ -9753,7 +9836,12 @@ export function AutomationsPillar({
           </main>
         </div>
 
-        {flowsEmpty ? null : configFolded && !inSlot ? (
+        {/* #34818 — Debug takes the Configuration's place, and the aside is
+            not drawn: in the classic row the simulator column widens to the
+            aside's width; in the right slot the simulator is drawn in the
+            slot itself (the chrome's `debugTarget`). The selection is kept,
+            so leaving Debug brings the aside back as it was. */}
+        {flowsEmpty || section === 'debug' ? null : configFolded && !inSlot ? (
           // objectui#11795 — the folded row: no aside reserving width beside
           // the canvas; the selection's configuration opens over it, and
           // closing the drawer clears the selection, as the aside's ✕ does.

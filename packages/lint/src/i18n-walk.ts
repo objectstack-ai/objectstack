@@ -144,6 +144,8 @@
  *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message      (#33214)
  *   hooks.<hook>.texts.<key>.message                           (#34374)
+ *   objects.<object>._actions.<action>.refusals.<CODE>.message  (#34273; and
+ *   globalActions.<action>.refusals.<CODE>.message, with `.reasons.<REASON>.message` under each)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
@@ -799,6 +801,40 @@ function pushActionOutcomeMessages(
   if (!messages || typeof messages !== 'object' || Array.isArray(messages)) return;
   for (const [outcome, message] of Object.entries<unknown>(messages)) {
     pushOptional(out, [...actionRoot, 'outcomeMessages', outcome], actionCopy(message), kind, { objectName });
+  }
+}
+
+/**
+ * [#34273] Emit `<action root>.refusals.<CODE>.message` for every entry an
+ * action's refusal catalogue declares (`ActionSchema.refusals`), and
+ * `….reasons.<REASON>.message` for each reason under it — seeded with the
+ * declared sentence, as {@link walkHookRefusals} seeds a hook's. The action
+ * body runner reads exactly that key (`actionRefusalMessageKey`) in the
+ * caller's locale, so each entry is one demand, under the action's own root:
+ * `objects.<object>._actions.<action>` or `globalActions.<action>`.
+ */
+function pushActionRefusals(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const refusals = action?.refusals;
+  if (!refusals || typeof refusals !== 'object' || Array.isArray(refusals)) return;
+  for (const [code, entry] of Object.entries<any>(refusals)) {
+    pushOptional(out, [...actionRoot, 'refusals', code, 'message'], inlineText(entry?.message), kind, { objectName });
+    const reasons = entry?.reasons;
+    if (!reasons || typeof reasons !== 'object' || Array.isArray(reasons)) continue;
+    for (const [reason, sentence] of Object.entries<any>(reasons)) {
+      pushOptional(
+        out,
+        [...actionRoot, 'refusals', code, 'reasons', reason, 'message'],
+        inlineText(sentence?.message),
+        kind,
+        { objectName },
+      );
+    }
   }
 }
 
@@ -1557,6 +1593,7 @@ export function collectExpectedEntries(
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionPreflight(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionRefusals(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
     }
 
@@ -1657,6 +1694,7 @@ export function collectExpectedEntries(
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
     pushActionPreflight(out, root, action, kind, objectName);
+    pushActionRefusals(out, root, action, kind, objectName);
   }
 
   // ── Apps + navigation ────────────────────────────────────────────
