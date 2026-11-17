@@ -2607,11 +2607,12 @@ export class AutomationServicePlugin implements Plugin {
         // build lint) still gets the guardrail. One verdict is thrown (#34451):
         // on a flow VALUE envelope (`assignment` values, `create_record` /
         // `update_record` `fields.*`) of a record-triggered flow or a
-        // time-relative sweep of the typed object that binds no `record`
-        // variable itself, the date-text family refuses registration — so with
-        // this resolver wired a stored flow carrying `timestamp(record.<date
-        // field>)` there stops registering until rewritten. Wired BEFORE the flow pull below so pulled flows
-        // are covered too. Best-effort: without ObjectQL, registration falls back
+        // time-relative sweep of the typed object that rebinds neither
+        // `record` nor `previous` itself, the date-text family refuses
+        // registration — so with this resolver wired a stored flow carrying
+        // `timestamp(record.<date field>)` there stops registering until
+        // rewritten. Wired BEFORE the flow pull below so pulled flows are
+        // covered too. Best-effort: without ObjectQL, registration falls back
         // to syntax + bare-ref validation only.
         try {
             const ql = ctx.getService<{

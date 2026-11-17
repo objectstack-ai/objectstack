@@ -639,27 +639,27 @@ const VARIABLE_NAME_CONFIG_KEYS = ['iteratorVariable', 'indexVariable', 'errorVa
 const ASSIGNMENT_ENTRY_NAME_KEYS = ['variable', 'name', 'key'] as const;
 
 /**
- * [#34451] Whether the flow binds a variable named `record` itself — a
- * declared variable, a node id, a node's `outputVariable` / iterator / index /
- * error variable, or an `assignment` target in any of its three shapes — in
- * any graph. The rows are `@objectstack/lint`'s `collectFlowVariableNames`,
- * asked about one name: that package is not a dependency of this one, and the
- * two doors must stand down on the same flows.
+ * [#34451] The names the flow's NODES bind into the run's variable map, in any
+ * graph: a node id, a node's `outputVariable` / iterator / index / error
+ * variable, and an `assignment` target in any of its three shapes. These are
+ * rows 2-8 of `@objectstack/lint`'s `collectFlowVariableNames` (that package
+ * is not a dependency of this one, and the two doors must stand down on the
+ * same flows); row 1, `flow.variables`, is read by the caller, because
+ * `seedRunVariables` sets `previous` over a declared variable of that name and
+ * so only a node can rebind it.
  */
-function flowBindsRecordVariable(flow: FlowParsed): boolean {
-    const RECORD = 'record';
-    const declared = (flow as { variables?: unknown }).variables;
-    if (Array.isArray(declared) && declared.some((v) => !!v && typeof v === 'object' && (v as { name?: unknown }).name === RECORD)) {
-        return true;
-    }
+function flowNodeBoundNames(flow: FlowParsed): ReadonlySet<string> {
+    const names = new Set<string>();
     for (const graph of collectFlowGraphs(flow)) {
         for (const node of graph.nodes) {
             if (!node || typeof node !== 'object') continue;
-            if (node.id === RECORD) return true;
+            if (typeof node.id === 'string' && node.id) names.add(node.id);
             const config = node.config;
             if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
             const cfg = config as Record<string, unknown>;
-            if (VARIABLE_NAME_CONFIG_KEYS.some((key) => cfg[key] === RECORD)) return true;
+            for (const key of VARIABLE_NAME_CONFIG_KEYS) {
+                if (typeof cfg[key] === 'string' && cfg[key]) names.add(cfg[key] as string);
+            }
             if (node.type !== 'assignment') continue;
             const raw = cfg.assignments;
             if (Array.isArray(raw)) {
@@ -668,18 +668,35 @@ function flowBindsRecordVariable(flow: FlowParsed): boolean {
                     if (!item || typeof item !== 'object') continue;
                     const entry = item as Record<string, unknown>;
                     const nameKey = ASSIGNMENT_ENTRY_NAME_KEYS.find((k) => typeof entry[k] === 'string' && entry[k]);
-                    if (nameKey && entry[nameKey] === RECORD) return true;
+                    if (nameKey) names.add(entry[nameKey] as string);
                 }
             } else if (raw && typeof raw === 'object') {
                 // Shape 1: { <var>: <value>, … }.
-                if (Object.prototype.hasOwnProperty.call(raw, RECORD)) return true;
-            } else if (Object.prototype.hasOwnProperty.call(cfg, RECORD)) {
+                for (const key of Object.keys(raw)) names.add(key);
+            } else {
                 // Shape 3: no wrapper — the config's own keys are the variable names.
-                return true;
+                for (const key of Object.keys(cfg)) names.add(key);
             }
         }
     }
-    return false;
+    return names;
+}
+
+/**
+ * [#34451] Whether the flow itself rebinds a root the value-envelope typing
+ * reads — `record` by any row (a declared variable too, as ruled, though the
+ * seed sets `record` over it on a record-change or sweep entrance), `previous`
+ * by a node row only (the seed sets it over a declared one unconditionally).
+ * `celScope` spreads the run's variables over the scope an envelope reads, so
+ * a rebound root is what the envelope reads, not the bound row.
+ */
+function flowRebindsRunRowRoots(flow: FlowParsed): boolean {
+    const declared = (flow as { variables?: unknown }).variables;
+    if (Array.isArray(declared) && declared.some((v) => !!v && typeof v === 'object' && (v as { name?: unknown }).name === 'record')) {
+        return true;
+    }
+    const nodeBound = flowNodeBoundNames(flow);
+    return nodeBound.has('record') || nodeBound.has('previous');
 }
 
 /** The body of {@link AutomationEngine.validateFlowExpressions}, moved unedited; that method's docblock is its contract. */
@@ -727,9 +744,10 @@ export function validateFlowExpressions(
     // `record` IS a row of the typed object: a record-change trigger on it,
     // or a time-relative sweep of it — the two kinds `@objectstack/lint`
     // declares a proven outcome for on a flow condition — and only while the
-    // flow binds no variable named `record` of its own (`celScope` resolves
-    // `record` through the variable spread, so a declared, assigned or output
-    // `record` is what the envelope reads). Anywhere else (an inbound hook, a
+    // flow rebinds neither root the typing reads, `record` or `previous`
+    // ({@link flowRebindsRunRowRoots}: `celScope` resolves both through the
+    // variable spread, so an assigned or output one is what the envelope
+    // reads). Anywhere else (an inbound hook, a
     // schedule, a flow started by a parent's `subflow` / `map` or by hand) the
     // name holds what the entrance handed the run, and no verdict is given.
     // `objectstack validate` stands down on the same set.
@@ -741,7 +759,7 @@ export function validateFlowExpressions(
         : bound?.triggerType === 'time_relative'
             && typeof sweep.object === 'string'
             && (typeof startCfg.objectName !== 'string' || startCfg.objectName === sweep.object);
-    const valueEnvelopeFieldTypes = runBindsTypedRow && !flowBindsRecordVariable(flow)
+    const valueEnvelopeFieldTypes = runBindsTypedRow && !flowRebindsRunRowRoots(flow)
         ? schemaHint?.fieldTypes
         : undefined;
 

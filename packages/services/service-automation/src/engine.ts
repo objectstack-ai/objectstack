@@ -826,7 +826,8 @@ export type FlowFunctionResolver = (
  * {@link AutomationEngine.valueEnvelopeRefusals}), an expression that faults on
  * every run, so a flow carrying one stops registering once a resolver is wired —
  * on a record-triggered flow or a time-relative sweep of the typed object that
- * binds no `record` variable of its own, the flows whose `record` is that row.
+ * rebinds neither `record` nor `previous` itself, the flows whose `record` is
+ * that row.
  */
 export type FlowObjectSchemaResolver = (
   objectName: string,
@@ -4760,7 +4761,7 @@ export class AutomationEngine implements IAutomationService {
      * (logged, never thrown); on a flow value envelope it adds one refusal,
      * the date-text family (#34451, {@link valueEnvelopeRefusals}), where the
      * run's `record` is the typed object's row (a record-triggered flow or a
-     * sweep of that object, binding no `record` variable itself). Passing
+     * sweep of that object, rebinding neither `record` nor `previous`). Passing
      * `null` detaches the bridge (registration reverts to syntax + bare-ref
      * validation only).
      */
@@ -10867,7 +10868,7 @@ export class AutomationEngine implements IAutomationService {
      * The fatal set is unchanged by it but for one verdict: a flow VALUE
      * envelope is typed with the same object where the run's `record` is that
      * object's row — a record-triggered flow, or a time-relative sweep of the
-     * typed object, that binds no `record` variable itself — and the date-text
+     * typed object, that rebinds neither `record` nor `previous` — and the date-text
      * family it fails (#34451, {@link valueEnvelopeRefusals}) is thrown — in
      * both modes, so the stored pass previews it. Any other flow's envelopes
      * are judged untyped, as before. `advisory: false` skips the advisory pass: the stored pass
@@ -11418,7 +11419,7 @@ export class AutomationEngine implements IAutomationService {
      * stored pass that previews it), as the field types of the object the
      * run binds as `record`, read through {@link setObjectSchemaResolver} and
      * handed only where that binding holds (a record-triggered flow or a sweep
-     * of the typed object, with no flow variable named `record`) —
+     * of the typed object, rebinding neither `record` nor `previous`) —
      * adds one more refusal: the date-text verdict family over the
      * envelope's `record.<field>` / `previous.<field>` reads
      * (`ExprSchemaHint.flowValueEnvelope`, `@objectstack/formula`), the

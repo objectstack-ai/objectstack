@@ -3107,7 +3107,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * as `record` — the object its conditions are typed against (the start
    * node's `objectName`, else a time-relative flow's swept object) — passed
    * only where that binding holds: a record-triggered flow or a sweep of the
-   * typed object, with no flow variable named `record` (the caller's
+   * typed object, rebinding neither `record` nor `previous` (the caller's
    * `valueEnvelopeFieldTypes`). Handed on
    * as `ExprSchemaHint.flowValueEnvelope`, which lets the date-text verdict
    * family alone reach the envelope, over its `record.<field>` /
@@ -3317,14 +3317,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     });
     // [#34451] The value envelopes' typing holds on the same flows: where the
     // run's `record` IS a row of the typed object — the flows a condition has
-    // a proven outcome on — and only while the flow binds no `record` of its
-    // own (`celScope` spreads the run's variables over the context, so a
-    // declared, assigned or output `record` is what an envelope reads).
-    // Elsewhere (an inbound hook, a schedule, a flow a parent's `subflow` /
-    // `map` starts) `record` holds whatever the entrance handed the run, and
-    // the envelope is judged untyped. The engine's `registerFlow` stands down
-    // on the same set (`flow-registration-checks.ts`).
-    const valueEnvelopeFieldTypes = flowFaultOutcome !== undefined && objectName && !declaredVariables.has('record')
+    // a proven outcome on — and only while the flow rebinds neither root the
+    // typing reads (`celScope` spreads the run's variables over the context,
+    // so an assigned or output `record` / `previous` is what an envelope
+    // reads): `record` by any row of `collectFlowVariableNames` (a declared
+    // one too), `previous` by a NODE row only — the collector asked without
+    // `flow.variables` — since `seedRunVariables` sets `previous` over a
+    // declared variable of that name. Elsewhere (an inbound hook, a schedule,
+    // a flow a parent's `subflow` / `map` starts) `record` holds whatever the
+    // entrance handed the run, and the envelope is judged untyped. The
+    // engine's `registerFlow` stands down on the same set
+    // (`flow-registration-checks.ts` `flowRebindsRunRowRoots`).
+    const valueEnvelopeFieldTypes = flowFaultOutcome !== undefined && objectName
+      && !declaredVariables.has('record')
+      && !collectFlowVariableNames({}, graphs).has('previous')
       ? fieldTypeIndex.get(objectName)
       : undefined;
     // [#29959] The names the run binds over the flattening — its declared

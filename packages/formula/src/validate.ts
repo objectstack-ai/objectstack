@@ -306,17 +306,22 @@ export interface ExprSchemaHint {
    * The PREMISE is the caller's to establish, and both callers pass the key
    * only where it holds: the flow is record-triggered on that object, or a
    * time-relative sweep of it (the entrance hands the run that object's row
-   * as `record`), AND the flow binds no variable named `record` itself — no
+   * as `record`), AND the flow rebinds neither root the typing reads — no
    * declared variable, node id, output / iterator / index / error variable
-   * or `assignment` target — since the run's variables are spread over the
-   * scope an envelope reads. On any other flow (an inbound hook, a schedule,
+   * or `assignment` target named `record`, and no node id, output / iterator
+   * / index / error variable or `assignment` target named `previous` (the
+   * run's seed sets `previous` over a declared variable of that name, so a
+   * declaration does not rebind it) — since the run's variables are spread
+   * over the scope an envelope reads. On any other flow (an inbound hook, a schedule,
    * a flow started by a parent's `subflow` / `map` or by hand) `record` is
    * whatever the entrance handed the run, and the key is not set.
    *
    * Of the schema-aware passes, ONLY the date-text verdict family runs —
    * `date-text-call*` and `date-text-arithmetic*` — and only over the
    * `record.<field>` / `previous.<field>` reads, which under that premise hold
-   * the bound row's values. Every other pass stands down: field existence, the
+   * what the entrance bound: the row under `record`, and under `previous` the
+   * row before the write (on a record-change trigger) or null (a sweep has
+   * none, and a read of it faults whatever the field's type). Every other pass stands down: field existence, the
    * near-miss, the role catalog, the bare-reference refusal, `type-mismatch*`,
    * `date-arithmetic*` and `date-duration-value` say nothing here. A bare name
    * stands down too: in a value envelope it holds whatever the run's variable

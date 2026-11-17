@@ -691,6 +691,70 @@ describe('value envelope — the date-text family at registerFlow (#34451)', () 
     }
   });
 
+  // A binder node placed between the start and the slot node.
+  const withBinder = (flow: ReturnType<typeof loanFlow>, binder: Record<string, unknown>) => ({
+    ...flow,
+    nodes: [flow.nodes[0], binder, ...flow.nodes.slice(1)],
+    edges: [
+      { id: 'e0', source: 'start', target: String(binder.id) },
+      { id: 'e1', source: String(binder.id), target: 'n1' },
+      flow.edges[1],
+    ],
+  });
+  const cel = (source: string) => ({ dialect: 'cel', source });
+  const region = (id: string) => ({ nodes: [{ id, type: 'assignment', label: 'Inner', config: { assignments: { note: cel('1') } } }], edges: [] });
+  // Every row of the binder check other than shape 1 of `assignment`, each binding `record`.
+  // The legacy assignment shapes evaluate nothing, so they bind a literal.
+  const RECORD_BINDERS: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ['a get_record outputVariable', { id: 'fetch', type: 'get_record', label: 'Fetch', config: { objectName: 'library_loan', limit: 1, outputVariable: 'record' } }],
+    ['a loop iteratorVariable', { id: 'each', type: 'loop', label: 'Each', config: { collection: cel('[1]'), iteratorVariable: 'record', body: region('inner') } }],
+    ['a loop indexVariable', { id: 'each', type: 'loop', label: 'Each', config: { collection: cel('[1]'), iteratorVariable: 'row', indexVariable: 'record', body: region('inner') } }],
+    ['a try_catch errorVariable', { id: 'guard', type: 'try_catch', label: 'Guard', config: { errorVariable: 'record', try: region('inner'), catch: region('inner2') } }],
+    ['a node id', { id: 'record', type: 'assignment', label: 'Note', config: { assignments: { note: cel('1') } } }],
+    ['an assignment, shape 2 (array entries)', { id: 'rebind', type: 'assignment', label: 'Rebind', config: { assignments: [{ variable: 'record', value: 'rebound' }] } }],
+    ['an assignment, shape 3 (no wrapper)', { id: 'rebind', type: 'assignment', label: 'Rebind', config: { record: 'rebound' } }],
+  ];
+
+  it.each(RECORD_BINDERS)('CONTROL: a record-triggered flow binding `record` through %s is not typed — registers', (_label, binder) => {
+    registersClean(engineWith(true), 'loan_due', withBinder(loanFlow('update_record', REFUSED), binder), _label);
+  });
+
+  // `previous`: the envelope reads it too, and a node rebinds it the same way.
+  // A DECLARED `previous` does not: `seedRunVariables` sets it over the
+  // declaration, so the declared row stays typed.
+  const PREVIOUS_REFUSED = 'timestamp(previous.borrow_date)';
+  it('reads through `previous` are refused on a record-triggered flow', () => {
+    expect(() => engineWith(true).registerFlow('loan_due', loanFlow('update_record', PREVIOUS_REFUSED)))
+      .toThrow(/isoDate\(addDays\(previous\.borrow_date, N\)\)/);
+  });
+
+  it.each([
+    ['a get_record outputVariable', { id: 'fetch', type: 'get_record', label: 'Fetch', config: { objectName: 'library_loan', limit: 1, outputVariable: 'previous' } }],
+    ['an assignment that builds it', { id: 'rebind', type: 'assignment', label: 'Rebind', config: { assignments: { previous: cel('{"borrow_date": "2026-01-01T00:00:00Z"}') } } }],
+  ])('CONTROL: a record-triggered flow binding `previous` through %s is not typed — registers', (_label, binder) => {
+    registersClean(engineWith(true), 'loan_due', withBinder(loanFlow('update_record', PREVIOUS_REFUSED), binder), _label);
+  });
+
+  it('a DECLARED `previous` variable does not stand the typing down — the seed sets `previous` over it', () => {
+    const flow = { ...loanFlow('update_record', PREVIOUS_REFUSED), variables: [{ name: 'previous', type: 'object' }] };
+    expect(() => engineWith(true).registerFlow('loan_due', flow as never)).toThrow(/previous\.borrow_date/);
+  });
+
+  it('refuses a date field subtracted from another in an envelope (date-text-arithmetic)', () => {
+    const error = catchError(() => engineWith(true).registerFlow('loan_due', loanFlow('update_record', 'record.due_date - record.borrow_date')));
+    expect(error.message).toContain(SLOT_PATH.update_record);
+    expect(error.message).toContain(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
+  });
+
+  it('CONTROL: a sweep whose start names another object than the swept one is not typed — registers', () => {
+    const engine = new AutomationEngine(createTestLogger());
+    registerLogicNodes(engine, createCtx());
+    engine.setObjectSchemaResolver((name) => (name === 'library_loan' || name === 'archive_loan' ? LOAN_SCHEMA : undefined));
+    const start = { objectName: 'archive_loan', schedule: '0 * * * *', timeRelative: { object: 'library_loan', dateField: 'due_date', offsetDays: 1 } };
+    expect(() => engine.registerFlow('loan_due', loanFlow('update_record', REFUSED, start) as never)).not.toThrow();
+    expect(engine.canonicalizeStoredFlow('loan_due', loanFlow('update_record', REFUSED, start) as never).todos).toEqual([]);
+  });
+
   it('CONTROL: a record-triggered flow whose assignment assigns `record` is not typed — registers', () => {
     for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
       const flow = loanFlow(slot, REFUSED);

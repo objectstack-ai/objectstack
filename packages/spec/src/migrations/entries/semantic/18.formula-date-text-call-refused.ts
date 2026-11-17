@@ -12,7 +12,9 @@ export const entry: SemanticMigration = {
     + '. The same shapes in a flow VALUE envelope are refused too (#34451): an assignment node\'s '
     + 'assignments value, a create_record / update_record node\'s fields.* value, reading the field '
     + 'through record (or previous), in a record-triggered flow or a time-relative sweep of the typed '
-    + 'object that binds no variable named record itself; os validate and the engine\'s registerFlow '
+    + 'object that rebinds neither record nor previous itself (no assignment target, output, iterator, '
+    + 'index or error variable or node id of either name, and no declared variable named record); '
+    + 'os validate and the engine\'s registerFlow '
     + 'refuse the same set. A stored flow carrying one fails to register at boot on an engine with the '
     + 'object-schema resolver wired (the automation service bridged to ObjectQL) until it is rewritten '
     + 'with the same rewrite',
@@ -43,5 +45,8 @@ export const entry: SemanticMigration = {
     'os validate and os build report no date-text-call finding; each rewritten formula field reads a '
     + 'value on GET /api/v1/data/OBJECT/ID where it read null before (and the same value where it read '
     + 'one), and each rewritten validation rule admits a write it refused as unevaluable before; no '
-    + 'stored sys_metadata object row reports the finding in its _diagnostics.',
+    + 'stored sys_metadata object row reports the finding in its _diagnostics.'
+    + ' For a stored flow: the boot log carries no "[Automation] failed to register flow" (or '
+    + '"cold-boot flow bind: failed to register flow") warning naming it, and os migrate meta --stored '
+    + '(POST /api/v1/meta/_migrate-stored) lists no registerFlow TODO at its assignments or fields slots.',
 };

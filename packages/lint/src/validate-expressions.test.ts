@@ -6732,6 +6732,72 @@ describe('validateStackExpressions — flow value envelopes take the date-text f
     }
   });
 
+  // A binder node placed between the start and the slot node.
+  const withBinder = (stack: ReturnType<typeof stackWith>, binder: Record<string, unknown>) => {
+    const flow = stack.flows[0];
+    stack.flows[0] = {
+      ...flow,
+      nodes: [flow.nodes[0], binder as never, ...flow.nodes.slice(1)],
+      edges: [
+        { id: 'e0', source: 'start', target: String(binder.id) },
+        { id: 'e1', source: String(binder.id), target: 'n1' },
+        flow.edges[1],
+      ],
+    };
+    return stack;
+  };
+  const region = () => ({ nodes: [{ id: 'inner', type: 'assignment', config: { assignments: { note: envelope('1') } } }], edges: [] });
+  // Every row of the binder check other than shape 1 of `assignment`, each binding `record`.
+  // The legacy assignment shapes evaluate nothing, so they bind a literal.
+  const RECORD_BINDERS: ReadonlyArray<[string, Record<string, unknown>]> = [
+    ['a get_record outputVariable', { id: 'fetch', type: 'get_record', config: { objectName: 'library_loan', limit: 1, outputVariable: 'record' } }],
+    ['a loop iteratorVariable', { id: 'each', type: 'loop', config: { collection: envelope('[1]'), iteratorVariable: 'record', body: region() } }],
+    ['a loop indexVariable', { id: 'each', type: 'loop', config: { collection: envelope('[1]'), iteratorVariable: 'row', indexVariable: 'record', body: region() } }],
+    ['a try_catch errorVariable', { id: 'guard', type: 'try_catch', config: { errorVariable: 'record', try: region(), catch: { nodes: [{ id: 'inner2', type: 'assignment', config: { assignments: { note: envelope('2') } } }], edges: [] } } }],
+    ['a node id', { id: 'record', type: 'assignment', config: { assignments: { note: envelope('1') } } }],
+    ['an assignment, shape 2 (array entries)', { id: 'rebind', type: 'assignment', config: { assignments: [{ variable: 'record', value: 'rebound' }] } }],
+    ['an assignment, shape 3 (no wrapper)', { id: 'rebind', type: 'assignment', config: { record: 'rebound' } }],
+  ];
+
+  it.each(RECORD_BINDERS)('CONTROL: a record-triggered flow binding `record` through %s is not typed — zero findings', (_label, binder) => {
+    expect(validateStackExpressions(withBinder(stackWith('update_record', REFUSED), binder))).toEqual([]);
+  });
+
+  // `previous`: the envelope reads it too, and a node rebinds it the same way.
+  // A DECLARED `previous` does not: `seedRunVariables` sets it over the
+  // declaration, so the declared row stays typed.
+  const PREVIOUS_REFUSED = 'timestamp(previous.borrow_date)';
+  it('reads through `previous` are refused on a record-triggered flow', () => {
+    const issues = validateStackExpressions(stackWith('update_record', PREVIOUS_REFUSED));
+    expect(issues.map((i) => [i.severity, i.path])).toEqual([['error', 'flows[0].nodes[1].config.fields.due_date']]);
+  });
+
+  it.each([
+    ['a get_record outputVariable', { id: 'fetch', type: 'get_record', config: { objectName: 'library_loan', limit: 1, outputVariable: 'previous' } }],
+    ['an assignment that builds it', { id: 'rebind', type: 'assignment', config: { assignments: { previous: envelope('{"borrow_date": "2026-01-01T00:00:00Z"}') } } }],
+  ])('CONTROL: a record-triggered flow binding `previous` through %s is not typed — zero findings', (_label, binder) => {
+    expect(validateStackExpressions(withBinder(stackWith('update_record', PREVIOUS_REFUSED), binder))).toEqual([]);
+  });
+
+  it('a DECLARED `previous` variable does not stand the typing down — the seed sets `previous` over it', () => {
+    const stack = stackWith('update_record', PREVIOUS_REFUSED);
+    stack.flows[0] = { ...stack.flows[0], variables: [{ name: 'previous', type: 'object' }] } as never;
+    expect(validateStackExpressions(stack).map((i) => i.path)).toEqual(['flows[0].nodes[1].config.fields.due_date']);
+  });
+
+  it('refuses a date field subtracted from another in an envelope (date-text-arithmetic)', () => {
+    const issues = validateStackExpressions(stackWith('update_record', 'record.due_date - record.borrow_date'));
+    expect(issues.map((i) => [i.severity, i.path])).toEqual([['error', 'flows[0].nodes[1].config.fields.due_date']]);
+  });
+
+  it('CONTROL: a sweep whose start names another object than the swept one is not typed — zero findings', () => {
+    const stack = stackWith('update_record', REFUSED, {
+      objectName: 'archive_loan', schedule: '0 * * * *', timeRelative: { object: 'library_loan', dateField: 'due_date', offsetDays: 1 },
+    });
+    stack.objects.push({ ...LOAN, name: 'archive_loan' });
+    expect(validateStackExpressions(stack)).toEqual([]);
+  });
+
   it('CONTROL: a record-triggered flow whose assignment assigns `record` is not typed — zero findings', () => {
     for (const slot of ['update_record', 'create_record', 'assignment'] as const) {
       const stack = stackWith(slot, REFUSED);
