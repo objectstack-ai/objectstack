@@ -66,7 +66,7 @@ import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external
 import { ENGINE_UPDATE_REJECT_MESSAGE, engineUpdateDispatchRejectError, resolveEngineUpdateDispatch } from './engine-update-dispatch.js';
 import type { EngineUpdateDispatchData, EngineUpdateDispatchInput } from './engine-update-dispatch.js';
 import {
-  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, REFERENTIAL_CLEAR_OPTION, WRITE_PRECONDITION_OPTION, applyStoredExpressionsToPatch,
+  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyStoredExpressionsToPatch,
   computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, hydrateWriteFormulas,
   lowerWhereFilterArray, masterIdOf, planStoredExpressions, rejectUnknownEngineOptions,
   replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
@@ -74,6 +74,7 @@ import {
   callerInputRefusalLogMeta,
 } from './engine-top-level.js';
 import type { OperationContext, ReferentialClearOption, StoredExpressionServing } from './engine-top-level.js';
+import { REFERENTIAL_CLEAR_OPTION } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
 
