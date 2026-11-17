@@ -10,8 +10,9 @@
 //
 // FROM (`main` d947a93cf8), a bundle with no canonical member:
 // - shipped in `fr-FR` only: the plain read and `/layers` served the `fr-FR`
-//   member (200) and the execution read returned it, while `?member=en-US`
-//   and `/published` answered 404;
+//   member (200) and the execution read returned it, naming no package and
+//   naming the shipping package (`?package=`), while `?member=en-US` and
+//   `/published` answered 404;
 // - stored in `fr-FR` only (a package-less row): 404 before a restart, then
 //   200 with the `fr-FR` row after it (the hydrated bare slot), while
 //   `?member=en-US` and `/published` answered 404 on both sides.
@@ -94,12 +95,14 @@ const shape = (answer: Answer, pick: (served: any) => unknown): unknown[] =>
     answer.status === 200 ? [200, pick(unwrap(answer.body))] : [answer.status, codeOf(answer.body)];
 const doc = (d: any) => (d == null ? d : { name: d.name, locale: d.locale, subject: d.subject, label: d.label });
 
-async function doors(b: Booted, type: string, name: string, member?: string) {
-    const query: Record<string, string> = member === undefined ? {} : { member };
+async function doors(b: Booted, type: string, name: string, member?: string, pkg?: string) {
+    const query: Record<string, string> = { ...(member === undefined ? {} : { member }), ...(pkg === undefined ? {} : { package: pkg }) };
     const protocol = b.kernel.getService('protocol') as any;
     let executed: unknown;
     try {
-        executed = doc((await protocol.getMetaItemForExecution({ type, name, ...query }))?.item ?? null);
+        executed = doc((await protocol.getMetaItemForExecution({
+            type, name, ...(member === undefined ? {} : { member }), ...(pkg === undefined ? {} : { packageId: pkg }),
+        }))?.item ?? null);
     } catch (e) {
         executed = ['threw', (e as { status?: unknown }).status, (e as { code?: unknown }).code];
     }
@@ -143,6 +146,14 @@ describe('[#34682] naming no member and naming the canonical member are one requ
                 } else {
                     expect({ leg, name, read: bare.read, effective: (bare.layers[1] as unknown[] | undefined)?.[0], executed: bare.executed })
                         .toEqual({ leg, name, read: [200, served], effective: served, executed: served });
+                }
+                // …and at the shipping package's own address (`?package=`), for a shipped bundle.
+                if (name.startsWith('ship_')) {
+                    const atBase = await doors(b, 'email_template', name, undefined, A);
+                    const atBaseNamed = await doors(b, 'email_template', name, CANONICAL, A);
+                    expect({ leg, name, ...atBaseNamed }, JSON.stringify(atBaseNamed)).toEqual({ leg, name, ...atBase });
+                    expect({ leg, name, read: atBase.read, executed: atBase.executed })
+                        .toEqual({ leg, name, read: served === undefined ? [404, 'RESOURCE_NOT_FOUND'] : [200, served], executed: served ?? null });
                 }
                 // `/published` takes no member selector: it reads the canonical member alone.
                 const named400 = await get(b.kernel, `/meta/email_template/${name}/published`, { member: CANONICAL });
