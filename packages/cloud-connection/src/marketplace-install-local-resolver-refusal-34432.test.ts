@@ -17,10 +17,13 @@
  * `marketplace-install-local-composed-top-level-reads.test.ts`), so 2c″ is the
  * first step to resolve the packages. (A runtime that carries those
  * judgements resolves the packages at step 1c first, and the resolver's
- * refusal leaves the door as a throw.) The controls pin the rest of the
- * contract: a table that really could not be read still answers 503, and an
- * undeclared throw out of the resolver (its own dependency-cycle error) is
- * rethrown, never relabelled.
+ * refusal is answered there, at step 1c — pinned over the real runtime in
+ * `marketplace-install-local-resolver-refusal-real-runtime.test.ts`.) The
+ * controls pin the rest of the contract: a table that really could not be read
+ * still answers 503, and a dependency cycle between two packages — an
+ * undeclared throw out of the resolver until #34574 — is now the resolver's
+ * declared `422 CYCLIC_ARTIFACT_PACKAGES`, answered like its siblings, never
+ * the 503.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -190,7 +193,7 @@ describe('#34432 — step 2c″ answers a body the artifact resolver refuses wit
     });
 });
 
-describe('#34432 — controls: the 503 stays the unread table\'s, and an undeclared throw stays a throw', () => {
+describe('#34432 — controls: the 503 stays the unread table\'s, and a cycle is the resolver\'s declared refusal', () => {
     it('CONTROL: a well-formed composed artifact whose renamed field\'s table cannot be read still answers 503 SERVICE_UNAVAILABLE', async () => {
         const driver = fakeDriver({ planThrows: true });
         const rt = await boot(dir, driver);
@@ -214,7 +217,7 @@ describe('#34432 — controls: the 503 stays the unread table\'s, and an undecla
         expect(driver.planDeclaredRenames).toHaveBeenCalledTimes(1);
     });
 
-    it('an undeclared throw out of the resolver (a dependency cycle between two packages) is rethrown, never answered 503', async () => {
+    it('a dependency cycle between two packages answers 422 CYCLIC_ARTIFACT_PACKAGES naming the cycle, never 503, and nothing is written', async () => {
         const driver = fakeDriver();
         const rt = await boot(dir, driver);
         const cyclic = [
@@ -222,13 +225,12 @@ describe('#34432 — controls: the 503 stays the unread table\'s, and an undecla
             entry(`${SUITE}.leads`, [LEAD], { [`${SUITE}.core`]: '*' }),
         ];
 
-        const outcome = await rt.install({ manifest: composed(cyclic) }).then(
-            (res: any) => ({ answered: res }),
-            (err: unknown) => ({ thrown: err as Error }),
-        );
+        const res = await rt.install({ manifest: composed(cyclic) });
 
-        expect('answered' in outcome ? JSON.stringify(outcome.answered.payload) : 'thrown').toBe('thrown');
-        expect((outcome as { thrown: Error }).thrown.message).toContain('Circular dependency');
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('CYCLIC_ARTIFACT_PACKAGES');
+        expect(res.payload.error.details).toEqual({ cycle: [`${SUITE}.core`, `${SUITE}.leads`, `${SUITE}.core`] });
         expectNothingWritten(rt, driver);
     });
 });
