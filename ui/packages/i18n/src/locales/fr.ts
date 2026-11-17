@@ -593,6 +593,7 @@ const fr = {
         "Cette vue est groupée, mais sa source de données n'implémente pas queryGroupHeaders : les groupes ne peuvent donc pas être comptés. Supprimez le regroupement pour afficher les enregistrements.",
       needsWholeRows:
         "Le regroupement a besoin de tous les enregistrements, mais cette grille n'en a reçu qu'une page : les groupes ne peuvent donc pas être comptés. Fournissez tous les enregistrements, ou laissez la grille les charger depuis une source de données qui implémente queryGroupHeaders.",
+      draftOnly: "Non regroupé par {{fields}} : ce champ n'existe que dans le brouillon jusqu'à la publication.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this

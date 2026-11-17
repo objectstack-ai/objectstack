@@ -629,6 +629,7 @@ const ar = {
         "هذا العرض مُجمَّع، لكن مصدر بياناته لا يطبّق queryGroupHeaders، لذا لا يمكن عدّ المجموعات. أزِل التجميع لعرض السجلات.",
       needsWholeRows:
         "يتطلب التجميع جميع السجلات، لكن هذه الشبكة تلقّت صفحة واحدة منها فقط، لذا لا يمكن عدّ المجموعات. مرّر جميع السجلات، أو دع الشبكة تجلبها من مصدر بيانات يطبّق queryGroupHeaders.",
+      draftOnly: "لم يتم التجميع حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى تقوم بالنشر.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
