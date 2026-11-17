@@ -47,6 +47,8 @@ const heldDatasources = vi.hoisted(() => new Map<string, string>());
 
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
+        // [#34613] The stored-seed funnel the plugin calls; it ends in `load`.
+        async loadStored() { return this.load(); }
         async load() { return { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] }; }
         async buildDependencyGraph(objects: string[]) { return { objects }; }
     },
