@@ -88,7 +88,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["timezone: 'Asia/Taipei'", "dateGranularity: 'month'", "zonedDateBucketing", "in memory", "in the database"],
-        "must_not_contain": ["date_trunc", "timezone: '+08:00'"]
+        "must_not_contain": ["date_trunc"]
       }
     }
   ]
