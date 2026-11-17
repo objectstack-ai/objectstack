@@ -119,6 +119,18 @@ async function rows(engine: ObjectQL, object: string, where: Record<string, unkn
   return (Array.isArray(found) ? found : []) as Array<Record<string, unknown>>;
 }
 
+/**
+ * Mark an address verified, as completing the verification mail does.
+ * Accepting, reading or listing an invitation needs a verified address
+ * (`invitation-acceptance-verified-address.test.ts` holds that rule at every
+ * door); the presented id admits the sign-up only.
+ */
+async function verifyAddress(engine: ObjectQL, email: string) {
+  const [user] = await rows(engine, 'sys_user', { email });
+  expect(user, `no account for ${email}`).toBeDefined();
+  await engine.update('sys_user', { id: user.id, email_verified: true } as never, SYSTEM);
+}
+
 /** Status, code and message of a refusal, in either envelope. */
 async function verdict(res: Response): Promise<{ status: number; code?: unknown; message?: unknown }> {
   const body = (await res.clone().json().catch(() => ({}))) as {
@@ -152,7 +164,7 @@ async function deployment(config: Record<string, unknown> = {}) {
 }
 
 describe('under invite_only, a self-serve sign-up is admitted only by the invitation it presents', () => {
-  it('admits the sign-up that presents its invitation, and the invitee accepts it with the invited role', async () => {
+  it('admits the sign-up that presents its invitation, and the invitee, once verified, accepts it with the invited role', async () => {
     const d = await deployment();
     const invitationId = await d.invite(INVITEE, 'admin');
 
@@ -163,6 +175,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     // The presented id never becomes a column of the account.
     expect(Object.keys(invitee)).not.toContain(SIGN_UP_INVITATION_ID_FIELD);
 
+    await verifyAddress(d.engine, INVITEE);
     const accept = await send(d.manager, 'POST', '/organization/accept-invitation', { invitationId }, cookieFrom(res));
     expect(accept.status, await accept.clone().text()).toBe(200);
     const members = await rows(d.engine, 'sys_member', { user_id: invitee.id, organization_id: ORG });
@@ -233,7 +246,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     expect(res.status, await res.clone().text()).toBe(200);
   });
 
-  it('an address-only attempt does not spend the invitation: the invitee still signs up with the link, and accepts', async () => {
+  it('an address-only attempt does not spend the invitation: the invitee still signs up with the link, and, once verified, accepts', async () => {
     const d = await deployment();
     const invitationId = await d.invite(INVITEE);
 
@@ -243,6 +256,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
 
     const invitee = await signUp(d.manager, INVITEE, { invitationId });
     expect(invitee.status, await invitee.clone().text()).toBe(200);
+    await verifyAddress(d.engine, INVITEE);
     const accept = await send(d.manager, 'POST', '/organization/accept-invitation', { invitationId }, cookieFrom(invitee));
     expect(accept.status, await accept.clone().text()).toBe(200);
     expect((await rows(d.engine, 'sys_invitation', { id: invitationId }))[0]?.status).toBe('accepted');
@@ -264,7 +278,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     expect(res.status, await res.clone().text()).toBe(200);
   });
 
-  it('a pending invitation lists in the session it admitted, its own and another organization\'s alike', async () => {
+  it('a pending invitation lists in the session it admitted once its address is verified, its own and another organization\'s alike', async () => {
     const d = await deployment();
     const invitationId = await d.invite(INVITEE);
     await d.engine.insert('sys_organization', { id: 'org_partner', name: 'Partner', slug: 'partner' }, SYSTEM);
@@ -283,6 +297,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     );
     const invitee = await signUp(d.manager, INVITEE, { invitationId });
     expect(invitee.status, await invitee.clone().text()).toBe(200);
+    await verifyAddress(d.engine, INVITEE);
 
     const listed = await send(d.manager, 'GET', '/organization/list-user-invitations', undefined, cookieFrom(invitee));
     expect(listed.status, await listed.clone().text()).toBe(200);
