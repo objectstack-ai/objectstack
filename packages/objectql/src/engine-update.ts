@@ -37,6 +37,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { collectComposableReadableIds } from './filter-comparand-shape.js';
 import { retiredSecretSlots, secretFieldsWritten } from './engine-secret-internal-fields.js';
 import type { PendingSecretRow, SecretHandleSlot } from './engine-secret-internal-fields.js';
+import { sealedSecretsNamedBy, secretKeysHoldingCallerValues, suppliedOverSealedSecrets } from './engine-update-sealed-secrets.js';
 import { referencesCheckedBeforeRules } from './engine-referential-integrity.js';
 import { mergeDriverOptionsIntoHookView } from './engine-driver-options.js';
 import { recordNotFoundError } from '@objectstack/core';
@@ -1262,8 +1263,14 @@ export class UpdateFacet {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
+               // A field the caller may not write keeps its stored value, whatever
+               // its type: which `secret` keys hold the caller's value is read
+               // here, before the pass below seals them, and both read-only strips
+               // judge `judgedSupplied` (see `engine-update-sealed-secrets.ts`).
+               const callerSecretKeys = secretKeysHoldingCallerValues(updateSchema, hookContext.input.data as Record<string, unknown>, suppliedValues);
                // [#27582] This record's own stored row is the pre-image read above.
                sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, driverOptions, async () => [priorRecord]);
+               const judgedSupplied = suppliedOverSealedSecrets(suppliedValues, callerSecretKeys, hookContext.input.data as Record<string, unknown>, sealedSecrets);
                // The multi-value wrap and the first value judgement wait for
                // both read-only strips (`judgeStrippedPayload`, below them).
                // [#5284] Demand-driven, and the demand is asked PER OBJECT.
@@ -1368,10 +1375,10 @@ export class UpdateFacet {
                const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys, wallJudgesOrganization };
                const landing = wantsParentBinding
                    ? await this.settleMasterDetailLanding({
-                       schema: updateSchema, data: preRoWhen, supplied: suppliedValues,
+                       schema: updateSchema, data: preRoWhen, supplied: judgedSupplied,
                        staticStrip,
                        resolve: (view) => this.resolveMasterDetailParent(updateSchema, view, priorRecord, opCtx.context),
-                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: suppliedValues, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhen, suppliedValues, staticStrip)) }) as Record<string, unknown>,
+                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: judgedSupplied, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhen, judgedSupplied, staticStrip)) }) as Record<string, unknown>,
                      })
                    : undefined;
                const roWhenParent = landing?.header;
@@ -1423,7 +1430,7 @@ export class UpdateFacet {
                // so a value forged for a static `readonly` field (stripped
                // below) cannot unlock a field whose predicate reads it.
                const roWhenSubject = landing?.subject ?? preRoWhen;
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? suppliedValues, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubject, suppliedValues, staticStrip)) }) as any;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? judgedSupplied, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubject, judgedSupplied, staticStrip)) }) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -1464,7 +1471,7 @@ export class UpdateFacet {
                    // taken with the row's own organization kept; it is not
                    // reported, and not refused under `strictReadonlyWrites`,
                    // which refuses exactly what this strip takes.
-                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
+                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, judgedSupplied, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // Both strips are done: wrap and judge what is left.
@@ -1633,8 +1640,9 @@ export class UpdateFacet {
                // call inside a hook to THIS object.
                // [#27495] The credential row is written now, after every pass that
                // can refuse this write and immediately before the statement; a
-               // statement that fails takes it back (the outer `catch`).
-               await this.persistSecretRows(sealedSecrets, writtenSecrets);
+               // statement that fails takes it back (the outer `catch`). Only the
+               // rows the payload still names: a key a strip took out takes its row.
+               await this.persistSecretRows(sealedSecretsNamedBy(sealedSecrets, hookContext.input.data as Record<string, unknown>), writtenSecrets);
                try {
                    // [ADR-0142 D4] A write under a precondition is the driver's
                    // conditional update plus a readback — see
@@ -1722,9 +1730,12 @@ export class UpdateFacet {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
+               // The same authorship read as the by-id branch, before the same pass.
+               const callerSecretKeysMulti = secretKeysHoldingCallerValues(updateSchema, hookContext.input.data as Record<string, unknown>, suppliedValues);
                // [#27582] The rows this write lands on are the matched rows: the
                // D7 memo, read here only when a non-system payload carries a ref.
                sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, driverOptions, readPriorRows);
+               const judgedSuppliedMulti = suppliedOverSealedSecrets(suppliedValues, callerSecretKeysMulti, hookContext.input.data as Record<string, unknown>, sealedSecrets);
                // The multi-value wrap and the first value judgement wait for
                // both read-only strips (`judgeStrippedPayload`, below them).
                // [#2982] The middleware-composed AST — asserted present and
@@ -1792,10 +1803,10 @@ export class UpdateFacet {
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
                    schemaHasParentRequiredWhenMulti
                        ? await this.settleMasterDetailLanding({
-                           schema: updateSchema, data: preRoWhenMulti, supplied: suppliedValues,
+                           schema: updateSchema, data: preRoWhenMulti, supplied: judgedSuppliedMulti,
                            staticStrip: staticStripMulti,
                            resolve: (view) => this.resolveMasterDetailParents(updateSchema, view, priorRows, opCtx.context),
-                           judgeFkLock: (named, fk) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: suppliedValues, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhenMulti, suppliedValues, staticStripMulti)) }) as Record<string, unknown>,
+                           judgeFkLock: (named, fk) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: judgedSuppliedMulti, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhenMulti, judgedSuppliedMulti, staticStripMulti)) }) as Record<string, unknown>,
                          })
                        : undefined;
                const parentForRow = landingMulti?.header;
@@ -1828,7 +1839,7 @@ export class UpdateFacet {
                    // [#19887] Nor read a different payload: each matched row's
                    // `record` is the payload the write stores, over that row.
                    const roWhenSubjectMulti = landingMulti?.subject ?? preRoWhenMulti;
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, roWhenSubjectMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? suppliedValues, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubjectMulti, suppliedValues, staticStripMulti)) }) as any;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, roWhenSubjectMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? judgedSuppliedMulti, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubjectMulti, judgedSuppliedMulti, staticStripMulti)) }) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —
@@ -1852,7 +1863,7 @@ export class UpdateFacet {
                    // branch: the wall's seam judges every matched row merged
                    // with this payload, so an admitted re-point is stored as
                    // sent on every one of them.
-                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
+                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRoMulti, judgedSuppliedMulti, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // Both strips are done: wrap and judge what is left, as on the
@@ -2119,7 +2130,8 @@ export class UpdateFacet {
                  : priorRowsRead
                    ? ((await readPriorRows()) ?? [])
                    : (((await driver.find(object, { ...ast, fields: ['id', ...movedSecretColumns] }, driverOptions)) ?? []) as Record<string, unknown>[]);
-               await this.persistSecretRows(sealedSecrets, writtenSecrets);
+               // Only the rows the payload still names, as on the by-id branch.
+               await this.persistSecretRows(sealedSecretsNamedBy(sealedSecrets, hookContext.input.data as Record<string, unknown>), writtenSecrets);
                try {
                    result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, driverOptions);
                } catch (driverError) {

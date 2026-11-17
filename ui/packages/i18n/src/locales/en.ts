@@ -2313,6 +2313,10 @@ const en = {
       launcherLabel: 'App launcher',
       menuLabel: 'App navigation',
       menuEmpty: 'This app has no navigation entries you can open.',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: 'App menu bar',
+      searchMenu: 'Search menu',
+      phoneBarHint: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
       // objectui#12427 — the ⋯ menu a sidebar entry shows on hover (`SidebarItemMenu`).
       itemMenu: 'More actions for {{name}}',
       openInNewTab: 'Open in new tab',
@@ -3052,6 +3056,7 @@ const en = {
       passwordsNote: 'Temporary passwords — shown once, never stored. Save them now; each user must change theirs at first sign-in.',
       passwordsMore: 'More entries omitted — use the download.',
       positionsHint: 'Positions: map a column of position machine names, several separated by ";". Each is assigned as in Setup; a name that does not exist, or that you may not assign, is reported on its row, and the user is still created.',
+      managerHint: 'Manager: map a column holding each user\'s manager, by email address (or phone number where phone sign-in is on). Managers are linked once every row is in, so a manager further down the file counts; a manager that is not found, or cannot be linked, is reported on its row, and the user is still created.',
       passwordsDownload: 'Download CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
@@ -4663,6 +4668,8 @@ const en = {
     viewApprovals: 'View approvals',
     noPendingApprovals: 'No pending approvals',
     openApprovalsInbox: 'Open Approvals Inbox',
+    needsYou: 'Needs your action',
+    viewApprovalDetails: 'View details',
     // Bell-badge breakdown (objectstack-ai/objectstack#7233): the badge sums unread notification topics
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
@@ -5303,6 +5310,13 @@ const en = {
     openNextAfterDecision: 'Open next after deciding',
     queueDone: 'No more pending requests in this list.',
     snapshotAsSubmitted: 'As submitted',
+    snapshotChanged: 'Changed',
+    snapshotCurrentValue: 'Current value',
+    snapshotOpenRecord: 'Open record',
+    snapshotCurrentUnreadable: 'The current record cannot be read, so changes made after submission are not marked.',
+    snapshotChildCurrent: 'Current rows: the submission does not keep child rows.',
+    progressTitle: 'Approval progress',
+    attachmentsTitle: 'Attachments',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',

@@ -23,7 +23,7 @@
  * One hook, two consumers — the two surfaces have no representable state in
  * which they disagree, because there is no second read and no second overlay.
  *
- * NOTHING is fetched here: `useSharedInboxFeed` / `useSharedPendingApprovalsCount`
+ * NOTHING is fetched here: `useSharedInboxFeed` / `useSharedPendingApprovalRequests`
  * own the polling, its cadence, its hidden-tab throttle and its failure backoff.
  * This hook adds only the optimistic read overlay and the mark-read writes.
  *
@@ -31,7 +31,13 @@
  */
 import { useCallback, useMemo, useState } from 'react';
 import { bearerAuthHeaders } from '../utils/authToken.js';
-import { useSharedInboxFeed, useSharedPendingApprovalsCount, type SharedFeedStatus } from './sharedUserFeeds.js';
+import {
+  refreshSharedPendingApprovals,
+  useSharedInboxFeed,
+  useSharedPendingApprovalRequests,
+  type PendingApprovalRequest,
+  type SharedFeedStatus,
+} from './sharedUserFeeds.js';
 import { useInboxArrivalNotifier } from './useInboxArrivalNotifier.js';
 import type { InboxNotification } from '../layout/inboxGrouping.js';
 
@@ -54,6 +60,13 @@ export interface InboxBell {
   unreadCount: number;
   /** The badge's second addend — pending approvals waiting on this user. */
   pendingApprovalsCount: number;
+  /**
+   * The first page of those requests, from the same one read as the count —
+   * the rows the inbox panel pins under "Needs your action" (objectstack#34589).
+   */
+  pendingApprovals: PendingApprovalRequest[];
+  /** Re-read the approvals now — after a decision taken from the panel. */
+  refreshPendingApprovals: () => void;
   markAllRead: () => Promise<void>;
   markRead: (id: string) => Promise<void>;
   markManyRead: (ids: string[]) => Promise<void>;
@@ -95,7 +108,9 @@ export function useInboxBell(): InboxBell {
    * Shared with Home's To-do card (#4197): one polled request serves both, so
    * the badge and the card can no longer disagree.
    */
-  const pendingApprovalsCount = useSharedPendingApprovalsCount();
+  const { value: approvalPage } = useSharedPendingApprovalRequests();
+  const pendingApprovalsCount = approvalPage.total;
+  const pendingApprovals = approvalPage.requests;
 
   const unreadCount = notifications.reduce((n, x) => n + (x.is_read ? 0 : 1), 0);
 
@@ -182,6 +197,8 @@ export function useInboxBell(): InboxBell {
     status,
     unreadCount,
     pendingApprovalsCount,
+    pendingApprovals,
+    refreshPendingApprovals: refreshSharedPendingApprovals,
     markAllRead,
     markRead,
     markManyRead,
