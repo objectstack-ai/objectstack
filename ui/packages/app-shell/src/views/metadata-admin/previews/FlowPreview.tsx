@@ -34,7 +34,6 @@ import {
   Variable,
   Zap,
 } from 'lucide-react';
-import { EmptyDescription } from '@object-ui/components';
 import type { MetadataPreviewProps, MetadataSelection } from '../preview-registry.js';
 import { PreviewShell, PreviewMessage, PreviewErrorBoundary } from './PreviewShell.js';
 import { appendArray } from '../inspectors/_shared.js';
@@ -46,6 +45,7 @@ import { edgeKey, type FlowDesignerEdge, type FlowDesignerNode } from './flow-ca
 import { NESTED_NODE_KIND, parseNestedNodeId, encodeNestedNodeId, locateFlowNode } from '../inspectors/flow-nested-selection.js';
 import { FlowSimulatorPanel } from './FlowSimulatorPanel.js';
 import { FlowRunsPanel } from './FlowRunsPanel.js';
+import { FlowVariablesPanel } from './FlowVariablesPanel.js';
 import { ProblemsPanel } from './ProblemsPanel.js';
 import {
   FlowRegistrationContext,
@@ -574,7 +574,14 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
           {section === 'variables' && (
             <div className="min-h-0 overflow-auto">
               <div className="mx-auto max-w-3xl space-y-2 px-6 py-5 text-xs">
-                <FlowVariablesList variables={variables} locale={locale} />
+                <FlowVariablesPanel
+                  variables={variables}
+                  nodes={nodes}
+                  edges={edges}
+                  flowText={[d.successMessage, d.errorMessage]}
+                  onPatch={canEdit ? onPatch : undefined}
+                  locale={locale}
+                />
               </div>
             </div>
           )}
@@ -724,7 +731,14 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
               <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
                 <Variable className="h-3 w-3" /> {tr('engine.flowPreview.variables', locale)}
               </div>
-              <FlowVariablesList variables={variables} locale={locale} />
+              <FlowVariablesPanel
+                variables={variables}
+                nodes={nodes}
+                edges={edges}
+                flowText={[d.successMessage, d.errorMessage]}
+                onPatch={canEdit ? onPatch : undefined}
+                locale={locale}
+              />
             </div>
           ) : null}
         </div>
@@ -795,40 +809,3 @@ function useCutText(ref: React.RefObject<HTMLElement | null>, enabled: boolean):
   return cut;
 }
 
-/** The flow's declared variables: the designer's side panel, and the Studio's Variables body (objectui#12454). */
-function FlowVariablesList({ variables, locale }: { variables: FlowVariable[]; locale?: string }) {
-  if (variables.length === 0) {
-    return <EmptyDescription className="text-xs italic">{tr('engine.flowPreview.noVars', locale)}</EmptyDescription>;
-  }
-  return (
-    <ul className="space-y-1.5">
-      {variables.map((v, i) => (
-        <li key={v.name || i} className="rounded border bg-background p-1.5">
-          <div className="flex items-baseline gap-1 flex-wrap">
-            <span className="font-mono">{v.name}</span>
-            {v.type && (
-              <span className="text-[10px] uppercase text-muted-foreground">
-                {v.type}
-              </span>
-            )}
-            {v.isInput && (
-              <span className="text-[9px] font-semibold uppercase px-1 rounded bg-sky-100 text-sky-700">
-                {tr('engine.flowPreview.varIn', locale)}
-              </span>
-            )}
-            {v.isOutput && (
-              <span className="text-[9px] font-semibold uppercase px-1 rounded bg-emerald-100 text-emerald-700">
-                {tr('engine.flowPreview.varOut', locale)}
-              </span>
-            )}
-          </div>
-          {v.defaultValue !== undefined && (
-            <div className="text-[10px] text-muted-foreground font-mono truncate">
-              = {String(v.defaultValue)}
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
