@@ -47,7 +47,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 - L1 普通审核:派发 PR 皆欠;派发席或其 L1 线程照 L1 清单在定稿绿 head 读 ACCEPT,修后读 delta。
 - L2 契约审核:PR 碰 `references/contract-review.md` 契约四面才欠,加在 L1 之上,⛔ 永不替代 L1。
-- L2 档:schema、governed 规则文本、收窄 ⇒ `CONTRACT_REVIEW_TIER`;仅 `Clause-②: yes` ⇒ `TIER_DEFAULT`。
+- L2 档随面定(`contract-review.md`);L1 与 `TIER_DEFAULT` 审核恒归车道,⛔ 永不归 L2 席。
 - ⛔ L1 规则不及 L2,L2 规则不及 L1;L2 席的账号、独立性、信箱与只写记录诸规只管 L2 席。
 - GitHub PR review 与 CI check 名不属两级;旧词与旧路径只读不写,唯在座 `review#N` 席仍写原名。
 
@@ -64,9 +64,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `coordinator` | 以协调者身份运行(项目会话:开席位线程与卡线程、跨车道调度;接口见 `references/coordinator.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
-| `batch:<n>` | 运行中槽位的上限:一槽 = 一个正在运行的子代理(`Agent`、`create_session`)或卡线程,报告落地即释放;等人批、在合并队列、等 CI、等裁决四态不占槽;dev、L1/L2 审核、普查皆计,⛔ 只读不豁免;p0 见 `priority:p0` 行 | 默认 `3`;`n` 的维护者天花板 `5` |
+| `batch:<n>` | 运行中槽位的上限:一槽 = 一个在跑的子代理(`Agent`、`create_session`)或卡线程,报告落地即释放;等人批、入队、等 CI、等裁决不占槽;dev、L1/L2 审核、普查皆计,⛔ 只读不豁免;p0 见 `priority:p0` 行 | 默认 `3`,一容器 dev ≤2;`n` 的维护者天花板 `5` |
 | `rounds:<n>` | 跑 N 轮后停 | 队列清空为止 |
-| `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时 M 及以上、p1、`security` 一律 `thread` |
+| `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时 M 及以上、p1、`security` 一律 `thread`;大卡判据照 `dispatch-runbook.md` 卡线程节 |
 | `#12 #34 …` | 显式 issue 清单,整体覆盖标签查询 | — |
 
 - 无角色参数按执行姿态运行,车道由座位贴认定;角色参数令召唤词收敛为一行调用。

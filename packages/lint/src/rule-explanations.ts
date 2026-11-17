@@ -4499,7 +4499,10 @@ const OBJECT_FIELD_REF_UNKNOWN_EXPLANATION: RuleExplanation = {
       'an entry out while the value is empty, so a path the record does not have would drop the filter ' +
       'without a word. A miss names the segment: an unknown head, ' +
       'a hop through a field that is not a relationship, a leaf the referenced object lacks, or a ' +
-      'second hop. A `$record` nested inside a literal value is not a reference and is not judged.',
+      'second hop. A path that names real fields is refused too when it reads a list: a path through or ' +
+      'to a multi-valued field (one flagged `multiple: true`, or a `multiselect`, `checkboxes` or `tags` ' +
+      'field), or a multi-valued leaf behind one hop, because the comparand is one ' +
+      'value under a scalar operator. A `$record` nested inside a literal value is not a reference and is not judged.',
     'A summary field\'s `summaryOperations.filter` is judged against the CHILD object ' +
       '`summaryOperations.object` names: the engine ANDs it with the parent-FK match and runs it as the ' +
       'query on that child, so every key (inside `$and` / `$or` / `$not` groups) is a field of the child. ' +

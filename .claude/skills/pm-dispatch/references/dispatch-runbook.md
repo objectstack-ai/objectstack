@@ -41,7 +41,7 @@
 - 座位贴活性归总监席巡查:扫 `label:pm:seat` 挂 `🟢 <github-login>` 的贴,Routine 席读调度器。
 - 判据只认在任者自有产出(评论、认领、改正文)及其作者与时间戳,⛔ 收到的通知不算。
 - >24h 无自有产出 ⇒ 当场降级:改 `⏳ vacant` + 摘 assignee 同笔 + 证据评论(时间戳与链接)。
-- 跨账户 L2 审核:每席巡查跑 `node scripts/pm/check-owed-reviews.mjs`,TAKE 行剔除本账户署名的 PR。
+- L2 欠审:每席巡查跑 `check-owed-reviews.mjs`,只接 take 点名本席的行。
 - L2 前落 `Contract-review-claim:` 行,形、失效、双认照 `contract-review.md`;有活认领 ⛔ 不双做。
 - L2 审核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席巡查列等候逾 24h 的 PR。
 - 车道巡查同跑:hold/closed 解锁重验回队;本仓无卡 fork PR 按 `external-contributions.md` 立卡。
@@ -127,11 +127,11 @@
 ## 卡线程(`mode:thread`)
 
 - 席位会话是项目线程(载 coordinator 通道工具)⇒ M 及以上、p1、`security` 卡一卡一线程。
+- 大卡同上,先于下行,分区亦然,修复轮随卡;大卡 = L/XL,或欠全量验证(`!` 标题或 narrowing 臂),
+  或改契约:`Clause-②: yes`、`Metadata-protocol` 非 `none`、非测试的 `packages/spec/src/**` 路径。
 - S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读 `os-dev.md`,起步成本不值。
 - 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
-- 项目的 coordinator 跨席位统一调度卡线程;每席一个线程跑 PM 循环,卡线程即 dev。
-- 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
-- 卡线程交回即释放槽位,席位当即告知 coordinator;L1/L2 期开着不占槽,REWORK 补丁轮再占一槽。
+- coordinator 调度卡线程(即 dev),候选与槽位照 `coordinator.md` 三;交回即告知它,REWORK 再占槽。
 - 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
 - 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
 - 席位留认领/派发令/ACCEPT/落地/L2 采纳或补缺;线程实施、开 draft PR、驱动 CI 与可合并。

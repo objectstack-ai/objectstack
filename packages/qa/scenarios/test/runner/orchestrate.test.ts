@@ -414,7 +414,10 @@ describe('runCard — the seed against a build whose owner field is a user looku
     expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] }); // the record lists the field it rewrote
     const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
     expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
-    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct3', 'ct4', 'ct5', 'ct2']); // the five seeded: the sdr's add deleted before move_eli, ct2 inserted again before contact_bad_email; the ambiguous delete only asked
+    // The booted app keeps add_contact's row: each operation an earlier write would meet ran on a fresh copy, seeded the same way.
+    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct2', 'ct3', 'ct4', 'ct5', 'new-add_contact']);
+    expect(apps.length).toBe(4); // the booted app and the three copies (move_eli, remove_ben, contact_bad_email)
+    for (const copy of apps.slice(1)) expect(Object.fromEntries(copy.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]))).toEqual(owners);
     expect(apps[0]!.rows.democrm_contact!.find((r) => r.id === 'ct5')!.owner_id).toBeUndefined(); // a path scope (`account.owner`) owns nothing
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 }); // every write found its seeded target
   });
@@ -434,7 +437,7 @@ describe('runCard — the card’s own namespace, demo + code', () => {
     expect(sc.modes[0]!.first.ask).toEqual({ passed: 16, total: 16, leaks: 0, notMeasured: 0 });
     expect(sc.modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
     // The installed copy keeps `democrm`; the environment's own unprefixed items (`setup`, `admin_full_access`) are not the app's.
-    expect(apps[1]!.installed!.namespace).toBe('democrm');
+    expect(apps[apps.length - 1]!.installed!.namespace).toBe('democrm'); // the template host, booted after the scratch half's copies
     expect(sc.modes[1]!.iterate!.build!.degraded).toBe(false);
     expect(run.modes[1]!.iterate!.build.score!.naming).toEqual([]);
   });
@@ -516,7 +519,8 @@ describe('runCard — the validation operation is probed by the runner itself (#
   it('sends the declared write once, after the turn, as the acting persona through its MCP door; a validating app passes it', async () => {
     const { scenario, ops, driver, apps } = setup();
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
-    expect(apps[0]!.toolCalls).toEqual([
+    // Each probe went to the app its operation ran on (a fresh copy, after an earlier write).
+    expect(apps.flatMap((a) => a.toolCalls)).toEqual([
       { apiKey: 'key-partner_user', tool: 'create_record', args: { objectName: 'democrm_contact', data: { full_name: 'Gil Ray', email: 'gil at acme' } } },
       // The card's permission overstep is probed the same way (#31145 item 4).
       { apiKey: 'key-partner_user', tool: 'update_record', args: { objectName: 'democrm_account', recordId: 'ac1', data: { industry: 'retail' } } },
@@ -535,10 +539,10 @@ describe('runCard — the validation operation is probed by the runner itself (#
     const broken = setup({ preValidates: true, app: () => Object.assign(new FakeApp(), { storesInvalidWrites: true }) });
     const run = await runCard(broken.scenario, broken.driver, broken.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     expect(failing(badEmail(run))).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
-    // The probe's own row, stored by the broken app, is deleted before the next operation runs.
+    // The probe's own row, stored by the broken app, is left behind: the next operation runs on a fresh copy without it.
     const after = run.modes[0]!.run!.operations.find((o) => o.operation === 'partner_edits_account')!;
-    expect(after.restored).toEqual({ deleted: ['democrm_contact/probe-5'] });
-    expect(broken.apps[0]!.rows.democrm_contact!.filter((r) => r.email === 'gil at acme')).toHaveLength(0);
+    expect(after.restored).toEqual({ freshCopy: ['democrm_contact/probe-5'] });
+    expect(broken.apps[broken.apps.length - 1]!.rows.democrm_contact!.filter((r) => r.email === 'gil at acme')).toHaveLength(0);
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 6, notMeasured: 0, restored: 4 });
   });
 
@@ -3086,7 +3090,7 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     }
   }
 
-  it('an operation after a wrong write passes on its own merits: the row the earlier turn deleted is inserted again, the row it added deleted', async () => {
+  it('an operation after a wrong write passes on its own merits: it runs on a fresh copy that holds the row the earlier turn deleted, and not the row it added', async () => {
     const { scenario, ops, driver, apps } = setup();
     // add_contact's turn also deletes Eli (ct5), the row move_eli acts on: one bad write that would fail the next operation.
     const ask = driver.ask.bind(driver);
@@ -3100,19 +3104,19 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     expect(opOf(run, 'add_contact').restored).toBeUndefined(); // the first operation: nothing had moved
     expect([opOf(run, 'move_eli').grade?.pass, opOf(run, 'move_eli').error]).toEqual([true, undefined]);
-    expect(opOf(run, 'move_eli').restored).toEqual({ deleted: ['democrm_contact/new-add_contact'], reinserted: ['democrm_contact/ct5'] });
+    expect(opOf(run, 'move_eli').restored).toEqual({ freshCopy: ['democrm_contact/new-add_contact', 'democrm_contact/ct5'] });
     expect(opOf(run, 'move_eli').observation!.writes).toBe(1);
     expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 6, total: 6, notMeasured: 0, restored: 3 });
   });
 
-  it('the restore runs before an operation, never between its ask and its confirmation; the confirmed delete is undone before the next one', async () => {
+  it('the move to a fresh copy comes before an operation, never between its ask and its confirmation; the confirmed delete is left behind before the next one', async () => {
     const { scenario, ops, driver } = setup();
     const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
     const removeBen = opOf(run, 'remove_ben');
-    expect(removeBen.restored).toEqual({ setBack: { 'democrm_contact/ct5': ['account'] } }); // move_eli's move, set back
+    expect(removeBen.restored).toEqual({ freshCopy: ['democrm_contact/ct5'] }); // move_eli's move, left on the copy before
     // The named single delete is applied outright (the maintainer's 2026-11-16 ruling): no confirmation turn.
     expect([removeBen.grade!.pass, removeBen.confirmTurn]).toEqual([true, undefined]);
-    expect(opOf(run, 'contact_bad_email').restored).toEqual({ reinserted: ['democrm_contact/ct2'] });
+    expect(opOf(run, 'contact_bad_email').restored).toEqual({ freshCopy: ['democrm_contact/ct2'] });
     expect(opOf(run, 'partner_edits_account').restored).toBeUndefined(); // the validation operation wrote nothing
     // The ambiguous delete waits on the person, and its ask matches more than one row: no confirmation turn.
     const removeTech = opOf(run, 'remove_tech_contact');
@@ -3132,26 +3136,31 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     expect(renderScorecard(cardScorecard(run))).toContain('| Run-operations | 2/2 |');
   });
 
-  it('⛔ a restore that cannot be done makes the operation NOT MEASURED with the reason, not asked, never a pass or a fail', async () => {
+  it('⛔ with no fresh copy (template mode), a restore that cannot be done makes the operation NOT MEASURED with the reason, not asked, never a pass or a fail', async () => {
     class NoDeleteApp extends FakeApp {
       override async deleteRow(): Promise<HttpAnswer> {
         return { ok: false, status: 403, body: {}, code: 'PERMISSION_DENIED', message: 'refused by the double' };
       }
     }
-    const { scenario, ops, driver } = setup({ app: () => new NoDeleteApp() });
-    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
-    const moveEli = opOf(run, 'move_eli');
+    /** The Run half on the booted app alone, as template mode runs it: no fresh copy, so the rows are written back through its doors. */
+    const halfOn = async (app: () => FakeApp) => {
+      const { scenario, ops, driver, apps } = setup({ app });
+      await ops.boot('host');
+      const half = await runHalf(namespacedScenario(scenario), apps[0]!, driver, { card: scenario.card.id, mode: 'template', phase: 'iterate-run' });
+      return { half, driver, op: (id: string) => half.operations.find((o) => o.operation === id)! };
+    };
+    const { half, driver, op } = await halfOn(() => new NoDeleteApp());
+    const moveEli = op('move_eli');
     expect(moveEli.notMeasured).toBe(
       'restore: the rows could not be restored to the seeded state: democrm_contact: 1 added (new-add_contact) (refused: delete democrm_contact new-add_contact: 403 PERMISSION_DENIED refused by the double)',
     );
     expect([moveEli.grade, moveEli.observation, moveEli.turn, moveEli.restored]).toEqual([undefined, undefined, undefined, undefined]);
     expect(driver.seen.some((k) => k.includes('/move_eli/'))).toBe(false);
-    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 1, total: 1, notMeasured: 5 });
+    expect([half.operations.filter((o) => o.grade?.pass).length, half.operations.filter((o) => o.notMeasured !== undefined).length]).toEqual([1, 5]);
 
     // A harness with no row delete at all says so.
-    const bare = setup({ app: () => Object.assign(new FakeApp(), { deleteRow: undefined }) });
-    const again = await runCard(bare.scenario, bare.driver, bare.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
-    expect(opOf(again, 'move_eli').notMeasured).toContain('(refused: delete democrm_contact new-add_contact: this app harness has no row delete)');
+    const bare = await halfOn(() => Object.assign(new FakeApp(), { deleteRow: undefined }));
+    expect(bare.op('move_eli').notMeasured).toContain('(refused: delete democrm_contact new-add_contact: this app harness has no row delete)');
   });
 
   it('restoreSeededRows: sets back only what moved, through the seed path; derived fields and the clock are neither compared nor written', async () => {
@@ -3175,6 +3184,98 @@ describe('runHalf — each operation starts from the seeded rows: an earlier tur
     app.rows.democrm_account = app.rows.democrm_account!.filter((r) => r.id !== 'ac1');
     expect(await restoreSeededRows(scenario, app, accounts, seeded, built)).toEqual({ restored: { reinserted: ['democrm_account/ac1'] } });
     expect(app.rows.democrm_account!.find((r) => r.id === 'ac1')).toEqual(seeded.get('democrm_account')!.find((r) => r.id === 'ac1'));
+  });
+});
+
+describe('runHalf — an operation an earlier write would meet runs on a fresh seeded copy of the app, so the app\'s own one-way state rule never judges a restore (#34448)', () => {
+  const ASSET_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/asset_lifecycle.json');
+  const REFUSAL = 'That status change is not allowed: a request is approved or rejected once, and only an approved one is disposed of.';
+
+  /** The asset card's app as a well-built one is: a decided scrap request never goes back to submitted (400 VALIDATION_FAILED). Counts the writes its doors take. */
+  class OneWayApp extends FakeApp {
+    writes = { insert: 0, update: 0, delete: 0 };
+    refusedTransitions = 0;
+    override async insertRow(object: string, row: Record<string, unknown>) {
+      this.writes.insert++;
+      return super.insertRow(object, row);
+    }
+    override async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+      this.writes.update++;
+      const row = (this.rows[object] ?? []).find((r) => r.id === id);
+      if (object === 'demoasset_disposal_request' && row && row.status !== 'submitted' && patch.status === 'submitted') {
+        this.refusedTransitions++;
+        return { ok: false, status: 400, body: {}, code: 'VALIDATION_FAILED', message: REFUSAL };
+      }
+      return super.updateRow(object, id, patch);
+    }
+    override async deleteRow(object: string, id: string) {
+      this.writes.delete++;
+      return super.deleteRow(object, id);
+    }
+  }
+
+  /** The asset card's run, its boots and stops counted. */
+  function assetRun<A extends FakeApp>(app: () => A, bootFails?: (n: number) => boolean) {
+    const out = setup({ scenario: load(ASSET_FILE), app });
+    const boot = out.ops.boot.bind(out.ops);
+    const life = { boots: 0, stops: 0 };
+    out.ops.boot = async (dir) => {
+      if (bootFails?.(life.boots + 1)) throw new Error('objectstack dev exited before it was ready');
+      life.boots++;
+      const booted = await boot(dir);
+      return { ...booted, stop: async () => void life.stops++ };
+    };
+    return { ...out, life };
+  }
+  const opsOf = (run: CardRun) => run.modes[0]!.run!.operations;
+  const opOf = (run: CardRun, id: string) => opsOf(run).find((o) => o.operation === id)!;
+
+  it('the approval moves DR-0006 one way, and the disposal after it is measured all the same: it ran on a copy, and no write went back through the app', async () => {
+    const { scenario, ops, driver, apps, life } = assetRun(() => new OneWayApp());
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(opsOf(run).map((o) => o.operation)).toEqual(['receive_and_issue_from_text', 'extend_overdue_loaner', 'manager_approves_scrap', 'dispose_scrapped_asset', 'employee_approves_own_scrap', 'check_out_asset_in_repair']);
+    // Six of six measured: none is NOT MEASURED for its start, and every one was asked.
+    expect(opsOf(run).filter((o) => o.notMeasured?.startsWith('restore:'))).toEqual([]);
+    for (const o of opsOf(run)) expect([o.operation, o.turn !== undefined, o.error]).toEqual([o.operation, true, undefined]);
+    expect(opOf(run, 'manager_approves_scrap').observation!.writes).toBe(1);
+    expect(opOf(run, 'dispose_scrapped_asset').restored).toEqual({ freshCopy: ['demoasset_disposal_request/dr06'] });
+    // The one-way rule judged no restore, and the booted app took no write after its seed: nothing went back through its doors.
+    expect(apps.map((a) => a.refusedTransitions)).toEqual(apps.map(() => 0));
+    const seed = run.modes[0]!.run!.seed;
+    const secondPass = Object.values(seed.secondPass ?? {}).reduce((a, b) => a + b, 0); // the seed's own updates: the lookups that close its department ↔ employee cycle
+    expect([secondPass > 0, apps[0]!.writes.update, apps[0]!.writes.delete, apps[0]!.writes.insert]).toEqual([true, secondPass, 0, seed.inserted]);
+    // Each copy was seeded alike and released: every boot stopped by the end.
+    expect([life.boots, life.stops]).toEqual([apps.length, apps.length]);
+  });
+
+  it('⛔ without a fresh copy the same rule refuses the write-back, and the disposal stays NOT MEASURED with the refusal named', async () => {
+    const { scenario, ops, driver, apps } = assetRun(() => new OneWayApp());
+    await ops.boot('host');
+    const half = await runHalf(namespacedScenario(scenario), apps[0]!, driver, { card: scenario.card.id, mode: 'template', phase: 'iterate-run' });
+    const dispose = half.operations.find((o) => o.operation === 'dispose_scrapped_asset')!;
+    expect(dispose.notMeasured).toMatch(/^restore: the rows could not be restored to the seeded state: demoasset_disposal_request: 1 changed \(dr06: status, decided_on\)/);
+    expect(dispose.notMeasured).toContain(`update demoasset_disposal_request dr06: 400 VALIDATION_FAILED ${REFUSAL.slice(0, 60)}`);
+    expect([dispose.turn, dispose.grade]).toEqual([undefined, undefined]);
+    expect(apps[0]!.refusedTransitions).toBeGreaterThan(0);
+  });
+
+  it('⛔ a copy whose seed does not load as the run\'s did, or that does not boot, leaves the operation NOT MEASURED with the reason, never graded on other rows', async () => {
+    // Every copy refuses one seed row the booted app took (the first two made: the harness's idle one, then the booted app).
+    let made = 0;
+    const { scenario, ops, driver, apps, life } = assetRun(() => (made++ < 2 ? new OneWayApp() : new RefusingApp(new Set(['demoasset_employee/e05']))));
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const second = opsOf(run)[1]!;
+    expect(second.notMeasured).toMatch(
+      /^restore: no fresh copy of the app could be seeded for it \(the copy's seed did not load as the run's did: it loaded \d+ rows, the run \d+; it refused demoasset_employee\/e05 VALIDATION_FAILED, the run nothing\); what had moved: demoasset_asset: 1 added \(new-receive_and_issue_from_text\)$/,
+    );
+    expect([second.turn, second.grade, second.restored]).toEqual([undefined, undefined, undefined]);
+    expect(driver.seen.some((k) => k.includes('/extend_overdue_loaner/'))).toBe(false);
+    expect([life.boots, life.stops]).toEqual([apps.length, apps.length]); // each refused copy was released
+
+    // A copy that does not boot says so.
+    const down = assetRun(() => new OneWayApp(), (n) => n > 1);
+    const again = await runCard(down.scenario, down.driver, down.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(opsOf(again)[1]!.notMeasured).toMatch(/^restore: no fresh copy of the app could be seeded for it \(objectstack dev exited before it was ready\); what had moved: /);
   });
 });
 
