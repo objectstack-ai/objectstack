@@ -1643,9 +1643,7 @@ export const CEILINGS = new Map([
   // area's loose-ends card, and the dedupe search before a review files. The
   // quota line (one card per defect) is untouched. Measured delta +3.
   // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
-  // Lowered 82 → 81 by the fleet-v2 text slice: grading item 8 now carries the ruled
-  // focus-theme rule in two lines instead of the MCP-only uplift's three. Landed count.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 81],
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 82],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
