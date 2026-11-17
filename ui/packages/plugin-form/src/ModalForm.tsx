@@ -84,6 +84,7 @@ import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
 import { useInitialFieldFocus } from './initialFieldFocus';
+import { FormDirtyReportContext } from './formDirtyReport';
 
 // Localized strings for the unsaved-changes guard and, since objectui#11039,
 // the form's own chrome (the default submit and cancel labels and the
@@ -1183,9 +1184,49 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     );
   }
 
+  // Radix routes backdrop click, Escape, and the X button all through here, in
+  // both arms. Closes are intercepted so unsaved input isn't silently
+  // discarded.
+  const handleDialogOpenChange = (open: boolean) => {
+    if (open) { schema.onOpenChange?.(true); return; }
+    attemptClose(false);
+  };
+
+  // Unsaved-changes guard — rendered INSIDE DialogContent so its portal
+  // inherits the Dialog's Radix layer context (focus scope + dismissable
+  // layer) through React. As a sibling of <Dialog> it had no such context, so
+  // the still-open modal swallowed its button clicks and "Keep editing" did
+  // nothing. Nesting lets Radix stack the two modals correctly: the alert
+  // becomes the topmost layer and its buttons work.
+  const discardDialog = (
+    <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('form.discardTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t('form.discardMessage')}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => { cancelIntentRef.current = false; }}>
+            {t('form.keepEditing')}
+          </AlertDialogCancel>
+          <AlertDialogAction onClick={finalizeClose}>
+            {t('form.discard')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   if (subforms?.length && schema.mode !== 'view') {
+    // The master-detail form owns its Save bar and pins it to the bottom of
+    // the body scroller below (objectstack#34599); it reports its unsaved
+    // input — header, lines, row editor — into this dialog's close guard, so
+    // the close paths prompt here exactly as they do in the flat arm. Its
+    // batch save carries no OCC token, so this arm has no conflict dialog.
     return (
-      <Dialog open={isOpen} onOpenChange={schema.onOpenChange}>
+      <Dialog open={isOpen} onOpenChange={handleDialogOpenChange}>
         <MobileDialogContent
           showCloseButton={showCloseButton}
           onOpenAutoFocus={initialFieldFocus.onOpenAutoFocus}
@@ -1204,6 +1245,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           )}
           <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
             <Suspense fallback={<ModalFormBodyPending />}>
+            <FormDirtyReportContext.Provider value={setIsDirty}>
             <MasterDetailForm
               schema={{
                 type: 'object-master-detail-form',
@@ -1239,8 +1281,10 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
               }}
               dataSource={dataSource}
             />
+            </FormDirtyReportContext.Provider>
             </Suspense>
           </div>
+          {discardDialog}
         </MobileDialogContent>
       </Dialog>
     );
@@ -1249,15 +1293,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   const hasFooter = !loading && !error && (showSubmit || showCancel || showReset);
 
   return (
-    <Dialog
-      open={isOpen}
-      onOpenChange={(open) => {
-        // Radix routes backdrop click, Escape, and the X button all through
-        // here. Intercept closes so unsaved input isn't silently discarded.
-        if (open) { schema.onOpenChange?.(true); return; }
-        attemptClose(false);
-      }}
-    >
+    <Dialog open={isOpen} onOpenChange={handleDialogOpenChange}>
       <MobileDialogContent
         showCloseButton={showCloseButton}
         onOpenAutoFocus={initialFieldFocus.onOpenAutoFocus}
@@ -1338,30 +1374,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           </div>
         )}
 
-        {/* Unsaved-changes guard — rendered INSIDE DialogContent so its portal
-            inherits the Dialog's Radix layer context (focus scope + dismissable
-            layer) through React. As a sibling of <Dialog> it had no such
-            context, so the still-open modal swallowed its button clicks and
-            "Keep editing" did nothing. Nesting lets Radix stack the two modals
-            correctly: the alert becomes the topmost layer and its buttons work. */}
-        <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('form.discardTitle')}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t('form.discardMessage')}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => { cancelIntentRef.current = false; }}>
-                {t('form.keepEditing')}
-              </AlertDialogCancel>
-              <AlertDialogAction onClick={finalizeClose}>
-                {t('form.discard')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {discardDialog}
         {/* Same nesting rationale as the discard guard above: as a child of
             the Dialog content the conflict alert stacks as the topmost Radix
             layer, so its buttons receive clicks while the modal stays open. */}
