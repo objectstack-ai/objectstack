@@ -10,7 +10,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { ApprovalNodeConfigSchema, DecisionConfigSchema } from '@objectstack/spec/automation';
 import { fieldsForNodeType, localizeFlowFields, type FlowConfigField } from './flow-node-config.js';
+import { jsonSchemaToFlowFields } from './json-schema-to-fields.js';
 
 const CJK = /[㐀-鿿]/;
 
@@ -25,6 +28,7 @@ function strings(field: FlowConfigField): Array<[string, string]> {
   for (const o of field.options ?? []) out.push([`${field.id}.opt.${o.value}`, o.label]);
   for (const c of field.columns ?? []) {
     out.push([`${field.id}.col.${c.key}.label`, c.label]);
+    if (c.help) out.push([`${field.id}.col.${c.key}.help`, c.help]);
     if (c.placeholder && !LITERAL_PLACEHOLDERS.has(c.placeholder)) out.push([`${field.id}.col.${c.key}.placeholder`, c.placeholder]);
     for (const o of c.options ?? []) out.push([`${field.id}.col.${c.key}.opt.${o.value}`, o.label]);
   }
@@ -36,6 +40,22 @@ describe('zh-CN decision and approval panels (objectstack#34818 item 5)', () => 
     const english = strings(fieldsForNodeType(type)[0]!).length; // the table is non-empty
     expect(english).toBeGreaterThan(0);
     const leftEnglish = localizeFlowFields(type, fieldsForNodeType(type), 'zh-CN')
+      .flatMap(strings)
+      .filter(([, text]) => !CJK.test(text));
+    expect(leftEnglish).toEqual([]);
+  });
+
+  // The fields as the engine publishes them online: the installed contract's
+  // own JSON Schema, whose descriptions are the help (the live panel drew
+  // `excludeSubmitter`, `fallbackApprovers` and the approver columns' help in
+  // English before this pin).
+  it.each([
+    ['approval', ApprovalNodeConfigSchema],
+    ['decision', DecisionConfigSchema],
+  ] as const)('every served %s string reads Chinese', (type, schema) => {
+    const served = jsonSchemaToFlowFields(z.toJSONSchema(schema, { io: 'input' }))!;
+    expect(served.length).toBeGreaterThan(0);
+    const leftEnglish = localizeFlowFields(type, served, 'zh-CN')
       .flatMap(strings)
       .filter(([, text]) => !CJK.test(text));
     expect(leftEnglish).toEqual([]);

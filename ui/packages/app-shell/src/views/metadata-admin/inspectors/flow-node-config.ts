@@ -1510,14 +1510,16 @@ function withUnmappedDeclaredKeys(
   return out;
 }
 
-/** Overlay a column's zh label / option labels (English is the fallback). */
+/** Overlay a column's zh label / help / option labels (English is the fallback). */
 function localizeColumn(
   col: FlowConfigColumn,
-  cz: { label?: string; placeholder?: string; opts?: Record<string, string> } | undefined,
+  cz: { label?: string; help?: string; placeholder?: string; opts?: Record<string, string> } | undefined,
 ): FlowConfigColumn {
   if (!cz) return col;
   const out: FlowConfigColumn = { ...col };
   if (cz.label) out.label = cz.label;
+  // objectstack#34818 — the served column help (the spec's description).
+  if (cz.help) out.help = cz.help;
   // objectstack#34818 — only a column the zh table names a placeholder for:
   // a prose hint, never an example literal.
   if (col.placeholder && cz.placeholder) out.placeholder = cz.placeholder;

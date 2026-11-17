@@ -216,8 +216,8 @@ interface FlowFieldZh {
   unsetNotice?: string;
   /** select option value → zh label. */
   opts?: Record<string, string>;
-  /** objectList column key → zh label (+ prose placeholder, nested option labels). */
-  cols?: Record<string, { label?: string; placeholder?: string; opts?: Record<string, string> }>;
+  /** objectList column key → zh label (+ help, prose placeholder, nested option labels). */
+  cols?: Record<string, { label?: string; help?: string; placeholder?: string; opts?: Record<string, string> }>;
 }
 
 /**
@@ -229,6 +229,62 @@ interface FlowFieldZh {
  * to its English label, so plugin nodes stay readable. Placeholders (example
  * literals like cron strings / URLs) are intentionally left in English.
  */
+/**
+ * The approver row's columns, shared by an approval's `approvers` and its
+ * `fallbackApprovers` (the same `ApprovalNodeApproverSchema`). objectstack#34818:
+ * the column help the server serves (the spec's descriptions) read English in
+ * the zh panel; each is said here in the admin's words.
+ */
+const APPROVER_COLS_ZH: NonNullable<FlowFieldZh['cols']> = {
+  type: {
+    label: '类型',
+    help:
+      '这一步如何找到审批人。尽量选组织里的角色(上级、岗位、部门、团队),不要选某个具体的人 —— 人可能离职,换一个环境也可能不存在。' +
+      '「上级」要等管理员在用户目录里登记了每个人的上级才能找到人;在此之前找不到任何人,请求按本节点「没有解析出审批人时」的设置处理。' +
+      '「平台管理员」只用于部署自带的打包流程,这里保存的流程不能使用。',
+    opts: {
+      user: '用户',
+      position: '岗位',
+      org_membership_level: '组织成员(所有者 / 管理员 / 成员)',
+      team: '团队',
+      department: '部门',
+      manager: '上级',
+      field: '字段',
+      queue: '队列',
+      expression: '表达式(CEL)',
+      platform_admin: '平台管理员',
+    },
+  },
+  value: {
+    label: '值',
+    help:
+      '按所选类型填写具体是谁:用户、成员级别、岗位、团队、部门或队列,或保存审批人的记录字段。「上级」留空。' +
+      '「表达式」填写返回审批人的 CEL 表达式,可读取 `current.*`、`trigger.*` 和 `vars.*`。',
+    placeholder: '按“类型”填写:用户、组织成员级别、岗位、团队、部门或字段',
+  },
+  resolveAs: {
+    label: '解析为',
+    help: '仅用于「表达式」:表达式的结果代表什么。默认每个结果是一个人;选部门、岗位或团队,则其全部成员都是审批人。',
+    opts: {
+      user: '用户 ID(默认)',
+      department: '部门 ID → 部门成员',
+      position: '岗位名称 → 任职人员',
+      team: '团队 ID → 团队成员',
+    },
+  },
+  group: {
+    label: '分组',
+    help: '分组会签的组名:同名的审批人为一组,这一步需要每一组都通过(如「法务」「财务」)。仅在审批方式为「分组会签」时读取。',
+    placeholder: '如 法务 / 财务 —— 用于分组会签',
+  },
+  organization: {
+    label: '所属组织',
+    help:
+      '到同一集团的另一个组织里找这个审批人,而不是请求所在的组织,例如由集团 CFO 审批某个工厂的采购单。留空则用请求所在的组织。' +
+      '填 `$root` 表示集团顶层,`$parent` 表示上一级,或填写组织的标识。',
+  },
+};
+
 const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
   start: {
     triggerType: {
@@ -296,8 +352,12 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
       label: '分支',
       help: '每个分支包含标签、CEL 表达式和目标节点。表达式为 “true” 的分支即默认 / else 路径。选择目标会接线该分支的出边(创建或更新),清空则断开该边。',
       cols: {
-        label: { label: '标签', placeholder: '如 有商机' },
-        expression: { label: '表达式' },
+        label: {
+          label: '标签',
+          help: '分支的标签;成立的分支沿同名标签的出边继续(都不成立时走标为默认、或标签为 default 的出边)。',
+          placeholder: '如 有商机',
+        },
+        expression: { label: '表达式', help: '决定是否走这个分支的 CEL 条件(不加 {{ }})。' },
         target: { label: '目标节点', placeholder: '下一个节点' },
       },
     },
@@ -404,34 +464,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     approvers: {
       label: '审批人',
       help: '谁可以处理此步骤。插入审批节点时会自带「通过」和「驳回」两条连线;请保留这两条,缺任一条时「问题」页签会提示。',
-      cols: {
-        type: {
-          label: '类型',
-          opts: {
-            user: '用户',
-            position: '岗位',
-            org_membership_level: '组织成员(所有者 / 管理员 / 成员)',
-            team: '团队',
-            department: '部门',
-            manager: '上级',
-            field: '字段',
-            queue: '队列',
-            expression: '表达式(CEL)',
-          },
-        },
-        value: { label: '值', placeholder: '按“类型”填写:用户、组织成员级别、岗位、团队、部门或字段' },
-        // objectstack#34818 — was English in the zh panel.
-        resolveAs: {
-          label: '解析为',
-          opts: {
-            user: '用户 ID(默认)',
-            department: '部门 ID → 部门成员',
-            position: '岗位名称 → 任职人员',
-            team: '团队 ID → 团队成员',
-          },
-        },
-        group: { label: '分组', placeholder: '如 法务 / 财务 —— 用于分组会签' },
-      },
+      cols: APPROVER_COLS_ZH,
     },
     behavior: {
       label: '审批方式',
@@ -450,13 +483,21 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
       help: '将请求状态(待审 / 通过 / 拒绝)镜像到的业务对象字段。应为只读。',
     },
     'escalation.enabled': { label: 'SLA 升级', help: '在超时内未做决策时升级。' },
-    'escalation.timeoutHours': { label: '超时(小时)' },
+    'escalation.timeoutHours': {
+      label: '超时(小时)',
+      help: '请求最多等多少小时后执行升级。按日历小时计算,夜间、周末和节假日都算在内;平台没有工作时间日历:周五 17:00 发起、设为 4 小时的请求会在当天 21:00 升级。',
+    },
     'escalation.action': {
       label: '超时动作',
+      help: '超过期限后怎么办:改派给其他人、自动通过、自动拒绝,或通知某人(默认)。',
       opts: { notify: '通知', reassign: '改派', auto_approve: '自动通过', auto_reject: '自动拒绝' },
     },
-    'escalation.escalateTo': { label: '升级至', placeholder: '岗位名称或用户 ID' },
-    'escalation.notifySubmitter': { label: '通知提交人' },
+    'escalation.escalateTo': {
+      label: '升级至',
+      help: '超过期限后由谁接手或接到通知:通常是一个岗位,也可以是具体的人。填写岗位名称或 position:<名称>、用户 ID 或邮箱。不接受 team:、department:、org_membership_level: 或 role: 这类地址,因为没有审批人以它们的身份处理。',
+      placeholder: '岗位名称或用户 ID',
+    },
+    'escalation.notifySubmitter': { label: '通知提交人', help: '升级时通知提交请求的人。' },
     maxRevisions: {
       label: '最多退回次数',
       help: '请求自动拒绝前的最多退回修订次数(0 表示禁用退回)。需要一条审批分支为「退回修改」的出边才生效。',
@@ -469,7 +510,20 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
         admin_rescue: '等待管理员接手(默认)',
         fail: '节点失败(配置有误)',
         auto_approve: '自动通过(直接放行!)',
+        fallback: '交给备用审批人',
       },
+    },
+    excludeSubmitter: {
+      label: '排除提交人',
+      help:
+        '防止自己审批自己的请求:开启后,不论审批人是怎样找到的,提交人都会从这一步的审批人中去掉。' +
+        '去掉后如果没人了,请求按「没有解析出审批人时」的设置处理(默认交给组织管理员,或交给你指定的备用审批人),绝不会自动通过,审批记录会写明原因。' +
+        '因此不能与「自动通过」同时选择。默认关闭。',
+    },
+    fallbackApprovers: {
+      label: '备用审批人',
+      help: '这一步找不到其他审批人时,由这些人决定。仅在「没有解析出审批人时」选择「交给备用审批人」时读取。',
+      cols: APPROVER_COLS_ZH,
     },
   },
   wait: {
