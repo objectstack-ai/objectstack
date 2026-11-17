@@ -124,7 +124,7 @@
           "verifiedAt": "2026-11-14",
           "evidenceScope": "in-repo",
           "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#fillHookRefusalParams (fills the picked sentence's `{{ NAME }}` holes from the throw's `params` through the formula template engine, the declared names alone in scope); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#declaredRefusalMessage (renders an entry that declares `params`; one that declares none stays plain text)",
-          "producer": "packages/spec/src/data/hook.zod.ts#hookRefusalMessageRefusal (judges each sentence's holes against the declared names at save)",
+          "producer": "packages/spec/src/data/declared-entry.zod.ts#declaredRefusalEntrySchema (judges each sentence's holes against the declared names at save; #34273 moved the judge into the shared declared-entry factory)",
           "note": "[#33214, ruling 6879477573 问三] Seeded `live` with its reader in one change. The template engine is the one the flow `end` refusal renders through (`renderTextSlot`)."
         }
       },

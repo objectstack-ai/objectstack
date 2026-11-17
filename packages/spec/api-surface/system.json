@@ -850,6 +850,7 @@
     "WorkerConfigSchema (const)",
     "WorkerStats (type)",
     "WorkerStatsSchema (const)",
+    "actionRefusalMessageKey (function)",
     "audienceAllows (function)",
     "audiencePermitsSelfRegistration (function)",
     "authorisesIrreversibleAction (function)",

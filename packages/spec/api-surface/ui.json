@@ -40,6 +40,8 @@
     "ActionParamParsed (type)",
     "ActionParamSchema (const)",
     "ActionParsed (type)",
+    "ActionRefusal (type)",
+    "ActionRefusalSchema (const)",
     "ActionSchema (const)",
     "ActionSession (type)",
     "ActionSessionSchema (const)",

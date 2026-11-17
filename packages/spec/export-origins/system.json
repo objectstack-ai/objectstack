@@ -810,6 +810,7 @@
     "WorkerConfigSchema": "src/system/worker.zod.ts#WorkerConfigSchema (const)",
     "WorkerStats": "src/system/worker.zod.ts#WorkerStats (type)",
     "WorkerStatsSchema": "src/system/worker.zod.ts#WorkerStatsSchema (const)",
+    "actionRefusalMessageKey": "src/system/i18n-resolver.ts#actionRefusalMessageKey (function)",
     "audienceAllows": "src/system/book.zod.ts#audienceAllows (function)",
     "audiencePermitsSelfRegistration": "src/system/auth-config.zod.ts#audiencePermitsSelfRegistration (function)",
     "authorisesIrreversibleAction": "src/system/migration.zod.ts#authorisesIrreversibleAction (function)",
