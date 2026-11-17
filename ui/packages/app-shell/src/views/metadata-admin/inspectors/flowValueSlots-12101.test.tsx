@@ -47,7 +47,7 @@ import '@objectstack/lint';
 afterEach(cleanup);
 
 const PICK = 'Insert a reference';
-const TOGGLE = 'Write as a CEL expression';
+const TOGGLE = 'Write as a formula';
 const env = (source: string) => ({ dialect: 'cel', source });
 
 

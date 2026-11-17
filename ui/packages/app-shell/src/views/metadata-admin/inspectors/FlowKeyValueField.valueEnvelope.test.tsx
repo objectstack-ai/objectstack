@@ -20,7 +20,7 @@ import { t } from '../i18n';
 
 afterEach(cleanup);
 
-const TOGGLE = 'Write as a CEL expression';
+const TOGGLE = 'Write as a formula';
 
 const ASSIGNMENTS: FlowConfigField = {
   id: 'assignments',

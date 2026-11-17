@@ -259,7 +259,7 @@ describe('objectui#11788 — the picker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add recipient' }));
     await userEvent.click(within(row(0)).getByRole('combobox', { name: 'Recipient type' }));
     await userEvent.click(await screen.findByRole('option', { name: 'Expression' }));
-    const box = within(row(0)).getByPlaceholderText('CEL, e.g. ownerId');
+    const box = within(row(0)).getByPlaceholderText('Formula, e.g. ownerId');
     fireEvent.change(box, { target: { value: '{ownerId}' } });
     expect(within(row(0)).getByRole('alert')).toBeInTheDocument();
     fireEvent.change(box, { target: { value: 'ownerId' } });

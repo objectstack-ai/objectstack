@@ -151,18 +151,63 @@ export function useObjectCatalog() {
   return usePickerLoad(load);
 }
 
+interface ObjectLabels {
+  labels: ReadonlyMap<string, string>;
+  /** A sentence below names an object: read the catalog (once). */
+  want: () => void;
+}
+
+const ObjectLabelsContext = React.createContext<ObjectLabels | null>(null);
+const NO_LABELS: ReadonlyMap<string, string> = new Map();
+
+/** Reads the catalog and hands its labels up; mounted only once a label is wanted. */
+function ObjectLabelsReader({ onLabels }: { onLabels: (labels: ReadonlyMap<string, string>) => void }) {
+  const catalog = useObjectCatalog();
+  const data = catalog.status === 'loaded' ? catalog.data : undefined;
+  React.useEffect(() => {
+    if (!data) return;
+    const out = new Map<string, string>();
+    for (const e of data) if (e.label) out.set(e.name, e.label);
+    onLabels(out);
+  }, [data, onLabels]);
+  return null;
+}
+
 /**
- * An object's label as the picker's catalog reads it, else the name itself —
- * for sentences that name an object (the flow node panel's "Fields of …"),
- * which read as the author's label and keep the machine name out of the text.
- * A name the catalog does not know (an expression, a name not served) is
- * returned as it is.
+ * Lends object labels to {@link useObjectDisplayName} for the panel below it.
+ * The catalog is read once for the whole panel, and only after a sentence
+ * that names an object mounts, so the sentences of one panel (the flow node
+ * panel's "Fields of …") cost one read between them and a panel that names
+ * no object reads nothing.
+ */
+export function ObjectLabelsProvider({ children }: { children?: React.ReactNode }) {
+  const [wanted, setWanted] = React.useState(false);
+  const [labels, setLabels] = React.useState<ReadonlyMap<string, string>>(NO_LABELS);
+  const want = React.useCallback(() => setWanted(true), []);
+  const value = React.useMemo(() => ({ labels, want }), [labels, want]);
+  return (
+    <ObjectLabelsContext.Provider value={value}>
+      {wanted && <ObjectLabelsReader onLabels={setLabels} />}
+      {children}
+    </ObjectLabelsContext.Provider>
+  );
+}
+
+/**
+ * An object's label from the nearest {@link ObjectLabelsProvider}, else the
+ * name itself — for sentences that name an object, which read as the author's
+ * label and keep the machine name out of the text. A name the catalog does not
+ * know (an expression, a name not served), or a sentence with no provider
+ * above it, reads the name as it is.
  */
 export function useObjectDisplayName(name: string | undefined): string {
-  const catalog = useObjectCatalog();
+  const ctx = React.useContext(ObjectLabelsContext);
+  const want = ctx?.want;
+  React.useEffect(() => {
+    if (name && want) want();
+  }, [name, want]);
   if (!name) return '';
-  if (catalog.status !== 'loaded') return name;
-  return catalog.data.find((e) => e.name === name)?.label ?? name;
+  return ctx?.labels.get(name) ?? name;
 }
 
 /**

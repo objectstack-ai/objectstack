@@ -94,7 +94,8 @@ const lastPatch = (onPatch: ReturnType<typeof vi.fn>) => onPatch.mock.calls.at(-
 describe('FlowNodeInspector — top-level regression', () => {
   it('edits a top-level node and offers delete', () => {
     const { onPatch } = renderInspector({ kind: 'node', id: 'each' });
-    expect(screen.getByRole('button', { name: /remove node/i })).toBeInTheDocument();
+    // Remove node sits in the header's "···" menu (objectstack#34796).
+    expect(screen.getByRole('button', { name: /more actions/i })).toBeInTheDocument();
     fireEvent.change(screen.getByDisplayValue('For each'), { target: { value: 'Each order' } });
     expect(lastPatch(onPatch).nodes[1].label).toBe('Each order');
   });
@@ -139,6 +140,7 @@ describe('FlowNodeInspector — nested node editing', () => {
   it('locks the id and hides delete for a nested node, with a hint', () => {
     renderInspector({ kind: NESTED_NODE_KIND, id: bodyChargeId });
     expect(screen.queryByRole('button', { name: /remove node/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /more actions/i })).toBeNull();
     expect(screen.getByDisplayValue('charge')).toBeDisabled(); // the id field
     expect(screen.getByText(/rename it in the container/i)).toBeInTheDocument();
   });

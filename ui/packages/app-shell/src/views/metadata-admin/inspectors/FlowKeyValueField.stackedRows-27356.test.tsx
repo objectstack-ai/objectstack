@@ -27,7 +27,7 @@ import type { FlowConfigField } from './flow-node-config';
 
 afterEach(cleanup);
 
-const TOGGLE = 'Write as a CEL expression';
+const TOGGLE = 'Write as a formula';
 const REMOVE = /remove/i;
 const LONG_FIELD = 'customer_satisfaction_score';
 

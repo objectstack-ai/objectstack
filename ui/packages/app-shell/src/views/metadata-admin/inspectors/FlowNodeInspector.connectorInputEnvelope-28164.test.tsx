@@ -36,7 +36,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const TOGGLE = 'Write as a CEL expression';
+const TOGGLE = 'Write as a formula';
 
 const SLACK_POST_MESSAGE = {
   type: 'object',

@@ -384,7 +384,7 @@ const REFERENCE_EN = [
   "Resolved at runtime from the submitter's manager — no value needed.",
   // ADR-0142 D6 replaced the "not supported" warning with what the value names.
   "The queue's machine name. Its members when the step opens are the approvers; an empty queue adds nobody.",
-  'Fields of account.',
+  'Fields of “account”.',
   'Set the flow’s trigger object (on the Start node) to list fields.',
   'Actions of slack.',
   'Choose a Connector above to list its actions.',
