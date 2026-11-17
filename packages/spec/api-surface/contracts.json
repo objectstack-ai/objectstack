@@ -109,6 +109,7 @@
     "DelegableScope (interface)",
     "DelegationNarrowing (type)",
     "DeployExecutionResult (interface)",
+    "DriverAggregateQuery (type)",
     "DriverQuery (type)",
     "EMBEDDER_SERVICE (const)",
     "EffectiveAccess (interface)",

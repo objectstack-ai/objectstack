@@ -201,3 +201,26 @@ describe('control: a published batch reads as before (objectui#11922)', () => {
     expect(calls(toast.success)).toEqual(['home.pendingDrafts.published']);
   });
 });
+
+// objectstack#32984 — `seedError` holds only the producer's own text and is
+// absent when it sent none; `seedFailed` is the failure. A failed seed with no
+// text still reads as a failed seed, in the publish-health line's own words.
+describe('Publish all reports a failed seed the producer sent no text for (objectstack#32984)', () => {
+  it('warns that sample data failed, with the line’s sentence as the detail', async () => {
+    batchBody = batch({
+      outcome: 'published',
+      publishedCount: 1,
+      failedCount: 0,
+      published: [{ type: 'view', name: 'lead_list', version: 'sha256:0' }],
+      failed: [],
+      seedApplied: { success: false, inserted: 0, updated: 0, errors: [] },
+    });
+    const outcome = await publishAll();
+    expect(outcome).toEqual({ ok: true, attempted: 2 });
+    expect(calls(toast.success)).toEqual([]);
+    const warnings = vi.mocked(toast.warning).mock.calls;
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][0]).toBe('home.pendingDrafts.seedWarn');
+    expect(warnings[0][1]).toEqual({ description: 'chatbot.build.health.seedFailed' });
+  });
+});
