@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/metadata-protocol': patch
 '@objectstack/lint': patch
 ---
@@ -7,7 +7,7 @@
 feat(metadata-protocol, spec, lint): a post-publish probe finding carries the sentence for the person who published, in their language
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 `POST /packages/:id/publish-drafts` answers with `probes`, the report of the checks that run after a publish (ADR-0038 L3). Each finding in `probes.issues[]` now carries `userMessage`: one sentence for the person who asked for the app, composed by the probe in the request's language. The language is the request's locale, else the workspace default, else English, over the eleven platform locales. A sentence names a dashboard, widget, dataset, view or object by its label where the probe can read one, and by its API name otherwise.
 
