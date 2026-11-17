@@ -21,6 +21,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+// The door reaches the runtime through a lazy `import()`; its first load is
+// paid here, during collection, never inside a clocked test body.
+import '@objectstack/runtime';
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { declareInstallerPlatformOwner, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';

@@ -47,6 +47,9 @@ import { composeStacks, defineStack, type ObjectStackDefinition } from '@objects
 import { resolveArtifactPackageOrder } from '@objectstack/core';
 import { devI18nPluginOptions, stackDeclaresTranslations } from './dev-i18n';
 import { DevPlugin } from './dev-plugin';
+// `DevPlugin` reaches the memory driver through a lazy `import()`; its first
+// load is paid here, during collection, never inside a clocked test body.
+import '@objectstack/driver-memory';
 
 const absent = (name: string): Error =>
   Object.assign(new Error(`Cannot find package '${name}'`), { code: 'ERR_MODULE_NOT_FOUND' });
