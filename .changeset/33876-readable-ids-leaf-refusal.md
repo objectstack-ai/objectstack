@@ -18,6 +18,7 @@ Skills-docs: follow-up #33875 — skills/objectstack-query/SKILL.md (its nested-
 
 - FROM `find('opportunity', { where: { account: { region: 'NA' } } })` TO two reads: `find('account', { where: { region: 'NA' }, fields: ['id'] })`, then `find('opportunity', { where: { account: { $in: ids } } })`. The same for `findOne`, `count` and `aggregate`.
 - FROM an analytics dimension `opportunity.stage` on a line cube TO a dimension on the lookup field itself (`opportunity`), then a read of `opportunity` for `stage` by those ids.
+- FROM an analytics `where` naming a field through a lookup (`opportunity.stage`), or a dataset whose own `filter` does, TO a filter on the lookup field itself (`opportunity` `$in` the ids read from `opportunity` with that condition): the analytics service hands such a leaf to the engine as the same nested-relation condition, so on these drivers it is refused `INVALID_FILTER` / 400 the same way.
 - A third-party driver whose filter compiler composes the leaf declares `supports.readableIdsLeaf: true` and keeps serving both.
 
 **`DriverCapabilities.readableIdsLeaf`** (`@objectstack/spec`) is a new optional capability bit: the driver's filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf. `driver-sql` declares it on every dialect (`SqliteWasmDriver` and `TursoDriver` inherit it), and so does `driver-memory`. MongoDB and OData do not. Absence means `false`.

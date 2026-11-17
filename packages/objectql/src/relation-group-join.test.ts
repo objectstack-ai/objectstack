@@ -216,8 +216,8 @@ describe('relation group join — DECLINED, with nothing read, wherever it is no
     });
   }
 
-  // [#33876] The dimension half of the maintainer's ruling A on #33626's Q2:
-  // a driver without the bit is REFUSED, not declined — the outcome carries
+  // [#33876] The dimension half (the scope note on #33876, 6917475155, under
+  // Prime Directive 5): a driver without the bit is REFUSED, not declined — the outcome carries
   // the error the caller throws instead of serving its FK-expand.
   for (const name of ['com.objectstack.driver.mongodb', 'com.objectstack.driver.odata', 'com.objectstack.driver.sql']) {
     it(`[#33876] a driver without readableIdsLeaf (${name}): refused, INVALID_QUERY / 400 on the outcome, no driver call`, async () => {

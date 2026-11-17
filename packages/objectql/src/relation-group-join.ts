@@ -301,8 +301,9 @@ export function withoutJudgedRelationFields<T extends { groupBy?: unknown }>(
  * compiles no `ReadableIds` leaf (its `DriverCapabilities.readableIdsLeaf`
  * bit is absent: MongoDB, OData) — the analytics dimension through a lookup,
  * decided by the same bit as a nested-relation `where`
- * (`relationSemiJoinDriverRefusal`), the maintainer's ruling A on #33626's
- * Q2. `undefined` when the driver declares the bit: `driver-memory` does, and
+ * (`relationSemiJoinDriverRefusal`): the scope note on #33876 (6917475155)
+ * under Prime Directive 5 (memory and mongo refuse what they cannot run with
+ * a stable code). `undefined` when the driver declares the bit: `driver-memory` does, and
  * keeps its in-process FK-expand through the ordinary decline. Nothing is
  * read; the caller serves nothing and throws the error, `INVALID_QUERY` /
  * 400, naming the driver and the two-step route.
