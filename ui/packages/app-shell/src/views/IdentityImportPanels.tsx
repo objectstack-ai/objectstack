@@ -44,6 +44,11 @@ const POSITIONS_HINT_FALLBACK =
   'Positions: map a column of position machine names, several separated by ";". Each is assigned as in Setup; '
   + 'a name that does not exist, or that you may not assign, is reported on its row, and the user is still created.';
 
+const MANAGER_HINT_FALLBACK =
+  'Manager: map a column holding each user\'s manager, by email address (or phone number where phone sign-in is on). '
+  + 'Managers are linked once every row is in, so a manager further down the file counts; a manager that is not found, '
+  + 'or cannot be linked, is reported on its row, and the user is still created.';
+
 export function IdentityImportOptions({
   policy,
   onPolicyChange,
@@ -79,6 +84,11 @@ export function IdentityImportOptions({
           holds, and that a bad name costs its row the position, not the user. */}
       <p className="text-xs text-muted-foreground" data-testid="identity-import-positions-hint">
         {t('console.identityImport.positionsHint', POSITIONS_HINT_FALLBACK)}
+      </p>
+      {/* objectstack#34536 — the `manager_id` column's help: what the cell
+          holds, and that an unresolved manager costs its row the link, not the user. */}
+      <p className="text-xs text-muted-foreground" data-testid="identity-import-manager-hint">
+        {t('console.identityImport.managerHint', MANAGER_HINT_FALLBACK)}
       </p>
     </div>
   );
@@ -150,6 +160,16 @@ export function IdentityImportResultExtra({ serverResult }: { serverResult?: Imp
  *  the row lands, as Setup assigns a position. Its help is the options
  *  panel's `positionsHint`.
  *
+ *  `manager_id` (objectstack#34536) names the user's manager by an identity
+ *  key — the manager's email, or phone where phone sign-in is on — which the
+ *  endpoint resolves after every row lands (objectstack#18028). Typed `text`:
+ *  the cell is a key, not the `sys_user` lookup id the field stores. Its help
+ *  is the options panel's `managerHint`.
+ *
+ *  This list is the endpoint's column set: a test reads `admin-import-users.ts`
+ *  in `@objectstack/plugin-auth` and fails when the two drift
+ *  (`identityImportFields.endpointColumns-34536.test.ts`).
+ *
  *  The flag is typed where it is written, against the wizard's own field type,
  *  and the return type does not name it. `ObjectView` passes this list or
  *  `importTargetFields`' list into the wizard's `fields` through one
@@ -168,5 +188,6 @@ export function identityImportFields(
     { name: 'name', label: label('name', 'Name'), type: 'text' },
     { name: 'role', label: label('role', 'Platform Role'), type: 'text' },
     { name: 'positions', label: 'Positions', type: 'text' },
+    { name: 'manager_id', label: label('manager_id', 'Manager'), type: 'text' },
   ];
 }

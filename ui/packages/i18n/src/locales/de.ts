@@ -1920,6 +1920,7 @@ const de = {
       passwordsNote: "Temporäre Passwörter — einmalig angezeigt, nie gespeichert. Speichern Sie sie jetzt; jeder Benutzer muss seines bei der ersten Anmeldung ändern.",
       passwordsMore: "Weitere Einträge ausgelassen — bitte den Download verwenden.",
       positionsHint: "Positionen: Ordnen Sie eine Spalte mit Maschinennamen von Positionen zu, mehrere durch Semikolon (;) getrennt. Jede wird wie in Setup zugewiesen; ein Name, den es nicht gibt oder den Sie nicht zuweisen dürfen, wird in seiner Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
+      managerHint: "Vorgesetzte: Ordnen Sie eine Spalte mit der vorgesetzten Person jedes Benutzers zu, per E-Mail-Adresse (oder Telefonnummer, wenn die Telefon-Anmeldung aktiv ist). Vorgesetzte werden verknüpft, wenn alle Zeilen angelegt sind, daher zählt auch eine Person weiter unten in der Datei; eine Person, die nicht gefunden oder nicht verknüpft werden kann, wird in ihrer Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
       passwordsDownload: "CSV herunterladen",
     },
     ai: {
