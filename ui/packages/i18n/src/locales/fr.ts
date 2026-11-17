@@ -2286,7 +2286,7 @@ const fr = {
       unavailableRetry: "Réessayer",
       unavailableHome: "Retour à l'accueil",
       dock: {
-        title: "Assistant",
+        title: "Assistant IA",
         description: "Discussion avec l'assistant IA",
         resize: "Redimensionner la discussion",
         collapse: "Réduire la discussion",
@@ -4859,7 +4859,7 @@ const fr = {
       securityBlockTitle_one: 'La publication sera refusée — {{count}} élément nécessite d’abord une décision',
       securityBlockTitle_many: 'La publication sera refusée — {{count}} d’éléments nécessitent d’abord une décision',
       securityBlockTitle_other: 'La publication sera refusée — {{count}} éléments nécessitent d’abord une décision',
-      securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Partage d’enregistrements, puis publiez à nouveau.',
+      securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Qui peut voir quels enregistrements, puis publiez à nouveau.',
       flowChecksTitle: 'Avant de publier : la vérification de publication signalera ceci',
       securityRule: {
         owdUnset: 'Aucune base de partage des enregistrements (sharingModel) n’est déclarée. L’exécution se rabat sur private, mais la base doit être une décision explicite.',

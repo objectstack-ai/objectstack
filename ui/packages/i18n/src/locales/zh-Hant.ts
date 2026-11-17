@@ -2508,7 +2508,7 @@ const zhHant = {
       unavailableRetry: '重試',
       unavailableHome: '返回首頁',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手對話',
         resize: '調整對話寬度',
         collapse: '收起對話',
@@ -3701,7 +3701,7 @@ const zhHant = {
       securityBlockTitle: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
       securityBlockTitle_one: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
       securityBlockTitle_other: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
-      securityBlockWhere: '請在物件的“設定 → 記錄共享模型”中修改後重新發布。',
+      securityBlockWhere: '請在物件的“設定 → 誰能看到哪些記錄”中修改後重新發布。',
       flowChecksTitle: '釋出前請先看 —— 釋出檢查會提出以下幾點',
       securityRule: {
         owdUnset: '未宣告記錄共享模型（sharingModel）。執行環境會按 private 處理，但這個基線必須是明確做出的決定。',

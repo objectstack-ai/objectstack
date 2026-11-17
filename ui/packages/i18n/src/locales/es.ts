@@ -2290,7 +2290,7 @@ const es = {
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
-        title: "Asistente",
+        title: "Asistente de IA",
         description: "Chat con el asistente de IA",
         resize: "Redimensionar el chat",
         collapse: "Contraer el chat",
@@ -4863,7 +4863,7 @@ const es = {
       securityBlockTitle_one: 'La publicación será rechazada: {{count}} elemento necesita una decisión primero',
       securityBlockTitle_many: 'La publicación será rechazada: {{count}} de elementos necesitan una decisión primero',
       securityBlockTitle_other: 'La publicación será rechazada: {{count}} elementos necesitan una decisión primero',
-      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Uso compartido de registros y vuelva a publicar.',
+      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Quién puede ver qué registros y vuelva a publicar.',
       flowChecksTitle: 'Antes de publicar: la comprobación de publicación señalará lo siguiente',
       securityRule: {
         owdUnset: 'No se ha declarado la base de uso compartido de registros (sharingModel). El entorno de ejecución usa private, pero la base debe ser una decisión explícita.',

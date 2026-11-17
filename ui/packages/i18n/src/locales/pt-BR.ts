@@ -2285,7 +2285,7 @@ const pt = {
       unavailableRetry: "Tentar novamente",
       unavailableHome: "Voltar ao início",
       dock: {
-        title: "Assistente",
+        title: "Assistente de IA",
         description: "Conversa com o assistente de IA",
         resize: "Redimensionar a conversa",
         collapse: "Recolher a conversa",
@@ -4858,7 +4858,7 @@ const pt = {
       securityBlockTitle_one: 'A publicação será recusada — {{count}} item precisa de uma decisão primeiro',
       securityBlockTitle_many: 'A publicação será recusada — {{count}} de itens precisam de uma decisão primeiro',
       securityBlockTitle_other: 'A publicação será recusada — {{count}} itens precisam de uma decisão primeiro',
-      securityBlockWhere: 'Corrija no objeto em Configurações → Compartilhamento de registros e publique novamente.',
+      securityBlockWhere: 'Corrija no objeto em Configurações → Quem pode ver quais registros e publique novamente.',
       flowChecksTitle: 'Antes de publicar: a verificação de publicação vai apontar o seguinte',
       securityRule: {
         owdUnset: 'Nenhuma base de compartilhamento de registros (sharingModel) foi declarada. O runtime usa private, mas a base precisa ser uma decisão explícita.',

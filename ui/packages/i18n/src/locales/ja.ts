@@ -2226,7 +2226,7 @@ const ja = {
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {
-        title: "アシスタント",
+        title: "AI アシスタント",
         description: "AI アシスタントのチャット",
         resize: "チャットのサイズを変更",
         collapse: "チャットを折りたたむ",
@@ -4723,7 +4723,7 @@ const ja = {
       securityBlockTitle: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_one: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_other: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
-      securityBlockWhere: 'オブジェクトの「設定 → レコード共有」で修正してから、もう一度公開してください。',
+      securityBlockWhere: 'オブジェクトの「設定 → 誰がどのレコードを見られるか」で修正してから、もう一度公開してください。',
       flowChecksTitle: '公開する前に確認してください — 公開チェックが次の点を指摘します',
       securityRule: {
         owdUnset: 'レコード共有のベースライン（sharingModel）が宣言されていません。ランタイムは private として扱いますが、ベースラインは明示的に決める必要があります。',

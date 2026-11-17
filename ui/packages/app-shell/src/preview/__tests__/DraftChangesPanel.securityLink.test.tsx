@@ -101,6 +101,6 @@ describe('DraftChangesPanel — reaching the object the publish door refuses (ob
     // And what #5418 shipped is intact: the item is still named, and the
     // sentence still says where to fix it.
     expect(block.textContent).toContain('object/crmext_visit');
-    expect(block.textContent).toMatch(/Settings → Record sharing/);
+    expect(block.textContent).toMatch(/Settings → Who can see which records/);
   });
 });
