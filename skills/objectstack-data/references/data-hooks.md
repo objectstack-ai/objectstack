@@ -318,8 +318,7 @@ await ctx.api.object('candidate').find({ limit: 1 });            // any row will
 ```
 
 An unpredicated `find` / `count` is fine — returning or counting every row is an
-honest answer. It is `findOne`'s implicit "just one of them" that turns a missing
-predicate into a confidently wrong record.
+honest answer.
 
 ### Capabilities — the complete list
 
@@ -815,8 +814,10 @@ cross-object operations; refuse a business rule by a
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); let a
 hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
 `after*` unless the failure must abort the operation; react to a refused or
-rolled-back write from an `async: true` hook, which never runs then (use a
-blocking hook); assume `ctx.session` exists — system operations carry no user.
+rolled-back write from an `async: true` hook, which never runs then — use a sync
+hook (its `ctx.api` writes roll back with the write) or record it in the caller,
+where the write is made; assume `ctx.session` exists — system operations carry
+no user.
 
 
 ---

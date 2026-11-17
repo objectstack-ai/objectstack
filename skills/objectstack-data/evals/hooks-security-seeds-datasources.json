@@ -234,11 +234,11 @@
     {
       "id": 24,
       "prompt": "Write a background hook that adds a `payment_failure` row whenever an insert on `payment` is refused or rolled back. It must not slow the save.",
-      "expected_output": "Redirects: a background (`async`) hook on `afterInsert` cannot do this. Inside a transaction it starts only once the outermost transaction commits and never runs when that rolls back (a failed commit included), so it never sees a refused or rolled-back insert. A reaction to a refused write belongs in a blocking hook, or where the write is made: the caller receives the error and records the `payment_failure` there, since a blocking hook's own `ctx.api` writes roll back with the write. The `async` flag stays for work that follows a committed insert.",
+      "expected_output": "Redirects: a background (`async: true`) hook on `afterInsert` cannot do this. Inside a transaction it starts only once the outermost transaction commits and never runs when that rolls back (a failed commit included), so it never sees a refused or rolled-back insert. Record the failure in the caller, where the write is made: the caller receives the error and inserts the `payment_failure` row outside the rolled-back transaction. A sync hook is no home for this row either: its own `ctx.api` writes roll back with the write. The `async` flag stays for work that follows a committed insert.",
       "files": [],
       "assertions": {
-        "must_contain": ["blocking", "commit"],
-        "must_not_contain": ["async: true"]
+        "must_contain": ["caller", "roll"],
+        "must_not_contain": []
       }
     }
   ]
