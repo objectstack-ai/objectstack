@@ -377,6 +377,24 @@
           "--client cursor"
         ]
       }
+    },
+    {
+      "id": 23,
+      "prompt": "On our self-hosted `os serve` deployment, every MCP `run_action` call on an action declaring `ai.requiresConfirmation: true` is refused 428 with `details.reason: 'no_confirmation_service'`. We want our people to approve these calls in our app. What do we build?",
+      "expected_output": "The open build ships no pending-confirmation service, so the `mcp` door refuses a gated call instead of running it on the caller's word. Write a plugin that registers an `IActionConfirmationService` (`@objectstack/spec/contracts`) under the service name `'ai.actionConfirmation'` (the `ACTION_CONFIRMATION_SERVICE` constant): `ctx.registerService('ai.actionConfirmation', service)` in `init`. Its `submit(handOff, context)` records the call for the person it ran as, notifies them and returns `{ pendingId }`. The door then answers `status: 'pending_confirmation'` with that `pendingId`, and nothing runs until that person approves it in the app, which your service owns. Not a `confirm` sent by the client: `run_action` and `resume_run` refuse any call that carries it. An AI service account stays refused (`details.reason: 'service_account'`) and is never handed off; a stdio client that advertised `elicitation` is asked in the client instead, and its `declined`, `cancelled` or `timed_out` answer refuses the call.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "IActionConfirmationService",
+          "ai.actionConfirmation",
+          "pending_confirmation",
+          "pendingId"
+        ],
+        "must_not_contain": [
+          "confirm: true",
+          "requiresConfirmation: false"
+        ]
+      }
     }
   ]
 }

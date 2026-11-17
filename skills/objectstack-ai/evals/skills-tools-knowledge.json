@@ -60,6 +60,26 @@
         "must_contain": ["pendingActions.list", "signed-in session", "refused"],
         "must_not_contain": ["pendingActions.approve("]
       }
+    },
+    {
+      "id": 7,
+      "prompt": "Our MCP agent runs the `crm_close_deal` action, which declares `ai.requiresConfirmation: true`. It asks the user in chat, then calls `run_action` again with `confirm: true`, and that call is now refused. Fix how the agent handles this action.",
+      "expected_output": "Stop sending `confirm`: `run_action` and `resume_run` refuse any call that carries the member, on every action, because the agent cannot confirm for the person. Call `run_action({ actionName: 'crm_close_deal', recordId })` without it. Where the host registers a pending-confirmation service, the answer is `status: 'pending_confirmation'` with a `pendingId` and a message: that is a success, not an error, and nothing has run. The agent relays the message, tells the user to approve it in the app, and does not retry. On a host with no such service (the open-source build ships none) the call is refused 428 `ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'`, and the person performs the action in the app. The two delete tools still take the member.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["pending_confirmation", "pendingId", "no_confirmation_service", "does not retry"],
+        "must_not_contain": ["recordId, confirm: true", "then retry with"]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "Our host bridges its action tools onto the stdio MCP server. A desktop client calls `run_action` on an action declaring `ai.requiresConfirmation: true` and the user sees a question in the client. What does each answer do? And what happens when our unattended agent calls the same action under its own AI service account key?",
+      "expected_output": "The client advertised form-mode `elicitation`, so the person is asked once in the client instead of in the app. `accept` runs the call once, and the next call is asked again. A decline, a dismissal or five minutes without an answer refuse it with 428 `ACTION_CONFIRMATION_REQUIRED` and `details.reason` `declined`, `cancelled` or `timed_out`: nothing runs, nothing is handed off, and the agent retries only when the person asks. Over Streamable HTTP nobody is asked in the client; a gated call there is handed off and answered `pending_confirmation`. The AI service account acts for no person, so its call is refused at every action door with `details.reason: 'service_account'`, and it is neither asked nor handed off: a person runs the action, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. Neither caller sends `confirm`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["elicitation", "declined", "cancelled", "timed_out", "service_account"],
+        "must_not_contain": ["confirm: true"]
+      }
     }
   ]
 }

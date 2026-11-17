@@ -732,7 +732,28 @@ export const CEILINGS = new Map([
   // absorbed and the ceiling moves 5997 -> 6014 (+17), the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24055 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6011],
+  // 6011 -> 6145 (card #34210, the Skills-docs follow-up the MCP action
+  // confirmation hand-off owed this file): a sixth `requires:` rule says the
+  // confirmation of an AI-door action is a service the host registers — an
+  // `IActionConfirmationService` under `'ai.actionConfirmation'` takes the
+  // hand-off (`pending_confirmation`, a `pendingId`), a host with none refuses
+  // 428 `no_confirmation_service`, `run_action` / `resume_run` refuse a call
+  // that sends `confirm`, and the `service_account` and elicited `declined` /
+  // `cancelled` / `timed_out` reasons point at objectstack-ai. Raise path the
+  // standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST — two restatements cut, each keeping its other
+  // home in the file: "Never rebuild what the platform owns." in the App /
+  // Platform Boundary intro (the first bullet under it, "capability belongs in
+  // the platform", and the third, "no hand-written predicate re-implementing a
+  // platform rule") and the `HonoServerPlugin` row's "(this is what `os dev` /
+  // `os serve` register)" (step 4 of the boot sequence lists the plugin under
+  // those two commands). Arithmetic in priced bytes (stamp line excluded): on
+  // `origin/main` the text was 24021 bytes (6006 tokens, headroom 5); the cuts
+  // remove 84 and the rule adds 640, so the LANDED priced text is 24577 bytes
+  // -> 6145 tokens: the 5 tokens of headroom are absorbed and the ceiling moves
+  // 6011 -> 6145 (+134), the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24577 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6145],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
