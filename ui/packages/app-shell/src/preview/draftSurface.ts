@@ -7,20 +7,19 @@
  */
 
 /**
- * objectui#12968 (objectstack#24324 ruling A, preview-first) — the one place
- * a draft and the console surface that shows it meet, in both directions:
+ * objectui#12968 (objectstack#24324 ruling A, preview-first) — where a draft
+ * and the console surface that shows it meet: {@link draftPreviewPath} maps
+ * drafted items to the router path of the affected surface, in draft preview
+ * (`?preview=draft`). The chat's Preview button opens it (`ChatbotEnhanced`'s
+ * `onPreviewDraft`), in the console's main area (objectstack#34610).
  *
- *  - {@link draftPreviewPath}: drafted items → the router path of the
- *    affected surface, in draft preview (`?preview=draft`). The chat's
- *    Preview button opens it (`ChatbotEnhanced`'s `onPreviewDraft`).
- *  - {@link draftsOnSurface}: the route the draft preview shows → the pending
- *    drafts (`usePendingDrafts`' entries) that belong to it. The
- *    `DraftPreviewBar`'s pending line counts them.
+ * objectstack#34610 — the reverse direction (the pending drafts on the surface
+ * the preview shows, the draft bar's per-page line) is gone: the bar counts
+ * one scope, the current app's package.
  *
- * Neither direction spells a route. A path is built by `@object-ui/layout`'s
+ * No route is spelled here. A path is built by `@object-ui/layout`'s
  * `resolveHref`, the console's one nav → URL mapping, from the nav entry that
- * would open the surface; a route is read by matching it against
- * `APP_ROUTE_METADATA_READS`, the table of every route `AppContent` declares.
+ * would open the surface.
  *
  * A view is a `<object>.<viewKey>` item and a field a `<object>.<field>` row:
  * the spec's qualified item names, whose prefix is the object
@@ -28,10 +27,8 @@
  * object itself.
  */
 
-import { matchRoutes } from 'react-router-dom';
 import { resolveHref } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
-import { APP_ROUTE_METADATA_READS } from '../console/appRouteMetadataReads.js';
 import { PREVIEW_QUERY_FLAG, PREVIEW_QUERY_VALUE } from './PreviewModeContext.js';
 
 /** A drafted item, as the chat lifts it and as `_drafts` lists it. */
@@ -109,49 +106,4 @@ export function draftPreviewPath(items: readonly DraftItem[], appSegment: string
   const params = new URLSearchParams(query);
   params.set(PREVIEW_QUERY_FLAG, PREVIEW_QUERY_VALUE);
   return `${path}?${params.toString()}`;
-}
-
-/** The surface a route under `/apps/:appName` shows, as its route params name it. */
-export interface DraftSurface {
-  objectName?: string;
-  pageName?: string;
-  dashboardName?: string;
-  reportName?: string;
-}
-
-/**
- * The surface the route at `subPath` (the path below `/apps/:appName`) shows,
- * or `null` for a route that shows no single object, page, dashboard or report
- * (the app's landing, metadata admin, search …).
- */
-export function draftSurfaceOf(subPath: string): DraftSurface | null {
-  const matches = matchRoutes([...APP_ROUTE_METADATA_READS], `/${subPath.replace(/^\/+/, '')}`);
-  const params = matches ? matches[matches.length - 1].params : {};
-  const surface: DraftSurface = {};
-  if (params.objectName) surface.objectName = params.objectName;
-  if (params.pageName) surface.pageName = params.pageName;
-  if (params.dashboardName) surface.dashboardName = params.dashboardName;
-  if (params.reportName) surface.reportName = params.reportName;
-  return Object.keys(surface).length > 0 ? surface : null;
-}
-
-/** The pending drafts that change what `surface` shows. */
-export function draftsOnSurface<T extends DraftItem>(entries: readonly T[], surface: DraftSurface): T[] {
-  return entries.filter((entry) => {
-    switch (entry.type) {
-      case 'object':
-        return entry.name === surface.objectName;
-      case 'view':
-      case 'field':
-        return surface.objectName !== undefined && objectOf(entry.name) === surface.objectName;
-      case 'page':
-        return entry.name === surface.pageName;
-      case 'dashboard':
-        return entry.name === surface.dashboardName;
-      case 'report':
-        return entry.name === surface.reportName;
-      default:
-        return false;
-    }
-  });
 }
