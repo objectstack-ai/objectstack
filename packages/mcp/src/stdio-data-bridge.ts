@@ -162,6 +162,10 @@ import {
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
 import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+// [ADR-0149 D2] The `/meta` list translation and its locale parse, the pair
+// the HTTP door's `loadDatasets` runs — imported, never restated, so both
+// transports localize a saved dataset with one function.
+import { metaRequestLocale, translateMetaList } from '@objectstack/rest';
 // [ADR-0106] Metadata-plane field-level security: the posture, its relation to
 // the fetched document and the projection every object-schema exit runs — the
 // REST `/meta` doors and the runtime dispatcher's included. Imported, never
@@ -258,6 +262,12 @@ export interface StdioDataBridgeDeps {
    * dataset tool registers.
    */
   datasetTools?: StdioDatasetToolsService;
+  /**
+   * [ADR-0149 D2] The `i18n` service the saved datasets are localized with,
+   * resolved at each use. `undefined`, or a resolver that throws, means none:
+   * the datasets are then served untranslated, as on the HTTP door.
+   */
+  i18n?: () => unknown;
 }
 
 /**
@@ -1410,17 +1420,42 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // analytics service's executor over. The saved datasets come from the
   // protocol's merged listing (the read the REST door resolves `datasetName`
   // from), or the metadata service on a host with none; a throwing read is
-  // left to throw, and the executor answers it as a degraded read. The stdio
-  // bridge has no delegation probe (an API key is not delegated), so none is
-  // passed, as `query_records` here carries none.
+  // left to throw, and the executor answers it as a degraded read. The list is
+  // localized with the HTTP door's `/meta` list translation: this transport
+  // carries no request, so the locale is the i18n service's default (what
+  // `metaRequestLocale` answers with no header), the workspace default the
+  // stdio principal speaks. An i18n service this host cannot resolve leaves the
+  // list untranslated, as there. The stdio bridge has no delegation probe (an
+  // API key is not delegated), so none is passed, as `query_records` here
+  // carries none.
   if (deps.datasetTools) {
     const service = deps.datasetTools;
     const loadDatasets = async (): Promise<readonly unknown[]> => {
-      const merged = protocol?.();
-      if (merged && typeof merged.getMetaItems === 'function') {
-        return metaItemsArray(await merged.getMetaItems({ type: 'dataset' }));
+      const protocolService = protocol?.();
+      let merged: StdioProtocolObjectReads | undefined;
+      let items: readonly unknown[];
+      if (protocolService && typeof protocolService.getMetaItems === 'function') {
+        merged = protocolService;
+        items = metaItemsArray(await protocolService.getMetaItems({ type: 'dataset' }));
+      } else {
+        items = (await metadataService.list('dataset')) ?? [];
       }
-      return (await metadataService.list('dataset')) ?? [];
+      const translated = await translateMetaList(
+        {
+          resolveI18nService: async () => {
+            try {
+              return deps.i18n?.();
+            } catch {
+              return undefined;
+            }
+          },
+          resolveProtocol: async () => merged,
+          requestLocale: (i18n?: unknown) => metaRequestLocale(undefined, i18n),
+        },
+        'dataset',
+        items,
+      );
+      return Array.isArray(translated) ? translated : items;
     };
     const executor = (maxQueryLimit?: number) =>
       service.datasetTools({ loadDatasets, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });

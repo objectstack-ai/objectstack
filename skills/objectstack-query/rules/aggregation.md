@@ -2,6 +2,8 @@
 
 A block pairing ❌ with ✅ is left out of `check:skill-examples`: its ❌ half is wrong on purpose.
 
+Answering a user's question over MCP (`aggregate_records`), not writing a query in code: see **objectstack-ask**.
+
 ## Aggregation Functions
 
 | Function | SQL Equivalent | Purpose | Requires `field` |
