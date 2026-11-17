@@ -959,6 +959,7 @@ const fr = {
     removeGroup: "Supprimer",
     groupingUnstoredNotice: "Cette liste ne peut pas être regroupée par {{fields}} : sa valeur est calculée à l’affichage et n’est pas stockée. La liste est affichée sans ce regroupement.",
     groupingUnstoredRemove: "Retirer du regroupement",
+    draftOnlyQueryDropped: "Non filtré ni trié par {{fields}} : ce champ n’existe que dans le brouillon jusqu’à la publication.",
     inlineEditShort: "Édition en ligne",
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
   },
