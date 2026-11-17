@@ -242,9 +242,15 @@ describe('below sm an app\'s bar leaves the product mark and the Studio button t
 
   it('the Studio button, in either posture, is not drawn below sm (read from source: it needs a package read)', () => {
     const src = source('AppHeader.tsx');
-    for (const id of ['app-design-in-studio-button', 'app-view-in-studio-button']) {
-      expect(src, id).toMatch(new RegExp(`className="h-8 w-8 ${PHONE_TARGET} max-sm:hidden shrink-0"\\s*asChild\\s*data-testid="${id}"`));
-    }
+    expect(src, 'app-design-in-studio-button').toMatch(
+      new RegExp(`className="h-8 w-8 ${PHONE_TARGET} max-sm:hidden shrink-0"\\s*asChild\\s*data-testid="app-design-in-studio-button"`),
+    );
+    // objectstack#34593 (ADR-0146 D5) — the read-only entry draws its words,
+    // so it is not square: its phone-band target is the 44 px height, the
+    // words giving it the width, and it is still not drawn below sm.
+    expect(src, 'app-view-in-studio-button').toMatch(
+      /className="h-8 max-md:h-11 max-sm:hidden shrink-0[^"]*"\s*asChild\s*data-testid="app-view-in-studio-button"/,
+    );
   });
 
   it('CONTROL — no other bar control is hidden below sm: trigger, search and avatar stay', () => {

@@ -3225,7 +3225,7 @@ const ja = {
     aiAssistant: "AI アシスタント",
     designInStudio: "Studio でデザイン",
     editApp: "アプリを編集",
-    openAppInStudio: "Studio でアプリを表示",
+    openAppInStudio: "Studio で {{app}} を表示",
   },
   home: {
     build: {

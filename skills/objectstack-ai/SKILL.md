@@ -182,7 +182,8 @@ questions, and Studio's "AI exposure" diagnostics use the same predicates.
 `@objectstack/mcp` publishes your app over the Model Context Protocol, so an
 external agent (Claude, Cursor, Codex, …) can read it and act on it with **no
 cloud licence**. (Consuming *external* MCP servers is the inbound sibling,
-`@objectstack/connector-mcp`.)
+`@objectstack/connector-mcp`.) Answering a question through those tools, as
+the connected agent, is **objectstack-ask**.
 
 ```ts
 import { MCPServerPlugin } from '@objectstack/mcp';
