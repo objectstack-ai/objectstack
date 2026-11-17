@@ -13,7 +13,7 @@
 - 同笔向卡的车道席敲 `Notify: ruling`,形状见 `../project-forms.md`;漏敲即录裁者欠的半状态。
 - 裁决记录同笔写明所选字母的工作量,读数取自卡面工作量列。
 - 划掉原 ⛔ 不派断言,走 `post-stamped --body --ack-through`;漏此笔 ⇒ 接卡者先读正文退决策箱。
-- 入口:维护者说处理决裁或处理 contract-review,或 `/pm-dispatch director`。
+- 入口:维护者说处理决裁或处理 contract-review,或 `/pm-dispatch director`;接分诊交来的降级释放。
 - 未回字 = 不在 = 停,⛔ 无巡检、审计、快照、聊天、卡评论。
 - 回来后先补跑审计与重挂复位一次,再只发一行「批 #N 待字;箱内另有 K 张新到未呈」。
 - 开场读一次服役档记入会话审计行,读法见 `../platform-readings.md`;⛔ 不因档位拒裁停三职。
