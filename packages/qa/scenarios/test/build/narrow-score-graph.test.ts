@@ -57,6 +57,8 @@ describe('the ./score entry import graph', () => {
       '@objectstack/spec/data',
       '@objectstack/spec/marketplace',
       '@objectstack/spec/meta-spelling',
+      // The dataset tools' term normalization (`normalizeDatasetTerm`), so a declared synonym is compared as the tools compare it.
+      '@objectstack/spec/ui',
     ]);
   });
 

@@ -3875,7 +3875,7 @@ const en = {
     aiAssistant: 'AI Assistant',
     designInStudio: 'Design in Studio',
     editApp: 'Edit app',
-    openAppInStudio: 'Open app in Studio',
+    openAppInStudio: 'Open {{app}} in Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',

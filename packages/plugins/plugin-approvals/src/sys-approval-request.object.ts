@@ -533,8 +533,15 @@ export const SysApprovalRequest = ObjectSchema.create({
   //    runtime type of each value, equal this block, for every caller shape it
   //    serves (`sys-approval-request-viewer.conformance.test.ts`). A leaf added
   //    to the service without this block, or here without the service, is red.
+  //
+  // [Maintainer ruling 2026-11-17, option B] `can_override_approve` is
+  // `can_override` minus an approval of the viewer's own request, which the
+  // override never grants: the Approve action reads it, the other override
+  // levers keep reading `can_override`.
   attachedOnRead: {
-    viewer: { can_act: 'boolean', can_override: 'boolean', is_submitter: 'boolean' },
+    viewer: {
+      can_act: 'boolean', can_override: 'boolean', can_override_approve: 'boolean', is_submitter: 'boolean',
+    },
   },
 
   indexes: [
@@ -568,7 +575,11 @@ export const SysApprovalRequest = ObjectSchema.create({
   // unstaffed position — otherwise undecidable, locking the record forever — by
   // approving, rejecting, reassigning it to a real approver, or recalling it
   // (the lever that releases the record without recording a decision nobody
-  // made). `viewer` is
+  // made). Approve's override arm reads `record.viewer.can_override_approve`
+  // instead: the same flag minus an approval of the viewer's own request, which
+  // the override never grants (maintainer ruling 2026-11-17, option B), so a
+  // submitter who is also an administrator is not offered an Approve the
+  // server refuses. `viewer` is
   // attached by getRequest/listRequests; where it is absent the predicate fails
   // closed. Its leaves are declared under `attachedOnRead` above, which is what
   // the build validator judges these predicates against.
@@ -641,9 +652,13 @@ export const SysApprovalRequest = ObjectSchema.create({
         // string[]`; the decision route persists them on `sys_approval_action`.
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
+      // The override arm reads `can_override_approve`, not `can_override`: the
+      // override never approves a request its actor submitted (maintainer
+      // ruling 2026-11-17, option B), and the flag is `can_override` minus
+      // exactly that. The slot holder's arm is unchanged.
       visible:
         'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
-        ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
+        ' || has(record.viewer) && has(record.viewer.can_override_approve) && record.viewer.can_override_approve == true',
       locations: ['record_section', 'list_item'],
       // Names what was approved, in the inbox's inline Approve wording. The
       // decide route answers `ApprovalDecisionResult`, whose `request` is the
@@ -660,7 +675,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Approve a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused and the request stays pending. Ask the human to confirm before calling.',
+          'Approve a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. Only a current approver of the request, or an administrator who may override a stuck request they did not submit, may approve it; anyone else is refused and the request stays pending. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -817,7 +832,8 @@ export const SysApprovalRequest = ObjectSchema.create({
       // (withdraw) or returned (abandon the revision instead of resubmitting).
       //
       // The second arm is the #3424 admin override, spelled byte-identically to
-      // the three core decision levers above (#12716). `ApprovalService.recall`
+      // reject's and reassign's above (#12716); approve's reads
+      // `can_override_approve` instead. `ApprovalService.recall`
       // has admitted the override caller since #3424 — `isOverrideActor`'s own
       // doc block names recall as one of the four levers — so until this arm
       // landed, recall was the one authorised capability with no button: an
