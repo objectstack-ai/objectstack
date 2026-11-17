@@ -734,6 +734,8 @@ describe('prompts, seed order, template manifest and change size', () => {
     const art = { manifest: { id: 'com.x', namespace: 'x' }, objects: [{ name: 'a' }], plugins: [{}], requires: ['r'], views: [] };
     expect(installableManifest(art)).toEqual({ manifest: { id: 'com.x', namespace: 'x', objects: [{ name: 'a' }], installModes: ['unmanaged'] }, installModesSupplied: true });
     expect(installableManifest({ manifest: { id: 'y', installModes: ['managed', 'unmanaged'] } }).installModesSupplied).toBe(false);
+    // Managed: nothing is added, so the door reads the build's own `installModes` (absent means managed).
+    expect(installableManifest(art, 'managed')).toEqual({ manifest: { id: 'com.x', namespace: 'x', objects: [{ name: 'a' }] }, installModesSupplied: false });
   });
 
   it("an environment's metadata less what it served before the install is the app alone", () => {
