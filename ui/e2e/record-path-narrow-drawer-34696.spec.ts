@@ -190,7 +190,8 @@ test.describe('record:path in a narrow drawer at a desktop viewport (objectstack
     expect(ordinary).toHaveLength(FORWARD.length - 1);
     for (const l of ordinary) {
       expect(l.clipped, `${l.label} fit whole in the desktop row at 380px`).toBe(true);
-      expect(l.width, `${l.label} got ${l.width}px`).toBeLessThan(45);
+      // About 47px of 14px-base text-xs: the first few letters, then the ellipsis.
+      expect(l.width, `${l.label} got ${l.width}px`).toBeLessThan(50);
     }
   });
 
