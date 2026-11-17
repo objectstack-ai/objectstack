@@ -10,10 +10,11 @@ import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { useSchemaContext } from '@object-ui/react';
 import { ObjectTimesheet } from './ObjectTimesheet';
-import type { ObjectTimesheetProps, ObjectTimesheetSchema } from './ObjectTimesheet';
+import type { ObjectTimesheetProps } from './ObjectTimesheet';
 
 export { ObjectTimesheet };
-export type { ObjectTimesheetProps, ObjectTimesheetSchema };
+export type { ObjectTimesheetProps };
+export type { ObjectTimesheetSchema } from '@object-ui/types';
 export {
   buildTimesheetRows,
   planCellWrite,

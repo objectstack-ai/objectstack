@@ -18,7 +18,7 @@ const zhHant = {
     addRowConfirm: '新增',
     cancel: '取消',
     noRows: '本週沒有記錄。新增一行即可開始。',
-    multipleRecords: '這一天有 {{count}} 條記錄，請在列表中編輯。',
+    multipleRecords: '這一天有多條記錄，請在列表中編輯。',
     invalidNumber: '請輸入數字',
     saveFailed: '未儲存：{{message}}',
     loadFailed: '無法載入本週資料。',

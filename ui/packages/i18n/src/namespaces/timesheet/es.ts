@@ -21,7 +21,7 @@ const es = {
     addRowConfirm: 'Añadir',
     cancel: 'Cancelar',
     noRows: 'No hay entradas esta semana. Añade una fila para empezar.',
-    multipleRecords: 'Este día tiene {{count}} registros. Edítalos en la lista.',
+    multipleRecords: 'Este día tiene más de un registro. Edítalos en la lista.',
     invalidNumber: 'Introduce un número',
     saveFailed: 'No guardado: {{message}}',
     loadFailed: 'No se pudo cargar esta semana.',

@@ -91,7 +91,7 @@ describe('ObjectTimesheet', () => {
     renderTimesheet(ds);
     const cell = await screen.findByTestId('timesheet-cell-readonly');
     expect(cell.textContent).toBe('3.5');
-    expect(cell.getAttribute('title')).toContain('2 records');
+    expect(cell.getAttribute('title')).toContain('more than one record');
   });
 
   it('updates a one-record cell through the record door', async () => {

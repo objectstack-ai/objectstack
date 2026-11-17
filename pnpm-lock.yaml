@@ -5987,9 +5987,6 @@ importers:
       '@object-ui/types':
         specifier: workspace:*
         version: link:../types
-      '@objectstack/spec':
-        specifier: workspace:^
-        version: link:../../../packages/spec
       lucide-react:
         specifier: ^1.43.0
         version: 1.43.0(react@19.3.0)

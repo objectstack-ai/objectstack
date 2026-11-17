@@ -21,7 +21,7 @@ const fr = {
     addRowConfirm: 'Ajouter',
     cancel: 'Annuler',
     noRows: 'Aucune saisie cette semaine. Ajoutez une ligne pour commencer.',
-    multipleRecords: 'Ce jour contient {{count}} enregistrements. Modifiez-les dans la liste.',
+    multipleRecords: 'Ce jour contient plus d’un enregistrement. Modifiez-les dans la liste.',
     invalidNumber: 'Saisissez un nombre',
     saveFailed: 'Non enregistré : {{message}}',
     loadFailed: 'Impossible de charger cette semaine.',

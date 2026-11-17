@@ -15,13 +15,11 @@ It registers one component type via the `ComponentRegistry`:
 
 ## Usage
 
-Declare the view in metadata; `ListView` composes the node:
+Declare a list view whose `type` is `timesheet`, with its binding block;
+`ListView` composes the node:
 
 ```ts
-const view = {
-  type: 'timesheet',
-  data: { provider: 'object', object: 'time_entry' },
-  columns: ['project', 'task', 'work_date', 'hours'],
+const binding = {
   timesheet: {
     rowFields: ['project', 'task'], // 1–3 fields; one row per distinct combination
     dateField: 'work_date',         // date or datetime

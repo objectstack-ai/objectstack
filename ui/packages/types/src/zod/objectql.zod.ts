@@ -25,6 +25,8 @@ import {
   // objectui#11168 slice 3 — the `object-tree` element's `tree` block, by
   // reference (`ObjectTreeSchema.tree` below).
   TreeConfigSchema as SpecTreeConfigSchema,
+  // objectstack#34382 — the `object-timesheet` node's `timesheet` block.
+  TimesheetConfigSchema as SpecTimesheetConfigSchema,
   HttpMethodSubsetSchema as SpecHttpMethodSubsetSchema,
   HttpRequestSchema as SpecHttpRequestSchema,
   ViewDataSchema as SpecViewDataSchema,
@@ -2873,6 +2875,21 @@ export const ObjectTreeSchema = BaseSchema.extend({
   children: retirementTombstone(OBJECT_TREE_NEITHER_CHANNEL),
 }).superRefine(...requireRecordSource('object-tree', RECORD_SOURCE_KEYS, 'node', 'not-read'));
 
+/**
+ * ObjectTimesheet Schema (objectstack#34382) — the editable row × weekday grid
+ * `ListView` composes for a `type: 'timesheet'` view. `timesheet` takes the
+ * spec's `TimesheetConfig` by reference; the renderer reads no content channel.
+ */
+export const ObjectTimesheetSchema = BaseSchema.extend({
+  type: z.literal('object-timesheet'),
+  objectName: z.string().describe('ObjectQL object name — the records the grid pivots, one per filled cell'),
+  timesheet: stripImportedDefaults(SpecTimesheetConfigSchema).optional().describe('The binding (rowFields, dateField, valueField) — the spec TimesheetConfig, by reference; incomplete, the grid shows its configuration-required screen'),
+  filter: z.union([
+    z.array(z.any()),
+    z.record(z.string(), z.any()),
+  ]).optional().describe('Base query filter, joined with the displayed week on dateField — the two arms of QueryParams[$filter]'),
+});
+
 /** objectui#9256 (E3 residual): ONE refusal string for both content channels of `ObjectGanttSchema`. */
 const OBJECT_GANTT_NEITHER_CHANNEL = neitherContentChannelGuidance(
   'object-gantt',
@@ -4344,6 +4361,7 @@ export const ObjectDataTableSchema = BaseSchema.extend({
 const ObjectQLComponentSchemaInferred = z.discriminatedUnion('type', [
   ObjectViewSchema,
   ObjectTreeSchema,
+  ObjectTimesheetSchema,
   ObjectCalendarSchema,
   ObjectKanbanSchema,
   ObjectGallerySchema,

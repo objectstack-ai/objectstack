@@ -21,7 +21,7 @@ const ja = {
     addRowConfirm: '追加',
     cancel: 'キャンセル',
     noRows: '今週のエントリはありません。行を追加して開始してください。',
-    multipleRecords: 'この日には {{count}} 件のレコードがあります。一覧で編集してください。',
+    multipleRecords: 'この日には複数のレコードがあります。一覧で編集してください。',
     invalidNumber: '数値を入力してください',
     saveFailed: '保存されていません: {{message}}',
     loadFailed: '今週のデータを読み込めませんでした。',

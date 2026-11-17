@@ -43,7 +43,6 @@
     "@object-ui/permissions": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/types": "workspace:*",
-    "@objectstack/spec": "workspace:^",
     "lucide-react": "^1.43.0"
   },
   "peerDependencies": {

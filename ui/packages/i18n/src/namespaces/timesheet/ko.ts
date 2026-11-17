@@ -21,7 +21,7 @@ const ko = {
     addRowConfirm: '추가',
     cancel: '취소',
     noRows: '이번 주에는 항목이 없습니다. 행을 추가하여 시작하세요.',
-    multipleRecords: '이 날에는 레코드가 {{count}}개 있습니다. 목록에서 편집하세요.',
+    multipleRecords: '이 날에는 레코드가 여러 개 있습니다. 목록에서 편집하세요.',
     invalidNumber: '숫자를 입력하세요',
     saveFailed: '저장되지 않음: {{message}}',
     loadFailed: '이번 주를 불러올 수 없습니다.',

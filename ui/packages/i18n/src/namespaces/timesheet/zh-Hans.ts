@@ -21,7 +21,7 @@ const zh = {
     addRowConfirm: '添加',
     cancel: '取消',
     noRows: '本周没有记录。添加一行即可开始。',
-    multipleRecords: '这一天有 {{count}} 条记录，请在列表中编辑。',
+    multipleRecords: '这一天有多条记录，请在列表中编辑。',
     invalidNumber: '请输入数字',
     saveFailed: '未保存：{{message}}',
     loadFailed: '无法加载本周数据。',

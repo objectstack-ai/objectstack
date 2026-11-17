@@ -2156,6 +2156,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
       map: currentNamedViewConfig?.map,
       chart: currentNamedViewConfig?.chart,
       tree: currentNamedViewConfig?.tree,
+      timesheet: currentNamedViewConfig?.timesheet,
     };
     const declaredKinds = Object.keys(canonicalViewKindBlocks)
       .filter((kind) => canonicalViewKindBlocks[kind] != null);
@@ -2571,6 +2572,14 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           // the spec's tree block is the four keys above, and the spread only
           // added undeclared keys and let a block key named like a node key
           // override the node's own value.
+        };
+      case 'timesheet':
+        // objectstack#34382 — the editable row × weekday grid, its binding by
+        // reference; `ObjectTimesheet` judges it and refuses an incomplete one.
+        return {
+          type: 'object-timesheet',
+          ...baseProps,
+          timesheet: viewOptions.timesheet,
         };
       case 'chart': {
         // ⛔ HOST-COMPOSITION ONLY (objectui#5321) — the same record as

@@ -42,7 +42,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import type { DataSource } from '@object-ui/types';
+import type { DataSource, ObjectTimesheetSchema } from '@object-ui/types';
 import {
   useDataInvalidation,
   useFilterScope,
@@ -105,7 +105,7 @@ const TIMESHEET_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'timesheet.addRowConfirm': 'Add',
   'timesheet.cancel': 'Cancel',
   'timesheet.noRows': 'No entries this week. Add a row to start.',
-  'timesheet.multipleRecords': 'This day holds {{count}} records. Edit them in the list.',
+  'timesheet.multipleRecords': 'This day holds more than one record. Edit them in the list.',
   'timesheet.invalidNumber': 'Enter a number',
   'timesheet.saveFailed': 'Not saved: {{message}}',
   'timesheet.loadFailed': 'This week could not be loaded.',
@@ -119,16 +119,6 @@ const useTimesheetTranslation = createSafeTranslation(
   TIMESHEET_DEFAULT_TRANSLATIONS,
   'timesheet.missingBindingTitle',
 );
-
-/** The `object-timesheet` node `ListView` composes for a timesheet view. */
-export interface ObjectTimesheetSchema {
-  type?: 'object-timesheet';
-  objectName?: string;
-  timesheet?: unknown;
-  filter?: unknown;
-  className?: string;
-  [key: string]: unknown;
-}
 
 export interface ObjectTimesheetProps {
   schema: ObjectTimesheetSchema;
@@ -439,7 +429,7 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
                         <td key={day} className="px-2 py-1 text-right">
                           <span
                             className="inline-block w-full rounded px-2 py-1 text-muted-foreground"
-                            title={t('timesheet.multipleRecords', { count: cell.records.length })}
+                            title={t('timesheet.multipleRecords')}
                             aria-label={`${label}: ${numberFormat.format(cell.sum)}`}
                             data-testid="timesheet-cell-readonly"
                           >

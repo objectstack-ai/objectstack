@@ -21,7 +21,7 @@ const en = {
     addRowConfirm: 'Add',
     cancel: 'Cancel',
     noRows: 'No entries this week. Add a row to start.',
-    multipleRecords: 'This day holds {{count}} records. Edit them in the list.',
+    multipleRecords: 'This day holds more than one record. Edit them in the list.',
     invalidNumber: 'Enter a number',
     saveFailed: 'Not saved: {{message}}',
     loadFailed: 'This week could not be loaded.',

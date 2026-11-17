@@ -45,6 +45,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, waitFor, screen, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { ListViewSchema, ViewItemSchema } from '@objectstack/spec/ui';
+// Paid during collection: the source under test reaches a dynamic
+// `import('@objectstack/lint')` (celAuthoring.ts), see check:test-source-alias.
+import '@objectstack/lint';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { MetadataClient } from '@object-ui/data-objectstack';
 

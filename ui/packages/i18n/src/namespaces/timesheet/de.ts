@@ -21,7 +21,7 @@ const de = {
     addRowConfirm: 'Hinzufügen',
     cancel: 'Abbrechen',
     noRows: 'Keine Einträge in dieser Woche. Fügen Sie eine Zeile hinzu, um zu beginnen.',
-    multipleRecords: 'Dieser Tag enthält {{count}} Datensätze. Bearbeiten Sie sie in der Liste.',
+    multipleRecords: 'Dieser Tag enthält mehr als einen Datensatz. Bearbeiten Sie sie in der Liste.',
     invalidNumber: 'Geben Sie eine Zahl ein',
     saveFailed: 'Nicht gespeichert: {{message}}',
     loadFailed: 'Diese Woche konnte nicht geladen werden.',

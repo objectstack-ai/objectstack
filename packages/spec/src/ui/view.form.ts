@@ -182,13 +182,6 @@ export const viewForm = defineForm({
       visibleWhen: "data.type == 'chart'",
       fields: [{ field: 'chart', type: 'composite' }],
     },
-    {
-      name: 'timesheet',
-      label: 'Timesheet',
-      description: 'Timesheet-specific configuration.',
-      visibleWhen: "data.type == 'timesheet'",
-      fields: [{ field: 'timesheet', type: 'composite' }],
-    },
     // [#17063] The `page` section was REMOVED with the mount it configured
     // (ADR-0049 enforce-or-remove, maintainer ruling 2026-09-09 「撤」). It bound
     // the one input `pageName`, which is now a `retiredKey()` tombstone on

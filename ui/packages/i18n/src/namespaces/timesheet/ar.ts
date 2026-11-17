@@ -21,7 +21,7 @@ const ar = {
     addRowConfirm: 'إضافة',
     cancel: 'إلغاء',
     noRows: 'لا توجد إدخالات هذا الأسبوع. أضف صفًا للبدء.',
-    multipleRecords: 'يحتوي هذا اليوم على {{count}} سجلات. عدّلها في القائمة.',
+    multipleRecords: 'يحتوي هذا اليوم على أكثر من سجل واحد. عدّلها في القائمة.',
     invalidNumber: 'أدخل رقمًا',
     saveFailed: 'لم يتم الحفظ: {{message}}',
     loadFailed: 'تعذر تحميل هذا الأسبوع.',

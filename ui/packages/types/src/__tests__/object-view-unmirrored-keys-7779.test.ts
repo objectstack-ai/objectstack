@@ -248,7 +248,7 @@ const NAMED_VIEW_READS = [
   'description', 'emptyState', 'exportOptions', 'fieldOrder', 'filter',
   'gallery', 'gantt', 'grouping', 'hiddenFields', 'inlineEdit', 'kanban', 'label', 'map',
   'name', 'navigation', 'pagination', 'resizable', 'rowActions', 'rowColor', 'rowHeight',
-  'searchableFields', 'selection', 'sharing', 'showRecordCount', 'sort', 'timeline', 'tree',
+  'searchableFields', 'selection', 'sharing', 'showRecordCount', 'sort', 'timeline', 'timesheet', 'tree',
   'type', 'userActions', 'userFilters',
 ] as const;
 
@@ -258,7 +258,7 @@ const NAMED_VIEW_READS = [
  * that moves between the two sets — in EITHER direction — fails by name.
  */
 
-/** Every top-level member `NamedListView` declares. 65 today (47 + objectui#8980's seventeen + objectui#12341's `requiredPermissions`), sorted. */
+/** Every top-level member `NamedListView` declares. 66 today (47 + objectui#8980's seventeen + objectui#12341's `requiredPermissions` + objectstack#34382's `timesheet`), sorted. */
 const NAMED_LIST_VIEW_DECLARED = [
   'addDeleteRecordsInline', 'addRecord', 'addRecordViaForm', 'allowExport', 'allowPrinting',
   'appearance', 'aria', 'bulkActionDefs', 'bulkActions', 'calendar', 'chart',
@@ -269,12 +269,12 @@ const NAMED_LIST_VIEW_DECLARED = [
   'pageName', 'pagination', 'prefixField', 'requiredPermissions', 'resizable', 'rowActions', 'rowColor', 'rowHeight',
   'searchableFields', 'selection', 'sharing', 'showColor', 'showDensity', 'showDescription',
   'showFilters', 'showGroup', 'showHideFields', 'showRecordCount', 'showSearch', 'showSort',
-  'sort', 'tabs', 'timeline', 'tree', 'type', 'userActions', 'userFilters', 'wrapHeaders',
+  'sort', 'tabs', 'timeline', 'timesheet', 'tree', 'type', 'userActions', 'userFilters', 'wrapHeaders',
 ] as const;
 
 /**
- * The DECLARED members the renderer reads off a named view. All 42 of them
- * (43 until objectui#13118 stopped reading `filterableFields`; 20 until
+ * The DECLARED members the renderer reads off a named view. All 43 of them
+ * (42 until objectstack#34382 added `timesheet`; 43 until objectui#13118 stopped reading `filterableFields`; 20 until
  * objectui#10758 added bucket ①; 21 until objectui#7928 dropped `options`) —
  * the read set and the declared set disagree on no name since objectui#8980,
  * which is what closed {@link NAMED_VIEW_READ_UNDECLARED}.
@@ -285,7 +285,7 @@ const NAMED_VIEW_READ_DECLARED = [
   'description', 'emptyState', 'exportOptions', 'fieldOrder', 'filter',
   'gallery', 'gantt', 'grouping', 'hiddenFields', 'inlineEdit', 'kanban', 'label', 'map',
   'name', 'navigation', 'pagination', 'resizable', 'rowActions', 'rowColor', 'rowHeight',
-  'searchableFields', 'selection', 'sharing', 'showRecordCount', 'sort', 'timeline', 'tree',
+  'searchableFields', 'selection', 'sharing', 'showRecordCount', 'sort', 'timeline', 'timesheet', 'tree',
   'type', 'userActions', 'userFilters',
 ] as const;
 
@@ -387,7 +387,7 @@ const PROTOCOL_LIST_VIEW_KEYS = [
   'grouping', 'hiddenFields', 'inlineEdit', 'kanban', 'label', 'map', 'name', 'navigation',
   'pageName', 'pagination', 'requiredPermissions', 'resizable', 'rowActions', 'rowColor',
   'rowHeight', 'searchableFields', 'selection', 'sharing', 'showRecordCount', 'sort',
-  'tabs', 'timeline', 'tree', 'type', 'userActions', 'userFilters',
+  'tabs', 'timeline', 'timesheet', 'tree', 'type', 'userActions', 'userFilters',
 ] as const;
 
 /**
@@ -1540,8 +1540,8 @@ describe('objectui#7779 → objectui#7928 — `listViews` was ledgered on the fa
     // figures could stale silently in either direction.
     expect(
       declared,
-      'NamedListView\'s top-level member count moved (was 65 — 47 plus objectui#8980\'s seventeen plus objectui#12341\'s requiredPermissions). Re-derive it with this file\'s own namedListViewMemberCount() regex, then update the "64 declared / 43 unread" figures in the three files that carry them together — .changeset/object-view-unmirrored-keys-7779.md, packages/types/src/zod/objectql.zod.ts and packages/types/src/__tests__/zod-mirror-parity.test.ts — plus this file\'s own header. A shrink toward the read set also re-opens the listViews decision (objectui#7928).',
-    ).toBe(65);
+      'NamedListView\'s top-level member count moved (was 66 — 47 plus objectui#8980\'s seventeen plus objectui#12341\'s requiredPermissions plus objectstack#34382\'s timesheet). Re-derive it with this file\'s own namedListViewMemberCount() regex, then update the "64 declared / 43 unread" figures in the three files that carry them together — .changeset/object-view-unmirrored-keys-7779.md, packages/types/src/zod/objectql.zod.ts and packages/types/src/__tests__/zod-mirror-parity.test.ts — plus this file\'s own header. A shrink toward the read set also re-opens the listViews decision (objectui#7928).',
+    ).toBe(66);
     expect(declared).toBeGreaterThan(NAMED_VIEW_READS.length);
   });
 
@@ -1573,15 +1573,15 @@ describe('objectui#7924 — the per-member liveness census on `NamedListView`, r
 
   it('the declared member set is EXACTLY the census, by name', () => {
     expect([...namedListViewMembers().names].sort()).toEqual([...NAMED_LIST_VIEW_DECLARED].sort());
-    expect(NAMED_LIST_VIEW_DECLARED).toHaveLength(65);
-    expect(new Set<string>(NAMED_LIST_VIEW_DECLARED).size).toBe(65);
+    expect(NAMED_LIST_VIEW_DECLARED).toHaveLength(66);
+    expect(new Set<string>(NAMED_LIST_VIEW_DECLARED).size).toBe(66);
   });
 
   it('all three instruments read the same declaration, and the two that disagree disagree for a stated reason', () => {
     const ast = namedListViewMembers().names.length;
     // The parser and the strict regex agree — that agreement is what licenses
     // replacing the regex without re-opening the number.
-    expect(ast).toBe(65);
+    expect(ast).toBe(66);
     expect(namedListViewMemberCount()).toBe(ast);
     // …and the loose regex does NOT, by 9, because it also counts nested
     // object-literal lines. The gap stayed exactly 12 through objectui#8980:
@@ -1594,7 +1594,7 @@ describe('objectui#7924 — the per-member liveness census on `NamedListView`, r
     // is a single-line type reference too, so it moved both counts by one and
     // left the gap at 9. Pinned so "a figure between two
     // instruments is neither" stays a reading rather than a remembered sentence.
-    expect(namedListViewLooseMemberCount()).toBe(74);
+    expect(namedListViewLooseMemberCount()).toBe(75);
     expect(namedListViewLooseMemberCount()).toBeGreaterThan(ast);
   });
 
@@ -1625,7 +1625,7 @@ describe('objectui#7924 — the per-member liveness census on `NamedListView`, r
     const d = deriveNamedViewReads();
     expect(d.reads).toEqual([...NAMED_VIEW_READS]);
     // 43 until objectui#13118 stopped reading the spec-retired `filterableFields`.
-    expect(d.reads).toHaveLength(42);
+    expect(d.reads).toHaveLength(43);
     // ⭐ THE INSTRUMENTS NOW DISAGREE BY ONE NAME, and the difference is pinned
     // rather than smoothed over. The AST finds STRICTLY more than the
     // `currentNamedViewConfig?.KEY` regex it replaced — that was already true
@@ -1651,7 +1651,7 @@ describe('objectui#7924 — the per-member liveness census on `NamedListView`, r
     const unread = [...declared].filter((m) => !reads.has(m)).sort();
     expect(read).toEqual([...NAMED_VIEW_READ_DECLARED]);
     expect(unread).toEqual([...NAMED_LIST_VIEW_UNREAD]);
-    expect(read).toHaveLength(42);
+    expect(read).toHaveLength(43);
     expect(unread).toHaveLength(23);
     expect(read.length + unread.length).toBe(declared.size);
     expect(read.filter((m) => unread.includes(m))).toEqual([]);
