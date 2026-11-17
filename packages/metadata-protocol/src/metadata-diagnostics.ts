@@ -454,6 +454,53 @@ export function withPublishVerdict(
     return verdict;
 }
 
+/**
+ * [#34818] The draft types whose served `_diagnostics.warnings` carry the gate's
+ * advisories ({@link withPublishAdvisories}). A type joins when its editor has a
+ * place that shows them on the element they name: the flow designer's Problems
+ * tab, its per-node badges and the publish drawer. Every other type's draft is
+ * served as before, its advisories still returned on the publish's 2xx.
+ */
+const DRAFT_ADVISORY_TYPES: ReadonlySet<string> = new Set(['flow']);
+
+/**
+ * Fold what publishing a draft would still SAY into the draft's `_diagnostics`:
+ * the runtime gate's advisories for the draft body (the findings a publish that
+ * passes returns on its 2xx), each as one `warnings[]` entry. The entry's
+ * `message` is the finding's user sentence (`userMessage`, composed in the
+ * read's `userTextLocales`) when the finding has one, else its developer
+ * `message`; its `path` is item-relative as for {@link withPublishVerdict}.
+ * Warnings never change `valid`. An advisory whose path and words a warning
+ * already carries is not repeated. Only for {@link DRAFT_ADVISORY_TYPES}; any
+ * other type, and no advisories, return `diagnostics` itself.
+ */
+export function withPublishAdvisories(
+    type: string,
+    name: string,
+    diagnostics: MetadataDiagnostics | undefined,
+    advisories: readonly RuntimeAuthoringIssue[],
+): MetadataDiagnostics | undefined {
+    if (advisories.length === 0 || !DRAFT_ADVISORY_TYPES.has(PLURAL_TO_SINGULAR[type] ?? type)) return diagnostics;
+    const findingKey = (entry: { path: string; message: string }) => JSON.stringify([entry.path, entry.message]);
+    const prior = diagnostics?.warnings ?? [];
+    const seen = new Set(prior.map(findingKey));
+    const added: Array<{ path: string; message: string }> = [];
+    for (const advisory of advisories) {
+        const entry = {
+            path: itemRelativeIssuePath(type, name, advisory.path),
+            message: typeof advisory.userMessage === 'string' && advisory.userMessage.trim() !== ''
+                ? advisory.userMessage
+                : advisory.message,
+        };
+        const key = findingKey(entry);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        added.push(entry);
+    }
+    if (added.length === 0) return diagnostics;
+    return { ...diagnostics, valid: diagnostics?.valid ?? true, warnings: [...prior, ...added] };
+}
+
 // ---------------------------------------------------------------------------
 // [#29196] The lint's `form-field-unknown` on a served view's `_diagnostics`
 // [#29309] …and its sibling `form-section-group-unknown`

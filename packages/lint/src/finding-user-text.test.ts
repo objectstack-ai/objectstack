@@ -67,6 +67,8 @@ import { FLOW_UPDATE_READONLY_WHEN_FIELD, validateReadonlyFlowWrites } from './v
 import { READONLY_FLOW_WRITES_USER_TEXT } from './validate-readonly-flow-writes.user-text.js';
 import { FLOW_CREDENTIAL_LITERAL, lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
 import { FLOW_CREDENTIAL_LITERALS_USER_TEXT } from './lint-flow-credential-literals.user-text.js';
+import { FLOW_DECISION_UNCONDITIONAL_BRANCH, lintFlowPatterns } from './lint-flow-patterns.js';
+import { FLOW_PATTERNS_USER_TEXT } from './lint-flow-patterns.user-text.js';
 
 describe('finding user text · the locale ladder (request locale, then workspace default, then en)', () => {
   /** A synthetic entry with two sentences: English and Simplified Chinese. */
@@ -479,12 +481,13 @@ interface AdvisoryCase {
 }
 
 /** Params that pick a sentence's arm rather than name something the sentence must show. */
-const ARM_PARAMS: ReadonlySet<string> = new Set(['slate', 'locked', 'trigger', 'root', 'position']);
+const ARM_PARAMS: ReadonlySet<string> = new Set(['slate', 'locked', 'trigger', 'root', 'position', 'shape']);
 
+/** A list param carries one name per line; each name must show. */
 const shownNamesOf = (params: Record<string, string>): string[] =>
   Object.entries(params)
     .filter(([key, value]) => !ARM_PARAMS.has(key) && value !== '')
-    .map(([, value]) => value);
+    .flatMap(([, value]) => value.split('\n'));
 
 /** The catalog holds exactly `ids`, each in exactly the platform locales, and is the one the door renders from. */
 function pinCatalog(name: string, catalog: UserTextCatalog, ids: readonly string[]): void {
@@ -1010,5 +1013,96 @@ describe('flow credential literals user text · never the value', () => {
     const advisory = result.advisories.find((f) => f.rule === FLOW_CREDENTIAL_LITERAL)!;
     expect(result.rulesRun).toContain('lintFlowCredentialLiterals');
     expect(findingUserMessage(advisory, ['ja-JP'])).toContain('ヘッダー「Authorization」');
+  });
+});
+
+// ── lint-flow-patterns (#34818) ────────────────────────────────────────────
+//
+// The flow designer's Problems tab shows the draft's check findings before
+// publish, so the sentence names the flow and its steps by the labels the
+// builder sees, never `node_2` or the rule id.
+
+/** A labelled decision flow; `edges` are the decision's out-edges. */
+const decisionStack = (edges: Array<Record<string, unknown>>) => ({
+  flows: [{
+    name: 'meeting_reminder',
+    label: 'Meeting reminder',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: {} },
+      { id: 'node_2', type: 'decision', label: 'Check date', config: {} },
+      { id: 'node_3', type: 'end', label: 'Remind owner', config: {} },
+      { id: 'node_4', type: 'end', label: 'Skip', config: {} },
+    ],
+    edges: [{ id: 'e0', source: 'start', target: 'node_2' }, ...edges],
+  }],
+});
+
+const FLOW_PATTERN_CASES: readonly AdvisoryCase[] = [
+  {
+    label: 'a decision that gates on nothing',
+    rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+    stack: decisionStack([
+      { id: 'e1', source: 'node_2', target: 'node_3' },
+      { id: 'e2', source: 'node_2', target: 'node_4' },
+    ]),
+    params: { flow: 'Meeting reminder', node: 'Check date', shape: 'none', targets: 'Remind owner\nSkip' },
+  },
+  {
+    label: 'a decision with an ungated path beside a guarded one',
+    rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+    stack: decisionStack([
+      { id: 'e1', source: 'node_2', target: 'node_3', condition: 'record.amount > 10' },
+      { id: 'e2', source: 'node_2', target: 'node_4' },
+    ]),
+    params: { flow: 'Meeting reminder', node: 'Check date', shape: 'mixed', targets: 'Skip' },
+  },
+];
+
+pinCatalog('flow patterns', FLOW_PATTERNS_USER_TEXT, [FLOW_DECISION_UNCONDITIONAL_BRANCH]);
+// The rule leaves `severity` unset for a warning, as the registry row reads it.
+pinCases('flow patterns', (stack) => lintFlowPatterns(stack).map((f) => ({ ...f, severity: f.severity ?? 'warning' })), FLOW_PATTERN_CASES);
+
+describe('flow patterns user text · what the builder reads (#34818)', () => {
+  it('places the finding on the decision node by its document path, so the draft verdict resolves onto it', () => {
+    for (const c of FLOW_PATTERN_CASES) {
+      const [finding] = lintFlowPatterns(c.stack).filter((f) => f.rule === c.rule);
+      expect(finding!.path, c.label).toBe('flows[0].nodes[1]');
+      const result = runRuntimeAuthoringRules({ type: 'flow', item: (c.stack.flows as unknown[])[0] });
+      expect(result.advisories.find((f) => f.rule === c.rule)!.path, c.label).toBe('flows[0].nodes[1]');
+    }
+  });
+
+  it('names no machine name and no rule id in any locale', () => {
+    for (const c of FLOW_PATTERN_CASES) {
+      const [finding] = lintFlowPatterns(c.stack).filter((f) => f.rule === c.rule);
+      for (const tag of PLATFORM_LOCALE_TAGS) {
+        const text = findingUserMessage(finding!, [tag])!;
+        expect(text, `${c.label} · ${tag}`).not.toMatch(/node_\d|meeting_reminder|flow-decision|config\./);
+      }
+    }
+  });
+
+  it('falls back to the machine names for a flow and nodes that declare no label', () => {
+    const stack = decisionStack([
+      { id: 'e1', source: 'node_2', target: 'node_3' },
+      { id: 'e2', source: 'node_2', target: 'node_4' },
+    ]);
+    const flow = (stack.flows as Array<Record<string, unknown>>)[0]!;
+    delete flow.label;
+    for (const node of flow.nodes as Array<Record<string, unknown>>) delete node.label;
+    const [finding] = lintFlowPatterns(stack).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH);
+    expect(finding!.userTextParams).toEqual({ flow: 'meeting_reminder', node: 'node_2', shape: 'none', targets: 'node_3\nnode_4' });
+  });
+
+  it('names an approval node and its flow by their labels too', () => {
+    const stack = approvalStack([{ type: 'position', value: 'finance_manager' }]);
+    const flow = (stack.flows as Array<Record<string, unknown>>)[0]!;
+    flow.label = 'Expense approval';
+    (flow.nodes as Array<Record<string, unknown>>)[1]!.label = 'Manager review';
+    const finding = validateApprovalApprovers(stack).find((f) => f.rule === APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY)!;
+    expect(finding.userTextParams).toEqual({ flow: 'Expense approval', node: 'Manager review', slate: 'group', locked: 'yes' });
+    expect(findingUserMessage(finding, ['zh-CN'])).toContain('流程“Expense approval”的审批节点“Manager review”');
+    // `where` keeps the machine names for `os validate` and logs.
+    expect(finding.where).toBe('flow "expense_approval" · node "manager_review"');
   });
 });

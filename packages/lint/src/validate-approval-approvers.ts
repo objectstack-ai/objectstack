@@ -52,7 +52,7 @@ import {
 } from '@objectstack/spec/automation';
 import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec';
 import { collectCelRootIdentifiers } from '@objectstack/formula';
-import { walkFlowNodes } from './flow-walk.js';
+import { flowDisplayLabel, flowNodeLabel, walkFlowNodes } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
 import type { UserTextParams } from './finding-user-text.js';
 
@@ -401,6 +401,9 @@ export function validateApprovalApprovers(
     const flow = flows[fi];
     if (!flow || typeof flow !== 'object') continue;
     const flowName = typeof flow.name === 'string' ? flow.name : `(flow ${fi})`;
+    // The user sentences name the flow and its nodes by the labels the builder
+    // sees in Studio; `where`, `message` and `path` keep the machine names.
+    const flowLabel = flowDisplayLabel(flow as AnyRec, fi);
     // Every node, INCLUDING those nested in try_catch / loop / parallel regions
     // — an approval inside a loop body is still an approval (#4380).
     const walked = walkFlowNodes(flow, `flows[${fi}]`);
@@ -409,6 +412,7 @@ export function validateApprovalApprovers(
       const { node, path: nodePath } = walked[ni];
       if (!node || node.type !== APPROVAL_NODE_TYPE) continue;
       const nodeId = typeof node.id === 'string' ? node.id : `(node ${ni})`;
+      const nodeLabel = flowNodeLabel(node as AnyRec, ni);
       const cfg = (node.config ?? {}) as AnyRec;
       const approvers = Array.isArray(cfg.approvers) ? (cfg.approvers as AnyRec[]) : [];
       const where = `flow "${flowName}" · node "${nodeId}"`;
@@ -432,7 +436,7 @@ export function validateApprovalApprovers(
             hint: fix
               ? `Use the spec value: { type: '${fix}', value: '${value}' }.`
               : `Pick one of the spec values; unmapped types degrade to an inert '${type}:${value}' literal at runtime.`,
-            userTextParams: { flow: flowName, node: nodeId, type, suggested: fix ?? '' },
+            userTextParams: { flow: flowLabel, node: nodeLabel, type, suggested: fix ?? '' },
           });
           continue;
         }
@@ -525,7 +529,7 @@ export function validateApprovalApprovers(
             path: `${path}.resolveAs`,
             message: `resolveAs has no effect on a '${type}' approver — it only applies to type 'expression'.`,
             hint: `Remove it, or switch this approver to { type: 'expression', value: '<CEL>', resolveAs: '${String(a.resolveAs)}' }.`,
-            userTextParams: { flow: flowName, node: nodeId, type },
+            userTextParams: { flow: flowLabel, node: nodeLabel, type },
           });
         }
 
@@ -551,7 +555,7 @@ export function validateApprovalApprovers(
             hint:
               `If it is an org position, author { type: 'position', value: '${value}' }; keep ` +
               `'org_membership_level' for the tiers the verdict lists`,
-            userTextParams: { flow: flowName, node: nodeId, value },
+            userTextParams: { flow: flowLabel, node: nodeLabel, value },
           });
         } else if (type in DEPRECATED_APPROVER_TYPES) {
           const fix = canonicalApproverType(type);
@@ -564,7 +568,7 @@ export function validateApprovalApprovers(
               `approver type '${type}' is the deprecated spelling of '${fix}' (ADR-0090 D3) and ` +
               `is removed in the next major.`,
             hint: `Author { type: '${fix}', value: '${value}' }. It resolves identically today.`,
-            userTextParams: { flow: flowName, node: nodeId, type, replacement: fix },
+            userTextParams: { flow: flowLabel, node: nodeLabel, type, replacement: fix },
           });
         } else if (
           (APPROVER_VALUE_BINDINGS as Record<string, { source: string }>)[canonical]?.source === 'unsupported'
@@ -588,7 +592,7 @@ export function validateApprovalApprovers(
             hint:
               `Route to people the engine can expand: ` +
               `{ type: ${EXPANDABLE_GROUP_TYPES.map((t) => `'${t}'`).join(' | ')}, ... }.`,
-            userTextParams: { flow: flowName, node: nodeId, type, routes: EXPANDABLE_GROUP_TYPES.join(', ') },
+            userTextParams: { flow: flowLabel, node: nodeLabel, type, routes: EXPANDABLE_GROUP_TYPES.join(', ') },
           });
         }
 
@@ -670,7 +674,7 @@ export function validateApprovalApprovers(
             `none is staffed the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
           hint: GROUP_ONLY_FIX,
-          userTextParams: { flow: flowName, node: nodeId, slate: 'group', locked: locks ? 'yes' : 'no' },
+          userTextParams: { flow: flowLabel, node: nodeLabel, slate: 'group', locked: locks ? 'yes' : 'no' },
         });
       }
 
@@ -717,7 +721,7 @@ export function validateApprovalApprovers(
             `is unset the request opens on the organization's administrators` +
             (locks ? STAYS_LOCKED : ''),
           hint: MANAGER_ONLY_FIX,
-          userTextParams: { flow: flowName, node: nodeId, slate: 'manager', locked: locks ? 'yes' : 'no' },
+          userTextParams: { flow: flowLabel, node: nodeLabel, slate: 'manager', locked: locks ? 'yes' : 'no' },
         });
       }
 
@@ -745,7 +749,7 @@ export function validateApprovalApprovers(
           hint:
             `Declare onEmptyApprovers on the node: 'admin_rescue', 'fail', 'auto_approve', or 'fallback' ` +
             `with a fallbackApprovers list`,
-          userTextParams: { flow: flowName, node: nodeId },
+          userTextParams: { flow: flowLabel, node: nodeLabel },
         });
       }
 
@@ -787,7 +791,7 @@ export function validateApprovalApprovers(
             hint:
               `Set escalateTo to a position machine name (expanded via sys_user_position, ` +
               `ADR-0090 D3) or a specific user id, or change action to 'notify'.`,
-            userTextParams: { flow: flowName, node: nodeId },
+            userTextParams: { flow: flowLabel, node: nodeLabel },
           });
         }
       }

@@ -47,6 +47,7 @@
 
 import type { MetadataSaveAdvisoryEvent } from '@object-ui/data-objectstack';
 import type { TranslateFn } from '@object-ui/i18n';
+import { werePublishChecksShown } from '../preview/publishChecksShown.js';
 
 /**
  * i18next's `t`, narrowed to what this module uses — RE-EXPORTED from its one
@@ -181,6 +182,10 @@ export function emitSaveAdvisories(
 ): void {
   if (!ev.advisories || ev.advisories.length === 0) return;
 
+  if (listedBeforePublish(ev)) {
+    sink.warning(advisoryTitle(ev, t), { duration: ADVISORY_TOAST_MS });
+    return;
+  }
   sink.warning(
     advisoryTitle(ev, t),
     {
@@ -188,4 +193,17 @@ export function emitSaveAdvisories(
       duration: ADVISORY_TOAST_MS,
     },
   );
+}
+
+/**
+ * Whether the author reviewed these findings right before this publish
+ * (objectstack#34818): the pending-changes sheet or the flow designer's
+ * Problems tab listed them, worded for the builder, and the author published
+ * from there (`preview/publishChecksShown.ts`). Repeating them as a block of
+ * text after the publish says nothing new, so the toast keeps its one title
+ * line. Every other publish, and the save door, keep the full body: there the
+ * toast is the only place the findings reach the author.
+ */
+function listedBeforePublish(ev: MetadataSaveAdvisoryEvent): boolean {
+  return ev.door === 'publish' && werePublishChecksShown(ev.type, ev.name, ev.member);
 }
