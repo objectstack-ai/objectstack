@@ -279,10 +279,11 @@ describe('[#33694] an in-product AI query is marked on the dataset_query row by 
   });
 
   it('CONTROL: an OAuth client — alone, or beside an agent — is the performer, with no conversation or confirmation', () => {
-    for (const performedBy of [
+    const envelopes: Array<Record<string, string>> = [
       { clientId: 'client_agent', conversationId: 'conv_1', confirmationId: 'pend_1' },
       { clientId: 'client_agent', agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' },
-    ]) {
+    ];
+    for (const performedBy of envelopes) {
       const meta = metadataOf(buildDatasetQueryAuditRow(aiQuery(performedBy), QUERIED_AT));
       expect(meta).toMatchObject({ performed_by: 'client_agent', on_behalf_of: 'u_analyst' });
       expect(meta).not.toHaveProperty('conversation_id');
