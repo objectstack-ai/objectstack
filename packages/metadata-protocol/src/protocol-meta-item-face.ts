@@ -777,7 +777,9 @@ export async function readMetaItemFace(
     // [#32607] …and refuses two enabled row holders of a name nobody ships.
     // The rows that judgment reads are read on the face's key and handed to
     // the read below, which takes them instead of reading them again
-    // (#24371: the item's active rows, one read).
+    // (#24371: the item's active rows, one read). [#34441 cell 2] Every
+    // judgment below that reads them takes the rows read already, so the
+    // served-holder and row-held-base judgments together are still one read.
     let activeRows: PrereadActiveRows | undefined;
     const host = this;
     const judgeHost: ServedRowHost = {
@@ -787,6 +789,7 @@ export async function readMetaItemFace(
         declinesStoredRow: (...a) => this.declinesStoredRow(...a),
         rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
         readItemActiveRows: async (type, name) => {
+            if (activeRows !== undefined && activeRows.type === type && activeRows.name === name) return [...activeRows.rows];
             const rows = await this.readItemActiveRows(type, name, true);
             activeRows = { type, name, rows };
             return rows;
