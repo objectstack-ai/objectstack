@@ -2648,6 +2648,25 @@ ComponentRegistry.register('form',
       return out;
     }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames]);
 
+    // objectstack#34615 — below `sm` a horizontal tab strip that does not fit
+    // scrolls sideways inside its own box (see the strip's classes) instead of
+    // widening the page. The ACTIVE tab must stay in that box's visible window:
+    // a pick, `defaultFieldTab`, or a failed submit jumping to the first
+    // offending tab can each select a trigger scrolled out of view. Only the
+    // strip's own `scrollLeft` moves, never an outer scroller, and a strip
+    // that fits (every desktop strip) is left untouched.
+    const fieldTabListRef = React.useRef<HTMLDivElement>(null);
+    React.useEffect(() => {
+      const list = fieldTabListRef.current;
+      if (!list || activeFieldTab === undefined || list.scrollWidth <= list.clientWidth) return;
+      const trigger = list.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+      if (!trigger) return;
+      const box = list.getBoundingClientRect();
+      const tab = trigger.getBoundingClientRect();
+      if (tab.left < box.left) list.scrollLeft -= box.left - tab.left;
+      else if (tab.right > box.right) list.scrollLeft += tab.right - box.right;
+    }, [activeFieldTab]);
+
     // Cascade clear (#2284): when a select/radio's option list narrows — because a
     // controlling field changed or a role/context predicate flipped — a previously
     // chosen value may no longer be offered. Drop it so the form never submits a
@@ -4471,13 +4490,26 @@ ComponentRegistry.register('form',
                 className={cn('flex w-full', isVerticalFieldTabs ? 'gap-4' : 'flex-col')}
               >
                 <TabsList
+                  ref={fieldTabListRef}
+                  data-testid="form-tab-strip"
                   className={cn(
                     // `self-start` keeps the strip its content's size instead of
                     // being stretched by the flex container above.
                     'self-start',
                     isVerticalFieldTabs
                       ? cn('h-auto flex-col', fieldTabsPosition === 'right' && 'order-last')
-                      : fieldTabsPosition === 'bottom' ? 'order-last mt-4' : 'mb-4',
+                      : cn(
+                          fieldTabsPosition === 'bottom' ? 'order-last mt-4' : 'mb-4',
+                          // objectstack#34615 — below `sm` the strip never
+                          // outgrows its container: it is capped at the
+                          // container's width and the tabs that do not fit
+                          // scroll sideways, with no scrollbar drawn (the
+                          // active tab is kept in view by the effect on
+                          // `fieldTabListRef`). Left-packed, because a centred
+                          // overflowing row cannot scroll to its first tab.
+                          'max-sm:max-w-full max-sm:justify-start max-sm:overflow-x-auto max-sm:overflow-y-hidden',
+                          'max-sm:[scrollbar-width:none] max-sm:[&::-webkit-scrollbar]:hidden',
+                        ),
                   )}
                 >
                   {visibleFieldTabGroups.map((group) => (
