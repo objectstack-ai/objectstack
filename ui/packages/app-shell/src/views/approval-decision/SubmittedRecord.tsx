@@ -383,7 +383,7 @@ function SectionHeading({ id, label, icon }: { id: string; label: string; icon?:
     <div className="border-b border-border" data-submitted-section-heading>
       <h4
         id={id}
-        className="flex min-h-11 sm:min-h-9 w-full scroll-mt-14 items-center gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground"
+        className="flex min-h-11 sm:min-h-9 w-full scroll-mt-3 items-center gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground"
       >
         {icon && <SectionIcon name={icon} />}
         <span className="min-w-0 break-words">{label}</span>
@@ -397,7 +397,9 @@ function SectionHeading({ id, label, icon }: { id: string; label: string; icon?:
  * entry per heading, in page order; a click scrolls its heading into view.
  * The form section navigation's strip (objectstack#34605), named by the
  * card's own heading. Nothing to unfold and no error counts here, so an entry
- * carries the item's key, label and anchor only.
+ * carries the item's key, label and anchor only. It sits at the top of the
+ * card and does not stick: the page's scroller pads its content, so a sticky
+ * strip would let the scrolled fields show through above it.
  */
 function SectionNav({ items, labelledBy }: {
   items: ReadonlyArray<Pick<FormSectionNavItem, 'key' | 'label' | 'anchorId'>>;
@@ -408,7 +410,7 @@ function SectionNav({ items, labelledBy }: {
     <nav
       aria-labelledby={labelledBy}
       data-testid="submitted-record-section-nav"
-      className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b border-border bg-card px-2 sm:px-4"
+      className="flex gap-1 overflow-x-auto border-b border-border px-2 sm:px-4"
     >
       {items.map((item) => (
         <button
