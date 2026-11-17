@@ -617,6 +617,14 @@ on empty development databases. That seed is hard-gated to
 `NODE_ENV=development`: it is a development convenience, never a production
 recovery path.
 
+Nor does a server outside development mode **accept** a development seed
+credential. A sign-in with the development seed password is refused on every
+account, and an account `os dev` seeded (its admin and the stack's `demoStaff`)
+opens no session while it still has the password it was seeded with. If you
+serve a database `os dev` wrote, set each seeded account's password on the
+server with [`os user set-password`](/docs/deployment/cli#os-user-set-password)
+first; the refusal names that command.
+
 ### A seeded directory opens no bootstrap window
 
 Both paths above assume the deployment's **first login** is still ahead of it.
