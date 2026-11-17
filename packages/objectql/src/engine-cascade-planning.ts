@@ -51,9 +51,10 @@ import { declaredHttpStatus } from '@objectstack/types';
 import { ORGANIZATION_OBJECT, resolveTenantFieldName } from './tenancy/system-write-organization.js';
 import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 import {
-  CascadeBatchNarrowed, cascadeMemberKey, cascadeSetAdd, cascadeSetHas, declaredMultiValued, deleteWalkTargetOf,
-  statesDeleteSemantics,
+  CascadeBatchNarrowed, REFERENTIAL_CLEAR_OPTION, cascadeMemberKey, cascadeSetAdd, cascadeSetHas, declaredMultiValued,
+  deleteWalkTargetOf, statesDeleteSemantics,
 } from './engine-top-level.js';
+import type { ReferentialClearOption } from './engine-top-level.js';
 import { isExternalDriverFloor } from './external-driver-floor.js';
 import { forgetCollectedProbes, takeCollectedProbe } from './engine-delete-cascade.js';
 import type { CascadeDeleteSet } from './engine-top-level.js';
@@ -1149,6 +1150,17 @@ export class CascadePlanningFacet {
                   object, id: String(id), referencingObject: childName, referencingId: String(depId), field: fieldName,
                 },
               } as ExecutionContext;
+              // The read-only strips' exemption for THIS clear: the holder row
+              // and the lookup, on the update's module-private symbol channel
+              // (`REFERENTIAL_CLEAR_OPTION`), never on the context above. A
+              // `readonly` / `readonlyWhen` lookup is the normal shape for a
+              // stamp a system writes, and the static strip runs on
+              // `!isSystem` alone, so without it this clear was dropped as a
+              // forged caller write and every holder kept the deleted row's id.
+              // `update()` exempts exactly this key at exactly the value written
+              // below; every other key is judged as before.
+              const referentialClear: ReferentialClearOption = { object: childName, id: String(depId), field: fieldName };
+              const clearOptions = { context: referentialCtx, [REFERENTIAL_CLEAR_OPTION]: referentialClear };
               // [ruling 6893104201 c1] The walk's first write: its hooks may
               // write a row a later probe must see.
               forgetCollectedProbes(cascadeSet);
@@ -1178,9 +1190,9 @@ export class CascadePlanningFacet {
                 // off-shape bare scalar normalized to the array spelling — is
                 // documented there.
                 const next = ObjectQL.remainderAfterMemberRemoval(dep?.[fieldName], id, cleared);
-                await this.update(childName, { id: depId, [fieldName]: next }, { context: referentialCtx } as any);
+                await this.update(childName, { id: depId, [fieldName]: next }, clearOptions as any);
               } else {
-                await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
+                await this.update(childName, { id: depId, [fieldName]: null }, clearOptions as any);
               }
               // [#30237, ADR-0148 D2] The reference a restore re-links while
               // the field still lacks it: the live row, the field, and the id

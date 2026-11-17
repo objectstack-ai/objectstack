@@ -976,6 +976,51 @@ interface ReadonlyWhenStripOptions {
    * that locks.
    */
   only?: string;
+  /**
+   * The `set_null` delete walk's clear of a reference, which this strip does
+   * not judge ({@link ReferentialClearExemption}). Omit on every other write.
+   */
+  referentialClear?: ReferentialClearExemption;
+}
+
+/**
+ * The one key an UPDATE's read-only strips leave to the engine's referential
+ * integrity: the lookup the `set_null` delete walk is clearing on this row, at
+ * the value the walk wrote — `null`, or on a `multiple: true` lookup the member
+ * list without the deleted id.
+ *
+ * Deleting a record makes the engine clear every optional lookup pointing at
+ * it. That UPDATE runs under the CALLER's context (never `isSystem`, whose
+ * exemption is total), so a `readonly` or `readonlyWhen`-locked lookup — the
+ * normal shape for a stamp a system writes — was stripped as if the caller had
+ * forged it: the delete answered 200, the strip logged that the value was
+ * DROPPED, and every holder kept the deleted row's id.
+ *
+ * Narrow on three sides, each pinned in `engine-set-null-readonly-lookup-clear.test.ts`:
+ *  - only `update()` builds it, and only from the walk's module-private option
+ *    (`REFERENTIAL_CLEAR_OPTION` in `engine-top-level.ts`) on the by-id write
+ *    of the row the walk named — never from the context, so a caller carrying
+ *    the operation-private `__referentialFieldClear` marker gains nothing;
+ *  - only `field`: every other read-only key in the same payload is stripped,
+ *    logged, reported and refused under `strictReadonlyWrites` as before;
+ *  - only while the key still holds `value` (by `Object.is`, the value the
+ *    write received): the same key holding anything else is judged as before.
+ */
+export interface ReferentialClearExemption {
+  readonly field: string;
+  readonly value: unknown;
+}
+
+/** Is `name` the walk's referential clear, still at the value the walk wrote? */
+function isReferentialClear(
+  data: Readonly<Record<string, unknown>>,
+  name: string,
+  exemption: ReferentialClearExemption | undefined,
+): boolean {
+  return exemption !== undefined
+    && name === exemption.field
+    && Object.prototype.hasOwnProperty.call(data, name)
+    && Object.is(data[name], exemption.value);
 }
 
 /**
@@ -1089,7 +1134,7 @@ export function stripReadonlyWhenFields(
   if (!fields || !data) return data;
   const supplied = options?.supplied ?? data;
   const stored = options?.stored ?? data;
-  const judged = judgedReadonlyWhenKeys(fields, data, supplied);
+  const judged = judgedReadonlyWhenKeys(fields, data, supplied, options?.referentialClear);
   if (judged.length === 0 || !judgesOnly(judged, options?.only)) return data;
   const settled = settleOrRefuse(logger, () => settleReadonlyWhenDrops(
     readonlyWhenLockGroups(fields, judged),
@@ -1111,10 +1156,16 @@ function judgedReadonlyWhenKeys(
   fields: Record<string, ConditionalFieldDef>,
   data: Record<string, unknown>,
   supplied: Readonly<Record<string, unknown>>,
+  referentialClear?: ReferentialClearExemption,
 ): string[] {
   const judged: string[] = [];
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
+    // The delete walk's clear of a reference to a row that no longer exists is
+    // not a change a state lock guards: keeping it locked keeps a dangling id
+    // (see ReferentialClearExemption). Not judged, so not taken and not warned
+    // about; every other locked key is judged as before.
+    if (isReferentialClear(data, name, referentialClear)) continue;
     // [#9107] Asked BEFORE any predicate runs, not after: a hook-written value
     // is not this strip's business at all, so there is nothing to evaluate and
     // nothing to warn about — including the unbound-root LOCKED branch, whose
@@ -2145,6 +2196,13 @@ export function stripReadonlyFields(
      * remedy, which is UPDATE-only.
      */
     verb?: 'update' | 'insert';
+    /**
+     * The `set_null` delete walk's clear of a reference: that key, at that
+     * value, is engine-owned referential integrity, kept and not logged —
+     * {@link ReferentialClearExemption}. Only `update()` passes it, and only
+     * for the walk's own write; omit everywhere else.
+     */
+    referentialClear?: ReferentialClearExemption;
   },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
@@ -2177,6 +2235,9 @@ export function stripReadonlyFields(
     // a `null` bug — `0`, `''`, `false` and a shared object reference collide
     // identically, which is why the fix is provenance and not a sentinel.
     if (hookWrittenKeys?.has(name)) continue; // the hook wrote this value — keep
+    // The delete walk's clear of this reference, still at the value it wrote:
+    // the engine's write, not the caller's — keep, and say nothing about it.
+    if (isReferentialClear(result as Record<string, unknown>, name, options?.referentialClear)) continue;
     // [#5591] ...and it must still BE the caller's value. A hook that
     // overwrote this key wrote a PLATFORM value; deleting that is what put
     // `status = published` rows in the database with `published_at = null`.
