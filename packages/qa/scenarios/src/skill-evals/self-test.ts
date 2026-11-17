@@ -20,7 +20,7 @@ import { ApiBillingRefusedError } from '../runner/driver.js';
 import { armArgs, prepareArmWorkdir } from './arms.js';
 import { loadSkillEvalCatalog, notUserInvocable, parseEvalFile, type SkillEvalCase } from './cases.js';
 import { type Grader, gradeAnswer } from './grade.js';
-import { judgeTurn, preflight, type SkillEvalRunRecord } from './run.js';
+import { judgeTurn, preflight, regradeRecords, type SkillEvalRunRecord } from './run.js';
 import { summariseRound } from './summary.js';
 
 /** Row label → minimum cases registered. A row is a battery; deleting one must red. */
@@ -45,10 +45,11 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   'judge: a graded with-skill turn → its answer judged by the grader': 1,
   'guard: ANTHROPIC_API_KEY set → the round refuses to start': 1,
   'summary: no-skill ≥ with-skill is named; invalid turns stay out of the rate': 1,
+  'regrade: a case changed since the round → SET APART, never graded against the new text': 1,
 });
 
 /** The roster's own size, pinned: a deleted row takes its floor with it otherwise. */
-export const SELF_TEST_BATTERY_FLOOR = 20;
+export const SELF_TEST_BATTERY_FLOOR = 21;
 
 let selfTestReachedVerdict = false;
 /** Whether the last {@link runSelfTest} reached its verdict line. */
@@ -264,6 +265,19 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
         const s = summariseRound([c], [rec('with-skill', 'pass'), rec('with-skill', 'invalid'), rec('no-skill', 'pass')], []);
         const b = s.bundles[0]!;
         return b.withSkill.rate === 1 && b.withSkill.invalid === 1 && b.noSkillAtLeastWithSkill.join() === c.key ? true : `got with-skill rate ${b.withSkill.rate}, invalid ${b.withSkill.invalid}, flagged [${b.noSkillAtLeastWithSkill.join()}]`;
+      },
+    },
+    {
+      label: 'regrade: a case changed since the round → SET APART, never graded against the new text',
+      run: () => {
+        const c = fixtureCase();
+        const was = judge(c, 'with-skill', stream({ skills: ['demo-skill'], answer: GOOD }));
+        const reworded = fixtureCase({ mustContain: ['$startsWith'] });
+        const out = regradeRecords([was], [c.key], [reworded], { bundles: ['demo-skill'], unlisted: [] }, grade);
+        const same = regradeRecords([was], [c.key], [c], { bundles: ['demo-skill'], unlisted: [] }, grade);
+        return out.records.length === 0 && out.cases.length === 0 && out.setApart.changed.join() === c.key && same.records.length === 1 && same.setApart.changed.length === 0
+          ? true
+          : `expected the reworded case set apart and the unchanged one regraded, got ${out.records.length} regraded / set apart [${out.setApart.changed.join()}], then ${same.records.length} regraded`;
       },
     },
   ];

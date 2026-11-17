@@ -17,10 +17,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { ApiBillingRefusedError } from '../../src/runner/driver.js';
 import type { TurnProcessRun } from '../../src/runner/drivers/process.js';
 import { ARM_TOOLS, armArgs, prepareArmWorkdir } from '../../src/skill-evals/arms.js';
-import { loadSkillEvalCatalog, notUserInvocable, parseEvalFile, selectBundles, type SkillEvalCase } from '../../src/skill-evals/cases.js';
-import { main, parseSkillEvalArgs } from '../../src/skill-evals/cli.js';
+import { hashCase, loadSkillEvalCatalog, notUserInvocable, parseEvalFile, selectBundles, type SkillEvalCase } from '../../src/skill-evals/cases.js';
+import { main, parseSkillEvalArgs, regradeRound, ROUND_RECORD_SCHEMA } from '../../src/skill-evals/cli.js';
 import { gradeAnswer } from '../../src/skill-evals/grade.js';
-import { executeRound, judgeTurn, planRound, preflight, rateLimitStop, regradeRecord } from '../../src/skill-evals/run.js';
+import { executeRound, judgeTurn, planRound, preflight, rateLimitStop, regradeRecord, regradeRecords, type SkillEvalRunRecord } from '../../src/skill-evals/run.js';
 import { runSelfTest, SELF_TEST_BATTERIES, SELF_TEST_BATTERY_FLOOR, selfTestReached } from '../../src/skill-evals/self-test.js';
 import { renderSummaryMarkdown, summariseRound } from '../../src/skill-evals/summary.js';
 
@@ -311,5 +311,86 @@ describe('a bundle the init line never lists (`user-invocable: false`), and --re
     expect(regradeRecord(now, quiet, view)).toMatchObject({ verdict: 'pass', regradedFrom: 'invalid' });
     expect(regradeRecord(now, quiet, { bundles: view.bundles, unlisted: [] })).toMatchObject({ verdict: 'invalid' });
     expect(regradeRecord(now, quiet, { bundles: view.bundles, unlisted: [] }).regradedFrom).toBeUndefined();
+  });
+});
+
+describe('--regrade grades an old answer only against the case that ran', () => {
+  const c: SkillEvalCase = { bundle: 'alpha-skill', file: 'cases.json', id: 1, key: 'alpha-skill/cases#1', prompt: 'p', mustContain: ['$icontains'], mustNotContain: [] };
+  const d: SkillEvalCase = { ...c, id: 2, key: 'alpha-skill/cases#2', mustContain: ['orderBy'] };
+  const view = { bundles: ['alpha-skill'], unlisted: [] };
+  const rec = (k: SkillEvalCase, answer: string) => judgeTurn(k, 'with-skill', 1, exited(stream({ skills: ['alpha-skill'], answer })), view, 't');
+
+  it('every record carries the hash of its case as run: prompt and both token lists, not expected_output', () => {
+    expect(rec(c, '$icontains').caseHash).toBe(hashCase(c));
+    expect(hashCase({ ...c, expectedOutput: 'other' })).toBe(hashCase(c));
+    expect(hashCase({ ...c, prompt: 'p2' })).not.toBe(hashCase(c));
+    expect(hashCase({ ...c, mustNotContain: ['x'] })).not.toBe(hashCase(c));
+  });
+
+  it('an unchanged case regrades normally; a changed one is set apart, never regraded; a record with no hash is regraded and counted', () => {
+    const reworded = { ...d, mustContain: ['sort:'] };
+    const unhashed: SkillEvalRunRecord = { ...rec(c, 'nothing'), verdict: 'pass' };
+    delete unhashed.caseHash;
+    const out = regradeRecords([rec(d, 'orderBy'), unhashed], [c.key, d.key], [c, reworded], view);
+    expect(out.setApart).toEqual({ changed: [d.key], removed: [] });
+    expect(out.cases.map((x) => x.key)).toEqual([c.key]);
+    expect(out.records.map((r) => [r.key, r.verdict, r.regradedFrom])).toEqual([[c.key, 'fail', 'pass']]);
+    expect(out).toMatchObject({ changed: 1, unhashed: 1, added: [] });
+    expect(() => regradeRecord(rec(d, 'orderBy'), reworded, view)).toThrow(/has changed since the turn ran/);
+    // Unchanged on both sides: regraded, no flip, nothing set apart.
+    const same = regradeRecords([rec(c, '$icontains'), rec(d, 'orderBy')], [c.key, d.key], [c, d], view);
+    expect(same).toMatchObject({ changed: 0, unhashed: 0, setApart: { changed: [], removed: [] } });
+    expect(same.records.map((r) => r.verdict)).toEqual(['pass', 'pass']);
+  });
+
+  it('a case removed since the round is set apart; one added since is left out, never counted as not run', () => {
+    const e: SkillEvalCase = { ...c, id: 3, key: 'alpha-skill/cases#3' };
+    const out = regradeRecords([rec(c, '$icontains'), rec(d, 'orderBy')], [c.key, d.key], [c, e], view);
+    expect(out.setApart).toEqual({ changed: [], removed: [d.key] });
+    expect(out.added).toEqual([e.key]);
+    expect(out.cases.map((x) => x.key)).toEqual([c.key]);
+  });
+
+  it('the command: a reworded case keeps its record bytes and leaves the pass rates; the summary names it and the unhashed records', async () => {
+    const root = writeCatalog();
+    const cat = loadSkillEvalCatalog(root);
+    const dir = mkdtempSync(join(scratch, 'round-'));
+    const exec = await executeRound(planRound(cat.cases, 1), {
+      bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: dir, maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
+      runTurn: async (_bin, _args, o) => {
+        const skillsDir = join(o.cwd, '.claude', 'skills');
+        return exited(stream({ skills: existsSync(skillsDir) ? readdirSync(skillsDir) : [], answer: 'orderBy defineView' }));
+      },
+    });
+    const summary = summariseRound(cat.cases, exec.records, []);
+    writeFileSync(join(dir, 'round.json'), JSON.stringify({ schema: ROUND_RECORD_SCHEMA, round: 'r', runner: { repo: 'x', sha: 'y' }, startedAt: 't', finishedAt: 't', wallMs: 1, skills: { source: 'workspace skills/', bundles: cat.bundles, allBundles: true }, driver: { driver: 'claude-code-cli', version: 'v', authMethod: 'oauth_token', apiBilled: false, servedModels: [], maxTurns: 5, caseTimeoutMs: 1, concurrency: 1, maxUtilization: 0.9 }, scope: { cases: 3, arms: ['with-skill', 'no-skill'], repeats: 1, plannedTurns: 6, ranTurns: 6, notRunTurns: 0 }, summary }));
+    // beta-skill's records predate case hashes; alpha-skill#2 is reworded after the round.
+    for (const f of readdirSync(join(dir, 'runs')).filter((n) => n.startsWith('beta-skill'))) {
+      const r = JSON.parse(readFileSync(join(dir, 'runs', f), 'utf8')) as SkillEvalRunRecord;
+      delete r.caseHash;
+      writeFileSync(join(dir, 'runs', f), JSON.stringify(r));
+    }
+    const evalsFile = join(root, 'alpha-skill', 'evals', 'cases.json');
+    const doc = JSON.parse(readFileSync(evalsFile, 'utf8')) as { evals: Array<{ assertions: { must_contain: string[] } }> };
+    doc.evals[1]!.assertions.must_contain = ['sort:'];
+    writeFileSync(evalsFile, JSON.stringify(doc));
+    const reworded = ['alpha-skill__cases__2__with-skill__r1.json', 'alpha-skill__cases__2__no-skill__r1.json'];
+    const bytesBefore = reworded.map((f) => readFileSync(join(dir, 'runs', f), 'utf8'));
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(regradeRound(dir, loadSkillEvalCatalog(root), 'workspace skills/')).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const round = JSON.parse(readFileSync(join(dir, 'round.json'), 'utf8')) as { regraded: Record<string, unknown>; summary: { cases: Array<{ key: string }>; totals: { withSkill: { pass: number; fail: number } } } };
+    expect(round.regraded).toMatchObject({ changed: 0, unhashed: 2, setApart: { changed: ['alpha-skill/cases#2'], removed: [] }, added: [] });
+    expect(round.summary.cases.map((x) => x.key)).toEqual(['alpha-skill/cases#1', 'beta-skill/cases#1']);
+    expect(round.summary.totals.withSkill).toMatchObject({ pass: 1, fail: 1 });
+    expect(reworded.map((f) => readFileSync(join(dir, 'runs', f), 'utf8'))).toEqual(bytesBefore);
+    const md = readFileSync(join(dir, 'summary.md'), 'utf8');
+    expect(md).toContain('1 case(s) changed since the round, set apart: not regraded and out of every pass rate below: `alpha-skill/cases#2`');
+    expect(md).toContain('2 record(s) carry no case hash');
+    expect(md).not.toContain('| alpha-skill/cases#2 |');
   });
 });

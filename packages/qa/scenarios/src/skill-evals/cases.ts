@@ -16,6 +16,7 @@
  * are not this runner's to edit.
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -61,6 +62,15 @@ const isStringList = (v: unknown): v is string[] => Array.isArray(v) && v.every(
 
 /** `BUNDLE/FILE_STEM#ID`. */
 export const caseKey = (bundle: string, file: string, id: number | string): string => `${bundle}/${file.replace(/\.json$/, '')}#${id}`;
+
+/**
+ * The case as a turn meets it: a hash of the prompt the turn is asked and the
+ * two token lists its answer is graded on (`expected_output` is neither sent
+ * nor graded, so it is left out). Every run record carries it, so `--regrade`
+ * can tell a case reworded since the round from the case that ran. Pure.
+ */
+export const hashCase = (c: Pick<SkillEvalCase, 'prompt' | 'mustContain' | 'mustNotContain'>): string =>
+  `sha256:${createHash('sha256').update(JSON.stringify([c.prompt, c.mustContain, c.mustNotContain])).digest('hex')}`;
 
 /** Read one eval file's text into cases, or refusals. Pure over its inputs. */
 export function parseEvalFile(bundle: string, file: string, text: string): { cases: SkillEvalCase[]; refusals: SkillEvalRefusal[] } {

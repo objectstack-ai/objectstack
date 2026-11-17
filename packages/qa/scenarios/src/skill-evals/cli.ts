@@ -43,7 +43,7 @@ import { fileURLToPath } from 'node:url';
 
 import { armArgs, ARMS } from './arms.js';
 import { loadSkillEvalCatalog, selectBundles, type SkillEvalCatalog } from './cases.js';
-import { executeRound, planRound, preflight, regradeRecord, type RoundStop, runRecordFile, type SkillEvalRunRecord } from './run.js';
+import { executeRound, planRound, preflight, regradeRecords, type RoundStop, runRecordFile, type SkillEvalRunRecord } from './run.js';
 import { runSelfTest, selfTestReached } from './self-test.js';
 import { renderSummaryMarkdown, type RoundSummary, summariseRound } from './summary.js';
 
@@ -172,9 +172,30 @@ export interface RoundRecord {
   };
   scope: { cases: number; arms: string[]; repeats: number; plannedTurns: number; ranTurns: number; notRunTurns: number };
   stopped?: RoundStop;
-  /** Set by `--regrade`: when, by which runner, and how many verdicts now differ from the ones the turns were given. */
-  regraded?: { at: string; sha: string; changed: number };
+  /**
+   * Set by `--regrade`: when, by which runner, and how many verdicts now differ
+   * from the ones the turns were given; then what the regrade could not apply
+   * the rules to. `setApart` cases (changed since the round, or removed) are not
+   * regraded and are out of the summary; `unhashed` records predate case hashes
+   * and were regraded against the cases as they are now; `added` cases were never
+   * planned by the round and are left out. A record regraded before these
+   * fields existed carries none of them.
+   */
+  regraded?: { at: string; sha: string; changed: number; unhashed?: number; setApart?: { changed: string[]; removed: string[] }; added?: string[] };
   summary: RoundSummary;
+}
+
+/** The summary's header lines for a regraded round: what was regraded, and what was not and why. */
+export function regradedLines(g: NonNullable<RoundRecord['regraded']>): string[] {
+  const names = (keys: readonly string[]) => keys.map((k) => `\`${k}\``).join(', ');
+  const apart = g.setApart ?? { changed: [], removed: [] };
+  return [
+    `regraded ${g.at} by runner ${g.sha}: ${g.changed} verdict(s) differ from the ones the turns were given, no model asked`,
+    ...(apart.changed.length ? [`${apart.changed.length} case(s) changed since the round, set apart: not regraded and out of every pass rate below: ${names(apart.changed)}`] : []),
+    ...(apart.removed.length ? [`${apart.removed.length} case(s) no longer in the catalog, set apart: not regraded and out of every pass rate below: ${names(apart.removed)}`] : []),
+    ...(g.unhashed ? [`${g.unhashed} record(s) carry no case hash (written before the runner hashed cases): regraded against the cases as they are now, which nothing shows are the cases that ran`] : []),
+    ...(g.added?.length ? [`${g.added.length} case(s) added since the round, left out: the round never ran them`] : []),
+  ];
 }
 
 /** `round.json`, `summary.md` and `summary.github.md` into `outDir`, and the per-bundle table on stdout. */
@@ -190,7 +211,7 @@ export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
       `driver: ${d.driver} ${d.version}, login \`${d.authMethod}\`, no API key; served ${d.servedModels.join(', ') || 'none'}; effort ${d.requestedEffort ?? 'CLI default'}`,
       `turns: ${scope.ranTurns} of ${scope.plannedTurns} ran (${scope.cases} cases × 2 arms × ${scope.repeats}), ${d.concurrency} at once, --max-turns ${d.maxTurns}`,
       `wall time: ${wallMin} min; notional cost the CLI reported: $${round.summary.reportedCostUsd} (subscription login, nothing billed)`,
-      ...(round.regraded ? [`regraded ${round.regraded.at} by runner ${round.regraded.sha}: ${round.regraded.changed} verdict(s) differ from the ones the turns were given, no model asked`] : []),
+      ...(round.regraded ? regradedLines(round.regraded) : []),
     ],
     ...(round.stopped ? { stopped: round.stopped } : {}),
   };
@@ -205,33 +226,42 @@ export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
  * rules from the answer and arm facts on its record (no login read, no model
  * asked), and rewrite the round's records and summary. The catalog must be the
  * one the round ran on (`--skills-from` naming the same source).
+ *
+ * A case reworded since the round is set apart, never regraded: its records
+ * are left as they are and it is named apart from the pass rates, which are
+ * drawn over the unchanged cases only (`regradeRecords`). Refusing the whole
+ * regrade instead would leave every round before a reword unregradeable, and
+ * regrading it would mix the old answers with the new assertions.
  */
-function regradeRound(dir: string, catalog: SkillEvalCatalog, sourceLabel: string): number {
+export function regradeRound(dir: string, catalog: SkillEvalCatalog, sourceLabel: string): number {
   const roundFile = join(dir, 'round.json');
   if (!existsSync(roundFile)) throw new Error(`--regrade: ${dir} holds no round.json`);
   const round = JSON.parse(readFileSync(roundFile, 'utf8')) as RoundRecord;
   if (round.schema !== ROUND_RECORD_SCHEMA) throw new Error(`--regrade: ${roundFile} is not a \`${ROUND_RECORD_SCHEMA}\` record`);
   if (round.skills.source !== sourceLabel) throw new Error(`--regrade: the round ran on ${round.skills.source}, not ${sourceLabel}; pass the same --skills-from`);
-  const cases = selectBundles(catalog, round.skills.bundles);
-  const byKey = new Map(cases.map((c) => [c.key, c]));
+  // The bundles may have left the catalog too; their cases are then set apart as removed.
+  const present = round.skills.bundles.filter((b) => catalog.bundles.includes(b));
+  const catalogCases = present.length ? catalog.cases.filter((c) => present.includes(c.bundle)) : [];
   const view = { bundles: catalog.bundles, unlisted: catalog.unlistedBundles };
   const runsDir = join(dir, 'runs');
-  const records: SkillEvalRunRecord[] = [];
-  let changed = 0;
-  for (const f of readdirSync(runsDir).filter((n) => n.endsWith('.json')).sort()) {
-    const rec = JSON.parse(readFileSync(join(runsDir, f), 'utf8')) as SkillEvalRunRecord;
-    const c = byKey.get(rec.key);
-    if (!c) throw new Error(`--regrade: ${f} records case \`${rec.key}\`, which the catalog no longer holds`);
-    const next = regradeRecord(rec, c, view);
-    if (next.regradedFrom !== undefined) changed += 1;
-    records.push(next);
-    writeFileSync(join(runsDir, f), JSON.stringify(next, null, 2) + '\n');
+  const files = readdirSync(runsDir).filter((n) => n.endsWith('.json')).sort();
+  const recorded = files.map((f) => ({ f, rec: JSON.parse(readFileSync(join(runsDir, f), 'utf8')) as SkillEvalRunRecord }));
+  // The cases the round planned: its summary's, plus any an earlier regrade set apart (and so left out of it).
+  const before = round.regraded?.setApart;
+  const plannedKeys = [...new Set([...round.summary.cases.map((c) => c.key), ...(before?.changed ?? []), ...(before?.removed ?? [])])];
+  const out = regradeRecords(recorded.map((r) => r.rec), plannedKeys, catalogCases, view);
+  const byKey = new Map(out.cases.map((c) => [c.key, c]));
+  const regraded = new Map(out.records.map((r) => [`${r.key}|${r.arm}|${r.repeat}`, r]));
+  for (const { f, rec } of recorded) {
+    const next = regraded.get(`${rec.key}|${rec.arm}|${rec.repeat}`);
+    if (next) writeFileSync(join(runsDir, f), JSON.stringify(next, null, 2) + '\n');
   }
-  const ran = new Set(records.map((r) => runRecordFile({ case: byKey.get(r.key)!, arm: r.arm, repeat: r.repeat })));
-  const notRun = planRound(cases, round.scope.repeats).filter((j) => !ran.has(runRecordFile(j)));
+  const ran = new Set(out.records.filter((r) => byKey.has(r.key)).map((r) => runRecordFile({ case: byKey.get(r.key)!, arm: r.arm, repeat: r.repeat })));
+  const notRun = planRound(out.cases, round.scope.repeats).filter((j) => !ran.has(runRecordFile(j)));
   // A round recorded before `allBundles` existed: read it off the catalog the regrade loaded.
   const skills = { ...round.skills, allBundles: round.skills.allBundles ?? round.skills.bundles.length === catalog.bundles.length };
-  writeRoundOutputs(dir, { ...round, skills, regraded: { at: new Date().toISOString(), sha: runnerSha(repoRoot()), changed }, summary: summariseRound(cases, records, notRun) });
+  const regradedBy = { at: new Date().toISOString(), sha: runnerSha(repoRoot()), changed: out.changed, unhashed: out.unhashed, setApart: out.setApart, added: out.added };
+  writeRoundOutputs(dir, { ...round, skills, regraded: regradedBy, summary: summariseRound(out.cases, out.records, notRun) });
   return 0;
 }
 

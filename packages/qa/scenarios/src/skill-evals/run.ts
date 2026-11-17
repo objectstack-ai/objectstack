@@ -36,7 +36,7 @@ import { runTurnProcess, type TurnProcessRun } from '../runner/drivers/process.j
 import { parseStreamJson } from '../runner/transcript.js';
 import type { TurnProcess } from '../runner/transcript.js';
 import { ARMS, type Arm, armArgs, prepareArmWorkdir } from './arms.js';
-import type { SkillEvalCase } from './cases.js';
+import { hashCase, type SkillEvalCase } from './cases.js';
 import { type Grader, gradeAnswer } from './grade.js';
 
 export const RUN_RECORD_SCHEMA = 'skill-eval-run/1';
@@ -124,6 +124,12 @@ export interface SkillEvalRunRecord {
   arm: Arm;
   /** 1-based. */
   repeat: number;
+  /**
+   * {@link hashCase} of the case as the turn ran it. Absent on a record written
+   * before the runner hashed cases: `--regrade` cannot show such a record's
+   * case is unchanged, and says so.
+   */
+  caseHash?: string;
   verdict: RunVerdict;
   /** Why an `invalid` or `error` turn is out of the denominator. */
   reason?: string;
@@ -250,6 +256,7 @@ export function judgeTurn(
     id: c.id,
     arm,
     repeat,
+    caseHash: hashCase(c),
     bundlesLoaded,
     skillsInvoked: facts.skillsInvoked,
     toolCalls: turn.toolCalls.map((t) => t.rawName),
@@ -270,17 +277,90 @@ export function judgeTurn(
 }
 
 /**
+ * Whether the case a record ran is the case now: `same` (the hashes match),
+ * `changed` (its prompt or a token list was edited since), or `unhashed` (the
+ * record predates case hashes, so nothing shows either way). Pure.
+ */
+export type CaseDrift = 'same' | 'changed' | 'unhashed';
+export function caseDrift(rec: Pick<SkillEvalRunRecord, 'caseHash'>, c: SkillEvalCase): CaseDrift {
+  if (rec.caseHash === undefined) return 'unhashed';
+  return rec.caseHash === hashCase(c) ? 'same' : 'changed';
+}
+
+/**
  * Re-draw a recorded turn's verdict under this runner's rules (`--regrade`):
  * the answer and the arm facts are the record's, so no model is asked. A
  * record whose verdict now differs from the one its turn was given keeps that
  * first verdict as `regradedFrom`, across any number of regrades.
+ *
+ * A record whose case has changed since its turn is refused: grading an old
+ * answer against a reworded case is a new measurement nobody ran, not a rule
+ * applied again. {@link regradeRecords} sets such cases apart before this runs.
  */
 export function regradeRecord(rec: SkillEvalRunRecord, c: SkillEvalCase, catalog: CatalogView, grade: Grader = gradeAnswer): SkillEvalRunRecord {
+  if (caseDrift(rec, c) === 'changed') throw new Error(`--regrade: \`${rec.key}\` has changed since the turn ran (record ${rec.caseHash}, now ${hashCase(c)}); a changed case is set apart, never regraded`);
   const { reason: _reason, armEvidence: _ev, regradedFrom: _was, ...rest } = rec;
   const v = verdictOf(c, rec.arm, { process: rec.process, initSeen: rec.reason !== NO_INIT_LINE, bundlesLoaded: rec.bundlesLoaded, skillsInvoked: rec.skillsInvoked, ...(rec.resultSubtype ? { resultSubtype: rec.resultSubtype } : {}), ...(rec.answer !== undefined ? { answer: rec.answer } : {}) }, catalog, grade);
   const out = applyVerdict(rest, v);
   const asRun = rec.regradedFrom ?? rec.verdict;
   return v.verdict === asRun ? out : { ...out, regradedFrom: asRun };
+}
+
+export interface RegradeOutcome {
+  /** The regraded records: every record of a case still as it ran, or carrying no hash. */
+  records: SkillEvalRunRecord[];
+  /** The round's cases the summary is drawn over: planned, still in the catalog, and not changed. */
+  cases: SkillEvalCase[];
+  /** Records whose verdict now differs from the one their turn was given. */
+  changed: number;
+  /** Records carrying no case hash, regraded against the case as it is now. */
+  unhashed: number;
+  /**
+   * Cases set apart, not regraded and out of every pass rate: `changed` since
+   * the round (a record's hash differs), or `removed` from the catalog.
+   * Their record files are left as they are.
+   */
+  setApart: { changed: string[]; removed: string[] };
+  /** Cases in the catalog now that the round never planned: left out. */
+  added: string[];
+}
+
+/**
+ * Regrade a recorded round (`--regrade`). Pure over its inputs.
+ *
+ * `plannedKeys` are the cases the round planned (its summary's), so a case
+ * added since is left out instead of counted as not run. A case whose text
+ * changed since the round, or that left the catalog, is set apart: its old
+ * answers are never graded against new assertions, and the regraded summary
+ * names it instead of folding it into a rate. A record with no hash (written
+ * before the runner hashed cases) is regraded and counted as `unhashed`.
+ */
+export function regradeRecords(records: readonly SkillEvalRunRecord[], plannedKeys: readonly string[], catalogCases: readonly SkillEvalCase[], view: CatalogView, grade: Grader = gradeAnswer): RegradeOutcome {
+  const now = new Map(catalogCases.map((c) => [c.key, c]));
+  const planned = new Set(plannedKeys);
+  const removed = new Set(plannedKeys.filter((k) => !now.has(k)));
+  for (const r of records) if (!now.has(r.key)) removed.add(r.key);
+  const changedCases = new Set(records.filter((r) => now.has(r.key) && caseDrift(r, now.get(r.key)!) === 'changed').map((r) => r.key));
+  const out: SkillEvalRunRecord[] = [];
+  let changed = 0;
+  let unhashed = 0;
+  for (const r of records) {
+    if (removed.has(r.key) || changedCases.has(r.key)) continue;
+    const c = now.get(r.key)!;
+    if (caseDrift(r, c) === 'unhashed') unhashed += 1;
+    const next = regradeRecord(r, c, view, grade);
+    if (next.regradedFrom !== undefined) changed += 1;
+    out.push(next);
+  }
+  const keep = (k: string) => planned.has(k) && !removed.has(k) && !changedCases.has(k);
+  return {
+    records: out,
+    cases: catalogCases.filter((c) => keep(c.key)),
+    changed,
+    unhashed,
+    setApart: { changed: [...changedCases].sort(), removed: [...removed].sort() },
+    added: catalogCases.filter((c) => !planned.has(c.key)).map((c) => c.key),
+  };
 }
 
 // ── Preflight ────────────────────────────────────────────────────────────────
