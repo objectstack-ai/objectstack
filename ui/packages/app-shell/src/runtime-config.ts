@@ -340,6 +340,20 @@ export interface AppShellRuntimeConfig {
    * absolute `https:` URL, so nothing is re-validated here.
    */
   mapStyleUrl?: string;
+  /**
+   * The control plane's upgrade / billing entry (objectstack#34622): the
+   * absolute URL `RuntimeConfigPlugin` serves as the top-level `upgradeUrl`
+   * when the host declares one (objectstack#14514, maintainer ruling cloud#1850
+   * option A), absent otherwise. A deep address, so the Cloud console root's
+   * landing never redirects it back into this environment.
+   *
+   * Taken VERBATIM: the producer already refuses a value that is not an
+   * absolute http(s) URL, and nothing here composes, trims or defaults one.
+   * Re-derived from each payload in full, like `mapStyleUrl`: absent, empty
+   * and non-string all leave it absent, and a later payload without the key
+   * withdraws it. Read it through {@link getUpgradeUrl}.
+   */
+  upgradeUrl?: string;
 }
 
 const defaults: AppShellRuntimeConfig = {
@@ -467,6 +481,11 @@ export async function initRuntimeConfig(baseUrl: string = ''): Promise<void> {
       mapStyleUrl:
         typeof body.mapStyleUrl === 'string' && body.mapStyleUrl.trim()
           ? body.mapStyleUrl.trim()
+          : undefined,
+      // objectstack#34622 — the declared upgrade entry, verbatim, or none.
+      upgradeUrl:
+        typeof body.upgradeUrl === 'string' && body.upgradeUrl.trim()
+          ? body.upgradeUrl
           : undefined,
       defaultOrgId: body.defaultOrgId ?? current.defaultOrgId ?? null,
       defaultEnvironmentId: body.defaultEnvironmentId ?? current.defaultEnvironmentId ?? null,
@@ -618,6 +637,20 @@ export function isRuntimeConfigInitialised(): boolean {
  */
 export function getCloudBase(): string {
   return current.cloudUrl ?? '';
+}
+
+/**
+ * The control plane's declared upgrade / billing entry, or `undefined` when
+ * this runtime declares none (objectstack#34622,
+ * {@link AppShellRuntimeConfig.upgradeUrl}).
+ *
+ * The upgrade links (storage-full banner, AI quota call to action) open this
+ * when it is present and keep their `cloudConsoleUrl()` target, with its
+ * show/hide rule, when it is absent. ⛔ Never compose a substitute from
+ * {@link getCloudBase}: the path below the origin belongs to the control plane.
+ */
+export function getUpgradeUrl(): string | undefined {
+  return current.upgradeUrl;
 }
 
 /**
