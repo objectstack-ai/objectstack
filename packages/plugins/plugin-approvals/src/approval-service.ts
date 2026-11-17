@@ -25,7 +25,7 @@ import {
   type ObjectSchemaReadDelegate,
   type RecordOrganizationResolver,
 } from '@objectstack/metadata-core';
-import { isObjectAbsentError, keysetWalk, strandedDecisionFailure } from '@objectstack/types';
+import { isObjectAbsentError, keysetWalk, strandedDecisionFailure, type StrandedDecisionDetails } from '@objectstack/types';
 // [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
 // both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
 // `BUILTIN_IDENTITY_PLATFORM_ADMIN` went with the platform arm's name read and
@@ -2063,6 +2063,12 @@ export function slotLabelSourceOf(service: ApprovalService): SlotLabelSource {
   }
   return source;
 }
+
+/**
+ * [#34579] The refusal half of a failed resume, as {@link ApprovalService}
+ * carries it from the engine's answer to the stranded-decision envelope.
+ */
+type ResumeRefusal = Pick<StrandedDecisionDetails, 'innerRefusal' | 'userMessage'>;
 
 /**
  * [#22559] The visibility source the read gate consumes for `service`: the
@@ -5925,16 +5931,29 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   ): Promise<{ runId: string; repairable: boolean; error: string } | undefined> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
     const reported = result as
-      { success?: boolean; code?: string; error?: string; status?: string } | undefined;
+      | ({ success?: boolean; code?: string; error?: string; status?: string } & ResumeRefusal)
+      | undefined;
     // Only an explicit `success: false` is a failure. An engine (or a test
     // double) that returns nothing is reporting nothing, and has always meant
     // "it ran".
     if (reported && typeof reported === 'object' && reported.success === false) {
       const err = new Error(
         `resume of run '${runId}' failed${reported.code ? ` [${reported.code}]` : ''}: ${reported.error ?? 'unknown error'}`,
-      ) as Error & { resumeCode?: string; resumeStatus?: string };
+      ) as Error & { resumeCode?: string; resumeStatus?: string; resumeRefusal?: ResumeRefusal };
       err.resumeCode = reported.code;
       err.resumeStatus = reported.status;
+      // [#34579] The refusal the continuation met, as the engine reported it
+      // (`AutomationResult.innerRefusal` / `.userMessage`, ruling B′ on
+      // #24914) — kept beside the code and status instead of being dropped
+      // here, one line before the envelope is built, which is where #13807
+      // found `status` too. Copied as reported; the recogniser in
+      // `@objectstack/types` validates it before anything reaches the wire.
+      if (reported.innerRefusal !== undefined || reported.userMessage !== undefined) {
+        err.resumeRefusal = {
+          ...(reported.innerRefusal !== undefined ? { innerRefusal: reported.innerRefusal } : {}),
+          ...(reported.userMessage !== undefined ? { userMessage: reported.userMessage } : {}),
+        };
+      }
       throw err;
     }
     return this.automation?.takeSubflowParentStrand?.(runId);
@@ -5960,6 +5979,18 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    */
   private static resumeStatusOf(err: unknown): string | undefined {
     return (err as { resumeStatus?: string } | undefined)?.resumeStatus;
+  }
+
+  /**
+   * The refusal behind a {@link serviceResume} rejection — the engine's
+   * `innerRefusal` / `userMessage` — or `{}` when the engine reported none
+   * (#34579). A third sibling of {@link resumeCodeOf} and
+   * {@link resumeStatusOf}: `code` says why a resume was refused, `status`
+   * how the run ended, and this what the continuation's own data call was
+   * refused with. Only the stranded-decision envelope reads it.
+   */
+  private static resumeRefusalOf(err: unknown): ResumeRefusal {
+    return (err as { resumeRefusal?: ResumeRefusal } | undefined)?.resumeRefusal ?? {};
   }
 
   /**
@@ -6257,10 +6288,14 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           ...(signal.resumedBy && signal.impersonatedBy ? { impersonatedBy: signal.impersonatedBy } : {}),
         });
       }
+      // [#34579] The refusal the continuation met rides the same envelope —
+      // the status code still does not move (#13807 B), but an approver whose
+      // decision stranded on a record hook's refusal is told WHICH refusal.
+      // The recogniser drops anything not in the declared shape.
       throw strandedDecisionFailure(
         `RESUME_FAILED: ${what} was recorded on request ${requestId}, but its flow run '${runId}' ` +
         `could not be resumed and is now stranded: ${reason}`,
-        { finalized: true, decision, runId, repairable },
+        { finalized: true, decision, runId, repairable, ...ApprovalService.resumeRefusalOf(err) },
       );
     }
   }

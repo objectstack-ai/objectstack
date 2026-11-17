@@ -13,6 +13,7 @@ Data-model rules (in addition to naming/label/i18n):
 | `relationship/master-detail-required` | warning; error under `controlled_by_parent` | a `master_detail` that isn't `required` (under `controlled_by_parent`, the only one may be `required: false`: the optional master) — or, under `controlled_by_parent`, is `readonly`/`system` |
 | `relationship/delete-behavior` | suggestion | `master_detail` without an explicit `deleteBehavior` |
 | `relationship/line-items-inline-edit` | suggestion | a `*_line`/`*_item` master_detail child without `inlineEdit` |
+| `relationship/inline-edit-needs-bulk` | warning | `inlineEdit` while the parent's or child's `enable.apiMethods` omits `'bulk'` |
 | `relationship/line-item-should-be-master-detail` | suggestion | a line-item-shaped child using `lookup` instead of `master_detail` |
 | `relationship/association-inline-edit` | warning | an association (comment/audit/activity) marked `inlineEdit` (clutters the parent form — use a detail-page related list) |
 | `rollup/missing-summary` | suggestion | a parent of numeric master_detail children with no roll-up `summary` |
@@ -46,7 +47,3 @@ These same rules are the **rubric for AI-generated metadata** — a generation i
   corpus (invoice+lines, project+tasks, blog+comments, expense+lines,
   account+contacts) offline; each case must clear the pass bar (`--eval-min`,
   default 75). Deterministic, no API key.
-
-When generating object metadata, target a lint-clean model: master_detail (with
-`required` + `deleteBehavior` + `inlineEdit` for line items), roll-up summaries
-on parents, `select` options, and a name/title field per object.

@@ -3050,6 +3050,7 @@ const en = {
       passwordsNote: 'Temporary passwords — shown once, never stored. Save them now; each user must change theirs at first sign-in.',
       passwordsMore: 'More entries omitted — use the download.',
       positionsHint: 'Positions: map a column of position machine names, several separated by ";". Each is assigned as in Setup; a name that does not exist, or that you may not assign, is reported on its row, and the user is still created.',
+      managerHint: 'Manager: map a column holding each user\'s manager, by email address (or phone number where phone sign-in is on). Managers are linked once every row is in, so a manager further down the file counts; a manager that is not found, or cannot be linked, is reported on its row, and the user is still created.',
       passwordsDownload: 'Download CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
@@ -5298,6 +5299,8 @@ const en = {
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
+    openNextAfterDecision: 'Open next after deciding',
+    queueDone: 'No more pending requests in this list.',
     snapshotAsSubmitted: 'As submitted',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
@@ -5305,6 +5308,13 @@ const en = {
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
     submittedByYou: 'You submitted this',
+    // The approver band's status line and menu on a record under approval
+    // (objectstack#34361): the task, the step number on the served route,
+    // the submitter by name, and the menu holding every non-decision lever.
+    awaitingYourDecision: 'Awaiting your approval',
+    stepNumber: 'Step {{n}}',
+    submittedByName: 'Submitted by {{name}}',
+    moreDecisionActions: 'More approval actions',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',

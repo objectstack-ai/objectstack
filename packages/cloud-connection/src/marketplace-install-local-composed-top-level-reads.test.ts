@@ -22,12 +22,28 @@
  * the artifact's package order. The controls pin that a flat bundle reads its
  * own top-level list unchanged, and that a composed artifact which still
  * carries its flattened union reads it once, never once more per package.
+ *
+ * [#34431] The same holds for the datasources and objects the install, the
+ * upgrade and the rehydrate hand `connectPackageDatasources`, for the
+ * datasource names step 2a judges against held names, and for the connectors
+ * whose credentials the install answer names: a composed bundle and the flat
+ * control carrying the same declarations hand the runtime the same lists and
+ * answer the same `datasources` and `credentialRefs`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+
+/**
+ * [#34431] What the runtime's datasource path is handed, one entry per call:
+ * the datasource names, the object names, each datasource's owner and whether
+ * the call was an installed one.
+ */
+const connectCalls = vi.hoisted(() => [] as Array<{ datasources: string[]; objects: string[]; owners: string[]; installed: boolean }>);
+/** [#34431] The datasource names another holder owns, as the runtime's judge answers them. */
+const heldDatasources = vi.hoisted(() => new Map<string, string>());
 
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
@@ -37,6 +53,17 @@ vi.mock('@objectstack/runtime', () => ({
     resolveSeedLocaleForLoad: async () => undefined,
     appDefaultSeedLocale: () => undefined,
     describeSeedLocale: () => 'none',
+    connectPackageDatasources: async (_ctx: unknown, options: any) => {
+        connectCalls.push({
+            datasources: options.datasources.map((d: any) => d.name),
+            objects: options.objects.map((o: any) => o.name),
+            owners: options.owned.map((o: any) => o.owner.packageId),
+            installed: options.installed === true,
+        });
+        return options.datasources.map((d: any) => ({ name: d.name, status: 'connected' }));
+    },
+    datasourceNameHolder: async (_ctx: unknown, _appId: string, name: string) =>
+        heldDatasources.has(name) ? { status: 'held', holder: heldDatasources.get(name) } : { status: 'free' },
 }));
 
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
@@ -132,6 +159,8 @@ async function boot(dir: string) {
         auth: installerAuthService(),
         objectql: withInstallerGrants({ syncSchemas: async () => undefined }),
         metadata: {},
+        // [#34431] Every credential reference is unset: the install answer names each one.
+        automation: { listConnectorCredentialRefs: async () => [] },
         i18n: {
             loadTranslations: (locale: string, data: any) => {
                 const labels = Object.values(data?.objects ?? {}).map((o: any) => o.label).join('|');
@@ -169,6 +198,8 @@ beforeEach(() => {
     // The request carries no organization, and the ceremony runs walled: the
     // installer is the deployment's declared platform owner.
     restoreOwner = declareInstallerPlatformOwner('admin');
+    connectCalls.length = 0;
+    heldDatasources.clear();
 });
 afterEach(() => {
     restoreOwner();
@@ -260,5 +291,160 @@ describe("ADR-0120 D5e — a composed bundle installed into an 'isolated' enviro
         expect(res.payload.success).toBe(false);
         expect(res.payload.error.code).toBe('INVALID_ARTIFACT_PACKAGES');
         expect(new LocalManifestSource(dir).read(SUITE).entry).toBeNull();
+    });
+});
+
+// ── [#34431] Datasources and connectors ────────────────────────────────────
+
+const ERP_DB = { name: 'erp_db', driver: 'memory', config: {} };
+const WMS_DB = { name: 'wms_db', driver: 'memory', config: {} };
+const ERP_API = { name: 'erp_api', label: 'ERP API', type: 'api', provider: 'rest', providerConfig: { baseUrl: 'https://erp.example.test' }, auth: { type: 'bearer', credentialRef: 'ERP_TOKEN' } };
+const WMS_API = { name: 'wms_api', label: 'WMS API', type: 'api', provider: 'rest', providerConfig: { baseUrl: 'https://wms.example.test' }, auth: { type: 'bearer', credentialRef: 'WMS_TOKEN' } };
+
+const sourceBody = (
+    id: string,
+    version: string,
+    object: Record<string, unknown>,
+    datasources: unknown[],
+    connectors: unknown[],
+    dependencies?: Record<string, string>,
+) => ({
+    manifest: {
+        id,
+        name: id,
+        version,
+        type: 'module',
+        ...(dependencies ? { dependencies } : {}),
+        objects: [object],
+        datasources,
+        connectors,
+    },
+});
+
+/**
+ * A composed artifact whose package bodies each declare a datasource and a
+ * connector, with no top-level `datasources`, `connectors` or `objects`. The
+ * order module is listed FIRST and depends on the core one, so package order
+ * (core, then orders) is not array order.
+ */
+const composedSources = (version = '2.0.0', extra: Record<string, unknown> = {}) => ({
+    id: SUITE,
+    name: 'Suite',
+    version,
+    type: 'app',
+    packages: [
+        sourceBody(`${SUITE}.o2c`, version, ORDER, [WMS_DB], [WMS_API], { [`${SUITE}.core`]: '*' }),
+        sourceBody(`${SUITE}.core`, version, ACCOUNT, [ERP_DB], [ERP_API]),
+    ],
+    ...extra,
+});
+
+/** The flat control: the same declarations at the top level, in package order. */
+const flatSources = (version = '2.0.0') => ({
+    id: SUITE,
+    name: 'Suite',
+    version,
+    type: 'app',
+    objects: [ACCOUNT, ORDER],
+    datasources: [ERP_DB, WMS_DB],
+    connectors: [ERP_API, WMS_API],
+});
+
+const CONNECTED = [{ name: 'erp_db', status: 'connected' }, { name: 'wms_db', status: 'connected' }];
+const HANDED = { datasources: ['erp_db', 'wms_db'], objects: ['crm_account', 'crm_order'], owners: [SUITE, SUITE], installed: true };
+
+describe('[#34431] a composed bundle: install connects every package body\'s datasources, in package order', () => {
+    it('install hands connectPackageDatasources every body\'s datasources and objects, core first, and the answer lists them', async () => {
+        const rt = await boot(dir);
+        const res = await rt.install({ manifest: composedSources() });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(connectCalls).toEqual([HANDED]);
+        expect(res.payload.data.datasources).toEqual(CONNECTED);
+    });
+
+    it('a composed bundle and its flat control answer the same datasources and hand connectPackageDatasources the same lists', async () => {
+        const composedRt = await boot(dir);
+        const composedRes = await composedRt.install({ manifest: composedSources() });
+        const composedCalls = connectCalls.splice(0);
+
+        const flatDir = mkdtempSync(join(tmpdir(), 'mil-composed-reads-flat-'));
+        try {
+            const flatRt = await boot(flatDir);
+            const flatRes = await flatRt.install({ manifest: flatSources() });
+            expect(flatRes.status, JSON.stringify(flatRes.payload)).toBe(200);
+            expect(composedRes.status, JSON.stringify(composedRes.payload)).toBe(200);
+            expect(composedCalls).toEqual(connectCalls);
+            expect(composedRes.payload.data.datasources).toEqual(flatRes.payload.data.datasources);
+            expect(composedRes.payload.data.credentialRefs).toEqual(flatRes.payload.data.credentialRefs);
+        } finally {
+            rmSync(flatDir, { recursive: true, force: true });
+        }
+    });
+
+    it('an upgrade connects the new version\'s datasources across every body', async () => {
+        const rt = await boot(dir);
+        expect((await rt.install({ manifest: composedSources('2.0.0') })).status).toBe(200);
+        connectCalls.length = 0;
+
+        const res = await rt.install({ manifest: composedSources('2.1.0') });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(connectCalls).toEqual([HANDED]);
+        expect(res.payload.data.datasources).toEqual(CONNECTED);
+    });
+
+    it('a restart\'s rehydrate connects them again from the ledger', async () => {
+        const first = await boot(dir);
+        expect((await first.install({ manifest: composedSources() })).status).toBe(200);
+        connectCalls.length = 0;
+
+        await boot(dir);
+        expect(connectCalls).toEqual([HANDED]);
+    });
+
+    it('the answer names the connector credentials every package body declares', async () => {
+        const rt = await boot(dir);
+        const res = await rt.install({ manifest: composedSources() });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.credentialRefs).toEqual([
+            { ref: 'ERP_TOKEN', connectors: ['erp_api'], status: 'missing', source: null },
+            { ref: 'WMS_TOKEN', connectors: ['wms_api'], status: 'missing', source: null },
+        ]);
+    });
+
+    it('control: a composed artifact that still carries its flattened top-level datasources connects that union once', async () => {
+        const rt = await boot(dir);
+        const res = await rt.install({
+            manifest: composedSources('2.0.0', { objects: [ACCOUNT, ORDER], datasources: [ERP_DB, WMS_DB] }),
+        });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(connectCalls).toEqual([HANDED]);
+        expect(res.payload.data.datasources).toEqual(CONNECTED);
+    });
+});
+
+describe('[#34431] step 2a judges a composed body\'s datasource names as a flat bundle\'s', () => {
+    it('a name another holder owns, declared by a package body, refuses the install 409 before any write', async () => {
+        heldDatasources.set('wms_db', "the datasource 'wms_db' created in Setup");
+        const rt = await boot(dir);
+
+        const res = await rt.install({ manifest: composedSources() });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(409);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
+        expect(res.payload.error.details).toEqual({ datasource: 'wms_db' });
+        expect(new LocalManifestSource(dir).read(SUITE).entry).toBeNull();
+        expect(connectCalls).toEqual([]);
+    });
+
+    it('control: the flat bundle declaring the same name is refused the same way', async () => {
+        heldDatasources.set('wms_db', "the datasource 'wms_db' created in Setup");
+        const rt = await boot(dir);
+
+        const res = await rt.install({ manifest: flatSources() });
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(409);
+        expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
+        expect(res.payload.error.details).toEqual({ datasource: 'wms_db' });
     });
 });

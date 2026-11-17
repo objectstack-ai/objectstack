@@ -247,7 +247,8 @@ Declare inline editing **on the relationship**, in the data model — not in a f
 view. Set `inlineEdit: true` on the child's `master_detail` (or `lookup`) field
 that points back to the parent. The parent's **standard** create/edit form then
 renders an editable grid for these children and saves parent + children in **one
-atomic transaction**.
+atomic transaction**. A parent or child declaring `enable.apiMethods` must list
+`'bulk'`, or that save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`.
 
 ```typescript
 // On the CHILD object's FK field:
@@ -275,8 +276,7 @@ the parent. **Leave it off for associations** (comments, attachments, activity,
 audit): those are also `master_detail` (cascade delete) but should NOT clutter
 the parent's entry form — surface them as related lists on the detail page.
 
-A form view may still set `subforms` to override the derived columns/order. See the
-objectstack-ui skill (Master-Detail Forms) for the rendering side.
+The rendering side, `subforms` overrides included: objectstack-ui → Master-Detail Forms.
 
 #### Inline-edit form factor (`grid` vs `form`)
 
@@ -297,7 +297,7 @@ inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL fo
   editable fields, else `grid`. Set the string to override.
 
 **Modeling a `'grid'` line item for the full editor.** The grid lights up extra
-behaviors purely from how you model the child + parent (no UI config):
+behaviors purely from how you model the child + parent:
 
 ```typescript
 // Parent
@@ -355,7 +355,7 @@ flags exist to *refine* that:
 project: {
   type: 'master_detail',
   reference: 'project',
-  inlineEdit: true,                 // write side: edit inline in the Project form
+  inlineEdit: true,
   relatedList: 'primary',           // read side: a body table
   relatedListTitle: 'Tasks',
   relatedListColumns: ['title', 'status', 'priority', 'due_date'],
