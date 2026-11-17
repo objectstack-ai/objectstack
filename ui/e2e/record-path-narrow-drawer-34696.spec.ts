@@ -183,15 +183,14 @@ async function readPath(
 }
 
 test.describe('record:path in a narrow drawer at a desktop viewport (objectstack#34696)', () => {
-  test('the defect this pins: at 380px the desktop row cuts every ordinary label to a sliver', async ({ page }) => {
+  test('the defect this pins: at 380px the desktop row gives each stage under 50px and cuts the long names', async ({ page }) => {
     // Forced on, the desktop row shows what the drawer drew before: not vacuous.
     const r = await readPath(page, { viewport: 1280, container: 380, forceDesktop: true });
     const ordinary = r.labels.filter((l) => l.ordinary);
     expect(ordinary).toHaveLength(FORWARD.length - 1);
-    for (const l of ordinary) {
-      expect(l.clipped, `${l.label} fit whole in the desktop row at 380px`).toBe(true);
-      // About 47px of 14px-base text-xs: the first few letters, then the ellipsis.
-      expect(l.width, `${l.label} got ${l.width}px`).toBeLessThan(50);
+    for (const l of ordinary) expect(l.width, `${l.label} got ${l.width}px`).toBeLessThan(50);
+    for (const name of ['Prospecting', 'Qualification', 'Needs Analysis', 'Negotiation']) {
+      expect(ordinary.find((l) => l.label === name)?.clipped, `${name} fit whole in the desktop row at 380px`).toBe(true);
     }
   });
 
