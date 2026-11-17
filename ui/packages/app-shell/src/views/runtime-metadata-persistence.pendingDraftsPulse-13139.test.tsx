@@ -11,7 +11,7 @@
  *
  * Pinned through the real `DraftPreviewBar`, on the object list route the
  * card's steps start from, against a fake `_drafts` ledger the fake metadata
- * client writes to. Each `_drafts` answer is the ledger as it stood when the
+ * client writes to (read as the route app's drafts, objectstack#34610). Each `_drafts` answer is the ledger as it stood when the
  * request was SENT, so a read sent before a write cannot count it.
  *
  * The bar's state is read from its controls and its count, not its copy: the
@@ -19,6 +19,9 @@
  * exactly when the count is a known zero.
  */
 import '@testing-library/jest-dom/vitest';
+// The draft bar reaches `import('@objectstack/lint')` (its publish
+// preflight); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -38,6 +41,12 @@ vi.mock('../preview/usePublishAllDrafts', () => ({
   usePublishAllDrafts: () => ({ publishAll: vi.fn(async () => ({ ok: true })), publishing: false }),
 }));
 vi.mock('../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
+// objectstack#34610 — the bar counts the current app's drafts (its package
+// and its customization pair), so the route's app resolves to its package.
+vi.mock('../providers/MetadataProvider', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useMetadata: () => ({ apps: [{ name: 'showcase_app', _packageId: PACKAGE }] }),
+}));
 
 import { DraftPreviewBar } from '../preview/DraftPreviewBar';
 import { subscribeMetadataRefresh } from '../assistant/assistantBus';
@@ -50,6 +59,7 @@ import {
 
 const OBJECT = 'showcase_account';
 const VIEW = 'showcase_account.all_accounts';
+const PACKAGE = 'com.example.showcase';
 const LIST_ROUTE = `/apps/showcase_app/${OBJECT}/view/${VIEW}?preview=draft`;
 
 /** A `_drafts` ledger the fake metadata client writes, served through `fetch`. */
@@ -57,7 +67,7 @@ function fakeServer(initial: Array<{ type: string; name: string }> = []) {
   const ledger = new Map(initial.map((d) => [`${d.type}/${d.name}`, d]));
   const draftsReads = vi.fn(async (input: RequestInfo | URL) => {
     expect(String(input)).toBe('/api/v1/meta/_drafts');
-    const answer = [...ledger.values()].map((d) => ({ ...d, packageId: null }));
+    const answer = [...ledger.values()].map((d) => ({ ...d, packageId: PACKAGE }));
     return { ok: true, status: 200, json: async () => answer };
   });
   vi.stubGlobal('fetch', draftsReads);

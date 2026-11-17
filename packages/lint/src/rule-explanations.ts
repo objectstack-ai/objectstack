@@ -1045,6 +1045,14 @@ const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
       'holders, declare `readable: true` on it in the sets they hold. A set that holds Modify All on the ' +
       'parent must drop that bit first, because Modify All makes the entry inert. If the set may see ' +
       'the child data, grant the read on the child instead.',
+    'If the pair is meant, say so on the set: `fields: { \'<object>.<summary>\': { readable: true, ' +
+      'rollupSourceUnreadableReason: \'<why holders of this set read the total>\' } }`. That one finding, ' +
+      'for this set and this column, is then reported as a note that quotes the reason, so `--strict` passes ' +
+      'and a reviewer still sees the pair and why it stands. Another set reading the same column, another ' +
+      'column of the same set and the row-scope note are judged as before. The runtime does not read the key, ' +
+      'but the entry that carries it is an ordinary declaring entry and votes `readable: true` in the field ' +
+      'merge: on a set that had no entry for the column, adding one restores the column for holders whose ' +
+      'other sets mask it. A blank reason, or a reason beside `readable: false`, is refused.',
   ],
 };
 

@@ -3026,7 +3026,10 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
  *
  * For every other caller, a door that enforces the author's AI opt-in and
  * still reads the member: today a host's door under the `ai` posture
- * (`dispatchAction`, `action-dispatch.ts`). [#33690] The MCP `run_action`
+ * (`dispatchAction`, `action-dispatch.ts`), and the host's resume door
+ * (`dispatchActionResume`, `action-dispatch.ts`, #34386), the approval leg of
+ * a handed-off `resume_run`, which reads the person's `confirm` for the
+ * candidate action that admits the run as `dispatchAction` reads it. [#33690] The MCP `run_action`
  * ({@link invokeBusinessAction}) and `resume_run` doors no longer read it:
  * under the amended contract they hand a declared-gated call to the person
  * ({@link aiDoorConfirmation}, {@link handOffActionConfirmation}) and the

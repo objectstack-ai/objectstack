@@ -1,4 +1,4 @@
-# 协调者(Coordinator)
+# 协调者(Coordinator;维护者本机的专题负责人 epic lead 另是一席,⛔ 不用本文)
 
 它不是 `domain:*` 席:不坐座位贴、不认领卡;席位线程照 SKILL.md 与 `execution-duties.md` 跑循环。
 

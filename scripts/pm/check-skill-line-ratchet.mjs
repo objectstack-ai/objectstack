@@ -1531,7 +1531,16 @@ export const CEILINGS = new Map([
   // review), which no rule text carried. The per-PR carve-out of the
   // ADR/skills-text line changed in place. Measured delta +1; landed count,
   // headroom 0.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 104],
+  // Raised 104 → 108 by the p3 first-touch standard (an ORDINARY ruled raise;
+  // ruling of record: comment 6943048358 on card #34153, the maintainer's
+  // choice 「四张全部 A」 on decision card cmsg_01FdL1XeUyvVNxLreh3F4Qi9WwExMWYmK6rBq81gx1Ameh,
+  // 2026-11-17: 「p3 标准写进规则并放宽 4 行」, ceiling at most 108 by the measured
+  // growth). Five lines: scope and precedence, the close rule (close item hit
+  // and no keep item hit ⇒ close; it outranks every not-closed rule here and in
+  // the filing gate; anything else stays), the close list and the keep list.
+  // One line paid: the cloud fallback now lives only in lanes/cloud.md, which
+  // triage-duties.md's cloud line points to. Measured delta +4; landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 108],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1728,7 +1737,9 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 43],
+  // Lowered 43 → 42 by the fleet-v2 text slice: the first-touch line restated
+  // triage-duties.md for a retired lane seat. Landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 42],
   // domain:ui lane charter — the objectui execution seat's job description. It is
   // the one lane the multi-repo charter ADDS beyond the domain table, and it was
   // the only live lane in that directory carrying no versioned charter. A lane
@@ -1737,7 +1748,9 @@ export const CEILINGS = new Map([
   // above); it is a NEW file, so this is an added row and no other row moves.
   // Lowered 38 → 23 by #25712 item 4: `ui/` is a workspace of this repo, so the
   // sister-repo seat steps (`pnpm objectui:refresh`, pin moves) were deleted.
-  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 23],
+  // Lowered 23 → 20 by the fleet-v2 text slice: three seat-form lines of the retired
+  // lane seat, covered by lanes/objectstack.md and SKILL.md. Landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/ui.md', 20],
   // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
