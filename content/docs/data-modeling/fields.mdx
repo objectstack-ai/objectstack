@@ -212,6 +212,14 @@ primary_contact: Field.lookup('contact', {
   ],
 }),
 
+// Filtered by the record being edited: books valid on the quote's date, or with no start date
+price_book: Field.lookup('price_book', {
+  label: 'Price Book',
+  lookupFilters: [
+    { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' }, orEmpty: true },
+  ],
+}),
+
 // A pick fills sibling fields: the picked product's list_price lands in unit_price
 product: Field.lookup('product', {
   label: 'Product',
@@ -238,12 +246,32 @@ order: Field.masterDetail('order', {
 | Property | Type | Description |
 | :--- | :--- | :--- |
 | `reference` (1st arg) | `string` | Target object name |
-| `lookupFilters` | `{ field, operator, value }[]` | Base filters restricting which records are selectable (structured, picker-honored) |
+| `lookupFilters` | `{ field, operator, value, orEmpty? }[]` | Base filters restricting which records are selectable (structured, picker-honored). `value` is a literal or a `{ $record }` reference — see below |
+| `dependsOn` | `(string \| { field, param? })[]` | Sibling fields that scope the candidates by equality; the picker is gated until they are set |
 | `deleteBehavior` | `enum` | `'set_null'`, `'cascade'`, `'restrict'` |
 | `inlineEdit` | `boolean \| 'grid' \| 'form'` | Render child records inline on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`) |
 | `inlineColumns` | `array` | Optional explicit columns for the inline grid |
 | `inlineAmountField` | `string` | Optional numeric child field for the inline running total |
 | `lookupAutofill` | `{ target, source, overwrite? }[]` | Fields of this object a pick fills from the picked record (single-value `lookup` / `master_detail` only) — see below |
+
+#### Lookup filters that read the record being edited
+
+A `lookupFilters` `value` can be `{ $record: 'field' }`, or one lookup hop away,
+`{ $record: 'lookup_field.field' }`: a value of the record being edited, which the picker
+of a record form sends in place of the reference.
+
+- **The reference** is the whole `value` and pairs only with `eq`, `ne`, `gt`, `lt`, `gte`
+  or `lte`. Outside a record form (inline edit, an action's parameter dialog, a bulk action)
+  the entry is left out.
+- **An empty value** drops the entry: while the referenced value is empty or cannot be read,
+  the other entries alone filter.
+- **`orEmpty: true`** also matches a candidate whose column is null; it pairs with the same
+  six operators.
+- **Not `dependsOn`.** The picker re-queries when a referenced field changes. Listing that
+  field in `dependsOn` as well would add an equality filter on it to the candidate query.
+
+Details and a fuller example:
+[Filtered Lookups](/docs/data-modeling/relationships#filter-by-the-record-being-edited).
 
 #### Lookup-pick autofill: `lookupAutofill`
 

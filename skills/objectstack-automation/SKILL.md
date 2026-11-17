@@ -27,7 +27,7 @@ Also vendor-integration callbacks and **assignment rules**.
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
 > string, or the `P\`...\`` / `cel\`...\`` tag (author-time validation); pick one
-> per file. Contract, stdlib, legacy → CEL table: **objectstack-formula**.
+> per file.
 
 ---
 
@@ -251,6 +251,12 @@ Most are caught by `objectstack build`:
    is refused with its `{{ }}` spelling. A date or the run user has no hole:
    assign it first (`assignments: { v: { dialect: 'cel', source:
    'current_user.id' } }`), then write `{{ v }}`.
+   `create_record` / `update_record` `fields` also take a text slot, marked
+   `{ dialect: 'template', source }`, for a sentence people read. It is written
+   in the organization's language (Localization setting if set, else
+   `i18n.defaultLocale`; key: **objectstack-i18n**), never the run starter's;
+   untranslated, the authored text; an unreadable setting fails the node. A
+   bare string stays a literal, never translated.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
    ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }`
@@ -294,7 +300,6 @@ Most are caught by `objectstack build`:
 
    ```ts
    defineStack({ functions: {
-     'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other' }),  // pure — the default
      'billing.sync': { handler: syncBilling, effect: 'writes' },
    } });
    ```
@@ -405,9 +410,6 @@ the **start node `config`**:
 | `record-before-write` / `record-after-write` — one flow, both events | insert + update hooks |
 
 ### Trigger Configuration — on the `start` node
-
-A flow around it also owns `label`, `type`, `nodes` and the `edges`
-`FlowSchema` requires:
 
 ```typescript
 {

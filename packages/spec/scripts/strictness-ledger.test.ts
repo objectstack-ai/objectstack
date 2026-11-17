@@ -105,7 +105,9 @@ describe('site counting reads the AST, not the source text', () => {
     // not counted.)
     // (9 → 12 at #31840, which ADDED the `preflight`, `preflight.read` and
     // `preflight.seed` strictObject sites.)
-    expect(countSites(at('ui/action.zod.ts'))).toBe(12);
+    // (12 → 13 at #34391, which ADDED the `table` column row's strictObject
+    // site, `ActionAnswerTableColumnSchema`.)
+    expect(countSites(at('ui/action.zod.ts'))).toBe(13);
   });
 
   it('counts a call the source wraps across lines (`z\\n  .object({`)', () => {

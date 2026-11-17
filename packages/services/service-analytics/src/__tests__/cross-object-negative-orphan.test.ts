@@ -4,9 +4,10 @@
  * A cross-object leaf (`'order.status'`, and through two hops) never selects a
  * detail row that has no parent — on the native SQL strategy as on the engine path and
  * the `/data` nested-relation filter — outside `$not`, for every operator pinned
- * below. Two native answers still select one and are not pinned here: a
- * positive comparison under `$not` (the engine refuses the shape) and
- * `$nin: []`, which folds to the constant TRUE.
+ * below, `$nin: []` included (#34384). One native answer still selects one and
+ * is not pinned here: under `$not`, a condition a missing value does not
+ * satisfy (`{ $not: { 'order.status': 'open' } }`, `$null: false`; the engine
+ * refuses the shape).
  *
  * ## What was wrong
  *
@@ -178,6 +179,8 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
     ['$empty true', { 'order.status': { $empty: true } }, { order: { status: { $empty: true } } }, ['l6']],
     ['$exists false', { 'order.status': { $exists: false } }, { order: { status: { $exists: false } } }, ['l6']],
     ["$ne 'cancelled'", { 'order.status': { $ne: 'cancelled' } }, { order: { status: { $ne: 'cancelled' } } }, ['l1', 'l2', 'l6']],
+    // An empty `$nin` excludes no value, so it selects every line whose order exists, and no orphan.
+    ['$nin []', { 'order.status': { $nin: [] } }, { order: { status: { $nin: [] } } }, ['l1', 'l2', 'l3', 'l4', 'l5', 'l6']],
     // A positive operator never selected an orphan: the comparison is UNKNOWN on a NULL. Unchanged.
     ["$eq 'cancelled'", { 'order.status': { $eq: 'cancelled' } }, { order: { status: { $eq: 'cancelled' } } }, ['l3', 'l4', 'l5']],
   ];
@@ -198,6 +201,7 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
   const TWO_HOP: Array<[string, Record<string, unknown>, Record<string, unknown>, string[]]> = [
     ["$ne 'gold'", { 'order.customer.tier': { $ne: 'gold' } }, { order: { customer: { tier: { $ne: 'gold' } } } }, ['l3', 'l4', 'l5']],
     ['$null true', { 'order.customer.tier': { $null: true } }, { order: { customer: { tier: { $null: true } } } }, []],
+    ['$nin []', { 'order.customer.tier': { $nin: [] } }, { order: { customer: { tier: { $nin: [] } } } }, ['l1', 'l2', 'l3', 'l4', 'l5']],
   ];
   for (const [label, where, nested, expected] of TWO_HOP) {
     it(`order.customer.tier ${label}: native, engine and /data select the same lines`, async () => {
@@ -260,6 +264,8 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
     ['$not $and [$null true, amount < 2000]', { $not: { $and: [{ 'order.status': { $null: true } }, { amount: { $lt: 2000 } }] } }, ['l1', 'l2', 'l3', 'l4', 'l5', 'l8']],
     // Two hops, the last hop's key.
     ['$not two-hop $null true', { $not: { 'order.customer.tier': { $null: true } } }, ['l1', 'l2', 'l3', 'l4', 'l5']],
+    // An empty `$nin` negated: no line, before and now.
+    ['$not $nin []', { $not: { 'order.status': { $nin: [] } } }, []],
   ];
   for (const [label, where, expected] of NEGATED) {
     it(`native, ${label}: the answer it gave before the conjunct`, async () => {
@@ -300,5 +306,60 @@ describe('a cross-object leaf never selects an orphan detail row, on the native 
   it('native: `$not` over `$null: true` answers what `$null: false` answers', async () => {
     expect(await totals('native', { $not: { 'order.status': { $null: true } } }))
       .toEqual(await totals('native', { 'order.status': { $null: false } }));
+  });
+
+  // Two `$not`s over a leaf a NULL satisfies cancel: the conjunct makes the
+  // leaf UNKNOWN for an orphan, and `NOT (NOT UNKNOWN)` is UNKNOWN, so the
+  // answer is the un-negated leaf's. On `origin/main` `5a755791a9`, before the
+  // conjunct, the inner `NOT` was FALSE for an orphan and the outer one TRUE,
+  // so both orphans were selected (3 / 6300). The engine path refuses the shape
+  // (`negated`), so this is the native face alone.
+  it('native: `$not` over `$not` over `$null: true` answers what `$null: true` answers', async () => {
+    const twice = await totals('native', { $not: { $not: { 'order.status': { $null: true } } } });
+    expect(twice).toEqual({ n: 1, total: sumOf(['l6']) });
+    expect(twice).toEqual(await totals('native', { 'order.status': { $null: true } }));
+  });
+
+  // [#34384] `$nin: []` lowers to the NULL escape around a constant TRUE. On a
+  // joined member that TRUE is evaluated on an existing parent too, as every
+  // other leaf a NULL satisfies is; on a base column it stays the constant.
+  it('native: an empty `$nin` on a joined member is the last hop key, on a base column the constant TRUE', async () => {
+    const joined = await services.native!.generateSql({ cube: LINE, measures: ['count'], where: { 'order.status': { $nin: [] } } } as never);
+    expect(joined.sql).toContain('LEFT JOIN "os33792_order" "order" ON');
+    expect(joined.sql).toContain('(("order"."status" IS NULL AND "order"."id" = "order"."id") OR "order"."id" = "order"."id")');
+    expect(joined.sql).not.toContain('1 = 1');
+
+    const twoHop = await services.native!.generateSql({ cube: LINE, measures: ['count'], where: { 'order.customer.tier': { $nin: [] } } } as never);
+    expect(twoHop.sql).toContain('OR "order__customer"."id" = "order__customer"."id")');
+
+    const base = await services.native!.generateSql({ cube: LINE, measures: ['count'], where: { amount: { $nin: [] } } } as never);
+    expect(base.sql).not.toContain('JOIN');
+    expect(base.sql).toContain('1 = 1');
+  });
+
+  it("an empty `$nin` in a measure's own filter: native leaves the orphan out, the engine refuses it as every related field there", async () => {
+    const scoped = DatasetSchema.parse({
+      ...DATASET,
+      name: 'os34384_lines_measure_filter_empty_nin',
+      measures: [
+        { name: 'line_count', aggregate: 'count', filter: { 'order.status': { $nin: [] } } },
+        { name: 'total', aggregate: 'sum', field: 'amount' },
+      ],
+    });
+    const res = await services.native!.queryDataset(scoped, { measures: ['line_count'] } as never);
+    const [row] = res.rows as Array<Record<string, unknown>>;
+    expect(Number(row?.line_count)).toBe(6);
+    await expect(services.objectql!.queryDataset(scoped, { measures: ['line_count'] } as never))
+      .rejects.toMatchObject({ code: 'INVALID_FIELD', status: 400 });
+  });
+
+  it("an empty `$nin` in the dataset's own filter leaves the orphan out, native and engine alike", async () => {
+    const scoped = DatasetSchema.parse({ ...DATASET, name: 'os34384_lines_dataset_filter_empty_nin', filter: { 'order.status': { $nin: [] } } });
+    const expected = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6'];
+    for (const face of ['native', 'objectql'] as const) {
+      const res = await services[face]!.queryDataset(scoped, { measures: ['line_count', 'total'] } as never);
+      const [row] = res.rows as Array<Record<string, unknown>>;
+      expect.soft({ n: Number(row?.line_count ?? 0), total: Number(row?.total ?? 0) }, face).toEqual({ n: expected.length, total: sumOf(expected) });
+    }
   });
 });
