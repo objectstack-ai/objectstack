@@ -51,7 +51,7 @@
  *   globalActions.<action_name>.label / .description / .confirmText /
  *     .successMessage / .disabledReason / .submitText / .cancelText /
  *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.* /
- *     .preflight.fields.<path>
+ *     .preflight.fields.<path> / .preflight.columns.<path>.<column_path>
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
  * translations are for object-less actions. A `globalActions` entry that names
@@ -293,21 +293,35 @@ export interface ActionParamLike {
   [key: string]: unknown;
 }
 
+/**
+ * One row of the fields an action shows from a server answer — the
+ * `{ path, label?, columns? }` row `resultDialog.fields` and
+ * `preflight.fields` share. `columns` is a `format: 'table'` field's cells,
+ * each with its own header `label` (#34652).
+ */
+interface AnswerFieldLike {
+  path: string;
+  label?: string;
+  columns?: Array<{ path: string; label?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
 /** Minimal result-dialog shape consumed by `resolveActionResultDialog`. */
 export interface ResultDialogLike {
   title?: string;
   description?: string;
   acknowledge?: string;
-  fields?: Array<{ path: string; label?: string; [key: string]: unknown }>;
+  fields?: AnswerFieldLike[];
   [key: string]: unknown;
 }
 
 /**
  * Minimal preflight shape consumed by `resolveActionPreflight` — the panel's
- * `fields` rows, the same `{ path, label? }` row `resultDialog.fields` carries.
+ * `fields` rows, the same `{ path, label?, columns? }` row `resultDialog.fields`
+ * carries.
  */
 export interface PreflightLike {
-  fields?: Array<{ path: string; label?: string; [key: string]: unknown }>;
+  fields?: AnswerFieldLike[];
   [key: string]: unknown;
 }
 
@@ -983,13 +997,42 @@ export function resolveActionConfirm(
  * Look up the translated `resultDialog` node for an action in a single
  * locale's data, at the action's one address ({@link actionTranslationNode}).
  * The node's `fields` record is keyed by the LITERAL result-field path
- * (`"user.email"`), so it is indexed directly — never split on `.`.
+ * (`"user.email"`), and its `columns` record by that path and then the
+ * column's literal path, so both are indexed directly — never split on `.`.
  */
 function lookupActionResultDialogNode(
   data: TranslationData | undefined,
   action: ActionLike,
-): { title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> } | undefined {
+):
+  | {
+      title?: string;
+      description?: string;
+      acknowledge?: string;
+      fields?: Record<string, string>;
+      columns?: Record<string, Record<string, string>>;
+    }
+  | undefined {
   return actionTranslationNode(data, action)?.resultDialog;
+}
+
+/**
+ * [#34652] Overlay a `format: 'table'` field's column header labels, each
+ * looked up by the column's literal `path` through `lookup` (which walks the
+ * locale chain). A column with no translated string keeps its authored
+ * `label` — an inline per-locale map included — and a field that declares no
+ * `columns` is answered as the same reference.
+ */
+function overlayAnswerColumnLabels<F extends AnswerFieldLike>(
+  field: F,
+  lookup: (columnPath: string) => string | undefined,
+): F {
+  if (!Array.isArray(field.columns)) return field;
+  const columns = field.columns.map((column) => {
+    if (!column || typeof column.path !== 'string') return column;
+    const label = lookup(column.path);
+    return label !== undefined ? { ...column, label } : column;
+  });
+  return { ...field, columns };
 }
 
 function lookupActionResultDialogText(
@@ -1010,10 +1053,12 @@ function lookupActionResultDialogText(
 
 /**
  * Resolve a translated copy of an action's `resultDialog`, overlaying
- * `title` / `description` / `acknowledge` and per-field `label`s (keyed by
- * the literal field path) when translations exist. Returns the original
- * spec untouched (same reference) when the action has no `resultDialog`;
- * otherwise a shallow copy with translated strings merged in.
+ * `title` / `description` / `acknowledge`, per-field `label`s (keyed by
+ * the literal field path) and a table field's column header `label`s (from
+ * `resultDialog.columns.<path>.<column_path>`, #34652) when translations
+ * exist. Returns the original spec untouched (same reference) when the action
+ * has no `resultDialog`; otherwise a shallow copy with translated strings
+ * merged in.
  */
 export function resolveActionResultDialog<T extends ResultDialogLike>(
   bundle: TranslationBundle | undefined,
@@ -1033,7 +1078,10 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
         const label =
           lookupActionResultDialogText(bundle, action, (n) => n.fields?.[field.path], opts) ??
           field.label;
-        return label !== undefined ? { ...field, label } : field;
+        const withColumns = overlayAnswerColumnLabels(field, (columnPath) =>
+          lookupActionResultDialogText(bundle, action, (n) => n.columns?.[field.path]?.[columnPath], opts),
+        );
+        return label !== undefined ? { ...withColumns, label } : withColumns;
       })
     : spec.fields;
   return {
@@ -1048,8 +1096,10 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
 /**
  * Resolve a translated copy of an action's `preflight`, overlaying each
  * declared field's `label` from `…preflight.fields.<path>` (keyed by the
- * literal field path, indexed directly and never split on `.`), exactly as
- * {@link resolveActionResultDialog} overlays `resultDialog.fields`. Returns the
+ * literal field path, indexed directly and never split on `.`) and a table
+ * field's column header labels from `…preflight.columns.<path>.<column_path>`,
+ * exactly as {@link resolveActionResultDialog} overlays `resultDialog.fields`
+ * and `resultDialog.columns`. Returns the
  * original spec untouched (same reference) when the action has no `preflight`
  * or it declares no `fields` — the panel then shows the answer as JSON and
  * reads no label; otherwise a shallow copy with translated labels merged in.
@@ -1063,21 +1113,27 @@ export function resolveActionPreflight<T extends PreflightLike>(
   if (!spec || !Array.isArray(spec.fields)) return spec;
   const fields = spec.fields.map((field) => {
     if (!field || typeof field.path !== 'string') return field;
-    const label = lookupActionPreflightFieldLabel(bundle, action, field.path, opts) ?? field.label;
-    return label !== undefined ? { ...field, label } : field;
+    const label =
+      lookupActionPreflightText(bundle, action, (n) => n.fields?.[field.path], opts) ?? field.label;
+    const withColumns = overlayAnswerColumnLabels(field, (columnPath) =>
+      lookupActionPreflightText(bundle, action, (n) => n.columns?.[field.path]?.[columnPath], opts),
+    );
+    return label !== undefined ? { ...withColumns, label } : withColumns;
   });
   return { ...spec, fields };
 }
 
-function lookupActionPreflightFieldLabel(
+function lookupActionPreflightText(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  path: string,
+  pick: (node: NonNullable<NonNullable<ReturnType<typeof actionTranslationNode>>['preflight']>) => string | undefined,
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
-    const value = actionTranslationNode(pickData(bundle, code), action)?.preflight?.fields?.[path];
+    const node = actionTranslationNode(pickData(bundle, code), action)?.preflight;
+    if (!node) continue;
+    const value = pick(node);
     if (typeof value === 'string' && value.length > 0) return value;
   }
   return undefined;
