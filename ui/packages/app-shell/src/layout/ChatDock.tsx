@@ -326,7 +326,7 @@ export function ChatDockPanel({
       <div className="flex h-11 shrink-0 items-center justify-between border-b px-3">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground/80">
           <MessagesSquare className="size-3.5" />
-          {title ?? t('console.ai.dock.title', { defaultValue: 'Assistant' })}
+          {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
         </span>
         <span className="flex items-center gap-0.5">
           {/* ADR-0057 #8 — proactive AI usage indicator (hides itself when the
@@ -470,7 +470,7 @@ export function ChatDockMobileSheet({
           <div className="flex items-center gap-1 pr-8">
             <SheetTitle className="inline-flex items-center gap-1.5 text-sm font-semibold">
               <MessagesSquare className="size-4" />
-              {title ?? t('console.ai.dock.title', { defaultValue: 'Assistant' })}
+              {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
             </SheetTitle>
             {/* ADR-0057 #8 — usage indicator, mirrored on the mobile sheet header. */}
             <AiUsageIndicator apiBase={apiBase} />
