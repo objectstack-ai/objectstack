@@ -20,7 +20,8 @@
  *    reset, and `/change-password` asked to end the other sessions (the
  *    session it installs stands);
  *  - a password sign-in during which the account's password changes is
- *    refused with what a wrong password answers, and leaves no session;
+ *    refused with what a wrong password answers at that door (email and
+ *    phone), and leaves no session;
  *  - the predicate and the clock: nothing is before a change that never
  *    happened, and the clock is the last write over the credential row.
  */
@@ -453,6 +454,32 @@ describe('a password sign-in during which the password changes is refused', () =
     });
 
     const raced = await s.signIn(EMAIL, FIRST);
+
+    expect(changed).toEqual({ status: 200 });
+    expect({ status: raced.status, code: raced.code }).toEqual({ status: wrong.status, code: wrong.code });
+    if (raced.bearer) expect(await s.whoIs(raced.bearer)).toBeNull();
+    expect(await s.liveSessions()).toEqual([]);
+  }, 60_000);
+
+  it('the phone door: it answers what a wrong password answers there and leaves no session', async () => {
+    const s = await stage({ plugins: { phoneNumber: true }, phoneOtp: { cooldownSeconds: 0 } });
+    await s.engine.update('sys_user', { id: s.userId, phone_number: PHONE, phone_number_verified: true }, SYS);
+    const phoneSignIn = async (password: string) => {
+      const res = await s.fire('/sign-in/phone-number', { phoneNumber: PHONE, password });
+      return { ...(await answer(res)), bearer: res.headers.get('set-auth-token') ?? undefined };
+    };
+    const wrong = await phoneSignIn('Not!The-Password-1');
+    expect(wrong).toMatchObject({ status: 401, code: 'INVALID_PHONE_NUMBER_OR_PASSWORD' });
+    const link = await s.requestLink();
+    const internal = (await s.manager.getAuthContext()).internalAdapter;
+    const original = internal.createSession.bind(internal);
+    let changed: { status: number; code?: string } | undefined;
+    vi.spyOn(internal, 'createSession').mockImplementation(async (...args: unknown[]) => {
+      if (!changed) changed = await answer(await s.fire('/reset-password', { token: link, newPassword: SECOND }));
+      return original(...args);
+    });
+
+    const raced = await phoneSignIn(FIRST);
 
     expect(changed).toEqual({ status: 200 });
     expect({ status: raced.status, code: raced.code }).toEqual({ status: wrong.status, code: wrong.code });

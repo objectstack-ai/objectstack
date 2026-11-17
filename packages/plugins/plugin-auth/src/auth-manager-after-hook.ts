@@ -172,17 +172,18 @@ async function refusedAfterTheCredential(returned: unknown): Promise<boolean> {
 }
 
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
-/** What a wrong password answers at `door`: better-auth's own refusal there (1.7.12). */
-async function wrongPasswordAt(door: 'email' | 'phone'): Promise<Error> {
+/**
+ * What a wrong password answers at `door`: better-auth's own refusal there
+ * (1.7.12), its code read off the vendor's own tables — `BASE_ERROR_CODES` for
+ * the email door, the phone-number plugin's `$ERROR_CODES` for the phone door —
+ * so no code is minted here.
+ */
+async function wrongPasswordAt(ctx: any, door: 'email' | 'phone'): Promise<Error> {
   const { APIError } = await import('better-auth/api');
-  if (door === 'phone') {
-    return new APIError('UNAUTHORIZED', {
-      code: 'INVALID_PHONE_NUMBER_OR_PASSWORD',
-      message: 'Invalid phone number or password',
-    });
-  }
   const { BASE_ERROR_CODES } = await import('@better-auth/core/error');
-  return APIError.from('UNAUTHORIZED', BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
+  const phoneCodes = door === 'phone' ? ctx?.context?.getPlugin?.('phone-number')?.$ERROR_CODES : undefined;
+  const phoneRefusal = phoneCodes?.INVALID_PHONE_NUMBER_OR_PASSWORD;
+  return APIError.from('UNAUTHORIZED', phoneRefusal ?? BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
 }
 
 /** Whether the endpoint answered a success (no `APIError` on `returned`). */
@@ -234,7 +235,7 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // `credential-change-ends-prior-access.ts` states the rule.
   const signInDoor = passwordSignInDoorOf(ctx);
   const signInAcrossChange = signInDoor
-    ? await refuseSignInAcrossCredentialChange(ctx, () => wrongPasswordAt(signInDoor.door))
+    ? await refuseSignInAcrossCredentialChange(ctx, () => wrongPasswordAt(ctx, signInDoor.door))
     : undefined;
   if (signInAcrossChange) ctx.context.returned = signInAcrossChange;
 
