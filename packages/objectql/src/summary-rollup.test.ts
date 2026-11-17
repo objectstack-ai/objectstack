@@ -1427,6 +1427,10 @@ describe('[#34465] a predicate update judges each matched row against the parent
         cap_ref: { type: 'lookup', reference: 'inv_cap' },
         cap_left: { type: 'formula', expression: 'record.cap_ref.amount - record.total', returnType: 'number' },
         slack: { type: 'number', expression: { dialect: 'cel', source: 'record.remaining' } },
+        // A formula over the roll-up that also reads a formula reading no roll-up (`room` over `ceiling`).
+        extra: { type: 'number' },
+        ceiling: { type: 'formula', expression: 'record.budget + record.extra', returnType: 'number' },
+        room: { type: 'formula', expression: 'record.ceiling - record.total', returnType: 'number' },
       },
     } as any);
     engine.registry.registerObject({ name: 'inv_cap', fields: { amount: { type: 'number' } } } as any);
@@ -1459,6 +1463,7 @@ describe('[#34465] a predicate update judges each matched row against the parent
         { name: 'cap_floor', type: 'script', severity: 'error', message: 'invoice cap left below 0', condition: "record.tag == 'capref' && record.inv.cap_left != null && record.inv.cap_left < 0" },
         // A stored computed field reading a formula: what does the rule read for it?
         { name: 'slack_set', type: 'script', severity: 'error', message: 'invoice slack is set', condition: "record.tag == 'slack' && record.inv.slack != null" },
+        { name: 'room_floor', type: 'script', severity: 'error', message: 'invoice room below 0', condition: "record.tag == 'room' && record.inv.room != null && record.inv.room < 0" },
       ],
     } as any);
     // CONTROL object: a roll-up of it exists, but no rule reads one.
@@ -1617,6 +1622,31 @@ describe('[#34465] a predicate update judges each matched row against the parent
     // Computed over the parent as READ (its formula values on it), the field would carry a value and the rule refuse.
     expect(await engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })).toBe(2);
     expect(inv(p.id).total).toBe(140);
+  });
+
+  it('one by one (the reference answer): a rule reading a formula over the roll-up and over a formula that reads no roll-up refuses the second line', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 60, extra: 40 });
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'room' });
+    const b = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'room' });
+    // The first reads room 100 - 80 = 20 (admitted; total then 110); the second reads 100 - 110 = -10.
+    await engine.update('inv_line', { id: a.id, amount: 70 });
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { id: b.id, amount: 70 })), 'invoice room below 0');
+    expect(inv(p.id).total).toBe(110);
+  });
+
+  it('predicate update: the formula the plan does not recompute keeps its stored value, so the recomputed formula reading it refuses the second row as one by one does', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 60, extra: 40 });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'room' }, { inv: p.id, amount: 40, tag: 'room' }]);
+    // Computed with `ceiling` missing, `room` would read null and the rule admit both rows.
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })), 'invoice room below 0');
+    expect(inv(p.id).total).toBe(80);
+  });
+
+  it('predicate update: the same, under the line: admitted', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 60, extra: 40 });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'room' }, { inv: p.id, amount: 40, tag: 'room' }]);
+    expect(await engine.update('inv_line', { amount: 50 }, { where: { inv: p.id }, multi: true })).toBe(2);
+    expect(inv(p.id).total).toBe(100);
   });
 
   it('predicate update that reparents: the header a parent. predicate reads counts the rows moved before', async () => {

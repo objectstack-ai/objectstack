@@ -2381,8 +2381,13 @@ export class UpdateFacet {
  *    `null` here as it does on every write), in their own plan order, with the
  *    DECLARED option labels;
  * 2. then the formulas, as the next read computes them: over that row with
- *    the stored fields just computed, in the read plan's order, with the
- *    option labels the SYSTEM read of the parent uses.
+ *    the stored fields just computed and the stored row's values of the
+ *    formulas the plan does not hold back on it, in the read plan's order,
+ *    with the option labels the SYSTEM read of the parent uses. A formula
+ *    outside the plan reads no folded roll-up, so it does not move while the
+ *    update is judged, and the SYSTEM read of the stored parent already
+ *    computed it: a planned formula reading one (`room = ceiling - total`,
+ *    `ceiling = budget + extra`) reads it as the by-id rule's read does.
  *
  * Each pass runs synchronously, with the read path's own evaluator
  * ({@link applyFormulaPlan}). An object no such field reads a folded roll-up
@@ -2398,6 +2403,7 @@ async function loadSummaryFoldDependents(
     storedPlan: Plan;
     formulaPlan: Plan;
     formulaFields: string[];
+    unplannedFormulas: string[];
     rows: Map<string, Record<string, unknown>>;
     permissions: Awaited<ReturnType<UpdateHost['resolveFormulaPermissions']>>;
     related: Awaited<ReturnType<UpdateHost['resolveFormulaRelated']>>;
@@ -2428,6 +2434,7 @@ async function loadSummaryFoldDependents(
       storedPlan,
       formulaPlan,
       formulaFields: formulaAll.map((entry) => entry.name),
+      unplannedFormulas: formulaAll.filter((entry) => !readers.has(entry)).map((entry) => entry.name),
       rows,
       permissions: await host.resolveFormulaPermissions(object, plan, storedRows, systemCtx, systemResolution),
       related: await host.resolveFormulaRelated(schema, plan, storedRows, systemCtx),
@@ -2443,6 +2450,8 @@ async function loadSummaryFoldDependents(
     const scratch: Record<string, unknown> = { ...stored, ...moved };
     for (const name of entry.formulaFields) delete scratch[name];
     if (entry.storedPlan.length > 0) applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels);
+    // The read's row: the formulas the plan does not recompute back at their stored values.
+    for (const name of entry.unplannedFormulas) if (name in stored) scratch[name] = stored[name];
     if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels);
     const values: Record<string, unknown> = {};
     for (const step of [...entry.storedPlan, ...entry.formulaPlan]) values[step.name] = scratch[step.name];
