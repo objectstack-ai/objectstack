@@ -116,14 +116,25 @@ const OPTION_COUNT = new RegExp(
 );
 
 /**
+ * Words ending in -s that follow a year as its subject or as grammar, not as
+ * what a number counts (`In 2025 sales grew`, `since 2020 earnings`, `in 2025
+ * its revenue`, `In 2025 was`). Closed: widen it when a year reads as a figure.
+ */
+const YEAR_FOLLOWERS = String.raw`(?:sales|earnings|revenues|profits|results|figures|numbers|totals|margins|costs|expenses|this|its|his|was|has|is|as|thus|plus|versus|across)`;
+
+/**
  * A year written alone (`revenue in 2025?`, 「2025 年的营收」): a 19xx/20xx
  * number behind a word that puts a time on it, or before 年. It names a
  * period, it counts nothing. Without that word it stays a figure (`Revenue is
- * 2025`, `a total of 2025 orders`), and so does one with a unit or currency.
+ * 2025`, `a total of 2025 orders`), and so does one with a unit or currency,
+ * or one a counted noun follows (`payments for 2031 orders`, `from 1980
+ * invoices`): any word ending in -s, or `people` / `staff`, unless it is one
+ * of {@link YEAR_FOLLOWERS}. So a word this misses reads as a figure (a graded
+ * miss), never as a year.
  */
 const BARE_YEAR = new RegExp(
   [
-    String.raw`(?<=\b(?:in|for|during|since|from|through|until|till|before|after|year|fiscal year|calendar year|FY)\s+)(?:19|20)\d{2}${NUMBER_AFTER}(?!\s*(?:万|亿|元|thousand|million|billion|mn|bn|dollars?|yuan|USD|EUR|RMB|CNY|[kKmMbB]\b))`,
+    String.raw`(?<=\b(?:in|for|during|since|from|through|until|till|before|after|year|fiscal year|calendar year|FY)\s+)(?:19|20)\d{2}${NUMBER_AFTER}(?!\s*(?:万|亿|元|thousand|million|billion|mn|bn|dollars?|yuan|USD|EUR|RMB|CNY|[kKmMbB]\b))(?!\s+(?:(?!${YEAR_FOLLOWERS}\b)[A-Za-z]+s|people|staff)\b)`,
     String.raw`${NUMBER_BEFORE}(?:19|20)\d{2}(?=\s*年)`,
   ].join('|'),
   'gi',

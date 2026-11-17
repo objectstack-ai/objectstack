@@ -131,6 +131,26 @@ describe('asked-back — asks which reading is meant, names every candidate, sta
       expect([reply, failed(g)]).toEqual([reply, ['asked-back:no-figure']]);
     }
   });
+
+  it('a year-shaped count after a time word stays a figure when a counted noun follows; a year followed by its subject or by grammar does not', () => {
+    for (const [reply, figures] of [
+      ['We received payments for 2031 orders — booked amount or billed amount?', [2031]],
+      ['Revenue came from 1980 invoices, booked amount or billed amount?', [1980]],
+      ['Since 2020 people bought it — booked amount or billed amount?', [2020]],
+      ['收到 2031 笔付款:订单金额或开票金额?', [2031]],
+      ['来自 1980 张发票:订单金额或开票金额?', [1980]],
+    ] as const) {
+      expect([reply, statedFigures(reply)]).toEqual([reply, figures]);
+      const g = grade('dq_revenue', reply);
+      expect([reply, failed(g)]).toEqual([reply, ['asked-back:no-figure']]);
+    }
+    expect(statedFigures('payments for 2031 orders')).toEqual([2031]);
+    expect(statedFigures('from 1980 invoices')).toEqual([1980]);
+    for (const text of ['In 2025 sales grew', 'since 2020 sales', 'Since 2020 earnings, booked or billed?', 'In 2025 its booked amount or billed amount?', 'In 2025 this means booked amount or billed amount?', '2025 年销售额增长', '自 2020 年起的营收']) {
+      expect([text, statedFigures(text)]).toEqual([text, []]);
+    }
+    expect(statedFigures('In 2025 sales grew 12%')).toEqual([12]);
+  });
 });
 
 describe('fallback-labelled — an object query answered, and the reply says it is not a governed metric', () => {
