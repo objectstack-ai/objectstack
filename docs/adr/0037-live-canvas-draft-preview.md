@@ -70,7 +70,7 @@ The 2026-06-10 reliability batch closed the failure modes a live canvas would ha
 
 - `assistantBus`: `emitCanvasInvalidate({ type, name })` / `subscribeCanvasInvalidate` (mirrors the existing review-request pattern).
 - Both chat hosts (`ConsoleFloatingChatbot`, `AiChatPage`) *(amended 2026-11-17, ui ADR-0057 A3: the console's one drawer)* emit invalidations from (a) `buildProgress.items` diffs and (b) `drafted` envelopes — the data is already in hand; this is wiring.
-- ~~A `LiveCanvas` split-view host~~ *(amended 2026-11-17, ui ADR-0057 A3: no separate host; the console's own shell in draft mode is the canvas, beside the drawer)*: opens automatically for Build-with-AI sessions; re-keys/refetches the affected renderer per `(type, name)`; a ~200 ms coalescing window prevents invalidation storms during whole-app builds.
+- ~~A `LiveCanvas` split-view host~~ *(amended 2026-11-17, ui ADR-0057 A3: no separate host; the console's own shell is the canvas, beside the drawer: in draft mode for changes to a published app, and the real unpublished app for a new or still-unpublished app per ADR-0045)*: opens automatically for Build-with-AI sessions; re-keys/refetches the affected renderer per `(type, name)`; a ~200 ms coalescing window prevents invalidation storms during whole-app builds.
 - Renderers accept an external refresh key (most already expose a reload hook).
 
 **Acceptance**: during `apply_blueprint` the ~~right pane~~ main area *(amended 2026-11-17, ui ADR-0057 A3)* grows artifact-by-artifact in step with the build tree; an incremental "add a field" edit reflects in the rendered form/kanban in < 1 s.
