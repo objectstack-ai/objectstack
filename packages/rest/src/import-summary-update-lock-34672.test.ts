@@ -113,7 +113,7 @@ async function boot() {
     const created = await call('POST', '/api/v1/data/:object', row, { object });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
   }
-  const stored = async () => engine.findOne(PARENT, { where: { id: 'a1' } }, { context: { isSystem: true } } as any);
+  const stored = async () => engine.findOne(PARENT, { where: { id: 'a1' } });
   expect(await stored()).toMatchObject({ order_total: 42, order_total_ro: 42 });
 
   const importUpdate = (rows: Array<Record<string, unknown>>, dryRun: boolean) =>
