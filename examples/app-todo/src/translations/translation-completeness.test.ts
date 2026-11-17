@@ -73,7 +73,7 @@ describe.each([
   const members = groups.flatMap((group) =>
     (TaskDataset[group] ?? []).map((m) => ({ group, name: m.name, description: m.description })));
 
-  it.each(members)('$group.$name', ({ group, name, description }) => {
+  it.each(members)('$group $name', ({ group, name, description }) => {
     expect(typeof description, `"${name}" declares no description`).toBe('string');
     const translated = t.datasets?.[TaskDataset.name]?.[group]?.[name]?.description;
     expect(translated, `[${locale}] Missing description for ${group} "${name}"`).toBeTruthy();
