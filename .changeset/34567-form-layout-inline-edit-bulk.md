@@ -3,7 +3,7 @@
 '@objectstack/lint': patch
 ---
 
-docs(skills): `objectstack-ui` keeps a long form `simple`, and both skills name the `bulk` an `inlineEdit` save needs; `os lint` warns when it is withheld
+docs(skills): `objectstack-ui` keeps a long form `simple`, and both skills name the `bulk` an `inlineEdit` save needs; `os lint`, `os validate` and `os build` warn when it is withheld
 
 Clause-②: no
 Metadata-protocol: none
@@ -12,6 +12,6 @@ Metadata-protocol: none
 
 The parent's form saves an `inlineEdit` child's rows with the parent in one `/api/v1/batch`, and that route asks every object in it for `bulk`. Master-Detail Forms in `objectstack-ui` and § Inline Editing in `objectstack-data` `rules/relationships.md` now say so: a parent or child that declares `enable.apiMethods` must list `'bulk'`, or the save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`. An undeclared `apiMethods` allows it.
 
-`os lint` gains the warning `relationship/inline-edit-needs-bulk`. It fires on an `inlineEdit` relationship (`true`, `'grid'` or `'form'`) whose parent or child declares `enable.apiMethods` without `'bulk'`, once per object, at that object's `enable.apiMethods`, and its fix line names the value to add. It refuses nothing. `references/lint-rules.md` lists it.
+A new authoring rule, `relationship/inline-edit-needs-bulk` (`lintInlineEditBulk`, exported with its id constant `RELATIONSHIP_INLINE_EDIT_NEEDS_BULK`), warns on an `inlineEdit` relationship (`true`, `'grid'` or `'form'`) whose parent or child declares `enable.apiMethods` without `'bulk'`: once per object, at that object's `enable.apiMethods`, with a fix line naming the value to add. It is registered for all three commands, so `os lint`, `os validate` and `os build` (and `objectstack dev`) report it. It is advisory and never fails a build. `references/lint-rules.md` lists it.
 
 The skill files pay for most of this by cutting text stated elsewhere, and the `objectstack-ui/SKILL.md` token ceiling moves by the measured remainder.
