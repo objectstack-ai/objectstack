@@ -63,7 +63,7 @@ const DEFAULT_CHART_COLOR = 'hsl(var(--primary))';
 // values live in the theme stylesheets, ADR-0065 §3), so a category chart of up
 // to ten slices never repeats a colour. Kept in step with the dashboard's
 // `CHART_COLORS` in plugin-dashboard.
-const THEME_CHART_PALETTE: readonly string[] = [
+const THEME_CHART_PALETTE: string[] = [
   'hsl(var(--chart-1))',
   'hsl(var(--chart-2))',
   'hsl(var(--chart-3))',
@@ -2465,7 +2465,7 @@ function AdvancedChartImplInner({
 
   // Helper function to get color palette. An explicit `colors` prop (set by the
   // page/dashboard) wins; otherwise fall back to the theme's --chart-1..10 vars.
-  const getPalette = (): readonly string[] =>
+  const getPalette = (): string[] =>
     Array.isArray(colors) && colors.length > 0 ? colors : THEME_CHART_PALETTE;
 
   // Compact numeric formatter for Y-axis ticks (1,200,000 → 1.2M).
