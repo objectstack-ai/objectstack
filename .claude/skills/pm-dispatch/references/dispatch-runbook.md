@@ -37,7 +37,7 @@
 
 - 座位贴活性归分诊席巡查:扫 `label:pm:seat` 挂 `🟢 <github-login>` 的贴,Routine 席读调度器。
 - 判据只认在任者自有产出(评论、认领、改正文)及其作者与时间戳,⛔ 收到的通知不算。
-- >24h 无自有产出 ⇒ 兄弟席一笔降级:改 `⏳ vacant` + 摘 assignee + 证据评论;分诊只敲门记录。
+- >24h 无产出 ⇒ 兄弟席(无则总监)一笔降级:`⏳ vacant`+摘 assignee+证据评论;分诊只敲门记录。
 - L2 欠审:每席巡查跑 `check-owed-reviews.mjs`,只接 take 点名本席的行。
 - L2 前落 `Contract-review-claim:` 行,形、失效、双认照 `contract-review.md`;有活认领 ⛔ 不双做。
 - L2 审核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席巡查列等候逾 24h 的 PR。
