@@ -806,6 +806,56 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
         }
     }, 240_000);
 
+    // [#34441 contract review M1] A type with no members has no bundle
+    // additions: the registry names every package holding the name a holder
+    // (`packageScopedHoldersOf` with no discriminator), whatever their
+    // dependencies. So base A and dependent D (which declares A) each storing
+    // a row of a `dashboard` no package ships stay two holders, and every door
+    // naming no package refuses naming both (#32607), in both registration
+    // orders, before and after a reboot; each exact address serves its own
+    // row. FROM (head 1aff827bd5, the cell-2 arm unguarded for such a type):
+    // the plain read, `/layers`, `/published` and the execution read served A's.
+    it.each([
+        { order: 'registered and saved A, D', registered: [A, D] },
+        { order: 'registered and saved D, A', registered: [D, A] },
+    ])('M1 guard, $order: a non-bundled name a base and its dependent both store is refused naming both on every door naming no package, before and after a reboot', async ({ registered }) => {
+        const file = freshFile();
+        const manifests = registered.map((id) => (id === A ? appManifest(A) : appManifest(D, { dependencies: { [A]: '*' } })));
+        let booted = await bootManifests(manifests, file);
+        const observe = async (b: Booted, leg: string) => {
+            const refusal = (r: { status?: number; body: any }) => [r.status, codeOf(r.body),
+                [...(r.body?.error?.details?.candidates ?? [])].map((c: any) => c.packageId).sort()];
+            const bare = {
+                read: refusal(await get(b.kernel, '/meta/dashboard/basedep_dash')),
+                layers: refusal(await get(b.kernel, '/meta/dashboard/basedep_dash/layers')),
+                published: refusal(await get(b.kernel, '/meta/dashboard/basedep_dash/published')),
+                executed: await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'dashboard', name: 'basedep_dash' })
+                    .then((r: any) => ['served', r?.item?.label ?? null], (e: any) => ['threw', e?.code ?? null, e?.httpStatus ?? null]),
+            };
+            const both = [A, D].sort();
+            expect({ leg, ...bare }).toEqual({
+                leg, read: [409, 'RESOURCE_CONFLICT', both], layers: [409, 'RESOURCE_CONFLICT', both],
+                published: [409, 'RESOURCE_CONFLICT', both], executed: ['threw', 'RESOURCE_CONFLICT', 409],
+            });
+            for (const id of [A, D]) {
+                const own = await get(b.kernel, '/meta/dashboard/basedep_dash', { package: id });
+                expect([leg, id, own.status, unwrap(own.body)?.item?.label], JSON.stringify(own.body)).toEqual([leg, id, 200, id === A ? 'base row' : 'addon row']);
+            }
+        };
+        try {
+            for (const id of registered) await layRow(booted.engine, 'dashboard', 'basedep_dash', id, { label: id === A ? 'base row' : 'addon row', widgets: [] });
+            await observe(booted, 'before a reboot');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            await observe(booted, 'after a reboot');
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
     // [#33210 contract review S1] The canonical-member mirror is left as it
     // was: a dependent's row of the CANONICAL member (`en-US`) over a base that
     // holds the name only as a stored row of another member (`fr-FR`). The

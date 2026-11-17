@@ -32,7 +32,7 @@ export const entry: SemanticMigration = {
     + 'judgement about that caller.',
   acceptanceCriteria:
     'For every bundled name a base ships only in non-canonical members and a dependent extends with a stored row '
-    + 'of the canonical member: every caller that reads /published without ?package= reads the dependent\'s row with '
-    + '?package=DEPENDENT&member=CANONICAL instead; /published without ?package= answers 404, before and after a '
+    + 'of the canonical member: every caller that reads /published without ?package= reads the dependent\'s row from the item read '
+    + 'GET /api/v1/meta/TYPE/NAME?package=DEPENDENT&member=CANONICAL instead; /published without ?package= answers 404, before and after a '
     + 'restart, as with no dependent row stored.',
 };

@@ -429,6 +429,11 @@ const STORED_ROW_HOLDERS_REFUSAL: unique symbol = Symbol.for('objectstack.metada
  * them, as `/layers` refuses the same rows (`packagelessLayeredReadRefusal`),
  * where it served a row by store order; beside one holder or none it leaves
  * the read as it was.
+ *
+ * [#34441 cell 2] Not refused, of a bundled type: two or more holders at the
+ * member where one is the base the others' rows are bundle additions to
+ * ({@link rowHeldBaseAddressOf}), with no package-less row beside them. The
+ * read is that base's, as a shipped base's own member is served.
  */
 async function storedRowHoldersRefusal(
     host: ServedRowHost,
@@ -642,18 +647,21 @@ export async function declaredMemberOverrideAddressOf(
  * addition, as the registry names A the one holder there; the read at the
  * shared member is A's (below, #34441 cell 2). The
  * base is the one row-holding package that is no addition;
- * the read is moved only when there is exactly one, it holds no row at the
- * member, and no package at the member is a customization pair of another
- * row-holding package (`pairsOf`: a pair's added member is served on its
- * base's address already, #28802 ruling A). So a second dependent adding a
+ * the read is moved only when there is exactly one and no package at the
+ * member is a customization pair of another row-holding package (`pairsOf`:
+ * a pair's added member is served on its base's address already, #28802
+ * ruling A). Where the base holds no row at the member, the read moves at a
+ * named non-canonical member only (the S1 guard); where it holds one, see
+ * the #34441 cell 2 paragraph below. So a second dependent adding a
  * member of its own (D1 `fr-FR`, D2 `de-DE` over A's `en-US`) leaves A the
  * base at each dependent's member, as the registry names A the one holder
  * whichever packages are installed, and a dependent of a dependent is an
- * addition to it. The arm applies only to a bundled type the registry reads
- * by package, for a name no package ships (a shipped name is the shipper's
- * already), at a named member other than the canonical one, with no
- * environment item at the member and no disabled package among the
- * row-holding packages (the served-holder judgment above reads those).
+ * addition to it. Both arms apply only to a bundled type the registry reads
+ * by package (a type with no members has no additions: its row holders stay
+ * holders, #34441 contract review M1), for a name no package ships (a shipped
+ * name is the shipper's already), with no environment item at the member and
+ * no disabled package among the row-holding packages (the served-holder
+ * judgment above reads those).
  *
  * [#34441 cell 2] …and, at ANY member the base itself holds as a row (the
  * canonical one included), beside one or more dependents' rows of the same
@@ -663,7 +671,11 @@ export async function declaredMemberOverrideAddressOf(
  * row holders ({@link storedRowHoldersRefusal}) and the layered door's
  * (`packagelessLayeredReadRefusal`) ask this first, so the plain read,
  * `/layers` and the execution face serve the base's row where they refused
- * naming both; beside a package-less row they still refuse (#33210).
+ * naming both; beside a package-less row they still refuse (#33210). The
+ * writes naming no package do not ask it: the save, delete, publish, draft
+ * and history doors still refuse these rows naming base and dependent
+ * (`packagelessAddress`), so the read serves the base's stack where the
+ * write it would send is refused (#34441 contract review S1).
  * `preread` is the item's active rows when the caller read them already.
  */
 export async function rowHeldBaseAddressOf(
@@ -707,6 +719,14 @@ async function rowHeldBaseJudgment(
     const registry: any = host.engine?.registry;
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    // [#34441 contract review M1] A bundled type only. For a type with no
+    // members every row of the name is at the member, and the registry names
+    // every holder (`packageScopedHoldersOf` with no discriminator: a bundle
+    // addition exists only for a bundled type), so two packages holding such
+    // a name as rows stay two holders, refused naming both (#32607), whatever
+    // their dependencies. Judged before the rows are read: such a read reads
+    // nothing more than it did.
+    if (overlayMemberValue(singular, member) === undefined) return undefined;
     if (shippingPackageIds(host.shippedArtifactsOf(type, name)).size > 0) return undefined;
     if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
         return undefined;
