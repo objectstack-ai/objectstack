@@ -78,6 +78,8 @@ export const GlobalNotificationsRenderer: React.FC<GlobalNotificationsRendererPr
     notifications,
     unreadCount,
     pendingApprovalsCount,
+    pendingApprovals,
+    refreshPendingApprovals,
     markAllRead,
     markRead,
     markManyRead,
@@ -96,6 +98,8 @@ export const GlobalNotificationsRenderer: React.FC<GlobalNotificationsRendererPr
         onMarkAllRead={markAllRead}
         onMarkRead={markRead}
         onMarkManyRead={markManyRead}
+        pendingApprovals={pendingApprovals}
+        onApprovalDecided={refreshPendingApprovals}
       />
     </div>
   );

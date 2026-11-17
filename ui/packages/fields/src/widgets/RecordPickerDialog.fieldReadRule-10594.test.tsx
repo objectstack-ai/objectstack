@@ -85,6 +85,7 @@ function policyDenying(...fields: string[]): MePermissionsAuthenticatedResponse 
     tenantId: null,
     positions: ['viewer'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: { account: { allowRead: true } },
     fields: Object.fromEntries(fields.map((f) => [`account.${f}`, { readable: false, editable: false }])),

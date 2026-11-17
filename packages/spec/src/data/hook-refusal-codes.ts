@@ -354,3 +354,92 @@ export function undeclaredHookRefusalReasonAtRun(
     + 'throw one of the declared reasons, or declare this one with the message the user reads.'
   );
 }
+
+/*
+ * ── A hook's declared texts (#34374, ruling 6913660232 parameter 7) ─────────
+ *
+ * A sentence a hook writes into a record for people to read — the subject of
+ * the follow-up task it opens, the summary of the activity it logs — is
+ * written in the ORGANIZATION's language, never the starter's (parameter 2).
+ * The hook declares each such sentence under `texts: { <key>: { message,
+ * params? } }`, the way it declares a refusal, and its code asks for one by
+ * key: `await ctx.text('follow_up_subject', { lead })`. The runtime picks
+ * `hooks.<hook>.texts.<key>.message` in the organization's language (the one
+ * shared reader `resolveOrganizationLocale`, parameter 3), else the declared
+ * sentence (parameter 5), and fills its `{{ }}` holes from `params` after
+ * (parameter 1). A string the hook builds itself stays a literal value
+ * (parameter 4).
+ *
+ * The same two halves as a refusal code: a key the hook's source asks for
+ * LITERALLY and `texts` does not declare is refused at save
+ * ({@link hookTextKeysAskedIn}); any other key is refused when the hook runs.
+ */
+
+/**
+ * The spelling of a declared text key: snake_case, a machine name like every
+ * other key an author declares. It never reaches the wire.
+ */
+export const HOOK_TEXT_KEY_PATTERN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
+
+/** `ctx.text('key'` — the call a hook's code asks for a declared text with. */
+const TEXT_CALL = new RegExp(
+  String.raw`(?<![\w$.])ctx\s*\.\s*text\s*\(\s*(?<tquote>['"\x60])(?<key>[a-z][a-z0-9]*(?:_[a-z0-9]+)*)\k<tquote>`,
+  'g',
+);
+
+/**
+ * The text keys a hook's source asks for LITERALLY — `ctx.text('key', …)` —
+ * in first-seen order: the cases a save can decide. A key that arrives any
+ * other way (a variable, a computed value) is left to the run-time refusal.
+ * Comments and longer strings are blanked first, as for a refusal code.
+ */
+export function hookTextKeysAskedIn(source: string): string[] {
+  const keys = new Set<string>();
+  for (const m of maskedSource(source).matchAll(TEXT_CALL)) keys.add(m.groups!.key);
+  return [...keys];
+}
+
+/** The save-time refusal for a key a hook's source asks for literally that `texts` does not declare. */
+export function undeclaredHookTextKeyAtSave(
+  key: string,
+  declared: readonly string[],
+  at: 'body.source' | 'handler' = 'body.source',
+): string {
+  return (
+    `\`${at}\` asks for text '${key}' (\`ctx.text('${key}')\`), and this hook's \`texts\` declares no such key `
+    + `(declared: ${declaredList(declared)}). Declare it under \`texts.${key}\` with the sentence the record keeps, `
+    + 'or ask for one of the declared keys.'
+  );
+}
+
+/** The save-time refusal for a `{{ … }}` hole in a text `message` whose entry declares no `params`. */
+export const HOOK_TEXT_MESSAGE_HOLE_REFUSED =
+  'A hook text `message` whose entry declares no `params` is plain text, and nothing fills a `{{ }}` hole: the '
+  + 'record would keep the braces as written. Declare the name under the entry\'s `params` (`params: [\'lead\']`) '
+  + 'and pass it to `ctx.text` (`ctx.text(\'KEY\', { lead })`), or write the sentence without the hole.';
+
+/**
+ * The save-time refusal for `texts` on a hook whose code cannot ask for one:
+ * an `expression` body, or no body and no handler at all.
+ */
+export function hookTextsWithoutRunnableCode(language: string | undefined): string {
+  return (
+    '`texts` is served to a sandboxed `body` (`language: \'js\'`) and to an in-process `handler` (which '
+    + `\`os build\` lowers to a \`js\` body) through \`ctx.text\`, and this hook has ${refusalCarrier(language)}: `
+    + 'nothing it runs can ask for a declared text, while `os i18n` still demanded its translations. Give the hook a '
+    + '`js` body or a `handler` that writes the texts, or drop `texts`.'
+  );
+}
+
+/**
+ * The run-time refusal for `ctx.text(key)` with a key the hook's `texts` does
+ * not declare (or a hook that declares none). Fault text: it names the hook
+ * and the key and says how to fix it.
+ */
+export function undeclaredHookTextAtRun(hookName: string, key: string, declared: readonly string[]): string {
+  return (
+    `hook '${hookName}' asked for text '${key}' (ctx.text), and its \`texts\` declares no such key `
+    + `(declared: ${declaredList(declared)}). Only a declared text is written in the organization's language: `
+    + 'declare it under `texts` with the sentence the record keeps, or ask for one of the declared keys.'
+  );
+}

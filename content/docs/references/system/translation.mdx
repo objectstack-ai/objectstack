@@ -189,7 +189,7 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
-| **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
+| **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
@@ -299,6 +299,7 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the hook's `texts` declares |
 
 ### Nested Shape: `PlatformTranslationData.positions[string]`
 
@@ -369,7 +370,7 @@ Served translation data — the platform groups the browser reads, without the s
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
-| **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
+| **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
@@ -478,6 +479,7 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the hook's `texts` declares |
 
 ### Nested Shape: `ServedTranslationData.positions[string]`
 
@@ -611,7 +613,7 @@ Per-app translation data for objects, apps, and UI messages
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
-| **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
+| **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
@@ -720,6 +722,7 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the hook's `texts` declares |
 
 ### Nested Shape: `TranslationData.positions[string]`
 
@@ -811,7 +814,7 @@ One locale of translations — the `translation` metadata type
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
-| **hooks** | `Record<string, { refusals?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
+| **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
@@ -931,6 +934,7 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **refusals** | `Record<string, { message?: string; reasons?: Record<string, object> }>` | optional | Refusal translations keyed by the code the hook's `refusals` declares |
+| **texts** | `Record<string, { message?: string }>` | optional | Text translations keyed by the key the hook's `texts` declares |
 
 ### Nested Shape: `TranslationItem.positions[string]`
 

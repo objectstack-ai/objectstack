@@ -110,6 +110,7 @@ vi.mock('../../console/ai/LiveCanvas', () => ({ LiveCanvas: () => null }));
 
 import { I18nProvider } from '@object-ui/i18n';
 import { ChatDockMobileSheet, ChatDockPanel, type ChatDockState } from '../ChatDock';
+import type { ChatDockTarget } from '../chatDockTarget';
 import { AiChatPage } from '../../console/ai/AiChatPage';
 
 window.matchMedia = ((query: string) => ({
@@ -195,6 +196,8 @@ function dockState(): ChatDockState {
     width: 420,
     dragging: false,
     maximized: false,
+    fullWindow: false,
+    setFullWindow: vi.fn(),
     toggle: vi.fn(),
     expand: vi.fn(),
     collapse: vi.fn(),
@@ -204,8 +207,9 @@ function dockState(): ChatDockState {
   };
 }
 
-function renderDock(appPackageId: string | undefined, onMaximize = vi.fn()) {
+function renderDock(appPackageId: string | undefined, target?: ChatDockTarget) {
   const dock = dockState();
+  const onTargetChange = vi.fn();
   const tree = (pkg: string | undefined) => (
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
       <MemoryRouter initialEntries={['/apps/crm_app']}>
@@ -214,13 +218,14 @@ function renderDock(appPackageId: string | undefined, onMaximize = vi.fn()) {
           userId="u1"
           apiBase={API}
           appPackageId={pkg}
-          onMaximize={onMaximize}
+          target={target}
+          onTargetChange={onTargetChange}
         />
       </MemoryRouter>
     </I18nProvider>
   );
   const { rerender } = render(tree(appPackageId));
-  return { onMaximize, switchApp: (pkg: string | undefined) => rerender(tree(pkg)) };
+  return { onTargetChange, switchApp: (pkg: string | undefined) => rerender(tree(pkg)) };
 }
 
 /**
@@ -370,25 +375,37 @@ describe('console dock — build thread bound to the current authorable app (obj
     for (const [, pkg] of crmPairs) expect(pkg).toBe('app.crm');
   });
 
-  it('maximize hands the bound package to the caller; an app-less thread hands none', async () => {
-    const bound = renderDock('app.crm');
+  // objectstack#34608 — the drawer has no page to hand a thread to any more:
+  // an old `/ai/build?package=X` link (and the "Edit with AI" entries) open
+  // the drawer on a TARGET naming the app, from wherever it is hosted (Home has
+  // no app in view). It must land on the same thread the in-app dock bound.
+  it('a build target naming app X, opened where no app is in view, resumes the thread the dock bound to X', async () => {
+    renderDock('app.crm');
     await sendFirst();
-    await settledConversationId();
-    fireEvent.click(screen.getByTestId('chat-dock-maximize'));
-    expect(bound.onMaximize).toHaveBeenCalledWith('app.crm');
-
+    const dockThread = await settledConversationId();
     cleanup();
     state.chat = undefined;
-    state.canAuthor = false;
-    const ambient = renderDock('app.crm');
-    await sendFirst();
-    await settledConversationId();
-    fireEvent.click(screen.getByTestId('chat-dock-maximize'));
-    expect(ambient.onMaximize).toHaveBeenCalledWith(undefined);
+
+    renderDock(undefined, { agent: 'build', packageId: 'app.crm' });
+    expect(await settledConversationId()).toBe(dockThread);
+    expect((state.chat as ChatOptions | undefined)?.body?.context?.packageId).toBe('app.crm');
+    expect(await screen.findByTestId('ai-build-package-chip')).toHaveTextContent('Customer Desk');
+    expect(minted).toBe(1);
   });
 
-  it('the mobile sheet binds the same way and its deferred maximize carries the package', async () => {
-    const onMaximize = vi.fn();
+  it('a target naming a conversation shows that conversation (an old /ai/build/ID link)', async () => {
+    renderDock('app.crm');
+    await sendFirst();
+    const dockThread = await settledConversationId();
+    cleanup();
+    state.chat = undefined;
+
+    renderDock(undefined, { agent: 'build', conversationId: dockThread });
+    expect(await settledConversationId()).toBe(dockThread);
+    expect(minted).toBe(1);
+  });
+
+  it('the mobile sheet binds the same way', async () => {
     const onOpenChange = vi.fn();
     const sheet = (open: boolean) => (
       <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
@@ -399,19 +416,13 @@ describe('console dock — build thread bound to the current authorable app (obj
             userId="u1"
             apiBase={API}
             appPackageId="app.crm"
-            onMaximize={onMaximize}
           />
         </MemoryRouter>
       </I18nProvider>
     );
-    const { rerender } = render(sheet(true));
+    render(sheet(true));
     await sendFirst();
     await settledConversationId();
     expect(state.chat?.body?.context?.packageId).toBe('app.crm');
-
-    fireEvent.click(screen.getByTestId('chat-dock-mobile-maximize'));
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-    rerender(sheet(false));
-    expect(onMaximize).toHaveBeenCalledWith('app.crm');
   });
 });

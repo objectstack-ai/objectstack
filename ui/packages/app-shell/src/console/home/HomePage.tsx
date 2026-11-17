@@ -69,6 +69,7 @@ import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
+import { useOpenAssistant } from '../../layout/chatDockControl.js';
 
 /**
  * Which AI home CTAs to surface, driven by the live agent catalog (the single
@@ -206,14 +207,15 @@ function HomeAiActions({
   askAvailable,
   buildAvailable,
   canAuthorMetadata,
-  navigate,
+  openAssistant,
   t,
   layout = 'row',
 }: {
   askAvailable: boolean;
   buildAvailable: boolean;
   canAuthorMetadata: boolean;
-  navigate: (to: string) => void;
+  /** objectstack#34608 — opens the console's chat drawer on this agent, in place. */
+  openAssistant: (agent: 'build' | 'ask') => void;
   t: (key: string, opts?: any) => string;
   layout?: 'row' | 'stack';
 }) {
@@ -229,18 +231,18 @@ function HomeAiActions({
   return (
     <div className={container}>
       {showBuild && (
-        <Button onClick={() => navigate('/ai/build')} className={buttonClass} data-testid="home-build-with-ai">
+        <Button onClick={() => openAssistant('build')} className={buttonClass} data-testid="home-build-with-ai">
           <Sparkles className="mr-2 h-4 w-4" />
           {t('home.buildWithAI', { defaultValue: 'Build with AI' })}
         </Button>
       )}
       {/* cloud#1674 maker convergence: with the build CTA shown, "Ask AI" is
           not a second door — the build composer answers data questions too
-          (data superset since cloud#1673), and `/ai/ask` would bounce a maker
-          straight back to `/ai/build`. Non-authoring sessions keep it. */}
+          (data superset since cloud#1673), and the ask agent would converge a
+          maker straight back onto build. Non-authoring sessions keep it. */}
       {askAvailable && !showBuild && (
         <Button
-          onClick={() => navigate('/ai/ask')}
+          onClick={() => openAssistant('ask')}
           className={buttonClass}
           data-testid="home-ask-ai"
         >
@@ -350,6 +352,10 @@ const BY_NAME: NavTargetLabelOptions = { byName: true };
 
 export function HomePage() {
   const navigate = useNavigate();
+  // objectstack#34608 — the Home AI buttons open the same right-side drawer
+  // every console page has (in place, no navigation).
+  const openAssistant = useOpenAssistant();
+  const openHomeAssistant = (agent: 'build' | 'ask') => openAssistant({ agent });
   const { t, language } = useObjectTranslation();
   const metadata = useMetadata();
   const { apps, loading } = metadata;
@@ -602,7 +608,7 @@ export function HomePage() {
               askAvailable={askAvailable}
               buildAvailable={buildAvailable}
               canAuthorMetadata={canAuthorMetadata}
-              navigate={navigate}
+              openAssistant={openHomeAssistant}
               t={t}
               layout="stack"
             />
@@ -638,7 +644,7 @@ export function HomePage() {
               askAvailable={askAvailable}
               buildAvailable={buildAvailable}
               canAuthorMetadata={canAuthorMetadata}
-              navigate={navigate}
+              openAssistant={openHomeAssistant}
               t={t}
               layout="stack"
             />
@@ -696,7 +702,7 @@ export function HomePage() {
                 askAvailable={askAvailable}
                 buildAvailable={buildAvailable}
                 canAuthorMetadata={canAuthorMetadata}
-                navigate={navigate}
+                openAssistant={openHomeAssistant}
                 t={t}
               />
               {/* The application builder's front door lives HERE, not in a

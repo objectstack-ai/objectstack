@@ -17,9 +17,10 @@
  *  - Target 4, the header: the subtitle from the first two declared text
  *    highlights, then at most four highlights;
  *  - Target 7, the bottom bar: the header's actions drawn below the body, in
- *    their bar face — the primary, one more and the `⋯`; with a declared
- *    second action the host's Edit folds into the `⋯`, with one it takes the
- *    second slot; the header draws no action row of its own;
+ *    their bar face — the host's Edit, the primary and the `⋯`, however many
+ *    actions the page declares (objectstack#34595; this file pinned Edit
+ *    after the declared actions before); the header draws no action row of
+ *    its own;
  *  - Target 8, a page pushed from its parent's related row: its 「‹」 names
  *    where it returns, the parent record (「‹ Mira Costa」), and it and the
  *    path row's parent go back in the history, to the parent, whose own 「‹」
@@ -323,11 +324,11 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(text).not.toContain('https://atlas.test');
   });
 
-  it('the bottom bar: [Convert Lead][Assign][⋯] with the host\'s Edit in the ⋯; the header draws no action row', async () => {
+  it('the bottom bar: [Edit][Convert Lead][⋯] with the declared second action in the ⋯; the header draws no action row (objectstack#34595)', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`]);
     const toolbar = await barDrawn();
     expect(toolbar.getAttribute('data-page-header-actions-face')).toBe('bar');
-    expect(barButtons()).toEqual(['Convert Lead', 'Assign', 'More actions']);
+    expect(barButtons()).toEqual(['Edit', 'Convert Lead', 'More actions']);
     // The header above the body has no toolbar of its own, and the bar is
     // below the body, not in it.
     const header = document.querySelector('[data-record-page-root] header') as HTMLElement;
@@ -336,14 +337,15 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(header.contains(actionBar())).toBe(false);
     expect(actionBar()!.contains(header)).toBe(false);
     const items = await moreItems();
-    expect(items).toContain('Edit');
+    expect(items).toContain('Assign');
+    expect(items).not.toContain('Edit');
   });
 
-  it('the bottom bar with one declared action: [Convert Lead][Edit][⋯]', async () => {
+  it('the bottom bar with one declared action: [Edit][Convert Lead][⋯] (objectstack#34595)', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`], objectsWith([action('convert', 'Convert Lead')]));
     await barDrawn();
     const buttons = barButtons();
-    expect(buttons.slice(0, 2)).toEqual(['Convert Lead', 'Edit']);
+    expect(buttons.slice(0, 2)).toEqual(['Edit', 'Convert Lead']);
     expect(buttons.length).toBeLessThanOrEqual(3);
   });
 

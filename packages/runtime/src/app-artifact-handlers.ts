@@ -436,8 +436,11 @@ export function bindAppArtifactHandlers(
                             // applies it after resolving the name, so both take this one wrap.
                             // [#33214] …and its throws are answered against the hook's refusal
                             // catalogue, in the caller's language, with the body path's wire.
+                            // [#34374] …and handed `ctx.text`, the hook's declared texts in
+                            // the organization's language, read through the same services.
                             wrapHandler: (handler, hook) => withInProcessHookTitle(handler, ql, hook, {
                                 i18n: options.i18n,
+                                getService: options.getService,
                                 logger,
                             }),
                         });
