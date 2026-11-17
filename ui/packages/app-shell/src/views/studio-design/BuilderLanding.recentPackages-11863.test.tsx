@@ -117,6 +117,22 @@ const recentSection = () => screen.getByTestId('studio-landing-recent');
 const recentLinks = () => within(recentSection()).getAllByRole('link');
 
 describe('Studio landing → recent packages (objectui#11863)', () => {
+  it('with a recent visit, the installed apps still lead the page: the list follows the author’s own apps (objectstack#34715)', async () => {
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.example.showcase', name: 'Showcase', writable: false, namespace: 'showcase' },
+    ];
+    renderLanding([visit('com.example.showcase')]);
+
+    await screen.findByText('Recently viewed');
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Installed apps',
+      'Your own apps',
+      'Recently viewed',
+      'Outside any app',
+    ]);
+  });
+
   it('lists the most recent packages first, each by its current name, each opening its /studio/PKG route', async () => {
     packages.list = [
       { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },

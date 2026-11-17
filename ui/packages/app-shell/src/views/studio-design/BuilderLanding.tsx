@@ -9,9 +9,8 @@
  * builder (`/studio/:packageId/:tab`). Also served standalone at bare `/studio` so the
  * builder is bookmarkable.
  *
- * The page is ordered by what the author came to do (objectstack#34715). The
- * packages the author was last in lead, when there are any (objectui#11863).
- * Installed apps come first after them, because changing one is the likeliest
+ * The page is ordered by what the author came to do (objectstack#34715).
+ * Installed apps come first, because changing one is the likeliest
  * errand: each card says what this deployment changed on it, "n customized,
  * m switched off" (ADR-0146 D3), from the server's per-package customization
  * read, and carries a Customize button that opens the app in Studio, where its
@@ -340,25 +339,6 @@ export function BuilderLanding(): React.ReactElement {
         </div>
       )}
 
-      {recentPackages.length > 0 && (
-        <>
-          <h2 className={headingClass}>{t('engine.home.recent', locale)}</h2>
-          <div data-testid="studio-landing-recent" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-            {recentPackages.map((item) => (
-              <Link key={item.id} to={item.href} className={entryCardClass}>
-                <span className={entryIconClass}>
-                  <Clock className="h-4 w-4" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium">{recentLabel(item)}</span>
-                  <span className="block truncate font-mono text-[10px] text-muted-foreground">{item.name}</span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </>
-      )}
-
       {pkgs === null && <p className="mb-6 text-[11px] text-muted-foreground">{t('engine.studio.loading', locale)}</p>}
 
       {/* objectui#11808 — an installed (read-only) app is not a dead end, and
@@ -531,6 +511,28 @@ export function BuilderLanding(): React.ReactElement {
         onOpenChange={setCreateOpen}
         onSaved={(r) => open(r.id)}
       />
+
+      {/* objectui#11863 — the packages last opened here. objectstack#34715
+        * orders the page by the errand: installed apps first, the author's own
+        * apps next, then the other entries, this one among them. */}
+      {recentPackages.length > 0 && (
+        <>
+          <h2 className={headingClass}>{t('engine.home.recent', locale)}</h2>
+          <div data-testid="studio-landing-recent" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+            {recentPackages.map((item) => (
+              <Link key={item.id} to={item.href} className={entryCardClass}>
+                <span className={entryIconClass}>
+                  <Clock className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium">{recentLabel(item)}</span>
+                  <span className="block truncate font-mono text-[10px] text-muted-foreground">{item.name}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
 
       <h2 className={headingClass}>{t('engine.studio.landing.outsideHeading', locale)}</h2>
       <div className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
