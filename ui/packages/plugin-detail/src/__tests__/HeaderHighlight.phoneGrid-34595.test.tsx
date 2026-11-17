@@ -47,7 +47,10 @@ const opportunityData = {
   owner_id: { id: 'u1', name: 'Jianguo Zhuang' },
 };
 
-const opportunityFields: HighlightField[] = Object.keys(opportunitySchema.fields).map((name) => ({ name }));
+const opportunityFields: HighlightField[] = Object.entries(opportunitySchema.fields).map(([name, f]) => ({
+  name,
+  label: f.label,
+}));
 
 const mount = (defaultPage = false) =>
   render(
