@@ -19,6 +19,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { ObjectQL } from './engine.js';
 
@@ -121,7 +122,11 @@ describe('[#33952] a package installed through registerApp keeps its translation
     expect(((ql.registry as SchemaRegistry).getPackage(DEP_PKG)?.manifest as any)?.translations).toEqual(DEP_TRANSLATIONS);
 
     // The protocol over this registry; no stored rows (the row read finds nothing).
-    const engine: any = { registry: ql.registry, async find() { return []; }, async findOne() { return null; } };
+    const engine: any = {
+      registry: ql.registry,
+      async find() { return []; },
+      async findOne(object: string, query: any) { assertEngineFindOnePredicate(object, query); return null; },
+    };
     const protocol = new ObjectStackProtocolImplementation(engine, undefined, 'env_test');
     expect(await protocol.getPackageTranslationBundle(DEP_PKG)).toEqual(DEP_TRANSLATIONS[0]);
     expect(protocol.getPackagedFieldPatchBases(OBJ).map((e: any) => [e.packageId, e.base.fields.registration_number.label]))
