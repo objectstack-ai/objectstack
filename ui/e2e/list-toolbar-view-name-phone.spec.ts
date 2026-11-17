@@ -24,7 +24,8 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * in `packages/plugin-list/src/listToolbarRow.ts`, by name), the 「In a queue」
  * toggle's and the Filter button's class strings and the phone touch-target
  * classes from plugin-list, the switcher's own classes from app-shell's
- * `objectViewTitleSwitcher.tsx`, and the phone title's wrapper from
+ * `objectViewTitleSwitcher.tsx` (which draws no record count beside the name,
+ * objectstack#34603), and the phone title's wrapper from
  * `ObjectView.tsx`, compiled with the installed `tailwindcss`. Change a class
  * in any of them and what this file measures changes with it.
  *
@@ -99,7 +100,6 @@ const objectViewSrc = read(OBJECT_VIEW_FILE);
 const SWITCHER = {
   phoneTitle: tagClass(objectViewSrc, OBJECT_VIEW_FILE, 'data-testid="list-phone-title"', ['min-w-0', 'font-semibold']),
   trigger: tagClass(switcherSrc, SWITCHER_FILE, 'data-testid="list-view-switcher"', ['min-w-0', 'max-sm:min-h-11']),
-  count: tagClass(switcherSrc, SWITCHER_FILE, 'data-testid="list-view-switcher-count"', ['shrink-0']),
 };
 // The switcher's outer span is the first element of its return.
 const SWITCHER_OUTER = (() => {
@@ -137,7 +137,6 @@ function fixture(label: string, { chips = 0, phone = true } = {}): string {
     <div id="leading" class="${c.leading}">
       <span class="${SWITCHER.phoneTitle}"><span class="flex min-w-0"><span class="${SWITCHER_OUTER}">
         <button id="trigger" class="${SWITCHER.trigger}"><span id="label" class="truncate">${label}</span><span class="${CHEVRON}"></span></button>
-        <span class="${SWITCHER.count}">· 10</span>
       </span></span></span>
     </div>
     ${chips > 0 ? `<div id="chips" class="${c.filters}"><div class="flex items-center gap-1">${Array.from({ length: chips }, () => `<span class="${CHIP}"></span>`).join('')}</div></div>` : ''}

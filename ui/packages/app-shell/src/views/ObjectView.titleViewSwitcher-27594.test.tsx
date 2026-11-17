@@ -9,7 +9,7 @@
 /**
  * objectstack#27594 — the console list page switches views from its title.
  *
- * The title reads 「VIEW ▾ · COUNT」 and opens a dropdown: a search box, the
+ * The title reads 「VIEW ▾」 and opens a dropdown: a search box, the
  * reader's pinned view, the views they opened lately, then every view. The
  * flat view-tab row it replaced (`ViewTabBar`, in the list's toolbar row
  * since objectui#12440) is not drawn on any face, the split pane's narrowed
@@ -20,7 +20,8 @@
  *
  * WHAT IS PINNED.
  *  - No view-tab bar, tab row or toolbar slot; the title is the switcher,
- *    with the view's label and the count the list reported.
+ *    with the view's label and no record count beside it (objectstack#34603):
+ *    the list's footer says how many records the view holds.
  *  - The dropdown: a search box, the views in their declared order, search
  *    narrowing them, and choosing one switching the list.
  *  - 📌 keeps the pinned view per object (the reader's workspace preference)
@@ -29,9 +30,10 @@
  *  - A record open beside the list (the split pane) leaves the same one
  *    switcher in the title.
  *  - On a phone (objectstack#27058) the page header is not drawn, and the
- *    same one switcher, count included, leads the list's toolbar row (its
- *    `toolbarLeading` slot): the same dropdown, and choosing a view switches
- *    the list.
+ *    same one switcher, with no count either, leads the list's toolbar row
+ *    (its `toolbarLeading` slot): the same dropdown, and choosing a view
+ *    switches the list. The record count is still on the phone's screen, in
+ *    the list's footer, away from the view name.
  */
 
 import * as React from 'react';
@@ -77,6 +79,9 @@ vi.mock('./MetadataInspector', () => ({
 }));
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
@@ -161,6 +166,10 @@ function openSwitcher() {
   return screen.getByTestId('list-view-switcher-menu');
 }
 
+/** The list's footer once its load settled: it says how many records the view holds. */
+const footerCount = () =>
+  waitFor(() => expect(screen.getByTestId('record-count-bar')).toHaveTextContent('1 record'), { timeout: 5000 });
+
 /** The ids of the rows in the dropdown's All section, in order. */
 const allRowIds = () =>
   Array.from(screen.getByTestId('list-view-switcher-all').querySelectorAll('[data-section="all"]')).map((el) =>
@@ -176,7 +185,7 @@ afterEach(() => {
 });
 
 describe('objectstack#27594 — the list title is the view switcher', () => {
-  it('draws no view-tab bar, tab row or toolbar slot; the title names the view and its count', async () => {
+  it('draws no view-tab bar, tab row or toolbar slot; the title names the view and no count (objectstack#34603)', async () => {
     setViewportWidth(1440);
     mountLeads();
     await listToolbar();
@@ -188,7 +197,10 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
     const heading = screen.getByRole('heading', { level: 1 });
     expect(heading.contains(switcher())).toBe(true);
     expect(switcher()).toHaveTextContent('View 1');
-    await waitFor(() => expect(screen.getByTestId('list-view-switcher-count')).toHaveTextContent('· 1'));
+    // Once the list has reported its count, the footer says it and the title does not.
+    await footerCount();
+    expect(screen.queryByTestId('list-view-switcher-count')).toBeNull();
+    expect(switcher().parentElement).toHaveTextContent(/^View 1$/);
   });
 
   it('opens a dropdown with a search box and every view in its declared order', async () => {
@@ -274,7 +286,7 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
   });
 
-  it('on a phone (objectstack#27058) the same one switcher leads the list\'s toolbar row, with its count and its dropdown', async () => {
+  it('on a phone (objectstack#27058) the same one switcher leads the list\'s toolbar row, with its dropdown; the count is in the footer (objectstack#34603)', async () => {
     setViewportWidth(390);
     mountLeads();
     await listToolbar();
@@ -283,7 +295,12 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
     expect(screen.getByTestId('list-toolbar-leading').contains(switcher())).toBe(true);
     expect(screen.queryByRole('heading', { level: 1 })?.contains(switcher()) ?? false).toBe(false);
     expect(switcher()).toHaveTextContent('View 1');
-    await waitFor(() => expect(screen.getByTestId('list-view-switcher-count')).toHaveTextContent('· 1'));
+    // The phone still shows the record count, once, in the list's footer, and
+    // nothing beside the view name.
+    await footerCount();
+    expect(screen.queryByTestId('list-view-switcher-count')).toBeNull();
+    expect(switcher().parentElement).toHaveTextContent(/^View 1$/);
+    expect(screen.getByTestId('list-toolbar-leading').contains(screen.getByTestId('record-count-bar'))).toBe(false);
     expect(screen.queryByTestId('view-tab-bar')).toBeNull();
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
 

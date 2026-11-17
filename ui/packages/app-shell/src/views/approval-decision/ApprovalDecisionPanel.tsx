@@ -11,7 +11,15 @@
  * of objectui#2763; ruling 6079807016, letter 乙), the page component type
  * `record:approval_decision`.
  *
- * One node, seven parts, each drawn by a piece already shipped:
+ * One node, the whole request page below its header (objectstack#34588):
+ * the decision row on top, then the business record on the left and a right
+ * rail of approval progress, attachments and activity, in that order
+ * (maintainer 2026-11-17: 「审批页应该直接显示完整的记录；「动态」在最后」). The
+ * rail is a column beside the record from the `@4xl` container width up;
+ * narrower, the parts stack in the same order, so the activity is last there
+ * too.
+ *
+ * The parts, each drawn by a piece already shipped:
  *
  *  0. **Where the request came from** (objectui#12491) — a request no person
  *     submitted (opened by a flow run with no user context, such as a
@@ -20,19 +28,16 @@
  *     origin" below.
  *  0b. **Why it was decided** (objectstack#32667) — on a request that was
  *     rejected, sent back for revision or approved, the comment the deciding
- *     action was recorded with, and who recorded it. See "The decision
- *     comment" below.
- *  1. **What was submitted** (objectui#12483) — the declared amount and a
- *     summary of the request's record snapshot, under the target object's
- *     declared labels and through the record page's own cells, with the
- *     object's `hidden: true` fields and the reader's unreadable fields left
- *     out. `RecordSnapshotSummary` draws it from the bound row's `payload`
- *     and `payload_display`: the target record as SUBMITTED, kept as the
- *     request's evidence of what was submitted (objectstack#10749), never a
- *     live read. It is headed "As submitted" so a decided request's snapshot
- *     never reads as the record's current state (objectstack#27502); the
- *     current record is the Details tab's pointer card. See its header for
- *     what it reads.
+ *     action was recorded with, and who recorded it. See "The request's
+ *     thread" below.
+ *  1. **What was submitted** (objectstack#34588, replacing objectui#12483's
+ *     six-field summary) — the business record whole, as SUBMITTED: every
+ *     field the reader may read, in the sections of the object's default
+ *     record page, a field changed after submission marked with its current
+ *     value, the record's child tables as current rows, and its attachment
+ *     fields in the rail. `./SubmittedRecord.tsx` draws it from the bound
+ *     row's `payload` and `payload_display` (objectstack#10749) and one read
+ *     of the record; see its header for what it reads.
  *  2. **Where the flow stands** (objectui#12491, objectstack#26668) — the
  *     vertical step line of this request's own route, the bound row's
  *     `flow_route` as the approvals get serves it: the steps its run passed,
@@ -101,21 +106,28 @@
  * origin, like the names, are drawn where no tally exists, so each is its own
  * part under its own gate.
  *
- * ## The decision comment (objectstack#32667)
+ * ## The request's thread (objectstack#32667, objectstack#34588)
  *
- * The reader a decision reaches lands on this page, on its Details tab; the
- * applicant of a rejected request comes here to learn what to fix. The reason
- * lives only on the request's thread (`sys_approval_action.comment`), which
- * the Timeline tab lists, so the panel draws the deciding action's comment
- * itself. The request row carries no comment, so the panel reads the thread
- * the way the Timeline tab reads it: a `find` of `sys_approval_action` scoped
- * to the request (`{ request_id }`), through the page's data source, which the
- * console routes to `GET /approvals/requests/:id/actions`. It reads once, only
- * on a request whose status a decision set, and again when a decision
- * invalidates the timeline; with no data source it reads nothing. The deciding
- * action is the latest of the kind the status names: `reject` for `rejected`,
- * `revise` for `returned`, `approve` for `approved`. A decision recorded
- * without a comment, and a read that fails, draw nothing.
+ * The rail ends with the request's activity: its thread
+ * (`sys_approval_action`), newest first, drawn by `ApprovalActionTimeline`,
+ * the markup the business record's approvals panel draws its timeline with.
+ * It took the place of the page's Timeline tab. The request row carries no
+ * thread, so the panel reads it the way that tab read it: a `find` of
+ * `sys_approval_action` scoped to the request (`{ request_id }`), through the
+ * page's data source, which the console routes to
+ * `GET /approvals/requests/:id/actions`. One read, again when a decision
+ * invalidates the timeline; with no data source it reads nothing. Like that
+ * tab's related list, it reads only on a read verdict for the object: a
+ * reader refused `sys_approval_action` sends no read and gets no activity
+ * card (objectui#13324).
+ *
+ * The reader a decision reaches lands on this page; the applicant of a
+ * rejected request comes here to learn what to fix. So on a request whose
+ * status a decision set, the deciding action's comment is also drawn on top,
+ * from the same read: the latest action of the kind the status names
+ * (`reject` for `rejected`, `revise` for `returned`, `approve` for
+ * `approved`). A decision recorded without a comment, and a read that fails,
+ * draw nothing there.
  *
  * ## No authorable props
  *
@@ -167,13 +179,20 @@ import {
   useRecordContext,
 } from '@object-ui/react';
 import { cn, Badge } from '@object-ui/components';
-import { Workflow } from 'lucide-react';
+import { usePermissions } from '@object-ui/permissions';
+import { History, Stamp, Workflow } from 'lucide-react';
+import { ApprovalActionTimeline } from '../approval-progress/ApprovalActionTimeline.js';
 import { ApprovalStepLine } from '../approval-progress/ApprovalStepLine.js';
 import { DecisionProgressIndicator } from '../approval-progress/DecisionProgressIndicator.js';
 import { eligibleApproverCount } from '../approval-progress/eligibleApprovers.js';
 import { DeclaredActionsBar } from '../DeclaredActionsBar.js';
 import { approverChips } from '../RecordApprovalsPanel.js';
-import { RecordSnapshotSummary } from './RecordSnapshotSummary.js';
+import {
+  SubmittedAttachmentsCard,
+  SubmittedChildTables,
+  SubmittedRecordCard,
+  useSubmittedRecord,
+} from './SubmittedRecord.js';
 import { RECORD_APPROVAL_ACTION_LOCATION, SYS_APPROVAL_REQUEST_OBJECT } from '../recordApprovalActions.js';
 import type { ApprovalActionLite, ApprovalRequestLite } from '../../hooks/useRecordApprovals.js';
 import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
@@ -285,16 +304,54 @@ const DECIDING_ACTION: Readonly<Record<string, string>> = {
   approved: 'approve',
 };
 
-/** The read of one request's thread, newest first: the Timeline tab's scope and order. */
+/** The read of one request's thread, newest first: the order the activity card draws it in. */
 function timelineQuery(requestId: string) {
   return { $filter: { request_id: requestId }, $orderby: [{ field: 'created_at', order: 'desc' as const }] };
 }
 
-/** The first `kind` row of a thread read newest first. */
-function latestOfKind(rows: unknown, kind: string): ApprovalActionLite | null {
-  if (!Array.isArray(rows)) return null;
-  const row = rows.find((r) => (r as ApprovalActionLite | null)?.action === kind);
-  return (row as ApprovalActionLite | undefined) ?? null;
+/**
+ * The request's thread, newest first: ONE read that the activity card and the
+ * decision comment share (see "The request's thread" above). `loaded` turns
+ * true once the read answered, a failure included.
+ *
+ * Read through the adapter the PAGE is bound to (the record context's), which
+ * the console routes to the request's actions route, and only on a read
+ * verdict, as the Timeline related list it replaces was: a reader whose
+ * verdict refuses `sys_approval_action` sends no read and sees no rows. Under
+ * the console's `ApprovalRecordReads` the verdict for both approval objects
+ * is the server's, so a party to the request reads its thread.
+ */
+function useRequestThread(requestId: string): { rows: ApprovalActionLite[]; loaded: boolean; readable: boolean } {
+  const adapter = useAdapter();
+  const dataSource = useRecordContext()?.dataSource ?? adapter;
+  const perms = usePermissions();
+  const timelineChanged = useDataInvalidation(APPROVAL_ACTION_OBJECT);
+  const [answer, setAnswer] = React.useState<{ key: string; rows: ApprovalActionLite[] } | null>(null);
+  const permitted = perms?.isLoaded ? perms.can(APPROVAL_ACTION_OBJECT, 'read') : true;
+  const canRead = permitted && typeof dataSource?.find === 'function';
+
+  React.useEffect(() => {
+    if (!canRead) return;
+    let cancelled = false;
+    // The executor runs synchronously, so a source that THROWS lands with a rejection.
+    new Promise<unknown>((resolve) => resolve(dataSource!.find(APPROVAL_ACTION_OBJECT, timelineQuery(requestId)))).then(
+      (out) => {
+        const rows = (out as { data?: unknown } | null)?.data;
+        if (!cancelled) setAnswer({ key: requestId, rows: Array.isArray(rows) ? (rows as ApprovalActionLite[]) : [] });
+      },
+      () => {
+        if (!cancelled) setAnswer({ key: requestId, rows: [] });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId, canRead, dataSource, timelineChanged]);
+
+  if (!canRead) return { rows: [], loaded: true, readable: permitted };
+  return answer && answer.key === requestId
+    ? { rows: answer.rows, loaded: true, readable: true }
+    : { rows: [], loaded: false, readable: true };
 }
 
 /**
@@ -302,33 +359,11 @@ function latestOfKind(rows: unknown, kind: string): ApprovalActionLite | null {
  * recorded it, on the request's own page; nothing on a pending request, or
  * for a decision recorded without a comment.
  */
-function DecisionComment({ request }: { request: ApprovalRequestLite }) {
+function DecisionComment({ request, thread }: { request: ApprovalRequestLite; thread: readonly ApprovalActionLite[] }) {
   const { t } = useObjectTranslation();
-  const dataSource = useAdapter();
   const kind = DECIDING_ACTION[request.status];
-  const requestId = String(request.id);
-  const timelineChanged = useDataInvalidation(kind ? APPROVAL_ACTION_OBJECT : undefined);
-  const [answer, setAnswer] = React.useState<{ key: string; action: ApprovalActionLite | null } | null>(null);
-  const key = kind ? `${requestId}::${kind}` : null;
-
-  React.useEffect(() => {
-    if (!kind || key === null || typeof dataSource?.find !== 'function') return;
-    let cancelled = false;
-    // The executor runs synchronously, so a source that THROWS lands with a rejection.
-    new Promise<unknown>((resolve) => resolve(dataSource.find(APPROVAL_ACTION_OBJECT, timelineQuery(requestId)))).then(
-      (out) => {
-        if (!cancelled) setAnswer({ key, action: latestOfKind((out as { data?: unknown } | null)?.data, kind) });
-      },
-      () => {
-        if (!cancelled) setAnswer({ key, action: null });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [kind, key, requestId, dataSource, timelineChanged]);
-
-  const action = answer && answer.key === key ? answer.action : null;
+  // The thread is newest first, so the first row of the kind is the deciding one.
+  const action = kind ? thread.find((row) => row?.action === kind) ?? null : null;
   const comment = typeof action?.comment === 'string' ? action.comment.trim() : '';
   if (!action || !comment) return null;
   const tr = (k: string, defaultValue: string) => String(t(`approvalsInbox.${k}`, { defaultValue }));
@@ -351,35 +386,85 @@ function DecisionComment({ request }: { request: ApprovalRequestLite }) {
   );
 }
 
+/** A titled card of the page's right rail. */
+function RailCard({ icon: Icon, title, testId, children }: {
+  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  title: string;
+  testId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border bg-card" data-testid={testId}>
+      <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-medium">
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span>{title}</span>
+      </div>
+      <div className="space-y-3 px-4 py-3">{children}</div>
+    </section>
+  );
+}
+
 /** The parts over one request row. Module-internal: no package export. */
 export function ApprovalDecisionPanel({ request, className }: ApprovalDecisionPanelProps) {
+  const { t } = useObjectTranslation();
   const progress = request.decision_progress;
   const eligible = eligibleApproverCount(request);
   const requestId = String(request.id);
+  const thread = useRequestThread(requestId);
+  const submitted = useSubmittedRecord(request);
+  const stepLabel = (request as { current_step_label?: unknown }).current_step_label;
+  // A row names its own step when the read serves `step_label`; else every
+  // row of this request is on the request's step (one request, one node).
+  const stepText = React.useCallback(
+    (action: ApprovalActionLite) => {
+      const own = (action as { step_label?: unknown }).step_label;
+      if (typeof own === 'string' && own !== '') return own;
+      return typeof stepLabel === 'string' && stepLabel !== '' ? stepLabel : null;
+    },
+    [stepLabel],
+  );
 
   const handleDecided = React.useCallback(() => {
     notifyDataChanged({ objectName: SYS_APPROVAL_REQUEST_OBJECT, recordId: requestId });
     notifyDataChanged({ objectName: APPROVAL_ACTION_OBJECT });
   }, [requestId]);
 
+  const tr = (key: string, defaultValue: string) => String(t(`approvalsInbox.${key}`, { defaultValue }));
+
   return (
-    <div className={cn('space-y-3', className)} data-testid="approval-decision-panel">
-      <FlowOrigin request={request} />
-      <DecisionComment request={request} />
-      <RecordSnapshotSummary
-        objectName={request.object_name}
-        snapshot={request.payload}
-        display={request.payload_display}
-      />
-      <ApprovalStepLine steps={request.flow_route?.steps} />
-      {progress && <DecisionProgressIndicator progress={progress} eligibleApprovers={eligible} />}
-      <PendingApprovers request={request} />
-      <DeclaredActionsBar
-        objectName={SYS_APPROVAL_REQUEST_OBJECT}
-        record={request}
-        location={RECORD_APPROVAL_ACTION_LOCATION}
-        onDone={handleDecided}
-      />
+    <div className={cn('@container space-y-4', className)} data-testid="approval-decision-panel">
+      <div className="space-y-3" data-testid="approval-decision-head">
+        <FlowOrigin request={request} />
+        <DecisionComment request={request} thread={thread.rows} />
+        {/* The approver's band, the same one the business record page draws
+            (objectstack#34361). */}
+        <DeclaredActionsBar
+          objectName={SYS_APPROVAL_REQUEST_OBJECT}
+          record={request}
+          location={RECORD_APPROVAL_ACTION_LOCATION}
+          onDone={handleDecided}
+          foldDecisions
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-4 @4xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="min-w-0 space-y-4" data-testid="approval-decision-record">
+          {submitted && <SubmittedRecordCard model={submitted} />}
+          {submitted && <SubmittedChildTables model={submitted} />}
+        </div>
+        <aside className="min-w-0 space-y-4" data-testid="approval-decision-rail">
+          <RailCard icon={Stamp} title={tr('progressTitle', 'Approval progress')} testId="approval-decision-progress">
+            <ApprovalStepLine steps={request.flow_route?.steps} />
+            {progress && <DecisionProgressIndicator progress={progress} eligibleApprovers={eligible} />}
+            <PendingApprovers request={request} />
+          </RailCard>
+          {submitted && <SubmittedAttachmentsCard model={submitted} />}
+          {thread.readable && (
+            <RailCard icon={History} title={tr('history', 'Activity')} testId="approval-decision-activity">
+              <ApprovalActionTimeline actions={thread.rows} loading={!thread.loaded} stepText={stepText} />
+            </RailCard>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
