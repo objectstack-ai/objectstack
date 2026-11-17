@@ -197,7 +197,12 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
       expect(result.isError).toBe(true);
       expect(result.content).toHaveLength(1);
       expect(JSON.parse(result.content[0].text)).toEqual({
-        error: { code: 'RECORD_NOT_FOUND', message: 'Record t9 not found in task', status: 404 },
+        error: {
+          code: 'RECORD_NOT_FOUND', message: 'Record t9 not found in task', status: 404,
+          // The end user's sentence the producer marks (#34699): no caller here, so
+          // English. The metadata door's answer carries no `userMessage` channel.
+          ...(site.metaDoor ? {} : { userMessage: 'This record does not exist, or you do not have access to it.' }),
+        },
       });
     });
 
