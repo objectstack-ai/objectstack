@@ -235,7 +235,7 @@ describe('objectui#3546 slice five — the marketplace and preview namespaces', 
     // sets and placeholder shape, and never looks at what a value SAYS.
     //
     // Set equality against the EMPTY set, not a subset: unlike slice two (12
-    // pairs), three (18) and four (1 — French "Assistant"), this slice has no
+    // pairs), three (18) and four (none left), this slice has no
     // legitimate cognate at all. 0 of 360 pairs is identical to `en`. A first
     // identical pair fails here and must be justified on the line below, the way
     // those slices justified theirs.

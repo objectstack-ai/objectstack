@@ -1005,12 +1005,30 @@ export function normalizeFilters(filters: any[]): any[] {
  * `filter`, and its last fallback was `table.defaultFilters`, declared
  * `Record<string, any>` (retired since objectui#12030; `table.filter` takes
  * the same object). `toFilterNode` now converts it instead.
+ *
+ * `draftOnly` (objectstack#34807): the fields the object definition marks as
+ * existing only in the draft preview. Every comparison on one is left out of
+ * the merged node, whichever of the sources carried it, since the data door
+ * refuses the name and with it the whole list. Empty outside the preview,
+ * where the node is exactly what it was.
  */
 export function buildEffectiveFilter(
   baseFilter: unknown,
   currentFilters: FilterBuilderRowGroup,
   userFilterConditions: any[],
   queueSittingConditions: ReadonlyArray<QueueSittingCondition> = NO_QUEUE_SITTING_CONDITIONS,
+  draftOnly: ReadonlySet<string> = NO_DRAFT_ONLY_FIELDS,
+): any[] | Record<string, any> | undefined {
+  const merged = mergeEffectiveFilterSources(baseFilter, currentFilters, userFilterConditions, queueSittingConditions);
+  if (draftOnly.size === 0) return merged;
+  return omitDraftOnlyFilterFields(merged, draftOnly, new Set()) as any[] | Record<string, any> | undefined;
+}
+
+function mergeEffectiveFilterSources(
+  baseFilter: unknown,
+  currentFilters: FilterBuilderRowGroup,
+  userFilterConditions: any[],
+  queueSittingConditions: ReadonlyArray<QueueSittingCondition>,
 ): any[] | Record<string, any> | undefined {
   const userFilter = convertFilterGroupToAST(currentFilters);
   return mergeFilterNodes(
@@ -1460,6 +1478,8 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.recordOpenPage': 'Full page',
   'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
   'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
+  // The draft preview's note on a sort or filter it left out (objectstack#34807).
+  'list.draftOnlyQueryDropped': 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
   // Heading of the record-detail overlay this view opens when a child view's
   // row is clicked (objectui#3426). Borrowed from the `detail.*` namespace
   // rather than minted as `list.recordDetail`: `NavigationOverlay` already
@@ -1820,6 +1840,89 @@ function describeRefusedPageSize(
 }
 
 /**
+ * objectstack#34807 (ruling 6946403206) — the fields an object definition
+ * marks as existing only in the DRAFT. Under the console's draft preview
+ * (`?preview=draft`) the host's data source answers `getObjectSchema` with the
+ * published document plus each field only the draft declares, carrying this
+ * undeclared key. The data door validates every `$select`, `$expand`,
+ * `$filter` and `$orderby` name against the PUBLISHED object and answers
+ * `400 INVALID_FIELD` for one it does not know, so a single draft-only column
+ * used to refuse the whole list. Such a name is left out of every request this
+ * component makes and of the Filter and Sort pickers; its column is drawn
+ * empty under the field's draft label, and a filter or sort that names it is
+ * left out with a note (`list.draftOnlyQueryDropped`).
+ *
+ * An underscore-private convention between `@object-ui/app-shell`, which sets
+ * it, and this package: never an authoring key, never declared, never written
+ * back. Outside the preview no definition carries it, and every reader below
+ * answers exactly as it did before.
+ */
+const DRAFT_ONLY_FIELD_KEY = '_draftOnly';
+const NO_DRAFT_ONLY_FIELDS: ReadonlySet<string> = new Set<string>();
+const NO_DRAFT_ONLY_QUERY_DROPS: readonly string[] = [];
+
+/** The names `objectDef` marks {@link DRAFT_ONLY_FIELD_KEY}, in either field-map shape. */
+function readDraftOnlyFieldNames(objectDef: unknown): ReadonlySet<string> {
+  const raw = (objectDef as { fields?: unknown } | null | undefined)?.fields;
+  if (!raw || typeof raw !== 'object') return NO_DRAFT_ONLY_FIELDS;
+  const entries: Array<[unknown, unknown]> = Array.isArray(raw)
+    ? raw.map((f) => [(f as { name?: unknown } | null)?.name, f])
+    : Object.entries(raw as Record<string, unknown>);
+  const names = new Set<string>();
+  for (const [name, def] of entries) {
+    if (typeof name === 'string' && !!def && typeof def === 'object'
+        && (def as Record<string, unknown>)[DRAFT_ONLY_FIELD_KEY] === true) names.add(name);
+  }
+  return names.size > 0 ? names : NO_DRAFT_ONLY_FIELDS;
+}
+
+/** Whether a field reference (`owner` or a dotted `owner.name`) starts at a draft-only field. */
+function refersToDraftOnlyField(ref: unknown, draftOnly: ReadonlySet<string>): ref is string {
+  return typeof ref === 'string' && draftOnly.has(ref.split('.')[0]);
+}
+
+/** `fields` (either field-map shape) without the draft-only ones. */
+function withoutDraftOnlyFields(fields: unknown, draftOnly: ReadonlySet<string>): any {
+  if (Array.isArray(fields)) {
+    return fields.filter((f) => !draftOnly.has((f as { name?: unknown } | null)?.name as string));
+  }
+  if (!fields || typeof fields !== 'object') return fields;
+  return Object.fromEntries(Object.entries(fields as Record<string, unknown>).filter(([name]) => !draftOnly.has(name)));
+}
+
+/**
+ * The array filter AST without every comparison on a draft-only field, or
+ * `undefined` when nothing is left. The shapes are the ones the server reads:
+ * an `and` / `or` group, a flat list (implicit AND) and a 2- or 3-element
+ * comparison. A group left with one child becomes that child. Anything else is
+ * returned as it came. The names removed are added to `dropped`.
+ */
+function omitDraftOnlyFilterFields(node: unknown, draftOnly: ReadonlySet<string>, dropped: Set<string>): unknown {
+  if (!Array.isArray(node) || node.length === 0) return node;
+  const head = node[0];
+  const keyword = typeof head === 'string' ? head.toLowerCase() : undefined;
+  if (keyword === 'and' || keyword === 'or') {
+    const kept = node.slice(1)
+      .map((child) => omitDraftOnlyFilterFields(child, draftOnly, dropped))
+      .filter((child) => child !== undefined);
+    if (kept.length === 0) return undefined;
+    return kept.length === 1 ? kept[0] : [head, ...kept];
+  }
+  if (Array.isArray(head)) {
+    const kept = node
+      .map((child) => omitDraftOnlyFilterFields(child, draftOnly, dropped))
+      .filter((child) => child !== undefined);
+    return kept.length === 0 ? undefined : kept;
+  }
+  if (typeof head === 'string' && typeof node[1] === 'string' && node.length <= 3
+      && refersToDraftOnlyField(head, draftOnly)) {
+    dropped.add(head.split('.')[0]);
+    return undefined;
+  }
+  return node;
+}
+
+/**
  * Field-level READ for the field lists the toolbar offers: the Filter panel's
  * (`filterFields`, objectui#11925), the Sort picker's (`sortFields`,
  * objectui#11943), and since objectui#11984 the list the hide-fields popover,
@@ -2132,6 +2235,31 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   );
 
   /**
+   * objectstack#34807 — the fields `objectDef` marks as existing only in the
+   * draft preview (see `readDraftOnlyFieldNames`). Read once, beside the
+   * definition, for every leg that keeps them out of a request: the
+   * projection, `$expand`, the filter (`buildEffectiveFilter`), the sort
+   * (`serverSort`) and the Filter and Sort pickers. One shared empty set
+   * outside the preview, so no dependency list sees a new identity there.
+   */
+  const draftOnlyFields = React.useMemo(() => readDraftOnlyFieldNames(objectDef), [objectDef]);
+
+  /**
+   * objectstack#34807 — the view's `searchableFields` as every query this list
+   * makes or hands down sends them: without a draft-only field, which the data
+   * door refuses as `$searchFields` (`400 INVALID_FIELD`, an unknown field)
+   * and with it the whole list. The authored list itself outside the preview,
+   * or when it names none. When every entry is draft-only nothing is sent, and
+   * the term searches the object's default fields.
+   */
+  const searchFieldsSent = React.useMemo(() => {
+    const declared = schema.searchableFields;
+    if (!declared || draftOnlyFields.size === 0) return declared;
+    const kept = declared.filter((f) => !refersToDraftOnlyField(f, draftOnlyFields));
+    return kept.length === declared.length ? declared : kept;
+  }, [schema.searchableFields, draftOnlyFields]);
+
+  /**
    * objectui#12966 — the object's `search` resolves to no field, so the server
    * refuses any term with `400 INVALID_FIELD`: no quick-search box, and a term
    * restored at mount or carried across a view switch is not applied, for the
@@ -2252,12 +2380,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * the next write. No signal served ⇒ sent unchanged, as before
    * objectstack#10235, because there is no verdict to filter by.
    */
-  const serverSort = React.useMemo(
-    () => (platformSortability
+  const serverSort = React.useMemo(() => {
+    const sortable = platformSortability
       ? filterPlatformSortableSort(currentSort, platformSortability)
-      : currentSort),
-    [currentSort, platformSortability],
-  );
+      : currentSort;
+    // objectstack#34807 — a draft-only field is not sortable by the data door
+    // whatever the projection served (the published one does not name it, and
+    // an older deployment or a never-published object serves none at all).
+    return draftOnlyFields.size > 0
+      ? sortable.filter((item) => !refersToDraftOnlyField(item.field, draftOnlyFields))
+      : sortable;
+  }, [currentSort, platformSortability, draftOnlyFields]);
 
   /**
    * The view's DECLARED sort, for the "reset to default" affordance
@@ -2657,6 +2790,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     queueFilterOffered && sittingInQueueOnly && !datasetChartOnScreen
       ? QUEUE_SITTING_CONDITIONS
       : NO_QUEUE_SITTING_CONDITIONS;
+
+  /**
+   * objectstack#34807 — the draft-only fields a sort or filter on this list
+   * names, each left out of the request (`serverSort`, `buildEffectiveFilter`)
+   * because the data door refuses it. Said in one line above the rows
+   * (`list.draftOnlyQueryDropped`) while it is true, so the rows are not read
+   * as filtered or sorted by it. Empty outside the draft preview.
+   */
+  const draftOnlyQueryDrops = React.useMemo<readonly string[]>(() => {
+    if (draftOnlyFields.size === 0) return NO_DRAFT_ONLY_QUERY_DROPS;
+    const dropped = new Set<string>();
+    for (const item of currentSort) {
+      if (refersToDraftOnlyField(item.field, draftOnlyFields)) dropped.add(item.field.split('.')[0]);
+    }
+    try {
+      omitDraftOnlyFilterFields(
+        mergeEffectiveFilterSources(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions),
+        draftOnlyFields,
+        dropped,
+      );
+    } catch (error) {
+      // A malformed filter is the fetch's own load error to raise, not this line's.
+      if (!(error instanceof FilterOperatorError)) throw error;
+    }
+    return dropped.size > 0 ? Array.from(dropped) : NO_DRAFT_ONLY_QUERY_DROPS;
+  }, [draftOnlyFields, currentSort, authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions]);
 
   // User filters render ONLY when explicitly configured (ADR-0047 §data
   // mode): saved list views already act as the preset switcher, so an
@@ -3250,7 +3409,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       if (read.expand) collected.add(read.field);
     }
     const augmented = collected.size > 0 ? Array.from(collected) : undefined;
-    const expandable = buildExpandFields(objectDef?.fields, augmented);
+    // objectstack#34807 — a draft-only lookup is not expanded: the data door
+    // refuses a relation the published object does not declare.
+    const expandable = buildExpandFields(
+      draftOnlyFields.size > 0 ? withoutDraftOnlyFields(objectDef?.fields, draftOnlyFields) : objectDef?.fields,
+      augmented,
+    );
     // [objectui#7215] FIELD-LEVEL SECURITY ON `$expand`, the half objectui#6898
     // left open on both projection sites. `$select` on a denied lookup asks for
     // its BARE FOREIGN KEY; `$expand` asks the server to RESOLVE it and return
@@ -3294,6 +3458,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     schema.map,
     perms,
     schema.objectName,
+    draftOnlyFields,
   ]);
 
   /**
@@ -3630,7 +3795,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       try {
         // Construct filter — shared with the export path so the file a user
         // downloads is built from the same three sources as the rows on screen.
-        const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions);
+        const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, draftOnlyFields);
 
         // Convert sort to query format
         // Use array format to ensure order is preserved (Object keys are not guaranteed ordered)
@@ -3670,9 +3835,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // `addSpeculative`) — the shape `ObjectGrid` (`ensureId([])` keeps
           // `['id']`) and `RelatedList` (objectui#10186) send.
           if (rawCols.length === 0) return undefined;
-          const cols = (perms?.isLoaded && schema.objectName)
-            ? rawCols.filter(c => perms.checkField(schema.objectName!, c, 'read'))
+          // objectstack#34807 — a column on a draft-only field is drawn (empty,
+          // under its draft label) but never asked for: the data door knows
+          // only the published object and refuses the whole query for it.
+          const servedCols = draftOnlyFields.size > 0
+            ? rawCols.filter(c => !refersToDraftOnlyField(c, draftOnlyFields))
             : rawCols;
+          const cols = (perms?.isLoaded && schema.objectName)
+            ? servedCols.filter(c => perms.checkField(schema.objectName!, c, 'read'))
+            : servedCols;
           // Don't speculatively add `_id` / `name` — some backends reject
           // unknown select keys with an empty result set rather than
           // ignoring them. Stick to the user-requested columns plus the
@@ -3701,7 +3872,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             const names = Array.isArray(f)
               ? (f as any[]).map(x => x?.name).filter((n): n is string => typeof n === 'string')
               : Object.keys(f);
-            const s = new Set<string>(names);
+            // objectstack#34807 — a draft-only field is no real field of the
+            // object the data door reads, so no speculative binding asks for it.
+            const s = new Set<string>(names.filter((n) => !draftOnlyFields.has(n)));
             s.add('id'); s.add('created_at'); s.add('updated_at');
             return s;
           })();
@@ -4091,8 +4264,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
            ...(expandFields.length > 0 ? { $expand: expandFields } : {}),
            ...(searchTerm ? {
              $search: searchTerm,
-             ...(schema.searchableFields && schema.searchableFields.length > 0
-               ? { $searchFields: schema.searchableFields }
+             ...(searchFieldsSent && searchFieldsSent.length > 0
+               ? { $searchFields: searchFieldsSent }
                : {}),
            } : {}),
         };
@@ -4291,7 +4464,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, searchFieldsSent, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken, draftOnlyFields]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -4717,7 +4890,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   let selfQueryFilter: unknown = authoredFilter;
   if (currentView === 'gantt' || currentView === 'tree' || currentView === 'chart' || gridOwnsGroupedFetch || kanbanLanesPaged) {
     try {
-      const value = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions);
+      const value = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, draftOnlyFields);
       const key = JSON.stringify(value ?? null);
       const cached = selfQueryFilterRef.current;
       if (cached && cached.key === key) {
@@ -4848,8 +5021,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ...(gridOwnsGroupedFetch
             ? {
                 filter: selfQueryFilter,
-                ...(schema.searchableFields && schema.searchableFields.length > 0
-                  ? { searchableFields: schema.searchableFields }
+                ...(searchFieldsSent && searchFieldsSent.length > 0
+                  ? { searchableFields: searchFieldsSent }
                   : {}),
               }
             : {}),
@@ -5200,8 +5373,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ...(ganttSearchTerm
             ? {
                 search: ganttSearchTerm,
-                ...(schema.searchableFields && schema.searchableFields.length > 0
-                  ? { searchableFields: schema.searchableFields }
+                ...(searchFieldsSent && searchFieldsSent.length > 0
+                  ? { searchableFields: searchFieldsSent }
                   : {}),
               }
             : {}),
@@ -5390,7 +5563,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, serverSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, serverSort, searchFieldsSent, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
@@ -5557,13 +5730,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     return candidateFields
       .filter((f) => canReadField(perms, schema.objectName, f.value))
       .filter((f) => !isHidden(f.value) || held.has(f.value))
+      // objectstack#34807 — a draft-only field cannot filter the list (the
+      // data door refuses it), so it is not offered; a held condition naming
+      // one keeps its row, so it can be removed.
+      .filter((f) => !draftOnlyFields.has(f.value) || held.has(f.value))
       .map((field, index) => ({ field, index, tier: tierOf(field.value) }))
       .sort((a, b) =>
         a.tier - b.tier ||
         (a.tier === 0 ? columnRank.get(a.field.value)! - columnRank.get(b.field.value)! : a.index - b.index),
       )
       .map(({ field }) => field);
-  }, [candidateFields, currentFilters.conditions, effectiveFields, objectDef, schema.objectName, perms]);
+  }, [candidateFields, currentFilters.conditions, effectiveFields, objectDef, schema.objectName, perms, draftOnlyFields]);
 
   // Sort candidates: ALL fields the view can name, minus the ones the sort
   // cannot honestly reach (objectui#4243 — previously ⊂ filter candidates).
@@ -5659,9 +5836,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       const offered = canReadField(perms, schema.objectName, field.value) && !isDeclaredHidden(defs, field.value);
       if (!offered && !inUse.has(field.value)) continue;
       const relational = EXPANDABLE_FIELD_TYPES.has(field.type);
-      const platformSortable = platformSortability
+      // A draft-only field (objectstack#34807) is never sortable: the data
+      // door refuses it, whatever the projection says.
+      const platformSortable = !draftOnlyFields.has(field.value) && (platformSortability
         ? isPlatformSortableField(platformSortability, field.value)
-        : !UNMATERIALIZED_FIELD_TYPES.has(field.type);
+        : !UNMATERIALIZED_FIELD_TYPES.has(field.type));
       // `type` lets the picker name a date's direction as time
       // (objectstack#27520): "Oldest → Newest", not "A → Z".
       if (offered && !relational && platformSortable) {
@@ -5682,7 +5861,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       if (relational) excluded = true;
     }
     return { sortFields: fields, sortHasRelationalField: excluded, sortPicksRelationalField: picked };
-  }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName, objectDef]);
+  }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName, objectDef, draftOnlyFields]);
 
   /**
    * [#6455] THE persist boundary: what this picker LISTS is not what it
@@ -5855,9 +6034,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       && !!schema.objectName
       && exportConfig?.streaming !== false;
     if (serverEligible) {
-      const fields = effectiveFields
+      // A draft-only column (objectstack#34807) is drawn empty, never asked for.
+      const fields = (effectiveFields
         .map((f: any) => columnIdentity(f))
-        .filter(Boolean) as string[];
+        .filter(Boolean) as string[])
+        .filter((f) => !refersToDraftOnlyField(f, draftOnlyFields));
 
       // The rows on screen were asked for with `serverSort`, so the file is too:
       // a refused entry would fail the export the way it failed the list.
@@ -5878,7 +6059,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // file, no message. Here it lands in the catch below, which names it
           // in the toolbar the way the data fetch's own `try` names it in the
           // load-error panel — and nothing is exported unfiltered.
-          const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions);
+          const finalFilter = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, draftOnlyFields);
           const blob = await dataSource!.exportDownload!(schema.objectName!, {
             format: format as 'csv' | 'xlsx' | 'json',
             fields: fields.length ? fields : undefined,
@@ -5889,8 +6070,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // with objectstack#4230; older ones ignore it and behave as before.
             ...(searchTerm ? {
               search: searchTerm,
-              ...(schema.searchableFields && schema.searchableFields.length > 0
-                ? { searchFields: schema.searchableFields }
+              ...(searchFieldsSent && searchFieldsSent.length > 0
+                ? { searchFields: searchFieldsSent }
                 : {}),
             } : {}),
             sort,
@@ -5972,7 +6153,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setShowExport(false);
     // `searchTerm` / `searchableFields` belong here: the export now narrows by
     // the active search, so a stale closure would export the wrong row set.
-  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel, t]);
+  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, searchFieldsSent, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel, t, draftOnlyFields]);
 
   // All available fields for hide/show (with i18n)
   //
@@ -7405,6 +7586,28 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         </div>
       )}
 
+      {/* objectstack#34807 — a sort or filter naming a field that exists only
+          in the draft preview is left out of the query (see
+          `draftOnlyQueryDrops`); this line says so, instead of the data door
+          refusing the whole list. */}
+      {draftOnlyQueryDrops.length > 0 && (
+        <div
+          role="status"
+          data-testid="list-draft-only-query-notice"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            {t('list.draftOnlyQueryDropped', {
+              fields: draftOnlyQueryDrops
+                .map((field) => allFields.find((f) => f.name === field)?.label
+                  || tFieldLabel(field, objectDef?.fields?.[field]?.label || field))
+                .join(', '),
+            })}
+          </span>
+        </div>
+      )}
+
       {/* View Content */}
       <div key={currentView} className="flex-1 min-h-0 bg-background relative overflow-hidden animate-in fade-in-0 duration-200">
         {/* Re-fetch indicator: thin top progress bar shown when refreshing
@@ -7647,8 +7850,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               ? {
                   lanePaging: {
                     search: searchTerm,
-                    ...(schema.searchableFields && schema.searchableFields.length > 0
-                      ? { searchFields: schema.searchableFields }
+                    ...(searchFieldsSent && searchFieldsSent.length > 0
+                      ? { searchFields: searchFieldsSent }
                       : {}),
                     reloadKey: `${refreshKey}:${String(schema.refreshTrigger ?? '')}`,
                   },

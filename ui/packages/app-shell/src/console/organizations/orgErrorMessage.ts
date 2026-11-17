@@ -195,6 +195,42 @@ export function isAcceptNeedsVerifiedEmail(err: unknown): boolean {
 }
 
 /**
+ * The verification screen that answers {@link isAcceptNeedsVerifiedEmail}, as a
+ * router path: `/verify-email-prompt` with the account's address (`email`) and
+ * the router path the verification mail's link returns to (`redirect`). Each
+ * is left out when absent.
+ *
+ * The route is the host's: the console declares it, and a host that mounts
+ * the accept page or the console's action runtime without it sends the person
+ * nowhere (the package README, "Hosting the invitation pages").
+ */
+export function verifyEmailPromptPath(
+  email: string | null | undefined,
+  redirect: string | null | undefined,
+): string {
+  const sp = new URLSearchParams();
+  if (email) sp.set('email', email);
+  if (redirect) sp.set('redirect', redirect);
+  return `/verify-email-prompt?${sp.toString()}`;
+}
+
+/**
+ * {@link verifyEmailPromptPath} for a refusal that did not come from the accept
+ * page — the invitation inbox's `accept_invitation` action: the mail's link
+ * returns to the accept page for that invitation, where the person accepts
+ * once verified. No invitation id, no `redirect`.
+ */
+export function invitationVerifyEmailPromptPath(
+  email: string | null | undefined,
+  invitationId: unknown,
+): string {
+  const redirect = typeof invitationId === 'string' && invitationId
+    ? `/accept-invitation/${encodeURIComponent(invitationId)}`
+    : undefined;
+  return verifyEmailPromptPath(email, redirect);
+}
+
+/**
  * Resolve a rejected organization call into the message to show the user.
  *
  * Order — mapped code, then the server's own sentence, then the site's own
