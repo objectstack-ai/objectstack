@@ -1,18 +1,17 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import React from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
 import { Button } from '@object-ui/components';
-import { Maximize2 } from 'lucide-react';
+import { Maximize2, Minimize2 } from 'lucide-react';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { useChatConversation } from '../../hooks/useChatConversation.js';
 import { chatConversationScope, chatProductOfAgent } from '../../hooks/chatScope.js';
 import { resolveSurfaceAgent } from '../../hooks/surfaceAgent.js';
-import { t } from '../metadata-admin/i18n.js';
 import { ChatPane, resolveApiBase, type PendingFirstMessage } from '../../console/ai/AiChatPage.js';
 import { AiUsageIndicator } from '../../layout/AiUsageIndicator.js';
-import { rememberDockReturnLocation } from '../../layout/chatDockState.js';
 import { usePlanApprovalPendingCount } from '../../assistant/assistantBus.js';
 
 /**
@@ -29,8 +28,6 @@ export interface StudioSurfaceLabel {
 interface StudioCopilotConversationProps {
   /** The package the Studio surface is editing — scopes the build agent to it. */
   packageId: string;
-  /** ADR-0037/P3c — the Live Canvas open/close seam, forwarded to ChatPane. */
-  onCanvasOpenChange?: (open: boolean) => void;
   /**
    * objectui#8219 — the open artifact's display label, for the "discussing"
    * chip only. Passed to ChatPane as its own prop when it labels the SAME
@@ -49,7 +46,6 @@ interface StudioCopilotConversationProps {
  */
 export function StudioCopilotConversation({
   packageId,
-  onCanvasOpenChange,
   surfaceLabel,
 }: StudioCopilotConversationProps): React.ReactElement | null {
   // cloud#1610 — the URL is the single source of the surface context: the
@@ -100,8 +96,8 @@ export function StudioCopilotConversation({
 
   // One durable conversation per (user, app, product) — ADR-0057. Keyed on the
   // PACKAGE and PRODUCT, not on this surface, so reopening the same app's design
-  // chat in the full-page `/ai/build?package=…` focus view resumes THIS thread
-  // (no `studio:` fork). See {@link chatConversationScope}.
+  // chat in the console's drawer (`/ai/build?package=…` opens it there)
+  // resumes THIS thread (no `studio:` fork). See {@link chatConversationScope}.
   const { conversationId, initialMessages, ensureConversation, createError } = useChatConversation({
     userId: activeAgent ? userId : undefined,
     scope: activeAgent
@@ -142,7 +138,6 @@ export function StudioCopilotConversation({
       onSent={() => {}}
       onShare={() => {}}
       showDebug={false}
-      onCanvasOpenChange={onCanvasOpenChange}
     />
   );
 }
@@ -161,8 +156,6 @@ export interface StudioCopilotStatus {
 export interface StudioChatDockProps {
   /** The package the Studio surface is editing — scopes the build agent to it. */
   packageId: string;
-  /** UI locale (from the Studio surface) for the copilot's own chrome. */
-  locale?: string;
   /** objectui#8219 — the open artifact's display label, for the chat's
    * "discussing" chip; see {@link StudioCopilotConversation}. */
   surfaceLabel?: StudioSurfaceLabel | null;
@@ -176,8 +169,13 @@ export interface StudioChatDockProps {
    * every change, and as unavailable on unmount.
    */
   onStatusChange?: (status: StudioCopilotStatus) => void;
-  /** ADR-0037 — the Live Canvas opened or closed; the slot widens while it is open. */
-  onCanvasOpenChange?: (open: boolean) => void;
+  /**
+   * objectstack#34610 (ADR-0057 Amendment A3) — the slot is widened in place.
+   * The expand control toggles it through `onWideChange`; the Studio page
+   * stays where it is.
+   */
+  wide?: boolean;
+  onWideChange?: (wide: boolean) => void;
 }
 
 /**
@@ -188,20 +186,19 @@ export interface StudioChatDockProps {
  * its host moved. The slot owns showing and hiding, its width and the small
  * screen; this renders the conversation and its toolbar.
  *
- *  - Maximize opens `/ai/build?package=…`, which resumes THIS thread (the
- *    scope is keyed on the package, not the surface).
- *  - The Live Canvas reports open/close up to the slot (ADR-0037 — the preview
- *    needs more width than the slot has).
+ *  - objectstack#34610 — the expand control widens the slot in place
+ *    (`wide` / `onWideChange`) and the same control narrows it again. It used
+ *    to open `/ai/build?package=…`, which after objectstack#34608 lands on Home
+ *    with the drawer full window, so the Studio page was lost.
  */
 export function StudioChatDock({
   packageId,
-  locale,
   surfaceLabel,
   onStatusChange,
-  onCanvasOpenChange,
+  wide = false,
+  onWideChange,
 }: StudioChatDockProps): React.ReactElement | null {
-  const navigate = useNavigate();
-  const location = useLocation();
+  const { t: tc } = useObjectTranslation();
   const apiBase = React.useMemo(() => resolveApiBase(), []);
 
   // The catalog gate lives HERE: the slot asks it, and draws nothing of a
@@ -224,16 +221,11 @@ export function StudioChatDock({
     [],
   );
 
-  // Record where we maximized FROM so the `/ai` page's collapse-to-dock
-  // returns to THIS Studio surface, not to some console page.
-  const openFullPage = React.useCallback(() => {
-    rememberDockReturnLocation(`${location.pathname}${location.search}`);
-    navigate(`/ai/build?package=${encodeURIComponent(packageId)}`);
-  }, [location.pathname, location.search, navigate, packageId]);
-
   if (!available) return null;
 
-  const maximizeLabel = t('engine.studio.slot.openFullPage', locale);
+  const maximizeLabel = wide
+    ? tc('console.ai.dock.restore', { defaultValue: 'Restore side panel' })
+    : tc('console.ai.dock.expand', { defaultValue: 'Expand' });
   return (
     <>
       <div className="flex h-9 shrink-0 items-center justify-end gap-0.5 border-b px-2">
@@ -244,12 +236,13 @@ export function StudioChatDock({
           variant="ghost"
           size="icon"
           className="h-7 w-7 text-muted-foreground hover:text-foreground"
-          onClick={openFullPage}
+          onClick={() => onWideChange?.(!wide)}
           aria-label={maximizeLabel}
           title={maximizeLabel}
+          aria-pressed={wide}
           data-testid="studio-copilot-maximize"
         >
-          <Maximize2 className="h-3.5 w-3.5" />
+          {wide ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
         </Button>
       </div>
       {/* flex-col so the ChatPane child (its root is `flex min-h-0 flex-1`)
@@ -257,7 +250,6 @@ export function StudioChatDock({
       <div className="flex min-h-0 flex-1 flex-col">
         <StudioCopilotConversation
           packageId={packageId}
-          onCanvasOpenChange={onCanvasOpenChange}
           surfaceLabel={surfaceLabel}
         />
       </div>
