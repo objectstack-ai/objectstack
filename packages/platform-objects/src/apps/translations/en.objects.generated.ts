@@ -263,6 +263,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "Already pending, told again",
             "summary.failed": "Not added",
             rows: "Result per row"
+          },
+          columns: {
+            rows: {
+              row: "Row",
+              email: "Email",
+              ok: "Succeeded",
+              alreadyPending: "Already pending, told again",
+              "host.notified": "Hosting organization told",
+              "host.reason": "Why not told",
+              "error.message": "Not added because",
+              notApplied: "Not applied (set these on the record)",
+              managerError: "Manager"
+            }
           }
         }
       },
