@@ -23,10 +23,12 @@
  * that exists nowhere. Both, in en and zh-CN, must read the same sentence with
  * only the name changed.
  *
- * Direction, written before the run: with the record and create faces put back
- * on `empty.objectNotFoundDescription` the create cells RED (that key is gone, so
- * the raw key renders); with the pack sentence put back to "does not exist in
- * the current configuration" every cell RED on the sentence assertion.
+ * The route cells read the sentence from the pack, so they pin which key each
+ * face draws and that both names read alike; the premise cell pins the wording.
+ * Measured: the create face put back on `empty.objectNotFoundDescription` reds
+ * both create cells (that key is gone, so the raw key renders); the en sentence
+ * put back to "does not exist in the current configuration" reds the premise
+ * cell and leaves the route cells green.
  */
 
 import '@testing-library/jest-dom/vitest';
