@@ -590,6 +590,7 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
             const envelope = resolveThrownHttpError(err);
             expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
             expect(String(err.message)).toContain(`'${WRITABLE}'`);
+            expect(String(err.message)).toContain('publishing this draft would move it');
             expect(metadataWrites()).toHaveLength(before);
             expect(rows('action', NAME, 'draft')).toEqual([]);
             expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'invoice', 'custom']]);
@@ -608,6 +609,23 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
             expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
             expect(String(err.message)).toContain(`Cannot publish action '${NAME}'`);
             expect(String(err.message)).toContain(`'${WRITABLE}'`);
+            expect(metadataWrites()).toHaveLength(before);
+            expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
+            expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'invoice', 'custom']]);
+        });
+
+        it('the same, the per-item publish stating `packageId: null` in process: refused 409 the same way, and the row and the draft stay', async () => {
+            const { protocol, rows, seedRow, metadataWrites } = makeProtocol();
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
+            await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
+            seedRow({ type: 'action', name: NAME, package_id: null, metadata: JSON.stringify(action(NAME, 'custom', 'invoice')), checksum: 'sha-custom' });
+            const before = metadataWrites().length;
+
+            const err = await refusalOf(() => protocol.publishMetaItem({ type: 'action', name: NAME, packageId: null } as any));
+
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(String(err.message)).toContain(`Cannot publish action '${NAME}'`);
             expect(metadataWrites()).toHaveLength(before);
             expect(stored(rows('action', NAME, 'draft'))).toEqual([[null, 'task', 'env']]);
             expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'invoice', 'custom']]);

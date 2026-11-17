@@ -895,8 +895,10 @@ export class ProtocolHistoryAndPublishFacet {
         // draft is promoted into the one package-unbound active row of the
         // name: when that row is a holder's customization, the publish would
         // move it off the holder's object, so it is refused, never moved, as
-        // the saves are ({@link environmentActionPublishSlotRefusal}).
-        if (!('packageId' in request) && draftKey === null && promoteInto === null && draftForGate) {
+        // the saves are ({@link environmentActionPublishSlotRefusal}). Asked
+        // whether the caller named no package or stated `packageId: null`:
+        // both promote the package-unbound draft into that row.
+        if (draftKey === null && promoteInto === null && draftForGate) {
             const slotRefusal = await environmentActionPublishSlotRefusal(host, singularType, request.name, draftForGate.body);
             if (slotRefusal) throw slotRefusal;
         }

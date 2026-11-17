@@ -3063,17 +3063,19 @@ export function environmentActionSlotRefusal(
     item: unknown,
     storedBody: unknown,
     activeRows: ReadonlyArray<{ package_id?: unknown; metadata?: unknown }>,
-    verb: 'save' | 'publish' = 'save',
+    verb: 'save' | 'publish' | 'draft-save' = 'save',
 ): (Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined {
     const holders = actionCustomizationHoldersOf(storedBody, activeRows);
     if (holders.length === 0) return undefined;
     const where = (object: string | undefined): string => (object === undefined ? 'bound to no object' : `on object '${object}'`);
     const stored = storedBody === undefined ? 'unreadable' : where(boundObjectOf(storedBody));
     const slot = state === 'draft' ? 'draft' : 'row';
+    const door = verb === 'publish' ? 'publish' : 'save';
+    const mover = verb === 'draft-save' ? 'publishing this draft' : `this ${verb}`;
     const err = new Error(
-        `Cannot ${verb} ${type} '${name}' naming no package ${where(boundObjectOf(item))}: the environment keeps one `
+        `Cannot ${door} ${type} '${name}' naming no package ${where(boundObjectOf(item))}: the environment keeps one `
         + `package-less ${slot} of this name, and the stored one (${stored}) is the customization of `
-        + `${holders.map((id) => `'${id}'`).join(', ')}, so this ${verb} would move it. Nothing was written. `
+        + `${holders.map((id) => `'${id}'`).join(', ')}, so ${mover} would move it. Nothing was written. `
         + `To edit that customization, save it ${stored === 'unreadable' ? 'naming the package' : stored}; for the `
         + `environment's own ${type} ${where(boundObjectOf(item))}, `
         + `${verb === 'publish' ? 'discard this draft and save it under another name' : 'use another name'}.`,
@@ -3109,7 +3111,7 @@ async function environmentActionDraftSlotRefusal(
         if (draftRefusal) return draftRefusal;
     }
     for (const row of activeRows.filter((candidate) => !isPackageBoundRow(candidate))) {
-        const rowRefusal = environmentActionSlotRefusal('active', type, name, item, storedBodyOf(row.metadata), activeRows);
+        const rowRefusal = environmentActionSlotRefusal('active', type, name, item, storedBodyOf(row.metadata), activeRows, 'draft-save');
         if (rowRefusal) return rowRefusal;
     }
     return undefined;
