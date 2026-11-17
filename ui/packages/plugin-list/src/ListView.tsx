@@ -1073,6 +1073,16 @@ export function objectHasOwnershipQueue(objectDef: unknown): boolean {
 }
 
 /**
+ * Does the session's per-object queue answer name this object? `objectsUsingQueues`
+ * is the server's list (objectstack#34602): the objects on which a record sits
+ * in a queue now, or an assignment rule routes new records into one. Only
+ * membership in a present list counts; an absent answer is not a yes.
+ */
+export function objectUsesQueues(objectsUsingQueues: readonly string[] | undefined, objectName: unknown): boolean {
+  return Array.isArray(objectsUsingQueues) && typeof objectName === 'string' && objectsUsingQueues.includes(objectName);
+}
+
+/**
  * Does the view's own filter require `owner_id` to hold a value? Then no row it
  * returns can sit in a queue, whose rows have no owner, and the "In a queue"
  * toggle could only ever empty the list (objectstack#34580). An affordance is
@@ -2619,10 +2629,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // The "In a queue" toggle (objectstack ADR-0142 D3). Offered only on an
   // object the server serves with its injected `queue` column, AND only when
   // the session says the organization has at least one queue (`hasAnyQueue`
-  // on `/auth/me/permissions`, objectstack#28428): with no queue the toggle
-  // could only ever return an empty list. The flag rides the permissions
-  // answer the console already holds, so a list mount reads no queue list.
-  // An unknown answer (no provider, the role-based one, anonymous) hides it.
+  // on `/auth/me/permissions`, objectstack#28428) AND names this object among
+  // those that use queues (`objectsUsingQueues`, objectstack#34602: a record
+  // of it sits in a queue now, or an assignment rule routes it into one):
+  // anywhere else the toggle could only ever return an empty list. Both ride
+  // the permissions answer the console already holds, so a list mount reads
+  // no queue list. An unknown answer (no provider, the role-based one,
+  // anonymous) hides it.
   // Not offered on a view whose own filter pins `owner_id` to a value
   // (`viewFilterRequiresOwner`, objectstack#34580): no row of it can sit in a
   // queue. Withheld that way it contributes nothing and a pressed state is let
@@ -2630,9 +2643,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // Withheld with the user filters on a dataset-bound chart. Ephemeral like
   // the toolbar's other unpersisted toggles: it narrows what is on screen.
   const [sittingInQueueOnly, setSittingInQueueOnly] = React.useState(false);
-  const { hasAnyQueue } = usePermissions();
+  const { hasAnyQueue, objectsUsingQueues } = usePermissions();
   const viewPinsOwner = React.useMemo(() => viewFilterRequiresOwner(authoredFilter), [authoredFilter]);
-  const queueFilterOffered = hasAnyQueue === true && objectHasOwnershipQueue(objectDef) && !viewPinsOwner;
+  const queueFilterOffered =
+    hasAnyQueue === true
+    && objectUsesQueues(objectsUsingQueues, schema.objectName)
+    && objectHasOwnershipQueue(objectDef)
+    && !viewPinsOwner;
   React.useEffect(() => {
     if (viewPinsOwner) setSittingInQueueOnly(false);
   }, [viewPinsOwner]);

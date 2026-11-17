@@ -1379,6 +1379,8 @@ const de = {
     writeStrippedUnknownReason: "Vom Server nicht übernommen: {{fields}}",
     approvalPendingEditable: "In Genehmigung · bearbeitbar",
     approvalPendingTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage; dieser Schritt erlaubt weiterhin die Bearbeitung",
+    approvalPending: "In Genehmigung",
+    approvalPendingNotEditableTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage",
     approvalProgress: "Genehmigungen — {{got}} von {{need}}",
     approvalProgressGroups: "Freigabe — {{got}} von {{need}} Gruppen",
     approvalProgressLabel: "Genehmigungsfortschritt",
@@ -2331,6 +2333,7 @@ const de = {
       view: "Anzeigen",
       confirm: "Bestätigen",
       cancel: "Abbrechen",
+      continue: "Fortsetzen",
       prefilled: "Noch nicht festgelegte Werte sind aus Ihrem Browser vorgeschlagen. Gespeichert wird erst, wenn Sie bestätigen.",
       organizationName: {
         title: "Organisation benennen",

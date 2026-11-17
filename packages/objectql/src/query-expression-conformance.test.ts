@@ -214,7 +214,10 @@ function makeStubDriver() {
     const driver: any = {
         name: 'memory',
         version: '0.0.0',
-        supports: {} as any,
+        // [#33876] It evaluates a composed `ReadableIds` leaf (above), and says
+        // so: a nested-relation condition on a read verb is refused up front
+        // on a driver without the bit.
+        supports: { readableIdsLeaf: true } as any,
         async connect() {},
         async disconnect() {},
         async checkHealth() { return true; },

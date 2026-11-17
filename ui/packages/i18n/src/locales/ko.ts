@@ -1379,6 +1379,8 @@ const ko = {
     writeStrippedUnknownReason: "다음 필드는 서버에서 적용되지 않았습니다: {{fields}}",
     approvalPendingEditable: "승인 진행 중 · 편집 가능",
     approvalPendingTooltip: "이 레코드에 대기 중인 승인 요청이 있지만 이 단계에서는 편집할 수 있습니다",
+    approvalPending: "승인 진행 중",
+    approvalPendingNotEditableTooltip: "이 레코드에 대기 중인 승인 요청이 있습니다",
     approvalProgress: "승인 — {{need}}건 중 {{got}}건",
     approvalProgressGroups: "합의 — {{need}}개 그룹 중 {{got}}개",
     approvalProgressLabel: "승인 진행 상황",
@@ -2331,6 +2333,7 @@ const ko = {
       view: "보기",
       confirm: "확인",
       cancel: "취소",
+      continue: "계속",
       prefilled: "아직 설정되지 않은 값은 브라우저를 기준으로 제안되었습니다. 확인하기 전에는 아무것도 저장되지 않습니다.",
       organizationName: {
         title: "조직 이름 정하기",

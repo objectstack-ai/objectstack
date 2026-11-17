@@ -90,13 +90,13 @@ describe('DetailView – approval-lock band (objectui#2618)', () => {
  */
 describe('DetailView – approval band, editable vs locked (objectui#2902)', () => {
   it('labels a pending-but-unlocked approval as editable, not locked', () => {
-    renderBand({ locked: false, approvalPending: true });
+    renderBand({ locked: false, approvalPending: true, canEdit: true });
     expect(screen.getByText('In approval · editable')).toBeInTheDocument();
     expect(screen.queryByText('Locked for approval')).not.toBeInTheDocument();
   });
 
   it('uses a distinct tooltip for the editable state', () => {
-    renderBand({ locked: false, approvalPending: true });
+    renderBand({ locked: false, approvalPending: true, canEdit: true });
     expect(screen.getByRole('status')).toHaveAttribute(
       'title',
       'This record has a pending approval request; this step still allows editing',
@@ -131,7 +131,7 @@ describe('DetailView – approval band, editable vs locked (objectui#2902)', () 
     // a band that says "Locked for approval". The host resolved its verdict
     // from the request's `lock_record`, which is the same snapshot the
     // server's lock hook reads, so it wins.
-    renderBand({ locked: false, approvalPending: true }, { approval_status: 'pending' });
+    renderBand({ locked: false, approvalPending: true, canEdit: true }, { approval_status: 'pending' });
     expect(screen.getByText('In approval · editable')).toBeInTheDocument();
     expect(screen.queryByText('Locked for approval')).not.toBeInTheDocument();
   });
@@ -180,7 +180,7 @@ describe('DetailView – quorum & per-group progress (objectstack#4478)', () => 
   it('renders the tally on an editable (lockRecord: false) node too', () => {
     // Progress is about the DECISION, not the lock — an unlocked quorum node
     // needs the same count.
-    renderBand({ locked: false, approvalPending: true, approvalProgress: QUORUM });
+    renderBand({ locked: false, approvalPending: true, approvalProgress: QUORUM, canEdit: true });
     expect(screen.getByText('In approval · editable')).toBeInTheDocument();
     expect(screen.getByText('Approvals — 1 of 2')).toBeInTheDocument();
   });

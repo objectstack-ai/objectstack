@@ -1440,6 +1440,8 @@ const ja = {
     writeStrippedUnknownReason: "次の項目はサーバーで反映されませんでした: {{fields}}",
     approvalPendingEditable: "承認中 · 編集可能",
     approvalPendingTooltip: "このレコードには承認待ちのリクエストがありますが、このステップでは編集できます",
+    approvalPending: "承認中",
+    approvalPendingNotEditableTooltip: "このレコードには承認待ちのリクエストがあります",
     approvalProgress: "承認 — {{need}} 件中 {{got}} 件",
     approvalProgressGroups: "合議 — {{need}} グループ中 {{got}} グループ",
     approvalProgressLabel: "承認の進捗",
@@ -2333,6 +2335,7 @@ const ja = {
       view: "表示",
       confirm: "確定",
       cancel: "キャンセル",
+      continue: "続ける",
       prefilled: "未設定の項目にはブラウザーから推測した値が入っています。確定するまで何も保存されません。",
       organizationName: {
         title: "組織に名前を付ける",

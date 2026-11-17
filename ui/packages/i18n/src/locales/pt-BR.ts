@@ -1418,6 +1418,8 @@ const pt = {
     writeStrippedUnknownReason: "Não aplicado pelo servidor: {{fields}}",
     approvalPendingEditable: "Em aprovação · editável",
     approvalPendingTooltip: "Este registro tem uma solicitação de aprovação pendente; esta etapa ainda permite a edição",
+    approvalPending: "Em aprovação",
+    approvalPendingNotEditableTooltip: "Este registro tem uma solicitação de aprovação pendente",
     approvalProgress: "Aprovações — {{got}} de {{need}}",
     approvalProgressGroups: "Assinaturas — {{got}} de {{need}} grupos",
     approvalProgressLabel: "Progresso da aprovação",
@@ -2394,6 +2396,7 @@ const pt = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Os valores ainda não definidos foram sugeridos com base no seu navegador. Nada é salvo até você confirmar.",
       organizationName: {
         title: "Dê um nome à sua organização",
