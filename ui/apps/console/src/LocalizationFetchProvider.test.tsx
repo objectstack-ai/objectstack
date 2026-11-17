@@ -408,15 +408,19 @@ describe('LocalizationFetchProvider', () => {
       clearSharedDiscoveryCache();
     });
 
-    /** Discovery serving `locale`, and a server answering the `Accept-Language` rung with what it was told. */
-    function serveDiscovery(locale: { default: string; supported: string[] }) {
+    /**
+     * Discovery serving `locale`, and a server answering the `Accept-Language`
+     * rung with what it was told — or, told nothing, with `deploymentDefault`
+     * (the organization's language, else the app's declared default).
+     */
+    function serveDiscovery(locale: { default: string; supported: string[] }, deploymentDefault = 'en-US') {
       fetchMock().mockImplementation(async (url: string, init: RequestInit) =>
         String(url).endsWith('/api/v1/discovery')
           ? ok({ success: true, data: { locale: { ...locale, timezone: 'UTC' } } })
           : ok({
               authenticated: true,
               currency: null,
-              locale: (init.headers as Record<string, string>)['Accept-Language'] ?? 'en-US',
+              locale: (init.headers as Record<string, string>)['Accept-Language'] ?? deploymentDefault,
               timezone: 'UTC',
             }),
       );
@@ -437,15 +441,18 @@ describe('LocalizationFetchProvider', () => {
       expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('zh-CN');
     });
 
-    it("with no choice on this device, a browser language the app does not ship states the app's default", async () => {
-      serveDiscovery({ default: 'zh-CN', supported: ['zh-CN'] });
+    it('with no choice on this device, a browser language the app does not ship states nothing, and the server decides (objectstack#34392)', async () => {
+      // The organization's language is zh-CN; the app's declared default is en.
+      serveDiscovery({ default: 'en', supported: ['en', 'zh-CN'] }, 'zh-CN');
       vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('fr');
       void loadPreferredLocale('');
 
       renderUnderLanguage('zh-CN');
 
       await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日'));
-      expect(statedOn(1)).toBe('zh-CN');
+      // Stating the app's `en` would have answered the request rung and hidden the organization's language.
+      expect(statedOn(1)).toBeNull();
+      expect(fetchMock()).toHaveBeenCalledTimes(2);
       expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('zh-CN');
     });
 

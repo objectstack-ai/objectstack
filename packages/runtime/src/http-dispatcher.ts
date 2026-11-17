@@ -56,8 +56,8 @@ import { createApprovalsActDomain, APPROVALS_ACT_ROUTE } from './domains/approva
 import { createWebhooksRedeliverDomain } from './domains/webhooks.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
-import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest } from './action-dispatch.js';
-import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
+import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest, type ActionResumeRequest } from './action-dispatch.js';
+import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge, resumeActionRunRequest } from './domains/mcp.js';
 import { createMetaDomain, handleMetadataRequest } from './domains/meta.js';
 import { createDataDomain, handleDataRequest } from './domains/data.js';
 
@@ -2967,6 +2967,16 @@ export class HttpDispatcher {
      */
     async dispatchHostAction(request: ActionDispatchRequest): Promise<ActionDispatchAnswer> {
         return dispatchActionRequest(this.domainDeps, request, (context, hints) => this.placeHostActionRequest(context, hints));
+    }
+
+    /**
+     * [#34386] A host's own resume door over this dispatcher's deps — the MCP
+     * `resume_run` door's steps for the approval leg of a handed-off resume
+     * (`./action-dispatch.ts#dispatchActionResume`, the published entry),
+     * placed as {@link dispatchHostAction} places its call.
+     */
+    async resumeHostActionRun(request: ActionResumeRequest): Promise<ActionDispatchAnswer> {
+        return resumeActionRunRequest(this.domainDeps, request, (context, hints) => this.placeHostActionRequest(context, hints));
     }
 
     /**

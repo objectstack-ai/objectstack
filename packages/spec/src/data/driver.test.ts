@@ -61,6 +61,9 @@ const RETIRED_BITS = [
  *
  * `aggregationFilter` is the fifth, under the same rule: `engine.aggregate`
  * reads it (with method presence) to send a per-measure filter to the driver.
+ *
+ * `lockRows` is the sixth: a predicate delete's cascade arm reads it (with an
+ * open transaction) to send its matched-row read with `DriverOptions.lockRows`.
  */
 const LIVE_BITS = [
   'queryDateGranularity',
@@ -68,6 +71,7 @@ const LIVE_BITS = [
   'batchSchemaSync',
   'transactionsUnsupported',
   'aggregationFilter',
+  'lockRows',
 ] as const;
 
 describe('DriverCapabilitiesSchema', () => {
@@ -78,6 +82,7 @@ describe('DriverCapabilitiesSchema', () => {
       batchSchemaSync: true,
       transactionsUnsupported: true,
       aggregationFilter: true,
+      lockRows: true,
     };
 
     expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
@@ -95,13 +100,19 @@ describe('DriverCapabilitiesSchema', () => {
     expect(parsed).not.toHaveProperty('transactionsUnsupported');
     // Absent = the engine aggregates a filtered measure in memory, as before the bit.
     expect(parsed).not.toHaveProperty('aggregationFilter');
+    // Absent = the engine sends no lock request with a predicate delete's read.
+    expect(parsed).not.toHaveProperty('lockRows');
   });
 
   it('refuses a non-boolean aggregationFilter', () => {
     expect(DriverCapabilitiesSchema.safeParse({ aggregationFilter: 'yes' }).success).toBe(false);
   });
 
-  it('declares exactly the audited shape: 5 live bits + 31 tombstones', () => {
+  it('refuses a non-boolean lockRows', () => {
+    expect(DriverCapabilitiesSchema.safeParse({ lockRows: 'yes' }).success).toBe(false);
+  });
+
+  it('declares exactly the audited shape: 6 live bits + 31 tombstones', () => {
     const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
     const keys = Object.keys(shape).sort();
     expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
@@ -202,7 +213,7 @@ describe('tsc channel: the retired bits are unwritable in DriverCapabilities', (
     const props = new Map(capsType.getProperties().map((p) => [p.getName(), p]));
 
     // Anti-vacuity: the walked shape is the audited key set — 31 tombstones
-    // plus the live bits (5 since `aggregationFilter`).
+    // plus the live bits (6 since `lockRows`).
     expect([...props.keys()].sort()).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
 
     const decl = capsAlias!.declarations?.[0];
@@ -463,5 +474,18 @@ describe('driverSupportsTransactions — a driver that cannot honour transaction
 
   it('only the literal `true` denies — an absent or undefined bit is not a denial', () => {
     expect(driverSupportsTransactions({ ...withMethod, supports: { transactionsUnsupported: undefined } })).toBe(true);
+  });
+});
+
+// `DriverOptions.lockRows` — the lock request a predicate delete's matched-row
+// read carries to a driver declaring `supports.lockRows`. A declared key, so the
+// engine's closed driver-option hop (`pickDeclaredDriverOptions`) passes it.
+describe('DriverOptions.lockRows', () => {
+  it('keeps a boolean lockRows', () => {
+    expect(DriverOptionsSchema.parse({ lockRows: true }).lockRows).toBe(true);
+  });
+
+  it('refuses a non-boolean lockRows', () => {
+    expect(DriverOptionsSchema.safeParse({ lockRows: 'yes' }).success).toBe(false);
   });
 });
