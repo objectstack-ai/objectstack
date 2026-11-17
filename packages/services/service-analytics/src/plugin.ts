@@ -499,7 +499,7 @@ export class AnalyticsServicePlugin implements Plugin {
       // serves the dimension by its FK-expand. Same engine as the executor
       // above, by construction.
       executeRelationGroupAggregate = async (objectName, input, relations) => {
-        const request: { relations: typeof relations; outcome?: { kind: string; reason?: string } } = { relations };
+        const request: { relations: typeof relations; outcome?: { kind: string; reason?: string; error?: unknown } } = { relations };
         const engine = requireDataEngine();
         const aggregate = engine.aggregate as unknown as (
           object: string, query: unknown, options: Record<symbol, unknown>,
@@ -508,6 +508,11 @@ export class AnalyticsServicePlugin implements Plugin {
           [RELATION_GROUP_BY]: request,
         });
         if (request.outcome?.kind === 'joined') return { joined: true, rows: rows as Record<string, unknown>[] };
+        // [#33876] The read's driver compiles no semi-join: the engine's
+        // refusal travels back for the strategy to throw — no FK-expand.
+        if (request.outcome?.kind === 'refused' && request.outcome.error instanceof Error) {
+          return { joined: false, reason: request.outcome.error.message, refusal: request.outcome.error };
+        }
         return {
           joined: false,
           reason: request.outcome?.reason ?? 'the "data" engine does not serve a relation group join',

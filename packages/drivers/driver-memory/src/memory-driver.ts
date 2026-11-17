@@ -596,8 +596,13 @@ export class InMemoryDriver implements IDataDriver {
    * expressed by the methods this class implements; the bits were read by
    * nothing and two of them were WRONG for years (`streaming: true` over a
    * full-table read — see #4484/#4634).
+   *
+   * [#33876] `readableIdsLeaf`: this driver evaluates a composed
+   * `ReadableIds` leaf in process (ADR-0139 D3: read the related object under
+   * the composed scope, then member-test), so the engine plans a
+   * nested-relation condition on a read verb as that leaf here.
    */
-  readonly supports = {};
+  readonly supports = { readableIdsLeaf: true };
 
   /**
    * The "Database": A map of TableName -> Array of Records

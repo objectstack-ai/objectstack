@@ -168,7 +168,11 @@
 //     an object outside its package's closure. A `sys_`-prefixed name stays
 //     unjudged under a closure too, exactly as without one. The CLI commands
 //     and a write that names no package state no closure and keep the advisory
-//     unchanged.
+//     unchanged, with one narrowing (#34616): a name that a package the stack's
+//     manifest declares in `dependencies` provides, read off the artifact's
+//     `packages[]`, is defined, as it is inside the publish gate's closure. So
+//     the CLI's per-package pass no longer warns on a dependency's object; a
+//     sibling package the manifest did not declare still warns.
 //   - `warning` / `error` — `flow-input-unknown-object` (#29442), on the same
 //     question and the same closure split as `flow-trigger-unknown-object`: a
 //     start input declared a record reference (`variables[].objectName`) names
@@ -213,8 +217,9 @@ import {
   apiTriggerVerifierOf,
   resolveFlowTriggerKind,
 } from '@objectstack/spec/automation';
+import { resolvePackageClosure } from '@objectstack/metadata-core';
 import { walkFlowNodes } from './flow-walk.js';
-import { closureDependencyRemedy, recordsOf, suggestName } from './object-graph.js';
+import { closureDependencyRemedy, packagesOf, recordsOf, suggestName } from './object-graph.js';
 import type { UserTextParams } from './finding-user-text.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
@@ -559,6 +564,61 @@ function plainRecord(value: unknown): AnyRec | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as AnyRec) : undefined;
 }
 
+/**
+ * [#34616] The objects the packages this stack's manifest declares in
+ * `dependencies` (transitively) provide, read off the artifact's `packages[]`
+ * — the resolution context the CLI's per-package pass hands every package's
+ * stack (`packageBodyAsStack`, ADR-0130 D4).
+ *
+ * The per-package pass judges one package's collections, so a flow in package
+ * B on an object its declared dependency A owns read as a name "this stack does
+ * not define" and warned, and `os lint --strict` failed a flow the runtime
+ * publish gate accepts: the gate judges the same write against B's closure
+ * (#24669, ruling #9612), and A's objects are in it. This is that closure, by
+ * the gate's own walk ({@link resolvePackageClosure}), with `packages[]` as the
+ * package registry. So the author-time door and the publish door give the same
+ * answer for a dependency's object.
+ *
+ * ⛔ The closure, not every entry of `packages[]`. A sibling package B did not
+ * declare is outside what the publish gate lets B bind a flow to, so its object
+ * keeps the advisory here: the remedy (declare the dependency) is the one the
+ * gate names when it refuses.
+ *
+ * Empty when there is no `packages[]`, no `manifest.id`, or no declared
+ * dependency the artifact carries. A dependency the artifact does not carry
+ * contributes nothing: its objects are not in this stack to read, and the
+ * advisory's hedge ("another installed package") still covers it.
+ */
+function dependencyClosureObjectNames(stack: AnyRec): string[] {
+  const entries = packagesOf(stack);
+  if (entries.length === 0) return [];
+  const manifest = stack.manifest;
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return [];
+  const ownId = nonEmptyString((manifest as AnyRec).id);
+  if (!ownId) return [];
+  const carried = new Map<string, AnyRec>();
+  for (const entry of entries) {
+    const body = entry.manifest;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+    const id = nonEmptyString((body as AnyRec).id);
+    if (id && !carried.has(id)) carried.set(id, body as AnyRec);
+  }
+  const closure = resolvePackageClosure(ownId, (id) => {
+    if (id === ownId) return { manifest };
+    const body = carried.get(id);
+    return body ? { manifest: body } : undefined;
+  });
+  if (!closure) return [];
+  const names: string[] = [];
+  for (const dep of closure.dependencies) {
+    for (const obj of recordsOf(carried.get(dep)?.objects)) {
+      const name = nonEmptyString(obj.name);
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
@@ -582,7 +642,9 @@ function startNodeOf(flow: AnyRec): { node: AnyRec; index: number } | undefined 
  *   gate narrowed `stack.objects` to (`AuthoringRuleContext.packageScope`),
  *   present only when one was in force. Stated, an unknown trigger object is
  *   outside that closure and `flow-trigger-unknown-object` is an `error` (see
- *   the Severity section at the top of this file). The CLI never sets it.
+ *   the Severity section at the top of this file). The CLI never sets it;
+ *   without it, a declared dependency's objects carried in `packages[]` count
+ *   as defined (#34616, `dependencyClosureObjectNames`).
  */
 export function validateFlowTriggerReadiness(
   stack: AnyRec,
@@ -592,12 +654,17 @@ export function validateFlowTriggerReadiness(
   const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
 
+  const closure = options.packageScope;
   const objectNames = new Set(
     recordsOf(stack.objects)
       .map((o) => (typeof o.name === 'string' ? o.name : undefined))
       .filter((n): n is string => !!n),
   );
-  const closure = options.packageScope;
+  // [#34616] With no closure stated (the CLI doors), a name a declared
+  // dependency carried in `packages[]` provides is defined: the publish gate's
+  // closure holds it. Under a stated closure `stack.objects` already IS the
+  // closure, so nothing is added there.
+  if (!closure) for (const name of dependencyClosureObjectNames(stack)) objectNames.add(name);
 
   /**
    * [#24669] `flow-trigger-unknown-object` at one of its two positions, for a
