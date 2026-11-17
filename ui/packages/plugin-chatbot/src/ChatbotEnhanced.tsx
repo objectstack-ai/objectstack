@@ -1204,6 +1204,13 @@ function writtenRecordOf(
  */
 const PLAIN_SURFACE_GUTTER = 'px-4 @3xl:px-0';
 
+/**
+ * An assistant turn on the plain surface spans the column below `@3xl`, so its
+ * prose, tables and cards end on the same 16px gutter as the composer; at
+ * full width it keeps the bubble's usual 95% cap.
+ */
+const PLAIN_SURFACE_ASSISTANT_WIDTH = 'max-w-full @3xl:max-w-[95%]';
+
 /** The item a selected model none of the offered models carries is shown by. */
 const OUTSIDE_MODELS = 'outside';
 
@@ -5411,7 +5418,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                   if (block.kind === 'text') lastTextBlock = i;
                 });
                 return (
-                  <Message key={message.id} from={formatMessageProps(message.role)}>
+                  <Message
+                    key={message.id}
+                    from={formatMessageProps(message.role)}
+                    className={isPlainSurface && !isUser ? PLAIN_SURFACE_ASSISTANT_WIDTH : undefined}
+                  >
                     <div
                       className={cn(
                         'flex w-full gap-2.5',
