@@ -1466,6 +1466,32 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
 }
 
 /**
+ * [#34655, ADR-0126 §4] The engine's reader over the BODIES the loader's set
+ * holds: the `defaultActive` package `packageId`'s own flow `name` declares,
+ * through the protocol's `shippedArtifactsOf` (the every-shipper read
+ * `packagedFlowReader` judges a package's own question by, and reached the
+ * same way, by duck type at question time). `undefined` when the package's
+ * body declares none, when the protocol cannot be asked, and when the set
+ * holds no body of that package: the flow then ships on, as every packaged
+ * flow did before the key.
+ */
+export function packagedFlowDefaultReader(ctx: Pick<PluginContext, 'getService'>): (name: string, packageId: string) => boolean | undefined {
+    return (name, packageId) => {
+        let protocol: { shippedArtifactsOf?: (type: string, name: string) => unknown[] } | undefined;
+        try {
+            protocol = ctx.getService('protocol');
+        } catch {
+            return undefined;
+        }
+        if (typeof protocol?.shippedArtifactsOf !== 'function') return undefined;
+        const own = protocol.shippedArtifactsOf('flow', name)
+            .find((artifact) => (artifact as { _packageId?: unknown } | null)?._packageId === packageId);
+        const declared = (own as { defaultActive?: unknown } | undefined)?.defaultActive;
+        return typeof declared === 'boolean' ? declared : undefined;
+    };
+}
+
+/**
  * [ADR-0150 D3] The engine's reader over the one package-scoped resolver:
  * `resolvePackageScopedName` from `@objectstack/objectql`, asked of the
  * registry ObjectQL serves, for the `flow` type. See
@@ -2280,6 +2306,10 @@ export class AutomationServicePlugin implements Plugin {
         // its locked-base verdict reads — never the stamps on a definition.
         // See `packagedFlowReader`.
         this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
+        // [#34655, ADR-0126 §4] The default a package's own flow declares,
+        // read off the loader's body, so a `.custom` override armed in its
+        // place does not move it. See `packagedFlowDefaultReader`.
+        this.engine.setPackagedFlowDefaultSource(packagedFlowDefaultReader(ctx));
 
         // [ADR-0150 D3] Which item a bare flow name means, for a caller of a
         // package or of none, is the one package-scoped resolver's answer over

@@ -1180,9 +1180,17 @@ export const FlowSchema = lazySchema(() => strictObject(
    * The switch's state is the activation ledger (`sys_metadata_activation`):
    * a row there is an administrator's choice and wins over this key, so a
    * flow an administrator turned on stays on across a restart, an upgrade
-   * and a reinstall, and one turned off stays off. With no row the flow
-   * follows this key, so a later version of the package that changes it
-   * moves an installation nobody switched.
+   * and a reinstall, and one turned off stays off. (An "on" row counts only
+   * when it names the package that holds the flow now; a legacy row naming no
+   * package, or one naming a package that no longer holds it, leaves a flow
+   * shipped off switched off.) With no row the flow follows this key, so a
+   * later version of the package that changes it moves an installation
+   * nobody switched.
+   *
+   * The default is the PACKAGE's: the key is read off the package's own body.
+   * A declared `.custom` override armed in the package's place does not
+   * change it in either direction, whatever the override declares; it is
+   * switched by the same switch.
    *
    * `status` stays the AUTHOR's: `obsolete` / `invalid` disarm the flow for
    * every installation, and no switch overrides that. Ship a flow an
@@ -1190,7 +1198,8 @@ export const FlowSchema = lazySchema(() => strictObject(
    *
    * Only a flow a package ships has that switch. A flow authored in the
    * environment is switched by its `status`, so registering one that
-   * declares `defaultActive` is refused; a clone of a packaged flow drops
+   * declares `defaultActive` is refused (and a dry run of one, and the stored
+   * pass lists a stored one); a clone of a packaged flow drops
    * the key, and an unmanaged install copies `defaultActive: false` as
    * `status: 'obsolete'`.
    */

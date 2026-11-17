@@ -221,8 +221,13 @@ read at each runtime's own consult point; an empty ledger changes nothing anywhe
 > (`packages/spec/src/automation/flow.zod.ts#FlowSchema`) makes its packaged default **off**. Absence of a row still means
 > the packaged default, so on an installation where no administrator has switched the flow it is not armed and does not run.
 > A row is still the installation's choice and wins over the declared default in either state: a flow an administrator
-> switched on stays on across a restart, an upgrade and a reinstall, and one switched off stays off. With no row the flow
-> follows the body armed today, so an upgrade that changes the declaration moves only installations nobody switched.
+> switched on stays on across a restart, an upgrade and a reinstall, and one switched off stays off. An "on" row counts
+> only when it names the package that holds the flow now: a legacy row naming no package, or one naming a package that
+> no longer holds the name, does not switch a flow shipped off on (an "off" row of either kind still switches it off).
+> With no row the flow follows the declaration of the package's own body for the version installed now, so an upgrade
+> that changes it moves only installations nobody switched. The default is the package's: a declared `.custom` override
+> (ADR-0146 D2) armed in the base's place does not change it in either direction, whatever it declares, and is switched
+> by the same row (`packages/services/service-automation/src/engine.ts#packagedFlowDefault`).
 > The default is read at the consult point and never written as a row at install, so a row keeps meaning a recorded choice
 > (`packages/services/service-automation/src/flow-activation-projection.ts#FlowActivationProjection`). "An empty ledger
 > changes nothing anywhere" holds for every item that declares no default, and the ledger's shape does not move (§9's line
