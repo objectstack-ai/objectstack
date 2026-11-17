@@ -101,6 +101,7 @@ export interface ProtocolHost {
     readonly diffMetaItem: ObjectStackProtocolImplementation['diffMetaItem'];
     readonly disabledActionsOf: ObjectStackProtocolImplementation['disabledActionsOf'];
     readonly discardDraftInItsScope: ObjectStackProtocolImplementation['discardDraftInItsScope'];
+    readonly draftPublishJudgement: ObjectStackProtocolImplementation['draftPublishJudgement'];
     readonly draftPublishVerdict: ObjectStackProtocolImplementation['draftPublishVerdict'];
     readonly dropObjectStorage: ObjectStackProtocolImplementation['dropObjectStorage'];
     readonly dropStorageRemainingRowsRefusal: (typeof ObjectStackProtocolImplementation)['dropStorageRemainingRowsRefusal'];

@@ -939,33 +939,62 @@ describe('read_file extracts PDF and Word text on a worker pool, off the request
     expect({ ticks, enough: ticks >= 20 && ticks >= wallMs / 4 }).toMatchObject({ enough: true });
   });
 
+  /**
+   * The worker started with a preload that replaces `process.threadCpuUsage`
+   * IN THE WORKER THREAD with a clock advancing `stepMs` on every read: the
+   * worker's twin of the in-process `steppingCpuClock`, which spies the
+   * request thread's `process.cpuUsage` and cannot reach a worker. "The budget
+   * is spent" is then decided by how many checkpoints the extractor reached,
+   * never by how fast, or how loaded, this machine is. The worker's own code
+   * is unchanged: it reads the clock it always reads.
+   */
+  function steppingThreadCpuWorker(stepMs: number): ExtractionWorkerEntry {
+    const clock = `let now = 0; process.threadCpuUsage = () => { now += ${stepMs * 1000}; return { user: now, system: 0 }; };`;
+    return {
+      ...SOURCE_WORKER,
+      execArgv: [...(SOURCE_WORKER.execArgv ?? []), '--import', `data:text/javascript,${encodeURIComponent(clock)}`],
+    };
+  }
+
   it('out of CPU budget on the worker: the pages read so far, truncated, with the budget note, as in-process', async () => {
-    configureReadFileExtraction({ cpuBudgetMs: 30, maxConcurrent: 4 });
+    // The budget is spent at the third checkpoint (3 x 1000 ms of the stepping
+    // clock), so the read stops after page 3, whatever the runner's load. The
+    // budget is 3000 ms, not a few tens, because the pool's wall-clock ceiling
+    // is 5 budgets of REAL time: at 30 ms that ceiling (150 ms) cut a loaded
+    // runner's read before page 1, answering "after page 0" with no text.
+    configureReadFileExtraction({ cpuBudgetMs: 3000, maxConcurrent: 4 });
+    configureExtractionWorkerEntry(steppingThreadCpuWorker(1000));
     const pdf = heavyPdf(120, () => 2250);
     const bridge = fullBridge();
-    const file = { name: 'heavy.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf };
-    await readFile(bridge, minimalPdfFile()); // warm, so unpdf's load is not charged here
-    const result = await readFile(bridge, file);
+    const result = await readFile(bridge, { name: 'heavy.pdf', mimeType: 'application/pdf', size: pdf.length, bytes: pdf });
     const facts = factsOf(result);
-    expect(facts).toMatchObject({ content: 'text', format: 'application/pdf', truncated: true });
-    const read = /^Reading stopped at the CPU-time budget for one file \(30 ms\) after page (\d+) of 120, so the text is partial\. Download the file with the link for the rest\.$/.exec(facts.note);
-    expect(read).not.toBeNull();
-    const pages = Number(read![1]);
-    expect(pages).toBeGreaterThanOrEqual(1);
-    expect(pages).toBeLessThan(120);
-    expect(textOf(result.content[1])).toBe(pageTexts(pages).join('\n\n'));
+    expect(facts).toMatchObject({
+      content: 'text',
+      format: 'application/pdf',
+      truncated: true,
+      note: 'Reading stopped at the CPU-time budget for one file (3000 ms) after page 3 of 120, so the text is partial. '
+        + 'Download the file with the link for the rest.',
+    });
+    expect(textOf(result.content[1])).toBe(pageTexts(3).join('\n\n'));
     expect(facts.download).toBeTruthy();
 
+    // Word: the budget is checked every 64 paragraphs. A 15 ms step spends the
+    // same 3000 ms budget at the 200th checkpoint, 12,800 paragraphs in, which
+    // is past the length cap, so the cap is what cuts the text that was read.
+    configureExtractionWorkerEntry(steppingThreadCpuWorker(15));
     const paragraphs = Array.from({ length: 60_000 }, (_, i) => `Paragraph ${i + 1}`);
     const docx = zip({ 'word/document.xml': docxBody(paragraphs) });
     const word = await readFile(bridge, { name: 'long.docx', mimeType: DOCX, size: docx.length, bytes: docx });
-    const wordFacts = factsOf(word);
-    expect(wordFacts).toMatchObject({ content: 'text', format: DOCX, truncated: true });
-    const count = Number(/after (\d+) paragraphs, so the text is partial/.exec(wordFacts.note)?.[1]);
-    expect(count % 64).toBe(0);
-    expect(count).toBeLessThan(paragraphs.length);
+    expect(factsOf(word)).toMatchObject({
+      content: 'text',
+      format: DOCX,
+      truncated: true,
+      note: 'Reading stopped at the CPU-time budget for one file (3000 ms) after 12800 paragraphs, so the text is partial. '
+        + 'Download the file with the link for the rest.',
+    });
     // The length cap still applies to what was read.
-    expect(textOf(word.content[1])).toBe(paragraphs.slice(0, count).join('\n').slice(0, 100_000));
+    expect(paragraphs.slice(0, 12_800).join('\n').length).toBeGreaterThan(100_000);
+    expect(textOf(word.content[1])).toBe(paragraphs.slice(0, 12_800).join('\n').slice(0, 100_000));
   });
 
   function minimalPdfFile(text = 'Small') {

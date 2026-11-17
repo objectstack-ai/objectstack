@@ -839,6 +839,7 @@
     "api/GetMetaItemRequest:previewDrafts",
     "api/GetMetaItemRequest:state",
     "api/GetMetaItemRequest:type",
+    "api/GetMetaItemRequest:userTextLocales",
     "api/GetMetaItemResponse:cascadeDeleteObjects",
     "api/GetMetaItemResponse:deletable",
     "api/GetMetaItemResponse:disabledActions",

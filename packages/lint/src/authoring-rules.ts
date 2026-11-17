@@ -2059,9 +2059,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         severity: f.severity ?? 'warning',
         rule: f.rule,
         where: f.where,
-        path: f.where,
+        // [#34818] A finding placed on a node carries its document path, so a
+        // draft's `_diagnostics` entry resolves onto that node; the rest keep
+        // `where` as before.
+        path: f.path ?? f.where,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the doors can
+        // render this finding in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
   },
   // A credential typed as a LITERAL into a flow position every flow reader is

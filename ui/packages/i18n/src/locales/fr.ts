@@ -2236,7 +2236,7 @@ const fr = {
       changesApplied: "Appliqué",
       changesDrafted: "Enregistré comme brouillon",
       changesFailed: "Non appliqué",
-      discussing: "Sujet : {{target}}",
+      discussing: "Affiché : {{target}}",
       changeVerb: {
         createObject: "Créer un objet",
         addField: "Ajouter un champ",
@@ -4716,7 +4716,7 @@ const fr = {
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
       fieldOrderChanged: 'Ordre des champs modifié',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclut des modifications rédigées par le copilote IA',
+      draftedByCopilot: 'Inclut des modifications rédigées par l’assistant IA',
       draftedByMcpClient: 'Inclut des modifications rédigées par le client MCP « {{client}} »',
       draftedByMcp: 'Inclut des modifications rédigées par un client MCP',
       detailChangedKeys: 'Également modifié :',
@@ -4854,6 +4854,7 @@ const fr = {
       securityBlockTitle_many: 'La publication sera refusée — {{count}} d’éléments nécessitent d’abord une décision',
       securityBlockTitle_other: 'La publication sera refusée — {{count}} éléments nécessitent d’abord une décision',
       securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Partage d’enregistrements, puis publiez à nouveau.',
+      flowChecksTitle: 'Avant de publier : la vérification de publication signalera ceci',
       securityRule: {
         owdUnset: 'Aucune base de partage des enregistrements (sharingModel) n’est déclarée. L’exécution se rabat sur private, mais la base doit être une décision explicite.',
         owdAlias: 'La base de partage des enregistrements (sharingModel) n’est pas une valeur canonique : l’exécution traite donc l’objet comme private.',

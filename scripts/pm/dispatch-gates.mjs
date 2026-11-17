@@ -487,6 +487,7 @@ import {
   ESCAPABLE_LITERAL_LEDGER_ROWS,
   CHANGE_KIND_ROWS,
   UI_SCRIPTS_SUITE_ROOTS,
+  SPEC_MIGRATION_ENTRY_ROOTS,
   MANDATORY_TIER_GLOB_ROWS,
   SUSPECT_TIER_GLOB_ROWS,
   GENERATED_MODULE_SOURCES,
@@ -506,6 +507,7 @@ export {
   RETIRED_TIER_WORDS,
   GENERATED_MODULE_SOURCES,
   UI_SCRIPTS_SUITE_ROOTS,
+  SPEC_MIGRATION_ENTRY_ROOTS,
 };
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
@@ -12084,6 +12086,40 @@ export function readByUiScriptsSuite(path, roots = UI_SCRIPTS_SUITE_ROOTS) {
 }
 
 /**
+ * Does this input path sit under the migration-entry sources the cli guidance test reads?
+ *
+ * The same reader as `readByUiScriptsSuite`, over `SPEC_MIGRATION_ENTRY_ROOTS`: a file or the directory
+ * under `packages/spec/src/migrations/entries`, in CI's own `paths:` language, and nothing beside it — not
+ * the registry template, not the generator, not the spec manifest.
+ */
+export function readBySpecMigrationEntryConsumers(path, roots = SPEC_MIGRATION_ENTRY_ROOTS) {
+  return triggerListCovers(roots, path.replace(/^\.\//, '')) !== null;
+}
+
+/**
+ * The one shape a PACKAGE-TEST subset gate's name may take: `pnpm --filter PKG exec vitest run FILE`, FILE
+ * relative to that package, one file and no other argument. Returns the FILE, or null.
+ *
+ * A gate standing in for a job that runs every package's test TASK (Test Core's `turbo run test`) cannot
+ * narrow that runner by prefix the way the ui suite narrows its own: the runner names no package and no
+ * file, so the local subset is spelled another way. It declares `ciSubset`, the repo path of the one file it
+ * runs, and this is the spelling the binding holds its name to — so the name and the path cannot name two
+ * different files, and a respelled name refuses at load instead of resolving by accident.
+ */
+export function packageTestSubsetFile(name) {
+  const m = /^pnpm --filter\s(\S+) exec vitest run (\S+)$/.exec(name);
+  return m ? m[2] : null;
+}
+
+/**
+ * Is a package-test subset gate's binding whole? `ciSubset` is a repo path ending in the FILE its name runs.
+ */
+export function packageTestSubsetIsWhole(gate) {
+  const file = packageTestSubsetFile(gate.name);
+  return typeof gate.ciSubset === 'string' && file !== null && gate.ciSubset.endsWith(`/${file}`);
+}
+
+/**
  * Does a live workflow still run the CI job a change-kind gate is the local SUBSET of (#26318)?
  *
  * Every other gate in the change-kind roster is named by an invocation the workflows run, and it resolves
@@ -12128,6 +12164,7 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'cli-command-literal': (path) => carriesACliCommandLiteral(path),
   'adr-anchored-file': (path) => breaksAnAdrAnchor(path),
   'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
+  'spec-migration-entry': (path) => readBySpecMigrationEntryConsumers(path),
   // One per population net (#31257), each bound to its own net.
   ...Object.fromEntries(Object.entries(POPULATION_NETS).map(([key, net]) => [key, (path) => reachesPopulationNet(path, net)])),
   'published-readme-claim': (path) => takesAReadmeClaim(path),
@@ -12144,12 +12181,16 @@ export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {
     }
     // A CI-job-subset gate (`ciJobRunsRunner`) carries both halves of its binding, and its name narrows
     // the runner it stands in for — refused at load, so a half-declared row cannot resolve by accident.
+    // A PACKAGE-TEST subset (`ciSubset`) narrows a runner that names no file, so its name is held to the
+    // one spelling `packageTestSubsetFile` reads, naming the file `ciSubset` names, instead.
     for (const gate of row.gates) {
-      const bound = gate.ciJob !== undefined || gate.ciRunner !== undefined;
-      if (bound && !(typeof gate.ciJob === 'string' && typeof gate.ciRunner === 'string' && gate.name.startsWith(`${gate.ciRunner} `))) {
+      const bound = gate.ciJob !== undefined || gate.ciRunner !== undefined || gate.ciSubset !== undefined;
+      const narrows = gate.ciSubset !== undefined ? packageTestSubsetIsWhole(gate) : gate.name.startsWith(`${gate.ciRunner} `);
+      if (bound && !(typeof gate.ciJob === 'string' && typeof gate.ciRunner === 'string' && narrows)) {
         throw new Error(
           `dispatch-gates: change-kind row '${row.kind}' gate '${gate.name}' declares a CI-job binding that is not whole — ` +
-            'a gate standing in for a CI job carries both `ciJob` and `ciRunner`, and its name begins with that runner',
+            'a gate standing in for a CI job carries both `ciJob` and `ciRunner`, and its name begins with that runner — ' +
+            'or, for a package-test subset, carries `ciSubset` and is spelled as a pnpm filter on one package, then `exec vitest run FILE`, with `ciSubset` ending in that FILE',
         );
       }
     }
@@ -12194,6 +12235,7 @@ export function changeKindGates(paths, resolveInvocation, kinds = CHANGE_KIND_GA
         why: gate.why,
         command: resolveInvocation(gate.name, gate),
         ...(gate.ciJob ? { ciJob: gate.ciJob, ciRunner: gate.ciRunner } : {}),
+        ...(gate.ciSubset ? { ciSubset: gate.ciSubset } : {}),
       })),
     });
   }
@@ -12204,10 +12246,12 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
   const lines = [];
   for (const { kind, hits, gates } of changeKindGates(paths, resolveInvocation, kinds)) {
     lines.push(`  ${kind}: ${hits.join(', ')}`);
-    for (const { name, why, command, ciJob, ciRunner } of gates) {
+    for (const { name, why, command, ciJob, ciRunner, ciSubset } of gates) {
       lines.push(
         command
           ? `    - ${command}   — ${why}`
+          : ciSubset
+            ? `    - ⚠ ${name}: STALE — no workflow job named '${ciJob}…' runs '${ciRunner}' any more, or ${ciSubset} is gone. The job was renamed or retired, or the test moved; fix CHANGE_KIND_GATES in this script.`
           : ciJob
             ? `    - ⚠ ${name}: STALE — no workflow job named '${ciJob}…' runs '${ciRunner}' any more. The job was renamed or retired; fix CHANGE_KIND_GATES in this script.`
             : `    - ⚠ ${name}: STALE — no workflow runs a gate under this name. It was renamed or retired; fix CHANGE_KIND_GATES in this script.`,
@@ -15671,7 +15715,12 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
   // rows: the card this section answers is about two renderings of one
   // derivation drifting apart, so a second traversal here would reintroduce it.
   const resolveInvocation = (name, gate = null) => {
-    if (gate?.ciJob) return ciJobRunsRunner(gate, workflowEntries) ? name : null;
+    if (gate?.ciJob) {
+      // A package-test subset also owes its file: a moved or deleted test renders STALE, never a command
+      // that runs nothing (vitest exits non-zero on a filter matching no file, but only once someone runs it).
+      if (gate.ciSubset !== undefined && !existsSync(nodePath.join(ROOT, gate.ciSubset))) return null;
+      return ciJobRunsRunner(gate, workflowEntries) ? name : null;
+    }
     const entry = byCheck.get(name);
     return entry ? runnableInvocation(entry) : null;
   };

@@ -2308,7 +2308,7 @@ const ru = {
       changesApplied: "Применено",
       changesDrafted: "Сохранено как черновик",
       changesFailed: "Не применено",
-      discussing: "Обсуждается: {{target}}",
+      discussing: "Просмотр: {{target}}",
       changeVerb: {
         createObject: "Создать объект",
         addField: "Добавить поле",
@@ -4842,7 +4842,7 @@ const ru = {
       detailNone: 'Различий не обнаружено — черновик совпадает с опубликованной версией.',
       fieldOrderChanged: 'Порядок полей изменён',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Включает изменения, подготовленные ИИ-копилотом',
+      draftedByCopilot: 'Включает изменения, подготовленные ИИ-ассистентом',
       draftedByMcpClient: 'Включает изменения, подготовленные MCP-клиентом «{{client}}»',
       draftedByMcp: 'Включает изменения, подготовленные MCP-клиентом',
       detailChangedKeys: 'Также изменено:',
@@ -5009,6 +5009,7 @@ const ru = {
       securityBlockTitle_many: 'Публикация будет отклонена — {{count}} элементов требуют решения',
       securityBlockTitle_other: 'Публикация будет отклонена — {{count}} элемента требуют решения',
       securityBlockWhere: 'Исправьте это в объекте в разделе «Настройки → Общий доступ к записям» и опубликуйте снова.',
+      flowChecksTitle: 'Перед публикацией: проверка публикации сообщит следующее',
       securityRule: {
         owdUnset: 'Базовый уровень общего доступа к записям (sharingModel) не объявлен. Среда выполнения использует private, но базовый уровень должен быть осознанным решением.',
         owdAlias: 'Базовый уровень общего доступа к записям (sharingModel) — неканоническое значение, поэтому среда выполнения считает объект private.',

@@ -27,4 +27,4 @@ The semantic entry `in-app-pending-action-decided-by-person` carries the same no
 What changes for a caller, from the release whose in-app door implements it:
 
 - FROM an operator or administrator approving another user's in-app pending action in the inbox TO the person the call ran as approving it; a second approver is a `held` item in the approvals engine.
-- FROM approving or rejecting through `POST /api/v1/ai/pending-actions/:id/approve|reject` with an API key or bearer token TO the person's signed-in session to the app.
+- FROM approving or rejecting through `POST /api/v1/ai/pending-actions/:id/approve|reject` with an API key, an OAuth token or another service credential TO the person's signed-in session to the app, whether its session token rides in the cookie or in an `Authorization: Bearer` header.

@@ -781,6 +781,8 @@ export async function readMetaItemFace(
     request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     },
     face: 'served' | 'execution',
 ) {

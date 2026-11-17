@@ -72,6 +72,11 @@
       "en": "Search apps by name or app ID…",
       "reason": "The 'manifest ID' jargon leaves the marketplace search placeholder (triage call on objectui#10969, item 5). Eight packs followed in this PR; zh already said '按名称或标识搜索应用…' (name or identifier) since objectui#10900 replaced the jargon there, so it had nothing to change.",
       "issue": "objectui#10969"
+    },
+    "preview.changes.draftedByCopilot": {
+      "en": "Includes changes drafted by the AI assistant",
+      "reason": "ar already reads \"AI assistant\" (مساعد الذكاء الاصطناعي): en followed the panel's new name, so the ar sentence already says what en now says.",
+      "issue": "objectstack#34725"
     }
   },
 

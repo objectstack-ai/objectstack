@@ -37,6 +37,7 @@ import {
     type MetadataDiagnostics,
     computeViewReferenceDiagnostics,
     decorateMetadataItem,
+    withPublishAdvisories,
     withPublishVerdict,
     withViewLintWarnings,
 } from './metadata-diagnostics.js';
@@ -644,6 +645,8 @@ export async function getMetaItem(host: Pick<ProtocolHost, 'engine' | 'getServic
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. Folded
     // HERE, at each face's boundary, as {@link getMetaItems} folds.
@@ -713,9 +716,11 @@ export interface PrereadActiveRows {
     readonly rows: readonly StoredOverlayRow[];
 }
 
-export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishVerdict' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredEntryOfDeclinedName' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
+export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishJudgement' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredEntryOfDeclinedName' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
     // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
     request = canonicalizeMetaRequestType(request);
@@ -843,17 +848,23 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // promotion reads, and [#29557] converts for its verdict exactly as the
     // promotion does — never the governed, converted or redacted copy this
     // read serves. The execution face serves no `_diagnostics`.
+    // [#34818] …and, for a type whose editor shows them, what that publish
+    // would still SAY: the gate's advisories, folded into
+    // `_diagnostics.warnings` ({@link withPublishAdvisories}) in the user
+    // sentence the request's locales pick, from the same single judgement.
     const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
         const served = await serveViewLint(serveItem(resolved));
         if (execution || !served || typeof served !== 'object') return served;
-        const issues = await host.draftPublishVerdict({
+        const judgement = await host.draftPublishJudgement({
             type: request.type,
             name: request.name,
             body: storedRowDocument(row),
             packageId: row.package_id ?? null,
+            ...(request.userTextLocales !== undefined ? { userTextLocales: request.userTextLocales } : {}),
         });
         const before = (served as { _diagnostics?: MetadataDiagnostics })._diagnostics;
-        const after = withPublishVerdict(request.type, request.name, before, issues);
+        const refused = withPublishVerdict(request.type, request.name, before, judgement.refusals);
+        const after = withPublishAdvisories(request.type, request.name, refused, judgement.advisories);
         return after === before ? served : { ...served, _diagnostics: after };
     };
     // ── [#20946, #20761 ruling rule 1, ADR-0126 §2 / §3] A shipped FLOW name ──
