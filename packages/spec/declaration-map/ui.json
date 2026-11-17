@@ -19,6 +19,8 @@
     "ActionNavItemSchema": "ui/ActionNavItem",
     "ActionParam": "ui/ActionParam",
     "ActionParamSchema": "ui/ActionParam",
+    "ActionRefusal": "ui/ActionRefusal",
+    "ActionRefusalSchema": "ui/ActionRefusal",
     "ActionSchema": "ui/Action",
     "ActionSession": "ui/ActionSession",
     "ActionSessionSchema": "ui/ActionSession",
