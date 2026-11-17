@@ -24,6 +24,14 @@ import {
   PredicateScopeProvider,
 } from '@object-ui/react';
 import { PageHeaderPhoneContext, type PageHeaderPhoneFace } from '../renderers/layout/page-header-phone-context';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
@@ -905,13 +913,17 @@ describe('PageHeaderRenderer — in-flight header action (objectstack#34933)', (
     );
   }
 
+  // A busy inline button stays focusable: `aria-disabled`, never native
+  // `disabled`, so a dialog its click opened can return focus to it.
   const expectBusy = (button: HTMLElement) => {
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
     expect(button.getAttribute('aria-busy')).toBe('true');
     expect(button.querySelector('[data-header-action-pending]')).not.toBeNull();
   };
   const expectIdle = (button: HTMLElement) => {
     expect((button as HTMLButtonElement).disabled).toBe(false);
+    expect(button.hasAttribute('aria-disabled')).toBe(false);
     expect(button.hasAttribute('aria-busy')).toBe(false);
     expect(button.querySelector('[data-header-action-pending]')).toBeNull();
   };
@@ -1014,4 +1026,85 @@ describe('PageHeaderRenderer — in-flight header action (objectstack#34933)', (
     await act(async () => { launch.resolve({ success: true }); await launch.promise; });
     await waitFor(() => expectIdle(button));
   });
+  it('the click guard holds a second click on the busy, still-focusable button', async () => {
+    const launch = deferred<ActionResult>();
+    const flow = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => launch.promise);
+    renderWithFlow(flow);
+    const button = screen.getByRole('button', { name: /Convert Lead/i });
+    fireEvent.click(button);
+    await waitFor(() => expectBusy(button));
+    // Not natively disabled, so the click is dispatched: only the guard stops it.
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await act(async () => { await Promise.resolve(); });
+    expect(flow).toHaveBeenCalledTimes(1);
+    await act(async () => { launch.resolve({ success: true }); await launch.promise; });
+    await waitFor(() => expectIdle(button));
+  });
+
+  it('a confirmText action confirmed from the keyboard hands focus back to its trigger, busy until the run settles', async () => {
+    const run = deferred<ActionResult>();
+    const api = vi.fn<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>(() => run.promise);
+    // The console's confirm dialog opens with no Radix Trigger, so Radix's own
+    // return-to-trigger does nothing; it returns focus to the control focused
+    // at open, as app-shell's `useActionDialogReturnFocus` does. This host
+    // does the same: focus() on a natively disabled opener is a no-op.
+    function ConfirmHost() {
+      const [ask, setAsk] = useState<{ message: string; answer: (ok: boolean) => void } | null>(null);
+      const [opener, setOpener] = useState<HTMLElement | null>(null);
+      const onConfirm = (message: string) => new Promise<boolean>((resolve) => {
+        setOpener(document.activeElement as HTMLElement | null);
+        setAsk({ message, answer: resolve });
+      });
+      const answer = (ok: boolean) => { ask?.answer(ok); setAsk(null); };
+      return (
+        <ActionProvider handlers={{ api }} onConfirm={onConfirm}>
+          <RecordContextProvider objectName="lead" recordId="lead-1" data={record} objectSchema={{ name: 'lead', label: 'Lead' }}>
+            <PageHeader
+              schema={{
+                type: 'page:header',
+                title: 'Lead',
+                actions: [{ name: 'qualify', type: 'api', target: '/api/v1/qualify', confirmText: 'Qualify this lead?', locations: ['record_header'], label: 'Qualify' }],
+              }}
+            />
+          </RecordContextProvider>
+          <AlertDialog open={ask !== null} onOpenChange={(open) => { if (!open) answer(false); }}>
+            <AlertDialogContent
+              onCloseAutoFocus={(event) => {
+                if (!opener) return;
+                event.preventDefault();
+                opener.focus();
+              }}
+            >
+              <AlertDialogTitle>Confirm</AlertDialogTitle>
+              <AlertDialogDescription>{ask?.message}</AlertDialogDescription>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => answer(true)}>Confirm</AlertDialogAction>
+            </AlertDialogContent>
+          </AlertDialog>
+        </ActionProvider>
+      );
+    }
+    render(<ConfirmHost />);
+    const trigger = screen.getByRole('button', { name: /Qualify/i });
+    // Keyboard activation: the trigger holds focus and Enter clicks it.
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('alertdialog');
+    expectBusy(trigger);
+    const confirm = within(dialog).getByRole('button', { name: 'Confirm' });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    confirm.focus();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(1));
+    // The run is still in flight: busy, and focus is back on the trigger.
+    expectBusy(trigger);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    await act(async () => { run.resolve({ success: true }); await run.promise; });
+    await waitFor(() => expectIdle(trigger));
+    expect(document.activeElement).toBe(trigger);
+  });
+
 });

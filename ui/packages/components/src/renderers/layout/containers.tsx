@@ -2386,11 +2386,13 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   }, [record, execute]);
 
   // An action whose click is still in flight — the launch that opens its
-  // dialog, or the run itself — is busy: disabled, `aria-busy`, a spinner in
-  // place of its icon, and a further click does nothing until the click's
-  // promise settles, fulfilled or rejected. A click that returns no promise
-  // is never busy. The ref is the guard (two clicks can land before a
-  // re-render); the state is what draws the face.
+  // dialog, or the run itself — is busy: `aria-busy`, a spinner in place of
+  // its icon, and a further click does nothing until the click's promise
+  // settles, fulfilled or rejected. A click that returns no promise is never
+  // busy. The ref is the guard and the only one on an inline button, which
+  // stays focusable while busy (`aria-disabled`, never native `disabled`) so a
+  // dialog the click opened can hand focus back to it on close. The state is
+  // what draws the face.
   const pendingActionKeysRef = React.useRef<Set<string>>(new Set());
   const [pendingActionKeys, setPendingActionKeys] = React.useState<ReadonlySet<string>>(() => new Set());
   const runHeaderAction = React.useCallback((action: any, key: string) => {
@@ -2655,7 +2657,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       const size = action.size || 'sm';
       const actionKey = action.name || action.id || `header-action-${idx}`;
       const pending = pendingActionKeys.has(actionKey);
-      const disabled = isActionDisabled(action) || pending;
+      const disabled = isActionDisabled(action);
       const icon = typeof action.icon === 'string' ? action.icon : null;
       const disabledReason = disabledReasonFor(action);
       const reasonId = `${disabledReasonIdBase}-reason-${idx}`;
@@ -2666,6 +2668,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           variant={variant}
           size={size}
           disabled={disabled}
+          aria-disabled={pending && !disabled ? true : undefined}
           aria-busy={pending || undefined}
           aria-describedby={disabledReason ? reasonId : undefined}
           aria-pressed={pressed}
@@ -2675,6 +2678,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           className={cn(
             'gap-2',
             barFace && 'h-11 min-w-0 flex-1',
+            pending && 'cursor-progress opacity-50',
             pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
           )}
           onClick={() => runHeaderAction(action, actionKey)}
