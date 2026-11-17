@@ -4585,6 +4585,39 @@ export function hookTextMessageKey(hookName: string, key: string): string {
 }
 
 /**
+ * Dot-notation i18n key for an action's declared refusal message (#34273,
+ * `ActionSchema.refusals`) — the action twin of {@link hookRefusalMessageKey},
+ * at the address every action translation is read at
+ * ({@link actionTranslationNode}):
+ *
+ *  - a bound action: `objects.<object>._actions.<action>.refusals.<CODE>.message`;
+ *  - an object-less action: `globalActions.<action>.refusals.<CODE>.message`;
+ *
+ * and, given a declared reason under the code,
+ * `….refusals.<CODE>.reasons.<REASON>.message`.
+ *
+ * Used by the action body runner, which answers a throw of a declared code
+ * with this translation in the caller's locale (`ExecutionContext.locale`),
+ * the declared sentence on a miss. `objectName` is the action's OWN object —
+ * `objectName` on its declaration, or the object that declares it inline —
+ * never the object a caller routed it under, so a bound action never reads
+ * `globalActions` and an object-less one never reads an object's group.
+ */
+export function actionRefusalMessageKey(
+  objectName: string | undefined,
+  actionName: string,
+  code: string,
+  reason?: string,
+): string {
+  const node = typeof objectName === 'string' && objectName.length > 0
+    ? `objects.${objectName}._actions.${actionName}`
+    : `globalActions.${actionName}`;
+  return reason === undefined
+    ? `${node}.refusals.${code}.message`
+    : `${node}.refusals.${code}.reasons.${reason}.message`;
+}
+
+/**
  * Dot-notation i18n key for a screen's heading or body text —
  * `flows.<flow>.screens.<node_id>.title` / `.description` (#22507).
  *

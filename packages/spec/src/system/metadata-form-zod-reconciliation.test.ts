@@ -475,6 +475,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'texts',
     why: "live, not yet offered in the Studio — the sentences a hook writes into records (`ctx.text`, answered in the organization's language) are validated at parse (snake_case keys, closed-scope holes over declared `params`, a literal `ctx.text` key the hook does not declare refused at save) and read at run time, and they are declared in the hook's package source beside the code that asks for them. The Studio row, a key-only record beside `refusals`, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then a hook authored in the Studio declares `texts` through the metadata API or its package source",
   },
+  // #34273 — an action's refusal catalogue lands in the action's source
+  // first, as a hook's declared texts did (#34374). The Studio row (a
+  // key-only record, with its help text in the eleven metadata-forms
+  // bundles) is a follow-up, so this row records why the key is not offered.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'refusals',
+    why: "live, not yet offered in the Studio — the refusals a `script` action's `js` body throws by code (answered with the declared sentence in the caller's locale) are validated at parse (SCREAMING_SNAKE codes, the hook entry's closed-scope holes over declared `params`, a literal code or reason the catalogue does not declare refused at save) and read at run time, and they are declared in the action's package source beside the body that throws them. The Studio row, a key-only record, needs its labels and help text translated in the eleven metadata-forms bundles and is owed to a follow-up card; until then an action authored in the Studio declares `refusals` through the metadata API or its package source",
+  },
   // #27946 — an action's pressed-state predicate lands spec-first the same
   // way: `planned` in the liveness ledger, drawn by no action surface until
   // the console card that draws `aria-pressed` on the header buttons.

@@ -36,6 +36,17 @@ import {
 } from './action-copy-template';
 import { templateExpressionInput } from '../shared/typed-expression-input';
 import { HookBodySchema } from '../data/hook-body.zod';
+// [#34273] An action's refusal catalogue: the hook catalogue's entry shape,
+// code spelling, literal-throw reading and sentences — import-free leaves.
+import { declaredRefusalEntrySchema } from '../data/declared-entry.zod';
+import {
+  HOOK_REFUSAL_CODE_PATTERN,
+  actionRefusalsWithoutSandboxedBody,
+  hookRefusalCodesThrownIn,
+  hookRefusalReasonsThrownIn,
+  undeclaredActionRefusalCodeAtSave,
+  undeclaredActionRefusalReasonAtSave,
+} from '../data/hook-refusal-codes';
 // [#25653] Import-free leaf, shared with `HookSchema`: the identity-assignment
 // set, the body-source reading and the refusal text.
 import {
@@ -1460,6 +1471,60 @@ const actionObject = () => strictObject({
   ),
 
   /**
+   * The action's refusal catalogue (#34273) — the twin of
+   * `HookSchema.refusals` (#26170, ruling 6431311681 letter A; #33214,
+   * ruling 6879477573), entry for entry: every refusal the action's body may
+   * throw, keyed by the code it throws.
+   *
+   *   refusals: {
+   *     SIGN_IN_REQUIRED: { message: 'Sign in to rate this article.', status: 401 },
+   *     STAGE_LOCKED: {
+   *       message: 'This stage change is not allowed.',
+   *       params: ['stage'],
+   *       reasons: { closed: { message: 'A {{ stage }} opportunity can no longer change stage.' } },
+   *     },
+   *   }
+   *
+   * The body refuses by code only — it throws an error carrying a declared
+   * `code`, optionally a declared `reason` and the `params` its sentence
+   * names — and the runtime answers with that entry: its `message` (or the
+   * reason's), translated in the caller's locale with the declared sentence
+   * as the fallback, its holes filled from `params`, marked as the end user's
+   * sentence (`userMessage`), and its `status`. The translation sits beside
+   * the action's other copy: `objects.<object>._actions.<action>.refusals.<CODE>.message`
+   * (`….reasons.<REASON>.message`), or `globalActions.<action>.refusals.…` for
+   * an object-less action — the address every action translation is read at.
+   *
+   * A code the catalogue does not declare, a reason a code with `reasons`
+   * does not declare, or a throw with no code, is refused loudly: at save
+   * where the body's source names it literally, otherwise when it runs, as a
+   * fault naming the action and the code. An error a host call raised and
+   * the body let through unchanged (a `ctx.api` write refused by the engine,
+   * a hook's refusal under it) passes through as before, and so does a crash.
+   *
+   * Answered where an action runs code of its own: a `type: 'script'`
+   * action's sandboxed `js` body — which is also what `os build` lowers an
+   * inline `target` function to. Refused on every other action: another
+   * `type` (its `target` is a URL, page, flow or endpoint), an `expression`
+   * body, or no body. Absent: the action's throws are answered as they
+   * always were.
+   */
+  refusals: z.record(
+    z.string().regex(HOOK_REFUSAL_CODE_PATTERN, {
+      message: 'A refusal code is SCREAMING_SNAKE (e.g. SIGN_IN_REQUIRED) — the error code the body throws',
+    }),
+    ActionRefusalSchema,
+  ).optional().describe(
+    'Refusal catalogue keyed by the SCREAMING_SNAKE code the action\'s js body throws: { message, status?, reasons?, '
+    + 'params? }. The body refuses by code only, optionally with a declared reason and params; the runtime answers with '
+    + 'the declared message (translated through objects.<object>._actions.<action>.refusals.<CODE>.message, or '
+    + 'globalActions.<action>.refusals.<CODE>.message for an object-less action, ….reasons.<REASON>.message for a '
+    + 'reason, in the caller\'s locale, holes filled from params) and status. A code not declared here, or a reason a '
+    + 'code with reasons does not declare, is refused loudly — at save when the body throws it literally, otherwise at '
+    + 'run time. Only a type: \'script\' action with a js body declares one',
+  ),
+
+  /**
    * The declarative single-record field write — the row-level counterpart of
    * a list view's `bulkActionDefs` `{ operation: 'update', patch }` (#14092,
    * maintainer ruling 2026-09-01), spelled with the same words on purpose:
@@ -2491,6 +2556,63 @@ function refuseUnopenableOnSuccessNavigate(
 }
 
 /**
+ * [#34273] One entry of an action's refusal catalogue (`ActionSchema.refusals`):
+ * the sentence the user reads when the action's body throws the entry's code,
+ * and the status the refusal is answered with. The same entry a hook's
+ * catalogue holds (`HookRefusalSchema`), built by the one factory so the two
+ * cannot drift; only its words name the action and its translation address.
+ */
+export const ActionRefusalSchema = declaredRefusalEntrySchema('action');
+
+export type ActionRefusal = z.input<typeof ActionRefusalSchema>;
+
+/**
+ * [#34273] The object-level check on an action's `refusals`, the twin of
+ * `HookSchema`'s: a catalogue nothing the action runs could answer is
+ * refused at `refusals`, and a code (or a reason under a code that declares
+ * `reasons`) the body's source throws literally that the catalogue does not
+ * declare is refused at `body.source`, one issue each. A code that arrives any
+ * other way is the run-time refusal's.
+ */
+function refuseUndeclaredLiteralActionRefusalCode(
+  data: {
+    type?: string;
+    body?: { language?: string; source?: unknown };
+    refusals?: Record<string, { reasons?: Record<string, unknown> } | undefined>;
+  },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (!data.refusals) return;
+  const type = data.type ?? 'script';
+  if (type !== 'script' || data.body?.language !== 'js') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['refusals'],
+      message: actionRefusalsWithoutSandboxedBody(type, data.body?.language),
+    });
+    return;
+  }
+  const source = data.body.source;
+  if (typeof source !== 'string') return;
+  const declared = Object.keys(data.refusals);
+  for (const code of hookRefusalCodesThrownIn(source)) {
+    if (Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
+    ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: undeclaredActionRefusalCodeAtSave(code, declared) });
+  }
+  for (const { code, reason } of hookRefusalReasonsThrownIn(source)) {
+    if (!Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
+    // Read only under a code that declares `reasons`, as on a hook.
+    const reasons = data.refusals[code]?.reasons;
+    if (!reasons || Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['body', 'source'],
+      message: undeclaredActionRefusalReasonAtSave(code, reason, Object.keys(reasons)),
+    });
+  }
+}
+
+/**
  * [#25653, ruling record 6384657105 letter A] App-authored automation does not
  * use elevation to write the four identity-assignment objects, and an action
  * body always runs as system (`buildActionExecutionContext`, runtime). The data
@@ -3002,6 +3124,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }).superRefine(refuseDeclarativeUpdateContradictions(ACTION_DECLARATIVE_UPDATE))
   .superRefine(refuseInertOutcomeMessages)
   .superRefine(refuseIdentityAssignmentBodyWrite)
+  .superRefine(refuseUndeclaredLiteralActionRefusalCode)
   .superRefine(refusePreflightContradictions)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final
