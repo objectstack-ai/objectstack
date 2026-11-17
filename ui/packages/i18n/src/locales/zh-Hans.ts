@@ -2289,6 +2289,9 @@ const zh = {
           title: '正在编辑「{{app}}」',
           titleGeneric: '编辑此应用',
           description: '想改点什么？我会就地修改这个应用 —— 加字段、对象、视图或仪表盘，或调整已有内容。',
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            '问数据，或者让我改这个应用 —— 可以问记录的计数、列表和汇总，也可以告诉我要改什么，我会就地修改：字段、对象、视图或仪表盘。',
         },
       },
       clearConversation: '清空',
@@ -2495,6 +2498,11 @@ const zh = {
         resize: '调整对话宽度',
         collapse: '收起对话',
         maximize: '以完整页面打开',
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: '历史',
+        backToChat: '返回对话',
+        expand: '展开',
+        restore: '还原为侧边栏',
         open: '打开助手',
         planAwaitingApproval: '有一个方案等待确认',
       },
