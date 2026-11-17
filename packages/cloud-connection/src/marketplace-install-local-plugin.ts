@@ -27,6 +27,9 @@
  *            before anything else looks at it; an id the declaration refuses
  *            answers `PLUGIN_MANIFEST_INVALID` (400 for an inline manifest,
  *            502 for a cloud snapshot) and nothing is registered or written.
+ *            So is its `namespace`, through `ManifestSchema.shape.namespace`
+ *            (#33922): absent is admitted, a value the declaration refuses
+ *            answers `PLUGIN_MANIFEST_INVALID` the same way.
  *            A package declaring code this door cannot run answers
  *            `VALIDATION_ERROR` (422) the same way: an enabled job with no
  *            `body`, or one whose `body` the declaration refuses (#21585), and
@@ -958,6 +961,40 @@ function judgeWithheldMaps(
         };
     }
     return { ok: true, withheldMaps: declared.data ?? [] };
+}
+
+/**
+ * [#33922, ADR-0048 §2] The package's `namespace`, parsed through its
+ * declaration (`ManifestSchema.shape.namespace`, `NAMESPACE_PATTERN`), by
+ * reference, ON THE BODY REGISTRATION READS: `manifest` is the body this door
+ * hands `manifest.register` (after `normalizeBundle`), and the registry
+ * installs it under that body's own top-level `namespace` — the key its install-time namespace
+ * gate compares. ⛔ Never a nested read ({@link declaredPackageManifest}): a
+ * judge reading any other key than the one registration reads answers about
+ * a namespace nothing installs under. `null` admits it; otherwise the refusal
+ * sentence.
+ *
+ * Absent is admitted, as the declaration admits it. Without this, `''`,
+ * `'QA_N'` or `'9-Bad Ns!'` registered as written: a namespace no author can
+ * declare, and a case variant of an owned one (`QA_N` beside `qa_n`) that the
+ * gate's uniqueness comparison never reads as the same namespace.
+ *
+ * ⛔ Not the members of a multi-package artifact: each `packages[]` entry is
+ * already parsed WHOLE through `ArtifactPackageSchema` (the core's
+ * `resolveArtifactPackageOrder`, reached here through {@link unrunnableCode}
+ * before any write), whose refusal of the same namespace is
+ * `INVALID_ARTIFACT_PACKAGE_ENTRY` / 422. A second judge here would move that
+ * answer, not close a gap.
+ *
+ * The sentence is the declaration's own inside the frame an invalid
+ * `installModes` is answered with ({@link judgeInstallMode}); no wording is
+ * minted.
+ */
+function namespaceRefusal(manifest: Record<string, any>, manifestId: string): string | null {
+    const declared = ManifestSchema.shape.namespace.safeParse(manifest.namespace);
+    if (declared.success) return null;
+    const [issue] = declared.error.issues;
+    return `Package '${manifestId}' declares an invalid \`namespace\`: ${issue?.message ?? 'refused by its declaration'}.`;
 }
 
 /**
@@ -1940,6 +1977,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *     install-time rows (or the user's own data) are still present, and
      *     re-upserting would silently revert user edits on every boot.
      *
+     * [#34405] The load honours the landed-key record (`sys_seed_landed_key`),
+     * as the runtime's boot seed does: a seed row whose key landed in this
+     * organization before and whose row is gone was removed by a person, and is
+     * withheld (counted in `skipped`), not inserted again. A database that lost
+     * its rows and the record with them is healed whole. A heal that landed
+     * no rows but skipped some, with no error, is reported at `info` and
+     * recorded with its real `skipped`, never as an `emptyInstall`. The split
+     * reads the loader's `skipped`, which also counts an `update` row with no
+     * match, so a heal whose only skips are those records settled too. Only a
+     * load that landed nothing otherwise (nothing skipped, or an error) is the
+     * empty install the boot banner escalates.
+     *
      * `converted` is the entry's manifest as rehydrate converted it — the one the
      * package registered — so the heal seeds what registered, not the raw
      * ledger bytes.
@@ -1981,7 +2030,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             // [#30281] No user starts a boot heal: the setting, then this
             // package's declared default locale.
-            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
+            // [#34405] Honouring the landed-key record, as the runtime's boot
+            // seed does: a new database holds no record and is healed whole,
+            // while seed rows a person deleted from every seeded object stay
+            // deleted.
+            const summary = await this.runInlineSeed(ctx, datasets, 'honour', undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
             const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
             if (landed > 0) {
                 entry.withSampleData = true;
@@ -2000,6 +2053,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     rejected: summary.errors ?? 0,
                     droppedRefs: summary.droppedRefs ?? 0,
                     healed: true,
+                });
+            } else if ((summary.skipped ?? 0) > 0 && (summary.errors ?? 0) === 0) {
+                // [#34405] Rows skipped and none landed, no error: a seed a
+                // person emptied is withheld by the landed-key record and stays
+                // empty on every restart. `skipped` also counts an `update` row
+                // with no match, so a heal whose only skips are those lands here
+                // too. A settled seed, not a failed one, so no `emptyInstall`.
+                ctx.logger?.info?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows: ${summary.skipped} seed row(s) skipped, none in error (a row withheld by the landed-key record, or an update-mode row with no match); the package's sample-data reseed brings withheld rows back`);
+                await this.recordSeedSummary(ctx, {
+                    source: entry.manifestId,
+                    marketplace: true,
+                    inserted: 0,
+                    updated: 0,
+                    skipped: summary.skipped,
+                    rejected: 0,
+                    droppedRefs: summary.droppedRefs ?? 0,
                 });
             } else {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows${summary.errorSample ? ` — first error: ${summary.errorSample}` : ''}`);
@@ -2221,7 +2290,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const empty = () => ({ inserted: 0, updated: 0, skipped: 0, errors: [] as any[] });
         // [#30281] `options.userId` is the organization's founder when the
         // org-scoping middleware knows one — the AppPlugin replayer's shape.
-        return async (organizationId: string, options?: { userId?: string }) => {
+        // [#34405] `options.reseed` is the deliberate re-seed the AppPlugin
+        // replayer takes too: every missing row, whatever the landed-key record
+        // says. Every other replay honours that record.
+        return async (organizationId: string, options?: { userId?: string; reseed?: boolean }) => {
             if (!organizationId) return empty();
             const datasetsNow = this.readSharedSeedDatasets(ctx);
             if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) return empty();
@@ -2247,7 +2319,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // [#30324] The founder owns the rows: the organization's first
             // admin, the one person this door is handed. With none, the rows
             // keep no owner, as before.
-            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId }, {
+            const s = await this.runInlineSeed(ctx, datasetsNow, options?.reseed === true ? 'reseed' : 'honour', organizationId, { userId: options?.userId }, {
                 userId: options?.userId ?? null,
                 door: 'per-organization seed replay',
                 none: `the replay of organization ${organizationId} names no founder`,
@@ -2602,6 +2674,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
+
+        // 1b″. [#33922, ADR-0048 §2] ⭐ THE DOOR PARSES THE PACKAGE NAMESPACE —
+        //      through its declaration, `ManifestSchema.shape.namespace`, by
+        //      reference ({@link namespaceRefusal}), right after the id and at
+        //      the same converged point, judged on the body registration reads,
+        //      so neither the registry's install-time namespace gate nor the
+        //      ledger write ever sees a namespace no author can declare. Before
+        //      this, `''`, `'QA_N'` and `'9-Bad Ns!'` installed with a 200, and
+        //      `QA_N` beside an owner of `qa_n` passed the gate, whose
+        //      uniqueness comparison never read the two as one namespace. An
+        //      absent namespace is admitted, as the declaration admits it.
+        //      The id gate's status split (400 caller input, 502 upstream
+        //      snapshot) and its rehydrate exemption (an entry an older build
+        //      ledgered under such a namespace still loads and can be removed).
+        {
+            const refusal = namespaceRefusal(manifest, manifestId);
+            if (refusal !== null) {
+                return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: refusal } }, callerManifest ? 400 : 502);
+            }
+        }
 
         // 1b′. [#31963, cloud#3624 ruling A] ⭐ THE GRANT GOVERNS THE COPY. A
         //      grant-path inline manifest is copied only when it declares the
@@ -3398,6 +3490,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // the database (e.g. a reinstall/upgrade over live sample data) — the
         // install carries sample data either way. Leaving the flag false here
         // is what made older ledgers claim "no sample data" over a seeded DB.
+        // [#34405] A row the landed-key record keeps out (a person deleted it)
+        // is in `skipped` too; the listing reads the rows, not this flag.
         const seededRows = (seededSummary.seeded.inserted ?? 0) + (seededSummary.seeded.updated ?? 0) + (seededSummary.seeded.skipped ?? 0);
         if (seededSummary.seeded.mode === 'inline' && seededRows > 0) {
             entry.withSampleData = true;
@@ -5527,7 +5621,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             organizationId = resolved;
         }
         try {
-            const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+            const s = await this.runInlineSeed(ctx, datasets, door === 'reseed' ? 'reseed' : 'honour', organizationId, {
                 ...(userId ? { userId } : {}),
                 app,
             }, {
@@ -7298,7 +7392,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     if (!multiTenant || organizationId) {
                         // [#30281] The installing (or reseeding) user and this
                         // package's own declared default locale.
-                        const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+                        // [#34405] The reseed re-seeds; the install and the
+                        // upgrade honour the landed-key record.
+                        const s = await this.runInlineSeed(ctx, datasets, opts.door === 'reseed' ? 'reseed' : 'honour', organizationId, {
                             userId: opts.userId,
                             app: manifest,
                         }, {
@@ -7411,10 +7507,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * A, maintainer, 2026-11-05: the install paths
      * pick datasets by locale). Nothing answers ⇒ no locale, and every dataset
      * loads as before. A dataset without `locale` loads whatever it answers.
+     *
+     * [#34405, #31021] `landedKeys` is the loader's own option, passed by every
+     * caller, never defaulted: each load keeps the record of which seed rows
+     * landed in the organization it seeds (`sys_seed_landed_key`). `'honour'`
+     * — the install, the upgrade, the restart heal, the per-organization
+     * replay and an unmanaged copy's first load — does not insert again a
+     * recorded row that is now gone, because a person removed it; a key never
+     * recorded still lands, so a row an upgrade adds is inserted. `'reseed'` —
+     * the sample-data reseed and the replayer's `{ reseed: true }` — is the
+     * deliberate re-seed: it inserts every missing row and records it again.
+     * A row the record keeps out is counted in `skipped`.
      */
     private runInlineSeed = async (
         ctx: PluginContext,
         datasets: any[],
+        landedKeys: 'honour' | 'reseed',
         organizationId?: string,
         localeFrom: { userId?: string; app?: unknown } = {},
         owner: SeedOwnerOfLoad = { userId: null, door: 'seed', none: 'no person named' },
@@ -7435,7 +7543,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             appDefaultLocale: appDefaultSeedLocale(localeFrom.app),
         });
         ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
-        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger, { landedKeys });
         const request = (SeedLoaderRequestSchema as any).parse({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
