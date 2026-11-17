@@ -603,8 +603,10 @@ describe('[#5860] the skip list is declared on the registration face', () => {
       author_id: 'u1',
       mentions: JSON.stringify(['u2']),
     });
-    expect(emit).toHaveBeenCalledTimes(1);
+    // The inbox notice, then the mention e-mail (`mention-email.ts`).
+    expect(emit).toHaveBeenCalledTimes(2);
     expect(emit.mock.calls[0]![0]).toMatchObject({ topic: 'collab.mention', audience: ['u2'] });
+    expect(emit.mock.calls[1]![0]).toMatchObject({ topic: 'collab.mention', audience: ['u2'], channels: ['email'] });
 
     // A non-comment insert carrying the same shape must not reach it.
     emit.mockClear();
