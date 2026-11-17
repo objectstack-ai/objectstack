@@ -34,6 +34,14 @@ export interface GridFieldAuthoring {
   /** Optional tooltip/aria-label for the edit-field button (defaults to "Edit field"). */
   editColumnLabel?: string;
   /**
+   * Set to draw a visible caret in every column header that opens the
+   * table's own column menu (sort, hide) — the menu a right-click opens.
+   * The value is the caret's tooltip/aria-label. A design host that takes
+   * the header click for itself (Studio selects the field) sets it so sort
+   * and hide stay one click away. Omit it and the header draws no caret.
+   */
+  columnMenuLabel?: string;
+  /**
    * Invoked when the user drag-reorders columns. Receives the new column order
    * as accessorKeys (= field names, including any non-field columns). Providing
    * this also ENABLES the table's built-in column drag-reorder (design mode), so

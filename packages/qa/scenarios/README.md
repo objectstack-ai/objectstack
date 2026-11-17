@@ -139,10 +139,12 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   never its figure (`gradeDatasetQuestion`; card-level `gradeCardDatasetQuestion`), by the grader its expected route
   names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
   arguments the model sent decide nothing), `asked-back` (the reply asks, names every candidate by a word other than
-  the asked one, and states no figure; an option list's numbering is no figure) and `fallback-labelled` (an object
-  query on the expected object answered, no dataset did, and the reply says the figure is not a governed metric: a
-  closed word list, English and Chinese, in `labelsFallback`). Its notes say what the turn did on the way, ungraded: a
-  loaded skill, no `list_datasets` call, the `candidates` a `list_datasets` answer offered.
+  the asked one, and states no figure; an option list's numbering, a count of the options it offers — `2 metrics`,
+  「2 个指标」 — and a year a time word or 年 marks are no figure, unless a counted noun follows it: `for 2031
+  orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
+  says the figure is not a governed metric: a closed word list, English and Chinese, in `labelsFallback`). Its notes
+  say what the turn did on the way, ungraded: a loaded skill, no `list_datasets` call, the `candidates` a
+  `list_datasets` answer offered.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -292,7 +294,7 @@ npx @objectstack/scenarios help                                      # the comma
 |:---|:---|
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
-| `ask` | the same install of the same verified build as `template`, into a blank host of its own → seed → Run, and nothing else: no authoring turn, no score, no iterate. Off by default (`--modes ask`, or `--modes scratch,ask`) |
+| `ask` | the same install of the same verified build as `template`, into a blank host of its own → seed → Run, and nothing else: no authoring turn, no score, no iterate. Ask mode edits nothing, so a build the unmanaged door refuses `UNMANAGED_INSTALL_UNCOPYABLE` (it carries an item no environment row can hold, such as a `capability`) is installed unchanged through the same door with `installMode: 'managed'`; the record's `template.installMode` says which mode the run used, and `template.unmanagedRefusal` keeps the refusal it fell back from. No other refusal falls back, and template mode never does. Off by default (`--modes ask`, or `--modes scratch,ask`) |
 
 - **Ask mode** (`orchestrate.ts`, `scorecard.ts`): `--modes ask` runs only the Run half — every question (with
   `--ask-repeats`) and every operation — on a verified build: `--template F` when given, else this run's scratch build
