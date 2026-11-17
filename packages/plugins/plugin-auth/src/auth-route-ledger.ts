@@ -302,6 +302,7 @@ export const AUTH_ROUTE_LEDGER: readonly AuthRouteLedgerEntry[] = [
   { route: 'POST /api/v1/auth/sys-oauth-application/register', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — the sys_oauth_application create action posts it directly; session-required self-service wrapper over better-auth /oauth2/create-client that splits the Console\'s newline-separated redirect-URL textarea into the redirect_uris array the vendor schema requires' },
   { route: 'POST /api/v1/auth/sys-session/revoke', family: 'objectstack-mount', source: 'objectstack', disposition: 'server-only', note: 'no SDK method builds this URL — the sys_session revoke_session row action posts it directly with the row id; the server resolves the session from the id, so the session token never travels to or from the console. The session owner is re-dispatched to better-auth /revoke-session; another user\'s session is revocable by a platform admin only (ADR-0068 D2), tombstoned with reason admin (ADR-0069 D4)' },
   { route: 'POST /api/v1/auth/organization/accept-invitation', family: 'organization', source: 'better-auth', disposition: 'sdk', client: 'organizations.invitations.accept', requires: 'organization' },
+  { route: 'POST /api/v1/auth/organization/accept-invitation-one-step', family: 'organization', source: 'better-auth', disposition: 'public', requires: 'organization', note: 'the one-step invitation acceptance (invitation-mailbox-proof.ts): an ObjectStack endpoint on the catch-all, answering a caller with NO session that presents the mailbox proof only the invitation mail carries. With a valid proof it creates the account (or sets the password of an unverified one with no linked provider account, revoking its sessions), marks the address verified, accepts through the vendor accept route and signs the person in; an address with an account the one-step path does not touch answers outcome sign_in, unspent. Every proof that does not admit answers one 400 INVALID_TOKEN. Single-use (spent only by a request that passed every gate), bound to the invitation, its address and its expiry; rate-limited per client network address and per invitation. On a cloud-managed environment a request carrying a proof answers 409 RESOURCE_CONFLICT, the proof unspent. Without a proof it serves a signed-in session whose address is the invited one and verified. The vendor accept route is unchanged' },
   // #9941 — better-auth declares `addMember` with NO HTTP path (server-only
   // `auth.api.addMember`; measured on the installed 1.7.1), so the catch-all
   // never publishes it and it is correctly ABSENT from
@@ -483,6 +484,7 @@ export const BETTER_AUTH_MOUNTED_SURFACE: readonly string[] = [
   'POST /api/v1/auth/oauth2/update-consent',
   'POST /api/v1/auth/oauth2/userinfo',
   'POST /api/v1/auth/organization/accept-invitation',
+  'POST /api/v1/auth/organization/accept-invitation-one-step',
   'POST /api/v1/auth/organization/add-team-member',
   'POST /api/v1/auth/organization/cancel-invitation',
   'POST /api/v1/auth/organization/check-slug',
