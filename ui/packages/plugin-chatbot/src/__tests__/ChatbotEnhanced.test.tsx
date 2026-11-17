@@ -1243,7 +1243,7 @@ describe('ChatbotEnhanced — publish build-health line (ADR-0038)', () => {
       <ChatbotEnhanced autoPublishDrafts isLoading={false} messages={[userMsg, draftMsg('app.todo')]} onPublishDrafts={onPublishDrafts} />,
     );
     await waitFor(() => expect(screen.getByTestId('publish-health')).toBeInTheDocument());
-    expect(screen.getByText(/6 sample rows live · 2 views · 3 widgets · 1 seed verified/i)).toBeInTheDocument();
+    expect(screen.getByText(/6 sample rows live · 2 views · 3 widgets · 1 sample data set verified/i)).toBeInTheDocument();
   });
 
   it('renders the seed-load failure loudly', async () => {
