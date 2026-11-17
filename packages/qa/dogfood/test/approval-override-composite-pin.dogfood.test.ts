@@ -246,7 +246,7 @@ describe('approval override composite (#16679)', () => {
  *      reassign of a member's request to that member;
  *   ⭐ the admin's reject and recall of their own requests succeed;
  *   ⭐ CONTROLS: the admin still override-approves a member's request, audited
- *      `via_override: true`, after which the bypassed approver reads 404; a
+ *      `via_override: true`, after which the slate's approver reads 404; a
  *      slot holder still approves their own request (`via_override: false`).
  *
  * The service-level half is `plugin-approvals`' `approval-override-audit.test.ts`.
@@ -367,15 +367,15 @@ describe('the override never approves its actor\'s own request, through the appr
     expect((await requestRow(recalled)).status).toBe('recalled');
   }, 60_000);
 
-  it('CONTROL: an administrator who did not submit the request override-approves it, audited, and the bypassed approver then reads 404', async () => {
+  it('CONTROL: an administrator who did not submit the request override-approves it, audited, and the slate\'s approver then reads 404', async () => {
     const id = await openRequest(memberToken, 'member approve');
     const approve = await call(adminToken, 'POST', `/approvals/requests/${id}/approve`, {});
     expect(approve.status).toBe(200);
     expect((await requestRow(id)).status).toBe('approved');
     expect(await decisionsOn(id)).toMatchObject([{ action: 'approve', via_override: true }]);
 
-    const bypassed = await call(approverToken, 'POST', `/approvals/requests/${id}/approve`, {});
-    expect([bypassed.status, bypassed.code]).toEqual([404, 'REQUEST_NOT_FOUND']);
+    const slateApprover = await call(approverToken, 'POST', `/approvals/requests/${id}/approve`, {});
+    expect([slateApprover.status, slateApprover.code]).toEqual([404, 'REQUEST_NOT_FOUND']);
     expect((await call(approverToken, 'GET', `/approvals/requests/${id}`)).status).toBe(404);
   }, 60_000);
 

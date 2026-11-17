@@ -1022,8 +1022,8 @@ is also a designated approver is approving normally and records `false` — the
 flag is about the branch that authorized the call, not about who holds admin
 rights. A row written before the column existed carries no value at all, which
 reads as *not recorded* rather than as *not an override*. Without it, an
-override and an ordinary approval were byte-for-byte identical. The bypassed
-approver is not told either: once the override decides the request it is no
+override and an ordinary approval were byte-for-byte identical. The slate's
+approvers are not told either: once the override decides the request it is no
 longer pending on them, so it leaves their queue and their view, and reading or
 deciding it answers `404 REQUEST_NOT_FOUND`, as for any request they may not
 read.
