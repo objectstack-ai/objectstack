@@ -527,7 +527,13 @@ const HOOK_TEXT_MESSAGE_SLOT = 'A hook text `message`';
  * filled from the call's `params` after — a declared refusal's posture
  * ({@link HookRefusalSchema}), with the organization's language in place of
  * the caller's. An entry that declares no `params` is plain text and a hole in
- * it is refused.
+ * it is refused. With `params`, a hole over an undeclared name is refused at
+ * parse; a hole holding logic, an unknown formatter, an empty hole and a
+ * `currency` formatter with no code are refused where the text is compiled —
+ * `os validate`, `compile` and the publish gate (`@objectstack/lint`
+ * `validate-hook-refusal-templates.ts`, which judges `texts` beside
+ * `refusals`). A translation whose holes do not render at run time is dropped
+ * for this `message`, filled.
  */
 export const HookTextSchema = lazySchema(() => strictObject(
   {
@@ -556,8 +562,9 @@ export const HookTextSchema = lazySchema(() => strictObject(
       }),
     ).optional().describe(
       'The names this text may fill: a {{ NAME }} or {{ NAME | formatter }} hole renders the value the hook passes '
-      + 'in ctx.text(KEY, { NAME: value }). A hole over any other name, logic, an unknown formatter and an empty '
-      + 'hole are refused. Absent: the sentence is plain text and a {{ }} hole is refused',
+      + 'in ctx.text(KEY, { NAME: value }). A hole over any other name is refused at parse; a hole holding logic, an '
+      + 'unknown formatter, an empty hole and a currency formatter with no code are refused where the text is compiled '
+      + '(os validate, compile, the publish gate). Absent: the sentence is plain text and a {{ }} hole is refused',
     ),
   },
 ).superRefine((entry, ctx) => {

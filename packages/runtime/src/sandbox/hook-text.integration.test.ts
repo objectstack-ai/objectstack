@@ -75,6 +75,8 @@ interface StackOptions {
   settings?: SettingsAnswer;
   /** Run the hook in-process (a `handler`) instead of as a sandboxed body. */
   inProcess?: boolean;
+  /** Collects every `logger.warn` line the runtime writes. */
+  warnings?: string[];
 }
 
 const ABSENT_TENANCY_TABLE = 'sys_organization';
@@ -125,7 +127,10 @@ describe('#34374 — a hook writes its declared text in the organization\'s lang
       throw new Error(`service '${name}' not registered`);
     };
     const i18nSource = hookRefusalI18nReader({ getService: getService as never });
-    const logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
+    const logger = {
+      debug: () => {}, info: () => {}, error: () => {},
+      warn: (...args: unknown[]) => { options.warnings?.push(args.map(String).join(' ')); },
+    };
 
     if (options.inProcess) {
       const hook = { name: HOOK_NAME, object: LEAD.name, events: ['afterUpdate'], handler: inProcessHandler, texts: TEXTS };
@@ -188,6 +193,21 @@ describe('#34374 — a hook writes its declared text in the organization\'s lang
       it('writes the declared sentence, holes filled, when the organization\'s language has no translation — and the hook goes on', async () => {
         const { engine: ql } = await makeStack({ inProcess, defaultLocale: 'fr-FR', bundles: { 'zh-CN': bundle(ZH) } });
         expect(await qualify(ql, 'Acme')).toEqual(['Follow up with qualified lead: Acme']);
+      }, 30000);
+
+      it('writes the declared sentence, filled, when the translation\'s holes do not render — never the braces; CONTROL: a translation that renders is written', async () => {
+        const warnings: string[] = [];
+        const { engine: ql } = await makeStack({
+          inProcess, defaultLocale: 'zh-CN', bundles: { 'zh-CN': bundle('跟进已认定线索：{{ lead | shout }}') }, warnings,
+        });
+        expect(await qualify(ql, 'Acme')).toEqual(['Follow up with qualified lead: Acme']);
+        expect(warnings.some((w) => w.includes("the zh-CN translation of its text 'follow_up_subject' did not render")
+          && w.includes('so the declared text is written'))).toBe(true);
+        await engine?.destroy(); engine = null;
+        if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
+
+        const control = await makeStack({ inProcess, defaultLocale: 'zh-CN', bundles: { 'zh-CN': bundle('跟进：{{ lead | upper }}') } });
+        expect(await qualify(control.engine, 'Acme')).toEqual(['跟进：ACME']);
       }, 30000);
 
       it('answers an unregistered Localization setting as not set (the app default writes); any other settings failure refuses the write', async () => {

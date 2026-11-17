@@ -465,10 +465,14 @@ export const leadFollowUp = {
 - **Translated first, filled after.** `ctx.text` picks
   `hooks.<hook>.texts.<key>.message` in that language, then fills the `{{ }}`
   holes from the `params` you pass. A text that declares `params` may write
-  `{{ name }}` holes over those names; one that declares none is plain text,
-  and a hole in it is refused when the hook is saved.
+  `{{ name }}` holes over those names, with an optional known formatter; one
+  that declares none is plain text, and a hole in it is refused when the hook
+  is saved. A hole over another name is refused at save; logic, an unknown
+  formatter, an empty hole and `{{ amount | currency }}` with no code are
+  refused by `os validate`, `compile` and the publish gate.
 - **A missing translation never fails the hook.** With no translation, or no
-  language to pick, the declared `message` is written.
+  language to pick, the declared `message` is written. A translation whose
+  holes do not render is dropped for the declared `message`, filled.
 - **An unreadable Localization setting rejects.** When the settings service
   cannot be read, `ctx.text` rejects rather than write another language over
   the organization's choice. Catch it if the hook should write anyway.

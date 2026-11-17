@@ -172,24 +172,31 @@ export function fillHookRefusalParams(
   params: Record<string, unknown> | undefined,
   logger?: { warn?: (...args: any[]) => void },
 ): string {
-  return fillHookTemplateParams(hookName, template, declared, params, logger, 'refusal');
+  const result = renderHookTemplate(template, declared, params);
+  if (result.ok) return result.value;
+  logger?.warn?.(
+    `[BodyRunner] hook '${hookName}': its refusal sentence did not render (${result.error}), `
+      + 'so it is served as written.',
+  );
+  return template;
 }
 
+/** What {@link renderHookTemplate} answers: the filled sentence, or why it did not render. */
+export type HookTemplateRender = { ok: true; value: string } | { ok: false; error: string };
+
 /**
- * {@link fillHookRefusalParams} for either kind of declared hook sentence: a
- * refusal (served as written when it cannot render — a refusal stays a
- * refusal) or, #34374, a text the hook writes into a record (written as
- * declared when it cannot render, and the hook goes on). One template engine,
- * one scope rule: only the entry's declared names are in scope.
+ * One declared hook sentence with its `{{ NAME }}` holes filled from `params`:
+ * the engine and the scope rule {@link fillHookRefusalParams} uses (only the
+ * entry's declared names are in scope), answering a failure instead of choosing
+ * a fallback, so each caller states its own. Shared with a hook's declared text
+ * (#34374, `hook-text.ts`), which falls back from a translation that does not
+ * render to the declared sentence.
  */
-export function fillHookTemplateParams(
-  hookName: string,
+export function renderHookTemplate(
   template: string,
   declared: readonly string[],
   params: Record<string, unknown> | undefined,
-  logger: { warn?: (...args: any[]) => void } | undefined,
-  kind: 'refusal' | 'text',
-): string {
+): HookTemplateRender {
   const scope: Record<string, unknown> = {};
   for (const name of declared) {
     scope[name] = params && Object.prototype.hasOwnProperty.call(params, name) ? params[name] : undefined;
@@ -200,15 +207,9 @@ export function fillHookTemplateParams(
   } catch (err: unknown) {
     result = { ok: false, error: { message: err instanceof Error ? err.message : String(err) } };
   }
-  if (result.ok) return String(result.value ?? '');
-  logger?.warn?.(
-    kind === 'refusal'
-      ? `[BodyRunner] hook '${hookName}': its refusal sentence did not render (${result.error?.message ?? 'unknown'}), `
-        + 'so it is served as written.'
-      : `[BodyRunner] hook '${hookName}': its text did not render (${result.error?.message ?? 'unknown'}), `
-        + 'so it is written as declared.',
-  );
-  return template;
+  return result.ok
+    ? { ok: true, value: String(result.value ?? '') }
+    : { ok: false, error: result.error?.message ?? 'unknown' };
 }
 
 /**

@@ -16,7 +16,8 @@
  *  - the translated sentence first, `hooks.<hook>.texts.<key>.message` through
  *    the `i18n` service, negotiated by `resolveBundleLocale`; then its `{{ }}`
  *    holes are filled from `params` through the formula template engine, the
- *    one a declared refusal is filled with (parameter 1);
+ *    one a declared refusal is filled with (parameter 1). A translation whose
+ *    holes do not render is dropped for the declared `message`, filled;
  *  - with no translation, or no language, the declared `message` (parameter 5)
  *    — the hook goes on;
  *  - a Localization setting that cannot be READ (the settings service throws)
@@ -39,8 +40,8 @@ import { undeclaredHookTextAtRun } from '@objectstack/spec/data';
 import { hookTextMessageKey } from '@objectstack/spec/system';
 import { readOrganizationTextLocale } from '@objectstack/core';
 import {
-  fillHookTemplateParams,
   negotiatedLocale,
+  renderHookTemplate,
   type HookRefusalI18nService,
   type HookRefusalI18nSource,
 } from './hook-refusal-catalogue.js';
@@ -121,11 +122,27 @@ export function buildHookTextSurface(
       opts.getService,
       typeof organizationId === 'string' && organizationId.length > 0 ? organizationId : undefined,
     );
-    const picked = (locale ? pickTranslatedText(hookName, key, locale, opts.i18n, opts.logger) : undefined)
-      ?? entry.message;
+    const translated = locale ? pickTranslatedText(hookName, key, locale, opts.i18n, opts.logger) : undefined;
     const declared = Array.isArray(entry.params) ? entry.params : [];
-    return declared.length > 0
-      ? fillHookTemplateParams(hookName, picked, declared, params, opts.logger, 'text')
-      : picked;
+    if (declared.length === 0) return translated ?? entry.message;
+    // A translation whose holes do not render falls back to the declared
+    // sentence, filled; never a sentence with its braces in the record.
+    if (translated !== undefined) {
+      const filled = renderHookTemplate(translated, declared, params);
+      if (filled.ok) return filled.value;
+      opts.logger?.warn?.(
+        `[BodyRunner] hook '${hookName}': the ${locale} translation of its text '${key}' did not render `
+          + `(${filled.error}), so the declared text is written.`,
+      );
+    }
+    const filled = renderHookTemplate(entry.message, declared, params);
+    if (filled.ok) return filled.value;
+    // Only reachable for a hook that skipped the compile check (`objectstack
+    // validate`, `compile`, the publish gate refuse such a sentence).
+    opts.logger?.warn?.(
+      `[BodyRunner] hook '${hookName}': its declared text '${key}' did not render (${filled.error}), `
+        + 'so it is written unfilled, holes and all.',
+    );
+    return entry.message;
   };
 }
