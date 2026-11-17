@@ -87,6 +87,7 @@ function permissionsAnswer(): MePermissionsAuthenticatedResponse {
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['service_agent'],
     systemPermissions: ['studio.access'],
     objects: {

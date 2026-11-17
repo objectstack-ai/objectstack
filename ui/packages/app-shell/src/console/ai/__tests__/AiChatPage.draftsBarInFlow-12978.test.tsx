@@ -151,6 +151,8 @@ function dockState(): ChatDockState {
     width: 420,
     dragging: false,
     maximized: false,
+    fullWindow: false,
+    setFullWindow: vi.fn(),
     toggle: vi.fn(),
     expand: vi.fn(),
     collapse: vi.fn(),

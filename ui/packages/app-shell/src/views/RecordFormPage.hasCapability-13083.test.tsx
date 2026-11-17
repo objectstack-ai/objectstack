@@ -99,6 +99,7 @@ function payload(systemPermissions: string[]): MePermissionsAuthenticatedRespons
     tenantId: 'org_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     systemPermissions,
     objects: { org_member: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false } },
