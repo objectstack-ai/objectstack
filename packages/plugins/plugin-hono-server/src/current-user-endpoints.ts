@@ -49,6 +49,7 @@ import {
     resolveOrganizationLocale,
     resolveRequestExecutionContext,
     rethrowAuthzStoreUnavailable,
+    isOutsideEveryOrganization,
     type ApiExposureSchemaLike,
     type ManagedSchemaLike,
     type RequestAuthService,
@@ -409,13 +410,24 @@ async function organizationHasAnyQueue(
  * What it discloses is per object, never per queue: no queue name, no count.
  * The full body narrows it to the objects the caller may read
  * ({@link readableObjectsUsingQueues}).
+ *
+ * A person outside every organization (`isOutsideEveryOrganization`,
+ * `@objectstack/core`: signed in, not system, an empty membership set, not a
+ * platform operator) is answered `[]` without asking. With no active
+ * organization the service reads environment-wide, and such a person can read
+ * no organization's rows: Layer 0 denies them every tenant row under every
+ * posture (ADR-0093 D8.1, as amended), so naming an object would disclose
+ * other organizations' queues. A context that carries no membership set at all
+ * is not judged by that rule and reads as before.
  */
 async function organizationObjectsUsingQueues(
     ctx: CurrentUserEndpointsContext,
+    execCtx: unknown,
     organizationId: string | null,
     hasAnyQueue: boolean,
 ): Promise<string[]> {
     if (!hasAnyQueue) return [];
+    if (isOutsideEveryOrganization(execCtx)) return [];
     try {
         const service = (() => {
             try { return ctx.getService<Partial<AnyQueueReader>>(OWNERSHIP_QUEUE_SERVICE) ?? null; }
@@ -1132,7 +1144,7 @@ export function registerCurrentUserEndpoints(
             const hasAnyQueue = await organizationHasAnyQueue(ctx, identity.tenantId);
             // [#34602] Same posture: asked on every authenticated branch, only
             // when there is a queue at all, and never throws.
-            const objectsUsingQueues = await organizationObjectsUsingQueues(ctx, identity.tenantId, hasAnyQueue);
+            const objectsUsingQueues = await organizationObjectsUsingQueues(ctx, execCtx, identity.tenantId, hasAnyQueue);
             if (!resolvePermissionSets || !metadata) {
                 // Auth resolved but security plugin isn't wired — emit
                 // an empty-but-authenticated body so the frontend can
