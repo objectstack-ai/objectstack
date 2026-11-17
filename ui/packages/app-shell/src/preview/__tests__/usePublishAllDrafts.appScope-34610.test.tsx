@@ -27,6 +27,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import type { TranslateFn } from '@object-ui/i18n';
+// Paid during collection: the capability probe this hook reaches loads it lazily.
+import '@objectstack/lint';
 
 vi.mock('sonner', () => ({
   toast: {
