@@ -368,4 +368,13 @@ describe('the phone bar spends no room on group dividers (objectstack#34596)', (
       ]),
     );
   });
+
+  it('the phone title takes no margin of its own beside the pill, and truncates only past the room left', () => {
+    mount();
+    const title = screen.getByTestId('app-bar-phone-title');
+    const classes = classesOf(title);
+    expect(classes).toEqual(expect.arrayContaining(['sm:hidden', 'truncate', 'min-w-0']));
+    expect(classes.filter((c) => /^m[lrx]?-/.test(c))).toEqual([]);
+    expect(leftOf()).toContainElement(title);
+  });
 });

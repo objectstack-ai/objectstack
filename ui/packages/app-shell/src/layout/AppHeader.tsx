@@ -1016,8 +1016,10 @@ export function AppHeader({
 
             {/* Mobile: the current page's label. A list's view switcher is
                 the list's own title, drawn in its toolbar row on a phone
-                (objectstack#27058), so the bar draws no view dropdown. */}
-            <span className="text-sm font-medium sm:hidden truncate min-w-0 ml-1">
+                (objectstack#27058), so the bar draws no view dropdown. No
+                margin of its own: the pill's padding already parts the two,
+                and the width goes to the label (objectstack#34596). */}
+            <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
               {lastSegmentLabel}
             </span>
           </>
