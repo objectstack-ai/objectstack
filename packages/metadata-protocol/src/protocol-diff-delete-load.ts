@@ -47,7 +47,7 @@ import type { ServedOverrideRow } from './served-override.js';
 import { REFERENCE_SITES } from './reference-sites.js';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import { hasMetadataRedactor, redactMetadataItem } from './metadata-redaction.js';
-import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, isPairRowRemoval } from './protocol-packaged-base-refusal.js';
 import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf, servesSealedOverrideRow } from './protocol-package-bindings.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
@@ -750,6 +750,13 @@ export class ProtocolDiffDeleteLoadFacet {
                 }
                 const packageId: string | null = request.packageId
                     ?? (draftAddress !== undefined ? draftAddress.key : rowsAtAddress.packageId);
+                // [ADR-0150 D2, #34401] Whether a code-shipped item sits under
+                // THIS address, which the two receipts below claim: a package's
+                // own permission set beside sets other namespaces' packages ship
+                // has none ({@link isOwnPermissionSetWrite}, the verdict its save
+                // reads), so removing it removes the set, never resets one.
+                const shippedUnderAddress = artifactBacked
+                    && !isOwnPermissionSetWrite(host.engine, singularTypeForRepo, request.name, packageId);
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
                 const current = await repo.get(ref, { state: targetState, packageId, ...memberOption(member) });
@@ -817,7 +824,7 @@ export class ProtocolDiffDeleteLoadFacet {
                         // unchanged, verbatim.
                         message: targetState === 'draft'
                             ? `No pending draft for ${request.type}/${request.name}.`
-                            : artifactBacked
+                            : shippedUnderAddress
                                 ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
                                 : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                     };
@@ -1005,7 +1012,7 @@ export class ProtocolDiffDeleteLoadFacet {
                     // discard reads byte for byte as before.
                     message: (request.state === 'draft')
                         ? `Draft discarded${deletedPackage} — ${request.type}/${request.name}. [seq=${result.seq}]`
-                        : artifactBacked
+                        : shippedUnderAddress
                             ? (remains
                                 ? `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} still carries another overlay: ${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}. [seq=${result.seq}]`
                                 : `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`)
