@@ -20,12 +20,15 @@
  *
  * Preview stays read-only for data (ADR-0037 Phase 1: the data plane is
  * untouched; seat ruling 6946403206). A field the draft adds does not exist in
- * the published object the data door validates against, so it reaches the
- * form `readonly: true`: drawn with its draft definition, not editable, and
- * left out of every create and update by the form's shared write sanitizer,
- * which skips read-only fields (a declared default included). Every member
- * other than `getObjectSchema` is the adapter's own, bound to it, so a write
- * goes out as it does without preview.
+ * the published object the data door validates against, so the proxy's
+ * `create` / `update` leave its name out of the record they send: what the
+ * viewer typed into it, or its declared default, is never written (the draft
+ * bar above every preview page says nothing there is live until publish).
+ * ⛔ The field is not locked instead: a create form drops a field declared
+ * `readonly: true` (`filterCreateModeFields` in `@object-ui/plugin-form`) and
+ * does not evaluate `readonlyWhen`, so either would hide the very field the
+ * preview exists to show or do nothing. Every other member is the adapter's
+ * own, bound to it, so a write goes out as it does without preview.
  *
  * @module utils/previewFormDataSource
  */
@@ -55,10 +58,18 @@ function isDocument(value: unknown): value is ObjectDocument {
  */
 export const DRAFT_ONLY_FIELD_KEY = '_draftOnly';
 
+/** The names `schema` marks {@link DRAFT_ONLY_FIELD_KEY}. */
+export function draftOnlyFieldNames(schema: unknown): string[] {
+  if (!isDocument(schema) || !isDocument(schema.fields)) return [];
+  return Object.entries(schema.fields)
+    .filter(([, def]) => isDocument(def) && def[DRAFT_ONLY_FIELD_KEY] === true)
+    .map(([name]) => name);
+}
+
 /**
  * The object definition a draft-preview reader draws: a copy of the published
  * document, plus each field only the draft overlay declares, with its draft
- * definition, `readonly: true` and {@link DRAFT_ONLY_FIELD_KEY}. Fields the
+ * definition, marked {@link DRAFT_ONLY_FIELD_KEY}. Fields the
  * published document declares keep their published definition, so what the
  * form validates and writes is what the data door accepts. The published
  * copy keeps the adapter's per-column sortability projection, which a spread
@@ -73,7 +84,7 @@ export function withDraftOnlyFields(published: unknown, overlay: unknown): unkno
   const fields: Record<string, Record<string, unknown>> = { ...publishedFields };
   for (const [name, def] of Object.entries(overlay.fields)) {
     if (Object.prototype.hasOwnProperty.call(publishedFields, name)) continue;
-    fields[name] = { ...def, readonly: true, [DRAFT_ONLY_FIELD_KEY]: true };
+    fields[name] = { ...def, [DRAFT_ONLY_FIELD_KEY]: true };
   }
   return attachObjectSortability({ ...base, fields }, readObjectSortability(published));
 }
@@ -100,23 +111,48 @@ export async function readDraftPreviewObjectSchema(
   return withDraftOnlyFields(published, overlay);
 }
 
+/** `data` without the `names` it carries; `data` itself when it carries none. */
+function withoutNames(data: unknown, names: readonly string[] | undefined): unknown {
+  if (!names || names.length === 0 || !isDocument(data)) return data;
+  if (!names.some((name) => Object.prototype.hasOwnProperty.call(data, name))) return data;
+  const out: Record<string, unknown> = { ...data };
+  for (const name of names) delete out[name];
+  return out;
+}
+
 /**
  * A proxy over `adapter` whose `getObjectSchema(name)` answers
- * {@link readDraftPreviewObjectSchema}. Every other member is the adapter's
- * own, bound to it.
+ * {@link readDraftPreviewObjectSchema}, and whose `create` / `update` leave the
+ * draft-only fields that answer named out of the record they send. Every
+ * other member is the adapter's own, bound to it.
  */
 export function createPreviewFormDataSource<T extends SchemaReader>(
   adapter: T,
   readOverlay: (objectName: string) => Promise<unknown>,
 ): T {
-  const getObjectSchema = (objectName: string): Promise<unknown> =>
-    readDraftPreviewObjectSchema(adapter, readOverlay, objectName);
+  const draftOnly = new Map<string, string[]>();
+  const getObjectSchema = async (objectName: string): Promise<unknown> => {
+    const schema = await readDraftPreviewObjectSchema(adapter, readOverlay, objectName);
+    draftOnly.set(objectName, draftOnlyFieldNames(schema));
+    return schema;
+  };
+  const writes: Record<string, (...args: unknown[]) => unknown> = {
+    create: (resource, data, ...rest) =>
+      (adapter as unknown as { create: (...a: unknown[]) => unknown })
+        .create(resource, withoutNames(data, draftOnly.get(resource as string)), ...rest),
+    update: (resource, id, data, ...rest) =>
+      (adapter as unknown as { update: (...a: unknown[]) => unknown })
+        .update(resource, id, withoutNames(data, draftOnly.get(resource as string)), ...rest),
+  };
   // Bound once per member, so a reader that keys an effect on a method's
   // identity sees the same function on every access.
   const bound = new Map<PropertyKey, unknown>();
   return new Proxy(adapter, {
     get(target, prop) {
       if (prop === 'getObjectSchema') return getObjectSchema;
+      if ((prop === 'create' || prop === 'update') && typeof Reflect.get(target, prop, target) === 'function') {
+        return writes[prop];
+      }
       const value = Reflect.get(target, prop, target);
       if (typeof value !== 'function') return value;
       let fn = bound.get(prop);

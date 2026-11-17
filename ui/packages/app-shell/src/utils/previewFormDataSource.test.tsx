@@ -10,10 +10,12 @@
  * The record form's data source under draft preview (objectstack#34807).
  *
  *   - In preview, `getObjectSchema` answers the published document plus each
- *     field only the draft overlay declares, read-only and marked draft-only;
- *     the adapter's sortability projection survives the copy.
+ *     field only the draft overlay declares, marked draft-only; the
+ *     adapter's sortability projection survives the copy, and the proxy's
+ *     writes leave a draft-only name out of the record.
  *   - The real `ModalForm` (the console's global New/Edit modal) draws such a
- *     field, and Save leaves it out of the create, a declared default included.
+ *     field, and Save leaves it out of the create: what the viewer typed into
+ *     it and its declared default alike.
  *   - CONTROL: outside preview the hook returns the adapter itself, so the form
  *     reads the published document through one adapter read (objectui#13044)
  *     and never draws the draft field.
@@ -75,12 +77,12 @@ afterEach(() => {
 type Doc = { name?: string; fields: Record<string, Record<string, unknown>> };
 
 describe('withDraftOnlyFields (objectstack#34807)', () => {
-  it('adds the draft-only field read-only and marked, keeps published definitions, and touches neither input', () => {
+  it('adds the draft-only field marked, keeps published definitions, and touches neither input', () => {
     const overlay = structuredClone(OVERLAY);
     const published = structuredClone(PUBLISHED);
     const out = withDraftOnlyFields(published, overlay) as Doc;
     expect(out.fields.priority).toEqual({
-      type: 'text', label: 'Priority', defaultValue: 'high', readonly: true, [DRAFT_ONLY_FIELD_KEY]: true,
+      type: 'text', label: 'Priority', defaultValue: 'high', [DRAFT_ONLY_FIELD_KEY]: true,
     });
     expect(out.fields.title).toEqual({ type: 'text', label: 'Title' });
     expect(overlay).toEqual(OVERLAY);
@@ -95,7 +97,7 @@ describe('withDraftOnlyFields (objectstack#34807)', () => {
 
   it('with no published document every overlay field is draft-only', () => {
     const out = withDraftOnlyFields(null, structuredClone(OVERLAY)) as Doc;
-    expect(out.fields.title.readonly).toBe(true);
+    expect(out.fields.title[DRAFT_ONLY_FIELD_KEY]).toBe(true);
     expect(out.fields.title.label).toBe('Task title');
     expect(out.fields.priority[DRAFT_ONLY_FIELD_KEY]).toBe(true);
   });
@@ -107,22 +109,22 @@ describe('withDraftOnlyFields (objectstack#34807)', () => {
 });
 
 describe('createPreviewFormDataSource (objectstack#34807)', () => {
-  it('answers the published document plus the draft-only field, read-only', async () => {
+  it('answers the published document plus the draft-only field', async () => {
     const adapter = makeAdapter();
     const ds = createPreviewFormDataSource(adapter, async () => structuredClone(OVERLAY));
     const schema = (await ds.getObjectSchema('tracker_task')) as Doc;
-    expect(schema.fields.priority.readonly).toBe(true);
+    expect(schema.fields.priority[DRAFT_ONLY_FIELD_KEY]).toBe(true);
     expect(schema.fields.priority.label).toBe('Priority');
     expect(schema.fields.title.label).toBe('Title');
   });
 
-  it('a draft-only object (published read absent) answers the overlay with every field read-only', async () => {
+  it('a draft-only object (published read absent) answers the overlay with every field draft-only', async () => {
     const adapter = makeAdapter();
     adapter.getObjectSchema.mockRejectedValueOnce(new MetadataNotFoundError('tracker_task'));
     const ds = createPreviewFormDataSource(adapter, async () => structuredClone(OVERLAY));
     const schema = (await ds.getObjectSchema('tracker_task')) as Doc;
-    expect(schema.fields.title.readonly).toBe(true);
-    expect(schema.fields.priority.readonly).toBe(true);
+    expect(schema.fields.title[DRAFT_ONLY_FIELD_KEY]).toBe(true);
+    expect(schema.fields.priority[DRAFT_ONLY_FIELD_KEY]).toBe(true);
   });
 
   it('a published read that fails for another reason fails the read', async () => {
@@ -131,6 +133,16 @@ describe('createPreviewFormDataSource (objectstack#34807)', () => {
     adapter.getObjectSchema.mockRejectedValueOnce(failure);
     const ds = createPreviewFormDataSource(adapter, async () => structuredClone(OVERLAY));
     await expect(ds.getObjectSchema('tracker_task')).rejects.toBe(failure);
+  });
+
+  it('create and update leave the draft-only names the schema read named out of the record', async () => {
+    const adapter = makeAdapter();
+    const ds = createPreviewFormDataSource(adapter, async () => structuredClone(OVERLAY));
+    await ds.getObjectSchema('tracker_task');
+    await ds.create('tracker_task', { title: 'a', priority: 'high' });
+    await ds.update('tracker_task', 'r1', { title: 'b', priority: 'low' }, { ifMatch: 'v1' });
+    expect(adapter.create).toHaveBeenCalledWith('tracker_task', { title: 'a' });
+    expect(adapter.update).toHaveBeenCalledWith('tracker_task', 'r1', { title: 'b' }, { ifMatch: 'v1' });
   });
 
   it('no overlay document: the adapter answer is returned as is', async () => {
@@ -209,6 +221,7 @@ describe('the global New modal under draft preview (objectstack#34807)', () => {
     GET_ITEM.fn = async () => structuredClone(OVERLAY);
     renderModal(true, adapter);
     await waitFor(() => expect(screen.getByText('Priority')).toBeInTheDocument());
+    fireEvent.change(document.body.querySelector('input[name="priority"]') as HTMLInputElement, { target: { value: 'urgent' } });
 
     fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
     fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);

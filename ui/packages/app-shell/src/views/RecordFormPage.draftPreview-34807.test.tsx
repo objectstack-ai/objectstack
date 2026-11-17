@@ -14,7 +14,8 @@
  * draft overlay in preview; the real `ObjectForm` draws only a name its object
  * definition declares, and that definition comes from the data source the page
  * hands it. In preview that source answers the published document plus the
- * draft-only field, read-only, so the field is drawn and Save leaves it out.
+ * draft-only field, so the field is drawn, and Save leaves it out of the
+ * create: what the viewer typed into it and its declared default alike.
  *
  * CONTROL: outside preview the page hands the form the adapter itself — one
  * published read (objectui#13044), no overlay read, no draft field.
@@ -102,6 +103,7 @@ describe('RecordFormPage under draft preview (objectstack#34807)', () => {
     renderNew(true);
     await waitFor(() => expect(screen.getByText('Priority')).toBeInTheDocument());
     expect(getItem).toHaveBeenCalledWith('object', 'tracker_task');
+    fireEvent.change(document.body.querySelector('input[name="priority"]') as HTMLInputElement, { target: { value: 'urgent' } });
 
     fireEvent.change(document.body.querySelector('input[name="title"]') as HTMLInputElement, { target: { value: 'Ship it' } });
     fireEvent.submit(document.body.querySelector('form') as HTMLFormElement);
