@@ -658,10 +658,12 @@ export function validateFlowExpressions(
     // start naming another object at publish, but a flow stored before it
     // still registers, and its advisory must speak of the scanned object.
     // Absent resolver / no object → the hint is undefined and only the fatal
-    // syntax/bare-ref pass runs (unchanged); the stored pass (`advisory:
-    // false`) never reads the hint, so it derives no binding.
+    // syntax/bare-ref pass runs (unchanged). The stored pass (`advisory:
+    // false`) never reads the advisory hint, but it does type the value
+    // envelopes below (#34451) — a refusal it must preview — so it derives the
+    // same binding.
     const startNode = flow.nodes.find((n) => n.type === 'start');
-    const bound = advisory && this.objectSchemaResolver ? this.deriveTriggerBinding(flowName, flow) : undefined;
+    const bound = this.objectSchemaResolver ? this.deriveTriggerBinding(flowName, flow) : undefined;
     const objectName = bound?.triggerType === 'time_relative'
         ? bound.binding.object
         : ((startNode?.config ?? {}) as Record<string, unknown>).objectName;
@@ -890,8 +892,13 @@ export function validateFlowExpressions(
                 // envelope stored verbatim (a variable `notify` rendered as
                 // JSON, a record column holding the envelope object), with
                 // nothing said at any layer.
+                //
+                // [#34451] Typed with the bound object's field types, so the
+                // date-text family reaches the envelope — the same hint
+                // `objectstack validate` passes. Thrown, in both modes: the
+                // envelope faults on every run.
                 if (found.entry.role === 'value') {
-                    for (const refusal of this.valueEnvelopeRefusals(found.value)) {
+                    for (const refusal of this.valueEnvelopeRefusals(found.value, schemaHint?.fieldTypes)) {
                         refuse(slotPath, slotWhere, refusal.message, refusal.source);
                     }
                     continue;

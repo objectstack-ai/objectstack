@@ -3103,11 +3103,25 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * registers, and a malformed envelope used to be stored verbatim and rendered
    * by `notify` as JSON with nothing said at any layer.
    *
+   * [#34451] `fieldTypes`: the field types of the object the flow's run binds
+   * as `record` — the object its conditions are typed against (the start
+   * node's `objectName`, else a time-relative flow's swept object). Handed on
+   * as `ExprSchemaHint.flowValueEnvelope`, which lets the date-text verdict
+   * family alone reach the envelope, over its `record.<field>` /
+   * `previous.<field>` reads: `timestamp(record.<date field>)` faults on the
+   * `YYYY-MM-DD` text on every run. The engine's `registerFlow` passes the
+   * same hint (`valueEnvelopeRefusals`), so the two doors refuse one set.
+   * Absent (no typed object), the call is byte for byte what it was.
+   *
    * @returns whether the slot was refused on SHAPE, so the caller can skip the
    *   root judgment (#22565) — a value that is not an envelope has no source to
    *   read roots from.
    */
-  const checkDeclaredValue = (where: string, raw: unknown): { refused: boolean } => {
+  const checkDeclaredValue = (
+    where: string,
+    raw: unknown,
+    fieldTypes?: Readonly<Record<string, string>>,
+  ): { refused: boolean } => {
     if (raw == null) return { refused: false };
     // `celSourceOf` — not a second read of `.source`: the same helper every
     // other slot in this file locates its finding with.
@@ -3118,7 +3132,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const issue of shape.error.issues) issues.push({ where, message: issue.message, source, severity: 'error' });
       return { refused: true };
     }
-    const res = validateExpression('value', raw as { dialect?: string; source?: string });
+    const res = validateExpression(
+      'value',
+      raw as { dialect?: string; source?: string },
+      fieldTypes ? { fieldTypes, flowValueEnvelope: true } : undefined,
+    );
     for (const e of res.errors) {
       issues.push({ where, message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`, source: e.source, severity: 'error' });
     }
@@ -3521,7 +3539,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // design — there is no field reading to displace.
           if (found.entry.role === 'value') {
             const from = issues.length;
-            if (!checkDeclaredValue(slotWhere, found.value).refused) {
+            if (!checkDeclaredValue(slotWhere, found.value, objectName ? fieldTypeIndex.get(objectName) : undefined).refused) {
               refuseUnboundRoots(slotWhere, found.value, from, 'value');
             }
             continue;
