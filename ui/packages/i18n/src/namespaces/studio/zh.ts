@@ -292,6 +292,10 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.missing': '该字段已不在草稿中。',
   'designer.field.remove': '删除“{label}”',
   'designer.field.section.basic': '基础',
+  'designer.field.section.developer': '开发者信息',
+  'designer.field.section.developerHint': '内部名在接口与公式里引用，日常改字段用不到。',
+  'designer.field.removeConfirmTitle': '删除字段“{label}”？',
+  'designer.field.removeConfirmBody': '字段会从这个对象的草稿中移除，发布后生效。',
   'designer.field.section.advanced': '高级',
   'designer.field.section.options': '{type} 选项',
   'designer.field.section.computed': '计算值',
@@ -2280,6 +2284,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.addFieldApiNameNotDerived': '标签里没有可用来生成 API 名称的英文字母，请手动填写（小写字母、数字和下划线）。',
   'engine.studio.data.addFieldApiNameTaken': '已有字段名为 {name}，请填写其他 API 名称。',
   'engine.studio.data.editFieldProps': '编辑字段属性',
+  'engine.studio.data.columnMenu': '排序与隐藏',
   'engine.studio.data.draftObjectTitle': '未发布的新对象',
   'engine.studio.data.draftObjectHint':
     '「记录」网格查询真实数据,而这个对象发布前还没有数据表。请先在「表单 · 布局」里设计字段与分组,然后点顶栏「发布」— 发布后这里就是它的实时数据网格。',
