@@ -197,6 +197,10 @@ describe('the upload doors on a booted organization wall (#22046)', () => {
       }),
     );
     expect(invited.status).toBe(200);
+    // Accepting an invitation needs a verified address; marked in place, as
+    // completing the verification mail does.
+    const [colleagueRow] = await ql.find('sys_user', { where: { email: COLLEAGUE_EMAIL }, limit: 1 }, SYS);
+    await ql.update('sys_user', { id: colleagueRow.id, email_verified: true }, SYS);
     const accepted = await stack.apiAs(colleague, 'POST', '/auth/organization/accept-invitation', {
       invitationId: invited.body.id,
     });

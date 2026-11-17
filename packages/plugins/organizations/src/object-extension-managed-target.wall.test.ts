@@ -114,6 +114,11 @@ describe('an objectExtensions entry on sys_organization and sys_user, on a boote
       }),
     );
     expect(invited.status).toBe(200);
+    // Accepting an invitation needs a verified address; marked in place, as
+    // completing the verification mail does.
+    const system = { context: { isSystem: true } };
+    const [memberRow] = await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, limit: 1 }, system);
+    await ql.update('sys_user', { id: memberRow.id, email_verified: true }, system);
     expect(
       (await stack.apiAs(member, 'POST', '/auth/organization/accept-invitation', { invitationId: invited.body.id })).status,
     ).toBe(200);
