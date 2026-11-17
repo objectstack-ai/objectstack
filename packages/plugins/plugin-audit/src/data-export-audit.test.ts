@@ -289,3 +289,40 @@ describe('[#30955] a lost row is loud, once per cause, and never throws', () => 
     expect(logger.error).not.toHaveBeenCalled();
   });
 });
+
+describe('[#33694] an in-product AI export is marked on the export row by the CRUD mirror\'s rule', () => {
+  const PERFORMER_KEYS = ['performed_by', 'on_behalf_of', 'conversation_id', 'confirmation_id'];
+  const aiExport = (performedBy: Record<string, string>) =>
+    exportEvent({ context: { userId: 'u_human', tenantId: 'org_a', performedBy } as any });
+
+  it('an AI-performed export records the agent, the person, the conversation and the confirmation', () => {
+    const row = buildDataExportAuditRow(
+      aiExport({ agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' }),
+    );
+    expect(row.user_id).toBe('u_human');
+    expect(metadataOf(row)).toMatchObject({
+      performed_by: 'sales_assistant',
+      on_behalf_of: 'u_human',
+      conversation_id: 'conv_1',
+      confirmation_id: 'pend_1',
+    });
+  });
+
+  it('CONTROL: an OAuth client — alone, or beside an agent — is the performer, with no conversation or confirmation', () => {
+    const envelopes: Array<Record<string, string>> = [
+      { clientId: 'client_agent', conversationId: 'conv_1', confirmationId: 'pend_1' },
+      { clientId: 'client_agent', agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' },
+    ];
+    for (const performedBy of envelopes) {
+      const meta = metadataOf(buildDataExportAuditRow(aiExport(performedBy)));
+      expect(meta).toMatchObject({ performed_by: 'client_agent', on_behalf_of: 'u_human' });
+      expect(meta).not.toHaveProperty('conversation_id');
+      expect(meta).not.toHaveProperty('confirmation_id');
+    }
+  });
+
+  it('CONTROL: a person\'s own export carries no performer key at all', () => {
+    const meta = metadataOf(buildDataExportAuditRow(exportEvent()));
+    for (const key of PERFORMER_KEYS) expect(meta).not.toHaveProperty(key);
+  });
+});
