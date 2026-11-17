@@ -107,6 +107,9 @@ vi.mock('../../providers/AdapterProvider', async (importOriginal) => {
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 
+// The source loads `@objectstack/lint` lazily; paid here, at collection, not
+// inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 
 window.matchMedia = ((query: string) => ({

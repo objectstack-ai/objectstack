@@ -30,6 +30,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   }),
 }));
 
+// The source loads `@objectstack/lint` lazily; paid here, at collection, not
+// inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { DraftChangesPanel, draftAgentSources } from '../DraftChangesPanel';
 
 const PKG = 'com.x';
