@@ -189,6 +189,10 @@ class FakeApp implements AppHarness {
   }
   /** True while the seed door loads rows: a double that judges a state machine in its insert skips it then, as the platform's seed posture does. */
   seeding = false;
+  /** The references the seed door drops from a row it loads, each field with its target object ({@link seedDoorAnswer}). None by default. */
+  seedDrops(_object: string, _row: Record<string, unknown>): Record<string, string> {
+    return {};
+  }
   /** The managed door: a data-only package's `data[]` is the seed ({@link seedDoorAnswer}); any other manifest is a build. */
   async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
     if (!Array.isArray(manifest.data)) {
@@ -197,7 +201,7 @@ class FakeApp implements AppHarness {
     }
     this.seeding = true;
     try {
-      return await seedDoorAnswer((object, row) => this.insertRow(object, row), manifest);
+      return await seedDoorAnswer((object, row) => this.insertRow(object, row), manifest, (object, row) => this.seedDrops(object, row));
     } finally {
       this.seeding = false;
     }
@@ -962,6 +966,43 @@ describe('seedApp — a card row already past its entry state loads through the 
     app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
     expect(await restoreSeededRows(scenario, app, [], seeded)).toEqual({ restored: { reinserted: ['demotravel_expense_claim/c001'] } });
     expect(app.rows.demotravel_expense_claim!.find((r) => r.id === 'c001')).toMatchObject({ status: 'paid' });
+  });
+
+  it('a reference the loader drops from a row it wrote refuses that row with the field and keeps its second-pass patch; a row also refused on write counts once; a restore counts the written row as reinserted', async () => {
+    /** Departments under a self-lookup `parent`. Finance breaks a budget floor, so its write is refused; a `parent` naming a department not in is dropped, as an optional lookup the loader cannot resolve. */
+    class DroppedParentApp extends TravelRulesApp {
+      override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+        if (object === 'demotravel_department' && Number(row.travel_budget) < 10000) return { ok: false, status: 400, body: {}, code: 'VALIDATION_FAILED', message: 'The travel budget must be at least 10000.' };
+        return super.insertRow(object, row);
+      }
+      override seedDrops(object: string, row: Record<string, unknown>): Record<string, string> {
+        const held = (id: unknown) => (this.rows.demotravel_department ?? []).some((r) => r.id === id);
+        return object === 'demotravel_department' && typeof row.parent === 'string' && !held(row.parent) ? { parent: 'demotravel_department' } : {};
+      }
+    }
+    const scenario = travel();
+    scenario.card.expect.lookups!.push({ object: 'demotravel_department', field: 'parent', to: 'demotravel_department' });
+    const departments = scenario.card.run.seed.demotravel_department!;
+    departments.find((d) => d.id === 'dep_fin')!.parent = 'dep_hq'; // no such department, and Finance's budget (5000) is under the floor: a write entry and a reference entry
+    departments.find((d) => d.id === 'dep_ops')!.parent = 'dep_fin'; // Finance is refused, so Operations lands without its parent: a reference entry only
+    const app = new DroppedParentApp();
+    const seed = await seedApp(scenario, app, []);
+    expect(seed).toEqual({
+      inserted: 755,
+      refused: [
+        { object: 'demotravel_department', id: 'dep_fin', message: 'Failed to write demotravel_department record #1 (id=dep_fin): The travel budget must be at least 10000.' },
+        { object: 'demotravel_department', id: 'dep_ops', fields: ['parent'], message: "Deferred reference unresolved after pass 2: demotravel_department.parent = 'dep_fin' → demotravel_department.id not found" },
+      ],
+      secondPass: { 'demotravel_department.manager': 3 },
+    });
+    const ops = app.rows.demotravel_department!.find((d) => d.id === 'dep_ops')!;
+    expect([ops.manager, 'parent' in ops]).toEqual(['e09', false]); // written without the dropped link, and its manager set by the second pass
+
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demotravel_department = app.rows.demotravel_department!.filter((d) => d.id !== 'dep_ops');
+    const restored = await restoreSeededRows(scenario, app, [], seeded);
+    expect(restored.restored?.reinserted).toEqual(['demotravel_department/dep_ops']);
+    expect(app.rows.demotravel_department!.find((d) => d.id === 'dep_ops')).toMatchObject({ manager: 'e09' });
   });
 
   it('a harness with no managed install door refuses every row, saying so', async () => {

@@ -8,16 +8,39 @@
  * `field: '(write)'`, `targetField: 'id'`, `attemptedValue`, `recordIndex` and
  * the loader's sentence; no error code). Each row is written through `write`,
  * so a double that refuses a row in its insert refuses it here too.
+ *
+ * `drops` names the references the loader drops from a row, each field with
+ * the object it points at: the field is removed and the row written without
+ * it, and the answer carries one entry with `field` set to that lookup, as the
+ * real loader reports a reference it could not resolve (`referencesDropped`).
+ * A row whose write then fails carries both entries.
  */
 
 import type { HttpAnswer } from '../../src/runner/app.js';
 
-export async function seedDoorAnswer(write: (object: string, row: Record<string, unknown>) => Promise<HttpAnswer>, manifest: Record<string, unknown>): Promise<HttpAnswer> {
+export async function seedDoorAnswer(
+  write: (object: string, row: Record<string, unknown>) => Promise<HttpAnswer>,
+  manifest: Record<string, unknown>,
+  drops: (object: string, row: Record<string, unknown>) => Record<string, string> = () => ({}),
+): Promise<HttpAnswer> {
   const datasets = manifest.data as Array<{ object: string; records: Array<Record<string, unknown>> }>;
   let inserted = 0;
   const errorList: Array<Record<string, unknown>> = [];
   for (const { object, records } of datasets) {
-    for (const [recordIndex, row] of records.entries()) {
+    for (const [recordIndex, sent] of records.entries()) {
+      const row = { ...sent };
+      for (const [field, targetObject] of Object.entries(drops(object, sent))) {
+        errorList.push({
+          sourceObject: object,
+          field,
+          targetObject,
+          targetField: 'id',
+          attemptedValue: sent[field],
+          recordIndex,
+          message: `Deferred reference unresolved after pass 2: ${object}.${field} = '${String(sent[field])}' → ${targetObject}.id not found`,
+        });
+        delete row[field];
+      }
       const r = await write(object, row);
       if (r.ok) inserted++;
       else
