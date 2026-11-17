@@ -823,7 +823,19 @@ export const CEILINGS = new Map([
   // bytes (15233 priced, 3809 tokens, headroom 5) -> 15349 (15329 priced) -> 3833 tokens,
   // the 5 absorbed, ceiling +19, pinned AT the measurement, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15329 / 4)
-  ['skills/objectstack-ui/SKILL.md', 3833],
+  // 3833 -> 3888: Form Views stops steering a long form to `tabbed` — `simple` is the
+  // default at any field count, `tabbed` names its cost, and one paragraph says how a long
+  // form stays `simple` (collapsed groups, `columns`, `modalSize`). PAID DOWN FIRST by two
+  // restatements cut from this file, each keeping a home: the derived-FK / roll-up paragraph
+  // under Master-Detail Forms (-223 bytes; the line-item paragraph's "every behaviour is
+  // derived from the DATA MODEL" and objectstack-data `rules/relationships.md` § Roll-up
+  // Summaries) and the "row-by-row" sentence under Field Conditional Rules (-97; the
+  // objectstack-data SKILL.md § Conditional Field Rules the line above links). Remainder
+  // raised under the standing ruling 「A:先削重复,余额按实测提高」 (record 6513306068):
+  // 15349 bytes (15329 priced) -> 15569 (15549 priced) -> 3888 tokens, pinned AT the
+  // measurement, zero headroom.
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15549 / 4)
+  ['skills/objectstack-ui/SKILL.md', 3888],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into

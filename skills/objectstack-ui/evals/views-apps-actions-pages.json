@@ -180,6 +180,16 @@
         "must_contain": ["defineAction", "ctx.api.object('product').findOne", "unit_price: product.list_price", "api.read"],
         "must_not_contain": []
       }
+    },
+    {
+      "id": 19,
+      "prompt": "Author the default form view for `opportunity`: 42 fields in six sections (Basics, Amounts, Dates, Partner, Shipping, Internal Notes). Reps fill Basics and Amounts on every create and the other four rarely. The form opens in the New dialog, mostly on wide screens.",
+      "expected_output": "One form view with `type: 'simple'`: the six sections stacked on one scrolling page, each listing its own `fields`, with `collapsed: true` on the four rarely filled ones (or `collapse: 'collapsed'` on those `fieldGroups` entries of the object). `columns: 3` uses the wide dialog and `modalSize: 'xl'` sizes it. Not tabs: a required field on another tab is flagged only on its tab, and the tab strip overflows on a phone.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'simple'", "collapsed: true", "modalSize"],
+        "must_not_contain": ["type: 'tabbed'"]
+      }
     }
   ]
 }

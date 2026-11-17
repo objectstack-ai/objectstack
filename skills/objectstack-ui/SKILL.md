@@ -55,9 +55,16 @@ the empty board over a field added in the same change:
 
 | Type | When to Use |
 |:-----|:------------|
-| `simple` | Single-page form — suitable for objects with ≤ 15 fields |
-| `tabbed` | Tabbed sections — for complex objects with many field groups |
+| `simple` | Stacked sections on one scrolling page — the default, at any field count |
+| `tabbed` | One tab per section — only for sections read apart; a required field on another tab is flagged only on its tab, and the tab strip overflows on a phone |
 | `wizard` | Step-by-step flow — guided data entry (onboarding, applications) |
+
+**A long form stays `simple`: collapse what is rarely filled** with
+`collapse: 'collapsed'` on the object's `fieldGroups` entry, or `collapsed: true`
+on a form section listing its own `fields`. `columns` (form or section) is a
+per-row ceiling a narrow screen lowers; unset, a section draws two, so set `3`
+for a wide data-entry form. `modalSize` (`sm` to `full`) sizes the New / Edit
+dialog; unset, the field count picks `lg` or `xl`.
 
 ### Master-Detail Forms (parent + child line items)
 
@@ -91,10 +98,6 @@ custom page or form config. Prefer, in order:
 3. **`object-master-detail-form` page block (bespoke layout).** Use a page only
    for free-form layouts. Same `details: [{ childObject }]` shorthand.
 
-The relationship FK and grid columns are derived from the child object's
-metadata in every case; select options and lookups carry through. A parent
-`summary` field rolls child values up server-side (see objectstack-data).
-
 **Line-item grid behaviors (`grid` mode).** The editable grid is a real
 spreadsheet-style line editor, and
 every behaviour is derived from the DATA MODEL — computed columns, catalog
@@ -115,9 +118,6 @@ Conditions that belong to a field's lifecycle — `visibleWhen`, `readonlyWhen`,
 `requiredWhen` — are declared on the **DATA MODEL field**, not in the form view;
 ObjectUI forms consume them. Their semantics and server behaviour:
 [objectstack-data → Conditional Field Rules](../objectstack-data/SKILL.md#conditional-field-rules).
-
-UI-side: inline master-detail grids evaluate these rules **row-by-row** against
-each child row.
 
 ---
 
