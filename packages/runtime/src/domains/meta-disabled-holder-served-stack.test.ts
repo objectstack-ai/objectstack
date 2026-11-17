@@ -439,6 +439,73 @@ describe.each([
             await down(booted);
         }
     }, 120_000);
+
+    // [#33210, ADR-0150 D3 red line 2] A package-less row beside the two
+    // packages' rows: three rows and no one holder. The bare doors refuse
+    // naming both packages in every save order, before and after a reboot,
+    // and never serve the package-less row in their place. FROM (`main`
+    // 5a755791a9): the plain read, `/published` and the execution face served
+    // a row by store order, while `/layers` refused naming both.
+    it.each([
+        { saveOrder: 'package-less, E, F', saved: [null, ROW_E, ROW_F] },
+        { saveOrder: 'F, package-less, E', saved: [ROW_F, null, ROW_E] },
+        { saveOrder: 'E, F, package-less', saved: [ROW_E, ROW_F, null] },
+    ])('[#33210] saved $saveOrder: a package-less row beside them leaves every bare door refusing naming both, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        const expectRefused = async (b: Booted) => {
+            await expectRefusedNamingBoth(b, 'three_rows_dash');
+            for (const door of ['', '/layers', '/published']) {
+                const answer = await get(b.kernel, `/meta/dashboard/three_rows_dash${door}`);
+                expect(JSON.stringify(answer.body ?? null), door).not.toContain('package-less row');
+            }
+        };
+        let booted = await bootRowKernel(registered, file);
+        try {
+            for (const id of saved) await layStoredRow(booted.engine, 'three_rows_dash', id, id === null ? 'package-less row' : `${rowTag(id)} row`);
+            await expectRefused(booted);
+        } finally {
+            await down(booted);
+        }
+        booted = await bootRowKernel(registered, file);
+        try {
+            await expectRefused(booted);
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
+    // [#33210] CONTROL: one package's row beside a package-less row has one
+    // holder, and every bare door serves that package's row in both save
+    // orders, before and after a reboot, as on `main`.
+    it.each([
+        { saveOrder: 'package-less row first', saved: [null, ROW_E] },
+        { saveOrder: 'E\'s row first', saved: [ROW_E, null] },
+    ])('[#33210] CONTROL, $saveOrder: one row holder beside a package-less row is served on every bare door as before, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        const expectServed = async (b: Booted) => {
+            const read = await get(b.kernel, '/meta/dashboard/one_holder_dash');
+            expect([read.status, unwrap(read.body)?.item?.label, unwrap(read.body)?.packageId], JSON.stringify(read.body)).toEqual([200, 'enabled row', ROW_E]);
+            const layers = await get(b.kernel, '/meta/dashboard/one_holder_dash/layers');
+            expect([layers.status, unwrap(layers.body)?.effective?.label], JSON.stringify(layers.body)).toEqual([200, 'enabled row']);
+            const published = await get(b.kernel, '/meta/dashboard/one_holder_dash/published');
+            expect([published.status, unwrap(published.body)?.label], JSON.stringify(published.body)).toEqual([200, 'enabled row']);
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'dashboard', name: 'one_holder_dash' });
+            expect(executed?.item?.label).toBe('enabled row');
+        };
+        let booted = await bootRowKernel(registered, file);
+        try {
+            for (const id of saved) await layStoredRow(booted.engine, 'one_holder_dash', id, id === null ? 'package-less row' : 'enabled row');
+            await expectServed(booted);
+        } finally {
+            await down(booted);
+        }
+        booted = await bootRowKernel(registered, file);
+        try {
+            await expectServed(booted);
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -447,9 +514,10 @@ describe.each([
 // slot. M1: a package's row and its customization pair's undeclared row are
 // one holder, whichever was saved (and so hydrated) last; the pair is never
 // named. M2: a dependent's added member over a base that holds the name only
-// as a stored row is the dependent's alone at that member (#28802); the
-// base's row of another member is no second holder there, and `/layers` does
-// not move. Both save orders, before and after a reboot. Measured on this
+// as a stored row is no second holder (#28802); the base's row of another
+// member is no second holder there either, so nothing is refused. [#33210 (c)]
+// The read naming no package reads the base's address there, as for a base
+// that ships the name (404). Both save orders, before and after a reboot. Measured on this
 // branch before the fix (1ab9370442): M1 refused 409 naming the base and its
 // pair in one save order; M2 refused 409 naming the base and the dependent.
 // On `main` 89d7bef033 neither refuses, and both answer as below.
@@ -542,21 +610,36 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
     const A = 'com.qa.mailrowbase';
     const D = 'com.qa.mailrowaddon';
     const template = (locale: string, subject: string) => ({ label: subject, locale, subject, bodyHtml: `<p>${subject}</p>` });
+    // [#33210 (c), #28802 R2] …and one answer, whether the base holds the
+    // name as a stored row or ships it: the read naming no package at the
+    // dependent's added member reads the base's address, which holds no
+    // `fr-FR` (404), on the plain read, /layers and the execution face; the
+    // dependent's own address serves its row. FROM (`main` 66f6638fa4): with a
+    // row-held base all three served the dependent's row (the M2 answer of
+    // #32607), while with a shipped base all three answered 404.
     it.each([
-        { order: 'A saved first', saved: [A, D] },
-        { order: 'D saved first', saved: [D, A] },
-    ])('M2, $order: the dependent\'s added `fr-FR` over a row-held base is served as the dependent\'s on the plain read, /layers and the execution face, before and after a reboot', async ({ saved }) => {
+        { order: 'row-held base, A saved first', ships: false, saved: [A, D] },
+        { order: 'row-held base, D saved first', ships: false, saved: [D, A] },
+        { order: 'shipped base (CONTROL)', ships: true, saved: [D] },
+    ])('M2, $order: the dependent\'s added `fr-FR` answers 404 on the plain read, /layers and the execution face naming no package, and is served at its own address, before and after a reboot', async ({ ships, saved }) => {
         const file = freshFile();
-        const manifests = [appManifest(A), appManifest(D, { dependencies: { [A]: '*' } })];
+        const manifests = [
+            appManifest(A, ships ? { emailTemplates: [{ name: 'rowmail', ...template('en-US', 'base en') }] } : {}),
+            appManifest(D, { dependencies: { [A]: '*' } }),
+        ];
         let booted = await bootManifests(manifests, file);
         const observe = async (b: Booted) => {
             const read = await get(b.kernel, '/meta/email_template/rowmail', { member: 'fr-FR' });
-            expect([read.status, unwrap(read.body)?.item?.subject, unwrap(read.body)?.packageId], JSON.stringify(read.body)).toEqual([200, 'addon fr', D]);
+            expect([read.status, codeOf(read.body)], JSON.stringify(read.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
             const layers = await get(b.kernel, '/meta/email_template/rowmail/layers', { member: 'fr-FR' });
-            expect([layers.status, unwrap(layers.body)?.effective?.subject], JSON.stringify(layers.body)).toEqual([200, 'addon fr']);
+            expect([layers.status, codeOf(layers.body)], JSON.stringify(layers.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+            for (const answer of [read, layers]) expect(JSON.stringify(answer.body ?? null)).not.toContain('addon fr');
             // `/published` takes no member selector (400 VALIDATION_ERROR): it reads the canonical member only.
             const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'rowmail', member: 'fr-FR' });
-            expect(executed?.item?.subject).toBe('addon fr');
+            expect(executed?.item ?? null, JSON.stringify(executed ?? null)).toBeNull();
+            // The dependent's own address serves its row.
+            const own = await get(b.kernel, '/meta/email_template/rowmail', { member: 'fr-FR', package: D });
+            expect([own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([200, 'addon fr', D]);
             // CONTROL: the base's own `en-US` stays the base's.
             const en = await get(b.kernel, '/meta/email_template/rowmail', { member: 'en-US' });
             expect([en.status, unwrap(en.body)?.item?.subject], JSON.stringify(en.body)).toEqual([200, 'base en']);
@@ -572,6 +655,170 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
         booted = await bootManifests(manifests, file);
         try {
             await observe(booted);
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
+    // [#33210 contract review M1] Two dependents, each adding a member of its
+    // own (D1 `fr-FR`, D2 `de-DE`) over A's `en-US`: each dependent is judged
+    // against its own closure, so A is the base at both members and each
+    // answers 404 naming no package, as with a shipped base. FROM (head
+    // b959edb979, `bases.length === 1`): the read at `fr-FR` found A and D2
+    // with no row there and served D1's row (200), and likewise at `de-DE`.
+    const D1 = 'com.qa.mailrowfr';
+    const D2 = 'com.qa.mailrowde';
+    const ADDED: Record<string, { locale: string; subject: string }> = {
+        [D1]: { locale: 'fr-FR', subject: 'addon fr' },
+        [D2]: { locale: 'de-DE', subject: 'addon de' },
+    };
+    it.each([
+        { order: 'row-held base, registered and saved A, D1, D2', ships: false, registered: [A, D1, D2] },
+        { order: 'row-held base, registered and saved D2, D1, A', ships: false, registered: [D2, D1, A] },
+        { order: 'shipped base (CONTROL), registered A, D1, D2', ships: true, registered: [A, D1, D2] },
+        { order: 'shipped base (CONTROL), registered D2, D1, A', ships: true, registered: [D2, D1, A] },
+    ])('M1 two dependents, $order: each dependent\'s added member answers 404 naming no package and is served at its own address, before and after a reboot', async ({ ships, registered }) => {
+        const file = freshFile();
+        const manifestOf = (id: string) => (id === A
+            ? appManifest(A, ships ? { emailTemplates: [{ name: 'twomail', ...template('en-US', 'base en') }] } : {})
+            : appManifest(id, { dependencies: { [A]: '*' } }));
+        const manifests = registered.map(manifestOf);
+        let booted = await bootManifests(manifests, file);
+        const observe = async (b: Booted, leg: string) => {
+            for (const id of [D1, D2]) {
+                const { locale, subject } = ADDED[id];
+                const where = `${locale}, ${leg}`;
+                const read = await get(b.kernel, '/meta/email_template/twomail', { member: locale });
+                const layers = await get(b.kernel, '/meta/email_template/twomail/layers', { member: locale });
+                const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'twomail', member: locale });
+                expect([where, read.status, codeOf(read.body), layers.status, codeOf(layers.body), executed?.item ?? null], JSON.stringify([read.body, layers.body]))
+                    .toEqual([where, 404, 'RESOURCE_NOT_FOUND', 404, 'RESOURCE_NOT_FOUND', null]);
+                const own = await get(b.kernel, '/meta/email_template/twomail', { member: locale, package: id });
+                expect([where, own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([where, 200, subject, id]);
+            }
+            // CONTROL: the base's own `en-US` stays the base's.
+            const en = await get(b.kernel, '/meta/email_template/twomail', { member: 'en-US' });
+            expect([leg, en.status, unwrap(en.body)?.item?.subject], JSON.stringify(en.body)).toEqual([leg, 200, 'base en']);
+        };
+        try {
+            for (const id of registered) {
+                if (id === A && ships) continue;
+                await layRow(booted.engine, 'email_template', 'twomail', id, id === A ? template('en-US', 'base en') : template(ADDED[id].locale, ADDED[id].subject));
+            }
+            await observe(booted, 'before a reboot');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            await observe(booted, 'after a reboot');
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
+    // [#33210 contract review S2] A dependent that also stores a member the
+    // base stores (D's `en-US` and `fr-FR` over A's `en-US`) is still an
+    // addition: the registry counts a clash only at a member shipped in code
+    // (#33127), and no package ships this name. So the read naming no package
+    // at D's `fr-FR` takes A's address (404), as with a shipped base. FROM
+    // (head 2b9293e63a, any shared member a clash): two bases, and the read at
+    // `fr-FR` served D's row (200).
+    it.each([
+        { order: 'row-held base, registered and saved A, D', ships: false, registered: [A, D] },
+        { order: 'row-held base, registered and saved D, A', ships: false, registered: [D, A] },
+        { order: 'shipped base (CONTROL), registered A, D', ships: true, registered: [A, D] },
+        { order: 'shipped base (CONTROL), registered D, A', ships: true, registered: [D, A] },
+    ])('S2, $order: a dependent storing the base\'s member as well as its own is an addition, and its own member answers 404 naming no package, before and after a reboot', async ({ ships, registered }) => {
+        const file = freshFile();
+        const manifestOf = (id: string) => (id === A
+            ? appManifest(A, ships ? { emailTemplates: [{ name: 'sharedmail', ...template('en-US', 'base en') }] } : {})
+            : appManifest(D, { dependencies: { [A]: '*' } }));
+        const manifests = registered.map(manifestOf);
+        let booted = await bootManifests(manifests, file);
+        const observe = async (b: Booted, leg: string) => {
+            const read = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'fr-FR' });
+            const layers = await get(b.kernel, '/meta/email_template/sharedmail/layers', { member: 'fr-FR' });
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'sharedmail', member: 'fr-FR' });
+            expect([leg, read.status, codeOf(read.body), layers.status, codeOf(layers.body), executed?.item ?? null], JSON.stringify([read.body, layers.body]))
+                .toEqual([leg, 404, 'RESOURCE_NOT_FOUND', 404, 'RESOURCE_NOT_FOUND', null]);
+            const own = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'fr-FR', package: D });
+            expect([leg, own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([leg, 200, 'addon fr', D]);
+            // The shared member `en-US`, naming no package, is not moved: the
+            // arm reads only a named non-canonical member. A shipped base serves
+            // its own `en-US`; over a row-held base A's and D's rows of it are
+            // two holders, refused naming both, as without this change.
+            const shared = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'en-US' });
+            if (ships) {
+                expect([leg, shared.status, unwrap(shared.body)?.item?.subject, unwrap(shared.body)?.packageId], JSON.stringify(shared.body)).toEqual([leg, 200, 'base en', A]);
+            } else {
+                expect([leg, shared.status, codeOf(shared.body)], JSON.stringify(shared.body)).toEqual([leg, 409, 'RESOURCE_CONFLICT']);
+                for (const id of [A, D]) expect(JSON.stringify(shared.body), leg).toContain(id);
+            }
+        };
+        try {
+            for (const id of registered) {
+                if (id === A) {
+                    if (!ships) await layRow(booted.engine, 'email_template', 'sharedmail', A, template('en-US', 'base en'));
+                    continue;
+                }
+                await layRow(booted.engine, 'email_template', 'sharedmail', D, template('en-US', 'addon en'));
+                await layRow(booted.engine, 'email_template', 'sharedmail', D, template('fr-FR', 'addon fr'));
+            }
+            await observe(booted, 'before a reboot');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            await observe(booted, 'after a reboot');
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
+    // [#33210 contract review S1] The canonical-member mirror is left as it
+    // was: a dependent's row of the CANONICAL member (`en-US`) over a base that
+    // holds the name only as a stored row of another member (`fr-FR`). The
+    // read naming no member addresses the canonical member, and the arm moves
+    // only a named non-canonical member, so every door serves the dependent's
+    // row as on `main`, in both save orders, before and after a reboot. FROM
+    // (head b959edb979, arm unguarded): the read naming no member, `/published`,
+    // `/layers` and the execution face answered 404 before a reboot, and the
+    // plain read and the execution face served A's `fr-FR` after it. No
+    // shipped CONTROL is pinned: with A shipping only `fr-FR`, the read naming
+    // no member serves A's `fr-FR`, and `/published` and `/layers` move across
+    // a reboot (200 then 404), so there is no one shipped answer to align with.
+    it.each([
+        { order: 'A saved first', saved: [A, D] },
+        { order: 'D saved first', saved: [D, A] },
+    ])('S1, $order: a dependent\'s canonical member over a row-held base of another member is served on every door naming no package, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        const manifests = [appManifest(A), appManifest(D, { dependencies: { [A]: '*' } })];
+        let booted = await bootManifests(manifests, file);
+        const observe = async (b: Booted, leg: string) => {
+            const read = await get(b.kernel, '/meta/email_template/canmail');
+            const named = await get(b.kernel, '/meta/email_template/canmail', { member: 'en-US' });
+            const layers = await get(b.kernel, '/meta/email_template/canmail/layers');
+            const published = await get(b.kernel, '/meta/email_template/canmail/published');
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'canmail' });
+            expect([leg, read.status, unwrap(read.body)?.item?.subject, named.status, unwrap(named.body)?.item?.subject,
+                layers.status, unwrap(layers.body)?.effective?.subject, published.status, unwrap(published.body)?.subject, executed?.item?.subject],
+            JSON.stringify([read.body, named.body, layers.body, published.body]))
+                .toEqual([leg, 200, 'addon en', 200, 'addon en', 200, 'addon en', 200, 'addon en', 'addon en']);
+            // CONTROL: the base's own `fr-FR` stays the base's.
+            const fr = await get(b.kernel, '/meta/email_template/canmail', { member: 'fr-FR' });
+            expect([leg, fr.status, unwrap(fr.body)?.item?.subject], JSON.stringify(fr.body)).toEqual([leg, 200, 'base fr']);
+        };
+        try {
+            for (const id of saved) await layRow(booted.engine, 'email_template', 'canmail', id, id === A ? template('fr-FR', 'base fr') : template('en-US', 'addon en'));
+            await observe(booted, 'before a reboot');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            await observe(booted, 'after a reboot');
         } finally {
             await down(booted);
         }
