@@ -405,6 +405,13 @@ sends for it is dropped, the rest of the write is stored, and the response's
 On create, a value you send is kept as the field's starting value (seed data or
 a historical import may carry a pre-computed total); the next child write
 replaces it with the computed one.
+An import with `writeMode: 'upsert'` therefore drops the value on the rows it
+updates and keeps it on the rows it creates. A historical import
+(`treatAsHistorical: true`, which writes with `preserveAudit`) keeps a summary
+value on update as well, as it keeps any other read-only value it sends. Undoing
+an ordinary import restores the rows through an ordinary update, so a summary
+value that an import committed before this rule overwrote is not put back by
+the undo; it stays until the next child write recomputes it.
 
 Because the roll-up is engine-derived state rather than a user write, the
 recompute runs under a system context: a user who may create a child does not
