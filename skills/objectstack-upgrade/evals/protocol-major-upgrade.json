@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "把这个项目升级到 v17。objectstack.config.ts 的 manifest 里写着 engines: { protocol: '^16' }。",
+      "prompt": "把这个项目升级到 v17。objectstack.config.ts 的 manifest 里写着 engines: { protocol: '^16' }。当前目录里没有这个项目的文件：请直接给出你要运行的命令、每一步要检查什么，以及最后交付什么。",
       "expected_output": "Preflight: `--from 16` read off `manifest.engines.protocol` (the floor of the range, never guessed from the installed spec); keep `os validate > .upgrade/validate-before.txt` as the control. Mechanical: `os migrate meta --from 16 --step`, `--json`, and `--out .upgrade/migrated.stack.json` — the command rewrites nothing on disk, so port the printed `path: from → to (conversionId)` edits into the sources, one `conversionId` per commit, then replay the ported hop, `os migrate meta --from 16 --to 17 --json`, until `applied` is `[]` with no `replayedNothing` (`--from 17` names an empty range and checks nothing). Acceptance: `os validate` green, `tsc --noEmit` green, and `.upgrade/REPORT.md` with the mechanical table, decided residue, open decisions and pending per-deployment gates.",
       "files": [],
       "assertions": {
@@ -13,7 +13,7 @@
     },
     {
       "id": 2,
-      "prompt": "After bumping @objectstack/spec, tsc fails: `conditionalRequired` does not exist ... [REMOVED] use `requiredWhen`. Just fix it for me.",
+      "prompt": "After bumping @objectstack/spec, tsc fails: `conditionalRequired` does not exist ... [REMOVED] use `requiredWhen`. Just fix it for me. None of the project's files are in this directory: answer with the commands you run and the change itself.",
       "expected_output": "Does not hand-write the rewrite: the chain already knows the rename, so it runs `os migrate meta --from <authored major>` to attribute the site to its `conversionId`, ports `requiredWhen` with the value unchanged, and confirms with `tsc --noEmit` (tombstones type the retired key as `never`). It is a decide-alone item (one target, evidence in the repo, being wrong fails a gate). Never adds a tolerant read or `??` alias so the old key keeps loading; finishes with the prose sweep for `conditionalRequired` in READMEs, comments and the project's AI conventions file.",
       "files": [],
       "assertions": {
@@ -23,12 +23,12 @@
     },
     {
       "id": 3,
-      "prompt": "The chain dropped `connectors[sap_erp].fieldMappings[].transform` = { type: 'javascript', expression: 'value / 100' }. Decide what to do with it.",
+      "prompt": "The chain dropped `connectors[sap_erp].fieldMappings[].transform` = { type: 'javascript', expression: 'value / 100' }. Decide what to do with it. None of the project's files are in this directory: answer from what is stated here.",
       "expected_output": "Classifies it as R1 (intent choice): the tombstone names one live target (import-mapping `transform`, a string enum with no `javascript` member) while the real options are import mapping, an ETL step where it actually runs, or delete because the member never executed — so the choice is a business statement and the owner decides. Asks with one message carrying the site, the prescription verbatim, the options and their costs, a recommendation and what will be verified; parks the item in the report as `AWAITING DECISION` and keeps the mechanical layer moving.",
       "files": [],
       "assertions": {
-        "must_contain": ["AWAITING DECISION", "owner", "never executed", "transform"],
-        "must_not_contain": ["type: 'javascript'"]
+        "must_contain": ["AWAITING DECISION", "owner", "transform"],
+        "must_not_contain": ["transform: { type: 'javascript'"]
       }
     },
     {

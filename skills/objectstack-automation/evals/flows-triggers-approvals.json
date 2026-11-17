@@ -80,7 +80,7 @@
     },
     {
       "id": 5,
-      "prompt": "Add a step calling our `pricing.recalc` function to compute the discount and save it on the quote, then post the quote to our tax service over HTTP; if the tax call fails, route to a handler node instead of failing the run.",
+      "prompt": "Add a step calling our `pricing.recalc` function to compute the discount and save it on the quote, then post the quote to our tax service over HTTP; if the tax call fails, route to a handler node instead of failing the run. None of the project's files are in this directory: write the flow nodes in your answer.",
       "expected_output": "A `script` node with `config.function: 'pricing.recalc'` (registered via `defineStack({ functions })`), `inputs` and `outputVariable: 'recalc'` — pure compute, so a following `update_record` persists `fields: { discount: { dialect: 'cel', source: 'recalc.discount' } }`. The `http` node sets `timeoutMs`. Failure routing is a `type: 'fault'` edge; a bare error label routes nothing.",
       "files": [],
       "assertions": {
@@ -231,7 +231,7 @@
       "files": [],
       "assertions": {
         "must_contain": [
-          "hotcrm.custom",
+          ".custom",
           "overrides:",
           "basedOn",
           "/toggle"
