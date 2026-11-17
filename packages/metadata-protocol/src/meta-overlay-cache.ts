@@ -301,6 +301,20 @@ const OVERLAY_READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne',
 /** Per-engine retirement counter. Compared, never interpreted. */
 interface OverlayWriteState {
   gen: number;
+  /**
+   * [#34554] When {@link gen} last moved (or the state was made). Every row
+   * set held under the current generation was read at or after it: an entry
+   * is stamped with the generation its read STARTED under and refused when it
+   * moved, so none can predate this. Read by {@link readOverlayCacheGenerationSince}.
+   */
+  since: number;
+}
+
+/** Move the generation and note when (the one place a generation moves). */
+function advance(state: OverlayWriteState): number {
+  state.gen += 1;
+  state.since = Date.now();
+  return state.gen;
 }
 
 /**
@@ -341,7 +355,7 @@ export function readOverlayCacheGeneration(engine: unknown): number | undefined 
   const seam = resolveWriteEpochSeam(engine);
   const register = (engine as { registerMiddleware?: unknown }).registerMiddleware;
   if (!seam || typeof register !== 'function') return undefined;
-  const state: OverlayWriteState = { gen: 0 };
+  const state: OverlayWriteState = { gen: 0, since: Date.now() };
   try {
     (register as (
       fn: (ctx: { object?: unknown; operation?: unknown }, next: () => Promise<void>) => Promise<void>,
@@ -357,11 +371,11 @@ export function readOverlayCacheGeneration(engine: unknown): number | undefined 
       try {
         await next();
       } finally {
-        state.gen += 1;
+        advance(state);
       }
     });
     seam.subscribe((_epoch, reason) => {
-      if (reason !== 'write') state.gen += 1;
+      if (reason !== 'write') advance(state);
     });
   } catch {
     overlayWriteStates.set(engine, null);
@@ -388,8 +402,21 @@ export function retireMetaOverlayCache(engine: unknown): number | undefined {
   if (!engine || typeof engine !== 'object') return undefined;
   const state = overlayWriteStates.get(engine);
   if (!state) return undefined;
-  state.gen += 1;
-  return state.gen;
+  return advance(state);
+}
+
+/**
+ * [#34554] The wall-clock time the current generation began
+ * ({@link readOverlayCacheGeneration}): every row set this engine holds was
+ * read at or after it. `undefined` for an engine this cache does not cover.
+ *
+ * The shared compile cache reads it when a counter it watches moves, to keep
+ * the row sets instead of retiring them while its next bound still ends
+ * within one bound of this time (`meta-compile-cache.ts`).
+ */
+export function readOverlayCacheGenerationSince(engine: unknown): number | undefined {
+  if (!engine || typeof engine !== 'object') return undefined;
+  return overlayWriteStates.get(engine)?.since;
 }
 
 /**
