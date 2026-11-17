@@ -280,12 +280,19 @@ describe('FlowCanvas reads the locale FlowPreview hands it (objectui#10862, slic
 
 describe('FlowPreview and FlowRunsPanel read the designer locale (objectui#10862, slice 4)', () => {
   for (const lang of LANGS) {
-    pin(`${lang}: the variables panel's in / out tags`, async () => {
+    // objectstack#34818 — an editable flow's panel edits each variable: its
+    // in / out tags are the Input / Output boxes, and the names are values.
+    pin(`${lang}: the variables panel's input / output boxes`, async () => {
       await mountFlow(lang);
       fireEvent.click(buttonReading(lang, 'engine.flowPreview.variables'));
       await flush();
-      expectSites(lang, [{ key: 'engine.flowPreview.varIn' }, { key: 'engine.flowPreview.varOut' }]);
-      expectAsWritten(['amount', 'verdict']);
+      expectSites(lang, [
+        { key: 'engine.flowPreview.vars.input' },
+        { key: 'engine.flowPreview.vars.output' },
+        { key: 'engine.flowPreview.addVariable' },
+        { key: 'engine.flowPreview.vars.defaultPlaceholder', in: 'placeholder' },
+      ]);
+      for (const name of ['amount', 'verdict']) expect(screen.getByDisplayValue(name)).toBeTruthy();
     });
 
     pin(`${lang}: an expanded run's id line, with and without a trigger`, async () => {
