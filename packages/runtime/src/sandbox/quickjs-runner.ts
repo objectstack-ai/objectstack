@@ -1438,8 +1438,7 @@ function installApiMethod(
     // Dump args now, while the handles are alive — they are freed when this
     // function returns, long before the async work below runs. The query
     // argument keeps every filter key the body wrote ({@link dumpQueryArgument}).
-    const call = `ctx.api.object('${objectName}').${method}`;
-    const args = argHandles.map((h, i) => (i === queryAt ? dumpQueryArgument(vm, crossing, h, call) : vm.dump(h)));
+    const args = argHandles.map((h, i) => (i === queryAt ? dumpQueryArgument(vm, crossing, h, objectName, method) : vm.dump(h)));
 
     const deferred = vm.newPromise();
     deferreds.add(deferred);
@@ -1575,12 +1574,13 @@ function dumpQueryArgument(
   vm: QuickJSContext,
   crossing: QueryArgumentCrossing,
   h: QuickJSHandle,
-  call: string,
+  objectName: string,
+  method: string,
 ): unknown {
   const encoded = vm.callFunction(crossing.encode, vm.undefined, h, crossing.mark);
   if (encoded.error) {
     encoded.error.dispose();
-    throwSandboxFault(vm, `${call}: its query argument could not cross into the host`);
+    throwSandboxFault(vm, `ctx.api.object('${objectName}').${method}: its query argument could not cross into the host`);
   }
   const text = vm.typeof(encoded.value) === 'string' ? vm.getString(encoded.value) : undefined;
   encoded.value.dispose();
