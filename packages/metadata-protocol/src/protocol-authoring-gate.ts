@@ -733,7 +733,16 @@ export async function draftPublishVerdict(
     return (await draftPublishJudgement.call(this, draft)).refusals;
 }
 
-/** The body of `ObjectStackProtocolImplementation#draftPublishJudgement`; the method's docblock there is its contract. */
+/**
+ * The body of `ObjectStackProtocolImplementation#draftPublishJudgement` (#34818):
+ * {@link draftPublishVerdict}'s judgement with the gate's ADVISORIES beside its
+ * refusal — what a publish that passes would still say about the draft, which
+ * the publish returns on its 2xx and the draft read folds into
+ * `_diagnostics.warnings` (`withPublishAdvisories`), so a flow designer shows the
+ * publish checks before Publish is pressed. One run of the same rules;
+ * `userTextLocales` picks the language of the advisories' user sentences and
+ * nothing else.
+ */
 export async function draftPublishJudgement(
     this: DraftVerdictHost,
     draft: {

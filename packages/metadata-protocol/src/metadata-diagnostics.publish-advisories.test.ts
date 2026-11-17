@@ -9,6 +9,9 @@
 import { describe, expect, it } from 'vitest';
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import { withPublishAdvisories } from './metadata-diagnostics.js';
+// Paid during collection, not inside a case's clock: the module under test
+// loads the lint package with a function-body import (check:test-source-alias).
+import '@objectstack/lint';
 
 const advisory = (over: Partial<RuntimeAuthoringIssue> = {}): RuntimeAuthoringIssue => ({
     rule: 'flow-decision-unconditional-branch',
