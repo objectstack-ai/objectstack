@@ -14,11 +14,14 @@
  * and an `active: true` from the same directory lifts it
  * (`AuthManager#reconcileScimUserLifecycle`). A local password is a
  * credential of its own, like an API key (`scim-deactivation-key-revocation.ts`),
- * so it does not ride the ban: the deactivation removes it, and a later
- * re-activation brings nothing back. The road back is the directory's own
- * sign-in (SSO); a new local password, where the deployment allows one, is
- * set again on purpose (`set-initial-password`, an administrator's
- * `admin/set-user-password`).
+ * so it does not ride the ban: the deactivation removes it, and the
+ * re-activation that lifts the directory's ban removes the local password the
+ * user holds at that moment before it lifts the ban. So a re-activation after a
+ * directory deactivation restores no credential from before it, one set while
+ * the directory held the user deactivated included: re-activation by the
+ * directory restores access through SSO only. A new local password, where the
+ * deployment allows one, is set again on purpose after the re-activation
+ * (`set-initial-password`, an administrator's `admin/set-user-password`).
  *
  * A SCIM `DELETE /Users/{id}` takes the same road: the installed
  * `@better-auth/scim` keeps the user row (it tombstones the SCIM source) and
@@ -26,7 +29,9 @@
  * same inactive branch of the reconcile callback runs. A create with
  * `active: false`, a tombstone re-link that arrives inactive, and a write to a
  * user who is already banned (by an earlier SCIM pass or by an administrator)
- * are inactive calls too, and each one runs this removal.
+ * are inactive calls too, and each one runs this removal. So does the
+ * `active: true` call that lifts the directory's own ban (a PATCH, a PUT, or a
+ * re-link of the same user through its tombstone).
  *
  * ## What this module writes
  *
@@ -37,8 +42,8 @@
  * write, so a second deactivation, or any later SCIM write that leaves the
  * user inactive, is a no-op once the password is gone. A password set again
  * while the directory still holds the user inactive (an administrator's
- * deliberate act) is removed by the next inactive SCIM write for that user,
- * and is kept by a re-activation, which removes nothing.
+ * deliberate act) is removed by the next SCIM write for that user that leaves
+ * the user inactive, or by the re-activation.
  *
  * ## Why the engine, and not `context.database`
  *
@@ -66,18 +71,27 @@
  *
  * ## Order, sessions and the directory-managed mark
  *
- * The caller runs this after the ban write and after the key revocation and
- * the AI service account suspension. A ban the break-glass last-administrator
- * guard refuses throws before this runs, so a refused deactivation removes
- * nothing (and the vendor rolls its own write back). Sessions are not this
- * module's: the vendor deletes the user's sessions after the reconcile
- * callback returns for an inactive state. The directory-managed mark runs
- * after this, so a user whose password is gone reads `idp_provisioned`
- * (ADR-0135 D4: only a user who holds a local password keeps `env_native`).
+ * On a deactivation the caller runs this after the ban write, the key
+ * revocation and the AI service account suspension. A ban the break-glass
+ * last-administrator guard refuses throws before this runs, so a refused
+ * deactivation removes nothing (and the vendor rolls its own write back).
+ * Sessions are not this module's: the vendor deletes the user's sessions after
+ * the reconcile callback returns for an inactive state. The directory-managed
+ * mark runs after this, so a user whose password is gone reads
+ * `idp_provisioned` (ADR-0135 D4: only a user who holds a local password keeps
+ * `env_native`).
  *
- * Only the directory's deactivation removes: an administrator's ban and unban
- * (`admin-ban-endpoints.ts`) and the `active: true` branch leave the password
- * as it is. The last-LOCAL-credential guard the admin ban mount runs
+ * On a re-activation the caller runs this first: before the directory-managed
+ * mark (so the mark reads what is left) and before the unban. There it fails
+ * closed: the ban is lifted only once this reports `complete`, so an incomplete
+ * removal fails the SCIM request and the vendor rolls it back with the user
+ * still deactivated.
+ *
+ * Only the directory removes, on a deactivation and on the re-activation that
+ * lifts its own ban. An administrator's ban and unban
+ * (`admin-ban-endpoints.ts`), an `active: true` over an administrator's ban,
+ * and any active write for a user who is not banned leave the password as it
+ * is. The last-LOCAL-credential guard the admin ban mount runs
  * (`last-local-credential.ts`) is deliberately not applied on this path, for
  * the reason `AuthManager#reconcileScimUserLifecycle` gives: the identity
  * provider is the authority for the user it deprovisions.
@@ -85,12 +99,14 @@
  * ## The outcome is counted, and never silent
  *
  * This never throws. A read or a delete that did not land is counted
- * (`complete: false`, `failed`), and the caller reports it once at `error`:
- * the account is disabled and the SCIM request succeeds, so nothing looks
- * wrong, while a password that was not removed is still there when the
- * directory re-activates the user. A failure the driver turns into an aborted
- * transaction fails the deprovision with it, as for the other writers on this
- * path: that is the database, not this removal.
+ * (`complete: false`, `failed`), and the caller reports it once at `error`. On
+ * a deactivation the account is disabled and the SCIM request succeeds, so
+ * nothing looks wrong while the user still holds a local password; the next
+ * inactive write runs the removal again, and the re-activation lifts the ban
+ * only once it completes. On a re-activation the caller fails the request
+ * instead. A failure the driver turns into an aborted transaction fails the
+ * SCIM write with it, as for the other writers on this path: that is the
+ * database, not this removal.
  */
 
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -181,7 +197,7 @@ export async function removeDirectoryDeactivatedLocalPassword(
 /**
  * The one notice for a deactivation whose local-password removal did not
  * finish, logged by the caller at `error` (the ban already landed). Names the
- * consequence and the remedy in its first line.
+ * consequence and the remedy.
  */
 export function scimDeactivationPasswordRemovalIncompleteMessage(
   userId: string,
@@ -191,9 +207,30 @@ export function scimDeactivationPasswordRemovalIncompleteMessage(
     `[auth] SCIM deactivation of user '${userId}': local password removal INCOMPLETE — ${outcome.removed} `
     + `credential row(s) removed, ${outcome.failed} delete(s) refused, or a read did not finish or more rows `
     + 'exist than were scanned. The account is disabled and the SCIM request succeeds, so nothing looks wrong, '
-    + 'but a local password that was not removed is still there when the directory re-activates the user. '
+    + 'but the user still holds a local password. '
     + `Remedy: delete the user's remaining sys_account rows with provider_id 'credential' (user_id '${userId}') `
     + 'in the system context, and check delete access on sys_account; the next SCIM write that leaves the user '
-    + 'inactive runs this removal again.'
+    + "inactive runs this removal again, and a re-activation lifts the directory's ban only once it has completed."
+  );
+}
+
+/**
+ * The one notice for a re-activation whose local-password removal did not
+ * finish, logged by the caller at `error` and thrown as the reason the SCIM
+ * request fails (the ban stays). Names the consequence and the remedy.
+ */
+export function scimReactivationPasswordRemovalIncompleteMessage(
+  userId: string,
+  outcome: ScimDeactivationPasswordRemovalOutcome,
+): string {
+  return (
+    `[auth] SCIM re-activation of user '${userId}' REFUSED: local password removal INCOMPLETE — ${outcome.removed} `
+    + `credential row(s) removed, ${outcome.failed} delete(s) refused, or a read did not finish or more rows `
+    + "exist than were scanned. A re-activation by the directory restores access through SSO only, so the "
+    + "directory's ban is lifted only once the user holds no local password: the SCIM request fails, nothing it "
+    + 'wrote is kept, and the user stays deactivated. '
+    + `Remedy: delete the user's remaining sys_account rows with provider_id 'credential' (user_id '${userId}') `
+    + "in the system context, and check delete access on sys_account; the directory's retry of the re-activation "
+    + 'runs this removal again.'
   );
 }

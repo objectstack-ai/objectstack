@@ -265,6 +265,7 @@ import {
 import {
   removeDirectoryDeactivatedLocalPassword,
   scimDeactivationPasswordRemovalIncompleteMessage,
+  scimReactivationPasswordRemovalIncompleteMessage,
 } from './scim-deactivation-password-removal.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
@@ -4885,14 +4886,16 @@ export class AuthManager {
    *    the vendor's session hook auto-lifts an expired ban and would admit a
    *    principal the IdP still holds deactivated, and this callback is not
    *    re-invoked until the IdP mutates that user again.
-   *  - `active: true` on a row banned WITH that reason ⇒ `applyUserUnban`.
-   *    A ban carrying any other reason was placed by an administrator and is
+   *  - `active: true` on a row banned WITH that reason ⇒ the user's local
+   *    password is removed, then `applyUserUnban` (the password paragraph
+   *    below). A ban carrying any other reason was placed by an administrator and is
    *    not the IdP's to lift: an attribute sync (every SCIM PUT carries
    *    `active: true`) must not silently re-admit a user banned for cause.
    *    Known collision, documented rather than reserved: an administrator
    *    who types the reason `Deactivated via SCIM` on the admin mount
    *    produces a ban this rule reads as the IdP's, so an `active: true`
-   *    lifts it. Reserving the string on the admin mount would change that
+   *    lifts it, and removes the user's local password with it. Reserving the
+   *    string on the admin mount would change that
    *    surface, which is not this hook's to do.
    *  - Anything else is a no-op. The callback is contractually idempotent
    *    ("Implementations must be idempotent") and the vendor invokes it on
@@ -4972,14 +4975,26 @@ export class AuthManager {
    *
    * An inactive state also removes the user's local password: every
    * `sys_account` row of the user with `provider_id = 'credential'`
-   * (`scim-deactivation-password-removal.ts`, the same ruling's later step). A
-   * re-activation lifts the ban only, so access returns through SSO alone. It
+   * (`scim-deactivation-password-removal.ts`, the same ruling's later step). It
    * runs on every inactive call after the suspension and before the mark, and
    * is idempotent: nothing to remove means no write. A refused last-
    * administrator ban throws before it, so that refusal removes nothing. A
-   * removal that does not finish never fails the deprovision; it is reported
-   * once at `error`. The `active: true` branch and an administrator's ban and
-   * unban leave the password alone.
+   * removal that does not finish never fails the deprovision (the ban already
+   * landed); it is reported once at `error`.
+   *
+   * A re-activation by the directory restores access through SSO only: the
+   * `active: true` call that lifts the directory's own ban runs the same
+   * removal first, so the re-activation restores no local password from before
+   * it, one set while the directory held the user deactivated included. There
+   * the removal fails closed, the mirror of the inactive branch: the ban is the
+   * state that keeps a password from signing in, so it is lifted only once the
+   * removal is complete. A removal that does not finish is reported once at
+   * `error` and fails the SCIM request; the vendor rolls the request back, the
+   * user stays deactivated, and the directory's retry runs it again. The
+   * removal comes before the unban in code order too, so even a driver without
+   * a real transaction never reaches the unban first. An `active: true` over an
+   * administrator's ban, any active call for a user who is not banned, and an
+   * administrator's ban and unban leave the password alone.
    *
    * [ADR-0135 D4] This callback also writes the directory-managed mark
    * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
@@ -5016,9 +5031,11 @@ export class AuthManager {
     // so the mark commits with the SCIM write or not at all.
     //
     // Its failure posture depends on the state, and the ORDER is the contract:
-    //  - active: the mark is written FIRST and fails closed — a mark that
-    //    cannot be written fails the SCIM request, the vendor rolls the create
-    //    back, and the IdP retries; no SCIM user is created unmarked.
+    //  - active: the mark is written before any ban column and fails closed —
+    //    a mark that cannot be written fails the SCIM request, the vendor rolls
+    //    the create back, and the IdP retries; no SCIM user is created
+    //    unmarked. Only a re-activation that lifts the directory's ban writes
+    //    before it: the local-password removal, which fails closed too.
     //  - inactive (a deactivation, a DELETE, a create with `active: false`):
     //    the deprovision write goes FIRST and the mark after it is best-effort,
     //    so a refused mark can never leave a deprovisioned account enabled. A
@@ -5067,7 +5084,9 @@ export class AuthManager {
       // access through SSO only. Before the mark, which then reads the user as
       // holding no local password (ADR-0135 D4).
       const removal = await removeDirectoryDeactivatedLocalPassword(engine as never, state.userId);
-      if (!removal.complete) this.logScimPasswordRemovalIncomplete(state.userId, removal);
+      if (!removal.complete) {
+        this.logScimPasswordRemovalIncomplete(scimDeactivationPasswordRemovalIncompleteMessage(state.userId, removal), removal);
+      }
       try {
         await markDirectoryProvisionedUsers(engine as never, [state.userId]);
       } catch (e) {
@@ -5075,10 +5094,23 @@ export class AuthManager {
       }
       return;
     }
-    await markDirectoryProvisionedUsers(engine as never, [state.userId]);
-    if (!banned) return;
     // An administrator's ban is not the IdP's to lift.
-    if (user.banReason !== SCIM_DEACTIVATION_BAN_REASON) return;
+    const liftsDirectoryBan = banned && user.banReason === SCIM_DEACTIVATION_BAN_REASON;
+    if (liftsDirectoryBan) {
+      // A re-activation by the directory restores access through SSO only: the
+      // local password goes first, before the mark (which then reads the user
+      // as holding none, ADR-0135 D4) and before the unban. Fail-closed: the
+      // ban is lifted only once the removal is complete, so a removal that
+      // does not finish fails the request and the vendor rolls it back.
+      const removal = await removeDirectoryDeactivatedLocalPassword(engine as never, state.userId);
+      if (!removal.complete) {
+        const message = scimReactivationPasswordRemovalIncompleteMessage(state.userId, removal);
+        this.logScimPasswordRemovalIncomplete(message, removal);
+        throw new Error(message);
+      }
+    }
+    await markDirectoryProvisionedUsers(engine as never, [state.userId]);
+    if (!liftsDirectoryBan) return;
     await applyUserUnban(writer, state.userId);
   }
 
@@ -5122,16 +5154,17 @@ export class AuthManager {
   }
 
   /**
-   * The one notice for a SCIM deprovision whose removal of the user's local
-   * password did not finish (`scim-deactivation-password-removal.ts`). Logged
-   * at `error`: the account is disabled, so nothing looks wrong, but a password
-   * left in place is still there when the directory re-activates the user.
+   * The one notice for a SCIM write whose removal of the user's local password
+   * did not finish (`scim-deactivation-password-removal.ts`), with the message
+   * for its branch. Logged at `error`. On a deprovision the account is
+   * disabled and the request succeeds, so nothing looks wrong while the user
+   * still holds a local password; on a re-activation the request fails and the
+   * user stays deactivated, and this line names the cause.
    */
   private logScimPasswordRemovalIncomplete(
-    userId: string,
+    message: string,
     outcome: Parameters<typeof scimDeactivationPasswordRemovalIncompleteMessage>[1],
   ): void {
-    const message = scimDeactivationPasswordRemovalIncompleteMessage(userId, outcome);
     const meta = { object: 'sys_account', removed: outcome.removed, failed: outcome.failed };
     const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
     if (typeof sink?.error === 'function') sink.error(message, meta);
