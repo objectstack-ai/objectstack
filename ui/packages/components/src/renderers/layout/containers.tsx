@@ -1802,7 +1802,8 @@ function recordPictureUrl(value: unknown): string | undefined {
 
 /**
  * The buttons a phone's bottom action bar holds before its `⋯`
- * (objectstack#27058): the primary action and one more. The record page v4
+ * (objectstack#27058): on an editable record, Edit and the primary action
+ * (objectstack#34595); else the primary action and one more. The record page v4
  * header row's cap is the primary, two more and the `⋯`; at 390 px the second
  * of those folds into the `⋯`.
  */
@@ -1847,10 +1848,10 @@ export interface PageHeaderActionsProps {
    * Where the row is drawn (objectstack#27058). `row` (the default) is the
    * header's own action row. `bar` is a phone's bottom action bar: the primary
    * action, one more and the `⋯`, each button sharing the bar's width. In the
-   * bar the host's Edit is one of the record's actions like any other: it
-   * takes a slot after the page's own actions, and folds into the `⋯` when
-   * they fill the bar. The page's `mobileMaxVisible` still sets the budget
-   * when it declares one.
+   * bar the host's Edit takes a slot like any other button, but the first
+   * one (objectstack#34595): on an editable record the bar is Edit, the
+   * primary action, then the `⋯` holding the rest. The page's
+   * `mobileMaxVisible` still sets the budget when it declares one.
    */
   face?: 'row' | 'bar';
 }
@@ -2500,17 +2501,22 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // the `⋯`'s destructive band, never inline as a red button.
     //
     // The phone's bottom bar (objectstack#27058) has room for its budget and
-    // no more, so there the host's buttons queue after the page's own actions
-    // for the same slots (the primary keeps the first), and what does not fit
-    // folds into the `⋯` with them.
+    // no more, so there every button queues for the same slots and what does
+    // not fit folds into the `⋯`. The queue is the bar's order
+    // (objectstack#34595): the host's buttons first — on an editable record
+    // that is its Edit, the record's base action, which the row never folds
+    // either — then the primary, then the page's other actions. So the
+    // default budget of two draws [Edit][primary][⋯] however many actions
+    // the page declares. A destructive host action is not a host button (see
+    // `isHostButton`): it still always folds.
     const authoredButtons = ranked.filter((a) => !isHostAction(a));
     const barQueue = barFace
-      ? [...(primaryAction ? [primaryAction] : []), ...authoredButtons, ...ranked.filter(isHostButton)]
+      ? [...ranked.filter(isHostButton), ...(primaryAction ? [primaryAction] : []), ...authoredButtons]
           .filter((a, i, all) => all.indexOf(a) === i)
       : [];
-    const inlineAuthored = new Set<unknown>(barFace ? barQueue.slice(0, maxVisible) : authoredButtons.slice(0, maxVisible));
+    const inlineAuthored = new Set<unknown>(authoredButtons.slice(0, maxVisible));
     const inlineActions = barFace
-      ? ranked.filter((a) => inlineAuthored.has(a))
+      ? barQueue.slice(0, maxVisible)
       : ranked.filter((a) => isHostButton(a) || inlineAuthored.has(a));
     const foldedButtons = barFace
       ? [
