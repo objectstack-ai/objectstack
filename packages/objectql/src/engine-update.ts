@@ -2396,7 +2396,7 @@ async function loadSummaryFoldDependents(
     const rows = new Map<string, Record<string, unknown>>();
     const ids = [...parentIds];
     for (let start = 0; start < ids.length; start += SUMMARY_GROUPED_AGGREGATE_CHUNK) {
-      const found = await host.facade.find(object, { where: { id: { $in: ids.slice(start, start + SUMMARY_GROUPED_AGGREGATE_CHUNK) } }, context: systemCtx } as any) as Array<Record<string, unknown>>;
+      const found = await host.facade.find(object, { where: { id: { $in: ids.slice(start, start + SUMMARY_GROUPED_AGGREGATE_CHUNK) } }, context: systemCtx }) as Array<Record<string, unknown>>;
       for (const row of found ?? []) if (row?.id != null) rows.set(String(row.id), row);
     }
     if (rows.size === 0) continue;
