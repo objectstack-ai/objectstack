@@ -18,8 +18,9 @@
  *
  * ## What is driven here
  *
- * The real `AppHeader` in its `app` variant, with the real `WorkspaceSwitcher`
- * inside it (two organizations, so it renders), under a real `MemoryRouter`.
+ * The real `AppHeader` in its `app` variant, with the real organization
+ * switcher inside its avatar menu (two organizations on a multi-organization
+ * deployment, so it renders), under a real `MemoryRouter`.
  * Only `navigate` is a spy, so each case reads where the header sent the user.
  * A page's unsaved edits are registered with the seam directly
  * (`registerUnsavedEdits`), the way a page's hook does; the pages' own
@@ -88,6 +89,9 @@ vi.mock('@object-ui/components', async (importOriginal) => {
     DropdownMenuLabel: Pass,
     DropdownMenuSeparator: () => null,
     DropdownMenuGroup: Pass,
+    DropdownMenuSub: Pass,
+    DropdownMenuSubTrigger: Pass,
+    DropdownMenuSubContent: Pass,
     Avatar: Pass,
     AvatarImage: () => null,
     AvatarFallback: Pass,
@@ -213,12 +217,10 @@ const MENU_DEPARTURES: Array<{ entry: string; click: () => void; to: string }> =
   { entry: 'avatar › My Organizations', click: () => fireEvent.click(screen.getByTestId('header-my-organizations')), to: '/organizations?manage=1' },
   { entry: 'avatar › Create organization', click: () => fireEvent.click(screen.getByTestId('header-create-workspace')), to: '/organizations?create=1' },
   { entry: 'avatar › a hidden app', click: () => fireEvent.click(screen.getByRole('button', { name: 'Personal Settings' })), to: '/apps/personal_settings' },
-  { entry: 'workspace › Manage members', click: () => fireEvent.click(screen.getByTestId('workspace-manage-members')), to: '/organizations/acme/members' },
-  { entry: 'workspace › Create organization', click: () => fireEvent.click(screen.getByTestId('workspace-create')), to: '/organizations?create=1' },
 ];
 
-/** The workspace switcher's row for the other organization. */
-const globexRow = () => screen.getAllByRole('button').find((b) => b.textContent?.trim().endsWith('Globex') && !b.hasAttribute('data-testid'))!;
+/** The avatar menu switcher's row for the other organization. */
+const globexRow = () => screen.getByTestId('workspace-switcher-org-org_globex');
 
 beforeEach(() => {
   navigate.mockReset();
@@ -257,7 +259,7 @@ describe('the header menus ask before leaving unsaved edits (objectui#13231)', (
     });
   }
 
-  it('workspace › another organization asks BEFORE set-active; Cancel sends nothing and keeps the organization', async () => {
+  it('avatar › Switch organization › another organization asks BEFORE set-active; Cancel sends nothing and keeps the organization', async () => {
     holdUnsavedEdit();
     await renderHeader();
 
@@ -268,7 +270,7 @@ describe('the header menus ask before leaving unsaved edits (objectui#13231)', (
     expect(window.location.hash).toBe('');
   });
 
-  it('workspace › another organization: OK switches, then reloads, with no second prompt from the tab-close guard', async () => {
+  it('avatar › Switch organization › another organization: OK switches, then reloads, with no second prompt from the tab-close guard', async () => {
     holdUnsavedEdit();
     confirmSpy.mockReturnValue(true);
     let unloadHeldDuringSwitch: boolean | undefined;

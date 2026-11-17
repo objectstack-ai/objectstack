@@ -3,14 +3,14 @@
 /**
  * CurrentOrganizationIndicator — objectui#5287.
  *
- * A single-membership user on a walled (isolated / group) deployment gets the
- * active organization name read-only; every other configuration renders
- * nothing. The two halves are equally load-bearing and fail in opposite
- * directions:
+ * A user on a walled (isolated / group) deployment gets the active organization
+ * name read-only, at one membership and at two or more alike (the switcher is
+ * in the avatar menu, objectstack-ai/objectstack#34591, so this is the bar's
+ * only organization name); every other configuration renders nothing. The two
+ * halves are equally load-bearing and fail in opposite directions:
  *
- *   - miss the render and the reported defect survives — with the switcher
- *     hidden by design at one membership, there is no second surface that
- *     would show the miss;
+ *   - miss the render and the reported defect survives — no other top-bar
+ *     surface names the organization, so nothing else would show the miss;
  *   - miss the GATE and every existing single-tenant console grows an
  *     organization name in its top bar, which is a visible regression for
  *     users who have no organization context at all.
@@ -92,7 +92,7 @@ beforeEach(() => {
   features = { multiOrgEnabled: true, tenancyPosture: 'isolated' };
 });
 
-describe('CurrentOrganizationIndicator — renders (walled posture, one membership)', () => {
+describe('CurrentOrganizationIndicator — renders (walled posture, any membership count)', () => {
   it('isolated posture: shows the active organization name', async () => {
     mount();
 
@@ -106,6 +106,31 @@ describe('CurrentOrganizationIndicator — renders (walled posture, one membersh
 
     expect(await screen.findByTestId('current-organization-indicator')).toBeInTheDocument();
     expect(screen.getByText('Titanwind EHR')).toBeInTheDocument();
+  });
+
+  it('two or more memberships, isolated posture: names the ACTIVE organization, read-only', async () => {
+    // The harness's active organization is the first membership: Globex here.
+    organizations = [SECOND, SOLO];
+    mount();
+
+    const indicator = await screen.findByTestId('current-organization-indicator');
+    expect(indicator).toHaveAttribute('title', 'Current organization: Globex');
+    expect(screen.getByText('Globex')).toBeInTheDocument();
+    expect(screen.queryByText('Titanwind EHR')).not.toBeInTheDocument();
+    // Still a name, not a switcher, at two memberships.
+    expect(indicator.querySelector('button, a, [role="button"], [role="menuitem"]')).toBeNull();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('two or more memberships, group posture: the write-target organization is named', async () => {
+    organizations = [SECOND, SOLO];
+    features = { multiOrgEnabled: true, tenancyPosture: 'group' };
+    mount();
+
+    expect(await screen.findByTestId('current-organization-indicator')).toHaveAttribute(
+      'title',
+      'Current organization: Globex',
+    );
   });
 
   it('is genuinely read-only — no control, no menu, no click target', async () => {
@@ -170,15 +195,6 @@ describe('CurrentOrganizationIndicator — renders nothing (the regression guard
 
     await settleConfig();
     expect(screen.queryByTestId('current-organization-indicator')).not.toBeInTheDocument();
-  });
-
-  it('multiple memberships: that is the switcher’s case, not this one', async () => {
-    organizations = [SOLO, SECOND];
-    mount();
-
-    await waitFor(() => expect(screen.getByTestId('posture')).toHaveTextContent('isolated'));
-    expect(screen.queryByTestId('current-organization-indicator')).not.toBeInTheDocument();
-    expect(screen.queryByText('Titanwind EHR')).not.toBeInTheDocument();
   });
 
   it('no memberships at all: no organization context to name', async () => {
