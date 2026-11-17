@@ -4332,7 +4332,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'set\'s `name` that a package of this stack declares. `reports.NAME` a report\'s `name` that ' +
       'a package of this stack declares. `books.BOOK` a doc book\'s `name` that a package of this ' +
       'stack declares, or a package id (its implicit book), and `.groups.KEY` a group `key` that ' +
-      'book declares, not its label.',
+      'book declares, not its label. `mappings.MAPPING` an import mapping\'s `name` that a ' +
+      'package of this stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
