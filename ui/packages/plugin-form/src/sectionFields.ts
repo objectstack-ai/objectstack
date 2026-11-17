@@ -468,7 +468,13 @@ function resolveSectionEntry(
   // `defaultValue` on the object field, not which layer asserted `required` —
   // a form view saying `required: true` over `defaultValue: 'NOW()'` makes the
   // same claim the object schema does, and hits the same wall.
-  if (fd.required != null) {
+  //
+  // Except over a `_draftOnly` field (the console's draft-preview marker, see
+  // `fromObjectSchema`): it is drawn disabled, so a requirement restated by a
+  // view would refuse every save over a control the viewer cannot fill. The
+  // marked copy already carries no `required` of its own.
+  const draftOnly = ctx.objectSchema?.fields?.[fieldName]?._draftOnly === true;
+  if (fd.required != null && !draftOnly) {
     base.required = isRequiredInForm(
       { required: fd.required, defaultValue: ctx.objectSchema?.fields?.[fieldName]?.defaultValue },
       isCreateFormMode(ctx),
