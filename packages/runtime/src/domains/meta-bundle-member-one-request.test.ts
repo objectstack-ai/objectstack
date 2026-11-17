@@ -95,7 +95,7 @@ const shape = (answer: Answer, pick: (served: any) => unknown): unknown[] =>
 const doc = (d: any) => (d == null ? d : { name: d.name, locale: d.locale, subject: d.subject, label: d.label });
 
 async function doors(b: Booted, type: string, name: string, member?: string) {
-    const query = member === undefined ? {} : { member };
+    const query: Record<string, string> = member === undefined ? {} : { member };
     const protocol = b.kernel.getService('protocol') as any;
     let executed: unknown;
     try {
