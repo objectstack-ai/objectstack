@@ -744,17 +744,22 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
                 .toEqual([leg, 404, 'RESOURCE_NOT_FOUND', 404, 'RESOURCE_NOT_FOUND', null]);
             const own = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'fr-FR', package: D });
             expect([leg, own.status, unwrap(own.body)?.item?.subject, unwrap(own.body)?.packageId], JSON.stringify(own.body)).toEqual([leg, 200, 'addon fr', D]);
-            // The shared member `en-US`, naming no package, is not moved: the
-            // arm reads only a named non-canonical member. A shipped base serves
-            // its own `en-US`; over a row-held base A's and D's rows of it are
-            // two holders, refused naming both, as without this change.
+            // [#34441 cell 2] The shared member `en-US`, naming no package, is
+            // the base's, however A holds the name: D's row of it is a bundle
+            // addition, never a second holder, so the plain read, /layers and
+            // the execution face serve A's row, as a shipped base serves its
+            // own. FROM (`main` 31096af83d): over a row-held base A's and D's
+            // rows of it were two holders, refused 409 naming both.
             const shared = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'en-US' });
-            if (ships) {
-                expect([leg, shared.status, unwrap(shared.body)?.item?.subject, unwrap(shared.body)?.packageId], JSON.stringify(shared.body)).toEqual([leg, 200, 'base en', A]);
-            } else {
-                expect([leg, shared.status, codeOf(shared.body)], JSON.stringify(shared.body)).toEqual([leg, 409, 'RESOURCE_CONFLICT']);
-                for (const id of [A, D]) expect(JSON.stringify(shared.body), leg).toContain(id);
-            }
+            const sharedLayers = await get(b.kernel, '/meta/email_template/sharedmail/layers', { member: 'en-US' });
+            const sharedExecuted = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'email_template', name: 'sharedmail', member: 'en-US' });
+            expect([leg, shared.status, unwrap(shared.body)?.item?.subject, unwrap(shared.body)?.packageId,
+                sharedLayers.status, unwrap(sharedLayers.body)?.effective?.subject, sharedExecuted?.item?.subject],
+            JSON.stringify([shared.body, sharedLayers.body]))
+                .toEqual([leg, 200, 'base en', A, 200, 'base en', 'base en']);
+            // D's own address still serves D's row of it.
+            const sharedOwn = await get(b.kernel, '/meta/email_template/sharedmail', { member: 'en-US', package: D });
+            expect([leg, sharedOwn.status, unwrap(sharedOwn.body)?.item?.subject], JSON.stringify(sharedOwn.body)).toEqual([leg, 200, 'addon en']);
         };
         try {
             for (const id of registered) {
@@ -819,6 +824,63 @@ describe('[#32607 M1, M2] the no-disabled arm judges holders at the rows\' grain
         booted = await bootManifests(manifests, file);
         try {
             await observe(booted, 'after a reboot');
+        } finally {
+            await down(booted);
+        }
+    }, 240_000);
+
+    // [#34441 cell 1, #28802 R2] A dependent's canonical member over a base
+    // that SHIPS only another member (A ships `fr-FR`, D stores `en-US`) moves
+    // no door naming no package: each answers what it answers with no D row
+    // (the CONTROL), in both registration orders, before and after a restart.
+    // The dependent's row is an addition, served only at its own address.
+    // FROM (`main` 31096af83d): `/published` served D's row before a restart
+    // (the layered read reported it as an orphan of A's name, though A ships
+    // no `en-US`), and `/layers` naming no member answered 404 after it (the
+    // hydrated row took the bare slot the code layer read A's `fr-FR` from).
+    it.each([
+        { order: 'registered A, D', registered: [A, D] },
+        { order: 'registered D, A', registered: [D, A] },
+    ])('cell 1, $order: a dependent\'s canonical row over a base shipping only another member answers every door naming no package as with no such row, before and after a restart', async ({ registered }) => {
+        const file = freshFile();
+        const manifests = registered.map((id) => (id === A
+            ? appManifest(A, { emailTemplates: [{ name: 'shipfrmail', ...template('fr-FR', 'base fr') }] })
+            : appManifest(D, { dependencies: { [A]: '*' } })));
+        let booted = await bootManifests(manifests, file);
+        const answers = async (b: Booted) => {
+            const at = (r: { status?: number; body: unknown }, pick: (u: any) => unknown) => [r.status, r.status === 200 ? pick(unwrap(r.body)) : codeOf(r.body)];
+            const protocol = b.kernel.getService('protocol') as any;
+            return {
+                read: at(await get(b.kernel, '/meta/email_template/shipfrmail'), (u) => u?.item?.subject),
+                named: at(await get(b.kernel, '/meta/email_template/shipfrmail', { member: 'en-US' }), (u) => u?.item?.subject),
+                layers: at(await get(b.kernel, '/meta/email_template/shipfrmail/layers'), (u) => [u?.effective?.subject, u?.overlay?.subject ?? null]),
+                layersNamed: at(await get(b.kernel, '/meta/email_template/shipfrmail/layers', { member: 'en-US' }), (u) => u?.effective?.subject),
+                published: at(await get(b.kernel, '/meta/email_template/shipfrmail/published'), (u) => u?.subject),
+                executed: (await protocol.getMetaItemForExecution({ type: 'email_template', name: 'shipfrmail' }))?.item?.subject ?? null,
+                executedNamed: (await protocol.getMetaItemForExecution({ type: 'email_template', name: 'shipfrmail', member: 'en-US' }))?.item?.subject ?? null,
+            };
+        };
+        // The CONTROL, read on this boot before D's row is stored.
+        const control = {
+            read: [200, 'base fr'], named: [404, 'RESOURCE_NOT_FOUND'], layers: [200, ['base fr', null]], layersNamed: [404, 'RESOURCE_NOT_FOUND'],
+            published: [404, 'RESOURCE_NOT_FOUND'], executed: 'base fr', executedNamed: null,
+        };
+        const own = async (b: Booted, leg: string) => {
+            const r = await get(b.kernel, '/meta/email_template/shipfrmail', { member: 'en-US', package: D });
+            expect([leg, r.status, unwrap(r.body)?.item?.subject], JSON.stringify(r.body)).toEqual([leg, 200, 'addon en']);
+        };
+        try {
+            expect({ leg: 'no D row', ...(await answers(booted)) }).toEqual({ leg: 'no D row', ...control });
+            await layRow(booted.engine, 'email_template', 'shipfrmail', D, template('en-US', 'addon en'));
+            expect({ leg: 'before a restart', ...(await answers(booted)) }).toEqual({ leg: 'before a restart', ...control });
+            await own(booted, 'before a restart');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootManifests(manifests, file);
+        try {
+            expect({ leg: 'after a restart', ...(await answers(booted)) }).toEqual({ leg: 'after a restart', ...control });
+            await own(booted, 'after a restart');
         } finally {
             await down(booted);
         }
