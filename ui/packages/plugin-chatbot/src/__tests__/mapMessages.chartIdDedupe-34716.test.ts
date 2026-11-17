@@ -42,9 +42,14 @@ const toolPart = (output: string) => ({
 });
 
 /** The chart the mapper draws from one descriptor, without an offset. */
-const drawn = (d: ReturnType<typeof descriptor>) =>
-  uiMessageToChatMessage({ id: 'ref', role: 'assistant', parts: [{ type: 'data-chart', id: 'c', data: d }] })
-    .charts![0];
+const drawn = (d: ReturnType<typeof descriptor>) => {
+  const { textOffset: _placement, ...chart } = uiMessageToChatMessage({
+    id: 'ref',
+    role: 'assistant',
+    parts: [{ type: 'data-chart', id: 'c', data: d }],
+  }).charts![0];
+  return chart;
+};
 
 const FIRST = descriptor('Pipeline by stage', 10);
 const REDRAWN = descriptor('Pipeline by stage (won only)', 20);
