@@ -1978,6 +1978,18 @@ const pt = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        publishFromBar_one: '{{count}} alteração não publicada. Publique-a na barra do rascunho no topo.',
+        publishFromBar_many: '{{count}} de alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        publishFromBar_other: '{{count}} alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        showDraftToPublish: '{{count}} alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraftToPublish_one: '{{count}} alteração não publicada. Mostre o rascunho para revisá-la e publicá-la.',
+        showDraftToPublish_many: '{{count}} de alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraftToPublish_other: '{{count}} alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraft: 'Mostrar rascunho',
+        receipt: 'Publicado. Suas alterações estão no ar.',
+        dismissReceipt: 'Fechar',
         count: "{{count}} alteração(ões) ainda não publicada(s) — os usuários não conseguem vê-las.",
         publish: "Publicar",
         published: "Todas as alterações pendentes estão ativas.",
@@ -3286,7 +3298,7 @@ const pt = {
     aiAssistant: "Assistente de IA",
     designInStudio: "Projetar no Studio",
     editApp: "Editar aplicativo",
-    openAppInStudio: "Ver aplicativo no Studio",
+    openAppInStudio: "Ver {{app}} no Studio",
   },
   home: {
     build: {
@@ -4690,6 +4702,11 @@ const pt = {
       pendingHere_one: 'Pré-visualização do rascunho · {{count}} alteração não publicada nesta página',
       pendingHere_many: 'Pré-visualização do rascunho · {{count}} de alterações não publicadas nesta página',
       pendingHere_other: 'Pré-visualização do rascunho · {{count}} alterações não publicadas nesta página',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Pré-visualização do rascunho · {{count}} alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_one: 'Pré-visualização do rascunho · {{count}} alteração não publicada neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_many: 'Pré-visualização do rascunho · {{count}} de alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_other: 'Pré-visualização do rascunho · {{count}} alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
     },
     changes: {
       title: 'Alterações pendentes',
@@ -4854,6 +4871,8 @@ const pt = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Este app ainda não foi publicado. Ele funciona, mas só os criadores podem vê-lo. Publique para que seus usuários o vejam.',
       message: 'App não publicado — totalmente funcional, mas somente os criadores o veem. Publique-o para que seus usuários o vejam.',
       publish: 'Publicar',
       publishing: 'Publicando…',

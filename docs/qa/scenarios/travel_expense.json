@@ -38,7 +38,35 @@
       {"object": "approval_step", "field": "approver", "to": "employee"}
     ],
     "dashboards": ["travel_spend_by_department"],
-    "appNavTargets": ["trip_request", "expense_claim", "approval_step", "travel_spend_by_department"]
+    "appNavTargets": ["trip_request", "expense_claim", "approval_step", "travel_spend_by_department"],
+    "datasets": [
+      {
+        "name": "trip_plan",
+        "label": "Trip plan",
+        "description": "Trip requests: who travels, for how many days and at what estimated cost.",
+        "object": "trip_request",
+        "measures": [
+          {"name": "estimated_spend", "label": "Estimated spend", "aggregate": "sum", "field": "estimated_cost", "synonyms": ["estimated cost", "trip cost", "travel spend", "差旅花费", "预计费用"], "description": "The sum of the trip requests' estimated costs, every status counted."},
+          {"name": "trip_days", "label": "Trip days", "aggregate": "sum", "field": "days", "synonyms": ["days on the road", "出差天数"], "description": "How many days the requested trips last in total."}
+        ],
+        "dimensions": [
+          {"name": "trip_status", "label": "Trip status", "field": "status", "synonyms": ["request status"], "description": "Where a trip request stands."}
+        ]
+      },
+      {
+        "name": "reimbursement",
+        "label": "Reimbursement",
+        "description": "Expense claims and the amounts claimed on them.",
+        "object": "expense_claim",
+        "measures": [
+          {"name": "claimed_amount", "label": "Claimed amount", "aggregate": "sum", "field": "total_amount", "synonyms": ["expense claims", "travel spend", "差旅花费", "报销金额"], "description": "The sum of the expense claims' totals, every status counted, rejected ones included."},
+          {"name": "claim_count", "label": "Claim count", "aggregate": "count", "synonyms": ["number of claims", "报销单数"], "description": "How many expense claims there are."}
+        ],
+        "dimensions": [
+          {"name": "claim_status", "label": "Claim status", "field": "status", "description": "Where a claim stands, from submitted to paid."}
+        ]
+      }
+    ]
   },
   "asOf": "2026-10-31",
   "capabilities": [
@@ -1118,6 +1146,13 @@
         "summary": "Pay out a finance-approved claim; irreversible.",
         "confirm": true
       }
+    ],
+    "datasetQuestions": [
+      {"id": "dq_expense_claims", "ask": {"zh": "我们的报销金额合计是多少?", "en": "What do our expense claims add up to in total?"}, "words": ["expense claims", "报销金额"], "expect": {"kind": "metric_selected", "dataset": "reimbursement", "measure": "claimed_amount"}},
+      {"id": "dq_trip_days", "ask": {"zh": "申请的出差天数一共多少?", "en": "How many trip days have been requested?"}, "words": ["trip days", "出差天数"], "expect": {"kind": "metric_selected", "dataset": "trip_plan", "measure": "trip_days"}},
+      {"id": "dq_travel_spend", "ask": {"zh": "我们的差旅花费一共多少?", "en": "What is our total travel spend?"}, "words": ["travel spend", "差旅花费"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "trip_plan", "measure": "estimated_spend"}, {"dataset": "reimbursement", "measure": "claimed_amount"}]}},
+      {"id": "dq_claimed_so_far", "ask": {"zh": "我们一共报销了多少?", "en": "What has been claimed so far?"}, "words": ["claimed", "报销"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "reimbursement", "measure": "claimed_amount"}]}},
+      {"id": "dq_employee_count", "ask": {"zh": "我们有多少名员工?", "en": "How many employees do we have?"}, "words": ["employees", "员工"], "expect": {"kind": "fallback_labelled", "object": "employee"}}
     ]
   },
   "iterate": {

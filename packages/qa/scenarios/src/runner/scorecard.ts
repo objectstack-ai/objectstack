@@ -103,7 +103,7 @@
  *     half with nothing measured is `not-run` in the record, never `fail`.
  */
 
-import { askedFirst, confirmedByAgent, type CheckResult } from '../score/index.js';
+import { askedFirst, confirmedByAgent, DATASET_GRADERS, type CheckResult, type DatasetGrader } from '../score/index.js';
 import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, RollupSourceCharge, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
@@ -137,6 +137,13 @@ export interface HalfScores {
    * (`OperationResult.restored`). Absent ⇒ none.
    */
   operations?: Tally & { notMeasured: number; platformNotMeasured?: number; restored?: number };
+  /**
+   * The half's dataset questions (`run.datasetQuestions`): every ask counts,
+   * passing when its route grade passes, and per grader beside the total
+   * (`metric-selected`, `asked-back`, `fallback-labelled`); a not-measured ask
+   * is in neither passed nor total. Absent when the card declares none.
+   */
+  datasets?: Tally & { notMeasured: number; byGrader: Partial<Record<DatasetGrader, Tally>> };
   /** How the half's passing `pending_confirmation` operations were met ({@link confirmationTally}); absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
   /** The half's confirmation turns, the write after the person confirmed ({@link confirmedWriteTally}); absent ⇒ none ran. */
@@ -334,6 +341,20 @@ export function askTally(r: RunHalf | undefined): HalfScores['ask'] | undefined 
   return { passed: measured.filter(answerPassed).length, total: measured.length, leaks: measured.filter(answerLeaked).length, notMeasured: r.questions.length - measured.length };
 }
 
+/** The half's dataset questions, every ask counted ({@link HalfScores.datasets}); `undefined` when it asked none. */
+export function datasetTally(r: RunHalf | undefined): HalfScores['datasets'] | undefined {
+  if (!r?.datasetQuestions) return undefined;
+  const measured = r.datasetQuestions.filter((q) => !q.notMeasured);
+  const byGrader: Partial<Record<DatasetGrader, Tally>> = {};
+  for (const q of measured) {
+    if (!q.grade) continue;
+    const t = (byGrader[q.grade.grader] ??= { passed: 0, total: 0 });
+    t.total++;
+    if (q.grade.pass) t.passed++;
+  }
+  return { passed: measured.filter((q) => q.grade?.pass === true).length, total: measured.length, notMeasured: r.datasetQuestions.length - measured.length, byGrader };
+}
+
 /**
  * Each (question, persona) turn's asks as k of N, in the order the half asked
  * them, when the run asked each turn more than once (its question results
@@ -444,9 +465,10 @@ export function guardrailTally(r: RunHalf | undefined): GuardrailVerdict[] | und
   );
 }
 
-/** A Run half's persona turns that ran: every question and operation turn, each operation's confirmation turn after it. */
+/** A Run half's persona turns that ran: every question, dataset question and operation turn, each operation's confirmation turn after it. */
 const halfTurnsOf = (r: RunHalf | undefined): TurnSummary[] => [
   ...(r?.questions ?? []).flatMap((q) => (q.turn ? [q.turn] : [])),
+  ...(r?.datasetQuestions ?? []).flatMap((q) => (q.turn ? [q.turn] : [])),
   ...(r?.operations ?? []).flatMap((o) => [o.turn, o.confirmTurn?.turn].filter((t): t is TurnSummary => t !== undefined)),
 ];
 
@@ -624,6 +646,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   if (gr) first.guardrails = gr;
   const rp = repeatTally(m.run);
   if (rp) first.repeats = rp;
+  const ds = datasetTally(m.run);
+  if (ds) first.datasets = ds;
   const out: ModeScorecard = {
     mode: m.mode,
     first,
@@ -667,6 +691,8 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
     if (igr) it.guardrails = igr;
     const irp = repeatTally(m.iterate.run);
     if (irp) it.repeats = irp;
+    const ids = datasetTally(m.iterate.run);
+    if (ids) it.datasets = ids;
     if (m.iterate.changeSize) it.changeSize = m.iterate.changeSize.total;
     out.iterate = it;
   }
@@ -797,6 +823,12 @@ const NO_AUTHORING_TURNS = 'no authoring turns';
 /** Did every mode that ran run on a supplied build ({@link ModeScorecard.supplied}): then the card authored nothing either. */
 const suppliedOnly = (sc: CardScorecard): boolean => sc.modes.some((m) => m.supplied !== undefined) && sc.modes.every((m) => m.supplied !== undefined || m.skipped !== undefined);
 
+/** `2/4 (metric-selected 1/2 · asked-back 1/1 · fallback-labelled 0/1)`: a half's dataset questions, then each grader's. */
+const datasetCell = (t: HalfScores['datasets']): string =>
+  t
+    ? `${cell(t)}${Object.keys(t.byGrader).length ? ` (${(Object.values(DATASET_GRADERS) as DatasetGrader[]).flatMap((g) => (t.byGrader[g] ? [`${g} ${t.byGrader[g]!.passed}/${t.byGrader[g]!.total}`] : [])).join(' · ')})` : ''}`
+    : '—';
+
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
 export function renderScorecard(sc: CardScorecard): string {
   const noAuthoring = suppliedOnly(sc);
@@ -823,6 +855,7 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Run-operations', (m) => opsCell(m.first));
   row('Run · model', (m) => modelCell(m.first.models));
   if (sc.modes.some((m) => !m.skipped && m.first.guardrails)) row('Run · guardrails', (m) => guardrailCell(m.first.guardrails));
+  if (sc.modes.some((m) => !m.skipped && m.first.datasets)) row('Run · datasets', (m) => datasetCell(m.first.datasets));
   row('Iterate · Build', (m) => buildCell(m.iterate?.build));
   row('Iterate · author', (m) => authorCell(m.iterate?.build));
   row('Iterate · Seed', (m) => seedCell(m.iterate?.seed));
@@ -830,6 +863,7 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Iterate · Run-operations', (m) => opsCell(m.iterate));
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   if (sc.modes.some((m) => !m.skipped && m.iterate?.guardrails)) row('Iterate · Run · guardrails', (m) => guardrailCell(m.iterate?.guardrails));
+  if (sc.modes.some((m) => !m.skipped && m.iterate?.datasets)) row('Iterate · Run · datasets', (m) => datasetCell(m.iterate?.datasets));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
   row('Author cost', (m) => (m.supplied !== undefined ? NO_AUTHORING_TURNS : m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
   row('Author time', (m) => (m.supplied !== undefined ? NO_AUTHORING_TURNS : m.authorTime === undefined || m.authorTime.turns > 0 ? authorTimeText(m.authorTime) : '—'));
@@ -883,6 +917,8 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
       ['build', s.first.build, m.build?.error, m.build?.score ? [...m.build.score.expect.checks, ...m.build.score.tags.flatMap((t) => t.checks), ...m.build.score.agentActions, ...m.build.score.personaGrants, ...m.build.score.naming, ...rollupSourceChecks(m.build)] : rollupSourceChecks(m.build), buildNote(s.first.build)],
       ['run-ask', s.first.ask, m.run?.error, m.run?.questions ?? [], s.first.ask ? cell(s.first.ask) : (firstOut ?? '')],
       ['run-operations', s.first.operations, m.run?.error, m.run?.operations ?? [], s.first.operations ? cell(s.first.operations) : (firstOut ?? '')],
+      // Only a card that declares dataset questions has this half: every other record keeps its results.
+      ...(m.run?.datasetQuestions ? [['run-datasets', s.first.datasets, m.run.error, m.run.datasetQuestions, datasetCell(s.first.datasets)] as [string, Tally | undefined, string | undefined, unknown[], string]] : []),
       ['iterate-build', s.iterate?.build, m.iterate?.build.error, m.iterate?.build.score ? [...m.iterate.build.score.expect.checks, ...m.iterate.build.score.naming, ...rollupSourceChecks(m.iterate.build)] : rollupSourceChecks(m.iterate?.build), s.iterate?.build ? buildNote(s.iterate.build) : (firstOut ?? noIterate ?? '')],
       ['iterate-run-ask', s.iterate?.ask, m.iterate?.run?.error, m.iterate?.run?.questions ?? [], s.iterate?.ask ? cell(s.iterate.ask) : (iterateOut ?? '')],
       ['iterate-run-operations', s.iterate?.operations, m.iterate?.run?.error, m.iterate?.run?.operations ?? [], s.iterate?.operations ? cell(s.iterate.operations) : (iterateOut ?? '')],
