@@ -4278,6 +4278,18 @@ export class ObjectStackProtocolImplementation implements
      * name with one served holder is no ambiguity: {@link getMetaItemLayered}
      * reads it at that holder's address. Both are judged by the same
      * `servedAddressJudgment`, which neither of them throws.
+     *
+     * [#34441 cell 2] The one exception, of a bundled type with no shipper:
+     * two or more packages holding the addressed member as rows where one is
+     * the base and every other one's row is a bundle addition to it
+     * (`rowHeldBaseAddressOf`) are no ambiguity here, as the registry names
+     * the base the one holder there; {@link getMetaItemLayered} reads the
+     * base's stack, as the plain read serves the base's row. Beside a
+     * package-less row they are still refused (#33210). The writes naming no
+     * package are not moved: the save, delete, publish, draft and history
+     * doors still refuse the same rows naming base and dependent, so here the
+     * view loads where the save it then sends is refused (a follow-up card
+     * judges whether the writes follow the base).
      */
     async packagelessLayeredReadRefusal(request: {
         type: string;
@@ -7952,6 +7964,12 @@ export class ObjectStackProtocolImplementation implements
      * The address is the draft save's, read from the item's ACTIVE rows
      * ({@link packagelessAddress}):
      *
+     *  - [ADR-0150 D4] an `action` whose body (the saved body, else the
+     *    stored package-unbound draft's) binds an object none of those rows
+     *    binds: the environment's own package-unbound draft, promoted into
+     *    the package-unbound row, whatever the number of bindings, except
+     *    that a package-unbound draft is judged only where no package's own
+     *    draft is the address (the cases below);
      *  - bound to one package `P`: `P`'s draft, else the package-unbound draft,
      *    which the draft save adopts into `P` on its next write and the read
      *    serves in `P`'s place (ADR-0048 prefer-local). A publish promotes such
@@ -7988,6 +8006,8 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** [#22877] The bundle member the door addresses; omitted, the canonical one. */
         member?: string,
+        /** [ADR-0150 D4] The body a draft save writes; omitted, the stored package-unbound draft's. */
+        body?: unknown,
     ): Promise<
         | { kind: 'ambiguous'; candidates: readonly string[] }
         | {
@@ -8000,8 +8020,10 @@ export class ObjectStackProtocolImplementation implements
         // [#25467 cut 5] The body moved to `protocol-lock-version-gates.ts` (see `LockVersionGateHost`).
         const host: ThisParameterType<typeof packagelessDraftAddress> = {
             packagelessAddress: (...a) => this.packagelessAddress(...a),
+            getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            readItemActiveRows: (...a) => this.readItemActiveRows(...a),
         };
-        return packagelessDraftAddress.call(host, type, name, member);
+        return packagelessDraftAddress.call(host, type, name, member, body);
     }
 
     /**

@@ -48,11 +48,16 @@ const LINE_OBJECT = {
 
 interface SeenCall { verb: string; object: string; ast: any }
 
-function makeRecordingDriver(name: string) {
+/**
+ * `supports` defaults to the `DriverCapabilities.readableIdsLeaf` bit every
+ * SQL face and `driver-memory` declare ([#33876]); MongoDB and OData declare
+ * nothing.
+ */
+function makeRecordingDriver(name: string, supports: Record<string, unknown> = { readableIdsLeaf: true }) {
   const calls: SeenCall[] = [];
   let answer: Array<Record<string, unknown>> = [];
   const driver: any = {
-    name, version: '0.0.0', supports: {},
+    name, version: '0.0.0', supports,
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(o: string, ast: any) { calls.push({ verb: 'find', object: o, ast }); return []; },
     async findOne(o: string, ast: any) { calls.push({ verb: 'findOne', object: o, ast }); return null; },
@@ -82,8 +87,8 @@ const request = (over: Partial<RelationGroupByRequest['relations'][number]> = {}
 
 const BASE_QUERY = { groupBy: ['region'], aggregations: [{ function: 'sum' as const, field: 'amount', alias: 'total' }] };
 
-async function makeEngine(driverName: string) {
-  const rec = makeRecordingDriver(driverName);
+async function makeEngine(driverName: string, supports?: Record<string, unknown>) {
+  const rec = makeRecordingDriver(driverName, supports);
   const engine = new ObjectQL();
   engine.registerDriver(rec.driver, true);
   await engine.init();
@@ -200,13 +205,30 @@ describe('relation group join — served as one driver statement whose related h
 });
 
 describe('relation group join — DECLINED, with nothing read, wherever it is not provably the FK-expand\'s read', () => {
-  for (const name of ['com.objectstack.driver.memory', 'com.objectstack.driver.mongodb', 'com.objectstack.driver.odata', 'com.objectstack.driver.turso']) {
-    it(`a driver that compiles no join (${name}): declined, no driver call — the caller's own path serves it`, async () => {
+  for (const name of ['com.objectstack.driver.memory', 'com.objectstack.driver.turso']) {
+    it(`a driver that compiles no join but declares readableIdsLeaf (${name}): declined, no driver call — the caller's own path serves it`, async () => {
       const { engine, rec } = await makeEngine(name);
       const req = request();
       const rows = await engine.aggregate(LINE, BASE_QUERY, { [RELATION_GROUP_BY]: req } as never);
       expect(rows).toEqual([]);
       expect(req.outcome?.kind).toBe('declined');
+      expect(rec.calls).toEqual([]);
+    });
+  }
+
+  // [#33876] The dimension half (the scope note on #33876, 6917475155, under
+  // Prime Directive 5): a driver without the bit is REFUSED, not declined — the outcome carries
+  // the error the caller throws instead of serving its FK-expand.
+  for (const name of ['com.objectstack.driver.mongodb', 'com.objectstack.driver.odata', 'com.objectstack.driver.sql']) {
+    it(`[#33876] a driver without readableIdsLeaf (${name}): refused, INVALID_QUERY / 400 on the outcome, no driver call`, async () => {
+      const { engine, rec } = await makeEngine(name, {});
+      const req = request();
+      const rows = await engine.aggregate(LINE, BASE_QUERY, { [RELATION_GROUP_BY]: req } as never);
+      expect(rows).toEqual([]);
+      expect(req.outcome?.kind).toBe('refused');
+      const err = (req.outcome as { error?: Error & { code?: string; status?: number } }).error;
+      expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_QUERY', status: 400 });
+      expect(err?.message).toContain(`'${name}'`);
       expect(rec.calls).toEqual([]);
     });
   }

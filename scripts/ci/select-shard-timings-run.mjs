@@ -106,15 +106,20 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { liveShardTotal } from '../ci-shard-matrix.mjs';
 import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 
-// The Test Core shard count of the LIVE matrix. partition-test-shards.mjs owns
-// the split itself and its own self-test reads ci.yml back, so this is a
-// reader's default rather than a second declaration of the split -- and since
-// #25376 it is NOT what a candidate run is judged against. See "A RUN IS
-// COMPLETE AT ITS OWN WIDTH" below.
-export const SHARD_COUNT = 8;
+// The Test Core shard count of the LIVE matrix, READ from ci.yml's `test`
+// matrix through scripts/ci-shard-matrix.mjs -- the same source
+// partition-test-shards.mjs sizes the split from -- so a resize has one
+// spelling, the workflow's (#34710: this was a literal 8 that stayed behind
+// when the matrix went to 10). An unreadable matrix fails the import rather
+// than falling back to a remembered count. It is only the matchers' default:
+// since #25376 a candidate run is judged at its OWN width, never this one, so
+// the runs from before a resize stay readable. See "A RUN IS COMPLETE AT ITS
+// OWN WIDTH" below.
+export const SHARD_COUNT = liveShardTotal('test');
 
 const API = 'https://api.github.com';
 
@@ -123,8 +128,8 @@ const API = 'https://api.github.com';
 // and would pass every eligibility and coverage check while measuring a slice.
 export const DEFAULT_RUN_EVENT = 'schedule';
 
-// `Test Core (3/8)` -> 3. Anchored on both ends: a job merely CONTAINING that
-// text (a future "Test Core (3/8) rerun") is not this job, and reading it as one
+// `Test Core (3/10)` -> 3. Anchored on both ends: a job merely CONTAINING that
+// text (a future "Test Core (3/10) rerun") is not this job, and reading it as one
 // would let a run qualify on a job that never ran the suite.
 export function testCoreShard(jobName, shardCount = SHARD_COUNT) {
   const m = /^Test Core \((\d+)\/(\d+)\)$/.exec(String(jobName ?? '').trim());
@@ -134,7 +139,7 @@ export function testCoreShard(jobName, shardCount = SHARD_COUNT) {
   return index >= 1 && index <= shardCount ? index : null;
 }
 
-// `test-core-run-summary-3-of-8` -> 3, by the same anchoring argument.
+// `test-core-run-summary-3-of-10` -> 3, by the same anchoring argument.
 export function summaryArtifactShard(artifactName, shardCount = SHARD_COUNT) {
   const m = /^test-core-run-summary-(\d+)-of-(\d+)$/.exec(String(artifactName ?? '').trim());
   if (!m) return null;
@@ -143,7 +148,7 @@ export function summaryArtifactShard(artifactName, shardCount = SHARD_COUNT) {
   return index >= 1 && index <= shardCount ? index : null;
 }
 
-// `test-core-timings-3-of-8` -> 3: the shard's per-FILE capture
+// `test-core-timings-3-of-10` -> 3: the shard's per-FILE capture
 // (`report-test-timings.mjs --capture`), anchored like the summary matcher.
 // NOT an eligibility input -- the capture step is report-only
 // (`continue-on-error`), so a run can be a complete measurement without one --
@@ -643,30 +648,39 @@ async function selfTest() {
   // -- The two name matchers. Both are anchored, and the pins that matter are
   //    the NEAR MISSES: a matcher that also accepts a rerun job or a
   //    differently-sharded artifact would qualify a run on evidence from a run
-  //    that is not this one.
+  //    that is not this one. Spelled at the LIVE width `W` (the matchers'
+  //    default, read from ci.yml), so a resize moves these with the matrix;
+  //    `OTHER` is a width the live matrix is not. The retained-run half -- an
+  //    8-wide name read at ITS width, as runIsEligible() reads a run made
+  //    before #34710 -- is pinned beside each default-width case.
+  const W = SHARD_COUNT;
+  const OTHER = W + 1;
   check(() => {
-    if (testCoreShard('Test Core (3/8)') !== 3) throw new Error('job matcher: the plain shape did not parse');
+    if (testCoreShard(`Test Core (3/${W})`) !== 3) throw new Error('job matcher: the plain shape did not parse');
+    if (testCoreShard('Test Core (3/8)', 8) !== 3) throw new Error('job matcher: a retained 8-wide name did not parse at its own width');
   });
   check(() => {
-    if (testCoreShard('Test Core (1/8)') !== 1 || testCoreShard('Test Core (8/8)') !== 8) {
+    if (testCoreShard(`Test Core (1/${W})`) !== 1 || testCoreShard(`Test Core (${W}/${W})`) !== W) {
       throw new Error('job matcher: an endpoint shard did not parse');
     }
+    if (testCoreShard('Test Core (8/8)', 8) !== 8) throw new Error('job matcher: a retained 8-wide endpoint did not parse at its own width');
   });
   check(() => {
-    if (testCoreShard('Test Core (0/8)') !== null || testCoreShard('Test Core (9/8)') !== null) {
+    if (testCoreShard(`Test Core (0/${W})`) !== null || testCoreShard(`Test Core (${W + 1}/${W})`) !== null) {
       throw new Error('job matcher: an out-of-range shard index was accepted');
     }
+    if (testCoreShard('Test Core (9/8)', 8) !== null) throw new Error('job matcher: an out-of-range 8-wide index was accepted');
   });
   check(() => {
-    if (testCoreShard('Test Core (3/8) rerun') !== null) {
+    if (testCoreShard(`Test Core (3/${W}) rerun`) !== null) {
       throw new Error('job matcher: a job merely CONTAINING the shape was accepted');
     }
   });
   check(() => {
-    if (testCoreShard('Dogfood (3/8)') !== null) throw new Error('job matcher: a different job was accepted');
+    if (testCoreShard(`Dogfood (3/${W})`) !== null) throw new Error('job matcher: a different job was accepted');
   });
   check(() => {
-    if (testCoreShard('Test Core (3/6)') !== null) {
+    if (testCoreShard(`Test Core (3/${OTHER})`) !== null || testCoreShard('Test Core (3/8)') !== null) {
       throw new Error('job matcher: a job from a different shard count was accepted');
     }
   });
@@ -676,34 +690,41 @@ async function selfTest() {
     }
   });
   check(() => {
-    if (summaryArtifactShard('test-core-run-summary-4-of-8') !== 4) {
+    if (summaryArtifactShard(`test-core-run-summary-4-of-${W}`) !== 4) {
       throw new Error('artifact matcher: the plain shape did not parse');
+    }
+    if (summaryArtifactShard('test-core-run-summary-4-of-8', 8) !== 4) {
+      throw new Error('artifact matcher: a retained 8-wide summary did not parse at its own width');
     }
   });
   check(() => {
-    if (summaryArtifactShard('test-core-run-summary-4-of-6') !== null) {
+    if (summaryArtifactShard(`test-core-run-summary-4-of-${OTHER}`) !== null || summaryArtifactShard('test-core-run-summary-4-of-8') !== null) {
       throw new Error('artifact matcher: a different shard count was accepted');
     }
   });
   check(() => {
-    if (summaryArtifactShard('test-core-run-summary-4-of-8-retry') !== null) {
+    if (summaryArtifactShard(`test-core-run-summary-4-of-${W}-retry`) !== null) {
       throw new Error('artifact matcher: a longer name was accepted');
     }
   });
   // #22949 ruling E: the per-file capture matcher, anchored the same way --
   // and NOT the run-summary name, which is a different artifact.
   check(() => {
-    if (timingCaptureShard('test-core-timings-2-of-8') !== 2) throw new Error('capture matcher: the plain shape did not parse');
-    if (timingCaptureShard('test-core-timings-2-of-6') !== null || timingCaptureShard('test-core-timings-2-of-8-retry') !== null) {
+    if (timingCaptureShard(`test-core-timings-2-of-${W}`) !== 2) throw new Error('capture matcher: the plain shape did not parse');
+    if (timingCaptureShard('test-core-timings-2-of-8', 8) !== 2) throw new Error('capture matcher: a retained 8-wide capture did not parse at its own width');
+    if (timingCaptureShard(`test-core-timings-2-of-${OTHER}`) !== null || timingCaptureShard(`test-core-timings-2-of-${W}-retry`) !== null) {
       throw new Error('capture matcher: a different shard count or a longer name was accepted');
     }
-    if (timingCaptureShard('test-core-run-summary-2-of-8') !== null || summaryArtifactShard('test-core-timings-2-of-8') !== null) {
+    if (timingCaptureShard(`test-core-run-summary-2-of-${W}`) !== null || summaryArtifactShard(`test-core-timings-2-of-${W}`) !== null) {
       throw new Error('capture matcher: the run summary and the per-file capture were read as each other');
     }
   });
 
   // -- Eligibility. The fixtures are built from the two rejection shapes this
   //    workflow actually meets: a cancelled shard, and an expired artifact.
+  //    They are an 8-wide run on purpose, read at its own width: the retained
+  //    runs from before #34710 are 8 wide, and the refresh lane must keep
+  //    accepting them after the matrix went to 10.
   const jobs = (conclusions) =>
     conclusions.map((conclusion, i) => ({ name: `Test Core (${i + 1}/8)`, conclusion, status: 'completed' }));
   const artifacts = (present, expired = []) =>
@@ -925,7 +946,7 @@ async function selfTest() {
 
   check(() => {
     const v = runIsEligible(sixShardRun);
-    if (!v.eligible) throw new Error(`width: a whole 6-shard run was rejected under an 8-shard matrix (${v.reasons.join('; ')})`);
+    if (!v.eligible) throw new Error(`width: a whole 6-shard run was rejected under a ${SHARD_COUNT}-shard matrix (${v.reasons.join('; ')})`);
     if (v.shardCount !== 6) throw new Error(`width: the run's own width read as ${v.shardCount}, not 6`);
     if (Object.keys(v.artifactIds).join(',') !== '1,2,3,4,5,6') {
       throw new Error(`width: the 6-shard run's artifacts read as ${JSON.stringify(v.artifactIds)}`);
@@ -935,8 +956,10 @@ async function selfTest() {
     // FIRING CONTROL: pinned to the live count, the same run is the rejection
     // job 121075952437 printed -- so the pass above is the width reading, not a
     // fixture that would pass anyway.
+    if (SHARD_COUNT === 6) {
+      throw new Error('width: the live matrix is 6 wide, so the 6-shard fixture cannot be its firing control -- respell the fixture at another width');
+    }
     const v = runIsEligible(sixShardRun, SHARD_COUNT);
-    if (SHARD_COUNT === 6) return;
     if (v.eligible || !v.reasons.some((r) => r.includes(`${SHARD_COUNT}/${SHARD_COUNT}`))) {
       throw new Error(`width: pinned to ${SHARD_COUNT}, the 6-shard run was not rejected as the live lane rejected it (${v.reasons.join('; ')})`);
     }
@@ -1010,7 +1033,7 @@ async function selfTest() {
   // that decided the dataset was being fed by affected-only push runs.
   //
   // The fake API below serves BOTH a schedule-shaped and a push-shaped run,
-  // and both are fully eligible -- six successful shards, six live artifacts.
+  // and both are fully eligible -- eight successful shards, eight live artifacts.
   // That is the point: eligibility cannot tell them apart, so the only thing
   // that can is the event named in the request. Each reading therefore comes
   // with its two controls -- a leg that makes the fake serve the push run
