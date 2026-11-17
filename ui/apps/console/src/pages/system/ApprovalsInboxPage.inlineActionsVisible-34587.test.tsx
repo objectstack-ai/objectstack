@@ -17,7 +17,7 @@
  *    swallows pointer events.
  *
  * jsdom applies no stylesheet, so "visible without hovering" is read from the
- * classes that hid them; the real-browser readings are on the pull request.
+ * classes that hid them.
  */
 
 import '@testing-library/jest-dom/vitest';
