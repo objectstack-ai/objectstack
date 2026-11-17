@@ -579,7 +579,7 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
             expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p']]);
         });
 
-        it('P on `invoice` and a package-unbound row on `invoice` (P\'s customization), no draft stored: the DRAFT save on `task` is refused 409, since its publish would rewrite that row, and nothing is written (FROM: the environment\'s draft written, and its publish moved that row onto `task`)', async () => {
+        it('P on `invoice` and a package-unbound row on `invoice` (P\'s customization), no draft stored: the DRAFT save on `task` is refused 409, since its publish would rewrite that row, and nothing is written (FROM: written as P\'s draft, whose publish moved P\'s action onto `task`)', async () => {
             const { protocol, rows, seedRow, metadataWrites } = makeProtocol();
             await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
             seedRow({ type: 'action', name: NAME, package_id: null, metadata: JSON.stringify(action(NAME, 'custom', 'invoice')), checksum: 'sha-custom' });
@@ -595,7 +595,7 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
             expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'invoice', 'custom']]);
         });
 
-        it('the environment\'s draft on `task` stored beside P\'s customization row on `invoice`: the per-item publish naming no package is refused 409, and the row and the draft stay (FROM: that row rewritten onto `task`)', async () => {
+        it('the environment\'s draft on `task` stored beside P\'s customization row on `invoice`: the per-item publish naming no package is refused 409, and the row and the draft stay (FROM: promoted into P\'s row, moving P\'s action onto `task`; at the prior head of this change, that row rewritten onto `task`)', async () => {
             const { protocol, rows, seedRow, metadataWrites } = makeProtocol();
             await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'invoice'), packageId: WRITABLE });
             await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'env', 'task'), mode: 'draft' });
