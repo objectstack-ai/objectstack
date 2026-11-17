@@ -60,11 +60,11 @@ export function readOrgMenuPosture(features: AuthPublicConfig['features'] | null
 }
 
 export interface OrgMenuEntries {
-  /** 「我的组织」 → `/organizations?manage=1`. */
+  /** "My Organizations" → `/organizations?manage=1`. */
   myOrganizations: boolean;
-  /** 「切换组织」 — the organization switcher, now inside the avatar menu. */
+  /** "Switch organization" — the organization switcher, inside the avatar menu. */
   switchOrganization: boolean;
-  /** 「创建组织」 → `/organizations?create=1`. */
+  /** "Create organization" → `/organizations?create=1`. */
   createOrganization: boolean;
 }
 

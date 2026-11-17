@@ -5,7 +5,7 @@
  *
  * The top bar's left side is the product mark and the app switcher; switching
  * organization is rare, so the switcher lives in the avatar menu as a
- * 「切换组织」 / "Switch organization" submenu (objectstack-ai/objectstack#34591).
+ * "Switch organization" submenu (objectstack-ai/objectstack#34591).
  * The avatar menu decides WHETHER it is offered from the served deployment
  * signals (`orgMenuEntries` in `hooks/useOrgMenuPosture.ts`: a multi-organization
  * deployment and two or more memberships). This component renders nothing
@@ -83,7 +83,7 @@ export function WorkspaceSwitcher() {
   );
 }
 
-/** The avatar menu's 「切换组织」 submenu. Render it inside a `DropdownMenuContent`. */
+/** The avatar menu's "Switch organization" submenu. Render it inside a `DropdownMenuContent`. */
 export function WorkspaceSwitcherMenu({ isGroupPosture }: { isGroupPosture: boolean }) {
   const { t } = useObjectTranslation();
   const { organizations, activeOrganization, switchOrganization } = useAuth();
@@ -120,7 +120,7 @@ export function WorkspaceSwitcherMenu({ isGroupPosture }: { isGroupPosture: bool
 
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger className="cursor-pointer" data-testid="workspace-switcher">
+      <DropdownMenuSubTrigger className="cursor-pointer" data-testid="header-switch-organization">
         <ArrowLeftRight className="mr-2 h-4 w-4" />
         {t('organization.switcher.label', { defaultValue: 'Switch organization' })}
       </DropdownMenuSubTrigger>
