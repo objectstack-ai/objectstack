@@ -28,7 +28,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { DeploymentNotice } from '../DeploymentNotice';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
-import { HIDDEN_KEY_PREFIX, deploymentVariablesText, parseDeploymentNotice } from '../deploymentNotice';
+import { HIDDEN_KEY_PREFIX, deploymentVariablesText, parseDeploymentNotice } from '../deploymentNoticeState';
 
 const NOTICE = {
   production: true,

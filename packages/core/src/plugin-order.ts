@@ -57,22 +57,50 @@ export interface OrderablePlugin {
 }
 
 /**
+ * The cycle {@link resolvePluginOrder} refuses, as a typed error.
+ *
+ * Non-breaking on purpose: it IS an `Error`, its `message` is the sorter's
+ * unchanged `[Kernel] Circular dependency detected: <name>`, and it carries no
+ * `code` / `status`, so a kernel boot that throws it reads exactly as it did
+ * before this class existed. What it adds is {@link cycle}, for a caller that
+ * answers the cycle to an author (the artifact resolver's ADR-0112 refusal,
+ * `artifact-packages.ts`) instead of re-parsing a message or walking the graph
+ * a second time.
+ */
+export class PluginOrderCycleError extends Error {
+    /**
+     * The names along the cycle, in edge order (each depends on the next),
+     * the first repeated last: `['a', 'b', 'a']` for two plugins that depend
+     * on each other, `['a', 'a']` for a plugin that depends on itself.
+     */
+    readonly cycle: readonly string[];
+
+    constructor(cycle: readonly string[]) {
+        super(`[Kernel] Circular dependency detected: ${cycle[cycle.length - 1]}`);
+        this.name = 'PluginOrderCycleError';
+        this.cycle = Object.freeze([...cycle]);
+    }
+}
+
+/**
  * Topologically order plugins: every plugin's `dependencies` (throw when
  * missing) and `optionalDependencies` (skip when missing) init before it.
  * Insertion order is preserved for plugins with no edges between them.
  * Cycles through either edge kind throw — an optional dependency is a real
- * edge whenever both sides are composed.
+ * edge whenever both sides are composed — as a {@link PluginOrderCycleError}.
  */
 export function resolvePluginOrder<P extends OrderablePlugin>(plugins: Map<string, P>): P[] {
     const resolved: P[] = [];
     const visited = new Set<string>();
     const visiting = new Set<string>();
+    // The names being visited, in visit order: the path a cycle is read off.
+    const path: string[] = [];
 
     const visit = (pluginName: string) => {
         if (visited.has(pluginName)) return;
 
         if (visiting.has(pluginName)) {
-            throw new Error(`[Kernel] Circular dependency detected: ${pluginName}`);
+            throw new PluginOrderCycleError([...path.slice(path.indexOf(pluginName)), pluginName]);
         }
 
         const plugin = plugins.get(pluginName);
@@ -81,6 +109,7 @@ export function resolvePluginOrder<P extends OrderablePlugin>(plugins: Map<strin
         }
 
         visiting.add(pluginName);
+        path.push(pluginName);
 
         for (const dep of plugin.dependencies ?? []) {
             if (!plugins.has(dep)) {
@@ -94,6 +123,7 @@ export function resolvePluginOrder<P extends OrderablePlugin>(plugins: Map<strin
             if (plugins.has(dep)) visit(dep);
         }
 
+        path.pop();
         visiting.delete(pluginName);
         visited.add(pluginName);
         resolved.push(plugin);
