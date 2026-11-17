@@ -804,7 +804,11 @@ export function useRecordPageReturn(recordId: string | undefined): RecordPageRet
       if (!recordId || !siblings || index < 0) return {};
       // The `from` state goes along unchanged: the next page has the same list.
       const go = (nextId: string) => () => {
-        const step = siblingRecordStep(location, recordId, nextId);
+        const step = siblingRecordStep(
+          { pathname: location.pathname, search: location.search, state: location.state },
+          recordId,
+          nextId,
+        );
         if (step === null) return;
         navigate(step.to, { replace: true, state: step.state });
       };
