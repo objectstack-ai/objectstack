@@ -566,6 +566,7 @@ const zh = {
         '此视图已分组，但其数据源未实现 queryGroupHeaders，因此无法统计分组。移除分组即可显示记录。',
       needsWholeRows:
         '分组需要全部记录，但此表格只收到其中一页，因此无法统计分组。请传入全部记录，或让表格从实现了 queryGroupHeaders 的数据源获取记录。',
+      draftOnly: '未按 {{fields}} 分组：它仅存在于草稿中，发布后才生效。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -961,6 +962,7 @@ const zh = {
     removeGroup: '删除',
     groupingUnstoredNotice: '无法按 {{fields}} 分组：它的值在显示时计算，并未存储。列表已暂不按它分组显示。',
     groupingUnstoredRemove: '从分组中移除',
+    draftOnlyQueryDropped: '未按 {{fields}} 筛选或排序：它仅存在于草稿中，发布后才生效。',
     inlineEditShort: '行内编辑',
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
   },
@@ -2403,7 +2405,7 @@ const zh = {
       changesApplied: '已生效',
       changesDrafted: '已暂存为草稿',
       changesFailed: '未生效',
-      discussing: '正在讨论：{{target}}',
+      discussing: '正在看：{{target}}',
       changesConfirmMessage: '确认修改，应用你刚才提议的改动。',
       changeVerb: {
         createObject: '新建对象',
@@ -2506,7 +2508,7 @@ const zh = {
       unavailableRetry: '重试',
       unavailableHome: '返回首页',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手对话',
         resize: '调整对话宽度',
         collapse: '收起对话',
@@ -2643,7 +2645,7 @@ const zh = {
       expandToPage: '整页打开',
       openAsPage: '整页打开',
       objectNotFound: '未找到对象',
-      objectNotFoundDescription: '对象"{{objectName}}"在当前配置中不存在。',
+      objectNotFoundDescription: '对象"{{objectName}}"不存在，或者您无权访问它。',
       objectNotFoundHint: '请检查您的应用导航设置或从侧边栏选择其他对象。',
       objectPackageDisabled: '对象“{{objectName}}”所属的软件包已被禁用，因此当前不提供该对象。',
       filterOrGroupNotEditable: '该筛选条件在其他条件之外还含有一个「或」分组，筛选编辑器无法显示这种结构，因此此处只读。视图仍会应用它。',
@@ -3039,6 +3041,10 @@ const zh = {
       missingToken: '验证链接缺少令牌。',
       emailMissing: '缺少邮箱地址',
       resendButton: '重新发送验证邮件',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        '您的邮箱地址尚未验证。请向 {{email}} 发送一封验证邮件，然后点击邮件中的链接以验证您的账户。',
+      sendButton: '发送验证邮件',
       resending: '发送中…',
       resent: '邮件已发送！请查看收件箱',
       resentSuccess: '验证邮件已发送！',
@@ -3503,7 +3509,6 @@ const zh = {
   },
   empty: {
     objectNotFound: '未找到对象',
-    objectNotFoundDescription: '对象 “{{name}}” 的定义不存在。请检查配置或返回选择有效的对象。',
     interfacePageSourceMissing: '此界面页引用了 “{{name}}”，但该来源不可用。',
     recordNotFound: '未找到记录',
     recordNotFoundDescription: '您查找的记录不存在、已被删除，或您没有访问权限。',
@@ -3595,7 +3600,7 @@ const zh = {
       detailNone: '未检测到差异 —— 草稿与已发布版本一致。',
       fieldOrderChanged: '字段顺序已变更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: '包含由 AI 副驾起草的更改',
+      draftedByCopilot: '包含由 AI 助手起草的更改',
       draftedByMcpClient: '包含由 MCP 客户端「{{client}}」起草的更改',
       draftedByMcp: '包含由 MCP 客户端起草的更改',
       detailChangedKeys: '其他变更：',
@@ -3703,7 +3708,8 @@ const zh = {
       securityBlockTitle: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_one: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_other: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
-      securityBlockWhere: '请在对象的“设置 → 记录共享模型”中修改后重新发布。',
+      securityBlockWhere: '请在对象的“设置 → 谁能看到哪些记录”中修改后重新发布。',
+      flowChecksTitle: '发布前请先看 —— 发布检查会提出以下几点',
       securityRule: {
         owdUnset: '未声明记录共享模型（sharingModel）。运行时会按 private 处理，但这个基线必须是明确做出的决定。',
         owdAlias: '记录共享模型（sharingModel）不是规范取值，运行时会按 private 处理此对象。',

@@ -583,6 +583,7 @@ const de = {
         "Diese Ansicht ist gruppiert, aber ihre Datenquelle implementiert queryGroupHeaders nicht, daher können die Gruppen nicht gezählt werden. Entfernen Sie die Gruppierung, um die Datensätze anzuzeigen.",
       needsWholeRows:
         "Die Gruppierung benötigt alle Datensätze, aber dieses Raster hat nur eine Seite davon erhalten, daher können die Gruppen nicht gezählt werden. Übergeben Sie alle Datensätze oder lassen Sie das Raster sie aus einer Datenquelle laden, die queryGroupHeaders implementiert.",
+      draftOnly: "Nicht nach {{fields}} gruppiert: Das Feld existiert nur im Entwurf, bis Sie veröffentlichen.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -934,6 +935,7 @@ const de = {
     removeGroup: "Entfernen",
     groupingUnstoredNotice: "Diese Liste kann nicht nach {{fields}} gruppiert werden: Der Wert wird bei der Anzeige berechnet und nicht gespeichert. Die Liste wird ohne diese Gruppierung angezeigt.",
     groupingUnstoredRemove: "Aus Gruppierung entfernen",
+    draftOnlyQueryDropped: "Nicht nach {{fields}} gefiltert oder sortiert: Das Feld existiert bis zur Veröffentlichung nur im Entwurf.",
     inlineEditShort: "Inline bearbeiten",
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
   },
@@ -2174,7 +2176,7 @@ const de = {
       changesApplied: "Angewendet",
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
-      discussing: "Thema: {{target}}",
+      discussing: "Angezeigt: {{target}}",
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",
@@ -2222,7 +2224,7 @@ const de = {
       unavailableRetry: "Erneut versuchen",
       unavailableHome: "Zurück zur Startseite",
       dock: {
-        title: "Assistent",
+        title: "KI-Assistent",
         description: "KI-Assistent-Chat",
         resize: "Chatbreite anpassen",
         collapse: "Chat einklappen",
@@ -2558,7 +2560,7 @@ const de = {
       expandToPage: "Als ganze Seite öffnen",
       openAsPage: "Als ganze Seite öffnen",
       objectNotFound: "Objekt nicht gefunden",
-      objectNotFoundDescription: "Das Objekt „{{objectName}}“ existiert in der aktuellen Konfiguration nicht.",
+      objectNotFoundDescription: "Das Objekt „{{objectName}}“ existiert nicht, oder Sie haben keinen Zugriff darauf.",
       objectNotFoundHint: "Überprüfen Sie Ihre App-Navigationseinstellungen oder wählen Sie ein anderes Objekt aus der Seitenleiste.",
       objectPackageDisabled: "Das Objekt „{{objectName}}“ gehört zu einem deaktivierten Paket und wird daher nicht bereitgestellt.",
       filterOrGroupNotEditable: "Dieser Filter enthält neben anderen Bedingungen eine ODER-Gruppe, die der Filter-Editor nicht darstellen kann, daher ist er hier schreibgeschützt. Die Ansicht wendet ihn weiterhin an.",
@@ -2957,6 +2959,10 @@ const de = {
       missingToken: "Im Bestätigungslink fehlt ein Token.",
       emailMissing: "E-Mail-Adresse fehlt",
       resendButton: "Bestätigungs-E-Mail erneut senden",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Ihre E-Mail-Adresse ist noch nicht bestätigt. Senden Sie einen Bestätigungslink an {{email}} und klicken Sie dann auf den Link, um Ihr Konto zu bestätigen.",
+      sendButton: "Bestätigungs-E-Mail senden",
       resending: "Sende…",
       resent: "E-Mail gesendet! Überprüfen Sie Ihren Posteingang",
       resentSuccess: "Bestätigungs-E-Mail gesendet!",
@@ -3422,7 +3428,6 @@ const de = {
   },
   empty: {
     objectNotFound: "Objekt nicht gefunden",
-    objectNotFoundDescription: "Definition des Objekts „{{name}}“ fehlt. Überprüfen Sie Ihre Konfiguration oder navigieren Sie zurück.",
     interfacePageSourceMissing: "Diese Interface-Seite verweist auf „{{name}}“, das nicht verfügbar ist.",
     pageNotFound: "Seite nicht gefunden",
     pageNotFoundDescription: "Die Seite „{{name}}“ wurde nicht gefunden. Sie wurde möglicherweise entfernt oder umbenannt.",
@@ -4615,7 +4620,7 @@ const de = {
       detailNone: 'Keine Unterschiede erkannt — der Entwurf entspricht der veröffentlichten Version.',
       fieldOrderChanged: 'Feldreihenfolge geändert',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Enthält Änderungen, die der KI-Copilot entworfen hat',
+      draftedByCopilot: 'Enthält Änderungen, die der KI-Assistent entworfen hat',
       draftedByMcpClient: 'Enthält Änderungen, die der MCP-Client „{{client}}“ entworfen hat',
       draftedByMcp: 'Enthält Änderungen, die ein MCP-Client entworfen hat',
       detailChangedKeys: 'Ebenfalls geändert:',
@@ -4723,7 +4728,8 @@ const de = {
       securityBlockTitle: 'Veröffentlichen wird abgelehnt — {{count}} Element(e) benötigen zuerst eine Entscheidung',
       securityBlockTitle_one: 'Veröffentlichen wird abgelehnt — {{count}} Element benötigt zuerst eine Entscheidung',
       securityBlockTitle_other: 'Veröffentlichen wird abgelehnt — {{count}} Elemente benötigen zuerst eine Entscheidung',
-      securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Datensatzfreigabe und veröffentlichen Sie erneut.',
+      securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Wer welche Datensätze sehen kann und veröffentlichen Sie erneut.',
+      flowChecksTitle: 'Vor dem Veröffentlichen: Die Veröffentlichungsprüfung meldet Folgendes',
       securityRule: {
         owdUnset: 'Es ist keine Basis für die Datensatzfreigabe (sharingModel) deklariert. Die Laufzeit greift auf private zurück, aber die Basis muss eine bewusste Entscheidung sein.',
         owdAlias: 'Die Basis für die Datensatzfreigabe (sharingModel) ist kein kanonischer Wert, daher behandelt die Laufzeit das Objekt als private.',

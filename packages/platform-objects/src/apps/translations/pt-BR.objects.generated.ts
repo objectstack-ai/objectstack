@@ -263,6 +263,19 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             "summary.alreadyPending": "Já pendentes, avisados novamente",
             "summary.failed": "Não adicionados",
             rows: "Resultado por linha"
+          },
+          columns: {
+            rows: {
+              row: "Linha",
+              email: "E-mail",
+              ok: "Sucesso",
+              alreadyPending: "Já pendente, avisado novamente",
+              "host.notified": "Organização de hospedagem avisada",
+              "host.reason": "Por que não foi avisada",
+              "error.message": "Não adicionado porque",
+              notApplied: "Não aplicado (defina no registro)",
+              managerError: "Gestor"
+            }
           }
         }
       },

@@ -22,7 +22,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor, act, cleanup } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { builtInLocales } from '@object-ui/i18n/locales';
 
 const authFetchSpy = vi.fn(async (..._args: unknown[]) =>
@@ -33,7 +33,7 @@ const authFetchSpy = vi.fn(async (..._args: unknown[]) =>
 );
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useAuth: () => ({ user: { id: 'u1', name: 'Ada', image: null }, activeOrganization: null }),
+  useAuth: () => ({ user: { id: 'u1', name: 'Ada', email: 'ada@example.test', image: null }, activeOrganization: null }),
   createAuthenticatedFetch: () => authFetchSpy,
 }));
 
@@ -119,6 +119,21 @@ const CLOSE_SUBTASK = {
   target: '/api/v1/subtasks/{id}/close',
 };
 
+/** The invitation inbox's accept, as `sys_invitation` declares it. */
+const ACCEPT = {
+  name: 'accept_invitation',
+  label: 'Accept Invitation',
+  type: 'api',
+  target: '/api/v1/auth/organization/accept-invitation',
+  recordIdParam: 'invitationId',
+};
+
+/** Where the router is, drawn so a test can read a navigation off the page. */
+function LocationProbe() {
+  const location = useLocation();
+  return <span data-testid="router-location">{location.pathname + location.search}</span>;
+}
+
 const OBJECTS = [
   {
     name: OBJECT_NAME,
@@ -127,7 +142,7 @@ const OBJECTS = [
       id: { type: 'text', label: 'Id' },
       title: { type: 'text', label: 'Title' },
     },
-    actions: [RECALC, PING, ROTATE],
+    actions: [RECALC, PING, ROTATE, ACCEPT],
   },
   { name: 'showcase_subtask', label: 'Subtask', fields: { id: { type: 'text', label: 'Id' } }, actions: [CLOSE_SUBTASK] },
 ];
@@ -172,6 +187,7 @@ async function clickOnPage(action: any, status: number, body: unknown) {
           recordIdOverride={RECORD_ID}
           embedded
         />
+        <LocationProbe />
       </MetadataCtx.Provider>
     </MemoryRouter>,
   );
@@ -276,5 +292,40 @@ describe('RecordDetailView api handler — a declared same-origin click goes thr
 
     expect(url.endsWith(`${DOOR}${OBJECT_NAME}/${RECALC.name}`)).toBe(true);
     expect(out).toEqual({ success: false, error: builtInLocales.en.form.noPermissionToSave });
+  });
+});
+
+describe('objectstack#34706 — RecordDetailView: an invitation accept refused for an unverified address opens the verification screen', () => {
+  const UNVERIFIED = {
+    code: 'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
+    message: 'Email verification required before accepting or rejecting invitation',
+  };
+  const VERIFY = `/verify-email-prompt?email=ada%40example.test&redirect=%2Faccept-invitation%2F${RECORD_ID}`;
+  const location = () => document.querySelector('[data-testid="router-location"]')?.textContent;
+
+  it('a header click through the door navigates to the prompt, returning to this record\'s accept page, with no toast', async () => {
+    const { out, url } = await clickOnPage(ACCEPT, 403, UNVERIFIED);
+
+    expect(url.endsWith(`${DOOR}${OBJECT_NAME}/${ACCEPT.name}`)).toBe(true);
+    expect(out).toEqual({ success: false });
+    await waitFor(() => expect(location()).toBe(VERIFY));
+  });
+
+  it('the direct call (an undeclared action name) hands over the same way', async () => {
+    const { out, url } = await clickOnPage({ ...ACCEPT, name: 'accept_elsewhere' }, 403, UNVERIFIED);
+
+    expect(url).toBe(ACCEPT.target);
+    expect(out).toEqual({ success: false });
+    await waitFor(() => expect(location()).toBe(VERIFY));
+  });
+
+  it('CONTROL: another refusal keeps its sentence and the page stays put', async () => {
+    const { out } = await clickOnPage(ACCEPT, 403, {
+      code: 'YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION',
+      message: 'You are not the recipient of the invitation',
+    });
+
+    expect(out).toEqual({ success: false, error: 'You are not the recipient of the invitation' });
+    expect(location()).toBe(`/app/demo/${OBJECT_NAME}/${RECORD_ID}`);
   });
 });

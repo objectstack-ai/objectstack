@@ -593,6 +593,7 @@ const fr = {
         "Cette vue est groupée, mais sa source de données n'implémente pas queryGroupHeaders : les groupes ne peuvent donc pas être comptés. Supprimez le regroupement pour afficher les enregistrements.",
       needsWholeRows:
         "Le regroupement a besoin de tous les enregistrements, mais cette grille n'en a reçu qu'une page : les groupes ne peuvent donc pas être comptés. Fournissez tous les enregistrements, ou laissez la grille les charger depuis une source de données qui implémente queryGroupHeaders.",
+      draftOnly: "Non regroupé par {{fields}} : ce champ n'existe que dans le brouillon jusqu'à la publication.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -959,6 +960,7 @@ const fr = {
     removeGroup: "Supprimer",
     groupingUnstoredNotice: "Cette liste ne peut pas être regroupée par {{fields}} : sa valeur est calculée à l’affichage et n’est pas stockée. La liste est affichée sans ce regroupement.",
     groupingUnstoredRemove: "Retirer du regroupement",
+    draftOnlyQueryDropped: "Non filtré ni trié par {{fields}} : ce champ n’existe que dans le brouillon jusqu’à la publication.",
     inlineEditShort: "Édition en ligne",
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
   },
@@ -2236,7 +2238,7 @@ const fr = {
       changesApplied: "Appliqué",
       changesDrafted: "Enregistré comme brouillon",
       changesFailed: "Non appliqué",
-      discussing: "Sujet : {{target}}",
+      discussing: "Affiché : {{target}}",
       changeVerb: {
         createObject: "Créer un objet",
         addField: "Ajouter un champ",
@@ -2284,7 +2286,7 @@ const fr = {
       unavailableRetry: "Réessayer",
       unavailableHome: "Retour à l'accueil",
       dock: {
-        title: "Assistant",
+        title: "Assistant IA",
         description: "Discussion avec l'assistant IA",
         resize: "Redimensionner la discussion",
         collapse: "Réduire la discussion",
@@ -2622,7 +2624,7 @@ const fr = {
       expandToPage: "Ouvrir en pleine page",
       openAsPage: "Ouvrir en pleine page",
       objectNotFound: "Objet introuvable",
-      objectNotFoundDescription: "L'objet « {{objectName}} » n'existe pas dans la configuration actuelle.",
+      objectNotFoundDescription: "L'objet « {{objectName}} » n'existe pas, ou vous n'y avez pas accès.",
       objectNotFoundHint: "Vérifiez les paramètres de navigation de votre application ou sélectionnez un autre objet dans la barre latérale.",
       objectPackageDisabled: "L'objet « {{objectName}} » appartient à un package désactivé et n'est donc pas servi.",
       filterOrGroupNotEditable: "Ce filtre comporte un groupe OU à côté d'autres conditions, que l'éditeur de filtres ne peut pas afficher, il est donc en lecture seule ici. La vue l'applique toujours.",
@@ -3025,6 +3027,10 @@ const fr = {
       missingToken: "Il manque un token dans le lien de vérification.",
       emailMissing: "Adresse e-mail manquante",
       resendButton: "Renvoyer l'e-mail de vérification",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Votre adresse e-mail n'est pas encore vérifiée. Envoyez un lien de vérification à {{email}}, puis cliquez sur le lien pour vérifier votre compte.",
+      sendButton: "Envoyer l'e-mail de vérification",
       resending: "Envoi…",
       resent: "E-mail envoyé ! Vérifiez votre boîte de réception",
       resentSuccess: "E-mail de vérification envoyé !",
@@ -3494,7 +3500,6 @@ const fr = {
   },
   empty: {
     objectNotFound: "Objet introuvable",
-    objectNotFoundDescription: "La définition de l'objet \"{{name}}\" est manquante. Vérifiez votre configuration ou revenez en arrière.",
     interfacePageSourceMissing: "Cette page d'interface référence \"{{name}}\", qui n'est pas disponible.",
     pageNotFound: "Page introuvable",
     pageNotFoundDescription: "La page \"{{name}}\" est introuvable. Elle a peut-être été supprimée ou renommée.",
@@ -4724,7 +4729,7 @@ const fr = {
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
       fieldOrderChanged: 'Ordre des champs modifié',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclut des modifications rédigées par le copilote IA',
+      draftedByCopilot: 'Inclut des modifications rédigées par l’assistant IA',
       draftedByMcpClient: 'Inclut des modifications rédigées par le client MCP « {{client}} »',
       draftedByMcp: 'Inclut des modifications rédigées par un client MCP',
       detailChangedKeys: 'Également modifié :',
@@ -4861,7 +4866,8 @@ const fr = {
       securityBlockTitle_one: 'La publication sera refusée — {{count}} élément nécessite d’abord une décision',
       securityBlockTitle_many: 'La publication sera refusée — {{count}} d’éléments nécessitent d’abord une décision',
       securityBlockTitle_other: 'La publication sera refusée — {{count}} éléments nécessitent d’abord une décision',
-      securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Partage d’enregistrements, puis publiez à nouveau.',
+      securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Qui peut voir quels enregistrements, puis publiez à nouveau.',
+      flowChecksTitle: 'Avant de publier : la vérification de publication signalera ceci',
       securityRule: {
         owdUnset: 'Aucune base de partage des enregistrements (sharingModel) n’est déclarée. L’exécution se rabat sur private, mais la base doit être une décision explicite.',
         owdAlias: 'La base de partage des enregistrements (sharingModel) n’est pas une valeur canonique : l’exécution traite donc l’objet comme private.',

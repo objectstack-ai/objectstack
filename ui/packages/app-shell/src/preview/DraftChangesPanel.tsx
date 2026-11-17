@@ -32,7 +32,7 @@
  */
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight, Equal, FilePlus2, FilePen, Loader2, Rocket, ShieldAlert } from 'lucide-react';
+import { ChevronDown, ChevronRight, Equal, FilePlus2, FilePen, ListChecks, Loader2, Rocket, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Badge,
@@ -111,6 +111,11 @@ import { isStudioHiddenSystemField } from '../views/studio-design/studioHiddenSy
 // EAGER graph (see the `@objectstack/spec` note above for what that costs).
 import { useSurfaceNavigator } from '../views/studio-design/surfaceDeepLinkChannel.js';
 import { lintDraftSecurityPosture, type DraftSecurityProblem } from './securityPostureLint.js';
+// objectstack#34818 — what a flow draft's publish would still say, read off
+// the server's own draft read. React-free and import-light (no `@objectstack/*`
+// runtime import), so it adds nothing else to the eager graph described above.
+import { readDraftChecks, type DraftCheck } from './flowDraftChecks.js';
+import { clearPublishChecksShown, markPublishChecksShown } from './publishChecksShown.js';
 // objectstack#27835 — a property by its label on the item type's form.
 import { formKeyLabel, labelSpellsKey } from './changeKeyLabels.js';
 
@@ -941,6 +946,20 @@ function securityProblemText(t: Translate, p: DraftSecurityProblem): string {
   return known ? known(t) : p.hint || p.message;
 }
 
+/** objectstack#34818 — the checks grouped by the draft they are about, in first-seen order. */
+function draftChecksByItem(
+  checks: readonly DraftCheck[],
+): Array<{ type: string; name: string; items: DraftCheck[] }> {
+  const groups = new Map<string, { type: string; name: string; items: DraftCheck[] }>();
+  for (const c of checks) {
+    const key = JSON.stringify([c.type, c.name]);
+    const group = groups.get(key) ?? { type: c.type, name: c.name, items: [] };
+    group.items.push(c);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 /** A backfill choice's identity: object and field, as a JSON tuple so no spelling collides. */
 function backfillKey(entry: DraftBackfillEntry): string {
   return JSON.stringify([entry.object, entry.field]);
@@ -1247,7 +1266,7 @@ function EntryDetail({
       data-testid="draft-entry-agent"
     >
       {source.by === 'copilot'
-        ? t('preview.changes.draftedByCopilot', { defaultValue: 'Includes changes drafted by the AI copilot' })
+        ? t('preview.changes.draftedByCopilot', { defaultValue: 'Includes changes drafted by the AI assistant' })
         : source.client
           ? t('preview.changes.draftedByMcpClient', {
               client: source.client,
@@ -1509,6 +1528,13 @@ export function DraftChangesPanel({
    */
   const [problems, setProblems] = useState<DraftSecurityProblem[]>([]);
   /**
+   * objectstack#34818 — what each flow draft's publish would still say: the
+   * gate's advisories (and any refusal) the server folds into the draft read,
+   * worded for the builder in the console's language. Listed beside the
+   * button so the author reads them before publishing, not in a toast after.
+   */
+  const [checks, setChecks] = useState<DraftCheck[]>([]);
+  /**
    * Null wherever no host listens for a surface request — the degradation this
    * panel owes its second home (Home / the draft-preview bar). Never a route
    * string test: reachability is answered by the tree that mounted us.
@@ -1603,6 +1629,7 @@ export function DraftChangesPanel({
     setEntries(null);
     setError(null);
     setProblems([]);
+    setChecks([]);
     setUnchanged(new Set());
     setBackfill(new Map());
     setNote('');
@@ -1624,6 +1651,18 @@ export function DraftChangesPanel({
         },
         drafts,
       ).then(setProblems, () => setProblems([]));
+      // objectstack#34818 — same stance: advisory, never awaited, and a failed
+      // read is "no checks". The read states the console's language, which is
+      // how the server picks the sentences' locale; this sheet's other reads
+      // state none.
+      void readDraftChecks(drafts, {
+        language: language || (typeof document !== 'undefined' ? document.documentElement.lang : '') || undefined,
+      }).then(
+        (found) => {
+          if (loadGenRef.current === gen) setChecks(found);
+        },
+        () => undefined,
+      );
       // Classify new-vs-update per TYPE: one published-list read covers every
       // draft of that type. A type whose read fails stays unclassified
       // (rendered neutrally) rather than failing the whole panel.
@@ -1709,7 +1748,7 @@ export function DraftChangesPanel({
     } finally {
       if (loadGenRef.current === gen) setClassifying(false);
     }
-  }, [packageId, include]);
+  }, [packageId, include, language]);
 
   useEffect(() => {
     if (open) void load();
@@ -1941,6 +1980,54 @@ export function DraftChangesPanel({
             ))
           )}
         </div>
+        {checks.length > 0 && !error && (
+          <div
+            data-testid="draft-flow-checks"
+            className="mt-auto border-t border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/30"
+          >
+            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-300">
+              <ListChecks className="h-3.5 w-3.5 shrink-0" />
+              {t('preview.changes.flowChecksTitle', {
+                defaultValue: 'Before you publish — the publish check will report these',
+              })}
+            </p>
+            <ul className="mt-1.5 flex flex-col gap-2">
+              {draftChecksByItem(checks).map(({ type, name, items }) => {
+                const entry = entries?.find((e) => e.type === type && e.name === name);
+                const heading = resolveI18nLabel(entry?.label, language)?.trim() || name;
+                return (
+                  <li key={JSON.stringify([type, name])} data-testid="draft-flow-checks-item">
+                    {/* The flow by the label its row shows, opening its designer
+                        where a host publishes the surface channel (Studio), plain
+                        text elsewhere — the security block's rule, below. */}
+                    {openSurface ? (
+                      <button
+                        type="button"
+                        onClick={() => openSurface({ type, name })}
+                        className="text-[11px] font-medium text-amber-900 underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:text-amber-200 dark:hover:text-amber-100"
+                      >
+                        {heading}
+                      </button>
+                    ) : (
+                      <span className="text-[11px] font-medium text-amber-900 dark:text-amber-200">{heading}</span>
+                    )}
+                    <ul className="mt-0.5 flex list-disc flex-col gap-1 pl-4">
+                      {items.map((c, i) => (
+                        <li
+                          key={i}
+                          data-severity={c.severity}
+                          className="text-[11px] leading-5 text-amber-900 dark:text-amber-200"
+                        >
+                          {c.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
         {problems.length > 0 && !error && (
           <div
             data-testid="draft-security-problems"
@@ -1991,7 +2078,7 @@ export function DraftChangesPanel({
             </ul>
             <p className="mt-1.5 text-[11px] text-amber-800/80 dark:text-amber-300/80">
               {t('preview.changes.securityBlockWhere', {
-                defaultValue: 'Fix it on the object under Settings → Record sharing, then publish again.',
+                defaultValue: 'Fix it on the object under Settings → Who can see which records, then publish again.',
               })}
             </p>
           </div>
@@ -2050,7 +2137,23 @@ export function DraftChangesPanel({
                   ...(backfill.size > 0 ? { backfill: [...backfill.values()] } : {}),
                   ...(message ? { message } : {}),
                 };
-                void (Object.keys(options).length > 0 ? onPublish(options) : onPublish());
+                // objectstack#34818 — the items whose publish checks this
+                // sheet just listed: their post-publish toast keeps its one
+                // title line (`publishChecksShown.ts`). Marked for the
+                // publish's flight only.
+                const reviewed = draftChecksByItem(checks);
+                for (const r of reviewed) markPublishChecksShown(r.type, r.name);
+                const clearReviewed = () => {
+                  for (const r of reviewed) clearPublishChecksShown(r.type, r.name);
+                };
+                try {
+                  void Promise.resolve(
+                    Object.keys(options).length > 0 ? onPublish(options) : onPublish(),
+                  ).finally(clearReviewed);
+                } catch (e) {
+                  clearReviewed();
+                  throw e;
+                }
               }}
               disabled={publishing}
               data-testid="draft-changes-publish"

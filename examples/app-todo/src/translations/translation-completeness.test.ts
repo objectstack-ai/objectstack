@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Task } from '../objects/task.object';
+import { TaskDataset } from '../datasets/task.dataset';
 import { en } from './en';
 import { zhCN } from './zh-CN';
 import { jaJP } from './ja-JP';
@@ -57,5 +58,25 @@ describe.each([
         `[${locale}] Missing option "${v}" for field "${name}"`,
       ).toBeTruthy();
     }
+  });
+});
+
+// Every task-dataset member carries a business `description` (ADR-0149 D1),
+// and each non-source locale translates it at
+// `datasets.<name>.{dimensions,measures}.<member>.description` — never a copy
+// of the English.
+describe.each([
+  ['zh-CN', zhCN],
+  ['ja-JP', jaJP],
+] as [string, TranslationData][])('%s dataset member descriptions', (locale, t) => {
+  const groups = ['dimensions', 'measures'] as const;
+  const members = groups.flatMap((group) =>
+    (TaskDataset[group] ?? []).map((m) => ({ group, name: m.name, description: m.description })));
+
+  it.each(members)('$group $name', ({ group, name, description }) => {
+    expect(typeof description, `"${name}" declares no description`).toBe('string');
+    const translated = t.datasets?.[TaskDataset.name]?.[group]?.[name]?.description;
+    expect(translated, `[${locale}] Missing description for ${group} "${name}"`).toBeTruthy();
+    expect(translated).not.toBe(description);
   });
 });

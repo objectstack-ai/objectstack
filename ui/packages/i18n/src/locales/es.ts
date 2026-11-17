@@ -598,6 +598,7 @@ const es = {
         "Esta vista está agrupada, pero su origen de datos no implementa queryGroupHeaders, por lo que no se pueden contar los grupos. Quite la agrupación para mostrar los registros.",
       needsWholeRows:
         "La agrupación necesita todos los registros, pero esta cuadrícula recibió solo una página de ellos, por lo que no se pueden contar los grupos. Entregue todos los registros o deje que la cuadrícula los obtenga de un origen de datos que implemente queryGroupHeaders.",
+      draftOnly: "No agrupado por {{fields}}: solo existe en el borrador hasta que publique.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -964,6 +965,7 @@ const es = {
     removeGroup: "Eliminar",
     groupingUnstoredNotice: "Esta lista no se puede agrupar por {{fields}}: su valor se calcula al mostrarse y no se almacena. La lista se muestra sin esa agrupación.",
     groupingUnstoredRemove: "Quitar de la agrupación",
+    draftOnlyQueryDropped: "Sin filtrar ni ordenar por {{fields}}: solo existe en el borrador hasta que publiques.",
     inlineEditShort: "Edición en línea",
     inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
   },
@@ -2240,7 +2242,7 @@ const es = {
       changesApplied: "Aplicado",
       changesDrafted: "Guardado como borrador",
       changesFailed: "No aplicado",
-      discussing: "Tratando: {{target}}",
+      discussing: "Viendo: {{target}}",
       changeVerb: {
         createObject: "Crear objeto",
         addField: "Añadir campo",
@@ -2288,7 +2290,7 @@ const es = {
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
-        title: "Asistente",
+        title: "Asistente de IA",
         description: "Chat con el asistente de IA",
         resize: "Redimensionar el chat",
         collapse: "Contraer el chat",
@@ -2626,7 +2628,7 @@ const es = {
       expandToPage: "Abrir como página completa",
       openAsPage: "Abrir como página completa",
       objectNotFound: "Objeto no encontrado",
-      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe en la configuración actual.",
+      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe o no tiene acceso a él.",
       objectNotFoundHint: "Verifique la configuración de navegación de su aplicación o seleccione un objeto diferente en la barra lateral.",
       objectPackageDisabled: "El objeto \"{{objectName}}\" pertenece a un paquete deshabilitado, por lo que no se está sirviendo.",
       filterOrGroupNotEditable: "Este filtro tiene un grupo O junto a otras condiciones, que el editor de filtros no puede mostrar, así que aquí es de solo lectura. La vista lo sigue aplicando.",
@@ -3029,6 +3031,10 @@ const es = {
       missingToken: "Falta un token en el enlace de verificación.",
       emailMissing: "Falta la dirección de correo",
       resendButton: "Reenviar correo de verificación",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Su correo aún no está verificado. Envíe un enlace de verificación a {{email}} y luego haga clic en el enlace para verificar su cuenta.",
+      sendButton: "Enviar correo de verificación",
       resending: "Enviando…",
       resent: "¡Correo enviado! Revise su bandeja de entrada",
       resentSuccess: "¡Correo de verificación enviado!",
@@ -3498,7 +3504,6 @@ const es = {
   },
   empty: {
     objectNotFound: "Objeto no encontrado",
-    objectNotFoundDescription: "Falta la definición del objeto \"{{name}}\". Verifique su configuración o navegue hacia atrás.",
     interfacePageSourceMissing: "Esta página de interfaz hace referencia a \"{{name}}\", que no está disponible.",
     pageNotFound: "Página no encontrada",
     pageNotFoundDescription: "La página \"{{name}}\" no fue encontrada. Puede haber sido eliminada o renombrada.",
@@ -4728,7 +4733,7 @@ const es = {
       detailNone: 'No se detectaron diferencias — el borrador coincide con la versión publicada.',
       fieldOrderChanged: 'Orden de los campos cambiado',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Incluye cambios redactados por el copiloto de IA',
+      draftedByCopilot: 'Incluye cambios redactados por el asistente de IA',
       draftedByMcpClient: 'Incluye cambios redactados por el cliente MCP «{{client}}»',
       draftedByMcp: 'Incluye cambios redactados por un cliente MCP',
       detailChangedKeys: 'También cambió:',
@@ -4865,7 +4870,8 @@ const es = {
       securityBlockTitle_one: 'La publicación será rechazada: {{count}} elemento necesita una decisión primero',
       securityBlockTitle_many: 'La publicación será rechazada: {{count}} de elementos necesitan una decisión primero',
       securityBlockTitle_other: 'La publicación será rechazada: {{count}} elementos necesitan una decisión primero',
-      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Uso compartido de registros y vuelva a publicar.',
+      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Quién puede ver qué registros y vuelva a publicar.',
+      flowChecksTitle: 'Antes de publicar: la comprobación de publicación señalará lo siguiente',
       securityRule: {
         owdUnset: 'No se ha declarado la base de uso compartido de registros (sharingModel). El entorno de ejecución usa private, pero la base debe ser una decisión explícita.',
         owdAlias: 'La base de uso compartido de registros (sharingModel) no es un valor canónico, así que el entorno de ejecución trata el objeto como private.',

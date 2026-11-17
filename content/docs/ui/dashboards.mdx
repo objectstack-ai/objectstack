@@ -223,12 +223,19 @@ export const salesDataset = defineDataset({
   object: 'opportunity',
   include: ['account'],
   dimensions: [
-    { name: 'region', field: 'account.region', type: 'string' },
-    { name: 'close_month', field: 'close_date', type: 'date', dateGranularity: 'month' },
+    { name: 'region', field: 'account.region', type: 'string', synonyms: ['territory', 'area'] },
+    {
+      name: 'close_month', field: 'close_date', type: 'date', dateGranularity: 'month',
+      synonyms: ['closing month', 'month closed'],
+    },
   ],
   measures: [
-    { name: 'revenue', field: 'amount', aggregate: 'sum' },
-    { name: 'deal_count', aggregate: 'count' },
+    {
+      name: 'revenue', field: 'amount', aggregate: 'sum',
+      synonyms: ['sales', 'pipeline value'],
+      description: 'The total amount of every opportunity, open or closed.',
+    },
+    { name: 'deal_count', aggregate: 'count', synonyms: ['deals', 'number of deals'] },
   ],
 });
 
@@ -516,7 +523,10 @@ declares:
 dimensions: [
   // The dashboard's dateRange filters `close_date`, so a compare widget's
   // window arrives as the dimension "close_date".
-  { name: 'close_date', label: 'Close date', field: 'close_date', type: 'date' },
+  {
+    name: 'close_date', label: 'Close date', field: 'close_date', type: 'date',
+    synonyms: ['closing date', 'date closed'],
+  },
 ],
 ```
 
@@ -696,14 +706,23 @@ export const projectTasksDataset = defineDataset({
   label: 'Project Tasks',
   object: 'project_task',
   dimensions: [
-    { name: 'status', field: 'status', type: 'string' },
-    { name: 'priority', field: 'priority', type: 'string' },
-    { name: 'completed_month', field: 'completed_at', type: 'date', dateGranularity: 'month' },
+    { name: 'status', field: 'status', type: 'string', synonyms: ['state', 'progress'] },
+    { name: 'priority', field: 'priority', type: 'string', synonyms: ['urgency', 'importance'] },
+    {
+      name: 'completed_month', field: 'completed_at', type: 'date', dateGranularity: 'month',
+      synonyms: ['month completed', 'finish month'],
+    },
   ],
   measures: [
-    { name: 'open_count', aggregate: 'count', filter: { status: { $ne: 'done' } } },
-    { name: 'done_count', aggregate: 'count', filter: { status: 'done' } },
-    { name: 'task_count', aggregate: 'count' },
+    {
+      name: 'open_count', aggregate: 'count', filter: { status: { $ne: 'done' } },
+      synonyms: ['open tasks', 'unfinished tasks'],
+    },
+    {
+      name: 'done_count', aggregate: 'count', filter: { status: 'done' },
+      synonyms: ['done tasks', 'completed tasks'],
+    },
+    { name: 'task_count', aggregate: 'count', synonyms: ['tasks', 'number of tasks'] },
   ],
 });
 ```

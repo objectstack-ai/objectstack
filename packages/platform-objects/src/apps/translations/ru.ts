@@ -38,7 +38,6 @@ export const ru: TranslationData = {
       navigation: {
         group_overview: { label: 'Обзор' },
         group_apps: { label: 'Приложения' },
-        nav_packaged_actions: { label: 'Действия из пакетов' },
         nav_marketplace_browse: { label: 'Обзор Marketplace' },
         nav_marketplace_installed: { label: 'Установленные приложения' },
         nav_cloud_connection: { label: 'Подключение к облаку' },

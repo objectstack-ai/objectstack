@@ -56,6 +56,12 @@ A flow *beside* it is "new similar": `POST /api/v1/automation/:name/clone`
 package-less; a flow holding a `secret` / `signingSecret` is refused (`409`): author
 it anew.
 
+A package ships a flow **switched off** with `defaultActive: false` (beside
+`status: 'active'`): unarmed (`_status` `enabled: false`) until an administrator
+turns that switch on, which then outlives restart, upgrade and reinstall.
+`status: 'obsolete'` disarms past the switch; a flow authored in the deployment
+is refused the key (its switch is `status`).
+
 ### Flow Node Types
 
 Built-in (plugins register more):

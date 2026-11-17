@@ -37,7 +37,12 @@
  * It is server-constructed by construction: no request body, query string or
  * stored row can spell a symbol, so no caller can claim or shed it. It is an
  * in-process provenance fact, never a principal and never an authorization
- * grant — its only reader narrows (it refuses; it admits nothing). `Symbol.for`
+ * grant. It has two readers, both in plugin-security, and neither admits an
+ * operation. The identity-write and append-only refusals narrow: they refuse.
+ * The owner stamp (`owner-anchor-stamp.ts`) reads the `'action'` mark to give
+ * ownership on an insert: an EMPTY `owner_id` is filled with the context's own
+ * `userId`, the principal a direct create under the same envelope is stamped
+ * with, and never a different one. `Symbol.for`
  * rather than a module-local `Symbol()`, because this package ships an ESM and
  * a CJS build and a process may load both: the mark must be the same key in
  * each.

@@ -1906,6 +1906,9 @@ importers:
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
         version: link:../../drivers/driver-sqlite-wasm
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../../services/service-messaging
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5

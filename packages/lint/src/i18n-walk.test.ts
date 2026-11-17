@@ -153,3 +153,104 @@ describe('collectExpectedEntries — preflight field labels', () => {
     expect(preflightKeys(['objects', 'sys_package', '_actions', 'install_bare'])).toEqual([]);
   });
 });
+
+/**
+ * [#34652] `resultDialog.columns.<path>.<column_path>` and
+ * `preflight.columns.<path>.<column_path>` — one key per labelled column of a
+ * `format: 'table'` field, beside the field's own `fields.<path>` key, both
+ * levels keyed by the literal path (a dotted path stays ONE segment).
+ */
+describe('collectExpectedEntries — answer table column labels', () => {
+  const table = {
+    path: 'rows',
+    label: 'Result per row',
+    format: 'table',
+    columns: [
+      { path: 'email', label: 'Email' },
+      { path: 'error.message', label: { en: 'Not added because', 'zh-CN': '未添加的原因' } },
+      { path: 'row', format: 'json' },
+    ],
+  };
+  const stack = {
+    objects: [
+      {
+        name: 'sys_user',
+        label: 'User',
+        fields: {},
+        actions: [
+          {
+            name: 'import_users',
+            label: 'Import',
+            type: 'api',
+            params: [{ name: 'csv', type: 'text' }],
+            resultDialog: { title: 'Done', fields: [{ path: 'summary.added', label: 'Added' }, table] },
+            preflight: { read: { url: '/api/v1/x' }, fields: [table] },
+          },
+        ],
+      },
+    ],
+  };
+  const entries = collectExpectedEntries(stack, { warnedGroups: new Set() });
+  const root = ['objects', 'sys_user', '_actions', 'import_users'];
+  const blockKeys = (block: string) =>
+    entries
+      .filter((e) => root.every((seg, i) => e.path[i] === seg) && e.path[root.length] === block)
+      .map((e) => e.path.slice(root.length));
+
+  it('lists a key per labelled column beside the field key, an unlabelled column none', () => {
+    expect(blockKeys('resultDialog')).toEqual([
+      // The optional prose slots are listed whether authored or not.
+      ['resultDialog', 'title'],
+      ['resultDialog', 'description'],
+      ['resultDialog', 'acknowledge'],
+      ['resultDialog', 'fields', 'summary.added'],
+      ['resultDialog', 'fields', 'rows'],
+      ['resultDialog', 'columns', 'rows', 'email'],
+      ['resultDialog', 'columns', 'rows', 'error.message'],
+    ]);
+    const email = entries.find((e) => e.path.join('\u0000') === [...root, 'resultDialog', 'columns', 'rows', 'email'].join('\u0000'));
+    expect(email).toMatchObject({ sourceValue: 'Email', inline: 'Email', source: 'action', objectName: 'sys_user' });
+    const reason = entries.find((e) => e.path.join('\u0000') === [...root, 'resultDialog', 'columns', 'rows', 'error.message'].join('\u0000'));
+    expect(reason?.inlineLocales).toEqual({ en: 'Not added because', 'zh-CN': '未添加的原因' });
+  });
+
+  it('lists the same column keys under a preflight table field', () => {
+    expect(blockKeys('preflight')).toEqual([
+      ['preflight', 'fields', 'rows'],
+      ['preflight', 'columns', 'rows', 'email'],
+      ['preflight', 'columns', 'rows', 'error.message'],
+    ]);
+  });
+});
+
+describe('collectExpectedEntries — an action\'s refusal catalogue (#34273)', () => {
+  const refusals = {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
+    STAGE_LOCKED: { message: 'Locked.', reasons: { closed: { message: 'A {{ stage }} deal is closed.' } }, params: ['stage'] },
+  };
+  const body = { language: 'js', source: "throw { code: 'NOT_DRAFT' };" };
+  const entries = collectExpectedEntries({
+    objects: [{
+      name: 'crm_invoice',
+      fields: {},
+      actions: [{ name: 'submit_signoff', label: 'Submit', type: 'script', body, refusals }],
+    }],
+    actions: [{ name: 'export_all', label: 'Export', type: 'script', body, refusals: { NOT_DRAFT: refusals.NOT_DRAFT } }],
+  }, { warnedGroups: new Set() });
+  const at = (path: string) => entries.find((e) => e.path.join('.') === path);
+
+  it('yields objects.<object>._actions.<action>.refusals.<CODE>.message with the declared sentence', () => {
+    expect(at('objects.crm_invoice._actions.submit_signoff.refusals.NOT_DRAFT.message')?.sourceValue)
+      .toBe('Only a draft invoice can be signed off.');
+  });
+
+  it('yields each declared reason under its code', () => {
+    expect(at('objects.crm_invoice._actions.submit_signoff.refusals.STAGE_LOCKED.reasons.closed.message')?.sourceValue)
+      .toBe('A {{ stage }} deal is closed.');
+  });
+
+  it('yields an object-less action\'s refusals under globalActions', () => {
+    expect(at('globalActions.export_all.refusals.NOT_DRAFT.message')?.sourceValue)
+      .toBe('Only a draft invoice can be signed off.');
+  });
+});

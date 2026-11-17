@@ -288,14 +288,14 @@ describe('Access: sharing settings in zh carry no English doublet or bare OWD (o
   });
 
   it('the matrix column and the explain rule name the sharing model in Chinese', () => {
-    expect(ZH['engine.studio.access.colOwd']).toBe('记录共享模型');
+    expect(ZH['engine.studio.access.colOwd']).toBe('谁能看到哪些记录');
     expect(ZH['engine.studio.access.explain.ruleKind.owd_baseline']).toMatch(/^\p{Script=Han}/u);
     // The prose that names the Private option names it the way the picker does.
     expect(ZH['engine.studio.settings.sharingDescUnset']).not.toMatch(/Private/u);
     expect(ZH['engine.studio.data.owdHint']).not.toMatch(/Private/u);
-    // en is untouched.
-    expect(EN['perm.owd.private']).toBe('Private');
-    expect(EN['engine.studio.access.colOwd']).toBe('OWD');
+    // en names them in plain words too (objectstack#34795).
+    expect(EN['perm.owd.private']).toBe('Only the owner can see');
+    expect(EN['engine.studio.access.colOwd']).toBe('Who can see which records');
   });
 });
 

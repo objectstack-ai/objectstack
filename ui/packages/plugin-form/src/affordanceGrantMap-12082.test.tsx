@@ -681,6 +681,14 @@ const WRITE_SITES: Record<string, WriteSite> = {
     outOfFamily("the language switcher changes the session's language locally and persists the caller's OWN sys_user.locale best-effort, a refusal surfacing as a toast"),
   'packages/app-shell/src/hooks/useUserLocale.ts :: saveSignInLanguagePick :: update':
     outOfFamily("the sign-in page saves the language picked on it as the caller's OWN sys_user.locale, only while that column is unset; a refusal leaves the pick on this device and does not hold the sign-in (no CRUD visibility door)"),
+  // The draft-preview record form's data source (objectstack#34807): a proxy
+  // over the adapter that forwards the create / update its form hands it,
+  // minus the draft-only field names. The affordance is the form's own write
+  // site, entered where the form calls it.
+  'packages/app-shell/src/utils/previewFormDataSource.ts :: createPreviewFormDataSource > writes > create :: create':
+    door('the draft-preview form data source: it forwards the create its form hands it, minus draft-only field names'),
+  'packages/app-shell/src/utils/previewFormDataSource.ts :: createPreviewFormDataSource > writes > update :: update':
+    door('the draft-preview form data source: it forwards the update its form hands it, minus draft-only field names'),
   // The attachments panel's upload has no data-source write site: the upload's
   // own completion attaches it (the upload adapter's `attachTo`), so the
   // `attachmentUpload` row is read where the upload is offered and no

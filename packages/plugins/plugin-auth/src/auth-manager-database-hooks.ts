@@ -278,7 +278,7 @@ export function composeDatabaseHooks(
       // means a membership now EXISTS, so the common no-bind login costs no
       // extra query at all.
       if (!orgId && this.isCreatedInThisRequest(ctx, userId)) {
-        const outcome = await this.settleMembership(userId);
+        const outcome = await this.settleMembership(userId, ctx);
         if (outcome === 'bound' || outcome === 'yielded') {
           orgId = await selectActiveOrg(reader, userId);
         }
@@ -492,8 +492,8 @@ export function composeDatabaseHooks(
   // reconciler then yields to whatever membership exists, so there is never a
   // double bind. Best-effort — never fails user creation.
   const hostUserAfter = (host as any)?.user?.create?.after;
-  const membershipReconciler = async (user: any) => {
-    await this.settleMembership(user?.id);
+  const membershipReconciler = async (user: any, ctx?: unknown) => {
+    await this.settleMembership(user?.id, ctx);
     // [#11739] The second half of an admitted SELF-registration: settle the
     // DECLARED permission-set grant staged by the validateUserInfo gate —
     // landed now, owned by the membership the line above bound, or held as
@@ -507,11 +507,11 @@ export function composeDatabaseHooks(
   const userAfter = hostUserAfter
     ? async (user: any, ctx: any) => {
         const hostResult = await hostUserAfter(user, ctx);
-        await membershipReconciler(user);
+        await membershipReconciler(user, ctx);
         return hostResult;
       }
-    : async (user: any) => {
-        await membershipReconciler(user);
+    : async (user: any, ctx?: unknown) => {
+        await membershipReconciler(user, ctx);
       };
 
   // [#12751] Walled owner-verified stamp, the CONSUMING half: the admission

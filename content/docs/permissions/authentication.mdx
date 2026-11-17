@@ -123,7 +123,11 @@ OS_AUTH_SIGNUP_ENABLED=false
 OS_AUTH_GOOGLE_ENABLED=true
 
 # Optional: what a new user joins (ADR-0093 D1). `auto` (default) binds every
-# new user to the default organization; `invite-only` grants membership only
+# new user to the default organization (except a sign-up admitted by its
+# invitation alone whose address is unverified: under the `invite_only`
+# audience posture, one admitted by the invitation it presents; under
+# `email_domain`, one off the allowlist that an invitation addressed to it
+# admitted. It joins by accepting); `invite-only` grants membership only
 # through an explicit act — creating a workspace, accepting an invitation, an
 # admin adding them, or SSO just-in-time provisioning.
 # Also configurable in Setup → Authentication → Membership.
@@ -1208,8 +1212,8 @@ organization the administrator has switched to in the console. There is no
 organization choice: to add someone to another organization, switch to it
 first. An administrator with no current organization is refused with
 `400 NO_ACTIVE_ORGANIZATION` and no user is created. Under the `single` posture
-(a degraded wall included) the user joins the default organization, as every new
-user does ([Membership](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization)).
+(a degraded wall included) the user joins the default organization, as every
+user an administrator creates does ([Membership](/docs/deployment/tenancy-modes#membership-how-new-users-join-an-organization)).
 
 The join is better-auth's `addMember`, the same act as **Add Member**, inside
 the account's transaction: an organization at its membership limit refuses the
