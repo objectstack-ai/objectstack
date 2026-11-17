@@ -191,6 +191,7 @@ function answer(bits: Record<string, unknown>): MePermissionsAuthenticatedRespon
     tenantId: null,
     positions: ['member'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects: { [OBJECT_NAME]: FULL, [COMMENT]: bits },
     fields: {},

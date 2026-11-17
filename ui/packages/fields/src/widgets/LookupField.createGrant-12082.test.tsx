@@ -73,6 +73,7 @@ const envelope = (target: Grant, source: Grant = { allowCreate: true }): MePermi
   userId: 'u-requester',
   tenantId: null,
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['clm_requester'],
   permissionSets: ['clm_requester'],
   objects: {

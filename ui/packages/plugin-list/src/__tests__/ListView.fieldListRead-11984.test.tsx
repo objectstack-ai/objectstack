@@ -72,6 +72,7 @@ function answer(fields: MePermissionsAuthenticatedResponse['fields']): MePermiss
     userId: 'u1',
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: [],
     permissionSets: ['fls_member'],
     objects: { [OBJECT]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false } },
