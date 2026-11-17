@@ -1,5 +1,5 @@
 ---
-'@objectstack/plugin-auth': minor
+'@objectstack/plugin-auth': patch
 '@object-ui/app-shell': patch
 '@objectstack/runtime': patch
 ---
