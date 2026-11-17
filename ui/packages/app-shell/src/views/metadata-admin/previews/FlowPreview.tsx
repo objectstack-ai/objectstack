@@ -21,6 +21,7 @@
  */
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import {
   AlertCircle,
@@ -115,6 +116,13 @@ export interface FlowPreviewChrome {
    * names the engine alone for `true`. Absent: the host does not know.
    */
   published?: boolean;
+  /**
+   * objectstack#34818 — where the Debug section's simulator goes when the host
+   * keeps its right column elsewhere (Studio's right slot): the simulator is
+   * drawn there, in the Configuration's place, and the section keeps the
+   * canvas alone. Absent or `null`: the simulator sits beside the canvas.
+   */
+  debugTarget?: HTMLElement | null;
 }
 
 const FlowPreviewChromeContext = React.createContext<FlowPreviewChrome | null>(null);
@@ -553,24 +561,33 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
     // objectui#12454 — the host's item header holds the meta and the tab row,
     // so the preview draws neither, and no frame: the section fills the body.
     const section = chrome.section;
+    const debugTarget = chrome.debugTarget ?? null;
     const panelBody = section === 'variables' || section === 'runs' || section === 'problems';
     return (
       <PreviewErrorBoundary fallbackHint={tr('engine.flowPreview.malformed', locale)}>
         <div
           data-testid="flow-preview-section"
           data-section={section}
-          className={'grid h-full min-h-0 gap-0 ' + (section === 'debug' ? 'lg:grid-cols-[1fr_300px]' : 'grid-cols-1')}
+          className={'grid h-full min-h-0 gap-0 ' + (section === 'debug' && !debugTarget ? 'lg:grid-cols-[1fr_300px]' : 'grid-cols-1')}
         >
           {/* Kept mounted under a body section, so its pan, zoom and opened
               regions are where the author left them when the canvas returns. */}
           <div className={panelBody ? 'hidden' : 'flex min-h-0 min-w-0 flex-col'}>
             <div className="min-h-0 flex-1">{canvasEl}</div>
           </div>
-          {section === 'debug' && (
-            <div className="border-l bg-muted/20">
-              <FlowSimulatorPanel nodes={nodes} edges={edges} variables={variables} locale={locale} onRunStateChange={setRunHL} />
-            </div>
-          )}
+          {section === 'debug' &&
+            (debugTarget ? (
+              createPortal(
+                <div className="flex min-h-0 w-full flex-1 flex-col bg-muted/20" data-testid="flow-debug-in-slot">
+                  <FlowSimulatorPanel nodes={nodes} edges={edges} variables={variables} locale={locale} onRunStateChange={setRunHL} />
+                </div>,
+                debugTarget,
+              )
+            ) : (
+              <div className="border-l bg-muted/20">
+                <FlowSimulatorPanel nodes={nodes} edges={edges} variables={variables} locale={locale} onRunStateChange={setRunHL} />
+              </div>
+            ))}
           {section === 'variables' && (
             <div className="min-h-0 overflow-auto">
               <div className="mx-auto max-w-3xl space-y-2 px-6 py-5 text-xs">

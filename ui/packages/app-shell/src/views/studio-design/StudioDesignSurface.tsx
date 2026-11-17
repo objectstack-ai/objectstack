@@ -9058,6 +9058,12 @@ export function AutomationsPillar({
   React.useEffect(() => {
     if (flowSelectionKey && showSlotProps) showSlotProps();
   }, [flowSelectionKey, showSlotProps]);
+  // objectstack#34818 — Debug takes the Configuration's place in the slot, so
+  // opening it shows the properties half, where the simulator is drawn.
+  const flowDebugOpen = flowSection === 'debug';
+  React.useEffect(() => {
+    if (flowDebugOpen && showSlotProps) showSlotProps();
+  }, [flowDebugOpen, showSlotProps]);
   React.useEffect(() => {
     if (!inSlot || !flowSelectionKey) return;
     const onKey = (e: KeyboardEvent) => {
@@ -9788,6 +9794,8 @@ export function AutomationsPillar({
                         onSectionChange: setFlowSection,
                         onProblemsChange: setProblemTally,
                         published: current && publishedFlowNames ? publishedFlowNames.has(current.name) : undefined,
+                        // objectstack#34818 — in the right slot, Debug draws the simulator there.
+                        debugTarget: inSlot && section === 'debug' ? slot.propsTarget : null,
                       }}
                     >
                       {React.createElement(Preview, {
@@ -9818,10 +9826,11 @@ export function AutomationsPillar({
           </main>
         </div>
 
-        {/* #34818 — Debug takes the Configuration's place: the simulator
-            column widens to the aside's width, and the aside is not drawn
-            (classic row and right slot alike). The selection is kept, so
-            leaving Debug brings the aside back as it was. */}
+        {/* #34818 — Debug takes the Configuration's place, and the aside is
+            not drawn: in the classic row the simulator column widens to the
+            aside's width; in the right slot the simulator is drawn in the
+            slot itself (the chrome's `debugTarget`). The selection is kept,
+            so leaving Debug brings the aside back as it was. */}
         {flowsEmpty || section === 'debug' ? null : configFolded && !inSlot ? (
           // objectui#11795 — the folded row: no aside reserving width beside
           // the canvas; the selection's configuration opens over it, and

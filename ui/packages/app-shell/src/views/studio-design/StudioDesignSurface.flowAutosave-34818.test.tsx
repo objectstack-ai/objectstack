@@ -121,6 +121,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 import { toast } from 'sonner';
 import { AutomationsPillar, InterfacesPillar } from './StudioDesignSurface';
+import { StudioRightSlotContext } from './studioRightSlotState';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -257,6 +258,50 @@ describe('the Debug section takes the Configuration aside’s place (#34818 item
     fireEvent.click(screen.getByTestId('auto-tab-canvas'));
     const aside = await screen.findByTestId('auto-config-aside');
     expect(within(aside).getByLabelText('Label')).toHaveValue('Start');
+  });
+
+  it('in the right slot, Debug draws the simulator in the slot, in the Configuration’s place', async () => {
+    const showProps = vi.fn();
+    function SlotHost({ children }: { children: React.ReactNode }) {
+      const [target, setTarget] = React.useState<HTMLElement | null>(null);
+      const handle = React.useMemo(
+        () => ({ propsTarget: target, mode: 'props' as const, claimProps: () => () => {}, showProps }),
+        [target],
+      );
+      return (
+        <StudioRightSlotContext.Provider value={handle}>
+          {children}
+          <div data-testid="slot-target" ref={setTarget} />
+        </StudioRightSlotContext.Provider>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+        <SlotHost>
+          <AutomationsPillar packageId={PKG} />
+        </SlotHost>
+      </MemoryRouter>,
+    );
+    await screen.findByTestId('auto-tab-canvas', undefined, { timeout: 8000 });
+    const slot = screen.getByTestId('slot-target');
+    await waitFor(() => expect(within(slot).getByTestId('auto-config-aside')).toBeInTheDocument(), { timeout: 8000 });
+    await selectStart();
+
+    showProps.mockClear();
+    fireEvent.click(screen.getByTestId('auto-tab-debug'));
+    await waitFor(() => expect(within(slot).getByTestId('flow-debug-in-slot')).toBeInTheDocument());
+    expect(within(slot).queryByTestId('auto-config-aside')).toBeNull();
+    expect(showProps, 'opening Debug shows the slot’s properties half').toHaveBeenCalled();
+    // The section keeps the canvas alone: no second simulator column beside it.
+    const sectionEl = screen.getByTestId('flow-preview-section');
+    expect(sectionEl.className).toContain('grid-cols-1');
+    expect(within(sectionEl).queryByRole('button', { name: en('engine.flowSim.run') })).toBeNull();
+    expect(within(slot).getByRole('button', { name: en('engine.flowSim.run') })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('auto-tab-canvas'));
+    const aside = await within(slot).findByTestId('auto-config-aside');
+    expect(within(aside).getByLabelText('Label')).toHaveValue('Start');
+    expect(within(slot).queryByTestId('flow-debug-in-slot')).toBeNull();
   });
 
   it('the control: the Canvas section keeps the aside', async () => {
