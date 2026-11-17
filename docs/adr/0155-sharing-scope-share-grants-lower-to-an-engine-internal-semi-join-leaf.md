@@ -285,8 +285,8 @@ Name the set once, so every later sentence can point at it:
   D1's reason for one leaf as this: one brand carries one meaning, so no composer has to ask which meaning it holds.
   This record keeps that reason the same way, by giving each further meaning a brand of its own.
 - **What it carries: the inputs of G and nothing else.** The object's name, the recipient's user id, and the admitted
-  access levels: none on the read form, which admits every level, and `WRITE_ACCESS_LEVELS` on the write form (③ A),
-  supplied by the producer so the level vocabulary keeps its one home. `recipient_type = 'user'` is fixed, not
+  access levels: none on the read form, which admits every level, and `WRITE_ACCESS_LEVELS` on the write form
+  (③ ruled A), supplied by the producer so the level vocabulary keeps its one home. `recipient_type = 'user'` is fixed, not
   carried. It carries no organization, no caller scope and no reading context. The inputs are ordinary enumerable
   properties, as `ReadableIds`' object name is, so two users' leaves never compare or serialise as equal; only the
   brand is non-enumerable. The rest of its representation is the spec card's.
@@ -437,8 +437,7 @@ After the switch the read scope is:
   ADR-0139 D5.2's class, and a find hook, `beforeFind` or `afterFind`
   (`packages/objectql/src/engine.ts#registerHook`), which this record adds for this table. ⛔ The seam never reads
   around either. What each class answers is ②'s, as ruled, and each is a row of Q2's census. No package in this
-  repository names
-  the table in either kind of registration on its own. plugin-audit registers its record-view hook for the objects a
+  repository names the table in either kind of registration on its own. plugin-audit registers its record-view hook for the objects a
   host opts in, so a host that opts this table in is in the class. That hook returns at once on a system read
   (`packages/plugins/plugin-audit/src/read-audit.ts#installReadAuditWriter`, through its record-view handler), which
   the grant read is.
@@ -818,8 +817,8 @@ ADR-0147's leaf and `delete` keep it as written. B and C were not taken.
 
 ## Open items (not blocking acceptance; each becomes a reading on its card)
 
-- **O1** — Names. `SharedRecordIds`, and the driver declaration's name (② as ruled consults one). The seat's call, fixed on
-  the spec card, and shared with ADR-0147's O1 where the declaration is shared.
+- **O1** — Names. `SharedRecordIds`, and the driver declaration's name (② as ruled consults one). The seat's
+  call, fixed on the spec card, and shared with ADR-0147's O1 where the declaration is shared.
 - **O2** — Key comparison. The subquery compares two columns where today a column meets bound strings. On the tables
   the platform manages both are strings. The driver card pins the comparison, type and collation, on every dialect
   `driver-sql` ships, and answers an outer key of another type with the same rows (D-0).
@@ -877,9 +876,10 @@ names.
 2. **Engine: the seam.** Door admission, pass-through, the position rule, the verb rule (③ ruled A: the write form
    admitted in the `where` of a predicate `update`, nowhere else) and the recipient rule, the two recognised classes
    (② as ruled: R2 with R1 behind it for an object on another datasource, R1 for the host class), the descent into
-   composed scopes, the refusal, and the consult of the driver declaration that R2 reads (② as ruled). The recipient rule is pinned on its four cases: the context's user, its
-   delegator, a system context, and any other recipient, which is refused. The cases of ADR-0147's anchor are pinned
-   on the card that adds that leaf to the seam: the reading context's own anchor; ADR-0147 D-c's context, the
+   composed scopes, the refusal, and the consult of the driver declaration that R2 reads (② as ruled).
+   The recipient rule is pinned on its four cases: the context's user, its delegator, a system context, and any
+   other recipient, which is refused. The cases of ADR-0147's anchor are pinned on the card that adds that leaf to
+   the seam: the reading context's own anchor; ADR-0147 D-c's context, the
    delegator's rebuilt one, reading under the anchor it carries; a system context; and an anchor that differs in its
    caller or in its organization, or a context that carries none, each refused.
 3. **`driver-sql` and the Turso remote transport: the compile.** The subquery with no tenant scope (① ruled A), the
@@ -889,8 +889,8 @@ names.
 4. **`driver-memory`: the in-process evaluation**, on reads and on the update path (③ ruled A).
 5. **The rest of the census, as ② is ruled**: the storage rows' refusal for this brand (R1, behind R2), the analytics
    compilers (the native compiler compiles the leaf; the engine strategy's merge admits the brand), the explainer's
-   record pass (resolved at the record). The native compiler's card carries the recognition of D4's two classes and the decline to
-   the engine strategy. ⛔ No card up to here refuses a boot.
+   record pass (resolved at the record). The native compiler's card carries the recognition of D4's two classes and
+   the decline to the engine strategy. ⛔ No card up to here refuses a boot.
 6. **plugin-sharing: the switch.** The seat that cuts this card first produces O8's census and records it in the
    card's body; without the census the card is not cut. `buildReadFilter` and `buildWriteFilter` write the leaf, and
    the approval ids become a disjunct of their own. Each tightening lands here, at the moment it takes effect: R2's
