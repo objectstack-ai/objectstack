@@ -364,6 +364,16 @@ export {
   hydratedMessagesToChatMessages,
 } from './console/ai/AiChatPage.js';
 export { ConversationsSidebar } from './console/ai/ConversationsSidebar.js';
+// objectstack#34608 — the AI assistant is one right-side drawer: the old
+// `/ai…` addresses route here to open it, and pages open it through the handle.
+export { AiAddressRedirect } from './console/ai/AiAddressRedirect.js';
+export {
+  ChatDockControlProvider,
+  useChatDockControl,
+  useOpenAssistant,
+  type ChatDockControl,
+} from './layout/chatDockControl.js';
+export type { ChatDockTarget } from './layout/chatDockTarget.js';
 // Conversation-history hydration helpers — reused by the public read-only
 // share page (`/s/:token`) so a shared transcript renders identically to the
 // live chat (tool cards included) instead of dumping raw envelopes.

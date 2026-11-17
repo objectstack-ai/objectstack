@@ -274,6 +274,11 @@ const en = {
     // only displace it by authoring a `description`, which makes a VISIBLE
     // subtitle appear on every form — so the fallback has to come from here.
     dialogDescriptionFallback: 'Complete the form fields, then submit or cancel.',
+    // The form section navigation (objectstack#34605): its accessible name,
+    // and the screen-reader text of a section's error count, which is drawn
+    // as a bare number beside the section name.
+    sectionNav: 'Form sections',
+    sectionNavErrors: 'Fields to fix: {{number}}',
     // The hint under a field the caller may read but not write, shown when the
     // field declares no description of its own (objectui#11071).
     deniedDescription: 'You do not have edit access to this field.',
@@ -2313,6 +2318,10 @@ const en = {
       launcherLabel: 'App launcher',
       menuLabel: 'App navigation',
       menuEmpty: 'This app has no navigation entries you can open.',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: 'App menu bar',
+      searchMenu: 'Search menu',
+      phoneBarHint: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
       // objectui#12427 — the ⋯ menu a sidebar entry shows on hover (`SidebarItemMenu`).
       itemMenu: 'More actions for {{name}}',
       openInNewTab: 'Open in new tab',
@@ -2758,6 +2767,9 @@ const en = {
           titleGeneric: 'Edit this app',
           description:
             'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         },
       },
       clearConversation: 'Clear',
@@ -2970,6 +2982,11 @@ const en = {
         resize: 'Resize chat',
         collapse: 'Collapse chat',
         maximize: 'Open full page',
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: 'History',
+        backToChat: 'Back to chat',
+        expand: 'Expand',
+        restore: 'Restore side panel',
         open: 'Open assistant',
         // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
         planAwaitingApproval: 'A proposed plan is waiting for your approval',
@@ -4662,6 +4679,8 @@ const en = {
     viewApprovals: 'View approvals',
     noPendingApprovals: 'No pending approvals',
     openApprovalsInbox: 'Open Approvals Inbox',
+    needsYou: 'Needs your action',
+    viewApprovalDetails: 'View details',
     // Bell-badge breakdown (objectstack-ai/objectstack#7233): the badge sums unread notification topics
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
@@ -5302,6 +5321,13 @@ const en = {
     openNextAfterDecision: 'Open next after deciding',
     queueDone: 'No more pending requests in this list.',
     snapshotAsSubmitted: 'As submitted',
+    snapshotChanged: 'Changed',
+    snapshotCurrentValue: 'Current value',
+    snapshotOpenRecord: 'Open record',
+    snapshotCurrentUnreadable: 'The current record cannot be read, so changes made after submission are not marked.',
+    snapshotChildCurrent: 'Current rows: the submission does not keep child rows.',
+    progressTitle: 'Approval progress',
+    attachmentsTitle: 'Attachments',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',

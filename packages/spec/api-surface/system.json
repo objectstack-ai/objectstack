@@ -873,6 +873,7 @@
     "hasObservedDeviation (function)",
     "hasPlatformObjectPrefix (function)",
     "hookRefusalMessageKey (function)",
+    "hookTextMessageKey (function)",
     "inProcessServiceMessage (function)",
     "interpolateValidationMessage (function)",
     "isAudiencePosture (function)",
