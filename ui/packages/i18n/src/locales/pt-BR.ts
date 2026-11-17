@@ -2235,7 +2235,7 @@ const pt = {
       changesApplied: "Aplicado",
       changesDrafted: "Salvo como rascunho",
       changesFailed: "Não aplicado",
-      discussing: "Discutindo: {{target}}",
+      discussing: "Vendo: {{target}}",
       changeVerb: {
         createObject: "Criar objeto",
         addField: "Adicionar campo",
@@ -4714,7 +4714,7 @@ const pt = {
       detailNone: 'Nenhuma diferença detectada — o rascunho corresponde à versão publicada.',
       fieldOrderChanged: 'Ordem dos campos alterada',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclui alterações rascunhadas pelo copiloto de IA',
+      draftedByCopilot: 'Inclui alterações rascunhadas pelo assistente de IA',
       draftedByMcpClient: 'Inclui alterações rascunhadas pelo cliente MCP “{{client}}”',
       draftedByMcp: 'Inclui alterações rascunhadas por um cliente MCP',
       detailChangedKeys: 'Também alterado:',
@@ -4852,6 +4852,7 @@ const pt = {
       securityBlockTitle_many: 'A publicação será recusada — {{count}} de itens precisam de uma decisão primeiro',
       securityBlockTitle_other: 'A publicação será recusada — {{count}} itens precisam de uma decisão primeiro',
       securityBlockWhere: 'Corrija no objeto em Configurações → Compartilhamento de registros e publique novamente.',
+      flowChecksTitle: 'Antes de publicar: a verificação de publicação vai apontar o seguinte',
       securityRule: {
         owdUnset: 'Nenhuma base de compartilhamento de registros (sharingModel) foi declarada. O runtime usa private, mas a base precisa ser uma decisão explícita.',
         owdAlias: 'A base de compartilhamento de registros (sharingModel) não é um valor canônico, então o runtime trata o objeto como private.',

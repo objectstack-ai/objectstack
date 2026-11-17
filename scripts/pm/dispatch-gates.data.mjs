@@ -523,12 +523,29 @@ export const COMPOUND_ANCHOR_LEDGER = [
  * one `Thread session:` line against the reader that lists a card thread on
  * its seat's roster — the same population claim, on a third governed file,
  * named on the same `self-test-reads` line.
+ *
+ * ## The eighth row: a generator whose INPUT is a published skill
+ *
+ * `scripts/gen-mcp-ask-skill.mjs` renders the mcp package's committed
+ * `ask-skill.generated.ts` from the published ask-data skill, so the governed
+ * file is its input, not a fixture — the fourth row's shape. It spells that
+ * path in its module body and has no self-test, so `declared` is false: there
+ * is no `self-test-reads` line for it to carry. No family runs it, so the
+ * census's DERIVED case has no family to place it under; what holds the
+ * module equal to the skill is the mcp package's single-source pin test,
+ * which reads the skill and is re-run by an edit to it through that
+ * package's cross-package test inputs, not by a gate family.
  */
 export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({ script: 'scripts/check-commit-card-trailers.mjs', file: '.claude/agents/os-dev.md', declared: false }),
   Object.freeze({
     script: 'scripts/check-skill-top-level-keys.mjs',
     file: 'skills/objectstack-platform/SKILL.md',
+    declared: false,
+  }),
+  Object.freeze({
+    script: 'scripts/gen-mcp-ask-skill.mjs',
+    file: 'skills/objectstack-ask/SKILL.md',
     declared: false,
   }),
   Object.freeze({
@@ -951,6 +968,15 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *     each test "really" reads does NOT qualify: that map is a second thing
  *     that goes stale, and the run is cheap enough not to need one (measured
  *     below).
+ *   - spec-migration-entry entry: when a workflow runs the cli
+ *     migrate-meta-engine-guidance test as a step of its own, under an
+ *     invocation the discovery reads, the row can name that family instead of
+ *     standing in for the Test Core job; and when the job stops running the
+ *     package test task, or the test file is moved or deleted, the binding goes
+ *     STALE by itself. ⛔ Widening it to every cli test that imports the
+ *     published migrations subpath does NOT qualify as a repair of anything:
+ *     that import is a syntactic reach, not a reading of the entries' prose
+ *     (see `SPEC_MIGRATION_ENTRY_ROOTS`).
  *   - population-net entries (#31257, fifteen): when the gate's own source
  *     declares a population this derivation can MATCH (a subtree it really
  *     walks, beside a filter the derivation reads), the ordinary path match
@@ -1302,6 +1328,19 @@ export const CHANGE_KIND_ROWS = [
       },
     ],
   },
+  {
+    kind: 'adds, edits or deletes an ADR-0087 migration entry under packages/spec/src/migrations/entries (the generated registry the published migrations subpath serves, read from the PATH)',
+    matches: 'spec-migration-entry',
+    gates: [
+      {
+        name: 'pnpm --filter @objectstack/cli exec vitest run test/migrate-meta-engine-guidance.test.ts',
+        ciJob: 'Test Core',
+        ciRunner: 'set -- pnpm turbo run test',
+        ciSubset: 'packages/cli/test/migrate-meta-engine-guidance.test.ts',
+        why: "it spawns `os migrate meta --all` once and holds the block the terminal prints for EVERY semantic entry in the registry (surface, why: from `reason`, verify: from `acceptanceCriteria`) to carry no tracker number, so an entry whose prose cites one, or a new entry in any family, moves it. It is a cli test, so no check family and no spec package test covers it: CI runs it only inside the Test Core shards' package test task, and a card editing entry text learned of a red one a CI round later, after a fully green local ledger. It reads the entries through the PUBLISHED migrations subpath, which the cli test config does not alias to source, so build the cli dependency closure first or a stale spec dist answers for your edit: pnpm --filter '@objectstack/cli^...' build . Repair the entry's prose to state the lesson in words; ADR ids stay",
+      },
+    ],
+  },
 ];
 
 /**
@@ -1319,6 +1358,26 @@ export const UI_SCRIPTS_SUITE_ROOTS = Object.freeze([
   'ui/apps/**',
   'skills/objectui/**',
   'ui/scripts/**',
+]);
+
+/**
+ * The roots whose change the cli `migrate-meta-engine-guidance` test can see, in CI's own `paths:` language
+ * (matched by `triggerListCovers`, as `UI_SCRIPTS_SUITE_ROOTS` is). The test reads every semantic entry of
+ * the generated migration registry, and that registry is generated from the files under `entries/` (the
+ * `GENERATED_MODULE_SOURCES` row below names the same directory), so a change there is what moves it. The
+ * bare directory is listed beside its subtree because a dispatch surface is often given as that directory.
+ *
+ * ONE named test, not every cli test that imports the published migrations subpath. That import is a
+ * reliable SYNTACTIC signal (ten cli test files carry it on this tree) but not a reading of the entries'
+ * prose: the others import the chain to drive one conversion, a range or a write, and pin behaviour the
+ * spec package's own tests already reach, while one of them is nightly-tier and never runs in the queue.
+ * The guidance test is the one that holds every entry's printed text, which is what an entry edit moves,
+ * and the one measured missing on a green local ledger. A second consumer earns its own row on its own
+ * measured miss.
+ */
+export const SPEC_MIGRATION_ENTRY_ROOTS = Object.freeze([
+  'packages/spec/src/migrations/entries',
+  'packages/spec/src/migrations/entries/**',
 ]);
 
 /**

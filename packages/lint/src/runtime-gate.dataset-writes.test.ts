@@ -135,6 +135,7 @@ describe('the dataset write door is wired at all (#19143)', () => {
     // precisely the drift this pin exists to catch.
     expect(runtimeAuthoringRulesFor('dataset').map((r) => r.name)).toEqual([
       'validateDatasetMeasureAggregates',
+      'validateDatasetMemberVocabulary',
       'validateReferenceIntegrity',
     ]);
   });
@@ -160,6 +161,7 @@ describe('the dataset write door is wired at all (#19143)', () => {
     const clean = gateDataset(cleanDataset());
     expect(clean.rulesRun).toEqual([
       'validateDatasetMeasureAggregates',
+      'validateDatasetMemberVocabulary',
       'validateReferenceIntegrity',
     ]);
     expect(clean.errors).toEqual([]);
@@ -464,15 +466,23 @@ describe('the shipped dataset corpus stays publishable (#19143)', () => {
     const item = {
       name: 'opportunity_metrics',
       object: 'crm_opportunity',
+      // Each member with the `synonyms` the shipped dataset declares (ADR-0149
+      // D1), so the advisory for a member with no vocabulary stays silent on it.
       dimensions: [
-        { name: 'stage', field: 'stage', type: 'string' },
-        { name: 'account', field: 'account', type: 'lookup' },
-        { name: 'close_date', field: 'close_date', type: 'date', dateGranularity: 'month' },
+        { name: 'stage', field: 'stage', type: 'string', synonyms: ['sales stage', 'deal stage', '销售阶段'] },
+        { name: 'account', field: 'account', type: 'lookup', synonyms: ['customer', 'client', '客户'] },
+        {
+          name: 'close_date',
+          field: 'close_date',
+          type: 'date',
+          dateGranularity: 'month',
+          synonyms: ['closing month', '成交日期'],
+        },
       ],
       measures: [
-        { name: 'opp_count', aggregate: 'count' },
-        { name: 'total_amount', aggregate: 'sum', field: 'amount' },
-        { name: 'avg_amount', aggregate: 'avg', field: 'amount' },
+        { name: 'opp_count', aggregate: 'count', synonyms: ['deal count', '商机数'] },
+        { name: 'total_amount', aggregate: 'sum', field: 'amount', synonyms: ['deal value', '商机金额'] },
+        { name: 'avg_amount', aggregate: 'avg', field: 'amount', synonyms: ['average deal value', '平均商机金额'] },
       ],
     };
 
