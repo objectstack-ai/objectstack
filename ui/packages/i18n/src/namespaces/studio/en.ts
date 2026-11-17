@@ -368,6 +368,10 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.missing': 'This field no longer exists in the draft.',
   'designer.field.remove': 'Remove “{label}”',
   'designer.field.section.basic': 'Basic',
+  'designer.field.section.developer': 'Developer info',
+  'designer.field.section.developerHint': 'The internal name the API and formulas refer to. Everyday edits do not need it.',
+  'designer.field.removeConfirmTitle': 'Delete the field “{label}”?',
+  'designer.field.removeConfirmBody': 'The field leaves this object\'s draft. The change takes effect when you publish.',
   'designer.field.section.advanced': 'Advanced',
   'designer.field.section.options': '{type} options',
   'designer.field.section.computed': 'Computed value',
@@ -2536,6 +2540,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.addFieldApiNameNotDerived': 'The label has no Latin letters to make an API name from. Type one: lowercase letters, digits and underscores.',
   'engine.studio.data.addFieldApiNameTaken': 'Another field is already named {name}. Type a different API name.',
   'engine.studio.data.editFieldProps': 'Edit field properties',
+  'engine.studio.data.columnMenu': 'Sort and hide',
   'engine.studio.data.draftObjectTitle': 'Unpublished new object',
   'engine.studio.data.draftObjectHint':
     'The Records grid queries real data, but this object has no table until it’s published. Design fields and groups in “Form · Layout” first, then click “Publish” in the top bar — after publishing, this becomes its live data grid.',
