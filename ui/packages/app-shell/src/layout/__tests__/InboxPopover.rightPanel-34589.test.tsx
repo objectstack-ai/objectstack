@@ -139,9 +139,13 @@ describe('InboxPopover — a right-side full-height panel (objectstack#34589)', 
     expect(document.querySelector('.bg-black\\/80')).toBeNull();
   });
 
-  it('stays open when the page beside it is clicked, and the click reaches the page', () => {
+  it('stays open when the page beside it is clicked, and the click reaches the page', async () => {
     render(bell());
     openInbox();
+    // Radix arms its outside-pointer listener a task after opening; let it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     const control = screen.getByTestId('page-control');
     const onClick = vi.fn();
     control.addEventListener('click', onClick);
