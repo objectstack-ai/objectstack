@@ -3050,6 +3050,7 @@ const en = {
       passwordsNote: 'Temporary passwords — shown once, never stored. Save them now; each user must change theirs at first sign-in.',
       passwordsMore: 'More entries omitted — use the download.',
       positionsHint: 'Positions: map a column of position machine names, several separated by ";". Each is assigned as in Setup; a name that does not exist, or that you may not assign, is reported on its row, and the user is still created.',
+      managerHint: 'Manager: map a column holding each user\'s manager, by email address (or phone number where phone sign-in is on). Managers are linked once every row is in, so a manager further down the file counts; a manager that is not found, or cannot be linked, is reported on its row, and the user is still created.',
       passwordsDownload: 'Download CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
