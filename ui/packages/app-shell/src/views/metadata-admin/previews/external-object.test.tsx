@@ -176,6 +176,8 @@ describe('ObjectFieldInspector — field of an external object', () => {
     expect(screen.getByTestId('field-apiname-input')).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Type' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Duplicate field' })).toBeNull();
+    // objectstack#34794 — Remove is the header ⋯ menu's entry: no menu at all here.
+    expect(screen.queryByTestId('field-more-menu')).toBeNull();
     expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
     // Label is display metadata, not the remote column: it stays editable.
     expect(screen.getByTestId('field-label-input')).not.toBeDisabled();
@@ -187,7 +189,7 @@ describe('ObjectFieldInspector — field of an external object', () => {
     expect(screen.getByTestId('field-apiname-input')).not.toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Type' })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: 'Duplicate field' })).toBeInTheDocument();
-    const footer = screen.getByRole('button', { name: /Remove/ });
-    expect(within(footer).getByText(/Task name/)).toBeInTheDocument();
+    // objectstack#34794 — Remove is the header ⋯ menu's entry.
+    expect(screen.getByTestId('field-more-menu')).not.toBeDisabled();
   });
 });

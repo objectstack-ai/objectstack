@@ -2016,8 +2016,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /**
  * objectstack#34794 — a section collapsed by default: its title is the toggle,
- * its one-line hint says what is inside, and the body mounts only while open.
- * Ephemeral UI state (AGENTS.md #8): each field opens with it collapsed.
+ * its one-line hint says what is inside. The body stays mounted and is only
+ * hidden while collapsed, so a control inside keeps its state across a toggle.
+ * Ephemeral UI state (ui/AGENTS.md #8): each field opens with it collapsed.
  */
 function DeveloperSection({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false);
@@ -2036,11 +2037,9 @@ function DeveloperSection({ title, hint, children }: { title: string; hint: stri
         <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-90')} aria-hidden="true" />
       </button>
       <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>
-      {open && (
-        <div id={bodyId} className="space-y-2">
-          {children}
-        </div>
-      )}
+      <div id={bodyId} hidden={!open} className="space-y-2">
+        {children}
+      </div>
     </div>
   );
 }
@@ -2082,6 +2081,9 @@ function FieldMoreMenu({
             aria-label={label}
             title={label}
             data-testid="field-more-menu"
+            // Its one entry is Delete: a locked field offers the menu disabled,
+            // so the lock's reason wraps a disabled control.
+            disabled={disabled}
           >
             <MoreHorizontal className="h-4 w-4" />
           </Button>

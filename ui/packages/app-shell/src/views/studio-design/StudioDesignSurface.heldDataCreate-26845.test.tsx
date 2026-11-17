@@ -144,10 +144,10 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-/** The object the header names: its api-name chip. */
+/** The object the header names: its title's tooltip (objectstack#34794). */
 async function openObjectIs(name: string): Promise<void> {
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByTestId('studio-item-api-name')).toHaveTextContent(name),
+    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', name),
     { timeout: 8000 },
   );
 }

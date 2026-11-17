@@ -198,7 +198,7 @@ const pendingRequest = () => fireEvent.click(screen.getByRole('button', { name: 
 async function noteIsOpen(): Promise<void> {
   await screen.findByTestId('studio-rail-data', undefined, { timeout: 8000 });
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByTestId('studio-item-api-name')).toHaveTextContent('acme_note'),
+    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', 'acme_note'),
     { timeout: 8000 },
   );
 }

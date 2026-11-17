@@ -163,7 +163,8 @@ describe('ObjectFieldInspector — display-patch mode explains every locked cont
       within(rail).getByLabelText(t('designer.field.visibleWhen', LOCALE)),
       // The header's pair and each option row's.
       ...within(rail).getAllByRole('button', { name: t('engine.inspector.reorder.up', LOCALE) }),
-      within(rail).getByRole('button', { name: tFormat('designer.field.remove', LOCALE, { label: 'Industry' }) }),
+      // objectstack#34794 — Remove is the header's ⋯ menu, its one entry.
+      within(rail).getByTestId('field-more-menu'),
       within(rail).getAllByTestId('option-value')[0]!,
     ];
     for (const control of named) {
