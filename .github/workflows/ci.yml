@@ -816,7 +816,7 @@ jobs:
 
       # Its own self-test, where it runs (check:self-test-wired). Milliseconds.
       # A red here fails this job before it publishes a plan, so the matrix
-      # falls back to all eight shards: a broken planner costs runners, never
+      # falls back to all ten shards: a broken planner costs runners, never
       # coverage.
       - name: Test Core shard planner self-test
         run: node scripts/ci/plan-test-core-shards.mjs --self-test
@@ -837,11 +837,12 @@ jobs:
             --exclude @objectstack/dogfood --github-output "$GITHUB_OUTPUT"
 
   test:
-    # Sharded 8-way BY PACKAGE (6-way until #25376): a core-touching PR ran
-    # the affected suite ~11½ min on one 4-vCPU runner — the longest pole in
-    # the whole workflow — and at 2 shards the slower shard still ran ~10 min,
-    # keeping merge-queue builds at ~11 min end-to-end (#4859).
-    # scripts/partition-test-shards.mjs splits the package list into eight
+    # Sharded 10-way BY PACKAGE (8-way until #34710, 6-way until #25376): a
+    # core-touching PR ran the affected suite ~11½ min on one 4-vCPU runner —
+    # the longest pole in the whole workflow — and at 2 shards the slower shard
+    # still ran ~10 min, keeping merge-queue builds at ~11 min end-to-end
+    # (#4859).
+    # scripts/partition-test-shards.mjs splits the package list into ten
     # deterministic bins balanced on MEASURED per-package test duration
     # (scripts/test-shard-timings.json, generated — see #10472 below) and each
     # shard runs its slice through turbo. NOT the dogfood
@@ -870,7 +871,16 @@ jobs:
     # shards means fewer suites per runner AND four more vCPUs per added
     # shard, because every shard gets its own runner.
     #
-    # EIGHT specifically (#25376; six from #22075 until then): sharding is BY
+    # TEN since #34710, on the whole-package leg cap rather than on balance.
+    # The 2026-11-16 refresh measured 14524s of whole packages, and no shard's
+    # whole leg may pass WHOLE_LEG_CAP_SECONDS (1868s, partition-test-shards.mjs:
+    # "a wider matrix or a finer slice, never a denser shard"). (14524s + the
+    # CLI's 2245.53s in 3 slices + the reader slice's 783s closure charge) /
+    # 1868s = 9.4, so ten: at eight five shards carried ~2195s of whole
+    # packages, at nine six carried ~1954s, at ten the heaviest carries 1769s
+    # (spec, alone). The partitioner's SHARD_COUNT header carries the figures.
+    #
+    # EIGHT before that (#25376; six from #22075 until then): sharding is BY
     # PACKAGE, so no shard can finish faster than the heaviest serial task it
     # carries. `@objectstack/cli` (2899.02s on the 2026-10-23 dataset) runs as 3
     # file-level slices whenever a run's own list makes it the serial floor
@@ -907,8 +917,8 @@ jobs:
     # 9.0 min in run 32428961038. Weights now come from
     # scripts/test-shard-timings.json — see partition-test-shards.mjs.
     #
-    # AND WHY NOT MORE THAN EIGHT. #10472 asked for 6 -> 8 and was refused
-    # while spec's 1146.69s was the floor; #25376 widened once the CLI was
+    # AND WHY NOT MORE THAN EIGHT, UNTIL #34710. #10472 asked for 6 -> 8 and
+    # was refused while spec's 1146.69s was the floor; #25376 widened once the CLI was
     # sliced and spec's 842s repo file was split (#25372). Two floors remain.
     # In bins, spec's whole 1606.55s binds at ten shards (above), and past it
     # max/mean gets WORSE with every shard. In wall, a CLI slice (~960-1010s
@@ -917,14 +927,22 @@ jobs:
     # partitioner's self-test pins the half of this that can fail: at
     # SHARD_COUNT the heaviest item must sit within 1.3x the mean, and when it
     # stops fitting, slicing it below package granularity is the remedy that
-    # failure names.
+    # failure names. #34710 widened past eight on the whole-leg cap, which
+    # that argument never weighed; on the 2026-11-16 dataset spec's whole
+    # 1769.27s is the heaviest bin at ten, 1.01x the mean, so ten is again the
+    # count where the floor binds, and spec past 1868s is a finer slice's
+    # card, not an eleventh shard's.
     #
     # ⚠ THE COST, stated because it is real: per-shard fixed overhead is paid
     # once PER SHARD, and the merge queue multiplies it by the speculative
     # build count. Measured over the 512 `Test Core (N/6)` jobs of the window
     # below, job start to the tests step is 1.6 min median (5.5 p90) and the
     # tail after it 0.2 min, so two more shards cost ≈ +3.6 runner-min per run
-    # at the median, accepted by the maintainer directive on #25376.
+    # at the median, accepted by the maintainer directive on #25376. 8 -> 10
+    # (#34710) reads the same: over the 16 `Test Core (N/8)` jobs of schedule
+    # runs 44014522626 and 43985144717, job start to the tests step is 1.67
+    # min median and the tail 0.12 min, so ≈ +3.6 runner-min per full run;
+    # the tests themselves are the same seconds cut ten ways, not more.
     # `--concurrency=4` is deliberately UNCHANGED here: narrower shards may
     # well want a lower value, but moving both at once makes the next
     # measurement unreadable.
@@ -932,7 +950,7 @@ jobs:
     # Branch protection requires the bare "Test Core" context, which a matrix
     # can never publish again — the test-gate job below carries that name
     # (the #3622 lesson; see dogfood-gate).
-    name: Test Core (${{ matrix.shard }}/8)
+    name: Test Core (${{ matrix.shard }}/10)
     needs: [filter, test-plan, queue-verdict]
     # "Skip only when the filter EXPLICITLY said no core paths changed" — see
     # THE FILTER CONTRACT on the filter job's outputs (#4928). `scripts` is ORed
@@ -943,7 +961,7 @@ jobs:
     # The third clause is the plan's (#26084): `[]` is the test-plan job's
     # positive statement that the package set is empty, and only that literal
     # skips. A plan job that died publishes nothing, `'' != '[]'` holds, and the
-    # matrix below falls back to all eight shards: half 1 of the contract again.
+    # matrix below falls back to all ten shards: half 1 of the contract again.
     if: ${{ !cancelled() && (needs.filter.outputs.core != 'false' || needs.filter.outputs.crosspkg != 'false') && needs.test-plan.outputs.shards != '[]' }}
     runs-on: ubuntu-latest
     # Backstop only — the stall guard on the test steps is the primary
@@ -1008,7 +1026,7 @@ jobs:
     # payloads of every completed pull_request, merge_group, push and
     # schedule run in it), BOTH guard verdicts -- the window path
     # (p + s + 10m) and the cap-deferred path (p + s + 20m) -- land before the
-    # new value on every observation, AND the slowest `Test Core (N/8)` job
+    # new value on every observation, AND the slowest `Test Core (N/10)` job
     # wall is at or under 80% of it. Read the pull_request and merge_group
     # runs, not the 4-hourly schedule alone: scheduled runs mostly replay the
     # cache their commit's push run saved. It carries no other expiry — a
@@ -1019,8 +1037,8 @@ jobs:
       contents: read
     # ⭐ ONLY THE SHARDS WITH WORK START (#26084). The list is the test-plan
     # job's: the indices of the bins `partition-test-shards.mjs` fills at
-    # SHARD_COUNT (8) for this run's package set. The count stays 8, so a
-    # started shard runs exactly the `--shard k/8` slice it ran before, under
+    # SHARD_COUNT (10) for this run's package set. The count stays 10, so a
+    # started shard runs exactly the `--shard k/10` slice it ran before, under
     # the same name, cache key and attestation; a shard whose bin is empty is
     # simply never created. The literal after `||` is the full roster, read
     # when the plan job published nothing (it died or timed out), and the gate
@@ -1044,7 +1062,7 @@ jobs:
     strategy:
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        shard: ${{ fromJSON(needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8]') }}
+        shard: ${{ fromJSON(needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]') }}
 
     steps:
       # Depth 1 (the default), then the step below fetches the history this job
@@ -1108,7 +1126,7 @@ jobs:
       #     the tail's low end (1063 s), not its top. In `test-ui` neither end
       #     fits beside the body inside the 30-minute wall, so its budget only
       #     ends the red sooner and names the step. A red `test-plan` falls
-      #     back to all eight shards, and each fetches for itself.
+      #     back to all ten shards, and each fetches for itself.
       # A fetch that stalls is retried after 60 s of silence; one that keeps
       # stalling ends red here, named, instead of eating the wall.
       - name: Fetch this commit's history and the base branch
@@ -1238,7 +1256,7 @@ jobs:
         run: |
           bash scripts/ci/select-shard-packages.sh
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
-            --shard ${{ matrix.shard }}/8 --exclude @objectstack/dogfood \
+            --shard ${{ matrix.shard }}/10 --exclude @objectstack/dogfood \
             > "$RUNNER_TEMP/shard-packages.txt"
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
@@ -1363,7 +1381,7 @@ jobs:
       # `--if-ran`: an empty shard exits the step above before turbo runs.
       - name: The Turbo remote cache was on for this shard's closure build
         run: |
-          node scripts/ci/assert-turbo-remote-cache.mjs --site 'Test Core (${{ matrix.shard }}/8) closure' \
+          node scripts/ci/assert-turbo-remote-cache.mjs --site 'Test Core (${{ matrix.shard }}/10) closure' \
             --log .turbo/remote-cache/test-core-closure.json --if-ran \
             --move-summary-to "$RUNNER_TEMP/turbo-remote-cache"
 
@@ -1732,7 +1750,7 @@ jobs:
         run: |
           node scripts/ci/report-test-leftovers.mjs report \
             --before "$RUNNER_TEMP/test-leftovers/before.json" \
-            --label "Test Core (${{ matrix.shard }}/8)"
+            --label "Test Core (${{ matrix.shard }}/10)"
 
       # --summarize above costs nothing at runtime and writes
       # `.turbo/runs/<id>.json`: one per-task record with the execution window
@@ -1776,7 +1794,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: test-core-run-summary-${{ matrix.shard }}-of-8
+          name: test-core-run-summary-${{ matrix.shard }}-of-10
           path: .turbo/runs/
           if-no-files-found: ignore
           retention-days: ${{ github.event_name == 'schedule' && 4 || 1 }}
@@ -1858,11 +1876,11 @@ jobs:
           shopt -s nullglob
           SUMMARIES=(.turbo/runs/*.json)
           if [ "${#SUMMARIES[@]}" -eq 0 ]; then
-            echo "shard-timing-drift: NOT MEASURED -- Test Core (${{ matrix.shard }}/8) wrote no turbo run summary (no packages on this shard)."
+            echo "shard-timing-drift: NOT MEASURED -- Test Core (${{ matrix.shard }}/10) wrote no turbo run summary (no packages on this shard)."
             exit 0
           fi
           node scripts/partition-test-shards.mjs --check-drift "${SUMMARIES[@]}" \
-            --label "Test Core (${{ matrix.shard }}/8)" --event "$GITHUB_EVENT_NAME"
+            --label "Test Core (${{ matrix.shard }}/10)" --event "$GITHUB_EVENT_NAME"
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
@@ -1992,7 +2010,7 @@ jobs:
           node scripts/report-test-timings.mjs --capture \
             --log "$RUNNER_TEMP/test-core.log" \
             --summaries .turbo/runs \
-            --shard "${{ matrix.shard }}/8" \
+            --shard "${{ matrix.shard }}/10" \
             --out "$RUNNER_TEMP/test-timings/shard-${{ matrix.shard }}.json"
 
       # Retention matches the run-summary upload above (4 days on `schedule`,
@@ -2005,7 +2023,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: test-core-timings-${{ matrix.shard }}-of-8
+          name: test-core-timings-${{ matrix.shard }}-of-10
           path: ${{ runner.temp }}/test-timings/
           if-no-files-found: ignore
           retention-days: ${{ github.event_name == 'schedule' && 4 || 1 }}
@@ -2048,10 +2066,10 @@ jobs:
           OS_SEED_ONLY: ${{ needs.queue-verdict.outputs.covered == 'true' }}
         run: |
           if [ "$OS_SEED_ONLY" = 'true' ]; then
-            node scripts/ci/prune-turbo-cache.mjs --site 'Test Core (${{ matrix.shard }}/8) seed-only' \
+            node scripts/ci/prune-turbo-cache.mjs --site 'Test Core (${{ matrix.shard }}/10) seed-only' \
               --cache .turbo/cache --run-summaries "$RUNNER_TEMP/turbo-remote-cache"
           else
-            node scripts/ci/prune-turbo-cache.mjs --site 'Test Core (${{ matrix.shard }}/8)' \
+            node scripts/ci/prune-turbo-cache.mjs --site 'Test Core (${{ matrix.shard }}/10)' \
               --cache .turbo/cache --run-summaries .turbo/runs \
               --extra-summaries "$RUNNER_TEMP/turbo-remote-cache"
           fi
@@ -2084,14 +2102,14 @@ jobs:
         if: needs.queue-verdict.outputs.covered != 'true'
         run: |
           node scripts/check-shard-attestation.mjs --emit \
-            --job test --shard ${{ matrix.shard }} --total 8 \
+            --job test --shard ${{ matrix.shard }} --total 10 \
             --out "$RUNNER_TEMP/shard-attestation"
 
       - name: Publish this shard's attestation
         if: needs.queue-verdict.outputs.covered != 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: shard-attest-test-${{ matrix.shard }}-of-8
+          name: shard-attest-test-${{ matrix.shard }}-of-10
           path: ${{ runner.temp }}/shard-attestation/
           if-no-files-found: error
           retention-days: 1
@@ -2207,8 +2225,8 @@ jobs:
           OS_DOWNLOAD_OUTCOME: ${{ steps.attestations.outcome }}
           # The planned roster, spelled exactly as the `test` job's matrix
           # spells it, fallback included: a plan job that died leaves the
-          # matrix on 1..8, and the gate then counts 1..8 too (#26084).
-          OS_TEST_PLAN: ${{ needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8]' }}
+          # matrix on 1..10, and the gate then counts 1..10 too (#26084).
+          OS_TEST_PLAN: ${{ needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]' }}
           OS_TEST_PLAN_RESULT: ${{ needs.test-plan.result }}
           # Read ONLY on the partially-attested-cancelled path above, never
           # otherwise; without it that path fails closed (red, naming the
@@ -2220,7 +2238,7 @@ jobs:
             --dir "$OS_ATTEST_DIR" \
             --filter-result "$OS_FILTER_RESULT" \
             --download-outcome "$OS_DOWNLOAD_OUTCOME" \
-            --leg "test/8:$OS_TEST_RESULT" \
+            --leg "test/10:$OS_TEST_RESULT" \
             --planned "test=$OS_TEST_PLAN" \
             --plan-result "$OS_TEST_PLAN_RESULT"
 

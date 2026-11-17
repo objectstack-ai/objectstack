@@ -873,7 +873,7 @@ const ActionAnswerTableColumnSchema = strictObject({
     '`table` is a field format, not a cell format: a cell draws one value of one row, and a table does not '
     + 'nest. Drop `format` (a cell value that does not fit its format, an object or an array included, draws as compact JSON text), or '
     + "write `format: 'json'`.",
-  ).optional().describe('Cell format: the field formats minus `table`; omitted, `text`. A value that does not fit the cell\'s format, whatever it is (an object or an array under `text`, a number under `secret`), draws as compact JSON text; a missing value draws an empty cell.'),
+  ).optional().describe('Cell format: the field formats minus `table`; omitted, `text`. A value that does not fit the cell\'s format, whatever it is (an object or an array under `text`, a number under `secret`), draws as compact JSON text; a missing or `null` value draws an empty cell. Inside a cell, `text` and `code-list` draw the value alone with no copy control, while `secret` keeps its mask, reveal and copy and `qrcode` keeps its code and copy.'),
 });
 
 /**
@@ -935,8 +935,8 @@ function actionAnswerFieldRow(surface: string, pathDescription: string) {
   }, {
     path: z.string().describe(pathDescription),
     label: I18nLabelSchema.optional(),
-    format: ActionAnswerFieldFormatSchema.optional().describe('Per-field format override. `table` [PLANNED — not yet rendered] draws an array as rows and requires `columns`.'),
-    columns: z.array(ActionAnswerTableColumnSchema).optional().describe("[PLANNED — not yet rendered] The cells of a `format: 'table'` field, in order: `[{ path, label?, format? }]`, `path` read in ONE element of the array. Required by `table` (never guessed from the element's keys) and refused beside any other format. Until the console's table renderer lands, a `table` field draws its label alone."),
+    format: ActionAnswerFieldFormatSchema.optional().describe('Per-field format override. `table` draws an array as rows and requires `columns`.'),
+    columns: z.array(ActionAnswerTableColumnSchema).optional().describe("The cells of a `format: 'table'` field, in order: `[{ path, label?, format? }]`, `path` read in ONE element of the array. Required by `table` (never guessed from the element's keys) and refused beside any other format."),
   }).superRefine(refuseTableColumnContradictions);
 }
 
@@ -1809,15 +1809,19 @@ const actionObject = () => strictObject({
    *   each entry of the field's `columns` one cell, in `columns` order. The
    *   header of a column is its `label`, falling back to its `path`. A cell
    *   reads the column's dot `path` in the element; a missing value (the
-   *   path resolves to `undefined`) draws an empty cell. A present value
-   *   draws in the column's `format` (omitted: `text`) when it fits that
-   *   format the way a field's value must: `qrcode`, `secret` and `text` take
-   *   a string, `code-list` an array of strings. Any value that does not fit,
-   *   whatever the column's format (an object or an array under the omitted
-   *   `text`, a number under `secret`), draws as compact JSON text, which is
-   *   also how `json` draws in a cell. An element that is not an object has no
-   *   paths to read: its row draws the element itself as compact JSON text in
-   *   the first cell and leaves the other cells empty. `[]` draws the header
+   *   path resolves to `undefined`) and a `null` draw an empty cell. A
+   *   present value draws in the column's `format` (omitted: `text`) when it
+   *   fits that format the way a field's value must: `qrcode`, `secret` and
+   *   `text` take a string, `code-list` an array of strings. Any value that
+   *   does not fit, whatever the column's format (an object or an array under
+   *   the omitted `text`, a number under `secret`), draws as compact JSON
+   *   text, which is also how `json` draws in a cell. Inside a cell, `text`
+   *   and `code-list` draw the value alone with no copy control, while
+   *   `secret` keeps its mask, reveal and copy and `qrcode` keeps its code
+   *   and copy. An element that is not
+   *   a plain object (an array, `null` or a scalar) has no paths to read: its
+   *   row draws the element itself as compact JSON text in the first cell and
+   *   leaves the other cells empty. `[]` draws the header
    *   row over an empty-state line. A field value that is missing is skipped
    *   like any other field's, and one that is not an array draws as `json`,
    *   as `code-list` does.

@@ -475,26 +475,32 @@ function isDeclaredRegisterRefusal(err: unknown): boolean {
 }
 
 /**
- * [#34407, #34432] The answer to a package body the artifact resolver refuses
- * before any write (`resolveStackCollection` → `resolveArtifactPackageEntries`:
+ * [#34407, #34432, #34574] The answer to a package body the artifact resolver
+ * refuses before any write (`resolveArtifactPackageEntries`, reached through
+ * `resolveStackCollection` or the runtime binder's judgements:
  * `INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`,
- * `DUPLICATE_ARTIFACT_PACKAGE`, each an ADR-0112 envelope with its declared
- * `status: 422`): that refusal's own declared status and code, the resolver's
- * sentence, and that nothing was written. The one reader of such a refusal on
- * this door's pre-write steps — the D5e gate (2b) and the declared renames
- * (2c″) both read the bodies through the resolver, so the same bytes are
- * answered the same way whichever step reads them first.
+ * `DUPLICATE_ARTIFACT_PACKAGE`, `CYCLIC_ARTIFACT_PACKAGES`, each an ADR-0112
+ * envelope with its declared `status: 422`): that refusal's own declared
+ * status and code, the resolver's sentence, its `details` when it states any
+ * (a cycle's `details.cycle`), and that nothing was written. The one reader of
+ * such a refusal on this door's pre-write steps — the unrunnable-code
+ * judgements (1c), the datasource holder (2a), the D5e gate (2b) and the
+ * declared renames (2c″) all read the bodies through the resolver, so the same
+ * bytes are answered the same way whichever step reads them first.
  *
  * `undefined` for a throw that declares no status below 500 — an undeclared
- * throw (the resolver's own dependency-cycle error among them) or a declared
- * 5xx: the caller rethrows it, never relabels it.
+ * throw or a declared 5xx: the caller rethrows it, never relabels it.
  */
 function declaredRefusalAnswer(
     manifestId: string,
     err: unknown,
-): { status: number; body: { success: false; error: { code: string; message: string } } } | undefined {
+): { status: number; body: { success: false; error: { code: string; message: string; details?: Record<string, unknown> } } } | undefined {
     const refusal = resolveThrownHttpError(err);
     if (refusal.declaredStatus === undefined || refusal.status >= 500) return undefined;
+    const stated = (err as { details?: unknown } | null | undefined)?.details;
+    const details = stated !== null && typeof stated === 'object' && !Array.isArray(stated)
+        ? stated as Record<string, unknown>
+        : undefined;
     return {
         status: refusal.status,
         body: {
@@ -502,6 +508,7 @@ function declaredRefusalAnswer(
             error: {
                 code: refusal.code,
                 message: `Package '${manifestId}' cannot be installed: ${String((err as any)?.message ?? err)} Nothing was installed or written.`,
+                ...(details !== undefined ? { details } : {}),
             },
         },
     };
@@ -2956,7 +2963,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     unbindable `pull` is warned by the binder and NOT scheduled), and
         //     its hook with no `body` is warned and NOT bound
         //     ({@link bindArtifactHandlers}).
-        const unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
+        //     [#34574] The binder's judgements read every package body of a
+        //     composed bundle through the artifact resolver, so over a runtime
+        //     that carries them THIS is the first step to resolve the
+        //     packages. A `packages` the resolver refuses — not a list, a
+        //     malformed entry, a duplicate id, packages that depend on each
+        //     other in a cycle — is answered here with that refusal
+        //     ({@link declaredRefusalAnswer}), as 2a, 2b and 2c″ answer it.
+        //     Before, the refusal left the door as a throw, and the transport,
+        //     which renders no `422`, answered `500 INTERNAL_ERROR`. An
+        //     undeclared throw stays a throw.
+        let unrunnable: UnrunnableCode;
+        try {
+            unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
+        }
         if (unrunnable.jobs.length > 0 || unrunnable.sharedJobNames.length > 0 || unrunnable.hooks.length > 0) {
             return c.json({
                 success: false,
