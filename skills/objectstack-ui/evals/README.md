@@ -7,8 +7,10 @@ view / page / dashboard / report metadata.
 
 - `analytics-inline-vs-dataset.json` — dataset-envelope decisions for
   dashboard/report widgets: when a data need fits a `defineDataset`, when it
-  must escalate to a stored field or app code, and when an ad-hoc
-  in-page `<ObjectChart>` needs no dataset at all.
+  must escalate to a stored field or app code, when an ad-hoc
+  in-page `<ObjectChart>` needs no dataset at all, and a dataset authored
+  for a Chinese brief, whose members carry Chinese `synonyms` and a
+  one-sentence `description`.
 - `record-page.json` — the record page as the object declares it: a child
   table placed first by `relatedList: 'primary'` (no page file),
   `navigation: { mode: 'page' }` on the list view with the reader's own

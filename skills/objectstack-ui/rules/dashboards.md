@@ -293,14 +293,15 @@ import { defineDataset, type DashboardWidget } from '@objectstack/spec/ui';
 // In the dataset (Guides → Analytics Datasets):
 defineDataset({
   name: 'crm_contract_metrics', label: 'Contract Metrics', object: 'contract',
-  dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
+  dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month',
+    synonyms: ['签约月'] }],
   measures: [{ name: 'signed_count', aggregate: 'count', synonyms: ['签约数', 'deals signed'],
     description: 'Contracts signed in the period, drafts excluded.' }],
 });
-// Member `synonyms` (ADR-0149 D1): the words a question uses for it, every
-// language in one list; matched, never translated; none may equal another
-// member's name, label or synonym. `description`: a business definition,
-// never a prompt; translated like `label`.
+// Every member: `synonyms`, the words a person types, in the brief's
+// language (matched, never translated; one word names one member), and a
+// one-sentence business `description`, never a prompt. Neither warns:
+// `dataset-member-no-vocabulary`.
 // A money measure may set `currency` (ISO 4217, e.g. `'USD'`). Chain:
 // measure `currency` → the field's `defaultCurrency` (`fixed` only) →
 // tenant `localization.currency`; omit it for counts. A

@@ -82,6 +82,16 @@
         "must_contain": ["duration", "unit: 'days'", "polarity: 'lower'"],
         "must_not_contain": ["beforeUpdate"]
       }
+    },
+    {
+      "id": 9,
+      "prompt": "销售总监想在仪表盘上按客户、按月看「回款金额」和「回款笔数」。payment（回款）对象有 amount（金额）、paid_at（回款日期）和 account（客户，lookup）。请写这个数据集。",
+      "expected_output": "Authors a dataset for a Chinese brief: every measure and dimension carries `synonyms` in the language of the brief, the words a person types (回款金额 / 回款额 / 到账金额 for the amount sum, 回款笔数 for the count, 客户, 回款月份), and a one-sentence business `description` written in Chinese, a definition and not a prompt. Synonyms are one flat list per member, never a locale-keyed map and never English-only words for a Chinese request; one word names one member, so no synonym repeats another member's name, label or synonym. No member is left with neither key (`dataset-member-no-vocabulary`).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineDataset", "synonyms", "description", "回款"],
+        "must_not_contain": ["synonyms: {", "'zh-CN': ["]
+      }
     }
   ]
 }

@@ -104,6 +104,7 @@ import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
+import { validateDatasetMemberVocabulary } from './validate-dataset-member-vocabulary.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
@@ -1074,6 +1075,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['dataset'],
     run: (stack) => validateDatasetMeasureAggregates(stack),
+  },
+  // ADR-0149 D1 — a dataset measure or dimension with neither `synonyms` nor a
+  // `description` answers only to its own name and label, so a question asked
+  // in a user's own words (or in another language) matches nothing and is
+  // answered by an ungoverned object query. Advisory: the dataset is valid and
+  // draws every widget bound to it, and one that only feeds charts loses
+  // nothing. `parsed`, like the two dataset rules above, because the three read
+  // the same positions (`datasets[].dimensions[]` / `.measures[]`) and must be
+  // handed one document; `os lint` judges it on its unparsed stack, which the
+  // rule tolerates (it reads two optional keys and nothing a default fills).
+  //
+  // On the runtime publish door for the type that carries the declaration,
+  // `dataset`, and nothing else: another type's write would only re-judge a
+  // STORED dataset, which the differential cancels as a pre-existing
+  // condition. The rule reads the written dataset's own members and no other
+  // collection, so the per-write snapshot cannot invent a finding. One finding
+  // per member that lacks both keys, on the save response, never a refusal.
+  {
+    name: 'validateDatasetMemberVocabulary',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dataset-member-vocabulary.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dataset'],
+    run: (stack) => validateDatasetMemberVocabulary(stack),
   },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
   // button that renders and refuses (or does nothing) on click: a `script`
