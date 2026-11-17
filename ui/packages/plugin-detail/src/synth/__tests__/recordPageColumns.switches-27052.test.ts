@@ -42,9 +42,10 @@ const RELATED = [{ objectName: 'task', relationshipField: 'parent_id', title: 'T
 const tabValues = (def: any) => buildDefaultTabs(def, { related: RELATED }).properties.items.map((i: any) => i.value);
 
 describe('动态 is a panel for every object (objectstack#27524, Target 5)', () => {
-  it('the strip places Timeline second for a worked object and a container alike', () => {
-    expect(tabValues(worked)).toEqual(['details', 'timeline', 'related']);
-    expect(tabValues(container)).toEqual(['details', 'timeline', 'related']);
+  it('the strip places Timeline last for a worked object and a container alike (objectstack#34590)', () => {
+    // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
+    expect(tabValues(worked)).toEqual(['details', 'related', 'timeline']);
+    expect(tabValues(container)).toEqual(['details', 'related', 'timeline']);
   });
 
   it('the object-derived default and the column switches are gone from the module', () => {

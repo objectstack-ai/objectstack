@@ -362,7 +362,8 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Activity stream', 'Related']);
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
+      expect(labels).toEqual(['Details', 'Related', 'Activity stream']);
       const related = tabItems(tabs).find((t: any) => t.label === 'Related');
       expect(related.children).toHaveLength(2);
       expect(related.children.map((c: any) => props(c).objectName)).toEqual(['task', 'note']);
@@ -480,10 +481,11 @@ describe('buildDefaultPageSchema', () => {
         slots: { details: { type: 'div', id: 'custom-details' } },
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Activity stream',
         'Related',
+        'Activity stream',
       ]);
       expect(tabItems(tabs)[0].children).toEqual([{ type: 'div', id: 'custom-details' }]);
       // record:details default body must be gone
@@ -557,15 +559,16 @@ describe('buildDefaultPageSchema', () => {
       expect(types).toContain('record:path');
     });
 
-    it('buildDefaultTabs emits Details/Timeline/Related in order', () => {
+    it('buildDefaultTabs emits Details/Related/Timeline in order (objectstack#34590)', () => {
       const tabs = buildDefaultTabs(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
       });
       expect(tabs.type).toBe('page:tabs');
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
         'Details',
-        'Activity stream',
         'Related',
+        'Activity stream',
       ]);
     });
 

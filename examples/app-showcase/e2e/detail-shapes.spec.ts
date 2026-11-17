@@ -197,7 +197,7 @@ test('ungrouped + related-heavy: flat details and the related panels on Contoso'
   // `relatedList: 'primary'` (CORE relationships), so each is a body table in
   // the details, with its rows read at open; the rest of Contoso's lists
   // (Contacts and the Field Zoo lookups) are panels of the right column,
-  // after its first panel, 动态 (objectstack#27524, Target 5).
+  // before its last panel, 动态 (objectstack#34590).
   const details = page.locator('[data-record-column="details"]');
   const invoicesTable = details
     .getByRole('table')
