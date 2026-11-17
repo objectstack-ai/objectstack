@@ -28,7 +28,7 @@ import { registerAllFields } from '@object-ui/fields';
 import '@object-ui/components';
 import { ModalForm } from '../ModalForm';
 import { ObjectForm } from '../ObjectForm';
-import { applyAutoColSpan, resolveColSpan, sectionedGridLayout } from '../autoLayout';
+import { applyAutoColSpan, applyAutoLayout, resolveColSpan, sectionedGridLayout } from '../autoLayout';
 
 registerAllFields();
 
@@ -133,6 +133,29 @@ describe('#34668 acceptance 1 — a multi file / image field takes the whole row
     expect(ladder('attachments')).toEqual(WHOLE_ROW);
   });
 
+  it("the object's fieldGroups in the dialog: the whole row", async () => {
+    const grouped = {
+      ...DEAL,
+      fieldGroups: [
+        { key: 'main', label: 'Main' },
+        { key: 'files', label: 'Files' },
+      ],
+      fields: Object.fromEntries(
+        Object.entries(DEAL.fields).map(([k, f], i) => [k, { ...f, group: i < 8 ? 'main' : 'files' }]),
+      ),
+    };
+    render(
+      <ModalForm
+        schema={{ ...base({}), formType: 'modal', open: true }}
+        dataSource={{ ...ds(), getObjectSchema: vi.fn().mockResolvedValue(grouped) }}
+      />,
+    );
+    await settle('gallery');
+    expect(ladder('f0')).toEqual([2, 3, 3]);
+    expect(ladder('gallery')).toEqual(WHOLE_ROW);
+    expect(ladder('logo')).toEqual([2, 3, 3]);
+  });
+
   it('a mixed-density dialog (twelve-track grid): the whole row', async () => {
     await openDialog({ sections: [{ ...SECTIONS[0], columns: 2 }, SECTIONS[1]] });
     expect(readField('gallery').grid).toContain('@md:grid-cols-12');
@@ -221,6 +244,18 @@ describe('#34668 the rule, at the layout helpers', () => {
     expect(resolveColSpan(ff('field:image', multi, { colSpan: 1 }), 3)).toBe(1);
     expect(resolveColSpan(ff('field:image', multi, { colSpan: 2 }), 3)).toBe(2);
     expect(applyAutoColSpan([ff('field:image', multi)], 4)[0].colSpan).toBe(4);
+  });
+
+  it('applyAutoLayout (the flat drawer and page path) widens it on the inferred grid', () => {
+    const fields = [
+      ...PLAIN.map((n) => ff('field:text', { type: 'text' }, { name: n })),
+      ff('field:image', { type: 'image', multiple: true }, { name: 'gallery' }),
+      ff('field:image', { type: 'image' }, { name: 'logo' }),
+    ];
+    const out = applyAutoLayout(fields, { fields: {} }, undefined, 'create');
+    expect(out.columns).toBe(3);
+    expect(out.fields.find((f) => f.name === 'gallery')?.colSpan).toBe(3);
+    expect(out.fields.find((f) => f.name === 'logo')?.colSpan).toBeUndefined();
   });
 
   it('the twelve-track grid gives the multi field all twelve twelfths, an authored colSpan its own', () => {
