@@ -359,7 +359,8 @@ describe('the served request page draws the submitted record whole (objectstack#
   it('the served page parses as a spec page, and the decision panel is its last node, with no prop', () => {
     const parsed = PageSchema.safeParse(SERVED_PAGE);
     expect(parsed.success, JSON.stringify(parsed.error?.issues ?? [])).toBe(true);
-    expect(SERVED_PAGE.regions[0].components.at(-1)).toEqual({ type: 'record:approval_decision' });
+    const components = SERVED_PAGE.regions[0].components;
+    expect(components[components.length - 1]).toEqual({ type: 'record:approval_decision' });
     expect(JSON.stringify(SERVED_PAGE)).not.toContain('page:tabs');
   });
 
@@ -449,7 +450,7 @@ describe('the served request page draws the submitted record whole (objectstack#
     const invoiceReads = host.findOne.mock.calls.filter(([resource]) => resource === 'invoice');
     expect(invoiceReads.map(([resource, id]) => [resource, id])).toEqual([['invoice', 'inv_1']]);
     // No params: the read the record page sends, not a narrowed one.
-    expect(invoiceReads[0][2]).toBeUndefined();
+    expect((invoiceReads[0] as unknown[])[2]).toBeUndefined();
     // The submitted value stays the value; the current one is beside it.
     expect(recordFields(panel).get('amount')?.value).toBe(recordPageFace('amount', 12500));
     const amount = panel.querySelector('[data-submitted-field="amount"]') as HTMLElement;
