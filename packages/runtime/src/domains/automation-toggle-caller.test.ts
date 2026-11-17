@@ -62,3 +62,74 @@ describe('#26474 — the flow toggle door passes its caller to toggleFlow', () =
         expect(caller).toEqual({ userId: 'u_admin' });
     });
 });
+
+/**
+ * [ADR-0126 §7.2] The 200 answer is the engine's state read back through
+ * `getFlowRuntimeStates` (the reading `GET /_status` serves), never the
+ * request echoed: the switch moves only the ledger bit, so a flow its own
+ * status keeps off read `{enabled: true}` here and `enabled: false` there.
+ * The stand-in's state is set apart from what toggleFlow was asked, so an echo
+ * and a read-back answer differently.
+ */
+describe('[ADR-0126 §7.2] the toggle door answers the engine state, not the request', () => {
+    function dispatcherWithState(stateEnabled: boolean | undefined, readsState = true) {
+        const toggleFlow = vi.fn(async () => undefined);
+        const getFlowRuntimeStates = vi.fn(() =>
+            stateEnabled === undefined ? [] : [{ name: 'welcome_flow', enabled: stateEnabled, bound: stateEnabled }],
+        );
+        const services: Record<string, unknown> = {
+            automation: {
+                getFlow: async (name: string) => (name === 'welcome_flow' ? { name, trigger: { type: 'manual' } } : null),
+                toggleFlow,
+                ...(readsState ? { getFlowRuntimeStates } : {}),
+            },
+        };
+        const resolve = (name: string) => services[name];
+        const kernel: any = {
+            getService: resolve,
+            getServiceAsync: async (name: string) => resolve(name),
+            context: { getService: resolve },
+        };
+        return { dispatcher: new HttpDispatcher(kernel), toggleFlow, getFlowRuntimeStates };
+    }
+
+    it('enable requested, the engine reads the flow off: 200 { enabled: false }, as GET /_status reads it', async () => {
+        const { dispatcher, toggleFlow } = dispatcherWithState(false);
+        const ctx = ctxOf({ userId: 'u_admin' });
+
+        const on = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', { enabled: true }, ctx);
+        const status = await dispatcher.handleAutomation('/_status', 'GET', undefined, ctx);
+
+        expect(toggleFlow).toHaveBeenLastCalledWith('welcome_flow', true, { userId: 'u_admin' });
+        expect(on.response?.status).toBe(200);
+        expect(on.response?.body?.data).toEqual({ name: 'welcome_flow', enabled: false });
+        expect(status.response?.body?.data?.flows?.[0]?.enabled).toBe(on.response?.body?.data?.enabled);
+    });
+
+    it('disable requested, the engine reads the flow on: 200 { enabled: true }', async () => {
+        const { dispatcher } = dispatcherWithState(true);
+
+        const off = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', { enabled: false }, ctxOf({ userId: 'u_admin' }));
+
+        expect(off.response?.status).toBe(200);
+        expect(off.response?.body?.data).toEqual({ name: 'welcome_flow', enabled: true });
+    });
+
+    it('CONTROL — engine state agrees with the request: the answer is that state', async () => {
+        const { dispatcher, getFlowRuntimeStates } = dispatcherWithState(true);
+
+        const on = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', { enabled: true }, ctxOf({ userId: 'u_admin' }));
+
+        expect(on.response?.body?.data).toEqual({ name: 'welcome_flow', enabled: true });
+        expect(getFlowRuntimeStates).toHaveBeenCalled();
+    });
+
+    it('a service that does not implement the read keeps the legacy answer, the request echoed', async () => {
+        const { dispatcher } = dispatcherWithState(undefined, false);
+
+        const off = await dispatcher.handleAutomation('/welcome_flow/toggle', 'POST', { enabled: false }, ctxOf({ userId: 'u_admin' }));
+
+        expect(off.response?.status).toBe(200);
+        expect(off.response?.body?.data).toEqual({ name: 'welcome_flow', enabled: false });
+    });
+});

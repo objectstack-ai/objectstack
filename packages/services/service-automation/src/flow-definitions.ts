@@ -527,7 +527,7 @@ function flowActivationWriteOptions(caller: Pick<AutomationContext, 'userId'> | 
 }
 
 /** The body of {@link AutomationEngine.toggleFlow}; that method's docblock is its contract. */
-export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refuseCustomerAuthoredToggle' | 'packagedFlowOwner' | 'refuseEnableOntoDisabledSubflow' | 'packagedSubflowCallers' | 'isFlowEnabled' | 'parkedRunsOf' | 'refuseUnderReachingCallers' | 'flowActivationStore' | 'logger' | 'flowLedgerDisabled' | 'activateFlowTrigger' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers' | 'flowSlotName' | 'isSharedFlowKey'>, name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
+export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refuseCustomerAuthoredToggle' | 'flowStatusDisabled' | 'packagedFlowOwner' | 'refuseEnableOntoDisabledSubflow' | 'packagedSubflowCallers' | 'isFlowEnabled' | 'parkedRunsOf' | 'refuseUnderReachingCallers' | 'flowActivationStore' | 'logger' | 'flowLedgerDisabled' | 'activateFlowTrigger' | 'deactivateFlowTrigger' | 'rejudgeSubflowCallers' | 'flowSlotName' | 'isSharedFlowKey'>, name: string, enabled: boolean, caller?: Pick<AutomationContext, 'userId'>): Promise<void> {
     const flow = this.flows.get(name);
     if (!flow) {
         throw new Error(`Flow '${name}' not found`);
@@ -540,7 +540,30 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
     // write and before any in-process change — with a ledger attached or
     // in the degraded mode without one. Nothing half-flips.
     this.refuseCustomerAuthoredToggle(name, enabled);
-    // Past the refusal the loader's set names a package, and the ledger row
+    // [ADR-0126 §7.2] Second, and still before anything is written: switching
+    // ON a packaged flow whose definition's `status` disarms it. The switch
+    // moves only the LEDGER bit and a status is the author's
+    // ({@link AutomationEngine.isFlowEnabled} composes the two, neither
+    // overrides the other), so the write would land and leave the flow exactly
+    // as off as it was, while the caller was told it is on. Refused instead,
+    // naming the one step that arms it. The verdict is `flowStatusDisabled`,
+    // the dimension `registerFlow` records, never a second reading of the
+    // status values. Switching such a flow OFF is not refused: it records the
+    // installation's choice, which still holds when a later definition ships
+    // the flow active.
+    if (enabled && this.flowStatusDisabled.get(name) === true) {
+        const status = String((flow as { status?: unknown }).status);
+        throw Object.assign(
+            new Error(
+                `Flow '${this.flowSlotName(name)}' cannot be enabled through this switch: its definition's status ` +
+                    `is '${status}', which keeps it off. This switch never changes a definition's status; ` +
+                    `publish the flow with status 'active' (for a package that is read-only here, that takes a ` +
+                    `package version that ships it active). Nothing was changed.`,
+            ),
+            { code: 'RESOURCE_CONFLICT', status: 409 },
+        );
+    }
+    // Past the provenance refusal the loader's set names a package, and the ledger row
     // is attributed to exactly that one — read with the verdict, so the
     // run-store await below cannot separate the two.
     const packageOwner = this.packagedFlowOwner(name) as string;
@@ -612,9 +635,9 @@ export async function toggleFlow(this: Pick<FlowDefinitionsHost, 'flows' | 'refu
     // A disabled flow should stop receiving trigger events; a re-enabled one
     // should resume. execute() also guards disabled flows, but unbinding
     // avoids firing the trigger (and its event-source subscription) at all.
-    // Re-enabling moves only the LEDGER bit: a flow whose `status` still
-    // disables it stays unarmed, by `activateFlowTrigger`'s enablement gate
-    // — armed, it would only fire runs `execute()` refuses.
+    // Re-enabling moves only the LEDGER bit. A flow whose `status` disables
+    // it never reaches here enabled (refused above); `activateFlowTrigger`'s
+    // enablement gate still declines any flow that may not run.
     if (enabled) {
         this.activateFlowTrigger(name);
     } else {
