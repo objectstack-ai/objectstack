@@ -92,6 +92,7 @@ interface ObjectDef {
 export interface ServedObjectDef {
   name: string;
   label?: string;
+  description?: string;
   fields?: Record<string, ServedFieldDef>;
   validations?: unknown[];
   enable?: Record<string, unknown>;
@@ -101,6 +102,7 @@ export interface ServedObjectDef {
 interface ServedFieldDef {
   type?: string;
   label?: string;
+  description?: string;
   required?: boolean;
   readonly?: boolean;
   system?: boolean;
@@ -120,7 +122,11 @@ interface ServedFieldDef {
  * where a write never sets the value, {@link writeNeverSetsField}), the allowed
  * `options` as value + label for a field that declares them (a picklist-bound
  * field carries its list's resolved options on the served object,
- * {@link declaresOptions}), and the `defaultValue` an INSERT applies. Per active validation rule: its name,
+ * {@link declaresOptions}), and the `defaultValue` an INSERT applies.
+ * [#34721] The object's and each field's authored `description`, where one is
+ * authored ({@link authoredDescription}): the text a client reads to pick an
+ * object and its fields, read off the same served object, so a field the
+ * caller cannot read takes its description with it. Per active validation rule: its name,
  * kind, message, severity, the write events it runs on, and the fields it names
  * — ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
@@ -148,10 +154,12 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
   return {
     name: def.name,
     label: def.label ?? def.name,
+    ...authoredDescription(def),
     fields: Object.entries(def.fields ?? {}).filter(([key]) => key !== SEARCH_COMPANION_FIELD).map(([key, f]) => ({
       name: key,
       type: f?.type,
       label: f?.label ?? key,
+      ...authoredDescription(f),
       required: f?.required ?? false,
       // Judged on the DECLARED field, never the served one: the caller's mask
       // deletes a readable field's `expression` when it names a field they
@@ -166,6 +174,23 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
     validations: describedRules(def.validations),
     enableFeatures: def.enable ?? {},
   };
+}
+
+/**
+ * [#34721] An object's or a field's `description` as `list_objects` and
+ * `describe_object` serve it: `{ description }` when the definition, as the
+ * caller is served it, carries a non-blank string there, and nothing
+ * otherwise, so an answer for a definition that authors none keeps the shape
+ * it always had. The existing key only: the spec declares it on the object
+ * and on the field (`ObjectSchema`, `FieldSchema`), and the ADR-0106
+ * projection keeps it as prose on everything the caller may read, which is
+ * what the `/meta` object door serves the same caller.
+ *
+ * The HTTP twin is `authoredDescription` in `packages/runtime/src/domains/mcp.ts`.
+ */
+export function authoredDescription(def: { description?: unknown } | undefined): { description?: string } {
+  const text = def?.description;
+  return typeof text === 'string' && text.trim() !== '' ? { description: text } : {};
 }
 
 /**

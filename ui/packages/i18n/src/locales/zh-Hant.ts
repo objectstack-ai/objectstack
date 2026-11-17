@@ -2197,6 +2197,16 @@ const zhHant = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
+        publishFromBar_one: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
+        publishFromBar_other: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
+        showDraftToPublish: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
+        showDraftToPublish_one: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
+        showDraftToPublish_other: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
+        showDraft: '檢視草稿',
+        receipt: '已釋出，改動已生效。',
+        dismissReceipt: '關閉',
         count: '有 {{count}} 項改動尚未釋出——使用者還看不到。',
         publish: '釋出',
         published: '全部待發布改動已生效。',
@@ -3279,7 +3289,7 @@ const zhHant = {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中設計',
     editApp: '編輯應用',
-    openAppInStudio: '在 Studio 中檢視應用',
+    openAppInStudio: '在 Studio 中檢視 {{app}}',
     openAssistant: '開啟{{name}}助手',
     offline: '離線',
     usersOnline: '當前線上使用者',
@@ -3552,6 +3562,10 @@ const zhHant = {
       pendingHere: '草稿預覽 · 本頁 {{count}} 項未釋出',
       pendingHere_one: '草稿預覽 · 本頁 {{count}} 項未釋出',
       pendingHere_other: '草稿預覽 · 本頁 {{count}} 項未釋出',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '草稿預覽 · 這個應用有 {{count}} 項未釋出的改動，釋出前都不會生效。',
+      pendingInApp_one: '草稿預覽 · 這個應用有 {{count}} 項未釋出的改動，釋出前都不會生效。',
+      pendingInApp_other: '草稿預覽 · 這個應用有 {{count}} 項未釋出的改動，釋出前都不會生效。',
       // 魔法時刻提示：剛搭好的草稿因為種子/示例資料要釋出後才載入，預覽裡
       // 儀表盤顯示 0、列表顯示“暫無內容”。直接說明，避免把空預覽誤當成搭壞了。
       sampleDataTitle: '示例資料將在釋出後出現',
@@ -3692,6 +3706,8 @@ const zhHant = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「這個應用還沒釋出過」.
+      notPublishedYet: '這個應用還沒釋出過。它可以正常使用，但只有搭建者能看到。釋出後你的使用者才能看到它。',
       message: '未釋出的應用 —— 功能完整，但只有構建者能看到。釋出後即可讓您的使用者看到。',
       publish: '釋出',
       publishing: '釋出中…',

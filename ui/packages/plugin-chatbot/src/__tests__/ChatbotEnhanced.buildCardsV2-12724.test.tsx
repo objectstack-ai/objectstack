@@ -303,4 +303,26 @@ describe('objectui#12724 phase 2 — 「接下来可以说」 on both envelopes 
     expect(screen.queryByTestId('build-result-next-steps')).not.toBeInTheDocument();
     expect(screen.getByTestId('build-result-posture')).toBeInTheDocument();
   });
+
+  // objectstack#34610 — under the shell's Publish the chat draws none, so the
+  // footer never says to click Publish here; the next-steps line stays.
+  it('publishFromShellBar: no posture sentence; the next-steps line stays, and with none the footer is not drawn', () => {
+    const { unmount } = render(
+      inLocale(
+        'zh',
+        <ChatbotEnhanced messages={[turn('built', ['apply_blueprint', applyEnvelope('zh')])]} onOpenBuiltApp={vi.fn()} publishFromShellBar />,
+      ),
+    );
+    expect(screen.getByTestId('build-result-next-steps')).toHaveTextContent(NEXT);
+    expect(screen.queryByTestId('build-result-posture')).not.toBeInTheDocument();
+    unmount();
+    const { nextSteps: _n, ...envelope } = applyEnvelope('zh');
+    render(
+      inLocale(
+        'zh',
+        <ChatbotEnhanced messages={[turn('built', ['apply_blueprint', envelope])]} onOpenBuiltApp={vi.fn()} publishFromShellBar />,
+      ),
+    );
+    expect(screen.queryByTestId('build-result-footer')).not.toBeInTheDocument();
+  });
 });

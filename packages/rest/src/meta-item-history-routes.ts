@@ -1488,6 +1488,15 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                     if (mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)) {
                         data = publishedCode;
                     }
+                    // [#34248, ruling 6893582352] …and a bare doc's package copy
+                    // where the layered read's code layer is the environment's
+                    // own package-less entry (two enabled holders beside it):
+                    // that entry answers first, never the holder registered last.
+                    const codeStamp = (publishedCode as { _packageId?: unknown } | null | undefined)?._packageId;
+                    if (canonicalMetaUrlType(type) === 'doc' && publishedCode != null && (typeof codeStamp !== 'string' || codeStamp === '' || codeStamp === 'sys_metadata')
+                        && typeof stamp === 'string' && stamp !== '' && stamp !== 'sys_metadata') {
+                        data = publishedCode;
+                    }
                     // The 404 this route could never produce before. An
                     // item that exists but was never published still
                     // answers 200 with its current definition — that is

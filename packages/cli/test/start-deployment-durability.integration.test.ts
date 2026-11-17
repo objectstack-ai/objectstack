@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — six starts that exit before any server answers (three image refusals; the multi-replica refusal, its pass and its memory-driver control), then two real `os start` boots (one on explicit settings; one on the defaults, which also signs up an owner, creates a member and reads the notice as each); the file read 27.6 s on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s, and 26.9 s with the three multi-replica starts added
+// test-budget: 40 — spawns the real producer once per single-cause fixture: six starts that exit before any server answers (three image refusals; the multi-replica refusal, its pass and its memory-driver control), then two real `os start` boots (one on explicit settings; one on the defaults, which also signs up an owner, creates a member and reads the notice as each); the file read 27.6 s on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s, and 26.9 s with the three multi-replica starts added
 
 /**
  * #30120, ruling A3 (record 6634240777) — the official image refuses to start
