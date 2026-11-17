@@ -14,6 +14,9 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a clocked case: the dispatcher's package domain
+// reaches it through a dynamic import (check:test-source-alias).
+import '@objectstack/metadata';
 
 function makeDispatcher() {
     const toggleFlow = vi.fn(async (_name: string, _on: boolean, _caller?: { userId?: string }) => undefined);
