@@ -4237,6 +4237,18 @@ export class ObjectStackProtocolImplementation implements
      * name with one served holder is no ambiguity: {@link getMetaItemLayered}
      * reads it at that holder's address. Both are judged by the same
      * `servedAddressJudgment`, which neither of them throws.
+     *
+     * [#34441 cell 2] The one exception, of a bundled type with no shipper:
+     * two or more packages holding the addressed member as rows where one is
+     * the base and every other one's row is a bundle addition to it
+     * (`rowHeldBaseAddressOf`) are no ambiguity here, as the registry names
+     * the base the one holder there; {@link getMetaItemLayered} reads the
+     * base's stack, as the plain read serves the base's row. Beside a
+     * package-less row they are still refused (#33210). The writes naming no
+     * package are not moved: the save, delete, publish, draft and history
+     * doors still refuse the same rows naming base and dependent, so here the
+     * view loads where the save it then sends is refused (a follow-up card
+     * judges whether the writes follow the base).
      */
     async packagelessLayeredReadRefusal(request: {
         type: string;

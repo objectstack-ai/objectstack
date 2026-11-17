@@ -72,17 +72,19 @@ interface SeenRead { object: string; ast: any }
 /**
  * A recording driver. A read of the object named in `answers` returns those
  * rows (the related read's matches); every other read returns none. Writes
- * are recorded, never applied. It answers to `name` — by default the SQL
- * driver's, one of the drivers the engine plans a semi-join for
- * (`SEMI_JOIN_COMPILING_DRIVERS`); any other name keeps the id read.
+ * are recorded, never applied. It answers to `name` (by default the SQL
+ * driver's) and declares `supports` — by default the
+ * `DriverCapabilities.readableIdsLeaf` bit the engine plans a semi-join on
+ * ([#33876]); a driver without it is refused a single-valued relation
+ * condition on a read verb up front.
  */
-function makeRecordingDriver(name = 'com.objectstack.driver.sql') {
+function makeRecordingDriver(name = 'com.objectstack.driver.sql', supports: Record<string, unknown> = { readableIdsLeaf: true }) {
   const reads: SeenRead[] = [];
   const writes: SeenRead[] = [];
   const answers = new Map<string, Array<Record<string, unknown>>>();
   const rowsOf = (o: string) => answers.get(o) ?? [];
   const driver: any = {
-    name, version: '0.0.0', supports: {},
+    name, version: '0.0.0', supports,
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(o: string, ast: any) { reads.push({ object: o, ast }); return rowsOf(o); },
     async findOne(o: string, ast: any) { reads.push({ object: o, ast }); return rowsOf(o)[0] ?? null; },
@@ -453,8 +455,8 @@ describe('[#20802] the nested-relation form is lowered at the engine\'s where se
 describe('[#33626] the semi-join falls back to the id read wherever it is not provably that read', () => {
   const OUTER_REF = { owner: { $in: ['u1'] } };
 
-  async function makeEngine(driverName?: string) {
-    const rec = makeRecordingDriver(driverName);
+  async function makeEngine(driverName?: string, supports?: Record<string, unknown>) {
+    const rec = makeRecordingDriver(driverName, supports);
     const engine = new ObjectQL();
     engine.registerDriver(rec.driver, true);
     await engine.init();
@@ -479,15 +481,86 @@ describe('[#33626] the semi-join falls back to the id read wherever it is not pr
     expect(normalized(r.outerWhere), name).toEqual({ owner: { $in: ids } });
   }
 
-  it('a driver that compiles no subquery (MongoDB, OData, any unnamed driver) keeps the capped id read', async () => {
-    for (const name of ['com.objectstack.driver.mongodb', 'com.objectstack.driver.odata', 'recording']) {
-      const { engine, rec } = await makeEngine(name);
-      rec.answers.set(OWNER, idRows('u1'));
-      expectIdRead(await readsOf(engine, rec), ['u1'], name);
-      // …and past the cap it is refused as it always was, never run over a cut-off list.
-      rec.answers.set(OWNER, Array.from({ length: RELATION_FILTER_ID_CAP + 1 }, (_, i) => ({ id: `u${i}` })));
-      expect(envelopeOf(await refusalOf(engine.find(OBJECT, { where: { owner: { region: 'NA' } } }))), name).toEqual(INVALID_FILTER);
+  // [#33876, the maintainer's ruling A on #33626's Q2] The bit decides, not
+  // the name: a driver without `readableIdsLeaf` (MongoDB, OData, any driver
+  // that declares nothing) is REFUSED the condition before any related read is
+  // planned or run — no id read, no driver call — and the refusal names the
+  // driver. Every read verb; a multi-valued relation and a write verb keep the
+  // capped id read there.
+  it('[#33876] a driver without the readableIdsLeaf bit (MongoDB, OData, an undeclared driver) is refused up front: INVALID_FILTER / 400, nothing read', async () => {
+    for (const name of ['com.objectstack.driver.mongodb', 'com.objectstack.driver.odata', 'recording', 'com.objectstack.driver.sql']) {
+      for (const supports of [{}, { readableIdsLeaf: false }, { readableIdsLeaf: 'true' }]) {
+        const label = `${name} ${JSON.stringify(supports)}`;
+        const { engine, rec } = await makeEngine(name, supports);
+        rec.answers.set(OWNER, idRows('u1'));
+        const where = { owner: { region: 'NA' } };
+        const verbs: Array<[string, () => Promise<unknown>]> = [
+          ['find', () => engine.find(OBJECT, { where })],
+          ['findOne', () => engine.findOne(OBJECT, { where })],
+          ['count', () => engine.count(OBJECT, { where })],
+          ['aggregate', () => engine.aggregate(OBJECT, { where, aggregations: [{ function: 'count', alias: 'n' }] } as EngineAggregateOptions)],
+        ];
+        for (const [verb, run] of verbs) {
+          rec.reads.length = 0;
+          const err = await refusalOf(run());
+          expect(envelopeOf(err), `${label} ${verb}`).toEqual(INVALID_FILTER);
+          expect(err?.message, `${label} ${verb}`).toContain(`'${name}'`);
+          expect(rec.reads, `${label} ${verb}: nothing read`).toEqual([]);
+        }
+        // Inside $or / $not alike — every site is judged before anything is read.
+        rec.reads.length = 0;
+        expect(envelopeOf(await refusalOf(engine.find(OBJECT, { where: { $or: [{ title: 'a' }, { $not: where }] } }))), label).toEqual(INVALID_FILTER);
+        expect(rec.reads, label).toEqual([]);
+        // A multi-valued relation keeps the capped id read on that driver…
+        rec.reads.length = 0;
+        await engine.find(OBJECT, { where: { owners: { region: 'NA' } } });
+        expect(rec.reads.filter((r) => r.object === OWNER), label).toHaveLength(1);
+        // …and so does a write verb's `where`.
+        rec.writes.length = 0;
+        await engine.update(OBJECT, { title: 'b' }, { where, multi: true });
+        expect(normalized(rec.writes[rec.writes.length - 1]?.ast?.where), label).toEqual({ owner: { $in: ['u1'] } });
+      }
     }
+  });
+
+  it('[#33876] CONTROL the bit decides, not the name: a driver named MongoDB that declares readableIdsLeaf plans the semi-join', async () => {
+    const { engine, rec } = await makeEngine('com.objectstack.driver.mongodb', { readableIdsLeaf: true });
+    rec.answers.set(OWNER, idRows('u1'));
+    const r = await readsOf(engine, rec);
+    expect(r.related).toHaveLength(0);
+    expect(normalized(r.outerWhere)).toEqual({ owner: { $in: { SEMI_JOIN: OWNER, scope: { region: 'NA' } } } });
+  });
+
+  it('[#33876] the filter judge answers the same up-front refusal as execution, from the declared bit, and reads nothing', async () => {
+    const where = { owner: { region: 'NA' } };
+    for (const name of ['com.objectstack.driver.mongodb', 'com.objectstack.driver.odata']) {
+      const { engine, rec } = await makeEngine(name, {});
+      rec.answers.set(OWNER, idRows('u1'));
+      for (const verb of ['find', 'findOne', 'count', 'aggregate'] as const) {
+        const run = verb === 'aggregate'
+          ? () => engine.aggregate(OBJECT, { where, aggregations: [{ function: 'count', alias: 'n' }] } as EngineAggregateOptions)
+          : () => engine[verb](OBJECT, { where });
+        const err = await refusalOf(run());
+        rec.reads.length = 0;
+        expect(engine.judgeFilter(OBJECT, where, { operation: verb }), `${name} ${verb}`).toEqual({ ok: false, ...INVALID_FILTER, message: err!.message });
+        // …under $or / $not too, at the depth execution judges it.
+        const nested = { $or: [{ title: 'a' }, { $not: where }] };
+        const nestedErr = await refusalOf(engine.find(OBJECT, { where: nested }));
+        expect(engine.judgeFilter(OBJECT, nested), `${name} nested`).toEqual({ ok: false, ...INVALID_FILTER, message: nestedErr!.message });
+        expect(rec.reads, `${name} ${verb}: the judge reads nothing`).toEqual([]);
+      }
+      // What execution serves on that driver, the judge admits: a multi-valued relation and a write verb's `where`.
+      expect(engine.judgeFilter(OBJECT, { owners: { region: 'NA' } }), name).toEqual({ ok: true });
+      expect(engine.judgeFilter(OBJECT, where, { operation: 'update' }), name).toEqual({ ok: true });
+    }
+    // CONTROL: a driver that declares the bit is admitted.
+    const { engine } = await makeEngine('com.objectstack.driver.mongodb', { readableIdsLeaf: true });
+    expect(engine.judgeFilter(OBJECT, where, { operation: 'aggregate' })).toEqual({ ok: true });
+    // CONTROL: an engine that routes the object to no driver (the authoring-time judge) does not judge it.
+    const authoring = new ObjectQL();
+    authoring.registry.registerObject(OWNER_OBJECT as any, 'test');
+    authoring.registry.registerObject(LEDGER as any, 'test');
+    expect(authoring.judgeFilter(OBJECT, where)).toEqual({ ok: true });
   });
 
   it('CONTROL a compiling driver plans the read: no id read, one composed leaf', async () => {

@@ -7,8 +7,8 @@
  * The launchers are on screen only while the chat is closed, so the reading
  * must leave the chat: `ChatbotEnhanced` reports it (pinned in plugin-chatbot's
  * `ChatbotEnhanced.planApprovalPending-11666.test.tsx`), `ChatPane` publishes it
- * on the assistant bus, and the FAB reads the bus. This file pins the middle
- * hop end to end — the REAL `ChatPane` and the REAL FAB, with `ChatbotEnhanced`
+ * on the assistant bus, and the console launcher reads the bus. This file pins the middle
+ * hop end to end — the REAL `ChatPane` and the REAL top-bar robot (the FAB until objectstack#34608), with `ChatbotEnhanced`
  * replaced by a prop recorder so the case can play the chat's reading.
  */
 
@@ -55,7 +55,7 @@ vi.mock('../../../providers/AdapterProvider', async (importOriginal) => {
 import { I18nProvider } from '@object-ui/i18n';
 import type { AgentDescriptor } from '@object-ui/plugin-chatbot';
 import { ChatPane } from '../AiChatPage';
-import { ConsoleChatbotFab } from '../../../layout/ConsoleChatbotFab';
+import { AssistantTopBarButton } from '../../../layout/AssistantTopBarButton';
 import { useConversationList } from '../../../hooks/useConversationList';
 import { publishPlanApprovalPending, usePlanApprovalPendingCount } from '../../../assistant/assistantBus';
 
@@ -70,7 +70,9 @@ window.matchMedia = ((query: string) => ({
   dispatchEvent: () => false,
 })) as unknown as typeof window.matchMedia;
 
-const MARKER = 'console-chatbot-fab-plan-pending';
+// objectstack#34608 — the top-bar robot replaced the floating button as the
+// console's launcher and carries its marker.
+const MARKER = 'topbar-ai-assistant-plan-pending';
 
 function renderPane(conversationId: string) {
   captured = {};
@@ -95,10 +97,12 @@ function renderPane(conversationId: string) {
   );
 }
 
-function renderFab() {
+function renderLauncher() {
   return render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
-      <ConsoleChatbotFab appLabel="Workspace" onOpenDock={() => {}} />
+      <MemoryRouter>
+        <AssistantTopBarButton />
+      </MemoryRouter>
     </I18nProvider>,
   );
 }
@@ -124,9 +128,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('ChatPane → assistant bus → FAB (objectui#11666)', () => {
-  it('the chat reading a waiting plan lights the FAB, and the marker outlives the chat closing', () => {
-    renderFab();
+describe('ChatPane → assistant bus → top-bar robot (objectui#11666)', () => {
+  it('the chat reading a waiting plan lights the robot, and the marker outlives the chat closing', () => {
+    renderLauncher();
     const pane = renderPane('conv-1');
     expect(screen.queryByTestId(MARKER)).not.toBeInTheDocument();
 
@@ -139,7 +143,7 @@ describe('ChatPane → assistant bus → FAB (objectui#11666)', () => {
   });
 
   it('reopening the chat clears nothing by itself; the plan leaving "awaiting" does', () => {
-    renderFab();
+    renderLauncher();
     const first = renderPane('conv-1');
     chatReports(true);
     first.unmount();
@@ -156,7 +160,7 @@ describe('ChatPane → assistant bus → FAB (objectui#11666)', () => {
   });
 
   it('a chat on another thread reporting no plan does not clear the waiting one', () => {
-    renderFab();
+    renderLauncher();
     const first = renderPane('conv-1');
     chatReports(true);
     first.unmount();
@@ -168,7 +172,7 @@ describe('ChatPane → assistant bus → FAB (objectui#11666)', () => {
 
   it('deleting the thread drops its reading (the /ai sidebar delete)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
-    renderFab();
+    renderLauncher();
     const pane = renderPane('conv-1');
     chatReports(true);
     pane.unmount();

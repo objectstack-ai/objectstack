@@ -2794,7 +2794,11 @@ describe('RecordActivityProps (enhanced)', () => {
     // Under the closed enum, 'commnet' got a named rejection. An open
     // vocabulary cannot distinguish a typo from a contributed kind, and the
     // ruling accepted that trade rather than re-close the vocabulary.
-    const result = RecordActivityProps.safeParse({ types: ['commnet'] });
+    // `showCommentInput: false`: a list without 'comment' beside the composer
+    // is refused on its own account (#34383, pinned below), which is not a
+    // by-name rejection of the typo — this case keeps the composer off so it
+    // reads the vocabulary alone.
+    const result = RecordActivityProps.safeParse({ types: ['commnet'], showCommentInput: false });
     expect(result.success).toBe(true);
   });
 
@@ -2808,6 +2812,80 @@ describe('RecordActivityProps (enhanced)', () => {
     expect(empty.success).toBe(false);
     if (!empty.success) {
       expect(empty.error.issues[0]?.path).toEqual(['types', 0]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #34383 — a feed `types` without 'comment' beside the comment composer
+// ---------------------------------------------------------------------------
+describe('RecordActivityProps — a `types` that leaves out comment is refused while the composer is on (#34383)', () => {
+  const refusedAtComposer = (result: { success: boolean; error?: { issues: z.core.$ZodIssue[] } }) => {
+    expect(result.success).toBe(false);
+    // Located at the composer the list rules out, not at `types` (see the
+    // check's docblock), so nothing reads it as a refusal of the list itself.
+    const issues = result.error!.issues.filter((i) => i.path.join('.') === 'showCommentInput');
+    expect(result.error!.issues.filter((i) => i.path[0] === 'types')).toEqual([]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    return issues[0];
+  };
+
+  it('refuses the measured producer shape (HotCRM lead_activity: types [task], composer by default)', () => {
+    const issue = refusedAtComposer(RecordActivityProps.safeParse({ types: ['task'], limit: 20, showCompleted: true }));
+    // Both fixes are named; the message is the author's prescription.
+    expect(issue.message).toContain("add 'comment' to `types`");
+    expect(issue.message).toContain('set `showCommentInput: false`');
+  });
+
+  it('refuses it when the composer is asked for explicitly, and for a list of contributed kinds only', () => {
+    refusedAtComposer(RecordActivityProps.safeParse({ types: ['task', 'email'], showCommentInput: true }));
+    refusedAtComposer(RecordActivityProps.safeParse({ types: ['scheduled'] }));
+    // An empty list shows nothing at all, so it shows no comment either.
+    refusedAtComposer(RecordActivityProps.safeParse({ types: [] }));
+  });
+
+  it('matches exactly, as the renderers do: a cased spelling is not the comment kind', () => {
+    refusedAtComposer(RecordActivityProps.safeParse({ types: ['Comment', 'task'] }));
+  });
+
+  it('accepts the first fix: comment added to types', () => {
+    const result = RecordActivityProps.safeParse({ types: ['task', 'comment'] });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts the second fix: the composer turned off', () => {
+    const result = RecordActivityProps.safeParse({ types: ['task'], showCommentInput: false });
+    expect(result.success).toBe(true);
+  });
+
+  it('leaves an absent types alone, with the composer on or off', () => {
+    expect(RecordActivityProps.safeParse({}).success).toBe(true);
+    expect(RecordActivityProps.safeParse({ showCommentInput: true }).success).toBe(true);
+    expect(RecordActivityProps.safeParse({ showCommentInput: false }).success).toBe(true);
+  });
+
+  it('leaves a non-string entry to its own element issue', () => {
+    const result = RecordActivityProps.safeParse({ types: [42] });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['types.0']);
+  });
+
+  it('keeps the strict-object refusal of an unknown key beside the new check', () => {
+    const result = RecordActivityProps.safeParse({ types: ['comment'], typo_key: true });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues[0].code).toBe('unrecognized_keys');
+  });
+
+  it('is the row both mounts judge with: record:activity, and the feed of record:chatter / record:discussion', () => {
+    expect(ComponentPropsMap['record:activity']).toBe(RecordActivityProps);
+    refusedAtComposer(ComponentPropsMap['record:activity'].safeParse({ types: ['task'] }));
+    for (const type of ['record:chatter', 'record:discussion'] as const) {
+      const result = ComponentPropsMap[type].safeParse({ feed: { types: ['task'] } });
+      expect(result.success, type).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'feed.showCommentInput');
+      expect(issue?.code, type).toBe('custom');
+      expect(ComponentPropsMap[type].safeParse({ feed: { types: ['task'], showCommentInput: false } }).success, type).toBe(true);
     }
   });
 });

@@ -60,13 +60,12 @@ const sectionIds = (testId: string) =>
 afterEach(cleanup);
 
 describe('objectstack#27594 — the title switcher dropdown', () => {
-  it('the title is the open view\'s label with ▾, and the count beside it once the list reported one', () => {
+  it('the title is the open view\'s label with ▾, and no record count beside it (objectstack#34603)', () => {
     render(
       <ObjectViewTitleSwitcher
         views={VIEWS}
         activeViewId="all"
         activeLabel="All Leads"
-        count={1234}
         pinnedViewId={null}
         onPinnedViewChange={() => {}}
         recentViewIds={[]}
@@ -75,13 +74,10 @@ describe('objectstack#27594 — the title switcher dropdown', () => {
         t={t}
       />,
     );
-    expect(screen.getByTestId('list-view-switcher')).toHaveTextContent('All Leads');
-    // Formatted in the display locale (en here), never the machine's.
-    expect(screen.getByTestId('list-view-switcher-count')).toHaveTextContent('· 1,234');
-  });
-
-  it('CONTROL: no count is drawn until the list reports one', () => {
-    mount();
+    const trigger = screen.getByTestId('list-view-switcher');
+    expect(trigger).toHaveTextContent('All Leads');
+    // The switcher's whole outer span is the label and its chevron: no 「· N」.
+    expect(trigger.parentElement).toHaveTextContent(/^All Leads$/);
     expect(screen.queryByTestId('list-view-switcher-count')).toBeNull();
   });
 

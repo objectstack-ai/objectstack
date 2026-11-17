@@ -105,7 +105,6 @@ export function useObjectViewListRenderer({
     urlFilters,
     initialUfSelections,
     handleUserFilterSelectionsChange,
-    handleListTotalChange,
     viewPanelFilters,
 }: {
     objectName: string | undefined;
@@ -153,8 +152,6 @@ export function useObjectViewListRenderer({
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
-    /** objectstack#27594 — the records the active view matched, for the title's count. */
-    handleListTotalChange: (total: number) => void;
     /**
      * objectstack#30073 — the active view's own conditions when the Filter
      * panel holds them as rows (a personal view, `personalViewPanelFilters`):
@@ -1017,7 +1014,6 @@ export function useObjectViewListRenderer({
                     handleRowClick(record, event);
                 }}
                 onRowsChange={handleListRowsChange}
-                onTotalChange={handleListTotalChange}
                 // objectstack#30850 — the page lives in the address (`uf__page`,
                 // replace): the list reads it and reports every move back.
                 page={listPage}
@@ -1090,7 +1086,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
 }

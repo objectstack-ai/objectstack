@@ -60,6 +60,7 @@ import { coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFiel
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedRequiredWhen, preserveAuditIgnoredOnInsertWarning, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import type { staticReadonlyInsertSubject } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { resolveMasterDetailRelation } from './master-detail.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
@@ -1316,6 +1317,16 @@ export class InsertFacet {
         const batchSummaries = rows.length > 1
           ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
           : undefined;
+        // [#34466] The same overlay for the master-detail header a field-level
+        // `parent.` predicate reads (`requiredWhen: parent.line_count >= 3`):
+        // `insertParentForRow` above was read once too, before the batch.
+        const insertParentMaster = batchSummaries && insertParentForRow
+          ? resolveMasterDetailRelation(schemaForValidation as any)?.master
+          : undefined;
+        const insertParentOf = (row: Record<string, unknown>) => {
+          const header = insertParentForRow?.(row);
+          return insertParentMaster ? batchSummaries!.overlayRow(insertParentMaster, header) : header;
+        };
         // [#18783] The subject's effective object permissions, for an option
         // gated on `current_user.can(…)`: ONE resolution for the whole batch,
         // and none at all unless a row picks such an option. A resolution
@@ -1349,7 +1360,7 @@ export class InsertFacet {
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
             if (referencesFirst) await checkReferences();
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentOf(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
             if (!referencesFirst) await checkReferences();
             // [#25579] Admitted: a later row of this batch reads it in the summary.
             batchSummaries?.accept(rows[i]);

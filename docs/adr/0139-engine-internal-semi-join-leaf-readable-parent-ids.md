@@ -28,6 +28,19 @@ the chain unchanged, and D6's other ⛔ (an interim with two spellings of one sc
 [#33696](https://github.com/objectstack-ai/objectstack/issues/33696)). D6 carries the ruling's binding bullets verbatim,
 and ADR-0055 is noted in step, as the ruling orders. This amendment declares; #33696's change lands only after it
 merges.
+**Amended** (2026-11-17): D3's "⛔ No `DriverCapabilities` bit returns" is lifted for one bit and the engine's own
+readers of it, and nothing else. A driver declares `DriverCapabilities.readableIdsLeaf` when its filter compiler compiles
+(or, in process, evaluates) a composed `ReadableIds` leaf: `driver-sql` (every dialect; the WASM SQLite face and Turso
+by inheritance) and `driver-memory` declare it, MongoDB and OData do not. The engine reads it for author-written
+conditions only. A nested-relation condition beneath a single-valued relation on a read verb is refused up front on a
+driver without it, `INVALID_FILTER` / 400, and the engine's filter judge answers that same refusal (the maintainer's
+ruling A on [#33626](https://github.com/objectstack-ai/objectstack/issues/33626)'s Q2, record
+[`6889543194`](https://github.com/objectstack-ai/objectstack/issues/33626#issuecomment-6889543194); Q1, record
+[`6889549817`](https://github.com/objectstack-ai/objectstack/issues/33626#issuecomment-6889549817), keeps `driver-memory` serving in process). An
+analytics dimension through a lookup is refused `INVALID_QUERY` / 400 (the scope note on
+[#33876](https://github.com/objectstack-ai/objectstack/issues/33876), [`6917475155`](https://github.com/objectstack-ai/objectstack/issues/33876#issuecomment-6917475155), under Prime
+Directive 5). Each refusal names the driver and the two-step route, before any related read. D3's refusal envelope
+(`INTERNAL_ERROR` / 500) for a leaf any consumer composes is unchanged.
 **Decided by**: the maintainer, 「同意」 to the director seat's batch #312 item 2 (ruling
 [`6097072172`](https://github.com/objectstack-ai/objectstack/issues/22590#issuecomment-6097072172), 2026-10-10T11:34Z):
 **A is the end state, its first deliverable an ADR**; B (an unbounded `$in`) and a raised cap are ⛔ not taken. The
@@ -200,6 +213,17 @@ restriction".
   > refusal is excluded, because it would fail every `sys_user` read on a driver that does not compile it. So the
   > engine consults a driver declaration to choose between the compiled leaf and the exact-array floor before the call.
   > A declaration the engine consults is not the inert bit the 17.0.0 rationale removed.
+
+  > **Amendment note (2026-11-17, #33876).** For every consumer this bullet stands as written: its leaf still
+  > reaches a refusing driver and is refused there in this envelope. It no longer holds for two author-written
+  > conditions, where a 500 from inside the driver is the wrong answer because the author can rewrite them: a
+  > nested-relation condition beneath a single-valued relation on a read verb
+  > (`packages/objectql/src/relation-filter-lowering.ts#relationReadDriverRefusal`, which the nested-relation lowering
+  > and the engine's filter judge both call) and an analytics dimension through a lookup
+  > (`packages/objectql/src/relation-group-join.ts#relationGroupDriverRefusal`). For those the engine reads
+  > `DriverCapabilities.readableIdsLeaf` (`packages/objectql/src/relation-semi-join.ts#driverCompilesReadableIdsLeaf`)
+  > and refuses with a 400 before any read on a driver that does not declare it. The bit has readers in the same
+  > change, so it is not the inert bit the 17.0.0 rationale removed.
 - The leaf joins the per-driver conformance case-sets, so a driver that compiles it is measured and one that refuses
   is recorded as refusing.
 
@@ -344,6 +368,9 @@ change is #33696's, and by the ruling it lands only after this amendment merges.
   roughly 3–5k lines over 6–10 PRs across three lanes, by the ruling's own estimate, with no precedent in the tree.
 - **A deployment on a refusing driver** (`driver-mongodb`, until O3) reads the six objects as a loud 500, not a short
   list — the ruling's "refuse loudly"; a silent re-entry into the probe is the shape this record exists to remove.
+  On such a deployment, and on OData, a nested-relation `where` beneath a single-valued relation on a read verb and an
+  analytics dimension through a lookup answer a stable 400 before any read (amended 2026-11-17, #33876). Before, the
+  condition took the capped id read and the dimension read the related records by id.
 - **The bound-parameter ceiling moves, it does not vanish.** `getReadFilter`'s scope may itself carry pre-resolved id
   lists (ADR-0055's `rlsMembership`, record shares); they now bind inside the subquery. ADR-0055's known limit is
   unchanged, and O1 names the ceilings as unmeasured.

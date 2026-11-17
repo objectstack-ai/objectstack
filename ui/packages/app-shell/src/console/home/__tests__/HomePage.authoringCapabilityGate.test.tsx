@@ -238,6 +238,7 @@ const eePayload = (systemPermissions?: string[]): MePermissionsAuthenticatedResp
     tenantId: 'acme',
     positions: ['org_owner', 'everyone'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['organization_admin', 'member_default'],
     ...(systemPermissions ? { systemPermissions } : {}),
     objects: {},

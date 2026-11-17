@@ -674,8 +674,13 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
           <span className="text-foreground/80" data-stream-change="">{what}</span>
           <span aria-hidden>{' · '}</span>
           <span>{item.actor}</span>
-          <span aria-hidden>{' · '}</span>
-          <span>{formatTimestamp(item.createdAt, t, displayLocale)}</span>
+          {/* "· 3d ago" never breaks inside (objectstack#34614): the space
+              before it is the line's last break opportunity. */}
+          <span aria-hidden>{' '}</span>
+          <span className="whitespace-nowrap" data-stream-when="">
+            <span aria-hidden>{'· '}</span>
+            <span>{formatTimestamp(item.createdAt, t, displayLocale)}</span>
+          </span>
           {paired && (
             <span className="block text-foreground/70" data-stream-change-diff="">
               {changesText(paired)}
@@ -728,14 +733,17 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
           </div>
           {/* Content */}
           <div className="flex-1 min-w-0 pt-1">
-            <div className="flex items-center gap-2 mb-0.5">
+            {/* The row wraps between its pieces and the time is one
+                unbreakable piece (objectstack#34614): in a narrow drawer the
+                time moves to the next line instead of breaking per word. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
               <span className="text-sm font-medium">{item.actor}</span>
               {item.source && (
                 <span className="text-xs text-muted-foreground">
                   {t('detail.via', { source: item.source })}
                 </span>
               )}
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
                 {formatTimestamp(item.createdAt, t, displayLocale)}
               </span>
               {item.edited && (
@@ -860,9 +868,9 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             )}
           </div>
           <div className="flex-1 min-w-0 pt-1">
-            <div className="flex items-center gap-2 mb-0.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
               <span className="text-sm font-medium">{latest.actor}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground whitespace-nowrap" data-feed-when="">
                 {formatTimestamp(latest.createdAt, t, displayLocale)}
               </span>
               <span className="text-xs text-muted-foreground" data-testid="activity-fold-count">

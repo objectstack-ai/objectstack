@@ -11,6 +11,12 @@
  * sidebar carries none (`UnifiedSidebar` side: the sibling test
  * `LocalizedSidebarTrigger.appBar-12429.test.tsx`).
  *
+ * Below 768 px that slot changed with objectstack#34594 (the maintainer's
+ * direction on epic objectstack#34571): inside an app the menu is the bottom
+ * menu bar, whose 「More」 opens the drawer, so the slot goes back to the
+ * environment's home instead (the last describe). The describes above run at
+ * jsdom's 1024 px.
+ *
  * Harness: `AppHeader.appIdentity-12201.test.tsx`'s, with the trigger and the
  * workspace switcher as recorders. Layout is not measured; the responsive
  * classes and the DOM order are what the header controls, so they are what is
@@ -18,7 +24,7 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
@@ -171,6 +177,7 @@ const AUTHOR: MePermissionsAuthenticatedResponse = {
   tenantId: 'org_1',
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: [],
   systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
   objects: {},
@@ -221,6 +228,37 @@ describe('the app bar carries the one sidebar trigger at every width (objectui#1
 
   it('CONTROL — a platform surface (Home) has no sidebar and no trigger', () => {
     mountHome();
+    expect(screen.queryByTestId('sidebar-trigger-stub')).not.toBeInTheDocument();
+  });
+});
+
+describe('on a phone the left slot goes back to the environment home (objectstack#34594)', () => {
+  const setWidth = (width: number) =>
+    Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
+  afterEach(() => setWidth(1024));
+
+  it('at 375 px inside an app: a 44 px 「Back to home」 link to the home path, first in the slot, and no trigger', () => {
+    setWidth(375);
+    mountApp();
+    expect(screen.queryByTestId('sidebar-trigger-stub')).not.toBeInTheDocument();
+    const back = screen.getByTestId('app-bar-phone-home');
+    expect(back).toHaveAccessibleName('Back to home');
+    expect(back).toHaveAttribute('href', '/home');
+    expect(back.className.split(/\s+/)).toContain('size-11');
+    expect(back.parentElement!.firstElementChild).toBe(back);
+  });
+
+  it('CONTROL — at 768 px the slot holds the sidebar trigger, and no back link', () => {
+    setWidth(768);
+    mountApp();
+    expect(screen.getByTestId('sidebar-trigger-stub')).toBeInTheDocument();
+    expect(screen.queryByTestId('app-bar-phone-home')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL — at 375 px off an app (Home) neither is drawn', () => {
+    setWidth(375);
+    mountHome();
+    expect(screen.queryByTestId('app-bar-phone-home')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sidebar-trigger-stub')).not.toBeInTheDocument();
   });
 });
