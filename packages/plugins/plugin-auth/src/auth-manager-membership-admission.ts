@@ -85,19 +85,99 @@ export interface MembershipAdmissionHost {
   getMembershipPolicy: AuthManager['getMembershipPolicy'];
   hasPendingInvitationFor: AuthManager['hasPendingInvitationFor'];
   hasPresentedPendingInvitation: AuthManager['hasPresentedPendingInvitation'];
+  hasInvitationAdmissionInRequest: AuthManager['hasInvitationAdmissionInRequest'];
   isBootstrapCreation: AuthManager['isBootstrapCreation'];
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
+  isInvitationAdmissionInRequest: AuthManager['isInvitationAdmissionInRequest'];
   selfRegistrationSetResolvable: AuthManager['selfRegistrationSetResolvable'];
+  stageInvitationAdmission: AuthManager['stageInvitationAdmission'];
   stageOwnerVerifiedStamp: AuthManager['stageOwnerVerifiedStamp'];
   stageSelfRegistrationGrant: AuthManager['stageSelfRegistrationGrant'];
 }
 
-/** The body of `AuthManager#settleMembership`; the method's docblock there is its contract. */
-export async function settleMembership(this: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy'>, userId: unknown): Promise<ReconcileOutcome | undefined> {
+/**
+ * Under `invite_only`, a sign-up admitted by the invitation it PRESENTS is not
+ * bound into the deployment's organization while its address is unverified.
+ *
+ * The presented id is the admission ticket, and nothing more: the accept link
+ * and a copied link both carry it, so it proves nothing about the invited
+ * mailbox. Membership comes from accepting the invitation, which needs a
+ * verified address (`invitation-accept-verified-email.ts`) and writes the role
+ * the issuer chose, or from a platform administrator's Add Member.
+ *
+ * A policy-skip, not a bind deferred to the moment the address is verified:
+ *  - the invitation is the instrument of admission under this posture, and its
+ *    acceptance already writes the membership once the address is verified; a
+ *    second, role-less bind at verification would let a verified person who
+ *    never accepted (or who declined) join the organization by a route no
+ *    issuer chose;
+ *  - ADR-0093 D7 decides membership at creation and nowhere later; a bind
+ *    triggered by an identity update would be a new decision point on every
+ *    path that can write `email_verified` (the verification link, an
+ *    administrator's edit, a provider sign-in, a directory sync).
+ *
+ * Answers whether the user `userId` is such a sign-up, for the creation in the
+ * request `ctx` (the endpoint context better-auth hands the admission gate
+ * and both settle seams of one creation; `tryGetCurrentAuthEndpointContext()`
+ * when a seam hands none). The admission is staged on that request
+ * (`stageInvitationAdmission`), so it never reaches another creation of the
+ * same address in another request, and every creation this request did not
+ * admit by a presented invitation pays one in-memory lookup. A user row that
+ * cannot be read while this request staged an admission answers yes: the
+ * settle then binds nothing, the direction that keeps the rule.
+ */
+async function invitationSignUpAwaitsVerification(
+  this: Pick<MembershipAdmissionHost, 'config' | 'hasInvitationAdmissionInRequest' | 'isInvitationAdmissionInRequest'>,
+  userId: string,
+  ctx: unknown,
+): Promise<boolean> {
+  if (!this.hasInvitationAdmissionInRequest(ctx)) return false;
+  const engine = this.config.dataEngine;
+  if (!engine) return true;
   try {
+    const reader = withSystemReadContext(engine) as unknown as {
+      find(object: string, query: Record<string, unknown>): Promise<unknown>;
+    };
+    const rows = await reader.find('sys_user', { where: { id: userId }, fields: ['id', 'email', 'email_verified'], limit: 1 });
+    const row = (Array.isArray(rows) ? rows[0] : undefined) as { email?: unknown; email_verified?: unknown } | undefined;
+    if (!row || typeof row.email !== 'string') return true;
+    return this.isInvitationAdmissionInRequest(ctx, row.email) && !row.email_verified;
+  } catch {
+    return true;
+  }
+}
+
+/** The request a settle seam runs in: the context it was handed, else better-auth's current one. */
+async function settleRequestContext(ctx: unknown): Promise<unknown> {
+  if (ctx && typeof ctx === 'object') return ctx;
+  try {
+    const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
+    return tryGetCurrentAuthEndpointContext();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The body of `AuthManager#settleMembership`; the method's docblock there is its contract. */
+export async function settleMembership(
+  this: Pick<MembershipAdmissionHost, 'config' | 'getMembershipPolicy' | 'hasInvitationAdmissionInRequest' | 'isInvitationAdmissionInRequest'>,
+  userId: unknown,
+  ctx?: unknown,
+): Promise<ReconcileOutcome | undefined> {
+  try {
+    const id = typeof userId === 'string' && userId ? userId : undefined;
+    // A sign-up admitted by a presented invitation is not bound while its
+    // address is unverified ({@link invitationSignUpAwaitsVerification}).
+    if (id && (await invitationSignUpAwaitsVerification.call(this, id, await settleRequestContext(ctx)))) {
+      this.config.logger?.info?.(
+        '[membership] not bound: a sign-up admitted by the invitation it presents joins by accepting the invitation once its address is verified',
+        { userId: id },
+      );
+      return 'policy-skip';
+    }
     const result = await reconcileMembership(
       this.config.dataEngine,
-      typeof userId === 'string' && userId ? userId : undefined,
+      id,
       {
         // #5152 — read through the accessor, not `this.config` directly: it is
         // the single source the backfill path reads too.
@@ -120,7 +200,7 @@ export async function settleMembership(this: Pick<MembershipAdmissionHost, 'conf
 
 /** The body of `AuthManager#validateAudienceAdmission`; the method's docblock there is its contract. */
 export async function validateAudienceAdmission(
-  this: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'>,
+  this: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageInvitationAdmission' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'>,
   data: {
     user?: Record<string, unknown>;
     source?: { action?: string; method?: string; oauth?: { providerId?: string }; sso?: { providerId?: string } };
@@ -168,6 +248,7 @@ export async function validateAudienceAdmission(
         : undefined;
     let isBootstrap = false;
     let hasPendingInvitation = false;
+    let admittedByPresentedInvitation = false;
     if (creationClass === 'self-serve' || (ssoProvider !== undefined && !ssoProvider.allowJit)) {
       // Only the gated creations pay for the probes.
       isBootstrap = await this.isBootstrapCreation();
@@ -183,6 +264,7 @@ export async function validateAudienceAdmission(
         });
         if (proof === 'presented') {
           hasPendingInvitation = await this.hasPresentedPendingInvitation(presentedInvitationId(ctx), email);
+          admittedByPresentedInvitation = hasPendingInvitation;
         } else if (proof === 'address') {
           hasPendingInvitation = await this.hasPendingInvitationFor(email);
         }
@@ -230,6 +312,11 @@ export async function validateAudienceAdmission(
       shouldStampOwnerVerifiedAtCreation({ email, creationClass, isBootstrap })
     ) {
       this.stageOwnerVerifiedStamp(email);
+    }
+    // Admitted by the invitation it presents: the membership settle does not
+    // bind this sign-up while its address is unverified (`settleMembership`).
+    if (email && admittedByPresentedInvitation) {
+      this.stageInvitationAdmission(ctx, email);
     }
     if (verdict.grantPermissionSet) {
       const setName = audience.selfRegistrationPermissionSet;

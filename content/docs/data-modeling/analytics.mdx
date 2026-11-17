@@ -130,7 +130,11 @@ record (time to resolve, time to first response, cycle time) with `duration`
 in place of `field`:
 
 ```ts
-{ name: 'avg_hours_to_resolve', aggregate: 'avg', duration: { from: 'created_at', to: 'resolved_at', unit: 'hours' } }
+{
+  name: 'avg_hours_to_resolve', aggregate: 'avg',
+  duration: { from: 'created_at', to: 'resolved_at', unit: 'hours' },
+  synonyms: ['resolution time', 'time to resolve'],
+}
 ```
 
 - `from` and `to` name two `datetime` fields of the dataset's own object, by

@@ -523,12 +523,29 @@ export const COMPOUND_ANCHOR_LEDGER = [
  * one `Thread session:` line against the reader that lists a card thread on
  * its seat's roster — the same population claim, on a third governed file,
  * named on the same `self-test-reads` line.
+ *
+ * ## The eighth row: a generator whose INPUT is a published skill
+ *
+ * `scripts/gen-mcp-ask-skill.mjs` renders the mcp package's committed
+ * `ask-skill.generated.ts` from the published ask-data skill, so the governed
+ * file is its input, not a fixture — the fourth row's shape. It spells that
+ * path in its module body and has no self-test, so `declared` is false: there
+ * is no `self-test-reads` line for it to carry. No family runs it, so the
+ * census's DERIVED case has no family to place it under; what holds the
+ * module equal to the skill is the mcp package's single-source pin test,
+ * which reads the skill and is re-run by an edit to it through that
+ * package's cross-package test inputs, not by a gate family.
  */
 export const GOVERNED_READ_FLOOR = Object.freeze([
   Object.freeze({ script: 'scripts/check-commit-card-trailers.mjs', file: '.claude/agents/os-dev.md', declared: false }),
   Object.freeze({
     script: 'scripts/check-skill-top-level-keys.mjs',
     file: 'skills/objectstack-platform/SKILL.md',
+    declared: false,
+  }),
+  Object.freeze({
+    script: 'scripts/gen-mcp-ask-skill.mjs',
+    file: 'skills/objectstack-ask/SKILL.md',
     declared: false,
   }),
   Object.freeze({

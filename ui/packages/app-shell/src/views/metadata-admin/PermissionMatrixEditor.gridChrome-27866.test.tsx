@@ -16,6 +16,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -88,8 +92,11 @@ async function renderPage(studio = false) {
   await screen.findByRole('button', { name: objectButton('a_project') }, { timeout: 5000 });
 }
 
-/** An object row's expand button: its label, then its API name. */
-const objectButton = (name: string) => new RegExp(`^${name === 'a_project' ? 'Project' : 'Task'}\\W*${name}\\W*$`);
+/**
+ * An object row's expand button: its label, then its API name — on the Studio
+ * Objects tab the label alone, the API name its tooltip (objectstack#34795).
+ */
+const objectButton = (name: string) => new RegExp(`^${name === 'a_project' ? 'Project' : 'Task'}(\\W*${name}\\W*)?$`);
 
 async function expand() {
   fireEvent.click(screen.getByRole('button', { name: objectButton('a_project') }));

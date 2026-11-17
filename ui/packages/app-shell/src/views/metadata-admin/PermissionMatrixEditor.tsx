@@ -105,7 +105,6 @@ import {
 import { useDraftAutoSave, type DraftSend } from '../studio-design/useDraftAutoSave.js';
 // objectui#12456 — the Studio Access pillar's presentation draws the shared item header.
 import { StudioItemHeader, StudioTab } from '../studio-design/StudioItemHeader.js';
-import { STUDIO_KIND_CHIP } from '../studio-design/studio-tokens.js';
 import type { CustomizationMarkKind } from '../studio-design/customizationMarks.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import {
@@ -535,6 +534,11 @@ export interface PermissionStudioChrome {
   chips?: React.ReactNode;
   /** Before History in the header's actions (the pillar's Explain access). */
   actions?: React.ReactNode;
+  /**
+   * objectstack#34795 — the open app's name. The header's title reads
+   * "app · set label"; without it, the set's label alone.
+   */
+  appLabel?: string;
   /**
    * objectstack#32774 — told, for the set `name` this editor shows, the
    * package the clone door must name to copy it (`holdingPackage` of the
@@ -2310,26 +2314,35 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     const chipButton =
       'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground';
     const facetTab = chrome.tab === 'rls' || chrome.tab === 'tabs' || chrome.tab === 'admin' ? chrome.tab : null;
+    // objectstack#34795 — the title is "app · set label", in the title row
+    // alone, so it is not cut: the set's machine name is the title's tooltip,
+    // and the provenance, default and lock labels are the line under it.
+    const setLabel = headerLabel || name;
+    const studioTitle = chrome.appLabel ? `${chrome.appLabel} · ${setLabel}` : setLabel;
     return (
       <div className="flex h-full flex-col">
         <StudioItemHeader
           testId="access-item-header"
           leading={chrome.leading}
           icon={Shield}
-          title={headerLabel || name}
-          apiName={name}
-          chips={
-            <>
-              {/* The provenance chip in the artboard's kind-chip look; same
-                  test id and the same answer as the page's badge. */}
-              <span className={STUDIO_KIND_CHIP} data-testid="perm-provenance-badge">
+          title={studioTitle}
+          titleProps={{ title: name, 'data-testid': 'perm-studio-title' }}
+          note={
+            <span className="inline-flex items-center gap-1.5" data-testid="perm-studio-title-note">
+              {/* Same test id and the same answer as the page's badge. */}
+              <span data-testid="perm-provenance-badge">
                 {shippedByPackage ? t('perm.badge.package') : t('perm.badge.custom')}
               </span>
-              {!!draft.isDefault && <span className={STUDIO_KIND_CHIP}>{t('perm.badge.default')}</span>}
+              {!!draft.isDefault && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>{t('perm.badge.default')}</span>
+                </>
+              )}
               {/* A host-locked package says so in the pillar's note; the
                   other gates (type, artifact, wall) keep their own badge. */}
               {!readOnly && lockBadgeEl}
-            </>
+            </span>
           }
           meta={meta}
           actions={
@@ -2444,11 +2457,6 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                   onOpenOwd={onOpenOwd}
                 />
               </MatrixScrollPane>
-              {writable && (
-                <p className="shrink-0 border-t px-6 py-2.5 text-xs text-muted-foreground">
-                  {t('engine.studio.access.bulkHint')}
-                </p>
-              )}
             </div>
             <div hidden={chrome.tab !== 'capabilities'} data-testid="perm-tabpanel-capabilities" className="min-h-0 flex-1 overflow-auto">
               {capabilitiesEl}
@@ -2719,6 +2727,17 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
  */
 const STICKY_OBJECT_CELL =
   'sticky left-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:hidden after:w-px after:bg-border group-data-[scrolled-x=true]/matrix:after:block';
+
+/**
+ * objectstack#34795 — the Studio matrix's bulk column, header and rows alike:
+ * pinned to the right edge of the scroll pane, so a row's "全选 · 只读 · 清空"
+ * stay in view when the matrix is wider than the pane. Its left edge is drawn
+ * by a pseudo-element, because a collapsed border does not travel with a
+ * sticky cell. A row tint is laid on as a background image, as on the Object
+ * column.
+ */
+const STICKY_BULK_CELL =
+  'sticky right-0 bg-background before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-border';
 
 /* ────────────────────────────────────────────────────────────────── */
 /* Subcomponent: PermissionTable                                      */
@@ -3099,7 +3118,7 @@ function StudioObjectMatrix({
               {t(s.labelKey)}
             </th>
           ))}
-          <th className="w-56 border-l px-3 font-medium">
+          <th className={cn(STICKY_BULK_CELL, 'w-56 px-3 font-medium z-[1] bg-sidebar')}>
             <span className="sr-only">{t('perm.col.bulk')}</span>
           </th>
         </tr>
@@ -3183,18 +3202,21 @@ function StudioObjectRow({
   onFieldWhenLint: (objectName: string, fieldName: string, issues: CelLintIssue[]) => void;
   onOpenOwd?: (objectName: string) => void;
 }) {
-  // The bulk strip draws on the row under the pointer, and on the row that
-  // holds keyboard focus — read from the focus events themselves, so a Tab
-  // into the row's first checkbox brings the strip into the tab order.
+  // The row under the pointer, and the row that holds keyboard focus, is
+  // highlighted — read from the focus events themselves. objectstack#34795:
+  // the bulk strip no longer waits for either; every row draws it.
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
   const active = hovered || focused;
   const perm = cell.perm;
+  // objectstack#34795 — read as "All · Read only · Clear", the three the card
+  // names, then the CRUD arm as the fourth. Each still calls `onBulkSet` with
+  // the action it called before.
   const bulk: Array<{ action: 'read' | 'crud' | 'all' | 'none'; key: string }> = [
-    { action: 'read', key: 'perm.bulk.read' },
-    { action: 'crud', key: 'perm.bulk.crud' },
     { action: 'all', key: 'perm.bulk.all' },
+    { action: 'read', key: 'perm.bulk.read' },
     { action: 'none', key: 'perm.bulk.none' },
+    { action: 'crud', key: 'perm.bulk.crud' },
   ];
   return (
     <>
@@ -3221,6 +3243,10 @@ function StudioObjectRow({
             type="button"
             onClick={() => onToggleExpand(o.name)}
             aria-expanded={open}
+            // objectstack#34795 — the row shows the object's label alone; its
+            // machine name is the tooltip.
+            title={o.label ? o.name : undefined}
+            data-testid={`perm-object-name-${o.name}`}
             className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-left"
           >
             {/* The chevron opens the object's field-level R/W, as on the page. */}
@@ -3230,7 +3256,6 @@ function StudioObjectRow({
               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             )}
             <span className="font-medium text-foreground">{o.label ?? o.name}</span>
-            {o.label && <span className="font-mono text-[11px] text-muted-foreground">{o.name}</span>}
           </button>
           {o.accessDefault === 'private' && (
             <Badge
@@ -3251,7 +3276,7 @@ function StudioObjectRow({
         <td className="px-3 py-1 align-middle">
           <span
             className={cn(
-              'inline-flex h-[22px] items-center rounded px-1.5 text-[11px] font-medium',
+              'inline-flex h-[22px] items-center whitespace-nowrap rounded px-1.5 text-[11px] font-medium',
               owdChipTone(o.owd),
               onOpenOwd && 'cursor-pointer hover:ring-1 hover:ring-border focus:outline-none focus-visible:ring-1 focus-visible:ring-primary',
             )}
@@ -3301,23 +3326,33 @@ function StudioObjectRow({
             />
           </td>
         ))}
-        <td className="border-l px-3 py-1 align-middle">
-          {active && (
-            <span className="flex items-center gap-1" data-testid={`perm-bulk-${o.name}`}>
-              {bulk.map((b) => (
+        <td
+          className={cn(
+            STICKY_BULK_CELL,
+            'px-3 py-1 align-middle z-[1]',
+            active && 'bg-gradient-to-r from-primary/5 to-primary/5',
+          )}
+        >
+          <span className="flex items-center gap-1 whitespace-nowrap" data-testid={`perm-bulk-${o.name}`}>
+            {bulk.map((b, i) => (
+              <React.Fragment key={b.action}>
+                {i > 0 && (
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    ·
+                  </span>
+                )}
                 <button
-                  key={b.action}
                   type="button"
                   disabled={!writable}
                   onClick={() => onBulkSet(o.name, b.action)}
                   title={b.action === 'all' ? t('perm.bulk.allTip') : undefined}
-                  className="inline-flex h-6 items-center rounded border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-6 items-center rounded px-1 text-[12px] font-medium text-primary hover:bg-muted hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline disabled:hover:bg-transparent"
                 >
                   {t(b.key)}
                 </button>
-              ))}
-            </span>
-          )}
+              </React.Fragment>
+            ))}
+          </span>
         </td>
       </tr>
       {open && (

@@ -586,21 +586,22 @@ contradicts it, and correct it here when it does.
      unexpired and addressed to that email
      (`packages/plugins/plugin-auth/src/presented-invitation.ts`); the address alone answers
      the same 403.
-     ⚠️ **The sign-up does not apply the invitation's role.** It binds the new user to the
-     Default Organization as `member` whatever role was invited, and leaves the invitation
-     `pending` (`reconcileMembership` in
-     `packages/plugins/plugin-auth/src/reconcile-membership.ts` writes `role: 'member'`). For
-     any other role (`admin`, `owner`), the persona — signed in as itself — then sends
-     `POST /api/v1/auth/organization/accept-invitation` with `{"invitationId": "ID"}` (the
-     `id` the invite-member call answered, or the row its own
-     `GET /api/v1/auth/organization/list-user-invitations` lists). Acceptance writes the
-     invitation's role onto that membership and the invitation reads `accepted`
-     (`adoptExistingMembership` in `packages/plugins/plugin-auth/src/adopt-membership.ts`,
-     which never lowers a grade; pinned by `accept-invitation-adopt-membership.test.ts`
-     beside it, 6 passed at `bfc1539fe0`). The invitee's email need not be verified: the
-     deployment declares `requireEmailVerificationOnInvitation: false`. QA run #24616 met it:
-     an `admin` invitation signed up as `member`, and the persona held `org_admin` only after
-     the accept. **Check:** read the persona's `sys_member` row (`role`) before scoring a
+     ⚠️ **The sign-up joins no organization.** A sign-up admitted by the invitation it
+     presents is not bound to the Default Organization while its address is unverified
+     (`settleMembership` in `packages/plugins/plugin-auth/src/auth-manager-membership-admission.ts`),
+     and the invitation stays `pending`. The persona joins by accepting it, and accepting,
+     declining and listing need a verified address on every deployment
+     (`packages/plugins/plugin-auth/src/invitation-accept-verified-email.ts`): an unverified
+     persona's accept and decline answer `403
+     EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`, its
+     `list-user-invitations` answers `403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION`, and
+     `get-invitation` answers. So verify the persona first through the verification mail
+     (`POST /api/v1/auth/send-verification-email`, then open its link; the mail transport has to
+     be live), then, signed in as itself, send
+     `POST /api/v1/auth/organization/accept-invitation` with `{"invitationId": "ID"}` (the `id`
+     the invite-member call answered). Acceptance writes the membership with the invitation's
+     role and the invitation reads `accepted`. Without a live mail transport this door mints no
+     member: use door 2. **Check:** read the persona's `sys_member` row (`role`) before scoring a
      role-gated clause, never the invitation you sent.
   2. **Admin create.** `POST /api/v1/auth/admin/create-user`, which answers
      `mustChangePassword: true` by default

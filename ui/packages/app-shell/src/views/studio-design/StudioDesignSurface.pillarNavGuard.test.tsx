@@ -32,6 +32,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -210,11 +212,11 @@ async function clickAccessInNav() {
 const inSetHeader = () => within(screen.getByTestId('access-item-header'));
 // The header is re-queried on each retry: the pillar's own header stands in
 // while no set is open, and the set's header replaces it once the page loads.
-const findInSetHeader = (text: string) => waitFor(() => inSetHeader().getByText(text));
+const findInSetHeader = (name: string) => waitFor(() => inSetHeader().getByTitle(name));
 
 /** Swap the main panel to the (real) OWD overview and edit a row. */
 async function dirtyTheOwdOverview() {
-  fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
   await screen.findByTestId('owd-internal-a_account');
   const owdPrivate = t('engine.studio.settings.sharingPrivate', 'en-US');
   fireEvent.keyDown(screen.getByTestId('owd-internal-a_account'), { key: 'ArrowDown' });
@@ -246,7 +248,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Interfaces' }));
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     // Confirming the same switch discards and lands on the Interfaces pillar.
@@ -267,7 +269,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     await renderSurfaceOnAccess();
     // Swap the main panel to the (real) OWD overview and edit a row so the
     // panel's dirty report crosses AccessPillar into the surface guard.
-    fireEvent.click(screen.getByRole('button', { name: 'Record sharing (OWD)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Who can see which records' }));
     await screen.findByTestId('owd-internal-a_account');
     // The dial is the shared Select (objectui#11865): open it and pick, as a user does.
     const owdPrivate = t('engine.studio.settings.sharingPrivate', 'en-US');
@@ -309,7 +311,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     await clickAccessInNav();
 
     expect(confirmSpy).not.toHaveBeenCalled();
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
   });
 
@@ -320,7 +322,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     confirmSpy.mockReturnValueOnce(false);
     fireEvent.click(screen.getByTitle('Studio home'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     confirmSpy.mockReturnValueOnce(true);
@@ -339,7 +341,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     confirmSpy.mockReturnValueOnce(false);
     fireEvent.click(other);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     // Confirming jumps to the other package (header re-labels; matrix reloads).

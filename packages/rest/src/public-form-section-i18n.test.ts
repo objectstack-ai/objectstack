@@ -398,3 +398,48 @@ describe('GET /forms/:slug — a section entry\'s label, placeholder and helpTex
         });
     });
 });
+
+// ─── a dependent package's fieldPatches text ────────────────────────────────
+
+describe('[#33952] GET /forms/:slug — a field label a code package\'s fieldPatches wrote reads that package\'s own translations', () => {
+    // The served object carries a dependent's patch of `subject`; the packaged
+    // base is the owner's; the protocol answers which package wrote the patch
+    // and that package's own zh-CN. The deployment catalog's `subject` row
+    // (`主题`) is the owner's translation of the text the patch replaced.
+    const patchedTicket = { ...ticketObject, fields: { ...ticketObject.fields, subject: { type: 'text', label: 'Topic' } } };
+    function buildPatched(withAccessors: boolean) {
+        const protocol: any = {
+            getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
+            getMetaTypes: vi.fn().mockResolvedValue([]),
+            getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+                if (type === 'view') return [formView()];
+                if (type === 'object') return [patchedTicket];
+                return [];
+            }),
+            getPackagedObjectBase: vi.fn((name: string) => (name === 'ticket' ? ticketObject : undefined)),
+            ...(withAccessors
+                ? {
+                    getPackagedFieldPatchBases: vi.fn((name: string) => (name === 'ticket'
+                        ? [{ packageId: 'com.example.helpdesk-addon', base: patchedTicket }]
+                        : [])),
+                    getPackageTranslationBundle: vi.fn(async (id: string) => (id === 'com.example.helpdesk-addon'
+                        ? { 'zh-CN': { objects: { ticket: { fields: { subject: { label: '话题' } } } } } }
+                        : undefined)),
+                }
+                : {}),
+        };
+        return routeOver(protocol);
+    }
+
+    it('zh-CN: the patched label is the patching package\'s translation; the unpatched labels read the catalog', async () => {
+        const res = await buildPatched(true)('zh-CN');
+        expect(res.body.objectSchema.fields.subject.label).toBe('话题');
+        expect(res.body.objectSchema.fields.email.label).toBe('邮箱');
+    });
+
+    it('CONTROL — without the protocol\'s patch accessors the patched label keeps its text, as before', async () => {
+        const res = await buildPatched(false)('zh-CN');
+        expect(res.body.objectSchema.fields.subject.label).toBe('Topic');
+        expect(res.body.objectSchema.fields.email.label).toBe('邮箱');
+    });
+});

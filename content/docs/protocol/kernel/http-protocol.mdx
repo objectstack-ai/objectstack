@@ -583,12 +583,16 @@ A single-record read returns a `GetDataResponse`: the `object` name, the record
 **Not Found (HTTP 404):**
 
 REST error responses use a flat envelope: a top-level `error` message string and
-a string `code`, plus optional context fields (`object`, per-field `fields`):
+a string `code`, plus optional context fields (`object`, per-field `fields`).
+`userMessage` is the sentence for the end user, in the caller's language (the
+request locale, else the workspace default, else English); it reads the same
+whether the row is missing or hidden from the caller:
 ```json
 {
   "error": "Record acc_999 not found in account",
   "code": "RECORD_NOT_FOUND",
-  "object": "account"
+  "object": "account",
+  "userMessage": "This record does not exist, or you do not have access to it."
 }
 ```
 

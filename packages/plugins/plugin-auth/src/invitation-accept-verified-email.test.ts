@@ -1,15 +1,16 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// [#34272] `POST /organization/accept-invitation` refuses an UNVERIFIED
-// session while this deployment delivers mail, and only then.
+// `POST /organization/accept-invitation` and `POST /organization/reject-invitation`
+// refuse a session whose address is not verified, on every deployment;
+// `GET /organization/get-invitation` stays open.
 //
 // These run the REAL better-auth pipeline through a REAL `AuthManager` (the
 // organization plugin, the audience-gate invitation carve-out, the membership
 // reconciler, the ObjectQL adapter), the same shape as
-// `list-user-invitations-verification.test.ts`. "Mail is live" is the one
-// reader the rule asks, `IEmailService.isConfigured()`, swapped between
-// requests: sign-ups run with mail off so every fixture account starts
-// UNVERIFIED (asserted), then each leg sets the deployment it measures.
+// `list-user-invitations-verification.test.ts`. Every fixture account starts
+// UNVERIFIED (asserted). The door-level matrix over account kinds and mail
+// transport states lives in `invitation-acceptance-verified-address.test.ts`;
+// this file pins the hooks' order, the bearer path and the function.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AuthManager } from './auth-manager';
@@ -18,16 +19,16 @@ import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import {
   ACCEPT_INVITATION_PATH,
   EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_INVITATION,
-  refuseUnverifiedAcceptWhileMailIsLive,
+  REJECT_INVITATION_PATH,
+  refuseUnverifiedInvitationAnswer,
 } from './invitation-accept-verified-email';
 import { ACCEPT_INVITATION_ONE_STEP_PATH } from './invitation-mailbox-proof';
-import { LIST_USER_INVITATIONS_PATH } from './list-user-invitations-verification';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
 const DEFAULT_ORG = 'org_default';
 const PARTNER_ORG = 'org_partner';
-const PASSWORD = 'S3cure!Passw0rd-34272';
+const PASSWORD = 'S3cure!Passw0rd-verified-answer';
 const REFUSAL_CODE = 'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION';
 
 type MemoryEngine = ReturnType<typeof createMemoryEngine>;
@@ -98,7 +99,9 @@ const invitationRow = (engine: MemoryEngine, id: string) =>
 /**
  * An owner of the partner organization, and invitations to b@ and c@ issued
  * BEFORE they sign up (`invite-member` refuses an address that is already a
- * member). Every account is created with mail NOT live, so unverified.
+ * member). Every account is created unverified. Each invitee's address is
+ * marked verified where a case says so, as completing the verification mail
+ * does.
  */
 const boot = async () => {
   const engine = createMemoryEngine();
@@ -154,8 +157,13 @@ const boot = async () => {
 
   const accept = (invitationId: string, as: { cookie?: string; bearer?: string }) =>
     request(manager, 'POST', ACCEPT_INVITATION_PATH, { body: { invitationId }, ...as });
+  const decline = (invitationId: string, as: { cookie?: string; bearer?: string }) =>
+    request(manager, 'POST', REJECT_INVITATION_PATH, { body: { invitationId }, ...as });
+  const verify = (email: string) => {
+    userRow(engine, email)!.email_verified = true;
+  };
 
-  return { engine, manager, mail, owner, b, c, bInvitation, cInvitation, invite, accept };
+  return { engine, manager, mail, owner, b, c, bInvitation, cInvitation, invite, accept, decline, verify };
 };
 
 /** The refusal's status and body, read once. */
@@ -176,31 +184,18 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('#34272 — the refusal is the vendor’s own', () => {
+describe('the refusal is the vendor’s own', () => {
   it('the local fallback equals better-auth’s own $ERROR_CODES entry (a vendor rename turns this red)', async () => {
     const { organization } = await import('better-auth/plugins/organization');
     const plugin: any = organization({});
     const vendor = plugin.$ERROR_CODES?.[REFUSAL_CODE];
     expect({ code: vendor?.code, message: vendor?.message }).toEqual(EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_INVITATION);
   });
-
-  it('PREMISE (measured): the vendor’s own accept route still lets an unverified session through with the option declared false', async () => {
-    // The vendor gate this module stands beside is the declared option; with
-    // it `false` the vendor never asks. If an upstream release starts asking
-    // on its own, this leg and the no-mail legs below disagree and say so.
-    const { b, bInvitation, accept, engine } = await boot();
-    const res = await answerOf(await accept(bInvitation.id, { cookie: b.cookie }));
-    expect(res.status, res.text).toBe(200);
-    expect(membersOf(engine, PARTNER_ORG, b.userId)).toHaveLength(1);
-  });
 });
 
-describe('#34272 — while mail is live, an unverified session may not accept', () => {
-  it('the reported hole: an unverified invitee is refused 403 with the vendor’s code, and nothing is written', async () => {
-    const { engine, manager, mail, b, bInvitation, accept } = await boot();
-    manager.setEmailService(mail.service as never);
-    mail.state.mode = 'live';
-
+describe('an unverified session may neither accept nor decline an invitation, and may read it', () => {
+  it('accept: refused 403 with the vendor’s code, and nothing is written', async () => {
+    const { engine, b, bInvitation, accept } = await boot();
     const res = await answerOf(await accept(bInvitation.id, { cookie: b.cookie }));
     expect(res.status, res.text).toBe(403);
     expect(res.body).toMatchObject(EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_INVITATION);
@@ -208,64 +203,58 @@ describe('#34272 — while mail is live, an unverified session may not accept', 
     expect(invitationRow(engine, bInvitation.id)?.status).toBe('pending');
   });
 
-  it('a bearer-token session is refused alike', async () => {
-    const { engine, manager, mail, b, bInvitation, accept } = await boot();
-    expect(b.bearer, 'sign-up handed out no bearer token').toBeTruthy();
-    manager.setEmailService(mail.service as never);
-    mail.state.mode = 'live';
-
-    const res = await answerOf(await accept(bInvitation.id, { bearer: b.bearer }));
+  it('decline: refused 403 with the vendor’s code, and the invitation stays pending', async () => {
+    const { engine, b, bInvitation, decline } = await boot();
+    const res = await answerOf(await decline(bInvitation.id, { cookie: b.cookie }));
     expect(res.status, res.text).toBe(403);
-    expect(res.body?.code).toBe(REFUSAL_CODE);
-    expect(membersOf(engine, PARTNER_ORG, b.userId)).toHaveLength(0);
+    expect(res.body).toMatchObject(EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_INVITATION);
+    expect(invitationRow(engine, bInvitation.id)?.status).toBe('pending');
   });
 
-  it('once the address is verified, the same invitation is accepted', async () => {
-    const { engine, manager, mail, b, bInvitation, accept } = await boot();
-    manager.setEmailService(mail.service as never);
-    mail.state.mode = 'live';
+  it('a bearer-token session is refused alike at accept and decline', async () => {
+    const { engine, b, bInvitation, accept, decline } = await boot();
+    expect(b.bearer, 'sign-up handed out no bearer token').toBeTruthy();
+    for (const answer of [accept, decline]) {
+      const res = await answerOf(await answer(bInvitation.id, { bearer: b.bearer }));
+      expect(res.status, res.text).toBe(403);
+      expect(res.body?.code).toBe(REFUSAL_CODE);
+    }
+    expect(membersOf(engine, PARTNER_ORG, b.userId)).toHaveLength(0);
+    expect(invitationRow(engine, bInvitation.id)?.status).toBe('pending');
+  });
+
+  it('get-invitation stays open to the unverified recipient', async () => {
+    const { manager, b, bInvitation } = await boot();
+    const got = await request(manager, 'GET', `/organization/get-invitation?id=${bInvitation.id}`, { cookie: b.cookie });
+    expect(got.status, await got.clone().text()).toBe(200);
+    expect(((await got.json()) as { id?: unknown }).id).toBe(bInvitation.id);
+  });
+
+  it('ORDER PIN: a session that is not the recipient still gets the vendor’s recipient refusal at accept and decline, not this one', async () => {
+    const { c, bInvitation, accept, decline } = await boot();
+    for (const answer of [accept, decline]) {
+      const res = await answerOf(await answer(bInvitation.id, { cookie: c.cookie }));
+      expect(res.status, res.text).toBe(403);
+      expect(res.body?.code).toBe('YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION');
+    }
+  });
+
+  it('CONTROL: once the address is verified, the same session accepts', async () => {
+    const { engine, b, bInvitation, accept, verify } = await boot();
     expect((await accept(bInvitation.id, { cookie: b.cookie })).status).toBe(403);
-
-    userRow(engine, 'b@example.com')!.email_verified = true;
-    // A fresh sign-in, as after following the verification link.
-    const signIn = await request(manager, 'POST', '/sign-in/email', {
-      body: { email: 'b@example.com', password: PASSWORD },
-    });
-    expect(signIn.status, await signIn.clone().text()).toBe(200);
-
-    const res = await answerOf(await accept(bInvitation.id, { cookie: cookieFrom(signIn) }));
+    verify('b@example.com');
+    const res = await answerOf(await accept(bInvitation.id, { cookie: b.cookie }));
     expect(res.status, res.text).toBe(200);
     expect(membersOf(engine, PARTNER_ORG, b.userId)).toHaveLength(1);
     expect(invitationRow(engine, bInvitation.id)?.status).toBe('accepted');
   });
 
-  it('ORDER PIN: a session that is not the recipient still gets the vendor’s recipient refusal, not this one', async () => {
-    const { manager, mail, c, bInvitation, accept } = await boot();
-    manager.setEmailService(mail.service as never);
-    mail.state.mode = 'live';
-
-    const res = await answerOf(await accept(bInvitation.id, { cookie: c.cookie }));
-    expect(res.status, res.text).toBe(403);
-    expect(res.body?.code).toBe('YOU_ARE_NOT_THE_RECIPIENT_OF_THE_INVITATION');
-  });
-
-  it('ONLY ACCEPT: the same unverified invitee still reads, lists and declines', async () => {
-    const { engine, manager, mail, b, bInvitation } = await boot();
-    manager.setEmailService(mail.service as never);
-    mail.state.mode = 'live';
-
-    const got = await request(manager, 'GET', `/organization/get-invitation?id=${bInvitation.id}`, { cookie: b.cookie });
-    expect(got.status, await got.clone().text()).toBe(200);
-
-    const listed = await request(manager, 'GET', LIST_USER_INVITATIONS_PATH, { cookie: b.cookie });
-    expect(listed.status, await listed.clone().text()).toBe(200);
-    expect(((await listed.json()) as any[]).map((i) => i.id)).toContain(bInvitation.id);
-
-    const rejected = await request(manager, 'POST', '/organization/reject-invitation', {
-      body: { invitationId: bInvitation.id },
-      cookie: b.cookie,
-    });
-    expect(rejected.status, await rejected.clone().text()).toBe(200);
+  it('CONTROL: once the address is verified, the same session declines', async () => {
+    const { engine, b, bInvitation, decline, verify } = await boot();
+    expect((await decline(bInvitation.id, { cookie: b.cookie })).status).toBe(403);
+    verify('b@example.com');
+    const res = await answerOf(await decline(bInvitation.id, { cookie: b.cookie }));
+    expect(res.status, res.text).toBe(200);
     expect(invitationRow(engine, bInvitation.id)?.status).toBe('rejected');
   });
 
@@ -295,61 +284,18 @@ describe('#34272 — while mail is live, an unverified session may not accept', 
   });
 });
 
-describe('#34272 — while mail is not live, accept is unchanged', () => {
-  it('no email service at all: the unverified invitee accepts', async () => {
-    const { engine, b, bInvitation, accept } = await boot();
-    const res = await answerOf(await accept(bInvitation.id, { cookie: b.cookie }));
-    expect(res.status, res.text).toBe(200);
-    expect(membersOf(engine, PARTNER_ORG, b.userId)).toHaveLength(1);
+describe('refuseUnverifiedInvitationAnswer', () => {
+  it('a verified user passes', async () => {
+    await expect(refuseUnverifiedInvitationAnswer({ emailVerified: true })).resolves.toBeUndefined();
   });
 
-  it('a log transport (isConfigured() false): the unverified invitee accepts', async () => {
-    const { engine, manager, mail, b, bInvitation, accept } = await boot();
-    manager.setEmailService(mail.service as never);
-    mail.state.mode = 'log';
-    const res = await answerOf(await accept(bInvitation.id, { cookie: b.cookie }));
-    expect(res.status, res.text).toBe(200);
-    expect(membersOf(engine, PARTNER_ORG, b.userId)).toHaveLength(1);
-  });
-
-  it('read per request: mail going live between two requests closes the door for the next one', async () => {
-    const { engine, manager, mail, b, c, bInvitation, cInvitation, accept } = await boot();
-    manager.setEmailService(mail.service as never);
-    mail.state.mode = 'live';
-    expect((await accept(bInvitation.id, { cookie: b.cookie })).status).toBe(403);
-    mail.state.mode = 'log';
-    expect((await accept(bInvitation.id, { cookie: b.cookie })).status).toBe(200);
-    mail.state.mode = 'live';
-    expect((await accept(cInvitation.id, { cookie: c.cookie })).status).toBe(403);
-    expect(membersOf(engine, PARTNER_ORG, c.userId)).toHaveLength(0);
-  });
-});
-
-describe('#34272 — refuseUnverifiedAcceptWhileMailIsLive', () => {
-  it('a verified user passes without asking whether mail is live', async () => {
-    const isEmailDeliveryLive = vi.fn(() => true);
-    await expect(refuseUnverifiedAcceptWhileMailIsLive({ emailVerified: true }, { isEmailDeliveryLive })).resolves.toBeUndefined();
-    expect(isEmailDeliveryLive).not.toHaveBeenCalled();
-  });
-
-  it('an unverified user passes while mail is not live', async () => {
-    await expect(
-      refuseUnverifiedAcceptWhileMailIsLive({ emailVerified: false }, { isEmailDeliveryLive: () => false }),
-    ).resolves.toBeUndefined();
-  });
-
-  it('an unverified (or unknown) user is refused while mail is live, with the entry the caller hands in', async () => {
+  it('an unverified (or unknown) user is refused, with the entry the caller hands in', async () => {
     for (const user of [{ emailVerified: false }, {}, null, undefined]) {
-      await expect(
-        refuseUnverifiedAcceptWhileMailIsLive(user, { isEmailDeliveryLive: () => true }),
-      ).rejects.toMatchObject({ statusCode: 403, body: { code: REFUSAL_CODE } });
+      await expect(refuseUnverifiedInvitationAnswer(user)).rejects.toMatchObject({ statusCode: 403, body: { code: REFUSAL_CODE } });
     }
     const vendorEntry = { code: REFUSAL_CODE, message: 'vendor sentence' };
     await expect(
-      refuseUnverifiedAcceptWhileMailIsLive(
-        { emailVerified: false },
-        { isEmailDeliveryLive: () => true, verificationRequired: vendorEntry },
-      ),
+      refuseUnverifiedInvitationAnswer({ emailVerified: false }, { verificationRequired: vendorEntry }),
     ).rejects.toMatchObject({ body: { message: 'vendor sentence' } });
   });
 });
