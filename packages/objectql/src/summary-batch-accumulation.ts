@@ -103,6 +103,32 @@ function filterNamesDottedPath(cond: unknown): boolean {
   return false;
 }
 
+/**
+ * [#34465] Does the filter read through a reference anywhere, in either
+ * spelling: a dotted path (`{ 'account.kind': 'x' }`), or the nested
+ * one-level form (`{ account: { status: 'x' } }`, a plain object holding a
+ * key that is no operator beneath a field), which is the form a summary
+ * filter reads a related record with. The in-memory walker does not refuse
+ * the nested form: it compares the row's scalar id with the object and
+ * answers "no match" for every state, so the predicate update's fold must
+ * leave such a roll-up out before any statement, as it leaves the dotted one.
+ */
+function filterReadsThroughReference(cond: unknown): boolean {
+  if (filterNamesDottedPath(cond)) return true;
+  if (Array.isArray(cond)) return cond.some(filterReadsThroughReference);
+  if (!cond || typeof cond !== 'object') return false;
+  for (const [key, value] of Object.entries(cond as Record<string, unknown>)) {
+    if (key === '$and' || key === '$or' || key === '$not') {
+      if (filterReadsThroughReference(value)) return true;
+      continue;
+    }
+    if (key.startsWith('$')) continue;
+    if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)
+      && Object.keys(value).some((inner) => !inner.startsWith('$'))) return true;
+  }
+  return false;
+}
+
 /** A single reference id, or `undefined` for an empty or multi-value slot. */
 function singleId(value: unknown): string | undefined {
   if (value == null || value === '' || Array.isArray(value) || typeof value === 'object') return undefined;
@@ -252,8 +278,9 @@ export function createBatchSummaryAccumulator(
  * full before the one statement, so it stays all-or-nothing. A roll-up whose
  * value the fold cannot say exactly keeps reading the value the binding
  * carries (the stored one, as before), the limits the insert arm names: a
- * value that is not a number, and a `filter` naming a dotted path or one the
- * in-memory walker refuses; and a `min` / `max` under a parent holding more
+ * value that is not a number, and a `filter` reading through a reference
+ * (a dotted path, or the nested one-level form `{ account: { status: 'x' } }`)
+ * or one the in-memory walker refuses; and a `min` / `max` under a parent holding more
  * than {@link MIN_MAX_EXCLUDED_ID_BUDGET} matched rows, whose exclusion
  * would not fit one statement.
  */
@@ -316,7 +343,7 @@ export async function loadPredicateUpdateSummaryBases(
 ): Promise<SummaryBases> {
   const bases: SummaryBases = new Map();
   for (const desc of descriptors) {
-    if (filterNamesDottedPath(desc.filter)) continue;
+    if (filterReadsThroughReference(desc.filter)) continue;
     if (desc.fn !== 'count' && desc.sourceField === undefined) continue;
     const holdsMatched = baseHoldsMatched(desc.fn);
     const parents = new Set<string>();

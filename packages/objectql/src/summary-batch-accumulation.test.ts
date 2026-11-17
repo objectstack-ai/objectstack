@@ -288,4 +288,14 @@ describe('[#34465] loadPredicateUpdateSummaryBases — the base a predicate upda
     expect(counted.calls).toEqual([]);
     expect((await loadPredicateUpdateSummaryBases(counted.engine, [desc({ fn: 'count', summaryField: 'n' })], many)).size).toBe(1);
   });
+
+  it('leaves out, before any statement, a roll-up whose filter reads through a reference in the nested form; an operator object beneath a field is no such read', async () => {
+    const nested = recorder(() => [{ order: 'o1', value: 1 }]);
+    for (const filter of [{ account: { status: 'x' } }, { $and: [{ kind: 'a' }, { account: { status: 'x' } }] }, { account: { status: { $in: ['x'] } } }]) {
+      expect((await loadPredicateUpdateSummaryBases(nested.engine, [desc({ fn: 'min', summaryField: 'low', filter })], matched)).size).toBe(0);
+    }
+    expect(nested.calls).toEqual([]);
+    // CONTROL: a field condition spelled with operators is evaluated in memory, so its roll-up is loaded.
+    expect((await loadPredicateUpdateSummaryBases(nested.engine, [desc({ fn: 'min', summaryField: 'low', filter: { kind: { $in: ['a'] } } })], matched)).size).toBe(1);
+  });
 });

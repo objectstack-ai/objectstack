@@ -487,8 +487,9 @@ read it as the matched rows judged before leave it, for every summary function,
 `avg` included, and a row that moves to another parent leaves the old one and
 joins the new one. If any row is refused, none is written. Three cases keep
 reading the stored value for every parent the update reads that summary for: a
-summary whose `filter` reads a dotted path (or one the in-memory filter cannot
-evaluate), a summary meeting a value that is not a number, and a `min` / `max`
+summary whose `filter` reads through another reference, as a dotted path or in
+the nested form `{ account: { status: 'x' } }` (or one the in-memory filter
+cannot evaluate), a summary meeting a value that is not a number, and a `min` / `max`
 when one parent holds more than 5,000 matched rows. A rule of the parent
 itself judges the summary once, after the write.
 **Hooks and flow steps read the value from before the batch:** inside one bulk

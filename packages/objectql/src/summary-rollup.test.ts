@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
-import { ObjectSchema } from '@objectstack/spec/data';
+import { ObjectSchema, isComposedReadableIds } from '@objectstack/spec/data';
 import { mapDataError } from '@objectstack/types';
 import { ValidationError } from './validation/record-validator.js';
 
@@ -32,7 +32,10 @@ function makeDriver() {
         case '$gte': return value >= target;
         case '$lt': return value < target;
         case '$lte': return value <= target;
-        case '$in': return Array.isArray(target) && target.includes(value);
+        // [#34465] A nested-relation condition reaches a driver declaring `readableIdsLeaf` as a composed semi-join leaf.
+        case '$in': return isComposedReadableIds(target)
+          ? [...storeFor(target.object).values()].some((r) => r.id === value && matches(r, target.scope))
+          : Array.isArray(target) && target.includes(value);
         case '$nin': return Array.isArray(target) && !target.includes(value);
         // [#34465] The engine widens a `$nin` to `{ $or: [{ x: { $null: true } }, { x: { $nin } }] }`.
         case '$null': return target ? value == null : value != null;
@@ -1422,6 +1425,8 @@ describe('[#34465] a predicate update judges each matched row against the parent
         budget: { type: 'number' },
         // Calculated from a roll-up: on read (a formula) and on write (a stored computed field).
         remaining: { type: 'formula', expression: 'record.budget - record.total', returnType: 'number' },
+        // A stored computed field declared BEFORE the stored computed field it reads (`headroom`).
+        head_gap: { type: 'number', expression: { dialect: 'cel', source: 'record.headroom' } },
         headroom: { type: 'number', expression: { dialect: 'cel', source: 'record.budget - record.total' } },
         // A formula reading a lookup hop as well as the roll-up, and a stored computed field reading a formula.
         cap_ref: { type: 'lookup', reference: 'inv_cap' },
@@ -1463,6 +1468,7 @@ describe('[#34465] a predicate update judges each matched row against the parent
         { name: 'cap_floor', type: 'script', severity: 'error', message: 'invoice cap left below 0', condition: "record.tag == 'capref' && record.inv.cap_left != null && record.inv.cap_left < 0" },
         // A stored computed field reading a formula: what does the rule read for it?
         { name: 'slack_set', type: 'script', severity: 'error', message: 'invoice slack is set', condition: "record.tag == 'slack' && record.inv.slack != null" },
+        { name: 'gap_floor', type: 'script', severity: 'error', message: 'invoice head gap below 0', condition: "record.tag == 'gap' && record.inv.head_gap < 0" },
         { name: 'room_floor', type: 'script', severity: 'error', message: 'invoice room below 0', condition: "record.tag == 'room' && record.inv.room != null && record.inv.room < 0" },
       ],
     } as any);
@@ -1649,6 +1655,25 @@ describe('[#34465] a predicate update judges each matched row against the parent
     expect(inv(p.id).total).toBe(100);
   });
 
+  it('one by one (the reference answer): a stored computed field declared before the stored computed field it reads tracks it on every write, and the rule refuses the second line', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 100 });
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'gap' });
+    const b = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'gap' });
+    expect(inv(p.id).head_gap).toBe(20);
+    // The recompute's write computes the stored fields twice: `head_gap` reads the `headroom` the first pass moved.
+    await engine.update('inv_line', { id: a.id, amount: 70 });
+    expect(inv(p.id).head_gap).toBe(-10);
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { id: b.id, amount: 70 })), 'invoice head gap below 0');
+  });
+
+  it('predicate update: the stored pass runs twice, as the write runs it, so the field declared first reads the moved field and the second row is refused', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 100 });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'gap' }, { inv: p.id, amount: 40, tag: 'gap' }]);
+    // Computed once in declaration order, `head_gap` would read the stored `headroom` (20) and the rule admit both rows.
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })), 'invoice head gap below 0');
+    expect(inv(p.id).head_gap).toBe(20);
+  });
+
   it('predicate update that reparents: the header a parent. predicate reads counts the rows moved before', async () => {
     const from = await engine.insert('inv', { name: 'FROM' });
     const to = await engine.insert('inv', { name: 'TO' });
@@ -1698,5 +1723,77 @@ describe('[#34465] a predicate update judges each matched row against the parent
     // (total twice over: directly, and through remaining and headroom).
     expect(before).toHaveLength(5);
     expect(before.every((e) => Array.isArray(e.ast.groupBy) && e.ast.groupBy[0] === 'inv')).toBe(true);
+  });
+});
+
+describe('[#34465] a min / max roll-up whose filter reads through a reference in the nested form keeps its stored value in a predicate update', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    // The nested-relation condition runs as a semi-join on a driver declaring the leaf.
+    d.driver.supports = { readableIdsLeaf: true };
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({ name: 'acct', fields: { status: { type: 'text' } } } as any);
+    engine.registry.registerObject({
+      name: 'ord',
+      fields: {
+        name: { type: 'text' },
+        // The nested one-level form a summary filter reads a related record with (the dotted form is refused for a relation head).
+        low_active: { type: 'summary', summaryOperations: { object: 'ord_line', field: 'amount', function: 'min', filter: { acct: { status: 'active' } } } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'ord_line',
+      fields: {
+        amount: { type: 'number' },
+        tag: { type: 'text' },
+        acct: { type: 'lookup', reference: 'acct' },
+        ord: { type: 'master_detail', reference: 'ord' },
+      },
+      validations: [
+        { name: 'low_floor', type: 'script', severity: 'error', message: 'order active low under 10', condition: "record.tag == 'low' && record.ord.low_active != null && record.ord.low_active < 10" },
+      ],
+    } as any);
+  });
+
+  const ord = (id: string) => storeFor('ord').get(id);
+
+  async function refusalOf(write: Promise<unknown>): Promise<unknown> {
+    try { await write; } catch (err) { return err; }
+    throw new Error('expected the write to be refused');
+  }
+
+  async function seed() {
+    const acct = await engine.insert('acct', { status: 'active' });
+    const p = await engine.insert('ord', { name: 'O' });
+    const m1 = await engine.insert('ord_line', { ord: p.id, acct: acct.id, amount: 5, tag: 'x' });
+    const m2 = await engine.insert('ord_line', { ord: p.id, acct: acct.id, amount: 50, tag: 'x' });
+    await engine.insert('ord_line', { ord: p.id, acct: acct.id, amount: 80, tag: 'x' });
+    expect(ord(p.id).low_active).toBe(5);
+    return { p, m1, m2 };
+  }
+
+  it('one by one (the reference answer): a patch that moves no roll-up reads the stored minimum, and the first line is refused', async () => {
+    const { m1 } = await seed();
+    const err = await refusalOf(engine.update('ord_line', { id: m1.id, tag: 'low' }));
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => f.message).join(' | ')).toContain('order active low under 10');
+  });
+
+  it('predicate update: the roll-up is left out of the fold, so it reads the stored minimum as one by one does and is refused', async () => {
+    const { p } = await seed();
+    // Folded over the children outside the match (80), with no matched row put back, the rule would admit both rows.
+    const err = await refusalOf(engine.update('ord_line', { tag: 'low' }, { where: { ord: p.id, amount: { $lt: 60 } }, multi: true }));
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => f.message).join(' | ')).toContain('order active low under 10');
+    expect([...storeFor('ord_line').values()].map((r) => r.tag)).toEqual(['x', 'x', 'x']);
   });
 });

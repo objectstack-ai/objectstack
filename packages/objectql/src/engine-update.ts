@@ -2379,7 +2379,12 @@ export class UpdateFacet {
  *    over the stored image (the row WITHOUT its formula fields, which a write's
  *    image never carries, so a stored field reading a formula computes
  *    `null` here as it does on every write), in their own plan order, with the
- *    DECLARED option labels;
+ *    DECLARED option labels, and TWICE: a by-id write computes them before its
+ *    `beforeUpdate` hooks, moves the changed values onto the patch, and
+ *    computes them again over the row with that patch before the statement.
+ *    So a stored field declared BEFORE the stored field it reads (`flag` over
+ *    `headroom`, `headroom` over the roll-up) is written over the moved value,
+ *    and the second evaluation here reads it the same way;
  * 2. then the formulas, as the next read computes them: over that row with
  *    the stored fields just computed and the stored row's values of the
  *    formulas the plan does not hold back on it, in the read plan's order,
@@ -2449,7 +2454,10 @@ async function loadSummaryFoldDependents(
     // The write's image: the stored row, no formula on it, the folded roll-ups in place.
     const scratch: Record<string, unknown> = { ...stored, ...moved };
     for (const name of entry.formulaFields) delete scratch[name];
-    if (entry.storedPlan.length > 0) applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels);
+    // Twice, as the write computes them: before its hooks, then over the row with the moved values.
+    for (let pass = 0; pass < 2 && entry.storedPlan.length > 0; pass += 1) {
+      applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels);
+    }
     // The read's row: the formulas the plan does not recompute back at their stored values.
     for (const name of entry.unplannedFormulas) if (name in stored) scratch[name] = stored[name];
     if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels);

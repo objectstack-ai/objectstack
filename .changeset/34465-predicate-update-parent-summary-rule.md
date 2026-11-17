@@ -16,7 +16,7 @@ Metadata-protocol: none
 - The answer moves both ways. Mostly it narrows: main admitted a row that one-by-one refuses, and it is refused now. It also admits a row main refused when the rows judged before it move the summary toward admitting it, as one by one does. For example, with `parent.line_count >= 3` requiring a field, a row leaving that parent lowers the count the later rows read.
 
 **Not moved.** A rule that reads no summary, a predicate update matching one row, a by-id update, hooks and flow steps (they read the value from before the update), and a rule of the parent itself (it judges the summary once, after the write). Three cases keep reading the stored value, as before, and each one covers that summary for EVERY parent the update reads it for, not only the parent that caused it:
-- a summary whose `filter` reads a dotted path, or that the in-memory filter walker refuses;
+- a summary whose `filter` reads through another reference, as a dotted path (`{ 'account.kind': 'x' }`) or in the nested form (`{ account: { status: 'x' } }`), or that the in-memory filter walker refuses;
 - a summary meeting a value that is not a number, in any matched row or in any parent's base;
 - a `min` / `max` when any one parent holds more than 5,000 matched rows.
 
