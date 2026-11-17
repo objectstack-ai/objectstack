@@ -2560,6 +2560,7 @@ const zh = {
       passwordsNote: '临时密码——仅显示一次，不会被保存。请立即保存；用户首次登录时必须修改。',
       passwordsMore: '更多条目已省略——请使用下载。',
       positionsHint: '岗位：可映射一列岗位机器名，多个用“;”分隔。每个岗位按 Setup 中指派岗位的同样规则分配；不存在或你无权指派的岗位会在该行报错，用户照常创建。',
+      managerHint: '上级：可映射一列每位用户的上级，填上级的邮箱(开启手机号登录时也可填手机号)。所有行导入后才关联上级，所以文件后面的上级也算数；找不到或无法关联的上级会在该行报错，用户照常创建。',
       passwordsDownload: '下载 CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).

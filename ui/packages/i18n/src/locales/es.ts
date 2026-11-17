@@ -1974,6 +1974,7 @@ const es = {
       passwordsNote: "Contraseñas temporales — se muestran una sola vez y nunca se almacenan. Guárdelas ahora; cada usuario debe cambiar la suya en el primer inicio de sesión.",
       passwordsMore: "Se han omitido más entradas — use la descarga.",
       positionsHint: "Puestos: asigne una columna con nombres de máquina de puestos, varios separados por «;». Cada uno se asigna como en Setup; un nombre que no existe o que usted no puede asignar se informa en su fila, y el usuario se crea igualmente.",
+      managerHint: "Responsable: asigne una columna con el responsable de cada usuario, por dirección de correo (o número de teléfono si el inicio de sesión por teléfono está activo). Los responsables se vinculan cuando todas las filas están dentro, así que cuenta también uno que aparece más abajo en el archivo; un responsable que no se encuentra o no se puede vincular se informa en su fila, y el usuario se crea igualmente.",
       passwordsDownload: "Descargar CSV",
     },
     ai: {
