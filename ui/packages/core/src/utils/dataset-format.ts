@@ -24,6 +24,10 @@ import { formatDisplayNumber, type DisplayNumberFormatOptions } from './number-d
 import { formatDate, formatDateTime, formatRelativeDate } from './date-display.js';
 import { resolveMeasureLabel, type BuiltinAggregateLabels } from './chart-series.js';
 import { composeDrillFilter } from './drill-down.js';
+import { FilterOperatorError } from './filter-converter.js';
+import { extractRecords } from './extract-records.js';
+import { isMultiValueField, referenceTargetOf } from '@objectstack/spec/data';
+import type { DataSource } from '@object-ui/types';
 
 /**
  * Column metadata the analytics server returns alongside the rows — the spec's
@@ -715,6 +719,18 @@ export interface DatasetDrillRange {
  *
  * Shared by the dashboard `DatasetWidget` and the report renderer so a drill
  * filters identically (and correctly, including lookups) on both surfaces.
+ *
+ * ## A relationship path is never written as a key here
+ *
+ * A dimension whose `field` is a `relationship.field` path (`account.owner`)
+ * cannot be filtered on as a dotted key: the data API refuses a dotted filter
+ * key with `INVALID_FIELD` / 400, and the client filter dialect has no node
+ * for the nested-relation form. Such a dimension is resolved first by
+ * {@link resolveDatasetDrillFilter}, which reads the related ids and hands the
+ * result back through `resolvedConditions` (`{ account: { $in: [...] } }`).
+ * Passing a path dimension in `drillDims` is refused with a
+ * {@link FilterOperatorError}, the error every caller already catches, so a
+ * refused query is never built.
  */
 export function buildDatasetDrillFilter(
   rawRow: Record<string, unknown> | undefined,
@@ -722,9 +738,18 @@ export function buildDatasetDrillFilter(
   dimensionFields: Record<string, string>,
   runtimeFilter?: unknown,
   rawRanges?: Record<string, DatasetDrillRange>,
+  resolvedConditions?: Record<string, unknown>,
 ): Record<string, unknown> {
   const drillFilter: Record<string, unknown> = {};
   for (const d of drillDims) {
+    if (isRelationshipPathField(dimensionFields[d])) {
+      throw new FilterOperatorError(
+        `[ObjectUI] The drill dimension '${d}' reads '${dimensionFields[d]}', a relationship path. `
+        + 'The data API refuses a dotted filter key, so it cannot be written into the drill filter '
+        + 'as-is. Resolve it with resolveDatasetDrillFilter, which reads the related ids first.',
+        { field: dimensionFields[d] },
+      );
+    }
     const raw = rawRow?.[d];
     // `null` is in this test, not only `''` / `undefined`: JSON cannot carry
     // `undefined`, so a SQL NULL grouped value arrives over the wire AS `null`
@@ -738,8 +763,276 @@ export function buildDatasetDrillFilter(
       if (r && r.field) drillFilter[r.field] = { $gte: r.gte, $lt: r.lt };
     }
   }
+  if (resolvedConditions) Object.assign(drillFilter, resolvedConditions);
   // ⛔ The composition is `composeDrillFilter`'s, never a spread. The identity
   // leg is deliberately left alone — see "only the composing leg moves" above.
   // `?? {}` is property 1: the empty/empty answer stays an empty object.
   return runtimeFilter ? composeDrillFilter(runtimeFilter, drillFilter) ?? {} : drillFilter;
+}
+
+// ---------------------------------------------------------------------------
+// Relationship-path drill dimensions
+// ---------------------------------------------------------------------------
+
+/**
+ * The most relationships one drill dimension may traverse: ADR-0071's hop
+ * limit (three to-one hops, four objects), the same limit a dataset `include`
+ * path carries. A path past it offers no drill.
+ */
+export const DATASET_DRILL_MAX_HOPS = 3;
+
+/**
+ * The most related records one relationship hop of a drill may resolve to.
+ *
+ * Over it the drill is not opened ({@link DatasetDrillResolution} `too-many`),
+ * ⛔ never run over a cut-off id list, which would list fewer records than the
+ * clicked number counts. The ids travel as an `$in` list in the drawer's own
+ * list read, inside a GET query string, so the cap keeps that request well
+ * under a server's request-line limit even with UUID ids.
+ */
+export const DATASET_DRILL_RELATED_ID_CAP = 200;
+
+/** True when a dataset dimension's `field` is a `relationship.field` path. */
+export function isRelationshipPathField(field: string | undefined): boolean {
+  return typeof field === 'string' && field.includes('.');
+}
+
+/** True when any of `drillDims` maps to a `relationship.field` path. */
+export function datasetDrillHasRelationshipPath(
+  drillDims: readonly string[],
+  dimensionFields: Record<string, string> | undefined,
+): boolean {
+  return !!dimensionFields && drillDims.some((d) => isRelationshipPathField(dimensionFields[d]));
+}
+
+/**
+ * True when every relationship path among `drillDims` is one this layer can
+ * resolve without reading anything: no empty segment and at most
+ * {@link DATASET_DRILL_MAX_HOPS} hops. A surface uses it to decide whether a
+ * bucket offers a drill at all; the rest (the relationship being known, the
+ * id count) is only answered by {@link resolveDatasetDrillFilter}.
+ */
+export function datasetDrillPathsResolvable(
+  drillDims: readonly string[],
+  dimensionFields: Record<string, string> | undefined,
+): boolean {
+  if (!dimensionFields) return true;
+  return drillDims.every((d) => {
+    const field = dimensionFields[d];
+    if (!isRelationshipPathField(field)) return true;
+    const segments = field.split('.');
+    return segments.every((s) => s !== '') && segments.length - 1 <= DATASET_DRILL_MAX_HOPS;
+  });
+}
+
+/** Why a relationship-path drill cannot be resolved into a list read. */
+export type DatasetDrillUnavailableReason =
+  /** The path traverses more than {@link DATASET_DRILL_MAX_HOPS} relationships, or has an empty segment. */
+  | 'hop-limit'
+  /** A hop names no single-valued relationship field the object declares (or no data source can say). */
+  | 'unknown-relationship'
+  /** The clicked bucket is the empty one: no related read reproduces what it counted. */
+  | 'empty-bucket';
+
+/** The answer {@link resolveDatasetDrillFilter} gives for one clicked bucket. */
+export type DatasetDrillResolution =
+  | { status: 'resolved'; filter: Record<string, unknown> }
+  | { status: 'too-many'; object: string; cap: number }
+  | { status: 'unavailable'; reason: DatasetDrillUnavailableReason; field: string };
+
+/** The two reads the resolution makes, both through the surface's own data source. */
+export type DatasetDrillDataSource = Pick<DataSource, 'find' | 'getObjectSchema'>;
+
+/** Arguments of {@link resolveDatasetDrillFilter}: {@link buildDatasetDrillFilter}'s, plus where to read. */
+export interface ResolveDatasetDrillFilterInput {
+  /** The dataset answer's base object (`QueryDatasetOutput.object`). */
+  object: string;
+  rawRow: Record<string, unknown> | undefined;
+  drillDims: string[];
+  dimensionFields: Record<string, string>;
+  runtimeFilter?: unknown;
+  rawRanges?: Record<string, DatasetDrillRange>;
+  /** The data source the drawer will list from; anything without `find` and `getObjectSchema` resolves nothing. */
+  dataSource: unknown;
+}
+
+/** One object's condition while a relationship-path drill is being resolved. */
+interface DrillRelationNode {
+  /** Equality conditions on this object's own fields. */
+  where: Record<string, unknown>;
+  /** Conditions beneath this object's relationship fields, by field name. */
+  relations: Map<string, DrillRelationNode>;
+}
+
+/** Carries a non-`resolved` answer out of the recursive walk. */
+class DrillResolutionStop {
+  constructor(readonly resolution: Exclude<DatasetDrillResolution, { status: 'resolved' }>) {}
+}
+
+function isDrillDataSource(source: unknown): source is DatasetDrillDataSource {
+  const s = source as Partial<DatasetDrillDataSource> | null | undefined;
+  return !!s && typeof s.find === 'function' && typeof s.getObjectSchema === 'function';
+}
+
+/**
+ * Build the record-list filter for a drilled dataset bucket whose dimensions
+ * may cross a relationship — {@link buildDatasetDrillFilter}, with every
+ * `relationship.field` dimension resolved into a filter the data API accepts.
+ *
+ * ## How a path is resolved
+ *
+ * The analytics compiler joins each hop on `<parent>.<relationship> =
+ * <related>.id`, the related object being the relationship field's declared
+ * target (`hop-object.ts` tier 2 on the server, `referenceTargetOf` here). So
+ * the rows a bucket `account.owner = u1` counted are the base rows whose
+ * `account` is one of the accounts whose `owner` is `u1`. That is read in two
+ * steps through the same data source the drawer lists from, as the viewer:
+ *
+ * 1. the related object's ids matching the clicked value
+ *    (`find('account', { $filter: { owner: 'u1' }, $select: ['id'] })`), and
+ *    for a deeper path the same step again, innermost object first;
+ * 2. the base object filtered on the relationship field `$in` those ids —
+ *    `{ account: { $in: [...] } }`, an operator the filter dialect already
+ *    lowers.
+ *
+ * Path dimensions that share a hop are read together (`account.owner` and
+ * `account.region` read the accounts once, on both conditions), and a plain
+ * dimension on the relationship field itself joins that read as an `id`
+ * condition rather than a second key.
+ *
+ * ## When it does not resolve
+ *
+ * - more than {@link DATASET_DRILL_MAX_HOPS} hops, or a hop that is no
+ *   single-valued relationship field of its object → `unavailable`;
+ * - the empty bucket of a path dimension → `unavailable`: that bucket also
+ *   counted base rows with no related record and rows whose related record the
+ *   viewer cannot read, which no related read can reproduce;
+ * - more than {@link DATASET_DRILL_RELATED_ID_CAP} related records at any hop
+ *   → `too-many`, never a truncated list.
+ *
+ * A read that fails rejects the promise with the read's own error; a filter
+ * the composition refuses rejects with {@link FilterOperatorError}, exactly as
+ * {@link buildDatasetDrillFilter} throws it.
+ *
+ * A bucket with no path dimension resolves to exactly what
+ * {@link buildDatasetDrillFilter} returns, with nothing read.
+ */
+export async function resolveDatasetDrillFilter(
+  input: ResolveDatasetDrillFilterInput,
+): Promise<DatasetDrillResolution> {
+  const { object, rawRow, drillDims, dimensionFields, runtimeFilter, rawRanges, dataSource } = input;
+  const plainDims = drillDims.filter((d) => !isRelationshipPathField(dimensionFields[d]));
+  const pathDims = drillDims.filter((d) => isRelationshipPathField(dimensionFields[d]));
+  if (pathDims.length === 0) {
+    return { status: 'resolved', filter: buildDatasetDrillFilter(rawRow, plainDims, dimensionFields, runtimeFilter, rawRanges) };
+  }
+
+  const root: DrillRelationNode = { where: {}, relations: new Map() };
+  for (const d of pathDims) {
+    const field = dimensionFields[d];
+    const segments = field.split('.');
+    if (segments.some((s) => s === '') || segments.length - 1 > DATASET_DRILL_MAX_HOPS) {
+      return { status: 'unavailable', reason: 'hop-limit', field };
+    }
+    const raw = rawRow?.[d];
+    if (raw === '' || raw === null || raw === undefined) {
+      return { status: 'unavailable', reason: 'empty-bucket', field };
+    }
+    let node = root;
+    for (const hop of segments.slice(0, -1)) {
+      let next = node.relations.get(hop);
+      if (!next) {
+        next = { where: {}, relations: new Map() };
+        node.relations.set(hop, next);
+      }
+      node = next;
+    }
+    node.where[segments[segments.length - 1]] = raw;
+  }
+
+  if (!isDrillDataSource(dataSource)) {
+    return { status: 'unavailable', reason: 'unknown-relationship', field: dimensionFields[pathDims[0]] };
+  }
+
+  // A plain dimension on a relationship field the paths also walk (`account`
+  // beside `account.owner`) is a condition on that related record's `id`.
+  const builderDims: string[] = [];
+  for (const d of plainDims) {
+    const field = dimensionFields[d];
+    const child = root.relations.get(field);
+    if (!child) {
+      builderDims.push(d);
+      continue;
+    }
+    const raw = rawRow?.[d];
+    child.where.id = raw === '' || raw === null || raw === undefined ? { $null: true } : raw;
+  }
+
+  const schemas = new Map<string, Promise<unknown>>();
+  const schemaOf = (name: string): Promise<unknown> => {
+    let pending = schemas.get(name);
+    if (!pending) {
+      pending = dataSource.getObjectSchema(name);
+      schemas.set(name, pending);
+    }
+    return pending;
+  };
+
+  const lowerNode = async (nodeObject: string, node: DrillRelationNode, path: string): Promise<Record<string, unknown>> => {
+    const where: Record<string, unknown> = { ...node.where };
+    for (const [field, child] of node.relations) {
+      const fieldPath = path ? `${path}.${field}` : field;
+      where[field] = { $in: await relatedIds(nodeObject, field, child, fieldPath) };
+    }
+    return where;
+  };
+
+  const relatedIds = async (fromObject: string, field: string, node: DrillRelationNode, fieldPath: string): Promise<unknown[]> => {
+    const def = fieldDefinitionOf(await schemaOf(fromObject), field);
+    let target: string | undefined;
+    try {
+      target = referenceTargetOf(def);
+    } catch {
+      // A non-string `reference` carrier: not a relationship this layer can walk.
+      target = undefined;
+    }
+    if (!target || isMultiValueField(def as Parameters<typeof isMultiValueField>[0])) {
+      throw new DrillResolutionStop({ status: 'unavailable', reason: 'unknown-relationship', field: fieldPath });
+    }
+    const where = await lowerNode(target, node, fieldPath);
+    const result = await dataSource.find(target, {
+      $filter: where,
+      $select: ['id'],
+      $top: DATASET_DRILL_RELATED_ID_CAP + 1,
+    });
+    const rows = extractRecords(result);
+    if (rows.length > DATASET_DRILL_RELATED_ID_CAP) {
+      throw new DrillResolutionStop({ status: 'too-many', object: target, cap: DATASET_DRILL_RELATED_ID_CAP });
+    }
+    return rows
+      .map((row) => (row as { id?: unknown } | null)?.id)
+      .filter((id) => id !== undefined && id !== null);
+  };
+
+  let resolved: Record<string, unknown>;
+  try {
+    resolved = await lowerNode(object, { where: {}, relations: root.relations }, '');
+  } catch (error) {
+    if (error instanceof DrillResolutionStop) return error.resolution;
+    throw error;
+  }
+  return {
+    status: 'resolved',
+    filter: buildDatasetDrillFilter(rawRow, builderDims, dimensionFields, runtimeFilter, rawRanges, resolved),
+  };
+}
+
+/** A field's definition from an object schema whose `fields` is a map or a legacy array. */
+function fieldDefinitionOf(schema: unknown, field: string): unknown {
+  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
+  if (Array.isArray(fields)) {
+    return fields.find((f) => (f as { name?: unknown } | null)?.name === field);
+  }
+  if (fields && typeof fields === 'object') return (fields as Record<string, unknown>)[field];
+  return undefined;
 }
