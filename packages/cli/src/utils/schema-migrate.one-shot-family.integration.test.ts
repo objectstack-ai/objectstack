@@ -110,6 +110,7 @@ import PluginTrustRevoke from '../commands/plugin/trust/revoke.js';
 import SecretOrphans from '../commands/secret/orphans.js';
 import SecretRewrap from '../commands/secret/rewrap.js';
 import StorageOrphans from '../commands/storage/orphans.js';
+import UserSetPassword from '../commands/user/set-password.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
 // MODULE LOAD: the commands reach them through dynamic `import()`s inside
@@ -463,6 +464,15 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'storage orphans', argv: ['--database-url', '@DB@', '--json'] }],
     write: [],
     note: 'report-only: it has no writing mode',
+  },
+  'commands/user/set-password.ts': {
+    run: invoke(UserSetPassword),
+    noWrite: [],
+    // No account holds this address: the boot happens and the command then
+    // refuses the address, before it asks for a password. The boot is what
+    // this case is about.
+    write: [{ label: 'user set-password', argv: ['osf-absent@example.com', '--database-url', '@DB@'] }],
+    note: 'every run of it is the write: it has no preview mode',
   },
   // [#27123] The trusted-key read `os plugin install` and `os serve`'s
   // boot-time loader share: a utility, so its boot runs through the command

@@ -91,6 +91,12 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // the change-owner door (`service-account-identity.ts`).
     'principal_kind',
     'accountable_user_id',
+    // The development seed's stamp (`dev-seed-credential.ts`). better-auth
+    // neither reads nor writes it (not `additionalFields`, for the `ai_access`
+    // reason above); declared so D7 proves better-auth's user schema owns no
+    // such name at the pinned version. Never generically editable: the seed
+    // writes it and `os user set-password` clears it, both as the system.
+    'dev_seed_credential',
   ]),
   sys_organization: new Set([
     // ADR-0069 D3 — the toggle-era per-org MFA column. Retired: an

@@ -68,6 +68,7 @@ import { withSystemReadContext } from './objectql-adapter.js';
 import { reconcileMembership, type ReconcileOutcome } from './reconcile-membership.js';
 import { isSsoProviderSource, readSsoProviderSignInOptions, ssoProviderIdOfSource } from './sso-sign-in-options.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
+import { stageDevSeedCredential } from './dev-seed-credential.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -231,6 +232,12 @@ export async function validateAudienceAdmission(
     ) {
       this.stageOwnerVerifiedStamp(email);
     }
+    // An operator-class creation is the development seed's own (`os dev`'s
+    // admin, a stack's `demoStaff`): only its provisioning ticket earns the
+    // class. Its seed stamp is staged here, where the ticket is proven, and
+    // written when the creation's password credential lands
+    // (`dev-seed-credential.ts`).
+    if (email && creationClass === 'operator') await stageDevSeedCredential(email);
     if (verdict.grantPermissionSet) {
       const setName = audience.selfRegistrationPermissionSet;
       if (!setName) {
