@@ -83,8 +83,8 @@ const TAB_CLASS =
 /**
  * The record page's tab row (objectstack#27524, Target 8): at the bottom
  * edge of the record header, on every face — 「概览」, then one tab per panel
- * (动态 first, then the related panels in the reader's arrangement), each with
- * its count. A tab is its panel's whole face (Target 9): choosing it draws
+ * (the related panels in the reader's arrangement, then 动态 last,
+ * objectstack#34590), each with its count. A tab is its panel's whole face (Target 9): choosing it draws
  * that face below the row, and 「概览」 returns to the page.
  *
  * How many tabs the row shows is computed from its own width, measured on

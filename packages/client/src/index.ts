@@ -3316,7 +3316,9 @@ export class ObjectStackClient {
      * conditional receipts (`seedApplied` / `materializeApplied` /
      * `unhiddenApps` / `unhideError` / `rebindError`) each report their own
      * outcome: a 200 does not mean the data plane or the visibility flip
-     * caught up. `probes` is deliberately opaque in the contract (#9406).
+     * caught up. `probes` is the modeled post-publish probe report: each of
+     * its `issues[]` has `message` / `fix` for an agent and `userMessage`,
+     * the sentence to show a person, already in the request's language.
      *
      * `opts.backfill` (#24253) names fields this publish adds whose literal
      * `defaultValue` is written into the object's existing rows, as the
@@ -5398,7 +5400,8 @@ export class ObjectStackClient {
      * Discriminate on `authenticated`: an anonymous caller RESOLVES
      * `{ authenticated: false }` (the route answers it at 200, so a client can
      * tell "signed out" from a fault), unlike {@link me}, which rejects. The
-     * authenticated answer carries `hasAnyQueue` among the rest;
+     * authenticated answer carries `hasAnyQueue` and `objectsUsingQueues`
+     * among the rest;
      * `systemPermissions` / `tabPermissions` are absent only on a server
      * without SecurityPlugin, where absent means unknown and an empty array
      * means none.

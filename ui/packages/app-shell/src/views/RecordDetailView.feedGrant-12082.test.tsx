@@ -145,6 +145,7 @@ function answer(feed: { [COMMENT]?: Bits; [REACTION]?: Bits }): MePermissionsAut
     tenantId: null,
     positions: ['member'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects: { [OBJECT_NAME]: SHAPE.full, ...feed },
     fields: {},

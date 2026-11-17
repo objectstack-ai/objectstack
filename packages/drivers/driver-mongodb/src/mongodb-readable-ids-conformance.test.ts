@@ -23,6 +23,7 @@ import {
   lowerFilterCondition,
 } from '@objectstack/spec/data';
 import { translateFilter } from './mongodb-filter.js';
+import { MongoDBDriver } from './mongodb-driver.js';
 import { buildAggregationPipeline } from './mongodb-aggregation.js';
 
 const seamed = (where: unknown): any => lowerFilterCondition(where, { isDatetimeColumn: () => false });
@@ -88,5 +89,17 @@ describe('[ADR-0139 D3] driver-mongodb — ReadableIds conformance (refusing dri
     } finally {
       error.mockRestore();
     }
+  });
+});
+
+describe('[#33876] driver-mongodb does not declare the readableIdsLeaf capability', () => {
+  // The engine reads this bit to plan a nested-relation condition as a
+  // composed leaf; without it the condition is refused up front,
+  // INVALID_FILTER / 400, before any related read. Declaring it while the
+  // filter translation above refuses the leaf would turn that 400 back into
+  // this driver's 500.
+  it('its supports record carries no readableIdsLeaf', () => {
+    const driver = new MongoDBDriver({ url: 'mongodb://127.0.0.1:1/never-connected', database: 'never_connected' });
+    expect(driver.supports).not.toHaveProperty('readableIdsLeaf');
   });
 });

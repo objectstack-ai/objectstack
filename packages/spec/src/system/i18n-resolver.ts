@@ -4447,6 +4447,20 @@ export function hookRefusalMessageKey(hookName: string, code: string, reason?: s
 }
 
 /**
+ * Dot-notation i18n key for a hook's declared text —
+ * `hooks.<hook>.texts.<key>.message` (#34374, ruling 6913660232 parameter 7).
+ *
+ * The sibling of {@link hookRefusalMessageKey} for a sentence the hook WRITES
+ * into a record rather than refuses with: the hook runtime answers
+ * `ctx.text(key, params)` with this translation in the ORGANIZATION's language
+ * (never the caller's), the declared sentence on a miss, and fills its holes
+ * after. By hook, never by object.
+ */
+export function hookTextMessageKey(hookName: string, key: string): string {
+  return `hooks.${hookName}.texts.${key}.message`;
+}
+
+/**
  * Dot-notation i18n key for a screen's heading or body text —
  * `flows.<flow>.screens.<node_id>.title` / `.description` (#22507).
  *

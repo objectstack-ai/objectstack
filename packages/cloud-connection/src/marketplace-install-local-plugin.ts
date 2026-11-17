@@ -27,6 +27,9 @@
  *            before anything else looks at it; an id the declaration refuses
  *            answers `PLUGIN_MANIFEST_INVALID` (400 for an inline manifest,
  *            502 for a cloud snapshot) and nothing is registered or written.
+ *            So is its `namespace`, through `ManifestSchema.shape.namespace`
+ *            (#33922): absent is admitted, a value the declaration refuses
+ *            answers `PLUGIN_MANIFEST_INVALID` the same way.
  *            A package declaring code this door cannot run answers
  *            `VALIDATION_ERROR` (422) the same way: an enabled job with no
  *            `body`, or one whose `body` the declaration refuses (#21585), and
@@ -469,6 +472,46 @@ export const SAMPLE_DATA_COUNT_QUERY_PARAMS: readonly string[] = Object.freeze([
 function isDeclaredRegisterRefusal(err: unknown): boolean {
     const declared = resolveThrownHttpError(err).declaredStatus;
     return declared !== undefined && declared >= 400 && declared < 500;
+}
+
+/**
+ * [#34407, #34432, #34574] The answer to a package body the artifact resolver
+ * refuses before any write (`resolveArtifactPackageEntries`, reached through
+ * `resolveStackCollection` or the runtime binder's judgements:
+ * `INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`,
+ * `DUPLICATE_ARTIFACT_PACKAGE`, `CYCLIC_ARTIFACT_PACKAGES`, each an ADR-0112
+ * envelope with its declared `status: 422`): that refusal's own declared
+ * status and code, the resolver's sentence, its `details` when it states any
+ * (a cycle's `details.cycle`), and that nothing was written. The one reader of
+ * such a refusal on this door's pre-write steps — the unrunnable-code
+ * judgements (1c), the datasource holder (2a), the D5e gate (2b) and the
+ * declared renames (2c″) all read the bodies through the resolver, so the same
+ * bytes are answered the same way whichever step reads them first.
+ *
+ * `undefined` for a throw that declares no status below 500 — an undeclared
+ * throw or a declared 5xx: the caller rethrows it, never relabels it.
+ */
+function declaredRefusalAnswer(
+    manifestId: string,
+    err: unknown,
+): { status: number; body: { success: false; error: { code: string; message: string; details?: Record<string, unknown> } } } | undefined {
+    const refusal = resolveThrownHttpError(err);
+    if (refusal.declaredStatus === undefined || refusal.status >= 500) return undefined;
+    const stated = (err as { details?: unknown } | null | undefined)?.details;
+    const details = stated !== null && typeof stated === 'object' && !Array.isArray(stated)
+        ? stated as Record<string, unknown>
+        : undefined;
+    return {
+        status: refusal.status,
+        body: {
+            success: false,
+            error: {
+                code: refusal.code,
+                message: `Package '${manifestId}' cannot be installed: ${String((err as any)?.message ?? err)} Nothing was installed or written.`,
+                ...(details !== undefined ? { details } : {}),
+            },
+        },
+    };
 }
 
 /**
@@ -961,6 +1004,40 @@ function judgeWithheldMaps(
 }
 
 /**
+ * [#33922, ADR-0048 §2] The package's `namespace`, parsed through its
+ * declaration (`ManifestSchema.shape.namespace`, `NAMESPACE_PATTERN`), by
+ * reference, ON THE BODY REGISTRATION READS: `manifest` is the body this door
+ * hands `manifest.register` (after `normalizeBundle`), and the registry
+ * installs it under that body's own top-level `namespace` — the key its install-time namespace
+ * gate compares. ⛔ Never a nested read ({@link declaredPackageManifest}): a
+ * judge reading any other key than the one registration reads answers about
+ * a namespace nothing installs under. `null` admits it; otherwise the refusal
+ * sentence.
+ *
+ * Absent is admitted, as the declaration admits it. Without this, `''`,
+ * `'QA_N'` or `'9-Bad Ns!'` registered as written: a namespace no author can
+ * declare, and a case variant of an owned one (`QA_N` beside `qa_n`) that the
+ * gate's uniqueness comparison never reads as the same namespace.
+ *
+ * ⛔ Not the members of a multi-package artifact: each `packages[]` entry is
+ * already parsed WHOLE through `ArtifactPackageSchema` (the core's
+ * `resolveArtifactPackageOrder`, reached here through {@link unrunnableCode}
+ * before any write), whose refusal of the same namespace is
+ * `INVALID_ARTIFACT_PACKAGE_ENTRY` / 422. A second judge here would move that
+ * answer, not close a gap.
+ *
+ * The sentence is the declaration's own inside the frame an invalid
+ * `installModes` is answered with ({@link judgeInstallMode}); no wording is
+ * minted.
+ */
+function namespaceRefusal(manifest: Record<string, any>, manifestId: string): string | null {
+    const declared = ManifestSchema.shape.namespace.safeParse(manifest.namespace);
+    if (declared.success) return null;
+    const [issue] = declared.error.issues;
+    return `Package '${manifestId}' declares an invalid \`namespace\`: ${issue?.message ?? 'refused by its declaration'}.`;
+}
+
+/**
  * [#28640 ruling ③A] The operator's line for an install that received
  * withheld maps: each one named, once, at `warn` — the connector is installed
  * and runs, without the headers or environment variables the export held back.
@@ -1260,16 +1337,32 @@ function planUnitWithdrawal(
 }
 
 /**
- * [#28039] The datasources a package body declares, as `AppPlugin` reads a
- * stack's: a list, or a map keyed by name.
+ * [#28039] The datasources a package artifact declares, as `AppPlugin` reads a
+ * stack's: a list, or a map keyed by name. The ONE reading for every door of
+ * this plugin that judges or connects them — the held-name check (2a), the
+ * connect of an install or an upgrade (4b′) and the `kernel:ready` rehydrate.
+ *
+ * [#34431, ADR-0130 D4] The list is read through `resolveStackCollection`, as
+ * the seed datasets are ({@link seedDatasetsOf}): the top-level list when the
+ * artifact carries one (a flat bundle, or a composed artifact that still
+ * carries its flattened union — read once, never again per package),
+ * otherwise every package body's, in the artifact's package order. A composed
+ * bundle carries no top-level `datasources`, and a top-level-only read
+ * connected none of its package bodies' datasources and judged none of their
+ * names. Entries are kept as declared, a name declared twice included, as a
+ * flat bundle's pair is: the runtime's path judges the pair.
+ *
+ * The map form is read at the top level only, where a flat bundle may carry
+ * it: a package body's `datasources` is a list by the package entry schema,
+ * and the resolver refuses a body that carries a map.
+ *
+ * @throws The resolver's ADR-0112 refusal for a malformed `packages`
+ *   (`INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`, …).
  */
-function declaredDatasources(body: unknown): any[] {
-    const defs = isPlainObject(body) ? body.datasources : undefined;
-    return Array.isArray(defs)
-        ? defs
-        : isPlainObject(defs)
-            ? Object.entries(defs).map(([name, def]) => ({ name, ...(def as any) }))
-            : [];
+function declaredDatasources(artifact: unknown): any[] {
+    const top = isPlainObject(artifact) ? artifact.datasources : undefined;
+    if (isPlainObject(top)) return Object.entries(top).map(([name, def]) => ({ name, ...(def as any) }));
+    return resolveStackCollection(artifact, 'datasources');
 }
 
 /**
@@ -1940,6 +2033,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *     install-time rows (or the user's own data) are still present, and
      *     re-upserting would silently revert user edits on every boot.
      *
+     * [#34405] The load honours the landed-key record (`sys_seed_landed_key`),
+     * as the runtime's boot seed does: a seed row whose key landed in this
+     * organization before and whose row is gone was removed by a person, and is
+     * withheld (counted in `skipped`), not inserted again. A database that lost
+     * its rows and the record with them is healed whole. A heal that landed
+     * no rows but skipped some, with no error, is reported at `info` and
+     * recorded with its real `skipped`, never as an `emptyInstall`. The split
+     * reads the loader's `skipped`, which also counts an `update` row with no
+     * match, so a heal whose only skips are those records settled too. Only a
+     * load that landed nothing otherwise (nothing skipped, or an error) is the
+     * empty install the boot banner escalates.
+     *
      * `converted` is the entry's manifest as rehydrate converted it — the one the
      * package registered — so the heal seeds what registered, not the raw
      * ledger bytes.
@@ -1981,7 +2086,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             // [#30281] No user starts a boot heal: the setting, then this
             // package's declared default locale.
-            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
+            // [#34405] Honouring the landed-key record, as the runtime's boot
+            // seed does: a new database holds no record and is healed whole,
+            // while seed rows a person deleted from every seeded object stay
+            // deleted.
+            const summary = await this.runInlineSeed(ctx, datasets, 'honour', undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
             const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
             if (landed > 0) {
                 entry.withSampleData = true;
@@ -2000,6 +2109,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     rejected: summary.errors ?? 0,
                     droppedRefs: summary.droppedRefs ?? 0,
                     healed: true,
+                });
+            } else if ((summary.skipped ?? 0) > 0 && (summary.errors ?? 0) === 0) {
+                // [#34405] Rows skipped and none landed, no error: a seed a
+                // person emptied is withheld by the landed-key record and stays
+                // empty on every restart. `skipped` also counts an `update` row
+                // with no match, so a heal whose only skips are those lands here
+                // too. A settled seed, not a failed one, so no `emptyInstall`.
+                ctx.logger?.info?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows: ${summary.skipped} seed row(s) skipped, none in error (a row withheld by the landed-key record, or an update-mode row with no match); the package's sample-data reseed brings withheld rows back`);
+                await this.recordSeedSummary(ctx, {
+                    source: entry.manifestId,
+                    marketplace: true,
+                    inserted: 0,
+                    updated: 0,
+                    skipped: summary.skipped,
+                    rejected: 0,
+                    droppedRefs: summary.droppedRefs ?? 0,
                 });
             } else {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] sample-data heal for ${entry.manifestId} landed no rows${summary.errorSample ? ` — first error: ${summary.errorSample}` : ''}`);
@@ -2221,7 +2346,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const empty = () => ({ inserted: 0, updated: 0, skipped: 0, errors: [] as any[] });
         // [#30281] `options.userId` is the organization's founder when the
         // org-scoping middleware knows one — the AppPlugin replayer's shape.
-        return async (organizationId: string, options?: { userId?: string }) => {
+        // [#34405] `options.reseed` is the deliberate re-seed the AppPlugin
+        // replayer takes too: every missing row, whatever the landed-key record
+        // says. Every other replay honours that record.
+        return async (organizationId: string, options?: { userId?: string; reseed?: boolean }) => {
             if (!organizationId) return empty();
             const datasetsNow = this.readSharedSeedDatasets(ctx);
             if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) return empty();
@@ -2247,7 +2375,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // [#30324] The founder owns the rows: the organization's first
             // admin, the one person this door is handed. With none, the rows
             // keep no owner, as before.
-            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId }, {
+            const s = await this.runInlineSeed(ctx, datasetsNow, options?.reseed === true ? 'reseed' : 'honour', organizationId, { userId: options?.userId }, {
                 userId: options?.userId ?? null,
                 door: 'per-organization seed replay',
                 none: `the replay of organization ${organizationId} names no founder`,
@@ -2603,6 +2731,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const manifestId = declaredId.data;
         if (inlineManifest) packageId = manifestId;
 
+        // 1b″. [#33922, ADR-0048 §2] ⭐ THE DOOR PARSES THE PACKAGE NAMESPACE —
+        //      through its declaration, `ManifestSchema.shape.namespace`, by
+        //      reference ({@link namespaceRefusal}), right after the id and at
+        //      the same converged point, judged on the body registration reads,
+        //      so neither the registry's install-time namespace gate nor the
+        //      ledger write ever sees a namespace no author can declare. Before
+        //      this, `''`, `'QA_N'` and `'9-Bad Ns!'` installed with a 200, and
+        //      `QA_N` beside an owner of `qa_n` passed the gate, whose
+        //      uniqueness comparison never read the two as one namespace. An
+        //      absent namespace is admitted, as the declaration admits it.
+        //      The id gate's status split (400 caller input, 502 upstream
+        //      snapshot) and its rehydrate exemption (an entry an older build
+        //      ledgered under such a namespace still loads and can be removed).
+        {
+            const refusal = namespaceRefusal(manifest, manifestId);
+            if (refusal !== null) {
+                return c.json({ success: false, error: { code: 'PLUGIN_MANIFEST_INVALID', message: refusal } }, callerManifest ? 400 : 502);
+            }
+        }
+
         // 1b′. [#31963, cloud#3624 ruling A] ⭐ THE GRANT GOVERNS THE COPY. A
         //      grant-path inline manifest is copied only when it declares the
         //      package and version the control plane granted: the cloud
@@ -2815,7 +2963,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     unbindable `pull` is warned by the binder and NOT scheduled), and
         //     its hook with no `body` is warned and NOT bound
         //     ({@link bindArtifactHandlers}).
-        const unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
+        //     [#34574] The binder's judgements read every package body of a
+        //     composed bundle through the artifact resolver, so over a runtime
+        //     that carries them THIS is the first step to resolve the
+        //     packages. A `packages` the resolver refuses — not a list, a
+        //     malformed entry, a duplicate id, packages that depend on each
+        //     other in a cycle — is answered here with that refusal
+        //     ({@link declaredRefusalAnswer}), as 2a, 2b and 2c″ answer it.
+        //     Before, the refusal left the door as a throw, and the transport,
+        //     which renders no `422`, answered `500 INTERNAL_ERROR`. An
+        //     undeclared throw stays a throw.
+        let unrunnable: UnrunnableCode;
+        try {
+            unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
+        }
         if (unrunnable.jobs.length > 0 || unrunnable.sharedJobNames.length > 0 || unrunnable.hooks.length > 0) {
             return c.json({
                 success: false,
@@ -2969,7 +3134,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     engine as well (a driver the legacy `onEnable` bridge registered
         //     has no metadata item), and a holder that cannot be read refuses
         //     `503`: a check that did not run is never taken for "no holder".
-        const heldDatasource = await this.findHeldDatasourceName(ctx, manifest, manifestId);
+        //     [#34431] The names are every package body's on a composed
+        //     bundle, so a `packages` the resolver refuses is answered here
+        //     with that refusal, before any write
+        //     ({@link declaredRefusalAnswer}), as 2b and 2c″ answer it. An
+        //     undeclared throw stays a throw.
+        let heldDatasource: Awaited<ReturnType<MarketplaceInstallLocalPlugin['findHeldDatasourceName']>>;
+        try {
+            heldDatasource = await this.findHeldDatasourceName(ctx, manifest, manifestId);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
+        }
         if (heldDatasource && 'reading' in heldDatasource) {
             ctx.logger?.warn?.(
                 `[MarketplaceInstallLocal] install of ${manifestId} refused: whether another holder owns its datasource `
@@ -3031,20 +3208,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     `packages` the resolver refuses (ADR-0112 `code` + its declared
         //     4xx status, the refusal the `manifest` service raises on the same
         //     bytes) is answered here, before anything is written — never
-        //     thrown out of the door. An undeclared throw stays a throw.
+        //     thrown out of the door ({@link declaredRefusalAnswer}). An
+        //     undeclared throw stays a throw.
         let gate: ReturnType<MarketplaceInstallLocalPlugin['evaluateGlobalUniqueGate']>;
         try {
             gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
-        } catch (err: any) {
-            const refusal = resolveThrownHttpError(err);
-            if (refusal.declaredStatus === undefined || refusal.status >= 500) throw err;
-            return c.json({
-                success: false,
-                error: {
-                    code: refusal.code,
-                    message: `Package '${manifestId}' cannot be installed: ${String(err?.message ?? err)} Nothing was installed or written.`,
-                },
-            }, refusal.status);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
         }
         if (gate.blocked) {
             ctx.logger?.warn?.(
@@ -3112,7 +3284,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      the physical table by the driver's own rule
         //      ({@link evaluateDeclaredRenames}); a declaration it cannot
         //      honour is refused `422 VALIDATION_ERROR`, naming the field, the
-        //      old key and the reason. Asked before 2c′, so a refusal no token
+        //      old key and the reason; [#34432] a body the artifact resolver
+        //      refuses is answered with that refusal's own status and code, as
+        //      at 2b, and only a table that could not be read answers 503.
+        //      Asked before 2c′, so a refusal no token
         //      answers is never preceded by a 409 asking for one. The carry
         //      itself runs right before step 3, the last moment the running
         //      version still serves the old key.
@@ -3398,6 +3573,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // the database (e.g. a reinstall/upgrade over live sample data) — the
         // install carries sample data either way. Leaving the flag false here
         // is what made older ledgers claim "no sample data" over a seeded DB.
+        // [#34405] A row the landed-key record keeps out (a person deleted it)
+        // is in `skipped` too; the listing reads the rows, not this flag.
         const seededRows = (seededSummary.seeded.inserted ?? 0) + (seededSummary.seeded.updated ?? 0) + (seededSummary.seeded.skipped ?? 0);
         if (seededSummary.seeded.mode === 'inline' && seededRows > 0) {
             entry.withSampleData = true;
@@ -4472,6 +4649,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * - **A refusal**: `422 VALIDATION_ERROR` (this door's body refusal),
      *   each in `details.refusals` with its object, field, old key(s) and
      *   reason. No token answers it: the package must change.
+     * - **A body the artifact resolver refuses** (a composed artifact whose
+     *   `packages` is not a list, or one of whose entries the entry contract
+     *   refuses): that refusal's own declared status and code
+     *   ({@link declaredRefusalAnswer}, step 2b's reader), before any table is
+     *   read. An undeclared throw out of the resolver is rethrown, never
+     *   relabelled.
      * - **A reading that failed** (the table could not be read): `503
      *   SERVICE_UNAVAILABLE`, never taken for "nothing to carry".
      * - Otherwise the tables to carry, which step 2f carries.
@@ -4481,7 +4664,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         converted: unknown,
         installed: unknown,
-    ): Promise<{ refusal?: { body: Record<string, unknown>; status: 422 | 503 }; tables: InstallRenameTable[] }> => {
+    ): Promise<{ refusal?: { body: Record<string, unknown>; status: number }; tables: InstallRenameTable[] }> => {
+        // [#34432] The bodies the plan reads, resolved FIRST through the fold
+        // the plan reads them by ({@link packageUpgradeSideOf}: the
+        // `resolveStackCollection` reads of `objects`, `objectExtensions` and
+        // `data`), so a body the resolver refuses is told apart from a table
+        // that could not be read: the resolver is deterministic over the same
+        // bytes, so the plan below never meets its refusal, and what the plan
+        // throws is answered as the table read's. Without this, the
+        // resolver's 422 was answered as the 503 below and its author was told
+        // to retry once the database answers.
+        try {
+            packageUpgradeSideOf(converted);
+            if (installed !== null && installed !== undefined) packageUpgradeSideOf(installed);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return { tables: [], refusal: refused };
+        }
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
             plan = await planDeclaredRenames(ctx, manifestId, converted, installed);
@@ -5527,7 +5727,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             organizationId = resolved;
         }
         try {
-            const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+            const s = await this.runInlineSeed(ctx, datasets, door === 'reseed' ? 'reseed' : 'honour', organizationId, {
                 ...(userId ? { userId } : {}),
                 app,
             }, {
@@ -6738,6 +6938,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * `failed-credentials` verdict, which the datasource answers and a read of
      * a bound object names (`ERR_DATASOURCE_UNAVAILABLE`).
      *
+     * [#34431, ADR-0130 D4] The datasources and the objects are read through
+     * the one reader of a package-owned collection ({@link declaredDatasources},
+     * `resolveStackCollection`), so a composed bundle hands the path every
+     * package body's, in package order, as a flat bundle hands its own. Every
+     * one is stamped with `manifestId`, the id the ledger entry, the uninstall
+     * cleanup and the held-name judge key on.
+     *
      * Answers each declared datasource's verdict, or `undefined` when the
      * package declares none (or the runtime predates the path). Never throws:
      * the package is installed either way.
@@ -6748,7 +6955,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         version: string | undefined,
     ): Promise<Array<{ name: string; status: string }> | undefined> => {
-        const declared = declaredDatasources(manifest);
+        let declared: any[];
+        let objects: any[];
+        try {
+            declared = declaredDatasources(manifest);
+            objects = resolveStackCollection(manifest, 'objects');
+        } catch (err: any) {
+            // The register before this step resolved the same bytes, so this
+            // is not expected; nothing is connected, and the log says so.
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] the datasources of ${manifestId} could not be read, so none is registered or connected: `
+                + `${err?.message ?? err}. The objects bound to them have no driver until a fixed version is installed.`,
+            );
+            return undefined;
+        }
         let connect: typeof import('@objectstack/runtime')['connectPackageDatasources'] | undefined;
         try {
             const mod: any = await import('@objectstack/runtime');
@@ -6763,7 +6983,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
             return undefined;
         }
-        const objects = isPlainObject(manifest) && Array.isArray(manifest.objects) ? manifest.objects : [];
         try {
             // Called with an empty list too: a reinstall whose new version
             // declares none withdraws what the previous version registered.
@@ -7038,14 +7257,18 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * automation service, or one that cannot list, the status is `unknown`.
      * `writable` is the references the credential door can store, as the
      * listing says; `undefined` when there is no listing to say it.
+     *
+     * [#34431, ADR-0130 D4] `connectors` through `resolveStackCollection`: the
+     * top-level list when the body carries one, otherwise every package
+     * body's, in package order. A composed bundle carries no top-level
+     * `connectors`, and the top-level read named none of its credentials.
      */
     private describeInstalledCredentialRefs = async (
         ctx: PluginContext,
         converted: unknown,
     ): Promise<{ entries: InstalledCredentialRef[]; writable?: ReadonlySet<string> } | undefined> => {
-        const connectors = (converted as { connectors?: unknown } | null)?.connectors;
         const declared = new Map<string, string[]>();
-        for (const raw of Array.isArray(connectors) ? connectors : []) {
+        for (const raw of resolveStackCollection(converted, 'connectors')) {
             const entry = raw as { name?: unknown; provider?: unknown; auth?: { credentialRef?: unknown } } | null;
             if (typeof entry?.name !== 'string' || typeof entry.provider !== 'string') continue;
             const ref = entry.auth?.credentialRef;
@@ -7179,7 +7402,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             const bundles: Array<Record<string, unknown>> = [];
             bundles.push(...(resolveStackCollection(manifest, 'translations') as Array<Record<string, unknown>>));
-            if (Array.isArray(manifest?.i18n)) bundles.push(...manifest.i18n);
 
             if (bundles.length > 0) {
                 let i18nService: any;
@@ -7298,7 +7520,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     if (!multiTenant || organizationId) {
                         // [#30281] The installing (or reseeding) user and this
                         // package's own declared default locale.
-                        const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+                        // [#34405] The reseed re-seeds; the install and the
+                        // upgrade honour the landed-key record.
+                        const s = await this.runInlineSeed(ctx, datasets, opts.door === 'reseed' ? 'reseed' : 'honour', organizationId, {
                             userId: opts.userId,
                             app: manifest,
                         }, {
@@ -7411,10 +7635,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * A, maintainer, 2026-11-05: the install paths
      * pick datasets by locale). Nothing answers ⇒ no locale, and every dataset
      * loads as before. A dataset without `locale` loads whatever it answers.
+     *
+     * [#34405, #31021] `landedKeys` is the loader's own option, passed by every
+     * caller, never defaulted: each load keeps the record of which seed rows
+     * landed in the organization it seeds (`sys_seed_landed_key`). `'honour'`
+     * — the install, the upgrade, the restart heal, the per-organization
+     * replay and an unmanaged copy's first load — does not insert again a
+     * recorded row that is now gone, because a person removed it; a key never
+     * recorded still lands, so a row an upgrade adds is inserted. `'reseed'` —
+     * the sample-data reseed and the replayer's `{ reseed: true }` — is the
+     * deliberate re-seed: it inserts every missing row and records it again.
+     * A row the record keeps out is counted in `skipped`.
      */
     private runInlineSeed = async (
         ctx: PluginContext,
         datasets: any[],
+        landedKeys: 'honour' | 'reseed',
         organizationId?: string,
         localeFrom: { userId?: string; app?: unknown } = {},
         owner: SeedOwnerOfLoad = { userId: null, door: 'seed', none: 'no person named' },
@@ -7435,7 +7671,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             appDefaultLocale: appDefaultSeedLocale(localeFrom.app),
         });
         ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
-        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger, { landedKeys });
         const request = (SeedLoaderRequestSchema as any).parse({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,

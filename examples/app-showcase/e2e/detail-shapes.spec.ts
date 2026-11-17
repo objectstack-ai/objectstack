@@ -197,7 +197,7 @@ test('ungrouped + related-heavy: flat details and the related panels on Contoso'
   // `relatedList: 'primary'` (CORE relationships), so each is a body table in
   // the details, with its rows read at open; the rest of Contoso's lists
   // (Contacts and the Field Zoo lookups) are panels of the right column,
-  // after its first panel, 动态 (objectstack#27524, Target 5).
+  // before its last panel, 动态 (objectstack#34590).
   const details = page.locator('[data-record-column="details"]');
   const invoicesTable = details
     .getByRole('table')
@@ -208,7 +208,8 @@ test('ungrouped + related-heavy: flat details and the related panels on Contoso'
   await expect(invoicesTable.getByRole('cell', { name: 'INV-1002', exact: true })).toBeVisible();
   await expect(projectsTable.getByRole('cell', { name: 'Data Platform', exact: true })).toBeVisible();
   const rightColumn = page.locator('[data-record-column="right"]');
-  await expect(rightColumn.locator(':scope > *').first()).toHaveAttribute('data-record-timeline-panel', '');
+  // objectstack#34590, ruling 6937542160 — 动态 last (supersedes objectstack#27524 Targets 5 and 8's 动态-first).
+  await expect(rightColumn.locator(':scope > *').last()).toHaveAttribute('data-record-timeline-panel', '');
   await expect(rightColumn.getByRole('region', { name: /^(Invoices|Projects)$/ })).toHaveCount(0);
 
   // Ungrouped shape: the details body is flat — no fieldGroup section cards.

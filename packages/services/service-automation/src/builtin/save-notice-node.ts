@@ -32,7 +32,38 @@ import { flowNoticeMessageKey } from '@objectstack/spec/system';
 import type { AutomationEngine } from '../engine.js';
 import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
-import { renderTextSlot } from './template.js';
+import type { AutomationContext } from '@objectstack/spec/contracts';
+import { renderTextSlot, type VariableMap } from './template.js';
+
+/**
+ * The save notice's message as a run renders it: translated at
+ * `flowNoticeMessageKey(flowName, nodeId)` in `context.locale`, its holes
+ * filled through the engine's one text renderer, and the authored template
+ * when the run names no flow. ONE spelling, asked by this executor and by a
+ * dry run's outbound payload (`dry-run.ts`), so the sentence a dry run reports
+ * is the sentence the saver would read in the same locale.
+ */
+export function renderSaveNoticeMessage(
+    engine: Pick<AutomationEngine, 'renderFlowTextSlot'>,
+    flowName: string | undefined,
+    nodeId: string,
+    authored: unknown,
+    variables: VariableMap,
+    context: AutomationContext,
+): string | undefined {
+    return flowName === undefined
+        ? renderTextSlot(authored, variables, context.currency)
+        : engine.renderFlowTextSlot(
+            {
+                key: flowNoticeMessageKey(flowName, nodeId),
+                authored,
+                subject: `flow '${flowName}' save_notice '${nodeId}'`,
+                shownAs: 'the save notice',
+            },
+            variables,
+            context,
+        );
+}
 
 export function registerSaveNoticeNode(engine: AutomationEngine, _ctx: PluginContext): void {
     engine.registerNodeExecutor({
@@ -77,18 +108,7 @@ export function registerSaveNoticeNode(engine: AutomationEngine, _ctx: PluginCon
             // The writer's locale, not the run's: a record-change run carries
             // none of its own, and the reader of this sentence is the writer.
             const renderContext = channel.locale ? { ...context, locale: channel.locale } : context;
-            const message = flowName === undefined
-                ? renderTextSlot(parsed.config.message, variables, context.currency)
-                : engine.renderFlowTextSlot(
-                    {
-                        key: flowNoticeMessageKey(flowName, node.id),
-                        authored: parsed.config.message,
-                        subject: `flow '${flowName}' save_notice '${node.id}'`,
-                        shownAs: 'the save notice',
-                    },
-                    variables,
-                    renderContext,
-                );
+            const message = renderSaveNoticeMessage(engine, flowName, node.id, parsed.config.message, variables, renderContext);
             if (typeof message !== 'string' || message.trim() === '') {
                 return {
                     success: false,

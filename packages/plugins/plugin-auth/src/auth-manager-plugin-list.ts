@@ -64,6 +64,7 @@ import { resolveUserAuthzGrants } from '@objectstack/core';
 import { applyPlatformAdminImpersonation } from './admin-impersonate-endpoint.js';
 import { requireSecondFactorAtCodeAndLinkDoors } from './second-factor-code-and-link-doors.js';
 import { buildOrganizationPlugin, type OrganizationPluginHost } from './auth-manager-organization-plugin.js';
+import { ACCEPT_INVITATION_ONE_STEP_PATH, buildInvitationProofDoorPlugin } from './invitation-mailbox-proof.js';
 import {
   OAUTH_ORGANIZATION_CLAIM,
   assertScimAdminCoherence,
@@ -121,7 +122,10 @@ export interface PluginListHost {
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
   getMcpResourceUrl: AuthManager['getMcpResourceUrl'];
+  getApi: AuthManager['getApi'];
+  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
+  isSsoOnlyMode: AuthManager['isSsoOnlyMode'];
   jwtSigningFailureReported: AuthManager['jwtSigningFailureReported'];
   multiOrgPostureEffective: AuthManager['multiOrgPostureEffective'];
   orgRolesMap: AuthManager['orgRolesMap'];
@@ -129,8 +133,30 @@ export interface PluginListHost {
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
   resolveMembershipRole: AuthManager['resolveMembershipRole'];
   resolveTwoFactorAccountLockout: AuthManager['resolveTwoFactorAccountLockout'];
+  assertPasswordNotReused: AuthManager['assertPasswordNotReused'];
+  recordPasswordHistory: AuthManager['recordPasswordHistory'];
+  stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
   storedRecipientLocale: AuthManager['storedRecipientLocale'];
+  validateAudienceAdmission: AuthManager['validateAudienceAdmission'];
 }
+
+/**
+ * better-auth's `haveIBeenPwned` default door list, as the installed vendor
+ * declares it. Handing the plugin an explicit list replaces that default, so
+ * the list the platform hands it is this one plus the one-step invitation
+ * acceptance; the card's test reads the installed vendor default and pins the
+ * two equal, so a vendor that grows its list reds that test instead of
+ * silently losing the addition.
+ */
+export const BREACH_CHECK_VENDOR_DEFAULT_PATHS: readonly string[] = [
+  '/sign-up/email',
+  '/change-password',
+  '/reset-password',
+  '/email-otp/reset-password',
+  '/phone-number/reset-password',
+  '/admin/create-user',
+  '/admin/set-user-password',
+];
 
 /**
  * The body of `AuthManager.buildPluginList()`; the method's docblock and the
@@ -268,6 +294,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
         getDataEngine: (...a) => this.getDataEngine(...a),
         getEmailService: (...a) => this.getEmailService(...a),
+        isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
         multiOrgPostureEffective: (...a) => this.multiOrgPostureEffective(...a),
         get orgRolesMap() { return readOrgRolesMap(); },
         set orgRolesMap(v) { writeOrgRolesMap(v); },
@@ -276,6 +303,18 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       };
       return buildOrganizationPlugin.call(host);
     });
+    // [#34257] The one-step acceptance door for the invitation mail's mailbox
+    // proof (`invitation-mailbox-proof.ts`), beside the plugin it accepts through.
+    plugins.push(await buildInvitationProofDoorPlugin({
+      getApi: () => this.getApi(),
+      validateAudienceAdmission: (...a) => this.validateAudienceAdmission(...(a as Parameters<AuthManager['validateAudienceAdmission']>)),
+      isSsoOnlyMode: () => this.isSsoOnlyMode(),
+      getDataEngine: () => this.getDataEngine(),
+      counterStore: () => this.config.sharedCounterStore?.() ?? Promise.reject(new Error('no shared counter store')),
+      stampPasswordChangedAt: (userId) => this.stampPasswordChangedAt(userId),
+      assertPasswordNotReused: (userId, candidate, verify) => this.assertPasswordNotReused(userId, candidate, verify),
+      recordPasswordHistory: (userId, oldHash) => this.recordPasswordHistory(userId, oldHash),
+    }));
   }
 
   if (enabled.twoFactor) {
@@ -301,6 +340,9 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.passwordRejectBreached) {
     const { haveIBeenPwned } = await import('better-auth/plugins/haveibeenpwned');
     plugins.push(haveIBeenPwned({
+      // The plugin's own default doors, plus the one-step invitation
+      // acceptance, which sets a password too.
+      paths: [...BREACH_CHECK_VENDOR_DEFAULT_PATHS, ACCEPT_INVITATION_ONE_STEP_PATH],
       customPasswordCompromisedMessage:
         'This password has appeared in a known data breach. Please choose a different one.',
     }));

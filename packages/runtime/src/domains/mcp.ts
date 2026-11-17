@@ -33,12 +33,14 @@ import {
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE } from '@objectstack/core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { actionInvocationFailure, recordActionInvocation, withActionSurface } from '../action-invocation-audit.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import type { ActionDispatchAnswer, ActionResumeRequest, PlaceRequestInEnvironment } from '../action-dispatch.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
@@ -809,27 +811,14 @@ function describedRule(raw: unknown, depth: number): Record<string, unknown> | u
 }
 
 /**
- * Build a principal-bound {@link McpDataBridge}: every method runs AS the
- * request's ExecutionContext through {@link callData} (RLS/permissions) and
- * the per-env metadata reads (the protocol's merged listing, or the metadata
- * service on a host with none). Keeps the MCP tool layer free of any direct
- * engine access.
- *
- * Also carries the action seam (`listActions` / `runAction`) and the skill seam
- * (`listSkills`, #3905) the MCP runtime wires by capability.
+ * [#34386] The per-request reads the action doors resolve declarations from:
+ * the metadata service, the protocol layer's merged listing, and the objects
+ * and standalone actions served from it. {@link buildMcpBridge} reads them for
+ * its tools, and the host resume door ({@link resumeActionRunRequest}) for
+ * `resume_run`'s gates, so the two cannot read different declarations.
  */
-export function buildMcpBridge(
-    deps: DomainHandlerDeps,
-    context: HttpProtocolContext,
-    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService } = {},
-): any {
-    const ec = context.executionContext;
+function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolContext) {
     const envId = context.environmentId;
-    const driver = (context as any).dataDriver;
-    // [#5155] Both the facilities AND the request are bound here, once, so the
-    // bridge's tool surface below reads exactly as it did — while every call it
-    // makes stays pinned to THIS request's kernel.
-    const callData = actionExec.callData.bind(null, deps, context);
     const getMeta = () => deps.resolveService(context, 'metadata', envId);
     // The protocol layer's merged read, resolved per request on the SAME
     // per-environment seam `getMeta` uses — never captured once at boot,
@@ -874,21 +863,6 @@ export function buildMcpBridge(
         (await actionExec.readMergedItems(await getProtocol(), 'object')) as any[] | undefined;
 
     /**
-     * The one object `describe_object` describes and `validate_expression`
-     * judges against: from the listing {@link readMergedObjects} reads, or the
-     * metadata service's by-name read on a host with none.
-     */
-    /** {@link readMergedObjects}, read once per bridge for the `aiReadExposed` asks. */
-    let mergedForAiRead: Promise<any[] | undefined> | undefined;
-
-    const readServedObject = async (name: string): Promise<any> => {
-        const merged = await readMergedObjects();
-        return merged !== undefined
-            ? merged.find((o: any) => o?.name === name)
-            : await ((await getMeta()) as any)?.getObject?.(name);
-    };
-
-    /**
      * [#25139] The object definitions `list_objects` lists: the merged listing,
      * or the metadata service's on a host with none. `list_actions`,
      * `run_action` and `resume_run` collect object-embedded actions from the
@@ -914,6 +888,47 @@ export function buildMcpBridge(
      */
     const readServedActions = async (): Promise<any[] | undefined> =>
         (await actionExec.readMergedItems(await getProtocol(), 'action')) as any[] | undefined;
+    return { getMeta, getProtocol, readMergedObjects, readServedObjects, readServedActions };
+}
+
+/**
+ * Build a principal-bound {@link McpDataBridge}: every method runs AS the
+ * request's ExecutionContext through {@link callData} (RLS/permissions) and
+ * the per-env metadata reads (the protocol's merged listing, or the metadata
+ * service on a host with none). Keeps the MCP tool layer free of any direct
+ * engine access.
+ *
+ * Also carries the action seam (`listActions` / `runAction`) and the skill seam
+ * (`listSkills`, #3905) the MCP runtime wires by capability.
+ */
+export function buildMcpBridge(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService } = {},
+): any {
+    const ec = context.executionContext;
+    const envId = context.environmentId;
+    const driver = (context as any).dataDriver;
+    // [#5155] Both the facilities AND the request are bound here, once, so the
+    // bridge's tool surface below reads exactly as it did — while every call it
+    // makes stays pinned to THIS request's kernel.
+    const callData = actionExec.callData.bind(null, deps, context);
+    const { getMeta, getProtocol, readMergedObjects, readServedObjects, readServedActions } = actionDeclarationReads(deps, context);
+
+    /**
+     * The one object `describe_object` describes and `validate_expression`
+     * judges against: from the listing {@link readMergedObjects} reads, or the
+     * metadata service's by-name read on a host with none.
+     */
+    /** {@link readMergedObjects}, read once per bridge for the `aiReadExposed` asks. */
+    let mergedForAiRead: Promise<any[] | undefined> | undefined;
+
+    const readServedObject = async (name: string): Promise<any> => {
+        const merged = await readMergedObjects();
+        return merged !== undefined
+            ? merged.find((o: any) => o?.name === name)
+            : await ((await getMeta()) as any)?.getObject?.(name);
+    };
 
     // [ADR-0150 D6] The engine the skill read last resolved (`listSkills`).
     let skillEngine: any;
@@ -1810,7 +1825,7 @@ function resumeDoorError(
     const envelope = (response?.body as {
         error?: { code?: unknown; message?: unknown; details?: unknown; userMessage?: unknown };
     } | undefined)?.error;
-    return Object.assign(new Error(typeof envelope?.message === 'string' ? envelope.message : message), {
+    const thrown = Object.assign(new Error(typeof envelope?.message === 'string' ? envelope.message : message), {
         code: typeof envelope?.code === 'string' ? envelope.code : undefined,
         status: response?.status ?? httpStatus,
         ...(envelope?.details !== undefined ? { details: envelope.details } : {}),
@@ -1820,6 +1835,26 @@ function resumeDoorError(
         // envelope's top level, never folded into `message`.
         ...(typeof envelope?.userMessage === 'string' ? { userMessage: envelope.userMessage } : {}),
     });
+    // [#34386] The host's resume door answers this refusal with the envelope
+    // it was built from (`resumeDoorAnswerOf`), `details` included.
+    resumeDoorEnvelopes.set(thrown, response);
+    return thrown;
+}
+
+/**
+ * [#34386] Each refusal {@link resumeDoorError} built, keyed to the envelope
+ * `deps.error` built for it. The MCP door throws the refusal and its tool
+ * reads `code`, `status` and `details` off it; the host's resume door answers
+ * that same envelope. A generic thrown-value reader would keep the code and
+ * the status but drop `details` (a confirmation refusal's `reason`, a shared
+ * flow name's `candidates`), so the host door does not read it that way.
+ */
+const resumeDoorEnvelopes = new WeakMap<object, { status: number; body: any }>();
+
+/** [#34386] The host resume door's answer to a throw: the door's own envelope, or the dispatcher's reader for anything else. */
+function resumeDoorAnswerOf(deps: DomainHandlerDeps, err: unknown): ActionDispatchAnswer {
+    const envelope = err !== null && typeof err === 'object' ? resumeDoorEnvelopes.get(err) : undefined;
+    return (envelope ?? deps.errorFromThrown(err, 500)) as ActionDispatchAnswer;
 }
 
 /**
@@ -1910,6 +1945,13 @@ function notResumableRunMessage(runId: string): string {
  * instead (or the `no_confirmation_service` refusal): the run stays parked,
  * and approving the hand-off resumes THAT run with these values, as the
  * approver, who must be its owner. No invocation row is written for it.
+ *
+ * [#34386] The host's door to the same steps is {@link resumeActionRunRequest}
+ * (published as `dispatchActionResume`): the approval leg of a handed-off
+ * `resume_run`. It asks steps 1 to 6 again as the approving person, with
+ * one difference at step 3: the confirmation gate reads the person's
+ * confirmation the host carries (`wiring.hostDoor`), so the call is never
+ * handed off or elicited again.
  */
 export async function resumeActionRun(
     deps: DomainHandlerDeps,
@@ -1928,9 +1970,22 @@ export async function resumeActionRun(
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
         /** [#33712] As `invokeBusinessAction`'s: the person asked in their client, in place of a hand-off. */
         elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+        /**
+         * [#34386] Present exactly when the call comes through the host's
+         * resume door ({@link resumeActionRunRequest}), never at the MCP
+         * tool. The host has asked the person already (an approved
+         * hand-off), so step 3's confirmation gate reads the person's
+         * `confirmation` as a host action door reads it (the member gate,
+         * `actionConfirmationRefusal`): nothing is handed off or elicited,
+         * an AI service account is refused whatever it carries, and the
+         * invocation row names no MCP surface.
+         */
+        hostDoor?: { confirmation: AIActionConfirmation };
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, readObjects, readActions, callData, elicitConfirmation } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, readActions, callData, hostDoor } = wiring;
+    // [#34386] The host door asks no client: it carries the person's answer.
+    const elicitConfirmation = hostDoor ? undefined : wiring.elicitConfirmation;
     if (typeof runId !== 'string' || runId === '') {
         throw resumeDoorError(deps, 'runId is required', 400);
     }
@@ -2009,7 +2064,7 @@ export async function resumeActionRun(
         });
         if (projected.kind === 'fault') throw actionRunFieldVisibilityRefusal(projected.object);
         if (projected.kind === 'withhold') continue;
-        const admission = resumeAdmissionRefusal(deps, candidate, ec, activationEngine);
+        const admission = resumeAdmissionRefusal(deps, candidate, ec, activationEngine, hostDoor?.confirmation);
         if (!(admission instanceof Error)) {
             admitted = candidate;
             handOff = admission.handOff;
@@ -2083,8 +2138,11 @@ export async function resumeActionRun(
     // refused, naming this door (`surface: 'mcp'`, set from the door's
     // identity), the admitting flow action, and the run it continued. A
     // refusal in steps 1–3 resumed nothing and writes no row.
+    // [#34386] At the host door the row names no surface, as the host action
+    // door's row does (`dispatchActionRequest`): the call came through
+    // neither REST nor MCP.
     const invocation = {
-        context: withActionSurface(ec, 'mcp'),
+        context: hostDoor ? (ec && typeof ec === 'object' ? ec : ({} as any)) : withActionSurface(ec, 'mcp'),
         actionName: typeof action?.name === 'string' && action.name ? action.name : String(flowName),
         objectName: actionExec.isObjectLessActionKey(objectName) ? undefined : objectName,
         recordId,
@@ -2104,6 +2162,94 @@ export async function resumeActionRun(
     }
     await recordActionInvocation(deps, context, envId, { ...invocation, outcome: 'succeeded' });
     return answer;
+}
+
+/**
+ * [#34386] The host's door to `resume_run`: the approval leg of a handed-off
+ * `resume_run` (`ActionConfirmationHandOff.run`, `@objectstack/spec/contracts`),
+ * published as `dispatchActionResume` (`../action-dispatch.ts`).
+ *
+ * The amended confirmation contract says that approving a handed-off
+ * `resume_run` resumes THAT parked run, with the values the call carried, as
+ * the approver, who must be the run's owner, every gate re-checked at that
+ * moment. This door is that sequence: {@link resumeActionRun}'s steps 1 to 6,
+ * asked again as `executionContext`, so a host keeps no second copy of them.
+ *
+ *  - Step 2 refuses a run that is no longer paused, and a run another person
+ *    started, with the door's one not-found answer (`404`).
+ *  - Step 3 asks every gate of the action that admits the run; its
+ *    confirmation gate reads `confirm` as a host action door reads it
+ *    (`dispatchAction`'s member gate): a declared-gated action resumes on the
+ *    person's `confirm: true` and is refused `428 ACTION_CONFIRMATION_REQUIRED`
+ *    without it. Nothing is handed off again, and an AI service account is
+ *    refused whatever it carries (ADR-0151 D3 rule 3).
+ *  - Steps 4 and 5 read the subject record again as the person and require
+ *    the run to be paused on a screen; step 6 resumes it.
+ *
+ * Step 2 refuses only a run that is no longer paused: a wizard moved on to
+ * its next screen is still paused under the same run id, and a second call
+ * with the same hand-off resumes that screen with the values given. Deciding
+ * a pending item once is the host's.
+ *
+ * Placement is the host action door's ({@link PlaceRequestInEnvironment}).
+ * What stays the host's before it calls, as for `dispatchAction`: resolving
+ * the person's envelope against the placed kernel, the ADR-0069
+ * authentication-policy gate, the environment-membership gate, and the
+ * approve door's own rule that only a person's signed-in session decides.
+ *
+ * The answer is the REST envelope: `200` with `resume_run`'s success value
+ * (`{ ok, action, objectName, recordId?, result }`) as `data`, or the
+ * refusal's ADR-0112 envelope. One invocation row is written for a call that
+ * cleared steps 1 to 3, as at the MCP door, with no surface.
+ */
+export async function resumeActionRunRequest(
+    deps: DomainHandlerDeps,
+    request: ActionResumeRequest,
+    place: PlaceRequestInEnvironment,
+): Promise<ActionDispatchAnswer> {
+    const ec: any = request?.executionContext;
+    // [#5519] ANONYMOUS BASELINE, first, as at the host action door.
+    if (shouldDenyAnonymous({ userId: ec?.userId, isSystem: ec?.isSystem, method: 'POST' })) {
+        return deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }) as ActionDispatchAnswer;
+    }
+    const runId = request?.runId;
+    if (typeof runId !== 'string' || runId === '') {
+        return deps.error('dispatchActionResume needs the paused run\'s id (`runId`)', 400) as ActionDispatchAnswer;
+    }
+    const namedEnvironment = typeof request.environmentId === 'string' && request.environmentId !== '' ? request.environmentId : undefined;
+    const context: HttpProtocolContext = { request: { headers: {} }, executionContext: ec };
+    // [ADR-0006 Phase 5] PLACEMENT, as at the host action door. The route
+    // path is informational only: no environment hint is derived from it.
+    try {
+        await place(context, {
+            routePath: `/mcp/resume_run/${encodeURIComponent(runId)}`,
+            ...(namedEnvironment ? { environmentId: namedEnvironment } : {}),
+        });
+    } catch (err) {
+        return deps.errorFromThrown(err, 500) as ActionDispatchAnswer;
+    }
+    if (namedEnvironment && !deps.isMultiTenantHost()) context.environmentId = namedEnvironment;
+    if (!context.environmentId) {
+        const def = deps.getDefaultEnvironmentId();
+        if (def) context.environmentId = def;
+    }
+    const { getMeta, readServedObjects, readServedActions } = actionDeclarationReads(deps, context);
+    const confirmation: AIActionConfirmation = request.confirm !== undefined ? { confirm: request.confirm } : {};
+    try {
+        const answer = await resumeActionRun(deps, context, runId, request.values !== undefined ? { values: request.values } : {}, {
+            driver: (context as any).dataDriver,
+            envId: context.environmentId,
+            ec,
+            getMeta,
+            readObjects: readServedObjects,
+            readActions: readServedActions,
+            callData: actionExec.callData.bind(null, deps, context),
+            hostDoor: { confirmation },
+        });
+        return deps.success(answer) as ActionDispatchAnswer;
+    } catch (err) {
+        return resumeDoorAnswerOf(deps, err);
+    }
 }
 
 /**
@@ -2193,6 +2339,7 @@ function resumeAdmissionRefusal(
     candidate: { action: any; objectName: string },
     ec: any,
     activationEngine: any,
+    hostConfirmation?: AIActionConfirmation,
 ): Error | { handOff: boolean } {
     const { action, objectName } = candidate;
     const systemObject = actionExec.systemObjectActionExposureError(deps, action, objectName);
@@ -2205,6 +2352,17 @@ function resumeAdmissionRefusal(
     if (disabled) return resumeDoorError(deps, disabled.message, disabled.status, { code: disabled.code });
     // [ADR-0151 D3 rule 3] The caller's envelope rides along: an AI service
     // account never confirms for itself, so it is refused whatever it sends.
+    // [#34386] The host's resume door carries the person's confirmation (an
+    // approved hand-off): the member gate a host action door asks reads it.
+    // An AI service account is refused there whatever it carries; nothing is
+    // handed off again.
+    if (hostConfirmation !== undefined) {
+        const refused = actionExec.actionConfirmationRefusal(deps, action, hostConfirmation, objectName, ec);
+        if (refused) {
+            return resumeDoorError(deps, refused.message, refused.status, { code: refused.code, ...refused.details });
+        }
+        return { handOff: false };
+    }
     // [#33690] The request is not read: a gated resume by anyone else is
     // handed to the person, never admitted on the caller's `confirm`.
     const confirmation = actionExec.aiDoorConfirmation(deps, action, objectName, ec);

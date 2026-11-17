@@ -821,7 +821,13 @@ export interface ResultDialogFieldSpec {
    * and React refuses an object as a child.
    */
   label?: SpecResultDialogField['label'];
-  format?: 'qrcode' | 'code-list' | 'secret' | 'text' | 'json';
+  /** Derived, like `label`: the contract's field format set (`table` included). */
+  format?: SpecResultDialogField['format'];
+  /**
+   * Derived, like `format`: the cells of a `format: 'table'` field,
+   * `[{ path, label?, format? }]`, `path` read in one element of the array.
+   */
+  columns?: SpecResultDialogField['columns'];
 }
 export interface ResultDialogSpec {
   /** Derived `I18nLabel` — see `ResultDialogFieldSpec.label` on resolving it. */
@@ -830,7 +836,8 @@ export interface ResultDialogSpec {
   description?: SpecResultDialog['description'];
   /** Derived `I18nLabel` — see `ResultDialogFieldSpec.label` on resolving it. */
   acknowledge?: SpecResultDialog['acknowledge'];
-  format?: 'qrcode' | 'code-list' | 'secret' | 'text' | 'json';
+  /** Derived: the dialog-level default set (every field format but `table`). */
+  format?: SpecResultDialog['format'];
   fields?: ResultDialogFieldSpec[];
 }
 

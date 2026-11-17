@@ -10,7 +10,7 @@ import { createAuthClient as createBetterAuthClient, parseJSON } from 'better-au
 import { organizationClient, twoFactorClient } from 'better-auth/client/plugins';
 import type {
   AuthClient, AuthClientConfig, AuthUser, AuthClientSession, SignInCredentials, SignUpData,
-  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig,
+  AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationOneStepInput, AuthInvitationOneStepOutcome, AuthPublicConfig,
   SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge, TwoFactorMethod,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
@@ -1382,6 +1382,40 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     async acceptInvitation(invitationId: string): Promise<void> {
       const { error } = await (betterAuth as any).organization.acceptInvitation({ invitationId });
       if (error) throw toAuthError(error, 'Failed to accept invitation');
+    },
+
+    async acceptInvitationOneStep(input: AuthInvitationOneStepInput): Promise<AuthInvitationOneStepOutcome> {
+      const url = `${origin}${basePath}/organization/accept-invitation-one-step`;
+      const response = await bearerFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(input),
+      });
+      const body = (await response.json().catch(() => null)) as
+        | {
+            data?: { outcome?: unknown; organizationId?: unknown };
+            code?: string;
+            message?: string;
+            error?: { code?: string; message?: string };
+          }
+        | null;
+      if (!response.ok) {
+        const code = body?.code ?? body?.error?.code;
+        const err = new Error(
+          body?.message ?? body?.error?.message ?? `Invitation acceptance failed with status ${response.status}`,
+        ) as Error & { code?: string; status?: number };
+        if (code) err.code = code;
+        err.status = response.status;
+        throw err;
+      }
+      // A success answers in the envelope, `{ success: true, data }`.
+      const data = body?.data;
+      if (data?.outcome === 'accepted' && typeof data.organizationId === 'string') {
+        return { outcome: 'accepted', organizationId: data.organizationId };
+      }
+      if (data?.outcome === 'sign_in' || data?.outcome === 'verify_email') return { outcome: data.outcome };
+      throw new Error('acceptInvitationOneStep: unexpected response body');
     },
 
     async rejectInvitation(invitationId: string): Promise<void> {

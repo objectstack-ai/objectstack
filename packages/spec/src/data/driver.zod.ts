@@ -111,6 +111,29 @@ export const DriverOptionsSchema = lazySchema(() => z.object({
    * rows a write touches.
    */
   bypassTenantAudit: z.boolean().optional().describe('Suppress the driver tenant-audit warning for a deliberately global write on a tenant-scoped object (diagnostics only — never changes what the write touches)'),
+
+  /**
+   * Lock the rows a read returns against concurrent writers until the
+   * `transaction` it runs in ends (SQL `SELECT … FOR UPDATE`).
+   *
+   * A request on the rows a read returns (`find()`, `findOne()`), and only
+   * with `transaction` set: a read outside a transaction has nothing to hold
+   * the lock to. A driver honours it only when it declares
+   * `DriverCapabilities.lockRows`. The engine never answers a request it
+   * cannot honour as if the rows were locked: its read and delete verbs do not
+   * take the key from a caller, and any other option bag that carries it to
+   * the engine -> driver hop is refused there, before any driver runs:
+   * `NOT_IMPLEMENTED` (501) when the object's driver lacks the bit,
+   * `PRECONDITION_REQUIRED` (428) when no transaction reaches that driver.
+   *
+   * The engine's one sender is a predicate delete whose target is referenced by
+   * delete-family lookups: it reads the matched ids, walks the cascade, then
+   * deletes those rows by id. Under the lock a concurrent writer cannot move a
+   * matched row out of the caller's predicate between that read and the
+   * delete and still see the row deleted, so a guard such as "delete only if
+   * still pending" holds for the whole unit of work.
+   */
+  lockRows: z.boolean().optional().describe('find() inside a transaction: lock the returned rows against concurrent writers until the transaction ends (SELECT … FOR UPDATE); honoured only by a driver declaring supports.lockRows'),
 }));
 
 /**
@@ -160,6 +183,19 @@ const capRemoved = (key: string, mechanism: string) =>
  *   `aggregate()`: the engine ANDs it with method presence, because a driver
  *   can carry `aggregate()` without compiling that key (and a subclass can
  *   inherit a compiler its own transport refuses).
+ * - `lockRows` — opt-IN for `DriverOptions.lockRows` on `find()`: the engine
+ *   sends the lock request on a predicate delete's matched-row read only when
+ *   the bit is set and the read runs inside a transaction.
+ * - `zonedDateBucketing` — opt-IN for a non-UTC reference zone on a date
+ *   bucket of `aggregate()` (ADR-0053 Phase 2 D2 as amended): the engine ANDs
+ *   it with method presence, because one driver class serves dialects with
+ *   and without a tz database.
+ * - `readableIdsLeaf` — opt-IN for a nested-relation condition on a read
+ *   verb: the engine plans it as a composed `ReadableIds` leaf (ADR-0139) on
+ *   a driver that declares it, and refuses it up front (`INVALID_FILTER` /
+ *   400) on one that does not, before any related read runs. The analytics
+ *   relation group join reads the same bit for a dimension through a lookup
+ *   (`INVALID_QUERY` / 400 without it).
  *
  * Everything else IS the method: aggregate pushdown gates on
  * `typeof driver.aggregate === 'function'`, schema sync on
@@ -337,6 +373,108 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
    * Optional; absence means `false`, like `batchSchemaSync`.
    */
   aggregationFilter: z.boolean().optional().describe('`aggregate()` evaluates a per-measure `aggregations[].filter` itself, with the engine\'s in-memory answer, except that text compares by the backend collation as in `where` (absence = false: the engine aggregates filtered measures in memory)'),
+
+  /**
+   * This driver's `find()` honours `DriverOptions.lockRows` inside a
+   * transaction.
+   *
+   * The promise: when `find()` runs with both `transaction` and `lockRows`
+   * set, no other writer changes a row that read returned behind the
+   * transaction's back. Either the writer waits until the transaction ends,
+   * or one of the two fails loudly; a writer's commit is never followed by a
+   * successful write of the transaction over the changed row. PostgreSQL and
+   * MySQL take row locks (`FOR UPDATE`): the writer waits. SQL Server takes an
+   * update lock (`UPDLOCK`). SQLite has no row locks and needs none:
+   * `driver-sql`'s pool holds one connection, so a second writer through the
+   * same driver waits for it, and a writer on another connection meets the
+   * database lock: in WAL mode (the file default) it commits and the
+   * transaction's own next write fails `SQLITE_BUSY_SNAPSHOT`; under a
+   * rollback journal the writer fails `SQLITE_BUSY`.
+   *
+   * What the engine does with it: a predicate delete on an object that
+   * delete-family lookups reference reads the matched ids inside the unit of
+   * work, walks the cascade, and deletes those rows by id. With the bit set it
+   * sends that read with `lockRows`, so the caller's predicate cannot stop
+   * holding for a matched row before the delete. Without it, or outside a
+   * transaction (the `'split'` cascade plan, or a driver with no
+   * transactions), the read takes no lock and a concurrent commit between the
+   * read and the delete is not seen: the memory, MongoDB and OData drivers
+   * keep that window.
+   *
+   * Why a bit and not the option alone: an option a driver silently ignores is
+   * a lock the engine believes it holds and does not. The bit is the driver's
+   * promise; the engine ANDs it with the open transaction.
+   *
+   * Optional; absence means `false`, like `batchSchemaSync`.
+   */
+  lockRows: z.boolean().optional().describe('`find()` honours `DriverOptions.lockRows` inside a transaction: no other writer changes a returned row behind the transaction (it waits, or one side fails) (absence = false: the engine sends no lock request)'),
+
+  /**
+   * `aggregate()` buckets a date `groupBy` item on the calendar of a named
+   * IANA zone, DST-correct, when the query it receives carries one
+   * (`DriverAggregateQuery.timezone`, `contracts/data-driver.ts`) — ADR-0053
+   * Phase 2 D2 as amended for #33697.
+   *
+   * What the engine does with it: `engine.aggregate` resolves the request's
+   * reference `timezone` through the runtime first (the `resolvedOptions()`
+   * name of an `Intl.DateTimeFormat`). A zone that resolves to `UTC` takes
+   * the UTC path every driver already serves. A zone that resolves to an
+   * area/location name (one containing `/`, such as `Asia/Taipei`, or
+   * `America/Chicago` for `CST`) is sent down WITH that resolved name when
+   * this bit is `true` and the driver has `aggregate()`; every other case
+   * (no bit, a name the runtime cannot resolve, an offset such as `+08:00`,
+   * an abbreviation that resolves to itself such as `EST5EDT`) keeps the
+   * in-memory aggregate (`applyInMemoryAggregation`), which answers it as it
+   * always has. The raw string never reaches a driver. Which spelling
+   * resolves to what is the runtime's tz data (the examples are as Node 22
+   * resolves them); the rule is the resolution, not the list.
+   *
+   * What a driver that declares it owes: its buckets equal the in-memory
+   * buckets (`bucketDateKey` in `@objectstack/core`) for that zone, on both
+   * sides of a DST change; the labels stay the `queryDateGranularity` output
+   * contract above; a `Field.date` (a timezone-naive calendar day) is never
+   * zone-shifted; the zone is a bound value, never SQL text; and a zone it
+   * cannot bucket is refused loudly, never read as UTC.
+   *
+   * Why a bit and not method presence: one driver class can serve dialects
+   * that differ here. `SqlDriver` declares it on PostgreSQL (`AT TIME ZONE`
+   * over the server's tz database) and not on SQLite, which has no tz
+   * database, nor on MySQL, SQL Server or Oracle.
+   *
+   * Optional; absence means `false`, like `aggregationFilter`.
+   */
+  zonedDateBucketing: z.boolean().optional().describe('`aggregate()` buckets a date groupBy on the calendar of the resolved IANA zone the engine sends (DriverAggregateQuery.timezone), DST-correct, equal to the in-memory buckets (absence = false: the engine buckets a non-UTC zone in memory)'),
+
+  /**
+   * This driver compiles (or, in process, evaluates) a composed `ReadableIds`
+   * leaf (ADR-0139 D1/D3): `field IN (SELECT id FROM <related> WHERE <scope>
+   * AND <tenant wall>)` as one statement on the SQL family, a read of the
+   * related rows then a member test in `driver-memory`.
+   *
+   * What the engine does with it: a nested-relation condition on a read verb
+   * (`{ account: { region: 'NA' } }` on `find`, `findOne`, `count`,
+   * `aggregate`) beneath a single-valued relation is planned as that leaf
+   * when this bit is `true`; when it is absent the engine REFUSES the
+   * condition before planning or reading anything, `INVALID_FILTER` / 400,
+   * naming the driver and the two-step route (read the related object, then
+   * match the relation field against its ids). An analytics dimension
+   * through a lookup is refused on such a driver the same way, before any
+   * read (`INVALID_QUERY` / 400). The same bit decides both.
+   *
+   * Why a bit and not method presence: no driver method says whether the
+   * filter compiler understands the leaf — every driver has `find()`. Before
+   * the bit, the engine chose by driver NAME, and a driver outside that name
+   * set (MongoDB, OData) got a capped id read instead: the related ids read
+   * first, served up to 1,000 matches and refused `INVALID_FILTER` / 400
+   * past them. A name decides nothing a third-party driver can declare.
+   *
+   * ⛔ Not a way to say "this condition, today". It describes the driver's
+   * filter compiler, is read at dispatch time, and a driver whose transport
+   * compiles the leaf only sometimes should not declare it.
+   *
+   * Optional; absence means `false`, like `batchSchemaSync`.
+   */
+  readableIdsLeaf: z.boolean().optional().describe('The filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf (absence = false: the engine refuses a nested-relation condition on a read verb up front, INVALID_FILTER / 400)'),
 
   // ============================================================================
   // Retired capability bits (#4634, ADR-0049 enforce-or-remove) — 17.0.0

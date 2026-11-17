@@ -46,15 +46,20 @@ import {
     engineExternalWriteForbidden,
     IDataEngine,
     resolveLocalizationContext,
+    resolveOrganizationLocale,
     resolveRequestExecutionContext,
     rethrowAuthzStoreUnavailable,
+    isOutsideEveryOrganization,
+    effectiveTenancyPosture,
+    type TenancyPostureSource,
     type ApiExposureSchemaLike,
     type ManagedSchemaLike,
     type RequestAuthService,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { MePermissionsAuthenticatedResponse } from '@objectstack/spec/api';
-import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader, resolveLocaleAmong } from '@objectstack/spec/system';
+import { postureEnforcesWall } from '@objectstack/spec/security';
 import {
     OWNERSHIP_QUEUE_SERVICE,
     type IMetadataService,
@@ -293,6 +298,8 @@ interface MePermissionsGrants {
     tabPermissions: Record<string, MePermissionsTabVisibility>;
     /** [#28508] See {@link organizationHasAnyQueue}. */
     hasAnyQueue: boolean;
+    /** [#34602] See {@link organizationObjectsUsingQueues}; narrowed to readable objects on this body. */
+    objectsUsingQueues: string[];
 }
 
 /**
@@ -308,7 +315,7 @@ interface MePermissionsGrants {
 function closedMePermissionsGrants(): MePermissionsGrants {
     return {
         positions: [], permissionSets: [], objects: {}, fields: {}, systemPermissions: [], tabPermissions: {},
-        hasAnyQueue: false,
+        hasAnyQueue: false, objectsUsingQueues: [],
     };
 }
 
@@ -316,7 +323,7 @@ function closedMePermissionsGrants(): MePermissionsGrants {
  * [#28508] The slice of the ownership-queue contract this handler reads: its
  * one "any queue at all?" answer.
  */
-type AnyQueueReader = Pick<IOwnershipQueueService, 'hasAnyQueue'>;
+type AnyQueueReader = Pick<IOwnershipQueueService, 'hasAnyQueue' | 'objectsUsingQueues'>;
 
 /**
  * [#28508] Does the caller's organization have at least one ownership queue,
@@ -390,6 +397,100 @@ async function organizationHasAnyQueue(
 }
 
 /**
+ * [#34602] The objects of the caller's organization on which the list's "in a
+ * queue" filter can find something: a record sits in a queue now, or an active
+ * assignment rule routes the object into a queue (the ownership-queue
+ * service's `objectsUsingQueues`). The console reads it once per session with
+ * `hasAnyQueue`, so the filter shows only where it can return a row.
+ *
+ * Asked only when `hasAnyQueue` is true: with no queue nothing can sit in one,
+ * and an organization without queues pays no read for this. Like
+ * {@link organizationHasAnyQueue} it never throws: no service, a service
+ * without the method, a throw, or an answer that is not a list of names ⇒
+ * `[]`, logged on a throw. A queue fault hides a toolbar filter; it must not
+ * cost the caller the permissions body.
+ *
+ * What it discloses is per object, never per queue: no queue name, no count.
+ * The full body narrows it to the objects the caller may read
+ * ({@link readableObjectsUsingQueues}).
+ *
+ * A person outside every organization (`isOutsideEveryOrganization`,
+ * `@objectstack/core`: signed in, not system, an empty membership set, not a
+ * platform operator) is answered `[]` without asking. With no active
+ * organization the service reads environment-wide, and such a person can read
+ * no organization's rows: Layer 0 denies them every tenant row under every
+ * posture (ADR-0093 D8.1, as amended), so naming an object would disclose
+ * other organizations' queues. A context that carries no membership set at all
+ * is not judged by that rule and reads as before.
+ *
+ * Under a walled posture (`isolated`, `group`) any caller with no active
+ * organization is answered `[]` too, and the service is never asked with
+ * `null`: the environment-wide read would cross the wall the posture states
+ * (seat ruling on #34602). Under `single`, or with no `tenancy` service (the
+ * same deployment shape), the no-organization read stays environment-wide.
+ * See {@link tenancyWallStands}.
+ */
+async function organizationObjectsUsingQueues(
+    ctx: CurrentUserEndpointsContext,
+    execCtx: unknown,
+    organizationId: string | null,
+    hasAnyQueue: boolean,
+): Promise<string[]> {
+    if (!hasAnyQueue) return [];
+    if (isOutsideEveryOrganization(execCtx)) return [];
+    if (organizationId === null && tenancyWallStands(ctx)) return [];
+    try {
+        const service = (() => {
+            try { return ctx.getService<Partial<AnyQueueReader>>(OWNERSHIP_QUEUE_SERVICE) ?? null; }
+            catch { return null; }
+        })();
+        const objectsUsingQueues = service?.objectsUsingQueues;
+        if (typeof objectsUsingQueues !== 'function') return [];
+        const answer: unknown = await objectsUsingQueues.call(service, organizationId);
+        if (!Array.isArray(answer)) return [];
+        return [...new Set(answer.filter((name): name is string => typeof name === 'string' && name !== ''))].sort();
+    } catch (err: any) {
+        ctx.logger?.warn?.('[hono] /auth/me/permissions: objectsUsingQueues could not be resolved — answering []', {
+            err: err?.message,
+        });
+        return [];
+    }
+}
+
+/**
+ * [#34602] Does the deployment's effective tenancy posture wall organizations
+ * apart (`isolated` or `group`)? Read from the kernel's `tenancy` service the
+ * way every walled door reads it (`effectiveTenancyPosture`). No service is the
+ * `single` shape: `false`. A service that cannot answer is no posture decided,
+ * and for a disclosure that is the walled answer: `true`, logged.
+ */
+function tenancyWallStands(ctx: CurrentUserEndpointsContext): boolean {
+    let tenancy: TenancyPostureSource | undefined;
+    try { tenancy = ctx.getService<TenancyPostureSource>('tenancy') ?? undefined; } catch { return false; }
+    try {
+        const posture = effectiveTenancyPosture(tenancy);
+        return posture !== undefined && postureEnforcesWall(posture);
+    } catch (err: any) {
+        ctx.logger?.warn?.('[hono] /auth/me/permissions: the tenancy posture could not be read — objectsUsingQueues answers [] with no active organization', {
+            err: err?.message,
+        });
+        return true;
+    }
+}
+
+/**
+ * [#34602] The disclosure bound of `objectsUsingQueues` on a security-wired
+ * body: only objects the caller may read are named, so a member learns nothing
+ * about an object the served `objects` map already withholds from them.
+ */
+function readableObjectsUsingQueues(
+    names: readonly string[],
+    objects: Record<string, { allowRead?: unknown } | undefined>,
+): string[] {
+    return names.filter((name) => objects[name]?.allowRead === true);
+}
+
+/**
  * [#23047] The ONE builder of the authenticated `/auth/me/permissions` body on a
  * security-wired stack. The success path hands it the computed grants, the
  * handler's outer `catch` hands it {@link closedMePermissionsGrants}, so the two
@@ -416,6 +517,7 @@ function mePermissionsBody(
         systemPermissions: grants.systemPermissions,
         tabPermissions: grants.tabPermissions,
         hasAnyQueue: grants.hasAnyQueue,
+        objectsUsingQueues: grants.objectsUsingQueues,
     };
 }
 
@@ -786,17 +888,37 @@ interface CurrentUserLocalization {
  * cascade (#15387).
  *
  * `locale` keeps the three rungs of #14788 (maintainer ruling 2026-09-03,
- * option D):
+ * option D), with the order the maintainer ruled for a user with no personal
+ * language inside rungs 2 and 3 (#34392, ruling 6915665005 on #33985:
+ * `sys_user.locale` → the browser's language when the app lists it → the
+ * organization's `localization.locale` → the app's `i18n.defaultLocale` →
+ * `en`):
  *
  *   1. `sys_user.locale` when set and shaped like the column's own rule says
  *      ({@link storedSignedInUserLocale});
  *   2. the request's `Accept-Language` preference — the SAME parse REST and
  *      the runtime dispatcher feed `execCtx.locale` from
  *      (`preferredLocaleFromHeader`, #3957), so this surface and a rejection
- *      message cannot disagree about what the request asked for;
- *   3. the deployment default — `resolveLocalizationContext`, the cascade
+ *      message cannot disagree about what the request asked for — when the
+ *      app lists that language ({@link requestedServedLocale}), answered in
+ *      the app's own spelling;
+ *   3. the deployment default: the organization's `localization.locale` when
+ *      somebody SET it, else the app's declared `i18n.defaultLocale` — the
+ *      platform's one reader of that ladder, `resolveOrganizationLocale`
+ *      ({@link organizationDefaultLocale}) — else the cascade
  *      `execCtx.locale` already derives from on the dispatcher
- *      (`localization.locale` settings → tenant `sys_setting` rows → `en-US`).
+ *      (`resolveLocalizationContext`: `localization.locale` settings → tenant
+ *      `sys_setting` rows → `en-US`), which is its floor.
+ *
+ * Why rungs 2 and 3 read the app's list and the setting's source (#34392):
+ * the request's language used to answer whatever the app ships, and rung 3
+ * answered the settings cascade, whose untouched value is the manifest's
+ * built-in `en-US` placeholder. The Console states a language on every read,
+ * so rung 3 never answered it, and an organization that set 中文 in Setup →
+ * Localization never decided the language of a member who had chosen none.
+ * The auth mail reads the same deployment default the same way (a request's
+ * language only when the platform ships it, then `localization.locale` →
+ * `i18n.defaultLocale`, ruling 2026-09-02 in plugin-auth's `auth-manager.ts`).
  *
  * `currency` and `timezone` come off that same cascade reading, which is the
  * repair #15387 names: they used to be read off the request
@@ -831,15 +953,97 @@ async function resolveCurrentUserLocalization(
     const settings = (() => {
         try { return ctx.getService<unknown>('settings'); } catch { return undefined; }
     })();
-    const [stored, deployment] = await Promise.all([
+    const i18n = (() => {
+        try { return ctx.getService<unknown>('i18n'); } catch { return undefined; }
+    })();
+    // Rung 2 needs no read, so it is known before the reads leave: the
+    // organization's language is asked for only when the request names no
+    // language the app lists, and then beside the other two reads, not after
+    // them (the console races this endpoint on a first visit).
+    const requested = requestedServedLocale(input.acceptLanguage, i18n);
+    const [stored, deployment, organization] = await Promise.all([
         storedSignedInUserLocale(ql, userId, ctx.logger),
         resolveLocalizationContext({ ql, settings, organizationId: tenantId, userId }),
+        requested ? undefined : organizationDefaultLocale(settings, i18n, tenantId, ctx.logger),
     ]);
     return {
         currency: deployment.currency,
-        locale: stored ?? preferredLocaleFromHeader(input.acceptLanguage) ?? deployment.locale,
+        locale: stored ?? requested ?? organization ?? deployment.locale,
         timezone: deployment.timezone,
     };
+}
+
+/**
+ * The locales the app lists — what discovery serves as `locale.supported`
+ * (`i18n.getLocales()`, else the declared default alone) — or `undefined`
+ * when there is no `i18n` service to ask, or it answers neither.
+ */
+function servedLocales(i18n: unknown): string[] | undefined {
+    const service = i18n as { getLocales?: unknown; getDefaultLocale?: unknown } | null | undefined;
+    if (!service || typeof service !== 'object') return undefined;
+    const text = (value: unknown): value is string => typeof value === 'string' && value.trim() !== '';
+    try {
+        const listed = typeof service.getLocales === 'function'
+            ? (service.getLocales as () => unknown).call(service)
+            : undefined;
+        const locales = Array.isArray(listed) ? listed.filter(text) : [];
+        if (locales.length > 0) return locales;
+        const declared = typeof service.getDefaultLocale === 'function'
+            ? (service.getDefaultLocale as () => unknown).call(service)
+            : undefined;
+        return text(declared) ? [declared] : undefined;
+    } catch {
+        // Best-effort, as every reader of the i18n service probes it.
+        return undefined;
+    }
+}
+
+/**
+ * Rung 2 (#34392): the request's top `Accept-Language` tag when the app lists
+ * that language, in the app's own spelling — the platform's one locale
+ * ladder, `resolveLocaleAmong`, the matcher the Console reads the browser's
+ * language through (`ja` → `ja-JP`, `en-US` → `en`, `es-MX` → `es-ES`). A
+ * language the app does not ship is no answer here, so the deployment default
+ * decides instead of a language with no translations.
+ *
+ * With no `i18n` service there is no list to match against, and the tag
+ * answers as it always did: nothing here can say the app does not ship it.
+ */
+function requestedServedLocale(acceptLanguage: string | null | undefined, i18n: unknown): string | undefined {
+    const requested = preferredLocaleFromHeader(acceptLanguage);
+    if (!requested) return undefined;
+    const served = servedLocales(i18n);
+    return served ? resolveLocaleAmong(requested, served) : requested;
+}
+
+/**
+ * Rung 3's first two steps (#34392): the organization's `localization.locale`
+ * when somebody SET it, else the app's declared `i18n.defaultLocale`
+ * (`resolveOrganizationLocale`, `@objectstack/core`, the one reader of that
+ * ladder). `undefined` sends the caller to the cascade's answer, which is its
+ * floor.
+ *
+ * A host with no `settings` service is left to that cascade too: its direct
+ * read of the organization's `sys_setting` row IS the organization's setting
+ * there, and nothing tells that row from the `en-US` floor, so ranking the
+ * app's default above it could hide a language an admin set. A settings read
+ * that fails is a courtesy lost, never a failed answer — and it is not
+ * answered with the app's default either, since the organization's choice may
+ * exist: the cascade, which falls back to the organization's own row, decides.
+ */
+async function organizationDefaultLocale(
+    settings: unknown,
+    i18n: unknown,
+    tenantId: string | undefined,
+    logger: CurrentUserEndpointsContext['logger'],
+): Promise<string | undefined> {
+    if (!settings || typeof (settings as { get?: unknown }).get !== 'function') return undefined;
+    try {
+        return (await resolveOrganizationLocale({ settings, i18n, organizationId: tenantId }))?.locale;
+    } catch (err: any) {
+        logger?.warn?.('[hono] /auth/me/localization: organization language read failed — the deployment cascade answers', { err: err?.message, tenantId });
+        return undefined;
+    }
 }
 
 /**
@@ -850,7 +1054,10 @@ async function resolveCurrentUserLocalization(
  * Exported for the serverless host path that composes the resolver directly
  * (cloud#924) and for the pin that asserts the precedence. Its ANSWER is
  * unchanged by #15387; what changed underneath is that the deployment cascade
- * is now read even when rung 1 or 2 wins (see above).
+ * is now read even when rung 1 or 2 wins (see above). #34392 changed it: a
+ * requested language the app does not list no longer answers, and the
+ * organization's setting, then the app's declared default, rank above the
+ * cascade's `en-US` placeholder.
  */
 export async function resolveSignedInUserLocale(input: ResolveSignedInUserLocaleInput): Promise<string> {
     return (await resolveCurrentUserLocalization(input)).locale;
@@ -967,6 +1174,9 @@ export function registerCurrentUserEndpoints(
             // included: whether the organization has a queue does not depend on
             // SecurityPlugin. Never throws (see {@link organizationHasAnyQueue}).
             const hasAnyQueue = await organizationHasAnyQueue(ctx, identity.tenantId);
+            // [#34602] Same posture: asked on every authenticated branch, only
+            // when there is a queue at all, and never throws.
+            const objectsUsingQueues = await organizationObjectsUsingQueues(ctx, execCtx, identity.tenantId, hasAnyQueue);
             if (!resolvePermissionSets || !metadata) {
                 // Auth resolved but security plugin isn't wired — emit
                 // an empty-but-authenticated body so the frontend can
@@ -981,6 +1191,9 @@ export function registerCurrentUserEndpoints(
                     objects: {},
                     fields: {},
                     hasAnyQueue,
+                    // Not narrowed: this body serves no `objects` map to narrow
+                    // by, and the server enforces no object grant here either.
+                    objectsUsingQueues,
                 });
             }
             // [#7616] The caller's sets, resolved ONCE by the owner of the
@@ -1063,6 +1276,7 @@ export function registerCurrentUserEndpoints(
                 systemPermissions: Array.from(systemPermissions),
                 tabPermissions,
                 hasAnyQueue,
+                objectsUsingQueues: readableObjectsUsingQueues(objectsUsingQueues, objects as Record<string, { allowRead?: unknown } | undefined>),
             }) });
         } catch (err: any) {
             ctx.logger?.warn?.('[hono] /auth/me/permissions failed', { err: err?.message });
@@ -1088,9 +1302,11 @@ export function registerCurrentUserEndpoints(
     //   1. the user's own `sys_user.locale` when set — a user-stated
     //      preference since the 2026-09-03 ruling on the column (#14787 B),
     //      accepted only when it passes the column's OWN shape rule;
-    //   2. the request's `Accept-Language` preference;
-    //   3. the deployment default (`localization.locale`, the same cascade
-    //      that feeds `execCtx.locale` on the dispatcher).
+    //   2. the request's `Accept-Language` preference, when the app lists
+    //      that language (#34392);
+    //   3. the deployment default: the organization's `localization.locale`
+    //      when set, else the app's `i18n.defaultLocale` (#34392), else the
+    //      same cascade that feeds `execCtx.locale` on the dispatcher.
     //
     // [#15387] All three come from {@link resolveCurrentUserLocalization} —
     // ONE reading of that same cascade. `currency` / `timezone` used to be read

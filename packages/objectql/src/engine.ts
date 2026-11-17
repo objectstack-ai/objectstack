@@ -339,7 +339,7 @@ import { SecretsAndRoutingFacet } from './engine-secrets-and-routing.js';
 // [#29986 codemod] Migration flags, value-shape deviations, creation attestations, destroy: the methods of the same names below hand the bodies what they read (`MigrationStateHost`).
 import { MigrationStateFacet } from './engine-migration-state.js';
 // [#29986 codemod] Summary indexes, related-record expansion, file and reference hydration: the methods of the same names below hand the bodies what they read (`SummariesAndExpansionHost`).
-import { SummariesAndExpansionFacet } from './engine-summaries-and-expansion.js';
+import { SummariesAndExpansionFacet, type SummaryBatchScope } from './engine-summaries-and-expansion.js';
 // [#29986 codemod] Query lowering, search, find and findOne: the methods of the same names below hand the bodies what they read (`FindHost`).
 import { FindFacet } from './engine-find.js';
 // [#29986 codemod] Write preparation and insert: the methods of the same names below hand the bodies what they read (`InsertHost`).
@@ -446,6 +446,9 @@ export class ObjectQL implements IObjectQLEngine {
    * into a present one on every nested delete.
    */
   private readonly cascadeDeleteSets = new AsyncLocalStorage<CascadeDeleteSet>();
+
+  /** [#33795] The open roll-up batch scope (`SummaryBatchScope` says why it is ambient). */
+  private readonly summaryBatchStore = new AsyncLocalStorage<SummaryBatchScope>();
 
   /**
    * [#23221] The child delete {@link walkReferencingRelations} is issuing right
@@ -1954,6 +1957,7 @@ export class ObjectQL implements IObjectQLEngine {
     const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof buildDriverOptions> = {
       isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
+      getDriver: (...a) => this.getDriver(...a),
       get txStore() { return readTxStore(); },
       transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
       get _registry() { return readRegistry(); },
@@ -3348,8 +3352,11 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * A registered name resolves exactly as the verbs resolve it, and the field
    * map is the one they read, so the verdict (and the object name inside its
-   * message) is the one execution would give. It stops before `getDriver`:
-   * nothing is resolved from or sent to a datasource.
+   * message) is the one execution would give. It calls no driver and sends
+   * nothing to a datasource; [#33876] it reads the object's driver's DECLARED
+   * capabilities for the one admission verdict that depends on them (a
+   * nested-relation condition on a driver without `readableIdsLeaf`), and
+   * skips that verdict when this engine routes the object to no driver.
    *
    * It judges the FILTER, not the object's existence. For a name the registry
    * does not resolve, the verbs refuse the object itself (`OBJECT_NOT_FOUND`,
@@ -4130,6 +4137,11 @@ export class ObjectQL implements IObjectQLEngine {
     return summaryRefreshesSettled(this);
   }
 
+  /** [#33795] `IObjectQLEngine.deferSummaryRecompute`: the body and its docblock are in `engine-summaries-and-expansion.ts`. */
+  deferSummaryRecompute<T>(callback: () => Promise<T>): Promise<T> {
+    return SummariesAndExpansionFacet.deferSummaryRecompute.call(summariesAndExpansionHost.of(this), callback) as Promise<T>;
+  }
+
   private initializeSummaryFields(object: string, record: any): any {
     // [#29986 codemod] The body moved to `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
     return SummariesAndExpansionFacet.initializeSummaryFields.call(summariesAndExpansionHost.of(this), object, record);
@@ -4299,6 +4311,7 @@ export class ObjectQL implements IObjectQLEngine {
       get relatedSchemaOf() { return readRelatedSchemaOf(); },
       find: (...a) => this.find(...a),
       relationSemiJoinServes: (...a) => this.relationSemiJoinServes(...a),
+      relationReadDriver: (name) => this.getDriver(name),
     };
     return (lowerRelationConditions<W>).call(host, object, operation, where, execCtx);
   }
@@ -6089,6 +6102,7 @@ export class ObjectQL implements IObjectQLEngine {
       set datasourceMapping(v) { engine.datasourceMapping = v; },
       get defaultDriver() { return engine.defaultDriver; },
       get drivers() { return engine.drivers; },
+      getDriver: (...a) => engine.getDriver(...a),
       get logger() { return engine.logger; },
       get manifests() { return engine.manifests; },
       get relatedSchemaOf() { return engine.relatedSchemaOf; },
@@ -6141,6 +6155,7 @@ export class ObjectQL implements IObjectQLEngine {
       invalidateSummaryIndex: (...a) => engine.invalidateSummaryIndex(...a),
       get logger() { return engine.logger; },
       serveReferenceNames: (...a) => engine.serveReferenceNames(...a),
+      get summaryBatchStore() { return engine.summaryBatchStore; },
       get summaryIndex() { return engine.summaryIndex; },
       set summaryIndex(v) { engine.summaryIndex = v; },
       get summaryIndexByParent() { return engine.summaryIndexByParent; },
@@ -6148,6 +6163,8 @@ export class ObjectQL implements IObjectQLEngine {
       get summaryIndexRevision() { return engine.summaryIndexRevision; },
       set summaryIndexRevision(v) { engine.summaryIndexRevision = v; },
       get summaryRetryOptions() { return engine.summaryRetryOptions; },
+      get txStore() { return engine.txStore; },
+      isClosedUnitHandle: (...a) => engine.isClosedUnitHandle(...a),
       update: (...a) => engine.update(...a),
     }));
     transactionsSectionHost.install((engine) => ({

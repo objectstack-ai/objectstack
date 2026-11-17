@@ -68,7 +68,9 @@ import {
   Eye,
   MoreHorizontal,
   Info,
+  ChevronLeft,
 } from 'lucide-react';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
@@ -111,6 +113,7 @@ import { resolveViewId } from '../utils/resolveViewId.js';
 import { getProductName, getLogoUrl } from '../runtime-config.js';
 import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { PreviewBadge } from './PreviewBadge.js';
+import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { AboutDialog } from './AboutDialog.js';
 import { getConsoleBuild } from '../buildIdentity.js';
 import { GO_HOME_SHORTCUT, useAdvertiseShortcut, type ShortcutChord } from '../chrome/advertisedShortcuts.js';
@@ -444,6 +447,10 @@ export function AppHeader({
   // landing, so the chrome cannot offer a second, contradicting "home".
   const homePath = useHomePath();
   useGoHomeShortcut(isApp, homePath);
+  // objectstack#34594 — on a phone inside an app the menu is the bottom bar
+  // (its 「More」 opens the drawer), so the bar's leftmost control goes back
+  // to the environment's home instead of opening the drawer.
+  const phone = usePhoneViewport();
   const { isOnline } = useOffline();
   // Idempotent, direct open of the ⌘K command palette (ADR-0054 C1). Replaces a
   // synthetic `⌘K` KeyboardEvent re-dispatch that did nothing under automation.
@@ -576,6 +583,8 @@ export function AppHeader({
     notifications,
     unreadCount,
     pendingApprovalsCount,
+    pendingApprovals,
+    refreshPendingApprovals,
     markAllRead,
     markRead: markNotificationRead,
     markManyRead,
@@ -875,12 +884,24 @@ export function AppHeader({
     <div className="flex items-center justify-between w-full h-full">
       {/* ── LEFT: Logo / App / Object path ── */}
       <div className="flex items-center min-w-0 flex-1">
-        {/* The shell's one sidebar trigger, at every width (objectui#12429):
-            the drawer button on a phone, the collapse/expand toggle for the
-            sidebar and its icon rail above that. It is the bar's leftmost
-            control inside an app, so it never moves when the sidebar
-            collapses; the sidebar itself carries no trigger. */}
-        {isApp ? (
+        {/* The shell's one sidebar trigger (objectui#12429): the
+            collapse/expand toggle for the sidebar and its icon rail from
+            768 px up. It is the bar's leftmost control inside an app, so it
+            never moves when the sidebar collapses; the sidebar itself carries
+            no trigger. On a phone that slot goes back to the environment's
+            home, and the drawer opens from the bottom menu bar's 「More」
+            (objectstack#34594). */}
+        {isApp && phone ? (
+          <Link
+            to={homePath}
+            data-testid="app-bar-phone-home"
+            aria-label={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            title={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronLeft className="h-5 w-5" aria-hidden />
+          </Link>
+        ) : isApp ? (
           <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
           // objectui#12605 — the product mark sits at the same x on every
@@ -996,8 +1017,10 @@ export function AppHeader({
 
             {/* Mobile: the current page's label. A list's view switcher is
                 the list's own title, drawn in its toolbar row on a phone
-                (objectstack#27058), so the bar draws no view dropdown. */}
-            <span className="text-sm font-medium sm:hidden truncate min-w-0 ml-1">
+                (objectstack#27058), so the bar draws no view dropdown. No
+                margin of its own: the pill's padding already parts the two,
+                and the width goes to the label (objectstack#34596). */}
+            <span className="text-sm font-medium sm:hidden truncate min-w-0" data-testid="app-bar-phone-title">
               {lastSegmentLabel}
             </span>
           </>
@@ -1015,10 +1038,12 @@ export function AppHeader({
           With the search centered, the search group here holds only the icon
           button and leaves at 960 px; the three `min-[960px]:` rules keyed on
           `data-topbar-search` keep the group after it from drawing a divider
-          next to nothing. */}
+          next to nothing. Below `sm` the groups draw no divider and no gap
+          beyond the cluster's own: the phone bar's 44 px controls sit side by
+          side and the room goes to the page title (objectstack#34596). */}
       <div
         className={cn(
-          'flex items-center gap-0.5 sm:gap-1 shrink-0 [&>*+*[data-topbar-group]]:ml-1 [&>[data-topbar-group]+[data-topbar-group]]:border-l [&>[data-topbar-group]+[data-topbar-group]]:border-border/60 [&>[data-topbar-group]+[data-topbar-group]]:pl-1 sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2 sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
+          'flex items-center gap-0.5 sm:gap-1 shrink-0 sm:[&>*+*[data-topbar-group]]:ml-1 sm:[&>[data-topbar-group]+[data-topbar-group]]:border-l sm:[&>[data-topbar-group]+[data-topbar-group]]:border-border/60 sm:[&>[data-topbar-group]+[data-topbar-group]]:pl-2 sm:[&>[data-topbar-group]+[data-topbar-group]]:ml-2',
           centersSearch &&
             'min-[960px]:flex-1 min-[960px]:min-w-max min-[960px]:justify-end min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:ml-1 min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:border-l-0 min-[960px]:[&>[data-topbar-search]+[data-topbar-group]]:pl-0',
         )}
@@ -1138,24 +1163,15 @@ export function AppHeader({
               onMarkAllRead={markAllRead}
               onMarkRead={markNotificationRead}
               onMarkManyRead={markManyRead}
+              pendingApprovals={pendingApprovals}
+              onApprovalDecided={refreshPendingApprovals}
             />
           </span>
 
           {/* AI Assistant — only when the runtime serves AI (hidden on
-              Community Edition so it can't dead-end on an agent-less chat). */}
-          {aiEnabled && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 shrink-0"
-              asChild
-              aria-label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
-            >
-              <Link to="/ai">
-                <Bot className="h-4 w-4" />
-              </Link>
-            </Button>
-          )}
+              Community Edition so it can't dead-end on an agent-less chat).
+              objectstack#34608: it opens and closes the drawer in place. */}
+          {aiEnabled && <AssistantTopBarButton />}
 
           {/* Help & Documentation — an aggregated menu rather than a bare
               external link: contextual "This app's docs" (only when the

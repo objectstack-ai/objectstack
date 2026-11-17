@@ -305,7 +305,9 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * when the performer is not the principal the write is authorized as.
    *
    * Two server-side producers set it, each naming its performer in its own
-   * key so one key never holds two id namespaces:
+   * key so no key of this envelope holds two id namespaces (the audit row's
+   * `performed_by` does hold both, by ruling; how its reader tells them apart
+   * is stated below):
    *
    * - **The `/mcp` OAuth door** — the ONE door that resolves an agent, whose
    *   access token names an authorized client (`azp`) — sets {@link clientId}
@@ -361,10 +363,27 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    *
    * Surfaced to hooks as `HookContext.provenance.performedByClientId`,
    * `performedByAgentId`, `performedByConversationId` and
-   * `performedByConfirmationId`. The audit writer records {@link clientId} in
-   * `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`; the
-   * in-product AI keys are carried for the audit writer, which records them
-   * under #33694 (at this revision it reads `performedByClientId` only). ⛔ It
+   * `performedByConfirmationId`. The record-write audit writer records the
+   * performer in `sys_audit_log.metadata` as `performed_by` beside
+   * `on_behalf_of` — {@link clientId}, or {@link agentId} for the in-product AI
+   * (owner ruling on objectstack-ai/cloud#3826: the existing pair, no new actor
+   * vocabulary). So that one key holds two id kinds. Only when the
+   * in-product agent is the recorded performer does the row also carry
+   * {@link conversationId} as `conversation_id` and {@link confirmationId} as
+   * `confirmation_id` (each when set); a row naming an OAuth client never
+   * carries either. What a reader can tell from a row: a value that matches
+   * the `client_id` of an existing `sys_oauth_application` row is an OAuth
+   * client; a row carrying `conversation_id` or `confirmation_id` names an
+   * in-product agent. A row meeting neither may name an in-product agent or
+   * an OAuth client whose application has since been deleted (its rows keep
+   * the `client_id`), and the row alone cannot tell which. Nor does the
+   * contract keep an agent name and a `client_id` from being the same string:
+   * where both tells apply the mark decides, and a matching value with no mark
+   * is the OAuth client unless an agent shares that string.
+   * If one envelope ever carried both performers, the row records
+   * {@link clientId} and drops the agent with its two marks. The
+   * action-invocation, data-export and dataset-query rows record the
+   * performer and the two marks by the same rule. ⛔ It
    * does NOT move `actor`: ADR-0118 D1/D5 keeps that column two-valued (a user
    * id, or `null` for the system) and answers "which non-user acted" with an
    * ADDED attribution field — this one — never with a second actor
@@ -377,11 +396,11 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    */
   performedBy: z.object({
     /**
-     * The OAuth client (`azp`) that performed the operation — the id of the
-     * registered `sys_oauth_application` the access token was issued to. Set
-     * by the `/mcp` OAuth door only.
+     * The OAuth client (`azp`) that performed the operation — the
+     * `client_id` of the registered `sys_oauth_application` the access token
+     * was issued to (not that row's `id`). Set by the `/mcp` OAuth door only.
      */
-    clientId: z.string().optional().describe('The OAuth client (`azp`, a registered sys_oauth_application id) that performed the operation. Set by the /mcp OAuth door only; absent when the in-product AI performed it.'),
+    clientId: z.string().optional().describe('The OAuth client (`azp`, the client_id of a registered sys_oauth_application) that performed the operation. Set by the /mcp OAuth door only; absent when the in-product AI performed it.'),
     /**
      * The in-product AI agent that performed the operation for the signed-in
      * person — the agent the chat runs as, the same value as
@@ -409,7 +428,7 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
     confirmationId: z.string().optional().describe('The confirmation the person gave before the operation ran: the id of the pending item their approval decided (the in-app pending action id, or the pending-confirmation service item id). Stamped only after the server resolved it as a pending item the person in userId decided for this operation; absent when the operation needed no confirmation.'),
   }).refine(requiredOneOf(['clientId', 'agentId']), {
     message: 'performedBy names its performer: clientId (the /mcp OAuth door) or agentId (the in-product AI path)',
-  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names its performer, at least one of clientId and agentId, each set only by its own producer. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied: an id a request named (an agent name, a conversation, a pending item) is stamped only after the server resolved it in its own store for the person in userId, and an unresolved id is not stamped. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId. The audit writer records clientId as sys_audit_log.metadata.performed_by beside on_behalf_of; the in-product AI keys are carried for the audit writer, which does not record them yet. It does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
+  }).optional().describe('ADR-0090 D10 rule 4 dual attribution: what PERFORMED this operation, when the performer is not the principal the write is authorized as. Two server-side producers set it: the /mcp OAuth door names the agent client in clientId, on the same branch that decides principalKind: agent and onBehalfOf; the server-constructed in-product AI path, acting for the signed-in person and running as them, names its agent in agentId with conversationId and, when the person confirmed the call, confirmationId. Absent everywhere else, and the absence is the record that the principal acted for itself; when present it names its performer, at least one of clientId and agentId, each set only by its own producer. ATTRIBUTION ONLY — no security middleware reads it, it never becomes the authorization subject, and userId stays the human so owner-stamping and current_user.* RLS still resolve to them. Server-constructed only, never client-supplied: an id a request named (an agent name, a conversation, a pending item) is stamped only after the server resolved it in its own store for the person in userId, and an unresolved id is not stamped. Surfaced to hooks as HookContext.provenance.performedByClientId / performedByAgentId / performedByConversationId / performedByConfirmationId. The record-write audit writer records the performer (clientId, or agentId for the in-product AI) as sys_audit_log.metadata.performed_by beside on_behalf_of, so that key holds two id kinds. Only when the agent is the recorded performer does the row also carry conversationId as metadata.conversation_id and confirmationId as metadata.confirmation_id (each when set); a client row never carries them. A reader can tell: a value matching the client_id of an existing sys_oauth_application row is an OAuth client; a row carrying conversation_id or confirmation_id names an in-product agent. A row meeting neither may name an agent or the client of a since-deleted application, and the row alone cannot tell which; nor does the contract keep an agent name and a client_id from being the same string: where both tells apply the mark decides, and a matching value with no mark is the client unless an agent shares that string. An envelope carrying both performers is recorded as the client. The action-invocation, data-export and dataset-query rows record the performer and the two marks by the same rule. It does not move `actor`, which ADR-0118 D1/D5 keeps two-valued.'),
 
   /**
    * [#27908 — ruling 6513869839 on #27681, parameter 3] WHICH DOOR an action

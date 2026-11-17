@@ -277,7 +277,7 @@
     },
     "resultDialog": {
       "status": "live",
-      "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}."
+      "note": "objectui one-shot result reveal {title,description,acknowledge,format,fields}. `fields[].format: 'table'` and its `columns` (#34391) are LIVE since the console reader #33187 (see `preflight.fields.columns`, the same row): the spec refuses the contradictions at parse, and the console's `ResultField` draws a `table` row as a table, one row per element and one cell per column."
     },
     "preflight": {
       "status": "live",
@@ -325,6 +325,29 @@
               "status": "live",
               "verifiedAt": "2026-11-09",
               "note": "Live with its container `preflight.fields`: the row's display format, from resultDialog's format set."
+            },
+            "columns": {
+              "status": "live",
+              "verifiedAt": "2026-11-17",
+              "evidence": "ui/packages/app-shell/src/views/ActionResultDialog.tsx#ResultField (the `table` branch: an array value draws through `TableBlock`, any other value as `json`); ui/packages/app-shell/src/views/ActionResultDialog.tsx#TableBlock (one row per element, one cell per entry of `columns`, in order); ui/packages/app-shell/src/views/ActionResultDialog.tsx#TableCellValue (the cell, in the column's format or as compact JSON); ui/packages/app-shell/src/views/ActionParamDialog.tsx#PreflightPanel (each preflight `fields` row through the same `ResultField`)",
+              "note": "LIVE (spec card #34391; reader #33187, maintainer ruling A 6915677641). The cells of a `format: 'table'` row, `[{ path, label?, format? }]`, from the row builder `resultDialog.fields` shares (packages/spec/src/ui/action.zod.ts#actionAnswerFieldRow). Enforced at parse: required by `table`, refused beside any other format (#refuseTableColumnContradictions), and a cell takes the field formats minus `table`. Drawn by the console's `ResultField`, which the result dialog and the preflight panel share, by the `table` bullet of the `resultDialog` renderer contract; pinned in ui/packages/app-shell/src/views/__tests__/ActionResultDialog.test.tsx. First producer: `sys_user.import_sso_users`, whose per-row report draws as a table (packages/platform-objects/src/identity/sys-user.object.ts).",
+              "children": {
+                "path": {
+                  "status": "live",
+                  "verifiedAt": "2026-11-17",
+                  "note": "Live with its container `preflight.fields.columns`: the dot path, in ONE element of the array, of the value a cell draws; a path that resolves to nothing or to `null` draws an empty cell, and an element that is not a plain object draws as compact JSON text in its row's first cell."
+                },
+                "label": {
+                  "status": "live",
+                  "verifiedAt": "2026-11-17",
+                  "note": "Live with its container `preflight.fields.columns`: the column header; omitted, the header is the column's `path`."
+                },
+                "format": {
+                  "status": "live",
+                  "verifiedAt": "2026-11-17",
+                  "note": "Live with its container `preflight.fields.columns`: the cell format, the field formats minus `table` (refused at parse: a table does not nest); omitted, `text`. A value that does not fit the cell's format, whatever it is, draws as compact JSON text, and a missing or `null` value draws an empty cell (the `table` bullet of the `resultDialog` renderer contract)."
+                }
+              }
             }
           }
         },

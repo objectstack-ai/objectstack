@@ -57,7 +57,7 @@ import {
   toast,
   cn,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1614,7 +1614,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       exportData.forEach(record => {
         rows.push(fields.map((f: string) => escapeCsvValue(record[f])).join(','));
       });
-      downloadFile(new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' }), fileNameFor('csv'));
+      downloadFile(csvBlob(rows.join('\n')), fileNameFor('csv'));
     } else if (format === 'json') {
       const unmasked = exportData.map((record) =>
         Object.fromEntries(Object.entries(record).filter(([key]) => !isMaskedKey(key))),
@@ -3362,7 +3362,17 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // or empty value rather than drawing it.
     const statusKey = detectStatusField(objectSchema);
     const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
-    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol).slice(0, 2);
+    // objectstack#34615 — the card's AMOUNT is the first shown body column whose
+    // field type is `currency` (the column draft's resolved type, so a view
+    // that presents the field as another type keeps it a plain value). It
+    // never shares the subtitle's width: it gets a line of its own under the
+    // subtitle, drawn whole at the right edge, and the status chip moves to
+    // that line's left so the two never compete for one row. A masked amount
+    // is not promoted; it stays a subtitle candidate, which skips it.
+    const amountCol = bodyColumns.find(
+      (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),
+    );
+    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol && c !== amountCol).slice(0, 2);
     const isEmptyCardValue = (value: unknown) => value == null || value === '';
     const cardCell = (col: ObjectGridColumnDraft, row: any): React.ReactNode => {
       const value = row[col.accessorKey];
@@ -3374,6 +3384,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         (col) => !isMaskedCardColumn(col.accessorKey) && !isEmptyCardValue(row[col.accessorKey]),
       );
       const showStatus = statusCol !== undefined && !isEmptyCardValue(row[statusCol.accessorKey]);
+      const showAmount = amountCol !== undefined && !isEmptyCardValue(row[amountCol.accessorKey]);
+      // With an amount column every card of the list draws the status on the
+      // amount line, an empty amount included, so the cards keep one shape.
+      const statusOnAmountLine = amountCol !== undefined;
+      const statusChip = (className: string) => statusCol !== undefined && (
+        <div data-testid="grid-card-status" className={className}>
+          {cardCell(statusCol, row)}
+        </div>
+      );
 
       return (
         <div
@@ -3411,12 +3430,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
                 ))}
               </div>
             )}
+            {statusOnAmountLine && (showStatus || showAmount) && (
+              <div data-testid="grid-card-amount-line" className="mt-1 flex min-w-0 items-center gap-2">
+                {showStatus && statusChip('min-w-0 truncate text-xs')}
+                {showAmount && (
+                  <div
+                    data-testid="grid-card-amount"
+                    className="ml-auto shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums"
+                  >
+                    {cardCell(amountCol, row)}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          {showStatus && (
-            <div data-testid="grid-card-status" className="max-w-[45%] shrink-0 truncate text-xs">
-              {cardCell(statusCol, row)}
-            </div>
-          )}
+          {showStatus && !statusOnAmountLine && statusChip('max-w-[45%] shrink-0 truncate text-xs')}
           {/* objectstack#29150 — the row's actions, the desktop row's own
               resolver and handlers in one 44 px "⋮" (inline budget 0, as the
               row context menu reads it). The menu stops its own clicks, so a

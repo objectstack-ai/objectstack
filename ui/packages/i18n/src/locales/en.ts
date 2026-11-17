@@ -274,6 +274,11 @@ const en = {
     // only displace it by authoring a `description`, which makes a VISIBLE
     // subtitle appear on every form — so the fallback has to come from here.
     dialogDescriptionFallback: 'Complete the form fields, then submit or cancel.',
+    // The form section navigation (objectstack#34605): its accessible name,
+    // and the screen-reader text of a section's error count, which is drawn
+    // as a bare number beside the section name.
+    sectionNav: 'Form sections',
+    sectionNavErrors: 'Fields to fix: {{number}}',
     // The hint under a field the caller may read but not write, shown when the
     // field declares no description of its own (objectui#11071).
     deniedDescription: 'You do not have edit access to this field.',
@@ -2313,6 +2318,10 @@ const en = {
       launcherLabel: 'App launcher',
       menuLabel: 'App navigation',
       menuEmpty: 'This app has no navigation entries you can open.',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: 'App menu bar',
+      searchMenu: 'Search menu',
+      phoneBarHint: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
       // objectui#12427 — the ⋯ menu a sidebar entry shows on hover (`SidebarItemMenu`).
       itemMenu: 'More actions for {{name}}',
       openInNewTab: 'Open in new tab',
@@ -2490,6 +2499,8 @@ const en = {
       view: 'View',
       confirm: 'Confirm',
       cancel: 'Cancel',
+      // The folded card's way back in, on a phone (objectstack#34596).
+      continue: 'Continue',
       prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
       organizationName: {
         title: 'Name your organization',
@@ -2758,6 +2769,9 @@ const en = {
           titleGeneric: 'Edit this app',
           description:
             'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         },
       },
       clearConversation: 'Clear',
@@ -2970,6 +2984,11 @@ const en = {
         resize: 'Resize chat',
         collapse: 'Collapse chat',
         maximize: 'Open full page',
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: 'History',
+        backToChat: 'Back to chat',
+        expand: 'Expand',
+        restore: 'Restore side panel',
         open: 'Open assistant',
         // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
         planAwaitingApproval: 'A proposed plan is waiting for your approval',
@@ -3049,6 +3068,8 @@ const en = {
       },
       passwordsNote: 'Temporary passwords — shown once, never stored. Save them now; each user must change theirs at first sign-in.',
       passwordsMore: 'More entries omitted — use the download.',
+      positionsHint: 'Positions: map a column of position machine names, several separated by ";". Each is assigned as in Setup; a name that does not exist, or that you may not assign, is reported on its row, and the user is still created.',
+      managerHint: 'Manager: map a column holding each user\'s manager, by email address (or phone number where phone sign-in is on). Managers are linked once every row is in, so a manager further down the file counts; a manager that is not found, or cannot be linked, is reported on its row, and the user is still created.',
       passwordsDownload: 'Download CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
@@ -4613,6 +4634,17 @@ const en = {
       accept: 'Accept invitation',
       accepted: 'Invitation accepted',
       joinedDescription: 'Welcome to {{orgName}}. You joined as {{role}}.',
+      joinedWelcome: 'Welcome to {{orgName}}.',
+      verifyEmailTitle: 'Verify your email address',
+      verifyEmailDescription: 'The email address of this account must be the invited one, and verified. Verify it, then open the invitation link from your mailbox again.',
+      proofInvalid: 'This invitation link can no longer be used. Ask for a new invitation, or sign in to an existing account.',
+      signInInstead: 'Sign in to an existing account',
+      proofTitle: 'Join {{orgName}}',
+      proofDescription: 'Set up your account for {{email}} to accept the invitation.',
+      proofDivider: 'or set a password',
+      proofNameLabel: 'Name',
+      proofPasswordLabel: 'Password',
+      proofSubmit: 'Create account and join',
       continue: 'Continue',
       acceptFailed: 'Failed to accept invitation',
       decline: 'Decline',
@@ -4649,6 +4681,8 @@ const en = {
     viewApprovals: 'View approvals',
     noPendingApprovals: 'No pending approvals',
     openApprovalsInbox: 'Open Approvals Inbox',
+    needsYou: 'Needs your action',
+    viewApprovalDetails: 'View details',
     // Bell-badge breakdown (objectstack-ai/objectstack#7233): the badge sums unread notification topics
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
@@ -5080,6 +5114,23 @@ const en = {
       needsAttention: '{{count}} need attention',
       needsAttention_one: '{{count}} needs attention',
       needsAttention_other: '{{count}} need attention',
+      // objectstack#32984 — the publish-health line under a Published badge, which was English in every locale.
+      health: {
+        sampleRowsLive: '{{count}} sample rows live',
+        sampleRowsLive_one: '{{count}} sample row live',
+        sampleRowsLive_other: '{{count}} sample rows live',
+        views: '{{count}} views',
+        views_one: '{{count}} view',
+        views_other: '{{count}} views',
+        widgets: '{{count}} widgets',
+        widgets_one: '{{count}} widget',
+        widgets_other: '{{count}} widgets',
+        seeds: '{{count}} sample data sets',
+        seeds_one: '{{count}} sample data set',
+        seeds_other: '{{count}} sample data sets',
+        verified: '{{checks}} verified',
+        seedFailed: 'Sample data failed to load.',
+      },
       unknownPhase: 'Unknown build phase',
       nextStepsLead: 'Next, you can say: {{steps}}',
       nextStepQuote: '“{{step}}”',
@@ -5269,13 +5320,29 @@ const en = {
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
+    openNextAfterDecision: 'Open next after deciding',
+    queueDone: 'No more pending requests in this list.',
     snapshotAsSubmitted: 'As submitted',
+    snapshotChanged: 'Changed',
+    snapshotCurrentValue: 'Current value',
+    snapshotOpenRecord: 'Open record',
+    snapshotCurrentUnreadable: 'The current record cannot be read, so changes made after submission are not marked.',
+    snapshotChildCurrent: 'Current rows: the submission does not keep child rows.',
+    progressTitle: 'Approval progress',
+    attachmentsTitle: 'Attachments',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
     submittedByYou: 'You submitted this',
+    // The approver band's status line and menu on a record under approval
+    // (objectstack#34361): the task, the step number on the served route,
+    // the submitter by name, and the menu holding every non-decision lever.
+    awaitingYourDecision: 'Awaiting your approval',
+    stepNumber: 'Step {{n}}',
+    submittedByName: 'Submitted by {{name}}',
+    moreDecisionActions: 'More approval actions',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',

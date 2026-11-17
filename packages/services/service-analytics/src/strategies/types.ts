@@ -215,8 +215,14 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * on the spec's {@link StrategyContext} for the reason `declaredFieldType`
    * is: nothing about it is an authorable surface, and a strategy that does
    * not know the hook keeps the behaviour it had.
+   *
+   * [#33697] With `timezone` (a resolved IANA area/location name), the zoned
+   * expression a driver declaring `supports.zonedDateBucketing` groups by, or
+   * `undefined` where the driver buckets no zone. An implementer that does not
+   * bucket the zone it is asked for answers `undefined`, never its UTC
+   * expression: the echo would print a statement grouped on the wrong calendar.
    */
-  dateBucketSql?(objectName: string, field: string, granularity: string): string | undefined;
+  dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): string | undefined;
   /**
    * [#19995] The ENGINE's own `where` admission verdict for `objectName`,
    * `IObjectQLEngine.judgeFilter` (#20157), or `undefined` when the host
@@ -273,8 +279,10 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * by its FK-expand (`resolveFkAttr`, an `id IN (…)` read of the related
    * object) only when this is absent or answers `joined: false`: the engine
    * declines every read it cannot prove is the FK-expand's own read as one
-   * statement (a driver that compiles no join — memory, MongoDB, OData —
-   * among them), before it reads anything the strategy's path reads again.
+   * statement (a driver that compiles no join — memory, Turso — among
+   * them), before it reads anything the strategy's path reads again. On a
+   * driver that compiles no semi-join at all (MongoDB, OData) it answers a
+   * `refusal` the strategy throws: no path serves the dimension there.
    *
    * `AnalyticsServicePlugin` wires it only when it bridges `executeAggregate`
    * itself, to the same engine. Declared HERE rather than on the spec's
@@ -302,7 +310,13 @@ export interface RelationGroupAggregateRelation {
   readonly resolvedAlias: string;
 }
 
-/** The engine's answer: the grouped rows, or why it declined (the rows path then serves). */
+/**
+ * The engine's answer: the grouped rows, or why it declined (the rows path
+ * then serves). [#33876] `refusal`: the read's driver compiles no semi-join
+ * (no `DriverCapabilities.readableIdsLeaf` bit: MongoDB, OData), so the
+ * dimension is served on NO path — the strategy throws it, `INVALID_QUERY` /
+ * 400, instead of falling back to its FK-expand.
+ */
 export type RelationGroupAggregateAnswer =
   | { readonly joined: true; readonly rows: Record<string, unknown>[] }
-  | { readonly joined: false; readonly reason: string };
+  | { readonly joined: false; readonly reason: string; readonly refusal?: Error };

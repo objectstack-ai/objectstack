@@ -7,6 +7,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { ObjectSchema } from '@objectstack/spec/data';
+import { mapDataError } from '@objectstack/types';
+import { ValidationError } from './validation/record-validator.js';
 
 function makeDriver() {
   const stores = new Map<string, Map<string, any>>();
@@ -788,5 +790,594 @@ describe('[#33795] grouped roll-up recompute', () => {
     expect(caught?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(caught.failures.map((f: any) => [f.parentId, f.field]).sort()).toEqual([[a.id, 'line_count'], [a.id, 'line_total']]);
     expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 2, line_count: 1 });
+  });
+});
+
+describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let log: ReturnType<typeof makeDriver>['log'];
+  let driver: any;
+  /** Every write to an `inv` parent, in order: the recompute's own writes are the only ones these tests make. */
+  let parentWrites: Array<Record<string, unknown>>;
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    log = d.log;
+    driver = d.driver;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'region',
+      fields: {
+        name: { type: 'text' },
+        grand_total: { type: 'summary', summaryOperations: { object: 'inv', field: 'line_total', function: 'sum' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+      },
+    } as any);
+    parentWrites = [];
+    engine.registerHook('beforeUpdate', async (ctx: any) => { parentWrites.push({ ...ctx.input.data }); }, { object: 'inv' });
+  });
+
+  /** Three parents, two lines each: a=5, b=7, c=9. */
+  async function seed() {
+    const [a, b, c] = await engine.insert('inv', [{ name: 'A' }, { name: 'B' }, { name: 'C' }]) as any[];
+    const lines = await engine.insert('inv_line', [
+      { inv: a.id, amount: 1 }, { inv: b.id, amount: 2 }, { inv: c.id, amount: 3 },
+      { inv: a.id, amount: 4 }, { inv: b.id, amount: 5 }, { inv: c.id, amount: 6 },
+    ]) as any[];
+    parentWrites.length = 0;
+    return { a, b, c, lines };
+  }
+
+  const aggregateReads = (from: number) => log.slice(from).filter((e) => e.op === 'find' && e.object === 'inv_line').length;
+
+  it('a loop of single-row updates recomputes once, when the scope ends', async () => {
+    const { a, b, c, lines } = await seed();
+    const before = log.length;
+    const answer = await engine.deferSummaryRecompute(async () => {
+      for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+      // Nothing recomputed yet: every parent still holds its pre-batch value.
+      expect(parentWrites).toHaveLength(0);
+      return 'done';
+    });
+    expect(answer).toBe('done');
+    // One write per parent for the whole batch (outside a scope: one per row),
+    // and one grouped aggregate per summary field (outside: one per row per field).
+    expect(parentWrites).toHaveLength(3);
+    expect(aggregateReads(before)).toBe(2);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 50, line_count: 2 });
+    expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 70, line_count: 2 });
+    expect(storeFor('inv').get(c.id)).toMatchObject({ line_total: 90, line_count: 2 });
+  });
+
+  it('control: the same loop outside a scope recomputes after every row', async () => {
+    const { lines } = await seed();
+    for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+    expect(parentWrites).toHaveLength(6);
+  });
+
+  it('a hook reading the parent summary during the batch reads the value from before the batch', async () => {
+    const { a, lines } = await seed();
+    const seen: unknown[] = [];
+    engine.registerHook('beforeUpdate', async () => {
+      const parent = await engine.findOne('inv', { where: { id: a.id } });
+      seen.push((parent as any)?.line_total);
+    }, { object: 'inv_line' });
+    const mine = lines.filter((l: any) => l.inv === a.id);
+    await engine.deferSummaryRecompute(async () => {
+      for (const line of mine) await engine.update('inv_line', { amount: 100 }, { where: { id: line.id } });
+    });
+    // Both rows read 5, the pre-batch total; one by one, the second read 104.
+    expect(seen).toEqual([5, 5]);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 200 });
+  });
+
+  it('a nested call joins the open scope; the outermost one recomputes', async () => {
+    const { a, lines } = await seed();
+    await engine.deferSummaryRecompute(async () => {
+      await engine.deferSummaryRecompute(async () => {
+        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id } });
+      });
+      expect(parentWrites).toHaveLength(0);
+      await engine.update('inv_line', { amount: 0 }, { where: { id: lines[3].id } });
+    });
+    expect(parentWrites).toHaveLength(1);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 0, line_count: 2 });
+  });
+
+  it('a summary over a summary recomputes up the chain when the scope ends', async () => {
+    const [r] = await engine.insert('region', [{ name: 'R' }]) as any[];
+    const [a, b] = await engine.insert('inv', [{ name: 'A', region: r.id }, { name: 'B', region: r.id }]) as any[];
+    const lines = await engine.insert('inv_line', [{ inv: a.id, amount: 10 }, { inv: b.id, amount: 32 }]) as any[];
+    expect(storeFor('region').get(r.id).grand_total).toBe(42);
+    await engine.deferSummaryRecompute(async () => {
+      for (const line of lines) await engine.update('inv_line', { amount: 1 }, { where: { id: line.id } });
+      expect(storeFor('region').get(r.id).grand_total).toBe(42);
+    });
+    expect(storeFor('region').get(r.id).grand_total).toBe(2);
+  });
+
+  it('a callback that throws: the rows that landed are recomputed, and its error is rethrown', async () => {
+    const { a, b, lines } = await seed();
+    const boom = new Error('row 2 refused');
+    await expect(engine.deferSummaryRecompute(async () => {
+      await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id } });
+      await engine.update('inv_line', { amount: 0 }, { where: { id: lines[1].id } });
+      throw boom;
+    })).rejects.toBe(boom);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 4 });
+    expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 5 });
+  });
+
+  it('a recompute that fails after the callback resolved: ERR_SUMMARY_RECOMPUTE, written = the callback result', async () => {
+    const { a, b, lines } = await seed();
+    const update = driver.update;
+    driver.update = async (object: string, id: string, data: Record<string, unknown>) => {
+      if (object === 'inv' && id === a.id) throw new Error('parent write refused');
+      return update.call(driver, object, id, data);
+    };
+    let caught: any;
+    try {
+      await engine.deferSummaryRecompute(async () => {
+        for (const line of lines.slice(0, 2)) await engine.update('inv_line', { amount: 0 }, { where: { id: line.id } });
+        return { rows: 2 };
+      });
+    } catch (e) { caught = e; }
+    expect(caught?.code).toBe('ERR_SUMMARY_RECOMPUTE');
+    expect(caught.written).toEqual({ rows: 2 });
+    expect(caught.failures.map((f: any) => [f.parentId, f.field]).sort()).toEqual([[a.id, 'line_count'], [a.id, 'line_total']]);
+    // The rows are stored, and the other parent was still recomputed.
+    expect(storeFor('inv_line').get(lines[0].id).amount).toBe(0);
+    expect(storeFor('inv').get(b.id)).toMatchObject({ line_total: 5 });
+  });
+
+  it('inside a transaction the recompute runs before the commit', async () => {
+    const { a, lines } = await seed();
+    const events: string[] = [];
+    engine.registerHook('beforeUpdate', async () => { events.push('parent write'); }, { object: 'inv' });
+    driver.commit = async () => { events.push('commit'); };
+    await engine.transaction(async (trxCtx: any) => {
+      await engine.deferSummaryRecompute(async () => {
+        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id }, context: trxCtx });
+        await engine.update('inv_line', { amount: 0 }, { where: { id: lines[3].id }, context: trxCtx });
+      });
+    });
+    expect(events).toEqual(['parent write', 'commit']);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 0 });
+  });
+
+  it('a write the callback started and did not await recomputes at once once the scope has ended', async () => {
+    const { a, lines } = await seed();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let late!: Promise<unknown>;
+    await engine.deferSummaryRecompute(async () => {
+      late = (async () => { await gate; await engine.update('inv_line', { amount: 0 }, { where: { id: lines[0].id } }); })();
+    });
+    expect(parentWrites).toHaveLength(0);
+    release();
+    await late;
+    expect(parentWrites).toHaveLength(1);
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 4 });
+  });
+
+  it('the scope is ambient: a hook-issued insert into a second child of the same parent is deferred to the end too', async () => {
+    // A second child object of `inv`, counted by a summary the recompute of
+    // `inv_line` does not touch, and a hook on each line that inserts a note.
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        note_count: { type: 'summary', summaryOperations: { object: 'inv_note', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_note',
+      fields: { text: { type: 'text' }, inv: { type: 'master_detail', reference: 'inv' } },
+    } as any);
+    const { a, b, c, lines } = await seed();
+    engine.registerHook('afterUpdate', async (ctx: any) => {
+      const row = await engine.findOne('inv_line', { where: { id: ctx.id ?? ctx.input?.id } });
+      await engine.insert('inv_note', { text: 'changed', inv: (row as any).inv });
+    }, { object: 'inv_line' });
+    const before = log.length;
+    await engine.deferSummaryRecompute(async () => {
+      for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+      // Six notes are stored, and no parent was recomputed for them yet.
+      expect(storeFor('inv_note').size).toBe(6);
+      expect(parentWrites).toHaveLength(0);
+      expect(storeFor('inv').get(a.id)).not.toHaveProperty('note_count', 2);
+    });
+    // One recompute per child object for the batch, each one write per parent:
+    // 3 parents x 2 child objects, where a per-row loop pays 6 rows x 2.
+    expect(parentWrites).toHaveLength(6);
+    expect(log.slice(before).filter((e) => e.op === 'find' && e.object === 'inv_note').length).toBe(1);
+    for (const p of [a, b, c]) expect(storeFor('inv').get(p.id)).toMatchObject({ line_count: 2, note_count: 2 });
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 50 });
+  });
+
+  it('a write under a transaction a hook opened and committed inside the batch recomputes in that transaction, not on its dead handle at the end', async () => {
+    // The sandbox runner's `ctx.api.transaction` is the discrete trio
+    // (`beginTransaction` / `commitTransaction`): with no transaction to join
+    // (a non-atomic bulk update) it opens and commits its own, before the
+    // batch ends. A driver call on a committed handle fails, as on knex.
+    driver.commit = async (h: any) => { h.done = true; };
+    for (const op of ['find', 'findOne', 'create', 'update', 'delete', 'count', 'aggregate', 'bulkCreate', 'updateMany']) {
+      const real = driver[op];
+      if (typeof real !== 'function') continue;
+      driver[op] = async (...args: any[]) => {
+        if (args.some((a) => a?.transaction?.done)) throw new Error('Transaction query already complete');
+        return real.apply(driver, args);
+      };
+    }
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        note_count: { type: 'summary', summaryOperations: { object: 'inv_note', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_note',
+      fields: { text: { type: 'text' }, inv: { type: 'master_detail', reference: 'inv' } },
+    } as any);
+    const { a, b, c, lines } = await seed();
+    const api = engine.createContext({ isSystem: true });
+    engine.registerHook('afterUpdate', async (ctx: any) => {
+      const row = await engine.findOne('inv_line', { where: { id: ctx.id ?? ctx.input?.id } });
+      const unit = (await api.beginTransaction())!;
+      expect(unit.owned).toBe(true);
+      await unit.ctx.object('inv_note').insert({ text: 'changed', inv: (row as any).inv });
+      await api.commitTransaction(unit.handle);
+    }, { object: 'inv_line' });
+    await engine.deferSummaryRecompute(async () => {
+      for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+    });
+    for (const p of [a, b, c]) expect(storeFor('inv').get(p.id)).toMatchObject({ line_count: 2, note_count: 2 });
+    expect(storeFor('inv').get(a.id)).toMatchObject({ line_total: 50 });
+  });
+
+  describe('[ruling 6928862195 B] a roll-up a rule reads is not deferred', () => {
+    const lineWith = (extra: Record<string, unknown>) => engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+        ...(extra.fields as object ?? {}),
+      },
+      ...(extra.validations ? { validations: extra.validations } : {}),
+    } as any);
+    /** Parent writes made DURING the batch, and after it. */
+    async function batchOfSix(): Promise<{ during: number; after: number }> {
+      const { lines } = await seed();
+      let during = 0;
+      await engine.deferSummaryRecompute(async () => {
+        for (const line of lines) await engine.update('inv_line', { amount: line.amount * 10 }, { where: { id: line.id } });
+        during = parentWrites.length;
+      });
+      return { during, after: parentWrites.length - during };
+    }
+
+    it('(i) a validation rule on the child reading the parent summary one hop: each row recomputes at once', async () => {
+      lineWith({ validations: [{ name: 'cap', type: 'script', severity: 'error', message: 'cap', condition: 'record.inv.line_count > 1000' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(i) a validation rule on ANOTHER object reading the parent summary: judged on the field read, not the object written', async () => {
+      engine.registry.registerObject({
+        name: 'inv_memo',
+        fields: { inv: { type: 'lookup', reference: 'inv' } },
+        validations: [{ name: 'cap', type: 'script', severity: 'error', message: 'cap', condition: 'record.inv.line_total > 100000' }],
+      } as any);
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(ii) a field-level parent. predicate reading the parent summary: each row recomputes at once', async () => {
+      lineWith({ fields: { note: { type: 'text', readonlyWhen: 'parent.line_total > 100000' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a parent. predicate reading a field that is no summary (the showcase invoice line, parent.status) keeps the deferral', async () => {
+      lineWith({ fields: { note: { type: 'text', readonlyWhen: "parent.name == 'paid'", requiredWhen: "parent.name == 'x'" } } });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('a rule reading another field of the related row keeps the deferral', async () => {
+      lineWith({ validations: [{ name: 'named', type: 'script', severity: 'error', message: 'named', condition: "record.inv.name == 'never'" }] });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    /** `inv` as registered above, with `extra` fields and validations of its own. */
+    const invWith = (extra: { fields?: Record<string, unknown>; validations?: unknown[] }) => engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        region: { type: 'lookup', reference: 'region' },
+        line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        ...(extra.fields ?? {}),
+      },
+      ...(extra.validations ? { validations: extra.validations } : {}),
+    } as any);
+
+    it('(iii) a validation rule of the parent reading its OWN summary: each row recomputes at once, so the rule judges every step', async () => {
+      invWith({ validations: [{ name: 'cap', type: 'script', severity: 'error', message: 'cap', condition: 'record.line_count > 1000' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) the same through `previous`, and through a conditional rule at depth', async () => {
+      invWith({ validations: [{ name: 'grow', type: 'conditional', when: "record.name != ''", then: { name: 'g', type: 'script', severity: 'error', message: 'g', condition: 'previous != null && previous.line_total > 100000' } }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) a field-level requiredWhen of the parent reading its own summary', async () => {
+      invWith({ fields: { memo: { type: 'text', requiredWhen: 'record.line_total > 100000' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) a rule of the parent reading only its own non-summary fields keeps the deferral', async () => {
+      invWith({ validations: [{ name: 'named', type: 'script', severity: 'error', message: 'named', condition: "record.name == 'never'" }] });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    /** `inv` with a formula over its own summary: `headroom = 1000000 - line_total`. */
+    const withHeadroom = (extra: { fields?: Record<string, unknown>; validations?: unknown[] } = {}) => invWith({
+      fields: { headroom: { type: 'formula', returnType: 'number', expression: '1000000 - record.line_total' }, ...(extra.fields ?? {}) },
+      ...(extra.validations ? { validations: extra.validations } : {}),
+    });
+
+    it('(i) through a formula: a child rule reading the parent formula computed from its summary', async () => {
+      withHeadroom();
+      lineWith({ validations: [{ name: 'room', type: 'script', severity: 'error', message: 'room', condition: 'record.inv.headroom < 0' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(ii) through a formula: a parent. predicate reading the header formula computed from its summary', async () => {
+      withHeadroom();
+      lineWith({ fields: { note: { type: 'text', requiredWhen: 'parent.headroom < 0' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) through a formula: a rule of the parent reading its own formula computed from its summary', async () => {
+      withHeadroom({ validations: [{ name: 'room', type: 'script', severity: 'error', message: 'room', condition: 'record.headroom != null && record.headroom < 0' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('through a stored computed field: an expression on a stored field of the parent reading its summary', async () => {
+      invWith({ fields: { doubled: { type: 'number', expression: 'record.line_total * 2' } } });
+      lineWith({ validations: [{ name: 'dbl', type: 'script', severity: 'error', message: 'dbl', condition: 'record.inv.doubled > 100000000' }] });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) a declared bound on a stored computed field of the parent calculated from its summary', async () => {
+      invWith({ fields: { room: { type: 'number', expression: '1000000 - record.line_total', min: -1000000000000 } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) a declared bound on the summary itself', async () => {
+      invWith({ fields: { line_count: { type: 'summary', max: 1000, summaryOperations: { object: 'inv_line', function: 'count' } } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) a declared precision on the summary itself', async () => {
+      invWith({ fields: { line_count: { type: 'summary', precision: 9, summaryOperations: { object: 'inv_line', function: 'count' } } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) an object-level unique index naming the summary', async () => {
+      engine.registry.registerObject({
+        name: 'inv',
+        fields: {
+          name: { type: 'text' },
+          region: { type: 'lookup', reference: 'region' },
+          line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+          line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        },
+        indexes: [{ name: 'inv_total_once', fields: ['region', 'line_total'], unique: 'organization' }],
+      } as any);
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a declared index naming the summary that is not unique keeps the deferral', async () => {
+      engine.registry.registerObject({
+        name: 'inv',
+        fields: {
+          name: { type: 'text' },
+          region: { type: 'lookup', reference: 'region' },
+          line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+          line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        },
+        indexes: [{ name: 'inv_by_total', fields: ['line_total'] }],
+      } as any);
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('(iii) a stored computed field of the parent calculated from its summary, with no bound and no rule: its write judges it all the same', async () => {
+      invWith({ fields: { doubled: { type: 'number', expression: 'record.line_total * 2' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a stored computed field of the parent that reads no summary keeps the deferral', async () => {
+      invWith({ fields: { label: { type: 'text', expression: 'record.name' } } });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('a stored computed field of the CHILD reading the parent summary one hop: each row recomputes at once', async () => {
+      lineWith({ fields: { seen: { type: 'number', expression: 'record.inv.line_count' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a formula (not stored) of the child reading the parent summary keeps the deferral: it is computed on read', async () => {
+      lineWith({ fields: { seen: { type: 'formula', returnType: 'number', expression: 'record.inv.line_count' } } });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('a rule reading a formula that reads no summary keeps the deferral', async () => {
+      invWith({ fields: { shout: { type: 'formula', returnType: 'text', expression: 'record.name.upperAscii()' } } });
+      lineWith({ validations: [{ name: 'shout', type: 'script', severity: 'error', message: 'shout', condition: "record.inv.shout == 'NEVER'" }] });
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('a chain: a rule on the grandparent reading a summary over the parent summary keeps the parent summary per row', async () => {
+      engine.registry.registerObject({
+        name: 'region',
+        fields: {
+          name: { type: 'text' },
+          grand_total: { type: 'summary', summaryOperations: { object: 'inv', field: 'line_total', function: 'sum' } },
+        },
+        validations: [{ name: 'cap', type: 'script', severity: 'error', message: 'cap', condition: 'record.grand_total > 1000000' }],
+      } as any);
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+  });
+
+  it('a scope with no roll-up write runs nothing', async () => {
+    const before = log.length;
+    await engine.deferSummaryRecompute(async () => { await engine.insert('region', { name: 'R' }); });
+    expect(parentWrites).toHaveLength(0);
+    expect(aggregateReads(before)).toBe(0);
+  });
+});
+
+// [#34466] A multi-row insert under one header answers a field-level
+// `parent.<summary>` predicate the way inserting the rows one by one does
+// (#25579's 「批量等于逐条」, extended from the related binding a rule reads
+// through a reference to the master-detail header a `requiredWhen` reads as
+// `parent`). The header is read once for the batch; the rows the rules have
+// admitted are accumulated in memory and overlaid on it for each later row.
+//
+// Reverse verification, predicted before running: drop the header overlay and
+// the atomic, partial, and preview cases go red (every row reads `line_count`
+// 0, so all three rows are admitted); the one-by-one, the CONTROL predicate
+// reading `parent.status`, and the unbound-header cases stay green.
+describe('[#34466] a multi-row insert accumulates its earlier rows into the parent summary a field-level parent. predicate reads', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'inv',
+      fields: {
+        name: { type: 'text' },
+        status: { type: 'text' },
+        line_count: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'count' } },
+      },
+    } as any);
+    engine.registry.registerObject({
+      name: 'inv_line',
+      fields: {
+        amount: { type: 'number' },
+        inv: { type: 'master_detail', reference: 'inv' },
+        // THE SUBJECT: from the third line on, a line carries a description.
+        description: { type: 'text', requiredWhen: 'parent.line_count >= 2' },
+        // CONTROL: reads a header field that is no summary.
+        note: { type: 'text', requiredWhen: "parent.status == 'sent'" },
+      },
+    } as any);
+  });
+
+  const lines = (inv: string) => [...storeFor('inv_line').values()].filter((r) => r.inv === inv);
+  const threeBare = (inv: string) => [{ inv, amount: 1 }, { inv, amount: 2 }, { inv, amount: 3 }];
+
+  /** The refusal the third row earns: `required` on `description`, in the ADR-0112 envelope the data door maps to 400. */
+  function expectDescriptionRequired(err: unknown): void {
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(mapDataError(err).status).toBe(400);
+    expect((err as ValidationError).fields.map((f) => ({ field: f.field, code: f.code }))).toEqual([{ field: 'description', code: 'required' }]);
+  }
+
+  async function refusalOf(write: Promise<unknown>): Promise<unknown> {
+    try { await write; } catch (err) { return err; }
+    throw new Error('expected the write to be refused');
+  }
+
+  it('one by one (the reference answer): the first two lines are admitted, the third is refused', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    const [a, b, c] = threeBare(p.id);
+    await engine.insert('inv_line', a);
+    await engine.insert('inv_line', b);
+    expectDescriptionRequired(await refusalOf(engine.insert('inv_line', c)));
+    expect(lines(p.id)).toHaveLength(2);
+    expect(storeFor('inv').get(p.id).line_count).toBe(2);
+  });
+
+  it('insert(array), all or nothing: the third row is refused as one by one refuses it, and nothing is written', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    expectDescriptionRequired(await refusalOf(engine.insert('inv_line', threeBare(p.id))));
+    expect(lines(p.id)).toHaveLength(0);
+  });
+
+  it('insertMany, per-row outcome: the first two rows land, the third carries the refusal', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    const out = await engine.insertMany('inv_line', threeBare(p.id));
+    expect(out.map((o) => o.ok)).toEqual([true, true, false]);
+    expectDescriptionRequired((out[2] as { ok: false; error: unknown }).error);
+    expect(lines(p.id)).toHaveLength(2);
+    expect(storeFor('inv').get(p.id).line_count).toBe(2);
+  });
+
+  it('a refused row moves nothing: with the second row refused, the third reads one earlier line and is admitted', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    // The second row is refused on its own (a non-number amount), so the batch
+    // counts one admitted row before the third, as one by one would store one.
+    const out = await engine.insertMany('inv_line', [{ inv: p.id, amount: 1 }, { inv: p.id, amount: 'x' }, { inv: p.id, amount: 3 }]);
+    expect(out.map((o) => o.ok)).toEqual([true, false, true]);
+    expect(lines(p.id)).toHaveLength(2);
+  });
+
+  it('the rows of the batch count per header: two headers, two lines each, all admitted', async () => {
+    const p = await engine.insert('inv', { name: 'P', status: 'draft' });
+    const q = await engine.insert('inv', { name: 'Q', status: 'draft' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 1 }, { inv: q.id, amount: 1 }, { inv: p.id, amount: 2 }, { inv: q.id, amount: 2 }]);
+    expect(storeFor('inv').get(p.id).line_count).toBe(2);
+    expect(storeFor('inv').get(q.id).line_count).toBe(2);
+  });
+
+  it('CONTROL: a parent. predicate reading a field that is no summary answers as before — draft admits the batch, sent refuses its first row', async () => {
+    const draft = await engine.insert('inv', { name: 'D', status: 'draft' });
+    const sent = await engine.insert('inv', { name: 'S', status: 'sent' });
+    await engine.insert('inv_line', [{ inv: draft.id, amount: 1, description: 'x' }, { inv: draft.id, amount: 2, description: 'x' }]);
+    expect(lines(draft.id)).toHaveLength(2);
+    const out = await engine.insertMany('inv_line', [{ inv: sent.id, amount: 1, description: 'x' }, { inv: sent.id, amount: 2, description: 'x', note: 'n' }]);
+    expect(out.map((o) => o.ok)).toEqual([false, true]);
+    expect((out[0] as { ok: false; error: ValidationError }).error.fields.map((f) => ({ field: f.field, code: f.code }))).toEqual([{ field: 'note', code: 'required' }]);
+  });
+
+  it('the multi-row insert preview answers the write: the third row is not valid', async () => {
+    const p = await engine.insert('inv', { name: 'INV-1', status: 'draft' });
+    const out = await engine.validate('inv_line', threeBare(p.id), { mode: 'insert' });
+    expect(out.results!.map((r) => r.valid)).toEqual([true, true, false]);
+    expect(out.results![2]!.errors.map((e) => ({ field: e.field, code: e.code }))).toEqual([{ field: 'description', code: 'required' }]);
+    expect(lines(p.id)).toHaveLength(0);
   });
 });

@@ -60,6 +60,7 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 
+import { mintInvitationProof, withInvitationProof } from './invitation-mailbox-proof.js';
 import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import { isCloudManaged } from '@objectstack/core';
 import { MEMBERSHIP_ROLE_DELEGATED_ADMIN, MEMBERSHIP_ROLE_EXTERNAL } from '@objectstack/spec';
@@ -80,6 +81,7 @@ import {
 import { buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { resolveInvitationLimitOption } from './invitation-limit.js';
+import { refuseUnverifiedAcceptWhileMailIsLive } from './invitation-accept-verified-email.js';
 import { invitationAcceptPath } from './invitation-link-action.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
 import { blankInvitationRoleRefusal } from './invite-role-not-found-code.js';
@@ -107,6 +109,7 @@ export interface OrganizationPluginHost {
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
+  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   multiOrgPostureEffective: AuthManager['multiOrgPostureEffective'];
   orgRolesMap: AuthManager['orgRolesMap'];
   resolveMembershipRole: AuthManager['resolveMembershipRole'];
@@ -191,11 +194,15 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
     // portal exposes a Teams page; without this flag those endpoints
     // 404 and the section silently breaks.
     teams: { enabled: true },
-    // Without a mailer wired in framework, requiring email verification
-    // before accepting invitations dead-ends every invite flow with
-    // FORBIDDEN EMAIL_VERIFICATION_REQUIRED…. Default-off here keeps
-    // the built-in /accept-invitation route usable for pilots; operators
-    // who wire a real mailer can re-enable downstream.
+    // The vendor's switch governs accept, reject and get-invitation
+    // together, and is read once, at boot. Declared off here: on a
+    // deployment with no live mail nothing can ever verify an address, so
+    // turning it on would dead-end every invite flow with FORBIDDEN
+    // EMAIL_VERIFICATION_REQUIRED…. [#34272] Where mail IS live, the
+    // accept door alone still refuses an unverified session, asked per
+    // request by `beforeAcceptInvitation` below
+    // (`invitation-accept-verified-email.ts`); reading and declining an
+    // invitation stay open, as does every door while mail is not live.
     requireEmailVerificationOnInvitation: false,
     // Cap how many orgs a user can CREATE (OS_ORG_LIMIT). Counts only orgs
     // the user OWNS (role=owner) — never orgs they were merely invited into —
@@ -424,6 +431,20 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
           });
         }
       },
+      // [#34272] While mail is live, an unverified session may not accept:
+      // the address it holds was never proven to be the invitee's mailbox.
+      // Fired by the vendor inside the accept endpoint, after its recipient
+      // and expiry checks and before anything is written, with the
+      // `session.user` its own verification check reads. A no-op while mail
+      // is not live. `invitation-accept-verified-email.ts` states the rule.
+      beforeAcceptInvitation: async ({ user }: any) => {
+        await refuseUnverifiedAcceptWhileMailIsLive(user, {
+          isEmailDeliveryLive: () => this.isEmailDeliveryLive(),
+          verificationRequired:
+            organizationPlugin?.$ERROR_CODES
+              ?.EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION,
+        });
+      },
       // [ADR-0105 D8] Accept-time application + host seam. The placement
       // the issuance gate approved lands WITH the better-auth membership,
       // so the invitee arrives already in the right unit and role. The
@@ -647,11 +668,18 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
         if (this.config.logger) this.config.logger.warn(msg, meta);
         else console.warn(msg, meta);
       }
+      // [#34257] The mail's link carries the invitation's mailbox proof; the
+      // copied link and the stored mail row never do. Minted only for a send
+      // that goes out; one that cannot be minted goes out as today's link.
+      const proof = expiry.expiresAt === undefined
+        ? undefined
+        : await mintProofForSend({ id: String(invitation.id), email: recipientEmail, expiresAt: invitation.expiresAt });
       try {
         await emailService.sendTemplate({
           template: 'auth.invitation',
           to: recipientEmail,
           ...mailLocale,
+          ...(proof ? { deliverOnlyData: { acceptUrl: withInvitationProof(acceptUrl, proof) } } : {}),
           data: {
             inviter: {
               name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
@@ -736,6 +764,28 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
  * than rendered as `Invalid Date`; the template declares the variable
  * required, so that send is refused rather than sent with a dangling sentence.
  */
+/**
+ * Mint the invitation's mailbox proof through the verification store of the
+ * request that sends the mail (better-auth calls `sendInvitationEmail` inside
+ * invite-member, a resend included). No endpoint context, or a store that
+ * refuses the write: no proof, and the mail carries today's link.
+ */
+async function mintProofForSend(invitation: { id: string; email: string; expiresAt: unknown }): Promise<string | undefined> {
+  try {
+    const { getCurrentAuthEndpointContext } = await import('@better-auth/core/context');
+    const ctx: any = getCurrentAuthEndpointContext();
+    const store = ctx?.context?.internalAdapter;
+    if (!store) return undefined;
+    return await mintInvitationProof(store, invitation);
+  } catch (err: any) {
+    console.warn(
+      `[AuthManager] invitation mail: no mailbox proof for invitation '${invitation.id}' (${err?.message ?? err}); ` +
+        'the mail carries the accept link without it',
+    );
+    return undefined;
+  }
+}
+
 function invitationExpiryArg(expiresAt: unknown): { expiresAt?: string } {
   if (!(expiresAt instanceof Date) && typeof expiresAt !== 'string' && typeof expiresAt !== 'number') return {};
   const instant = new Date(expiresAt);

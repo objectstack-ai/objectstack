@@ -261,27 +261,64 @@ function mapFieldTypeToFilterType(
 }
 
 /**
- * Fit one option's preview line to its one line (objectui#13123): show every
- * segment, then hide the last one still shown for as long as the line
- * overflows, so a column the line cannot hold leaves WHOLE, together with every
- * column after it. A segment that draws a badge never shrinks and a text
- * segment never shrinks below its label (`previewOf`), so this is the only way
- * a column gives way once the text values are cut as far as they go.
+ * The rows an option's preview may wrap onto. A column that does not fit
+ * beside the one before it starts the next row whole, so two text columns are
+ * not both cut to fit one row (objectstack#34362); past this many rows a column
+ * leaves, and an option's height stays bounded for the list's keyboard scroll.
+ */
+const LOOKUP_PREVIEW_MAX_ROWS = 2;
+
+/** The rows the shown segments occupy, read off their rendered offsets. */
+function previewRowsOf(segments: HTMLElement[]): number {
+  return new Set(segments.filter((s) => !s.hidden).map((s) => s.offsetTop)).size;
+}
+
+/**
+ * Fit one option's preview to its rows (objectui#13123, objectstack#34362):
+ * show every segment, then hide the last one still shown for as long as the
+ * line overflows its width or wraps past {@link LOOKUP_PREVIEW_MAX_ROWS}, so a
+ * column the line cannot hold leaves WHOLE, together with every column after
+ * it. A segment that draws a badge never shrinks and a text segment never
+ * shrinks below its label (`previewOf`), so this is the only way a column
+ * gives way once the text values are cut as far as they go.
+ *
+ * Then each shown segment that opens a row drops its leading separator, and a
+ * text value cut short carries its whole text as its `title`, so a value the
+ * row cannot hold stays readable.
  *
  * Read off the rendered box, never computed from field types: a cell renderer
  * draws what it draws, and only the browser knows how wide that is. jsdom has
- * no layout, where both widths read 0 and nothing is hidden.
+ * no layout, where every width and offset reads 0 and nothing is hidden.
  */
 function fitPreviewLine(line: HTMLElement): void {
   const segments = Array.from(line.children) as HTMLElement[];
-  for (const segment of segments) segment.hidden = false;
-  for (let i = segments.length - 1; i >= 0 && line.scrollWidth > line.clientWidth; i -= 1) {
+  for (const segment of segments) {
+    segment.hidden = false;
+    const separator = segment.querySelector<HTMLElement>('[data-lookup-preview-separator]');
+    if (separator) separator.hidden = false;
+  }
+  const overflows = () =>
+    line.scrollWidth > line.clientWidth || previewRowsOf(segments) > LOOKUP_PREVIEW_MAX_ROWS;
+  for (let i = segments.length - 1; i >= 0 && overflows(); i -= 1) {
     segments[i].hidden = true;
+  }
+  let rowTop: number | null = null;
+  for (const segment of segments) {
+    if (segment.hidden) continue;
+    const opensRow = rowTop !== null && segment.offsetTop !== rowTop;
+    const separator = segment.querySelector<HTMLElement>('[data-lookup-preview-separator]');
+    if (separator && opensRow) separator.hidden = true;
+    rowTop = segment.offsetTop;
+    const text = segment.querySelector<HTMLElement>('[data-lookup-preview-text]');
+    if (!text) continue;
+    if (text.scrollWidth > text.clientWidth) text.title = (text.textContent ?? '').trim();
+    else text.removeAttribute('title');
   }
 }
 
 /**
- * The line under an option's label: the segments `previewOf` builds, fitted by
+ * The preview under an option's label: the segments `previewOf` builds,
+ * wrapping onto at most {@link LOOKUP_PREVIEW_MAX_ROWS} rows, fitted by
  * {@link fitPreviewLine} after every commit (the segments may have changed)
  * and whenever the line's own box is resized (the popover follows its
  * trigger's width).
@@ -301,7 +338,7 @@ function OptionPreviewLine({ children }: { children: React.ReactNode }) {
   return (
     <span
       ref={lineRef}
-      className="flex min-w-0 items-center gap-1 overflow-hidden text-xs text-muted-foreground"
+      className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 overflow-hidden text-xs text-muted-foreground"
       data-testid="lookup-option-preview"
     >
       {children}
@@ -358,6 +395,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // Arrow-key active index (-1 = none)
   const [activeIndex, setActiveIndex] = useState(-1);
   const listRef = useRef<HTMLDivElement>(null);
+  // Which edges of the option list have more options past them: each draws a
+  // fade, so a row cut at the list's edge reads as "scroll for more"
+  // (objectstack#34362).
+  const [listMore, setListMore] = useState<{ above: boolean; below: boolean }>({ above: false, below: false });
+  const readListMore = useCallback(() => {
+    const list = listRef.current;
+    const next = list
+      ? { above: list.scrollTop > 0, below: list.scrollTop + list.clientHeight < list.scrollHeight - 1 }
+      : { above: false, below: false };
+    setListMore((prev) => (prev.above === next.above && prev.below === next.below ? prev : next));
+  }, []);
 
   const lookupField = field as any;
 
@@ -1514,8 +1562,10 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
    *  - any other column truncates its VALUE, never below its label (the
    *    `minmax(0, max-content)` track gives the value nothing of the
    *    segment's minimum width, so that minimum is the label);
-   *  - a column the line still cannot hold leaves whole, with every column
-   *    after it (`fitPreviewLine`).
+   *  - a column that does not fit beside the one before it wraps whole onto
+   *    the next row, and a column the rows still cannot hold leaves whole,
+   *    with every column after it (`fitPreviewLine`);
+   *  - a value cut short carries its whole text as its `title`.
    */
   const previewOf = useCallback(
     (option: LookupOption): React.ReactNode => {
@@ -1541,7 +1591,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         // gave way, and the row would grow.
         const lead = (
           <span className="flex items-center gap-1 whitespace-nowrap">
-            {i > 0 && <span aria-hidden="true" className="opacity-60">·</span>}
+            {i > 0 && <span aria-hidden="true" className="opacity-60" data-lookup-preview-separator="">·</span>}
             <span className="opacity-70">{`${col.label || fieldToLabel(col.field)}:`}</span>
           </span>
         );
@@ -1558,7 +1608,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         ) : (
           <span key={col.field} className="grid grid-cols-[auto_minmax(0,max-content)] items-center gap-1">
             {lead}
-            <span className="min-w-0 truncate" data-lookup-preview={col.field}>{value}</span>
+            <span className="min-w-0 truncate" data-lookup-preview={col.field} data-lookup-preview-text="">{value}</span>
           </span>
         );
       });
@@ -1594,6 +1644,26 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       el?.scrollIntoView({ block: 'nearest' });
     }
   }, [activeIndex]);
+
+  // The fades follow the list after every commit (options arrive, rows
+  // re-fit), and on a resize, which no commit announces: the list's box
+  // follows the room the popover is given, not React state.
+  React.useLayoutEffect(() => {
+    readListMore();
+  });
+  const attachList = useCallback(
+    (list: HTMLDivElement | null) => {
+      listRef.current = list;
+      if (!list || typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(() => readListMore());
+      observer.observe(list);
+      return () => {
+        observer.disconnect();
+        if (listRef.current === list) listRef.current = null;
+      };
+    },
+    [readListMore],
+  );
 
   if (readonly) {
     if (!selectedOptions.length) {
@@ -1881,12 +1951,28 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         <PopoverTrigger asChild>
           {triggerButton}
         </PopoverTrigger>
-        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        {/* The popover never runs past the room Radix reports on the side it
+            opens to, and goes to the side with more room when its whole list
+            does not fit (Radix's default flip, kept): the search row keeps its
+            height and the list takes what is left (objectstack#34362).
+            Across, it is as wide as its trigger but never narrower than 18rem,
+            so an option name stays readable when the trigger is a narrow
+            line-item grid cell; and never wider than the room Radix reports,
+            so on a narrow screen it stays inside the viewport. The floor is
+            itself capped by that room (`min()`), because a min-width larger
+            than the max-width would win over it. Radix's default shift keeps
+            a widened panel on screen when the trigger sits at the right edge
+            (objectstack#34601). */}
+        <PopoverContent
+          className="flex max-h-(--radix-popover-content-available-height) w-[var(--radix-popover-trigger-width)] min-w-[min(18rem,var(--radix-popover-content-available-width,100vw))] max-w-(--radix-popover-content-available-width) flex-col p-0"
+          align="start"
+          data-testid="lookup-popover"
+        >
           {/* Search input — not offered on a target whose search resolves to
               no field (objectui#12966, see `searchOffered`); the options below
               are buttons, so the list stays reachable without it. */}
           {searchOffered && (
-            <div className="p-2">
+            <div className="shrink-0 p-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
@@ -1913,7 +1999,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
           {/* Error state */}
           {error && (
-            <div className="flex flex-col items-center gap-2 py-4 px-2" role="alert">
+            <div className="flex shrink-0 flex-col items-center gap-2 py-4 px-2" role="alert">
               <AlertCircle className="size-5 text-destructive" />
               <p className="text-sm text-destructive">{error}</p>
               <Button
@@ -1929,7 +2015,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
           {/* Loading state (initial load only, not search refinement) */}
           {loading && filteredOptions.length === 0 && !error && (
-            <div className="flex flex-col items-center gap-2 py-6" role="status" aria-live="polite">
+            <div className="flex shrink-0 flex-col items-center gap-2 py-6" role="status" aria-live="polite">
               <Loader2 className="size-6 animate-spin text-muted-foreground" />
               <p className="text-sm text-muted-foreground">{t('lookup.loading')}</p>
             </div>
@@ -1937,7 +2023,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
           {/* Options list */}
           {!error && !(loading && filteredOptions.length === 0) && (
-            <div ref={listRef} className="max-h-64 overflow-y-auto px-1 pb-1" role="listbox" id={listboxId}>
+            <div className="relative flex min-h-0 flex-col">
+            <div
+              ref={attachList}
+              className="max-h-64 min-h-0 scroll-py-6 overflow-y-auto px-1 pb-1"
+              role="listbox"
+              id={listboxId}
+              onScroll={readListMore}
+            >
               {visibleOptions.length === 0 ? (
                 <div className="py-4 text-center">
                   <p className="text-sm text-muted-foreground">
@@ -2050,6 +2143,21 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   )}
                 </>
               )}
+            </div>
+            {listMore.above && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-popover to-transparent"
+                data-testid="lookup-list-more-above"
+              />
+            )}
+            {listMore.below && (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-md bg-gradient-to-t from-popover to-transparent"
+                data-testid="lookup-list-more-below"
+              />
+            )}
             </div>
           )}
         </PopoverContent>
