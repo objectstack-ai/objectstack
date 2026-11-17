@@ -23,7 +23,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { AuthManager } from './auth-manager';
-import { inviteForAudienceGate } from './audience-gate-test-support';
+import { operatorProvisioningField } from './audience-gate-test-support';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -180,10 +180,14 @@ const post = (manager: AuthManager, path: string, body: unknown, cookie?: string
 
 /** Sign a user up and return their session cookie + user id. */
 const signUp = async (manager: AuthManager, engine: MemoryEngine, email: string) => {
-  // [#11739] default posture invite_only: fixture users beyond the first
-  // enter through the invitation carve-out (see audience-gate-test-support).
-  const invitationId = await inviteForAudienceGate(engine, email);
-  const res = await post(manager, '/sign-up/email', { email, password: PASSWORD, name: email, invitationId });
+  // [#11739] default posture invite_only: fixture users beyond the first are
+  // members bound at creation — the auto-bound invitee this suite is about —
+  // so they enter through the operator door (`operatorProvisioningField`,
+  // audience-gate-test-support). A sign-up admitted by the invitation it
+  // presents joins no organization until it accepts.
+  const res = await post(manager, '/sign-up/email', {
+    email, password: PASSWORD, name: email, ...operatorProvisioningField(manager, email),
+  });
   expect(res.status, await res.clone().text()).toBe(200);
   const user = (engine.tables.get('sys_user') ?? []).find((u) => u.email === email);
   expect(user, `sign-up did not create ${email}`).toBeDefined();
