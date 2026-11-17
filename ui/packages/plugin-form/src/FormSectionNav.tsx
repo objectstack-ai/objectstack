@@ -123,8 +123,23 @@ export function FormSectionNav({ items, className }: FormSectionNavProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorIds]);
 
+  const active = shown ? (shown.some((i) => i.key === current) ? current : shown[0].key) : undefined;
+
+  // Keep the current entry in view inside the strip, which scrolls sideways
+  // on a narrow screen. The strip's own scroll offset only: an element
+  // `scrollIntoView` here would also move the form and cut a jump short.
+  const navRef = React.useRef<HTMLElement>(null);
+  React.useEffect(() => {
+    const strip = navRef.current;
+    const entry = strip?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!strip || !entry) return;
+    const left = entry.offsetLeft;
+    const right = left + entry.offsetWidth;
+    if (left < strip.scrollLeft) strip.scrollLeft = left;
+    else if (right > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = right - strip.clientWidth;
+  }, [active]);
+
   if (!shown) return null;
-  const active = shown.some((i) => i.key === current) ? current : shown[0].key;
 
   const jump = (item: FormSectionNavItem) => {
     if (holding.current) clearTimeout(holding.current);
@@ -145,9 +160,10 @@ export function FormSectionNav({ items, className }: FormSectionNavProps) {
 
   return (
     <nav
+      ref={navRef}
       aria-label={t('form.sectionNav')}
       data-testid="form-section-nav"
-      className={cn('flex gap-1 overflow-x-auto border-b border-border', className)}
+      className={cn('relative flex gap-1 overflow-x-auto border-b border-border', className)}
     >
       {shown.map((item) => {
         const isActive = item.key === active;
