@@ -213,10 +213,18 @@ const PENDING_LOCK_LIMIT = 1_000;
  */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
-function lockedError(message: string): never {
+/**
+ * `userMessage` [#34699] is passed only by the per-row lock, whose sentence is
+ * the end user's (`recordLockRefusal`): a client that shows `userMessage` then
+ * shows it without the `RECORD_LOCKED: ` prefix `message` keeps. The bound and
+ * unanswerable-intersection refusals name the object's API name for the
+ * developer who scoped the write, so they mark none.
+ */
+function lockedError(message: string, userMessage?: string): never {
   const err: any = new Error(`RECORD_LOCKED: ${message}`);
   err.code = 'RECORD_LOCKED';
   err.statusCode = 409;
+  if (userMessage !== undefined) err.userMessage = userMessage;
   throw err;
 }
 
@@ -704,7 +712,8 @@ export function bindApprovalLockHook(
         `[approvals] update refused RECORD_LOCKED: record '${recordId}' of '${object}' ` +
         `is held by pending approval request '${String(pending?.id ?? '')}'`,
       );
-      lockedError(recordLockRefusal(objectLabel, recordTitleOf(schema, asServed, recordId), locale, translate));
+      const sentence = recordLockRefusal(objectLabel, recordTitleOf(schema, asServed, recordId), locale, translate);
+      lockedError(sentence, sentence);
     }
   }, { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
 

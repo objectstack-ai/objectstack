@@ -28,6 +28,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/spec/data';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
@@ -218,6 +219,19 @@ describe('[#21154] a query over the approval snapshot by a reader withheld a sub
       });
     });
   }
+
+  it("[#34699] the predicate refusal carries the user's half in the caller's language; the aggregate words mark none", async () => {
+    const zhReader = { ...MASKED_READER, locale: 'zh-CN' } as Ctx;
+    let thrown: any = null;
+    try { await find(zhReader, contains(V.masked)); } catch (err) { thrown = err; }
+    expect([thrown?.code, thrown?.status]).toEqual(['PERMISSION_DENIED', 403]);
+    expect(firstSentence(String(thrown.message))).toBe(predicateWords);
+    expect(thrown.userMessage).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].query_field_not_readable);
+    let grouped403: any = null;
+    try { await grouped(zhReader); } catch (err) { grouped403 = err; }
+    expect(firstSentence(String(grouped403?.message))).toBe(aggregateWords);
+    expect(grouped403.userMessage).toBeUndefined();
+  });
 
   it('a filter that pins no subject object is refused for a reader withheld a field of any object a snapshot can concern', async () => {
     for (const reader of [MASKED_READER, UNSERVED_READER]) {

@@ -698,7 +698,7 @@ export async function callData(deps: ActionExecutionDeps,
             // answered 200 or 404 depending only on whether the deployment
             // registered the protocol slot — a difference the caller cannot see
             // and never asked for.
-            if (!match) throw recordNotFoundError(params.object, params.id);
+            if (!match) throw recordNotFoundError(params.object, params.id, executionContext);
             return { object: params.object, id: params.id, record: match };
         }
         throw { statusCode: 503, message: 'Data service not available' };
@@ -747,7 +747,7 @@ export async function callData(deps: ActionExecutionDeps,
             // all read `.status` → `.statusCode` → 500). A caller mistake was
             // reported as an internal fault and taken to the error reporter
             // with it.
-            if (!existing) throw recordNotFoundError(params.object, params.id);
+            if (!existing) throw recordNotFoundError(params.object, params.id, executionContext);
             // [#28782] The create arm's carrier, for an update that landed.
             let stale: SummaryRecomputeRefusal | undefined;
             await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }))
@@ -823,7 +823,7 @@ export async function callData(deps: ActionExecutionDeps,
             if (all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
             const existing = (all as any[]).find((i: any) => i.id === params.id);
-            if (!existing) throw recordNotFoundError(params.object, params.id);
+            if (!existing) throw recordNotFoundError(params.object, params.id, executionContext);
             // [#28782] The create arm's carrier, for a delete that landed.
             let stale: SummaryRecomputeRefusal | undefined;
             await ql.delete(params.object, findOpts({ where: { id: params.id } }))

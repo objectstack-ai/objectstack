@@ -676,3 +676,51 @@ describe('operation message catalog — the record-lock refusal', () => {
       .toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].record_locked.replace('{{object}}', '商机').replace('{{title}}', () => title));
   });
 });
+
+/**
+ * #34699 — the user's half of three platform refusals whose `message` stays the
+ * developer sentence: the by-id not-found, the filter-oracle guard and the
+ * delegated-administration scope refusal.
+ */
+describe('operation message catalog — not found, unreadable query field, delegated scope', () => {
+  const KEYS = ['record_not_found', 'query_field_not_readable', 'delegation_scope_violation'] as const;
+
+  it('every locale defines all three, placeholder-free', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key].match(/\{\{\w+\}\}/g) ?? [], `${locale}.${key}`).toEqual([]);
+      }
+    }
+  });
+
+  it('names no wire code, API vocabulary or authorization mechanism — in every locale', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        expect(catalog[key], `${locale}.${key}`).not.toMatch(/RECORD_NOT_FOUND|PERMISSION_DENIED|DELEGATION_SCOPE|adminScope|\[Security\]|_id\b|filter oracle/);
+      }
+    }
+  });
+
+  it('renders the caller locale, and falls back to en for a locale the catalog does not carry', () => {
+    expect(renderOperationMessage({ messageKey: 'record_not_found' }, { locale: 'zh-CN' })).toBe('该记录不存在，或您无权访问它。');
+    expect(renderOperationMessage({ messageKey: 'query_field_not_readable' }, { locale: 'zh' }))
+      .toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].query_field_not_readable);
+    expect(renderOperationMessage({ messageKey: 'delegation_scope_violation' }, { locale: 'de-DE' }))
+      .toBe(BUILTIN_OPERATION_MESSAGES.en.delegation_scope_violation);
+  });
+
+  it('each says something different from every other key, in every locale', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        const others = Object.entries(catalog).filter(([k]) => k !== key).map(([, v]) => v);
+        expect(others, `${locale}.${key}`).not.toContain(catalog[key]);
+      }
+    }
+  });
+
+  it('a deployment translation override wins, under the shared `errors.` address', () => {
+    const translate = (k: string) => (k === operationMessageTranslationKey('record_not_found') ? '记录不见了' : k);
+    expect(renderOperationMessage({ messageKey: 'record_not_found' }, { locale: 'zh-CN', translate })).toBe('记录不见了');
+  });
+});

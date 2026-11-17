@@ -228,6 +228,8 @@ describe('[#18153] CONTROL — the operator-facing refusals are untouched', () =
     );
     expect(thrown.code).toBe('RECORD_LOCKED');
     expect(thrown.statusCode).toBe(409);
+    // [#34699] An operator-facing sentence (it names the API name) is not marked for the end user.
+    expect(thrown.userMessage).toBeUndefined();
   });
 
   it('the predicate cap refusal still names the object', async () => {
@@ -356,6 +358,8 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
     expect(thrown.message).toContain('商机「Acme renewal」');
     expect(thrown.message).not.toContain(TAIL_EN);
     expect(thrown.message).not.toContain(opportunityId);
+    // [#34699] The same sentence is marked for the end user, without the wire prefix.
+    expect(thrown.userMessage).toBe(ZH.record_locked.replace('{{object}}', '商机').replace('{{title}}', 'Acme renewal'));
   });
 
   it('zh-CN, a record with no title: the label-only sentence, still in Chinese', async () => {
@@ -387,6 +391,7 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
     await rig(() => i18n);
     const thrown = await refusalIn(undefined, 'opportunity', opportunityId);
     expect(thrown.message).toBe(`RECORD_LOCKED: Opportunity 'Acme renewal' ${TAIL_EN}`);
+    expect(thrown.userMessage).toBe(`Opportunity 'Acme renewal' ${TAIL_EN}`);
   });
 
   it('no i18n service: the built-in catalog still answers zh-CN, with the declared label', async () => {

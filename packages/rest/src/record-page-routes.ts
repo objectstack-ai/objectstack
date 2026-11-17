@@ -243,7 +243,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     ...scope,
                 } satisfies ServerScopedDataRequest<GetDataRequest>);
                 const record = got?.record ?? got;
-                if (!record || typeof record !== 'object') throw recordNotFoundError(object, id);
+                if (!record || typeof record !== 'object') throw recordNotFoundError(object, id, context);
 
                 const answerRelated = async (entry: NonNullable<RecordPageRequest['related']>[number], index: number) => {
                     const head = { object: entry.object, field: entry.field };
@@ -415,7 +415,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                             return { error: { code: 'NOT_IMPLEMENTED', status: 501, message: 'The record field projection is not available on this deployment.' } };
                         }
                         const access = await security.getRecordFieldAccess(object, id, context);
-                        if (access === null) throw recordNotFoundError(object, id);
+                        if (access === null) throw recordNotFoundError(object, id, context);
                         if (access === undefined) {
                             return { error: { code: 'NOT_IMPLEMENTED', status: 501, message: `The record field projection has no answer for '${object}'.` } };
                         }

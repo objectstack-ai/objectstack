@@ -130,7 +130,7 @@ import {
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
 import { assertReadableQueryFields } from './predicate-guard.js';
-import { PermissionDeniedError, MaskedValueWriteError } from './errors.js';
+import { DelegationScopeViolationError, PermissionDeniedError, MaskedValueWriteError } from './errors.js';
 import { masterGateRefusalUserCopyOf, type MasterQuestion } from './security-plugin-cbp-write-gate.js';
 import {
   QUEUE_FIELD,
@@ -277,8 +277,9 @@ function denialLocaleOf(
 /**
  * The catalog keys this middleware renders. The first three are the `message`
  * of the gates #7414 / #7451 localized; the rest are the `userMessage` of the
- * owner-anchor, queue, field-write and master-detail write refusals
- * ({@link withUserMessage}); the last two are the list rules `field_edit_denied`'s `{{fields}}` is spelled by
+ * owner-anchor, queue, field-write and master-detail write refusals, the
+ * unreadable-query-field refusal and the delegated-administration scope
+ * refusal ({@link withUserMessage}); the last two are the list rules `field_edit_denied`'s `{{fields}}` is spelled by
  * ({@link labelList}).
  */
 type UserFacingDenialKey =
@@ -296,6 +297,8 @@ type UserFacingDenialKey =
   | 'master_record_edit_denied_opaque'
   | 'master_record_read_denied'
   | 'master_record_read_denied_opaque'
+  | 'query_field_not_readable'
+  | 'delegation_scope_violation'
   | 'field_label_quoted'
   | 'field_label_list_separator';
 
@@ -513,7 +516,7 @@ async function readDoorAnswerForGateRefusal(
     throw readRefusal;
   }
   if (row == null && isUnreadableAddressedRowRefusal(refusal)) {
-    return recordNotFoundError(opCtx.object, addressedId as string | number);
+    return recordNotFoundError(opCtx.object, addressedId as string | number, opCtx.context);
   }
   return refusal;
 }
@@ -818,7 +821,17 @@ export function registerAuthzMiddleware(
       try {
         await this.delegatedAdminGate.assert(opCtx);
       } catch (refusal) {
-        throw await readDoorAnswerForGateRefusal.call(this, opCtx, refusal, nestedInOperation);
+        const answer = await readDoorAnswerForGateRefusal.call(this, opCtx, refusal, nestedInOperation);
+        // [#34699] The scope refusal's `message` is the gate's reason, in
+        // English and in API names; the user's half rides `userMessage`.
+        if (answer instanceof DelegationScopeViolationError) {
+          (answer as DelegationScopeViolationError & { userMessage?: string }).userMessage = userFacingDenialMessage(
+            ctx,
+            'delegation_scope_violation',
+            denialLocalesOf(opCtx.context),
+          );
+        }
+        throw answer;
       }
     }
 
@@ -1464,7 +1477,7 @@ export function registerAuthzMiddleware(
             addressedId !== undefined &&
             (await this.callerCannotReadAddressedRow(opCtx, addressedId))
           ) {
-            throw recordNotFoundError(opCtx.object, addressedId as string | number);
+            throw recordNotFoundError(opCtx.object, addressedId as string | number, opCtx.context);
           }
           if (!visible) {
             // [#7451] The refusal an ordinary business user is most likely to
@@ -1519,7 +1532,7 @@ export function registerAuthzMiddleware(
           // step: a caller whose read is refused makes the caller-context
           // re-read throw for every id, and the record-level 403 is one answer
           // for all of them.)
-          throw recordNotFoundError(opCtx.object, addressedId as string | number);
+          throw recordNotFoundError(opCtx.object, addressedId as string | number, opCtx.context);
         }
       }
     }
@@ -2618,7 +2631,16 @@ export function registerAuthzMiddleware(
           opCtx.operation === 'update' || opCtx.operation === 'delete'
             ? { where: opCtx.options?.where }
             : (opCtx.ast as unknown as Record<string, unknown>);
-        assertReadableQueryFields(guardTarget, guardPerms, opCtx.object);
+        try {
+          assertReadableQueryFields(guardTarget, guardPerms, opCtx.object);
+        } catch (e) {
+          // [#34699] The guard's `message` names the hidden fields' API names
+          // for a developer; the user's half names none of them.
+          if (e instanceof PermissionDeniedError) {
+            throw withUserMessage(e, userFacingDenialMessage(ctx, 'query_field_not_readable', denialLocalesOf(opCtx.context)));
+          }
+          throw e;
+        }
       }
     }
 
