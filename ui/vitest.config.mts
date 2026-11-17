@@ -141,7 +141,6 @@ const domTsTests = [
 // and fails loudly in CI (it can never be skipped), so coverage cannot be lost
 // — only a red build that points at the fix.
 const heavyDomTests = [
-  'packages/app-shell/src/console/ai/LiveCanvas.test.tsx',
   'packages/app-shell/src/console/ai/__tests__/ConversationsSidebar.test.tsx',
   'packages/app-shell/src/console/organizations/__tests__/CreateWorkspaceDialog.test.tsx',
   'packages/app-shell/src/hooks/__tests__/useConsoleActionRuntime.test.tsx',

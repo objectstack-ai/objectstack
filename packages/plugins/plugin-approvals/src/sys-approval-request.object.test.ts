@@ -106,16 +106,23 @@ describe('sys_approval_request declared actions', () => {
       'exactly these levers OR in the #3424 override',
     ).toEqual(['approval_approve', 'approval_reassign', 'approval_recall', 'approval_reject']);
 
-    // ONE spelling of the arm, not four. This file has a spelling-drift history,
-    // and a fourth wording of the same idea is its own defect — `toContain` on
+    // ONE spelling of the arm, not three. This file has a spelling-drift history,
+    // and another wording of the same idea is its own defect — `toContain` on
     // the whole arm (leading ` || ` included) is what makes drift fail here
     // rather than in review.
     const OVERRIDE_ARM =
       ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true';
-    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_recall']) {
+    for (const name of ['approval_reject', 'approval_reassign', 'approval_recall']) {
       expect(vis(name), `${name} must spell the override arm exactly as its siblings do`)
         .toContain(OVERRIDE_ARM);
     }
+    // [Maintainer ruling 2026-11-17, option B] Approve's override arm reads the
+    // flag that excludes the viewer's own request, which the override never
+    // approves, and never the bare `can_override`.
+    expect(vis('approval_approve')).toContain(
+      ' || has(record.viewer) && has(record.viewer.can_override_approve) && record.viewer.can_override_approve == true',
+    );
+    expect(vis('approval_approve')).not.toContain(OVERRIDE_ARM);
   });
 
   it('recall stays available while a returned request is still the submitter\'s to abandon', () => {

@@ -432,3 +432,62 @@ describe('timestamp() handed a date-only field\'s text (#34363)', () => {
     expect(validateExpression('value', MEASURED, { scope: 'record' }).errors).toEqual([]);
   });
 });
+
+describe('a flow value envelope typed for the date-text family alone (#34451)', () => {
+  /** The object a record-triggered flow binds as `record`: a loan's borrow day, pick-up instant and title. */
+  const fieldTypes = { title: 'text', borrow_date: 'date', due_date: 'date', picked_up_at: 'datetime' };
+  const ENVELOPE: ExprSchemaHint = { fieldTypes, flowValueEnvelope: true };
+  const codes = (source: string, hint: ExprSchemaHint | undefined = ENVELOPE) =>
+    validateExpression('value', { dialect: 'cel', source }, hint).errors.map((e) => e.code);
+  /** The expression cloud measured in an `update_record` node's `fields.due_date`. */
+  const MEASURED = "isoDate(timestamp(record.borrow_date) + duration('168h'))";
+
+  it('refuses the measured expression under the run-may-fail arm, with the addDays shift', () => {
+    const r = validateExpression('value', { dialect: 'cel', source: MEASURED }, ENVELOPE);
+    expect(r.warnings).toEqual([]);
+    expect(r.errors.map((e) => ({ code: e.code, params: e.params }))).toEqual([{
+      code: 'date-text-call-run-may-fail',
+      params: {
+        call: 'timestamp(record.borrow_date)',
+        reference: 'record.borrow_date',
+        rewrite: 'date(record.borrow_date)',
+        shift: 'isoDate(addDays(record.borrow_date, N))',
+      },
+    }]);
+    expect(r.errors[0].message).toContain('`isoDate(addDays(record.borrow_date, N))`');
+  });
+
+  it('refuses the bare call, a previous.<field> read, and date-text arithmetic over record.<field>', () => {
+    expect(codes('timestamp(record.borrow_date)')).toEqual(['date-text-call-run-may-fail']);
+    expect(codes('timestamp(previous.borrow_date)')).toEqual(['date-text-call-run-may-fail']);
+    expect(codes("record.borrow_date - duration('24h')")).toEqual(['date-text-arithmetic-run-may-fail']);
+  });
+
+  it('CONTROL: a datetime field under timestamp(), and the taught shift, stay clean', () => {
+    expect(codes("isoDate(timestamp(record.picked_up_at) + duration('168h'))")).toEqual([]);
+    expect(codes('isoDate(addDays(record.borrow_date, 7))')).toEqual([]);
+  });
+
+  it('CONTROL: no verdict outside the date-text family reaches the envelope', () => {
+    // type-mismatch, date-arithmetic, date-duration-value, field existence: all stand down.
+    expect(codes('record.title * 2')).toEqual([]);
+    expect(codes('record.due_date + 1')).toEqual([]);
+    expect(codes('today() - record.borrow_date')).toEqual([]);
+    expect(codes('record.no_such_field')).toEqual([]);
+    // The same sources are refused or warned where a formula site types them.
+    const formula: ExprSchemaHint = { scope: 'record', fields: Object.keys(fieldTypes), fieldTypes };
+    const r = validateExpression('value', 'record.title * 2', formula);
+    expect([...r.errors, ...r.warnings].map((e) => e.code)).toEqual(['type-mismatch']);
+  });
+
+  it('a bare name, and a source reading `input`, take no verdict: the envelope cannot prove either is the field', () => {
+    expect(codes("isoDate(timestamp(borrow_date) + duration('168h'))")).toEqual([]);
+    expect(codes('timestamp(input.borrow_date)')).toEqual([]);
+  });
+
+  it('a malformed envelope is refused as before, and without field types nothing new runs', () => {
+    expect(codes('{record.borrow_date}')).toEqual(['cel-template-brace']);
+    expect(validateExpression('value', { dialect: 'cel', source: MEASURED }).errors).toEqual([]);
+    expect(codes(MEASURED, { flowValueEnvelope: true })).toEqual([]);
+  });
+});

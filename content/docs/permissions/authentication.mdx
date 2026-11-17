@@ -1300,6 +1300,19 @@ every row through better-auth so the accounts are login-capable:
   cannot assign positions during an import, or `PERMISSION_DENIED` when your
   own access cannot be resolved. A dry run never assigns positions, and
   reports `summary.positions` as zeros.
+- **Which organization the rows join** follows [Create a User Directly](#create-a-user-directly):
+  under a walled posture (`group` / `isolated`) every imported user joins your
+  **current** organization as `member`, each row in the same step as its
+  account, so the `positions` column validates against that organization. A row
+  the organization refuses (its membership limit, say) is failed on its row
+  with that refusal's code, and **that user is not created**: no account, no
+  temporary password, no invitation. The other rows still land. A row that
+  matches an existing user on `upsert` joins too; if the join is refused, the
+  row fails and its profile update is not applied. With no current
+  organization the whole import is refused with `400 NO_ACTIVE_ORGANIZATION`
+  and no user is created — a dry run included, so the preview tells you before
+  you import. Switch to the organization the people belong to first. Under the
+  `single` posture nothing changes: users join the default organization.
 - Synchronous only, at most 500 rows per request (password hashing is
   CPU-bound); split larger files into batches. Imports are not undoable.
 
