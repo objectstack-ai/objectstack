@@ -800,29 +800,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # The `test` job's step of the same name, verbatim but for its budget
-      # (its comment says why and sizes the budget).
+      # The `test` job's step of the same name, the same script with its own
+      # budget (the `test` job's comment says why and sizes the budget).
       - name: Fetch this commit's history and the base branch
         timeout-minutes: 8
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          refspecs=('+refs/heads/main:refs/remotes/origin/main')
-          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
-            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
-          fi
-          head=$(git rev-parse HEAD)
-          for attempt in 1 2 3; do
-            deepen=()
-            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
-            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
-            if [ "$attempt" = 3 ]; then
-              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
-              exit 1
-            fi
-            sleep $((attempt * 15))
-          done
-          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
+        run: bash scripts/ci/fetch-history.sh
 
       # Restore only: the `test` shards save this key.
       - name: Setup workspace
@@ -1097,7 +1081,16 @@ jobs:
       # then a red step: a selection read from a shallow clone is the silent
       # all-packages answer above, never a fallback this job may take quietly.
       #
-      # FETCH BUDGET: the one line that differs between the four copies. Each
+      # ONE BODY, scripts/ci/fetch-history.sh, for the five jobs that fetch
+      # (`test-plan`, `test`, `type-check-ui`, `test-ui-plan`, `test-ui`).
+      # Each attempt that writes nothing for 60 s is killed with its process
+      # group and retried (#34561): on 2026-11-16/17 a stalled transfer held
+      # attempt 1 silent until this budget killed it, four times, so the retry
+      # never ran, while sibling shards fetched the same history in 47-96 s.
+      # A fetch that keeps moving is never cut. The script's header has the
+      # reading; its self-test runs in lint.yml.
+      #
+      # FETCH BUDGET: the one line that differs between the five steps. Each
       # job gives the fetch what its wall leaves after its measured checkout
       # and body (the max over 2026-11-08's runs on `main` and the queue),
       # capped at 20 minutes: `test-plan` 8 (wall 10, body 0:37),
@@ -1116,28 +1109,13 @@ jobs:
       #     fits beside the body inside the 30-minute wall, so its budget only
       #     ends the red sooner and names the step. A red `test-plan` falls
       #     back to all eight shards, and each fetches for itself.
-      # A fetch that hangs ends red here, named, instead of eating the wall.
+      # A fetch that stalls is retried after 60 s of silence; one that keeps
+      # stalling ends red here, named, instead of eating the wall.
       - name: Fetch this commit's history and the base branch
         timeout-minutes: 20
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          refspecs=('+refs/heads/main:refs/remotes/origin/main')
-          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
-            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
-          fi
-          head=$(git rev-parse HEAD)
-          for attempt in 1 2 3; do
-            deepen=()
-            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
-            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
-            if [ "$attempt" = 3 ]; then
-              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
-              exit 1
-            fi
-            sleep $((attempt * 15))
-          done
-          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
+        run: bash scripts/ci/fetch-history.sh
 
       - name: Setup workspace
         uses: ./.github/actions/setup-workspace
@@ -3865,8 +3843,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # The `test` job's step of the same name, verbatim but for its budget
-      # (its comment says why and sizes the budget). Here the readers are check:lockfile-integrity
+      # The `test` job's step of the same name, the same script with its own
+      # budget (the `test` job's comment says why and sizes the budget). Here
+      # the readers are check:lockfile-integrity
       # (`git merge-base origin/<base> HEAD`), check:i18n-drift (the merge base
       # with origin/<base> or origin/main), the affected type-check scope
       # (`turbo --filter=...[BASE]`) and spec's build. On a shallow clone the
@@ -3876,23 +3855,7 @@ jobs:
         timeout-minutes: 20
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          refspecs=('+refs/heads/main:refs/remotes/origin/main')
-          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
-            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
-          fi
-          head=$(git rev-parse HEAD)
-          for attempt in 1 2 3; do
-            deepen=()
-            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
-            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
-            if [ "$attempt" = 3 ]; then
-              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
-              exit 1
-            fi
-            sleep $((attempt * 15))
-          done
-          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
+        run: bash scripts/ci/fetch-history.sh
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -4175,23 +4138,7 @@ jobs:
         timeout-minutes: 14
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          refspecs=('+refs/heads/main:refs/remotes/origin/main')
-          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
-            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
-          fi
-          head=$(git rev-parse HEAD)
-          for attempt in 1 2 3; do
-            deepen=()
-            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
-            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
-            if [ "$attempt" = 3 ]; then
-              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
-              exit 1
-            fi
-            sleep $((attempt * 15))
-          done
-          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
+        run: bash scripts/ci/fetch-history.sh
 
 
       - name: Setup Node.js
@@ -4364,8 +4311,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # The `test` job's step of the same name, verbatim but for its budget
-      # (its comment says why and sizes the budget).
+      # The `test` job's step of the same name, the same script with its own
+      # budget (the `test` job's comment says why and sizes the budget).
       # Here the readers are the select step below (`git merge-base` against
       # origin/<base ref>, then select-affected-tests.mjs's `git diff
       # base...HEAD`) and spec's build. On a shallow clone the select step
@@ -4374,23 +4321,7 @@ jobs:
         timeout-minutes: 14
         env:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          refspecs=('+refs/heads/main:refs/remotes/origin/main')
-          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != main ]; then
-            refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")
-          fi
-          head=$(git rev-parse HEAD)
-          for attempt in 1 2 3; do
-            deepen=()
-            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then deepen=(--unshallow); fi
-            if git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"; then break; fi
-            if [ "$attempt" = 3 ]; then
-              echo "::error::Could not fetch $head's history and ${refspecs[*]} after 3 attempts. This job's history readers need it, so this job stops here rather than reading from a shallow clone."
-              exit 1
-            fi
-            sleep $((attempt * 15))
-          done
-          echo "History: $(git rev-list --count HEAD) commit(s) behind HEAD, shallow=$(git rev-parse --is-shallow-repository), no tags, refs: $(git for-each-ref --format='%(refname)' refs/remotes | tr '\n' ' ')"
+        run: bash scripts/ci/fetch-history.sh
 
 
       - name: Setup Node.js
