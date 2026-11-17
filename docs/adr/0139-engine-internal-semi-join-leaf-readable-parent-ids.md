@@ -40,7 +40,7 @@ ruling A on [#33626](https://github.com/objectstack-ai/objectstack/issues/33626)
 analytics dimension through a lookup is refused `INVALID_QUERY` / 400 (the scope note on
 [#33876](https://github.com/objectstack-ai/objectstack/issues/33876), [`6917475155`](https://github.com/objectstack-ai/objectstack/issues/33876#issuecomment-6917475155), under Prime
 Directive 5). Each refusal names the driver and the two-step route, before any related read. D3's refusal envelope
-(`INTERNAL_ERROR` / 500) for a leaf one of the six consumers composes is unchanged.
+(`INTERNAL_ERROR` / 500) for a leaf any consumer composes is unchanged.
 **Decided by**: the maintainer, 「同意」 to the director seat's batch #312 item 2 (ruling
 [`6097072172`](https://github.com/objectstack-ai/objectstack/issues/22590#issuecomment-6097072172), 2026-10-10T11:34Z):
 **A is the end state, its first deliverable an ADR**; B (an unbounded `$in`) and a raised cap are ⛔ not taken. The
@@ -214,7 +214,7 @@ restriction".
   > engine consults a driver declaration to choose between the compiled leaf and the exact-array floor before the call.
   > A declaration the engine consults is not the inert bit the 17.0.0 rationale removed.
 
-  > **Amendment note (2026-11-17, #33876).** For the six consumers this bullet stands as written: their leaf still
+  > **Amendment note (2026-11-17, #33876).** For every consumer this bullet stands as written: its leaf still
   > reaches a refusing driver and is refused there in this envelope. It no longer holds for two author-written
   > conditions, where a 500 from inside the driver is the wrong answer because the author can rewrite them: a
   > nested-relation condition beneath a single-valued relation on a read verb
