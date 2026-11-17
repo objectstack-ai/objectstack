@@ -5400,7 +5400,8 @@ export class ObjectStackClient {
      * Discriminate on `authenticated`: an anonymous caller RESOLVES
      * `{ authenticated: false }` (the route answers it at 200, so a client can
      * tell "signed out" from a fault), unlike {@link me}, which rejects. The
-     * authenticated answer carries `hasAnyQueue` among the rest;
+     * authenticated answer carries `hasAnyQueue` and `objectsUsingQueues`
+     * among the rest;
      * `systemPermissions` / `tabPermissions` are absent only on a server
      * without SecurityPlugin, where absent means unknown and an empty array
      * means none.

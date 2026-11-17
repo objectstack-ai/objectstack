@@ -207,6 +207,7 @@ function grants(objects: Record<string, Record<string, boolean>>): MePermissions
     objects,
     fields: {},
     hasAnyQueue: false,
+    objectsUsingQueues: [],
   } as MePermissionsResponse;
 }
 

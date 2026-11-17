@@ -48,6 +48,7 @@ function answer(objects: Record<string, Record<string, unknown>>): MePermissions
     tenantId: null,
     positions: ['member'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects,
     fields: {},
