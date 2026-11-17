@@ -20,7 +20,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ApprovalService } from './approval-service.js';
+import type { ApprovalRequestRow } from '@objectstack/spec/contracts';
+import { ApprovalService, type ApprovalNodeAutoOutcome } from './approval-service.js';
 
 interface FakeRow { [k: string]: any }
 
@@ -216,5 +217,167 @@ describe('approval override audit marker (#4466)', () => {
     const row = (await svc.listActions(req.id, SYS)).at(-1)!;
     expect(row.via_override).toBeUndefined();
     expect(row.via_override).not.toBe(false);
+  });
+});
+
+/**
+ * [Maintainer ruling 2026-11-17, option B] The #3424 override never approves a
+ * request its actor submitted, whatever `excludeSubmitter` says, and it never
+ * hands the request's slot to its submitter. A rejection and a recall stay the
+ * submitter's, and a real slot holder is judged by `excludeSubmitter` alone.
+ * The door-level half (the real approvals routes on a booted app) is
+ * `packages/qa/dogfood/test/approval-override-own-request.dogfood.test.ts`.
+ */
+describe('the override never approves its actor\'s own request', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+  const baseTime = new Date('2026-11-17T10:00:00Z').getTime();
+
+  /** A second administrator, who did not submit the request. */
+  const OTHER_ADMIN = { userId: 'root2', tenantId: 't1', positions: [], permissions: ['admin_full_access'] } as any;
+  /** A tenant administrator of the request's organization, who submitted it. */
+  const TENANT_ADMIN = { userId: 'tadmin', tenantId: 't1', positions: [], permissions: ['organization_admin'] } as any;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    n = 0;
+    svc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(baseTime + (n++) * 1000) },
+    });
+    for (const id of ['root', 'root2', 'tadmin', 'u1', 'u7']) {
+      engine._tables['sys_user'].push({ id, email: `${id}@example.com` });
+    }
+  });
+
+  const opened = (result: ApprovalRequestRow | ApprovalNodeAutoOutcome): ApprovalRequestRow => {
+    if ('autoApproved' in result) throw new Error('expected an OPENED approval request, got an auto-approval outcome');
+    return result;
+  };
+  /** A request whose slate names one designated user, `u9`, opened by `submitter`. */
+  const open = async (submitter: any, extra: Record<string, any> = {}) => opened(await svc.openNodeRequest({
+    object: 'opportunity', recordId: `opp_${n}`, runId: `run_${n}`, nodeId: 'gate', flowName: 'own_request',
+    config: { approvers: [{ type: 'user' as const, value: 'u9' }], behavior: 'first_response' as const, ...extra },
+    record: { id: `opp_${n}` },
+  }, submitter));
+
+  const actions = async (id: string) => (await svc.listActions(id, SYS)).map((a: any) => a.action);
+  const statusOf = async (id: string) => (await svc.getRequest(id, SYS))!.status;
+
+  it('refuses a platform administrator\'s override approval of a request they submitted, writing nothing', async () => {
+    const req = await open(ADMIN);
+    expect(req.submitter_id).toBe('root');
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'root' }, ADMIN))
+      .rejects.toThrow(/^FORBIDDEN: 'root' submitted this request and holds no slot on it/);
+    expect(await actions(req.id)).toEqual(['submit']);
+    expect(await statusOf(req.id)).toBe('pending');
+  });
+
+  it('refuses it for a tenant administrator in their own organization too', async () => {
+    const req = await open(TENANT_ADMIN);
+    await expect(svc.decideNode(req.id, { decision: 'approve', actorId: 'tadmin' }, TENANT_ADMIN))
+      .rejects.toThrow(/^FORBIDDEN/);
+    expect(await statusOf(req.id)).toBe('pending');
+  });
+
+  it('refuses it with excludeSubmitter set false, and with it on (its own refusal)', async () => {
+    const off = await open(ADMIN, { excludeSubmitter: false });
+    await expect(svc.decideNode(off.id, { decision: 'approve', actorId: 'root' }, ADMIN))
+      .rejects.toThrow(/^FORBIDDEN: 'root' submitted this request and holds no slot on it/);
+    const on = await open(ADMIN, { excludeSubmitter: true });
+    await expect(svc.decideNode(on.id, { decision: 'approve', actorId: 'root' }, ADMIN))
+      .rejects.toThrow(/^FORBIDDEN: 'root' submitted this request, and its approval step sets excludeSubmitter/);
+  });
+
+  it('leaves the submitter-administrator their rejection, recorded as an override', async () => {
+    const req = await open(ADMIN);
+    await svc.decideNode(req.id, { decision: 'reject', actorId: 'root' }, ADMIN);
+    expect((await svc.listActions(req.id, SYS)).at(-1)).toMatchObject({ action: 'reject', actor_id: 'root', via_override: true });
+    expect(await statusOf(req.id)).toBe('rejected');
+  });
+
+  it('leaves the submitter-administrator their recall', async () => {
+    const req = await open(ADMIN);
+    await svc.recall(req.id, { actorId: 'root' }, ADMIN);
+    expect(await statusOf(req.id)).toBe('recalled');
+  });
+
+  it('refuses an override reassign that hands the request to its submitter, by id or by email, leaving the slate', async () => {
+    const own = await open(ADMIN);
+    for (const to of ['root', 'root@example.com']) {
+      await expect(svc.reassign(own.id, { actorId: 'root', to }, ADMIN))
+        .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to '.+' — it names the request's submitter, and a reassign the submitter makes through the administrator override/);
+    }
+    // Another administrator's override may not hand it to the submitter either.
+    const members = await open(SUBMITTER);
+    await expect(svc.reassign(members.id, { actorId: 'root2', to: 'u1' }, OTHER_ADMIN))
+      .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'u1' — it names the request's submitter, and a reassign made through the administrator override/);
+    expect((await svc.getRequest(own.id, SYS))!.pending_approvers).toEqual(['u9']);
+    expect((await svc.getRequest(members.id, SYS))!.pending_approvers).toEqual(['u9']);
+    expect(await actions(own.id)).toEqual(['submit']);
+  });
+
+  it('refuses an override reassign to the submitter\'s email in another letter case, where the store matches emails that way', async () => {
+    // A store whose collation folds letter case (MySQL's default) resolves a
+    // differently-cased email to the submitter's account, and the decision door
+    // admits a named email in any case: the comparison must not be narrower.
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      const email = options?.where?.email;
+      if (object === 'sys_user' && typeof email === 'string') {
+        return engine._tables['sys_user'].filter((u) => String(u.email ?? '').toLowerCase() === email.toLowerCase());
+      }
+      return find(object, options);
+    };
+    const own = await open(ADMIN);
+    await expect(svc.reassign(own.id, { actorId: 'root', to: 'ROOT@Example.COM' }, ADMIN))
+      .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'ROOT@Example.COM' — it names the request's submitter/);
+    const members = await open(SUBMITTER);
+    await expect(svc.reassign(members.id, { actorId: 'root2', to: 'U1@EXAMPLE.com' }, OTHER_ADMIN))
+      .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'U1@EXAMPLE.com' — it names the request's submitter/);
+    expect((await svc.getRequest(own.id, SYS))!.pending_approvers).toEqual(['u9']);
+    expect((await svc.getRequest(members.id, SYS))!.pending_approvers).toEqual(['u9']);
+  });
+
+  it('CONTROL: an administrator who did not submit the request still approves it through the override, audited', async () => {
+    const req = await open(SUBMITTER);
+    await svc.decideNode(req.id, { decision: 'approve', actorId: 'root2' }, OTHER_ADMIN);
+    expect((await svc.listActions(req.id, SYS)).at(-1)).toMatchObject({ action: 'approve', actor_id: 'root2', via_override: true });
+    expect(await statusOf(req.id)).toBe('approved');
+  });
+
+  it('CONTROL: an override reassign to someone other than the submitter still moves the request', async () => {
+    const req = await open(ADMIN);
+    await svc.reassign(req.id, { actorId: 'root', to: 'u7' }, ADMIN);
+    expect((await svc.getRequest(req.id, SYS))!.pending_approvers).toEqual(['u7']);
+  });
+
+  it('CONTROL: a slot holder approving their own request is excludeSubmitter\'s question, and stays open with it off', async () => {
+    // The designated approver submits a request routed to themselves, with
+    // and without administrator rights: a slot holder decides, not the override.
+    const plain = await open(DESIGNATED);
+    await svc.decideNode(plain.id, { decision: 'approve', actorId: 'u9' }, DESIGNATED);
+    expect((await svc.listActions(plain.id, SYS)).at(-1)).toMatchObject({ action: 'approve', via_override: false });
+    const admin = await open(ADMIN_ON_SLATE);
+    await svc.decideNode(admin.id, { decision: 'approve', actorId: 'u9' }, ADMIN_ON_SLATE);
+    expect((await svc.listActions(admin.id, SYS)).at(-1)).toMatchObject({ action: 'approve', via_override: false });
+    expect(await statusOf(admin.id)).toBe('approved');
+  });
+
+  it('serves viewer.can_override_approve false to the submitter-administrator and true to every other override actor', async () => {
+    const req = await open(ADMIN);
+    const viewerOf = async (ctx: any) => (await svc.getRequest(req.id, ctx))!.viewer as Record<string, boolean>;
+    expect(await viewerOf(ADMIN)).toEqual({
+      can_act: false, is_submitter: true, can_override: true, can_override_approve: false,
+    });
+    expect(await viewerOf(OTHER_ADMIN)).toEqual({
+      can_act: false, is_submitter: false, can_override: true, can_override_approve: true,
+    });
+    expect((await viewerOf(SYS)).can_override_approve).toBe(true);
+    // The slot holder approves through `can_act`; the override flag is not theirs.
+    expect(await viewerOf(DESIGNATED)).toEqual({
+      can_act: true, is_submitter: false, can_override: false, can_override_approve: false,
+    });
   });
 });

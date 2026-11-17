@@ -21,7 +21,13 @@
  *   3. walks every OTHER door's relative imports inside this directory
  *      (transitively) and holds that every `marketplace.*` key those files
  *      spell is in the RESIDENT pack — the package entry's `en`, which holds no
- *      namespace key.
+ *      namespace key;
+ *   4. treats a door as gated by its importers only when it is DECLARED in
+ *      {@link HOOK_GATED_DOORS}: every file outside this directory that imports
+ *      it is listed there, and each listed file asks for the namespace itself
+ *      (`useMarketplaceNamespace()`), drawing the door's component only once it
+ *      is ready (objectstack#34722). An undeclared importer makes the door an
+ *      ordinary ungated one again, so step 3 reads its keys.
  *
  * TypeScript's own parser reads the sources, so a key or an import written in
  * a comment is never read as code.
@@ -41,6 +47,22 @@ const rel = (file: string) => relative(UI_ROOT, file).split(sep).join('/');
 
 /** The pages behind the frame: what reaches them is gated by construction. */
 const GATED_PAGES = ['MarketplacePage.tsx', 'MarketplacePackagePage.tsx'].map((f) => join(MARKETPLACE_DIR, f));
+
+/**
+ * Doors whose every outside importer asks for the namespace itself, door by
+ * door (step 4): the door file, then the files allowed to import it.
+ */
+const HOOK_GATED_DOORS = new Map<string, readonly string[]>([
+  [
+    join(MARKETPLACE_DIR, 'UpdateAvailableBadge.tsx'),
+    // Setup → Installed Apps draws the badge in its Update cell (objectstack#34722).
+    ['packages/app-shell/src/views/metadata-admin/PackagesPage.tsx'],
+  ],
+]);
+
+/** The namespace module, and the hook a hook-gated importer must call from it. */
+const NAMESPACE_MODULE = '@object-ui/i18n/namespaces/marketplace';
+const NAMESPACE_HOOK = 'useMarketplaceNamespace';
 
 const isSource = (name: string) =>
   /\.(ts|tsx)$/.test(name) && !/\.(test|spec)\.(ts|tsx)$/.test(name) && !name.endsWith('.d.ts');
@@ -155,10 +177,48 @@ for (const file of allSources()) {
   }
 }
 
+/**
+ * A declared hook-gated door whose outside importers are all declared for it
+ * and all call the namespace hook (step 4); anything less leaves it ungated.
+ */
+const isHookGated = (file: string) => {
+  const allowed = HOOK_GATED_DOORS.get(file);
+  return (
+    !!allowed &&
+    [...(doors.get(file) ?? [])].every(
+      (importer) => allowed.includes(importer) && callsNamespaceHook(join(UI_ROOT, importer)),
+    )
+  );
+};
+
+/** Whether `file` imports {@link NAMESPACE_HOOK} from {@link NAMESPACE_MODULE} and calls it. */
+function callsNamespaceHook(file: string): boolean {
+  const sf = parse(file);
+  let imported = false;
+  let called = false;
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text === NAMESPACE_MODULE &&
+      node.importClause?.namedBindings &&
+      ts.isNamedImports(node.importClause.namedBindings) &&
+      node.importClause.namedBindings.elements.some((e) => e.name.text === NAMESPACE_HOOK && !e.propertyName)
+    ) {
+      imported = true;
+    } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === NAMESPACE_HOOK) {
+      called = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return imported && called;
+}
+
 /** Every file in this directory reachable from an ungated door, following relative imports inside it. */
 const ungated = new Set<string>();
 {
-  const queue = [...doors.keys()].filter((file) => !GATED_PAGES.includes(file));
+  const queue = [...doors.keys()].filter((file) => !GATED_PAGES.includes(file) && !isHookGated(file));
   while (queue.length > 0) {
     const file = queue.pop()!;
     if (ungated.has(file) || GATED_PAGES.includes(file)) continue;
@@ -217,6 +277,23 @@ describe('the marketplace namespace boundary (objectstack#30588)', () => {
     expect(read).toBeGreaterThan(15);
     expect(outside).toEqual([]);
   });
+
+  it.each([...HOOK_GATED_DOORS].map(([door, importers]) => [rel(door), door, importers] as const))(
+    '%s is drawn only by importers that ask for the namespace themselves (objectstack#34722)',
+    (_name, door, importers) => {
+      // Lit control: the door really is imported from outside this directory.
+      const actual = [...(doors.get(door) ?? [])];
+      expect(actual.length).toBeGreaterThan(0);
+      // Every outside importer is declared for it — an undeclared one would
+      // draw the door's keys without the namespace.
+      expect(actual.filter((importer) => !importers.includes(importer))).toEqual([]);
+      for (const importer of importers) {
+        expect(callsNamespaceHook(join(UI_ROOT, importer)), `${importer} calls ${NAMESPACE_HOOK}()`).toBe(true);
+      }
+      // And the door is outside the resident-key walk only because of this.
+      expect(ungated.has(door)).toBe(false);
+    },
+  );
 
   it('the probe key the frame waits on is NOT resident (the pack really is lighter)', () => {
     expect(lookup(en, 'marketplace.title')).toBeUndefined();

@@ -63,6 +63,39 @@
  *    names fields, and which field names a reader may see is the metadata
  *    plane's question, not this one's.
  *
+ * ## A text composed from a reference carries the referenced record's title
+ *
+ * The mirror names a referenced record by its TITLE: the record label of an
+ * object titled by a reference field, a tracked reference's change, a fired
+ * milestone's reference token. That title is a field of ANOTHER object, so the
+ * parent's served fields do not answer for it. A text whose declared sources
+ * name a reference field is served only to a reader served the title field of
+ * the object it points at and admitted to that object, the two answers
+ * `$expand` judges a target's title by at that level
+ * ({@link referenceTitlesPerRead}):
+ *
+ *  - the reader is served the target's title field unmasked — its ADR-0079
+ *    `resolveDisplayField` answer, the field the mirror reads a title from —
+ *    by the same {@link resolveServedFields} answer, which also withholds a
+ *    formula title computed from a field the reader may not read;
+ *  - and the security service admits the reader to the target object
+ *    (`canReadObject`), unless the reference field declares
+ *    `referenceNameVisible`: that key lifts the object-level refusal and never
+ *    the field-level rule, as on `$expand`.
+ *
+ * Otherwise the text is dropped whole, like any text this reader is not served,
+ * and the row's `record_id` is the bare id it is named by. A text whose
+ * provenance is unknown keeps the rule of rows without a declaration, below. No
+ * row is read: the answers are asked once per target object per read.
+ *
+ * The target's declared API exposure (ADR-0049) is decided where the title is
+ * READ: the mirror reads a title only from a target whose exposure serves
+ * `get` (`servesSummaryTitleTarget`, `audit-writers.ts`) and names every other
+ * referenced record by its stored id, per id, so one text can title one
+ * reference and name another by its id. A row is a snapshot of that write, and
+ * this redaction judges its reader against every reference a text names by
+ * the two answers above, whatever the target's exposure.
+ *
  * ## Rows without a declaration
  *
  *  - A row in the mirror's EARLIER shape — `metadata` exactly `{ old, new }`,
@@ -154,6 +187,8 @@
  * context-less programmatic calls are not redacted, as for the read gate.
  */
 
+import type { ISecurityService, SecurityContext } from '@objectstack/spec/contracts';
+import { referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
 import {
   ACTIVITY_CHANGED_FIELDS_COLUMN,
   ACTIVITY_KIND_KEY,
@@ -230,8 +265,12 @@ const VALUE_BEARING_COLUMNS = [
   ACTIVITY_MILESTONE_KEY_COLUMN,
 ] as const;
 
-/** The slice of the security contract this seam asks — the REAL interface. */
-export type ActivityFieldVisibilitySource = FieldVisibilitySource;
+/**
+ * The slice of the security contract this seam asks — the REAL interface: the
+ * two field answers, and the optional object-level read admission a text
+ * composed from a reference is judged by ({@link referenceTitlesPerRead}).
+ */
+export type ActivityFieldVisibilitySource = FieldVisibilitySource & Partial<Pick<ISecurityService, 'canReadObject'>>;
 
 export type ActivityRedactionLogger = FieldRedactionLogger;
 
@@ -339,6 +378,111 @@ async function sourcesServed(
   restricted: () => Promise<boolean>,
 ): Promise<boolean> {
   return sources === 'unknown' ? !(await restricted()) : sources.every((f) => served.has(f));
+}
+
+/**
+ * One read's answer to "may this reader read every referenced title a text
+ * composed from the declared `sources` of `parent` names?" — `true` when no
+ * source is a reference field.
+ */
+export type ReferenceTitlesServedFor = (parent: string, sources: readonly string[]) => Promise<boolean>;
+
+/**
+ * {@link ReferenceTitlesServedFor} for ONE read, asked of the reader `context`
+ * (see "A text composed from a reference carries the referenced record's
+ * title" in this module's header). A source of `parent` that is a reference
+ * field (`referenceTargetOf`, the spec's one arbiter of a reference's target)
+ * names its target's title, and that title is served when:
+ *
+ *  - the target declares no title field, or names the primary key: the mirror
+ *    names such a record by its id, which is no title;
+ *  - otherwise the reader is served the target's title field
+ *    (`resolveDisplayField`) by `servedFor` — a target the service gives no
+ *    answer for is not narrowed, as for the parent — AND the security service
+ *    admits the reader to the target object (`canReadObject`, `=== true`; a
+ *    throw refuses). A reference field declaring `referenceNameVisible` lifts
+ *    only that admission, as it does on `$expand`. A service that answers no
+ *    `canReadObject` leaves the title to the field-level answer, as the
+ *    parent-record gate leaves its own objects to the caller-scoped read.
+ *
+ * A reference whose target is not registered, or a field declaration that
+ * cannot be read, refuses (fail closed). One answer per reference field and one
+ * admission per target object, per read; no row is read.
+ */
+export function referenceTitlesPerRead(
+  schemaOf: ((object: string) => unknown) | undefined,
+  security: ActivityFieldVisibilitySource | undefined,
+  context: unknown,
+  servedFor: ServedFor,
+  logger?: ActivityRedactionLogger,
+): ReferenceTitlesServedFor {
+  const schema = (object: string): Record<string, unknown> | undefined => {
+    try {
+      const s = schemaOf?.(object);
+      return isRecord(s) ? s : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const fieldsOf = (object: string): Record<string, unknown> => {
+    const fields = schema(object)?.fields;
+    return isRecord(fields) ? fields : {};
+  };
+
+  const admitted = new Map<string, Promise<boolean>>();
+  const admits = (target: string): Promise<boolean> => {
+    let p = admitted.get(target);
+    if (!p) {
+      p = (async () => {
+        const canReadObject = security?.canReadObject;
+        if (typeof canReadObject !== 'function') return true;
+        try {
+          return (await canReadObject.call(security, target, { ...(context as object) } as SecurityContext)) === true;
+        } catch (err) {
+          logger?.warn(
+            `[audit] ${REDACTION_SEAM}: the object-level read admission for '${target}' failed — a text naming ` +
+              `its records by title is not served on this read (fail closed) (${(err as Error)?.message ?? err})`,
+          );
+          return false;
+        }
+      })();
+      admitted.set(target, p);
+    }
+    return p;
+  };
+
+  const perField = new Map<string, Promise<boolean>>();
+  const titleServed = (parent: string, field: string): Promise<boolean> => {
+    const key = JSON.stringify([parent, field]);
+    let p = perField.get(key);
+    if (!p) {
+      p = (async () => {
+        const def = fieldsOf(parent)[field];
+        let target: string | undefined;
+        try {
+          target = referenceTargetOf(def);
+        } catch {
+          return false;
+        }
+        if (!target) return true;
+        const targetSchema = schema(target);
+        if (!targetSchema) return false;
+        const titleField = resolveDisplayField(targetSchema as Parameters<typeof resolveDisplayField>[0]);
+        if (!titleField || titleField === 'id') return true;
+        const served = await servedFor(target);
+        if (served !== undefined && !served.some((f) => String(f) === titleField)) return false;
+        if (isRecord(def) && def.referenceNameVisible === true) return true;
+        return admits(target);
+      })();
+      perField.set(key, p);
+    }
+    return p;
+  };
+
+  return async (parent, sources) => {
+    for (const field of sources) if (!(await titleServed(parent, field))) return false;
+    return true;
+  };
 }
 
 /**
@@ -530,6 +674,11 @@ export async function redactActivityRows(
   served?: ServedFor,
   /** [#22786] Likewise the read's answer for unknown provenance. */
   restricted?: RestrictedFor,
+  /** The read's answer for a text composed from a reference
+   * ({@link referenceTitlesPerRead}). It needs the registry's definitions, so
+   * the middleware always hands it in; without it no source is judged as a
+   * reference. */
+  referenceTitles?: ReferenceTitlesServedFor,
 ): Promise<void> {
   const list = (Array.isArray(rows) ? rows : rows ? [rows] : []) as unknown[];
   if (list.length === 0) return;
@@ -604,7 +753,10 @@ export async function redactActivityRows(
     if (!provenance) continue;
     for (const col of TEXT_COLUMNS) {
       if (!(col in row)) continue;
-      if (!(await servedWhole(provenance[col]))) delete row[col];
+      const sources = provenance[col];
+      const served = (await servedWhole(sources))
+        && (!referenceTitles || sources === 'unknown' || (await referenceTitles(object, sources)));
+      if (!served) delete row[col];
     }
   }
 }
@@ -657,7 +809,14 @@ export function installActivityFieldRedaction(
       await next();
       const list = (Array.isArray(ctx.result) ? ctx.result : ctx.result ? [ctx.result] : []) as unknown[];
       try {
-        await redactActivityRows(list, security, ctx.context, logger, servedFor, restrictedFor);
+        const referenceTitles = referenceTitlesPerRead(
+          (object) => (typeof engine.getSchema === 'function' ? engine.getSchema(object) : undefined),
+          security,
+          ctx.context,
+          servedFor,
+          logger,
+        );
+        await redactActivityRows(list, security, ctx.context, logger, servedFor, restrictedFor, referenceTitles);
       } catch (err) {
         // A redaction failure must never fall open into a leak.
         logger.warn(

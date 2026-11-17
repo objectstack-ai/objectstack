@@ -10,6 +10,10 @@
  * selection's own aliases and guidance apply inside it; the query output takes
  * the dataset answer's members by reference and leaves out `sql`; the
  * projection is what an `AIToolDefinition` carries, built once.
+ *
+ * [ADR-0149 D3, amendment note] `list_datasets` answers a term that matched
+ * nothing with `candidates`: pointers to listed members, never a match and
+ * never an empty list, and an answer without the key parses as before.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -17,7 +21,9 @@ import { AnalyticsResultResponseSchema, DatasetSelectionSchema } from '../api/an
 import {
   DatasetToolCatalogEntrySchema,
   DatasetProvenanceSchema,
+  DatasetTermCandidateSchema,
   DatasetTermMatchSchema,
+  LIST_DATASETS_MAX_CANDIDATES_PER_TERM,
   LIST_DATASETS_TOOL_NAME,
   ListDatasetsInputSchema,
   ListDatasetsOutputSchema,
@@ -152,6 +158,65 @@ describe('list_datasets output', () => {
   });
 });
 
+describe('list_datasets candidates', () => {
+  const entry = {
+    name: 'billing',
+    label: '开票',
+    object: 'invoice',
+    dimensions: [{ name: 'invoice_status', label: '发票状态', type: 'string' as const }],
+    measures: [{ name: 'invoice_count', label: '发票数', aggregate: 'count' as const }],
+    matches: [],
+  };
+  const candidates = [
+    { term: 'invoice', dataset: 'billing', member: 'measures.invoice_count' },
+    { term: 'invoice', dataset: 'billing', member: 'dimensions.invoice_status' },
+  ];
+
+  it('an answer carries them beside the catalogue, and the parse keeps them', () => {
+    const parsed = ListDatasetsOutputSchema.parse({ datasets: [entry], candidates });
+    expect(parsed.candidates).toEqual(candidates);
+  });
+
+  it('an answer without the key parses to the same value as before', () => {
+    const answer = { datasets: [entry] };
+    const parsed = ListDatasetsOutputSchema.parse(answer);
+    expect(parsed).toEqual(answer);
+    expect(Object.keys(parsed)).not.toContain('candidates');
+  });
+
+  it('no candidates is the key\'s absence: an empty list is refused', () => {
+    const parsed = ListDatasetsOutputSchema.safeParse({ datasets: [entry], candidates: [] });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(['candidates']);
+  });
+
+  it('a candidate is a pointer: term, dataset and member, all required, and no `matchedOn`', () => {
+    expect(Object.keys(DatasetTermCandidateSchema.shape).sort()).toEqual(['dataset', 'member', 'term']);
+    const [candidate] = candidates;
+    expect(DatasetTermCandidateSchema.safeParse(candidate).success).toBe(true);
+    for (const key of ['term', 'dataset', 'member'] as const) {
+      const { [key]: _omitted, ...rest } = candidate!;
+      const parsed = DatasetTermCandidateSchema.safeParse(rest);
+      expect(parsed.success, key).toBe(false);
+      expect(parsed.error?.issues[0]?.path, key).toEqual([key]);
+    }
+  });
+
+  it('names its member in the format a match does', () => {
+    const pointer = { term: 'x', dataset: 'billing' };
+    for (const member of ['measures.invoice_count', 'dimensions.invoice_status', 'fields.status', 'invoice_count']) {
+      expect(DatasetTermCandidateSchema.safeParse({ ...pointer, member }).success, member)
+        .toBe(DatasetTermMatchSchema.safeParse({ term: 'x', matchedOn: 'name', member }).success);
+    }
+    expect(DatasetTermCandidateSchema.safeParse({ ...pointer, member: 'fields.status' }).success).toBe(false);
+    expect(DatasetTermCandidateSchema.safeParse({ ...pointer, member: 'measures.invoice_count' }).success).toBe(true);
+  });
+
+  it('the per-term cap is one exported number', () => {
+    expect(LIST_DATASETS_MAX_CANDIDATES_PER_TERM).toBe(5);
+  });
+});
+
 describe('query_dataset output', () => {
   const answer = {
     rows: [{ stage: 'Won', total_amount: 1200 }],
@@ -218,5 +283,17 @@ describe('JSON Schema projection', () => {
     expect(Object.keys(outputSchema.properties)).not.toContain('sql');
     const catalogue = getDatasetToolJsonSchemas().list_datasets.outputSchema as { required: string[] };
     expect(catalogue.required).toEqual(['datasets']);
+  });
+
+  it('the `list_datasets` outputSchema carries `candidates`: optional, never empty, three required members', () => {
+    const outputSchema = getDatasetToolJsonSchemas().list_datasets.outputSchema as unknown as {
+      required: string[];
+      properties: Record<string, { type?: string; minItems?: number; items?: { required?: string[] } }>;
+    };
+    expect(outputSchema.required).not.toContain('candidates');
+    const candidates = outputSchema.properties.candidates;
+    expect(candidates?.type).toBe('array');
+    expect(candidates?.minItems).toBe(1);
+    expect([...(candidates?.items?.required ?? [])].sort()).toEqual(['dataset', 'member', 'term']);
   });
 });

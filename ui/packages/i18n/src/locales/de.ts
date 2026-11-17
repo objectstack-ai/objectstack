@@ -1379,6 +1379,8 @@ const de = {
     writeStrippedUnknownReason: "Vom Server nicht übernommen: {{fields}}",
     approvalPendingEditable: "In Genehmigung · bearbeitbar",
     approvalPendingTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage; dieser Schritt erlaubt weiterhin die Bearbeitung",
+    approvalPending: "In Genehmigung",
+    approvalPendingNotEditableTooltip: "Dieser Datensatz hat eine ausstehende Genehmigungsanfrage",
     approvalProgress: "Genehmigungen — {{got}} von {{need}}",
     approvalProgressGroups: "Freigabe — {{got}} von {{need}} Gruppen",
     approvalProgressLabel: "Genehmigungsfortschritt",
@@ -1925,6 +1927,16 @@ const de = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} unveröffentlichte Änderungen. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        publishFromBar_one: '{{count}} unveröffentlichte Änderung. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        publishFromBar_other: '{{count}} unveröffentlichte Änderungen. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        showDraftToPublish: '{{count}} unveröffentlichte Änderungen. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraftToPublish_one: '{{count}} unveröffentlichte Änderung. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraftToPublish_other: '{{count}} unveröffentlichte Änderungen. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraft: 'Entwurf anzeigen',
+        receipt: 'Veröffentlicht. Ihre Änderungen sind live.',
+        dismissReceipt: 'Schließen',
         count: "{{count}} Änderung(en) sind noch nicht veröffentlicht — Benutzer können sie nicht sehen.",
         publish: "Veröffentlichen",
         published: "Alle ausstehenden Änderungen sind live.",
@@ -2162,7 +2174,7 @@ const de = {
       changesApplied: "Angewendet",
       changesDrafted: "Als Entwurf gespeichert",
       changesFailed: "Nicht angewendet",
-      discussing: "Thema: {{target}}",
+      discussing: "Angezeigt: {{target}}",
       changeVerb: {
         createObject: "Objekt erstellen",
         addField: "Feld hinzufügen",
@@ -3211,7 +3223,7 @@ const de = {
     aiAssistant: "KI-Assistent",
     designInStudio: "Im Studio gestalten",
     editApp: "App bearbeiten",
-    openAppInStudio: "App im Studio ansehen",
+    openAppInStudio: "{{app}} im Studio ansehen",
   },
   home: {
     build: {
@@ -4575,6 +4587,10 @@ const de = {
       pendingHere: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen auf dieser Seite',
       pendingHere_one: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderung auf dieser Seite',
       pendingHere_other: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen auf dieser Seite',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
+      pendingInApp_one: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderung in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
+      pendingInApp_other: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
     },
     changes: {
       title: 'Ausstehende Änderungen',
@@ -4591,7 +4607,7 @@ const de = {
       detailNone: 'Keine Unterschiede erkannt — der Entwurf entspricht der veröffentlichten Version.',
       fieldOrderChanged: 'Feldreihenfolge geändert',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Enthält Änderungen, die der KI-Copilot entworfen hat',
+      draftedByCopilot: 'Enthält Änderungen, die der KI-Assistent entworfen hat',
       draftedByMcpClient: 'Enthält Änderungen, die der MCP-Client „{{client}}“ entworfen hat',
       draftedByMcp: 'Enthält Änderungen, die ein MCP-Client entworfen hat',
       detailChangedKeys: 'Ebenfalls geändert:',
@@ -4700,6 +4716,7 @@ const de = {
       securityBlockTitle_one: 'Veröffentlichen wird abgelehnt — {{count}} Element benötigt zuerst eine Entscheidung',
       securityBlockTitle_other: 'Veröffentlichen wird abgelehnt — {{count}} Elemente benötigen zuerst eine Entscheidung',
       securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Datensatzfreigabe und veröffentlichen Sie erneut.',
+      flowChecksTitle: 'Vor dem Veröffentlichen: Die Veröffentlichungsprüfung meldet Folgendes',
       securityRule: {
         owdUnset: 'Es ist keine Basis für die Datensatzfreigabe (sharingModel) deklariert. Die Laufzeit greift auf private zurück, aber die Basis muss eine bewusste Entscheidung sein.',
         owdAlias: 'Die Basis für die Datensatzfreigabe (sharingModel) ist kein kanonischer Wert, daher behandelt die Laufzeit das Objekt als private.',
@@ -4710,6 +4727,8 @@ const de = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Diese App ist noch nicht veröffentlicht. Sie funktioniert, aber nur Builder können sie sehen. Veröffentlichen Sie sie, damit Ihre Benutzer sie sehen.',
       message: 'Unveröffentlichte App — voll funktionsfähig, aber nur für Builder sichtbar. Veröffentlichen Sie sie, damit Ihre Benutzer sie sehen.',
       publish: 'Veröffentlichen',
       publishing: 'Wird veröffentlicht…',

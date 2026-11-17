@@ -149,6 +149,7 @@ import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
 import {
+  authoredDescription,
   describeServedObject,
   metaItemsArray,
   readObjectWithDeclaration,
@@ -161,6 +162,10 @@ import {
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
 import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+// [ADR-0149 D2] The `/meta` list translation and its locale parse, the pair
+// the HTTP door's `loadDatasets` runs — imported, never restated, so both
+// transports localize a saved dataset with one function.
+import { metaRequestLocale, translateMetaList } from '@objectstack/rest';
 // [ADR-0106] Metadata-plane field-level security: the posture, its relation to
 // the fetched document and the projection every object-schema exit runs — the
 // REST `/meta` doors and the runtime dispatcher's included. Imported, never
@@ -257,6 +262,13 @@ export interface StdioDataBridgeDeps {
    * dataset tool registers.
    */
   datasetTools?: StdioDatasetToolsService;
+  /**
+   * [ADR-0149 D2 · #34872] The `i18n` service the saved datasets and the
+   * object tools' labels and descriptions are localized with, resolved at each
+   * use. `undefined`, or a resolver that throws, means none: they are then
+   * served untranslated, as on the HTTP door.
+   */
+  i18n?: () => unknown;
 }
 
 /**
@@ -285,6 +297,7 @@ export type StoredHashDigest = (plain: string) => Promise<string>;
 interface ObjectDef {
   name: string;
   label?: string;
+  description?: string;
   fields?: Record<string, { type?: string; label?: string; required?: boolean }>;
   enable?: Record<string, unknown>;
 }
@@ -1159,14 +1172,53 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // the view discovery answers from. The gates below read `objectView` whole.
   const servedView = callerObjectView(objectView, { resolvePrincipal, security, schemaReadDelegates });
 
+  /**
+   * [ADR-0149 D2 · #34872] What the HTTP door's `/meta` translation reads, on
+   * a transport that carries no request: the i18n service ({@link
+   * StdioDataBridgeDeps.i18n}; a resolver that throws is none) and, for the
+   * locale, `metaRequestLocale` with no request — the i18n service's default,
+   * the workspace default the stdio principal speaks. `resolveProtocol`
+   * answers the protocol the read was served from (an object's packaged base,
+   * a declared override's pair translations), or none.
+   */
+  const defaultLocaleSources = (resolveProtocol: () => Promise<unknown>) => ({
+    resolveI18nService: async () => {
+      try {
+        return deps.i18n?.();
+      } catch {
+        return undefined;
+      }
+    },
+    resolveProtocol,
+    requestLocale: (i18n?: unknown) => metaRequestLocale(undefined, i18n),
+  });
+
+  /**
+   * [#34872] Served objects in the locale this transport speaks: the HTTP
+   * door's `/meta` object translation (`translateMetaList`), ⛔ never a second
+   * routine, over the objects AS THE PRINCIPAL IS SERVED THEM ({@link
+   * callerObjectView}): the translator rewrites the text of the fields it is
+   * given and adds none, so a masked field stays absent, its translated text
+   * with it (ADR-0106 D3/D5). No locale, or a key the bundle does not carry,
+   * leaves the authored text; names never change.
+   */
+  const inServedLocale = async (served: readonly ObjectDef[]): Promise<ObjectDef[]> => {
+    if (served.length === 0) return [...served];
+    const translated = await translateMetaList(defaultLocaleSources(async () => protocol?.()), 'object', [...served]);
+    return Array.isArray(translated) ? (translated as ObjectDef[]) : [...served];
+  };
+
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {
       // [#25138] The protocol's merged listing ({@link readMergedObjects}),
       // [ADR-0106] as the principal is served it, so `fieldCount` counts the
       // fields that exist for them ({@link callerObjectView}).
-      return ((await servedView.listObjects()) as ObjectDef[]).map((o) => ({
+      // [#34721] …and the object's authored `description`, as the HTTP twin serves it.
+      // [#34872] …in the locale this transport speaks ({@link inServedLocale}).
+      return (await inServedLocale((await servedView.listObjects()) as ObjectDef[])).map((o) => ({
         name: o.name,
         label: o.label ?? o.name,
+        ...authoredDescription(o),
         fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
       }));
     },
@@ -1206,8 +1258,10 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // is read off the declaration.
     async describeObject(name: string): Promise<unknown | null> {
       const { served, declared } = await readObjectWithDeclaration(servedView, name);
-      const def = served as ObjectDef | undefined;
-      if (!def) return null;
+      if (!served) return null;
+      // [#34872] …in the locale this transport speaks ({@link inServedLocale});
+      // `declared` is read for the `readonly` verdict alone.
+      const [def] = await inServedLocale([served as ObjectDef]);
       // The field list is an ARRAY here, not the stored map: `validate_expression`
       // reads `Array.isArray(def.fields)` off this very value, and the HTTP
       // bridge projects the same shape. A map would type-check and silently
@@ -1406,17 +1460,28 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // analytics service's executor over. The saved datasets come from the
   // protocol's merged listing (the read the REST door resolves `datasetName`
   // from), or the metadata service on a host with none; a throwing read is
-  // left to throw, and the executor answers it as a degraded read. The stdio
-  // bridge has no delegation probe (an API key is not delegated), so none is
-  // passed, as `query_records` here carries none.
+  // left to throw, and the executor answers it as a degraded read. The list is
+  // localized with the HTTP door's `/meta` list translation: this transport
+  // carries no request, so the locale is the i18n service's default (what
+  // `metaRequestLocale` answers with no header), the workspace default the
+  // stdio principal speaks. An i18n service this host cannot resolve leaves the
+  // list untranslated, as there. The stdio bridge has no delegation probe (an
+  // API key is not delegated), so none is passed, as `query_records` here
+  // carries none.
   if (deps.datasetTools) {
     const service = deps.datasetTools;
     const loadDatasets = async (): Promise<readonly unknown[]> => {
-      const merged = protocol?.();
-      if (merged && typeof merged.getMetaItems === 'function') {
-        return metaItemsArray(await merged.getMetaItems({ type: 'dataset' }));
+      const protocolService = protocol?.();
+      let merged: StdioProtocolObjectReads | undefined;
+      let items: readonly unknown[];
+      if (protocolService && typeof protocolService.getMetaItems === 'function') {
+        merged = protocolService;
+        items = metaItemsArray(await protocolService.getMetaItems({ type: 'dataset' }));
+      } else {
+        items = (await metadataService.list('dataset')) ?? [];
       }
-      return (await metadataService.list('dataset')) ?? [];
+      const translated = await translateMetaList(defaultLocaleSources(async () => merged), 'dataset', items);
+      return Array.isArray(translated) ? translated : items;
     };
     const executor = (maxQueryLimit?: number) =>
       service.datasetTools({ loadDatasets, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });

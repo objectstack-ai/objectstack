@@ -35,6 +35,7 @@ import { basename, join } from 'node:path';
 
 import { ErrorCode } from '@objectstack/spec/api';
 
+import { checkDatasets } from './datasets.js';
 import {
   AppCodeSchema,
   GUARDRAIL_CHECKS,
@@ -1020,6 +1021,14 @@ function checkCard(
       }
     }
   });
+
+  // ── datasets and dataset questions (ADR-0149): what the platform accepts, and routes the words make right ──
+  const seedField = (object: string, field: string): 'absent' | 'number' | 'other' => {
+    const values = (seed[object] ?? []).map((r) => r[field]).filter((v) => v !== undefined);
+    if (values.length === 0) return 'absent';
+    return values.every((v) => v === null || typeof v === 'number') ? 'number' : 'other';
+  };
+  checkDatasets(card, seedField, new Set([...run.questions.map((q) => q.id), ...run.operations.map((o) => o.id)]), refuse);
 
   // ── iterate: the delta is additive and lands in a consistent expect ──
   const delta = card.iterate.expectDelta;

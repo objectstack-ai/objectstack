@@ -2561,10 +2561,17 @@ export class AutomationServicePlugin implements Plugin {
         // #1928 — bridge the object registry so `registerFlow` runs the same
         // schema-aware condition checks as `objectstack build`: unknown-field
         // refs, likely bare-field typos, and text/boolean fields misused in
-        // arithmetic. Everything it surfaces is advisory (logged, never thrown),
-        // so a dynamically-registered flow (which bypasses the build lint) still
-        // gets the guardrail. Wired BEFORE the flow pull below so pulled flows
-        // are covered too. Best-effort: without ObjectQL, registration falls back
+        // arithmetic. What it surfaces on a flow CONDITION is advisory (logged,
+        // never thrown), so a dynamically-registered flow (which bypasses the
+        // build lint) still gets the guardrail. One verdict is thrown (#34451):
+        // on a flow VALUE envelope (`assignment` values, `create_record` /
+        // `update_record` `fields.*`) of a record-triggered flow or a
+        // time-relative sweep of the typed object that rebinds neither
+        // `record` nor `previous` itself, the date-text family refuses
+        // registration — so with this resolver wired a stored flow carrying
+        // `timestamp(record.<date field>)` there stops registering until
+        // rewritten. Wired BEFORE the flow pull below so pulled flows are
+        // covered too. Best-effort: without ObjectQL, registration falls back
         // to syntax + bare-ref validation only.
         try {
             const ql = ctx.getService<{
@@ -2575,7 +2582,8 @@ export class AutomationServicePlugin implements Plugin {
                     parseObjectFieldSchema((ql.registry!.getObject!(objectName) as { fields?: unknown } | undefined)?.fields));
                 ctx.logger.debug(
                     '[Automation] object-schema resolver bridged to objectql.registry ' +
-                    '(flow conditions are checked against object fields at registration)',
+                    '(flow conditions are checked against object fields at registration, advisory; ' +
+                    'flow value envelopes are refused on the date-text family)',
                 );
             }
         } catch {

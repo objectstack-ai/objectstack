@@ -432,6 +432,25 @@ If the value should not be visible, set `readable: false` on the summary field i
 that set: it hides the field from every holder of the set, and another set they
 hold with no entry for the field does not restore it, so declare `readable: true`
 on the field in the sets whose holders should keep it.
+If the set is meant to read the total without its children (an account total
+shown to staff who may not see invoice rows), acknowledge that on the same entry
+with the reason, and the warning for that set and column becomes a note quoting
+it, so `os lint --strict` passes:
+
+```ts
+fields: {
+  'crm_account.invoiced_amount': {
+    readable: true,
+    rollupSourceUnreadableReason: 'Service staff read account totals but not invoice rows',
+  },
+},
+```
+
+Only these authoring checks read the key. The entry that carries it is still an
+ordinary field permission, though, and votes `readable: true`: on a set that had
+no entry for the summary, adding one restores the column for holders whose other
+sets mask it. Every other set and column is still reported, and a blank reason,
+or one beside `readable: false`, is refused.
 
 A child validation rule can read a parent summary one hop through its
 reference, for example "each supplier has at most one primary contact" as a

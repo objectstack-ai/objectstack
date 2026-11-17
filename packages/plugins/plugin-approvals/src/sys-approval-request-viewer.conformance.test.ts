@@ -22,8 +22,8 @@
  * object definitions registered: no engine double stands between the service
  * and the rows it decorates.
  *
- * Each caller shape is held to being the shape it names, by the one leaf that
- * marks it (or by none, for the caller who holds no capability), and the
+ * Each caller shape is held to being the shape it names, by the leaves that
+ * mark it (or by none, for the caller who holds no capability), and the
  * battery as a whole must observe both values of every boolean leaf, so a
  * type check that only ever saw `false` cannot pass for conformance.
  */
@@ -95,14 +95,16 @@ async function packageObjects(): Promise<any[]> {
 
 /**
  * A caller shape `attachViewers` serves: who is reading, which request, and
- * the one declared leaf that marks the shape (`null` — the caller who reads
- * the request but holds none of the three capabilities).
+ * the declared leaves that mark the shape — the ones served `true` (none for
+ * the caller who reads the request but holds no capability). An override
+ * actor holds two: `can_override`, and `can_override_approve` unless the
+ * request is their own (maintainer ruling 2026-11-17, option B).
  */
 interface Shape {
   label: string;
   context: () => any;
   request: () => string;
-  marks: string | null;
+  marks: readonly string[];
 }
 
 describe('sys_approval_request — the served viewer block conforms to attachedOnRead.viewer', () => {
@@ -112,16 +114,27 @@ describe('sys_approval_request — the served viewer block conforms to attachedO
   let now = Date.parse('2026-10-09T09:00:00.000Z');
 
   const SHAPES: Shape[] = [
-    { label: 'the submitter, on a pending request', context: () => asUser('u_sub'), request: () => ids.pending, marks: 'is_submitter' },
-    { label: 'a current pending approver', context: () => asUser('u_app'), request: () => ids.pending, marks: 'can_act' },
+    { label: 'the submitter, on a pending request', context: () => asUser('u_sub'), request: () => ids.pending, marks: ['is_submitter'] },
+    { label: 'a current pending approver', context: () => asUser('u_app'), request: () => ids.pending, marks: ['can_act'] },
     {
       label: 'an override actor (platform admin), on a pending request',
       context: () => asUser('u_root', [ADMIN_FULL_ACCESS]),
       request: () => ids.pending,
-      marks: 'can_override',
+      marks: ['can_override', 'can_override_approve'],
     },
-    { label: 'a system context, on a pending request', context: () => SYSTEM, request: () => ids.pending, marks: 'can_override' },
-    { label: 'the approver who decided, on the finalized request', context: () => asUser('u_app'), request: () => ids.decided, marks: null },
+    {
+      label: 'an override actor (platform admin), on a pending request they submitted',
+      context: () => asUser('u_root', [ADMIN_FULL_ACCESS]),
+      request: () => ids.own,
+      marks: ['is_submitter', 'can_override'],
+    },
+    {
+      label: 'a system context, on a pending request',
+      context: () => SYSTEM,
+      request: () => ids.pending,
+      marks: ['can_override', 'can_override_approve'],
+    },
+    { label: 'the approver who decided, on the finalized request', context: () => asUser('u_app'), request: () => ids.decided, marks: [] },
   ];
 
   beforeAll(async () => {
@@ -151,17 +164,18 @@ describe('sys_approval_request — the served viewer block conforms to attachedO
       } as any,
       logger: { warn: () => {}, info: () => {}, error: () => {}, debug: () => {} } as any,
     });
-    const open = async (key: string) => {
+    const open = async (key: string, submitter = 'u_sub') => {
       await engine.insert('crm_deal', { id: `D_${key}`, title: key }, { context: SYSTEM } as any);
       const row: any = await svc.openNodeRequest({
         object: 'crm_deal', recordId: `D_${key}`, runId: `run_${key}`, nodeId: 'review', flowName: 'deal_review',
         config: { approvers: [{ type: 'user', value: 'u_app' }], behavior: 'first_response' } as any,
-        submitterId: 'u_sub', record: { id: `D_${key}`, title: key },
-      }, asUser('u_sub'));
+        submitterId: submitter, record: { id: `D_${key}`, title: key },
+      }, asUser(submitter));
       ids[key] = row.id;
     };
     await open('pending');
     await open('decided');
+    await open('own', 'u_root');
     await svc.decideNode(ids.decided, { decision: 'approve' } as any, asUser('u_app'));
   });
 
@@ -198,9 +212,9 @@ describe('sys_approval_request — the served viewer block conforms to attachedO
         expect(HOLDS[type](block[leaf]), `${where}: \`${leaf}\` declared ${type}, served ${JSON.stringify(block[leaf])}`)
           .toBe(true);
       }
-      // The shape is the shape it names: its marking leaf is the only true one.
+      // The shape is the shape it names: its marking leaves are the only true ones.
       for (const leaf of Object.keys(DECLARED)) {
-        expect(block[leaf], `${where}: \`${leaf}\``).toBe(leaf === shape.marks);
+        expect(block[leaf], `${where}: \`${leaf}\``).toBe(shape.marks.includes(leaf));
       }
     }
   });

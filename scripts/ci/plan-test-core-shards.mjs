@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// plan-test-core-shards -- which `Test Core (N/8)` shards this run starts,
+// plan-test-core-shards -- which `Test Core (N/10)` shards this run starts,
 // decided ONCE, before any shard runner exists (#26084).
 //
 //   node scripts/ci/plan-test-core-shards.mjs <turbo-ls.json> --exclude <pkg>... --github-output <file>
@@ -33,9 +33,10 @@
 //            `fromJSON`. `[]` means nothing to test: the job's `if:` skips it.
 //   digest   a sha256 of the whole plan (every bin's items, in order).
 //
-// The shard count stays SHARD_COUNT: a planned shard runs `--shard k/8`
-// exactly as before, keeps its name `Test Core (k/8)`, its cache key and its
-// attestation `test-k-of-8`. Only the shards whose bin is empty are not
+// The shard count stays SHARD_COUNT (10 since #34710, read from ci.yml): a
+// planned shard runs `--shard k/10` exactly as an unplanned run would, keeps
+// its name `Test Core (k/10)`, its cache key and its attestation
+// `test-k-of-10`. Only the shards whose bin is empty are not
 // started, so no package moves to another shard and no shard carries more
 // than it did. This is deliberately NOT a re-sizing to fewer, fuller bins:
 // every package diff on main reaches @objectstack/cli, spec, core, objectql

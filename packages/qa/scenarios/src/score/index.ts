@@ -18,12 +18,14 @@
 
 import type { LoadedScenario } from '../loader.js';
 import { isProbedOperation, scenarioNamespace } from '../schema.js';
+import { gradeDatasetQuestion, type DatasetGrade } from './scenario-dataset-grade.js';
 import { askNamesTarget, gradeOperation, type OperationGrade, type OperationObservation } from './scenario-operation-grade.js';
 import { gradeInjectionAsData, type InjectionGuardrail, type InjectionTurn } from './scenario-guardrail-grade.js';
 import { gradePersonaRun, type FigureReading, type HiddenScope, type PersonaRunGrade, type ReadableRow, type RunTranscript } from './scenario-run-grade.js';
 import type { CheckResult } from './scenario-score.js';
 import { scoreScenarioArtifact, type ScenarioArtifactScore } from './scenario-tags.js';
 
+export * from './scenario-dataset-grade.js';
 export * from './scenario-graph.js';
 export * from './scenario-guardrail-grade.js';
 export * from './scenario-naming.js';
@@ -65,6 +67,17 @@ export function gradeCardOperation(scenario: LoadedScenario, operationId: string
     ...(asOf !== undefined ? { asOf } : {}),
     ...(agentConfirmation ? { agentConfirmation } : {}),
   });
+}
+
+/**
+ * Grade one dataset question's turn (`run.datasetQuestions`) on the route its
+ * answer took through the card's datasets (ADR-0149 D3): `metric-selected`,
+ * `asked-back` or `fallback-labelled`, as the question's `expect.kind` says.
+ */
+export function gradeCardDatasetQuestion(scenario: LoadedScenario, questionId: string, turn: RunTranscript): DatasetGrade {
+  const q = (scenario.card.run.datasetQuestions ?? []).find((x) => x.id === questionId);
+  if (!q) throw new RangeError(`${scenario.card.id}: no dataset question \`${questionId}\``);
+  return gradeDatasetQuestion(scenario.card.expect.datasets ?? [], q, turn);
 }
 
 export interface CardAnswer {

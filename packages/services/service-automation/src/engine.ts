@@ -820,9 +820,14 @@ export type FlowFunctionResolver = (
  * misused in arithmetic (#1928). Injected by the host (bridged to the object
  * registry), so the engine stays decoupled from any metadata store. Returns
  * `undefined` for an unknown object. When unwired, registration validation is
- * unchanged (syntax + bare-ref only). Everything it surfaces is advisory (logged
- * as a warning, never thrown) — a resolver can never break a flow that used to
- * register cleanly.
+ * unchanged (syntax + bare-ref only). What it surfaces on a CONDITION is
+ * advisory (logged as a warning, never thrown). One verdict is not: on a flow
+ * VALUE envelope it adds the date-text family's refusal (#34451,
+ * {@link AutomationEngine.valueEnvelopeRefusals}), an expression that faults on
+ * every run, so a flow carrying one stops registering once a resolver is wired —
+ * on a record-triggered flow or a time-relative sweep of the typed object that
+ * rebinds neither `record` nor `previous` itself, the flows whose `record` is
+ * that row.
  */
 export type FlowObjectSchemaResolver = (
   objectName: string,
@@ -4752,9 +4757,13 @@ export class AutomationEngine implements IAutomationService {
      * Wire the engine to the host's object registry (#1928) so `registerFlow`
      * runs the same schema-aware condition checks as `objectstack build` —
      * unknown-field refs, likely bare-field typos, and text/boolean fields
-     * misused in arithmetic. Everything it adds is advisory (logged, never
-     * thrown); passing `null` detaches the bridge (registration reverts to
-     * syntax + bare-ref validation only).
+     * misused in arithmetic. Everything it adds on a condition is advisory
+     * (logged, never thrown); on a flow value envelope it adds one refusal,
+     * the date-text family (#34451, {@link valueEnvelopeRefusals}), where the
+     * run's `record` is the typed object's row (a record-triggered flow or a
+     * sweep of that object, rebinding neither `record` nor `previous`). Passing
+     * `null` detaches the bridge (registration reverts to syntax + bare-ref
+     * validation only).
      */
     setObjectSchemaResolver(resolver: FlowObjectSchemaResolver | null): void {
         this.objectSchemaResolver = resolver;
@@ -7516,7 +7525,12 @@ export class AutomationEngine implements IAutomationService {
      *
      * @throws when the flow is unknown, when no package ships it
      *   (`RESOURCE_CONFLICT` / 409, before anything is written or changed),
-     *   when §7.3's subflow guard refuses in either direction, when the
+     *   when `enabled` is true and the flow's own definition's `status`
+     *   disables it (`RESOURCE_CONFLICT` / 409, before anything is written or
+     *   changed: this switch moves only the ledger bit, so the write would
+     *   leave the flow off while the caller read it as on; the refusal names
+     *   publishing the definition `active` — switching such a flow OFF still
+     *   records the choice), when §7.3's subflow guard refuses in either direction, when the
      *   durable suspended-run store cannot be listed while the disable guard
      *   judges a switched-off caller, or when the durable write fails — a
      *   reported flip that did not persist is the failure mode this whole leg
@@ -7554,6 +7568,7 @@ export class AutomationEngine implements IAutomationService {
         const host: ThisParameterType<typeof toggleFlow> = {
             flows: this.flows,
             refuseCustomerAuthoredToggle: (...a) => this.refuseCustomerAuthoredToggle(...a),
+            flowStatusDisabled: this.flowStatusDisabled,
             packagedFlowOwner: (...a) => this.packagedFlowOwner(...a),
             refuseEnableOntoDisabledSubflow: (...a) => this.refuseEnableOntoDisabledSubflow(...a),
             packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
@@ -10856,8 +10871,13 @@ export class AutomationEngine implements IAutomationService {
      * The object they are typed against is the one the run binds: a
      * time-relative flow's swept object, read off {@link deriveTriggerBinding}
      * (#30396).
-     * The fatal set is unchanged — a resolver can never break a flow that used to
-     * register cleanly. `advisory: false` skips that pass: the stored pass
+     * The fatal set is unchanged by it but for one verdict: a flow VALUE
+     * envelope is typed with the same object where the run's `record` is that
+     * object's row — a record-triggered flow, or a time-relative sweep of the
+     * typed object, that rebinds neither `record` nor `previous` — and the date-text
+     * family it fails (#34451, {@link valueEnvelopeRefusals}) is thrown — in
+     * both modes, so the stored pass previews it. Any other flow's envelopes
+     * are judged untyped, as before. `advisory: false` skips the advisory pass: the stored pass
      * previews refusals ({@link registrationCheckRefusals}), and an advisory
      * finding is none.
      *
@@ -11400,10 +11420,28 @@ export class AutomationEngine implements IAutomationService {
      * once. Two independently-derived notions of "malformed" is how a flow comes
      * to register cleanly and then fault, or to be refused for a shape the
      * executor would have run.
+     *
+     * [#34451] `fieldTypes` — handed ONLY by `registerFlow`'s pass (and the
+     * stored pass that previews it), as the field types of the object the
+     * run binds as `record`, read through {@link setObjectSchemaResolver} and
+     * handed only where that binding holds (a record-triggered flow or a sweep
+     * of the typed object, rebinding neither `record` nor `previous`) —
+     * adds one more refusal: the date-text verdict family over the
+     * envelope's `record.<field>` / `previous.<field>` reads
+     * (`ExprSchemaHint.flowValueEnvelope`, `@objectstack/formula`), the
+     * same call `objectstack validate` makes. `timestamp(record.<date
+     * field>)` checks clean as CEL and faults on the `YYYY-MM-DD` text on
+     * every run, so a flow carrying it is refused at registration rather
+     * than at each run. The evaluator never passes it, so registration's
+     * set is evaluation's plus that one family, never less: an envelope
+     * that registered is evaluated exactly as before.
      */
-    private valueEnvelopeRefusals(value: unknown): { message: string; source: string }[] {
+    private valueEnvelopeRefusals(
+        value: unknown,
+        fieldTypes?: Readonly<Record<string, string>>,
+    ): { message: string; source: string }[] {
         // The body lives in ./dag-traversal.ts (#25222).
-        return valueEnvelopeRefusals(value);
+        return valueEnvelopeRefusals(value, fieldTypes);
     }
 
     /**

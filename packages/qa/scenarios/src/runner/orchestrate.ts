@@ -53,6 +53,7 @@ import {
   askNamesTarget,
   flowRefusalOf,
   gradeCardAnswer,
+  gradeCardDatasetQuestion,
   gradeCardInjection,
   gradeConfirmedWrite,
   buildDeniesWrite,
@@ -66,6 +67,7 @@ import {
   type CheckResult,
   type ConfirmedWriteGrade,
   type ConfirmedWriteObservation,
+  type DatasetGrade,
   type OperationGrade,
   type OperationObservation,
   type PersonaRunGrade,
@@ -80,6 +82,7 @@ import type { CommandResult } from './project.js';
 import {
   buildPrompt,
   confirmPrompt,
+  datasetQuestionPrompt,
   iteratePrompt,
   operationPrompt,
   personaHandles,
@@ -285,6 +288,27 @@ export interface QuestionResult {
   error?: string;
 }
 
+/**
+ * One ask of a dataset question (`run.datasetQuestions`), graded on the route
+ * its answer took (`gradeCardDatasetQuestion`: `metric-selected`,
+ * `asked-back` or `fallback-labelled`). Asked as the admin, like a question
+ * that lists no persona, and as many times as `--ask-repeats` says.
+ */
+export interface DatasetQuestionResult {
+  question: string;
+  /** Which ask of the turn this is, counted from 1, when the run asked each question turn more than once. */
+  repeat?: number;
+  /**
+   * Why this ask measures nothing: it was replayed and the recording holds no
+   * turn for it ({@link datasetQuestionNotRecorded}), or the replay was not
+   * faithful. Never a fail.
+   */
+  notMeasured?: string;
+  grade?: DatasetGrade;
+  turn?: TurnSummary;
+  error?: string;
+}
+
 export interface OperationResult {
   operation: string;
   persona: string;
@@ -375,6 +399,14 @@ export interface RowRestore {
   freshCopy?: string[];
 }
 
+/**
+ * Why a replayed dataset question is not measured: the recording holds no turn
+ * for it. Dataset questions came later than most recordings, so a recording
+ * made before its card declared them holds none, and a replay of it has asked
+ * the agent nothing; nothing was graded, so nothing failed.
+ */
+const datasetQuestionNotRecorded = 'the recording holds no turn for this dataset question (it was made before the card declared it, or the run stopped short of it), so it was not replayed';
+
 /** Why a replayed operation's confirmed write is not measured: its recording was made before the runner sent a confirmation turn. */
 export const confirmationNotRecorded = 'the recording holds no confirmation turn for this operation, so the confirmed write was not replayed';
 
@@ -409,6 +441,11 @@ export interface RunHalf {
     secondPass?: Record<string, number>;
   };
   questions: QuestionResult[];
+  /**
+   * The card's dataset questions, each ask graded on its route; absent when
+   * the card declares none, so a card without them keeps its record's bytes.
+   */
+  datasetQuestions?: DatasetQuestionResult[];
   operations: OperationResult[];
   /**
    * The card's guardrails graded over the half's turns as a whole: today
@@ -1452,6 +1489,27 @@ export async function runHalf(
           }
           half.questions.push(res);
         }
+      }
+    }
+
+    // Dataset questions read too, so they run before any operation writes; as the admin, who reads every row.
+    for (const q of card.run.datasetQuestions ?? []) {
+      half.datasetQuestions ??= [];
+      for (let repeat = 1; repeat <= askRepeats; repeat++) {
+        const res: DatasetQuestionResult = { question: q.id, ...(askRepeats > 1 ? { repeat } : {}) };
+        try {
+          const turn = await driver.ask({ ...ref, step: q.id, ...(repeat > 1 ? { repeat } : {}), prompt: datasetQuestionPrompt(card, q.id, choice), ...doorOf(null) });
+          turns.push({ step: q.id, turn });
+          res.turn = summarize(turn);
+          res.grade = gradeCardDatasetQuestion(scenario, q.id, turn);
+        } catch (e) {
+          if (e instanceof MissingRecordingError) res.notMeasured = datasetQuestionNotRecorded;
+          else if (e instanceof ReplayNotFaithfulError) {
+            res.turn = summarize(e.turn);
+            res.notMeasured = replayNotFaithful(e);
+          } else res.error = errText(e);
+        }
+        half.datasetQuestions.push(res);
       }
     }
 

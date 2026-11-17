@@ -1286,3 +1286,100 @@ describe('[#29696] a flow read judges a stored legacy D2 row in its D2-converted
         expect(legacy.config.filters).toEqual({ name: 'Acme' });
     });
 });
+
+// ── [#34818] What the publish would still SAY, on the flow draft read ────────
+//
+// Measured on `origin/main` (3bbda33b) before this block: a flow draft whose
+// decision gates on nothing read `_diagnostics: { valid: true }` with no
+// warning, and its publish passed and returned the finding on the 2xx, so the
+// flow designer's Problems tab said "no problems" until after the publish.
+
+/** A labelled flow whose decision gates on nothing: an advisory, never a refusal. */
+const ungatedDecisionFlow = {
+    name: 'meeting_reminder',
+    label: '会议提醒',
+    type: 'autolaunched',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'node_2', type: 'decision', label: '检查日期', config: {} },
+        { id: 'node_3', type: 'end', label: '提醒负责人' },
+        { id: 'node_4', type: 'end', label: '跳过' },
+    ],
+    edges: [
+        { id: 'e1', source: 'start', target: 'node_2' },
+        { id: 'e2', source: 'node_2', target: 'node_3' },
+        { id: 'e3', source: 'node_2', target: 'node_4' },
+    ],
+};
+
+async function draftRead(protocol: ObjectStackProtocolImplementation, type: string, name: string, userTextLocales?: string[]) {
+    const read: any = await protocol.getMetaItem({
+        type, name, state: 'draft', packageId: PKG, ...(userTextLocales ? { userTextLocales } : {}),
+    } as any);
+    return read.item._diagnostics as { valid: boolean; errors?: unknown[]; warnings?: Array<{ path: string; message: string }> };
+}
+
+describe('[#34818] a flow draft read carries the advisories its publish would return', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it('as a warning on the decision node, in the request\'s language, naming steps by label', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'flow', ungatedDecisionFlow);
+
+        const diagnostics = await draftRead(protocol, 'flow', 'meeting_reminder', ['zh-CN', 'en']);
+        // An advisory is not a refusal: the draft still reads valid.
+        expect(diagnostics.valid).toBe(true);
+        expect(diagnostics.errors ?? []).toEqual([]);
+        const warning = (diagnostics.warnings ?? []).find((w) => w.path === 'nodes.1');
+        expect(warning, JSON.stringify(diagnostics)).toBeDefined();
+        expect(warning!.message).toContain('流程“会议提醒”中的条件分支“检查日期”');
+        expect(warning!.message).toContain('“提醒负责人”、“跳过”');
+        expect(warning!.message).not.toMatch(/node_\d|meeting_reminder|flow-decision-unconditional-branch/);
+    });
+
+    it('in English when the read states no locale', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'flow', ungatedDecisionFlow);
+
+        const warning = ((await draftRead(protocol, 'flow', 'meeting_reminder')).warnings ?? [])
+            .find((w) => w.path === 'nodes.1');
+        expect(warning!.message).toContain('The branch step "检查日期" in flow "会议提醒"');
+    });
+
+    it('with the words and path the publish returns for the same finding', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageDraft(protocol, 'flow', ungatedDecisionFlow);
+        const judgement = await (protocol as any).draftPublishJudgement({
+            type: 'flow', name: 'meeting_reminder', body: ungatedDecisionFlow, packageId: PKG, userTextLocales: ['zh-CN'],
+        });
+        const advisory = judgement.advisories.find((a: any) => a.rule === 'flow-decision-unconditional-branch');
+        expect(advisory.path).toBe('flows[0].nodes[1]');
+        expect(judgement.refusals).toEqual([]);
+
+        const warning = ((await draftRead(protocol, 'flow', 'meeting_reminder', ['zh-CN'])).warnings ?? [])
+            .find((w) => w.path === 'nodes.1');
+        expect(warning!.message).toBe(advisory.userMessage);
+    });
+
+    it('a gated decision reads no such warning', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const gated = structuredClone(ungatedDecisionFlow);
+        (gated.edges[1] as Record<string, unknown>).condition = 'true';
+        (gated.edges[2] as Record<string, unknown>).isDefault = true;
+        await stageDraft(protocol, 'flow', gated);
+
+        const warnings = (await draftRead(protocol, 'flow', 'meeting_reminder', ['zh-CN'])).warnings ?? [];
+        expect(warnings.filter((w) => w.path === 'nodes.1')).toEqual([]);
+    });
+});

@@ -67,8 +67,6 @@ export interface ChatDockConversationProps {
   surfaceContext?: ChatSurfaceContext;
   /** objectui#8219 — the display label of `surfaceContext.artifact`, for the chip only. */
   surfaceArtifactLabel?: string;
-  /** ADR-0037/P3c — the Live Canvas open/close seam, forwarded to ChatPane. */
-  onCanvasOpenChange?: (open: boolean) => void;
   /**
    * objectstack#34608 — what the drawer shows (see `chatDockTarget.ts`).
    * Absent → the ambient thread described on {@link ChatDockConversation}.
@@ -118,7 +116,6 @@ export function ChatDockConversation({
   appPackageId,
   surfaceContext,
   surfaceArtifactLabel,
-  onCanvasOpenChange,
   target,
   onTargetChange,
   handoff,
@@ -400,7 +397,6 @@ export function ChatDockConversation({
             onShare={() => setShareOpen(true)}
             onDebug={() => setDebugOpen(true)}
             showDebug={showDebug}
-            onCanvasOpenChange={onCanvasOpenChange}
           />
         </div>
         {/* Rail and sheet: the history covers the chat while open; the pane

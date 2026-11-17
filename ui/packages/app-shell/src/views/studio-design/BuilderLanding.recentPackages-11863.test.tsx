@@ -58,9 +58,17 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 // A read-only base's customization read (ADR-0146 D3) is not under test here:
 // it stays pending, so no request leaves the file.
-vi.mock('./packageCustomizations-io', () => ({
-  fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
+vi.mock('./packageCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./packageCustomizations-io')>()),
+  fetchPackageCustomizations: vi.fn(() => new Promise<never>(() => {})),
 }));
+
+// The package-less flow count the landing draws (objectstack#34715) is not under
+// test here: no flow belongs to no package, and no request leaves the file.
+vi.mock('./packageSurfaces', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('./packageSurfaces')>();
+  return { ...mod, loadPackageLessSurfaces: vi.fn(async () => []) };
+});
 
 import { BuilderLanding } from './BuilderLanding';
 import { RecentItemsProvider } from '../../context/RecentItemsProvider';
@@ -110,6 +118,23 @@ const recentSection = () => screen.getByTestId('studio-landing-recent');
 const recentLinks = () => within(recentSection()).getAllByRole('link');
 
 describe('Studio landing → recent packages (objectui#11863)', () => {
+  it('with a recent visit, the installed apps still lead the page: the list follows the author’s own apps (objectstack#34715)', async () => {
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.example.showcase', name: 'Showcase', writable: false, namespace: 'showcase' },
+    ];
+    renderLanding([visit('com.example.showcase')]);
+
+    await screen.findByText('Recently viewed');
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      'Installed apps',
+      'Customizations in this environment',
+      'Your own apps',
+      'Recently viewed',
+      'Outside any app',
+    ]);
+  });
+
   it('lists the most recent packages first, each by its current name, each opening its /studio/PKG route', async () => {
     packages.list = [
       { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
@@ -189,8 +214,8 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     await screen.findByText('Acme CRM');
     expect(screen.queryByTestId('studio-landing-recent')).not.toBeInTheDocument();
     expect(screen.queryByText('Recently viewed')).not.toBeInTheDocument();
-    expect(screen.getByText('My packages (writable)')).toBeInTheDocument();
-    expect(screen.getByTestId('studio-landing-org-scope')).toBeInTheDocument();
+    expect(screen.getByText('Your own apps')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-landing-env-catalog')).toBeInTheDocument();
   });
 
   it('the package cards stay beside the recent row', async () => {
@@ -200,7 +225,7 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     await screen.findByText('Recently viewed');
     // Once in the recent row, once as its writable card.
     expect(screen.getAllByText('Acme CRM')).toHaveLength(2);
-    expect(screen.getByText('My packages (writable)')).toBeInTheDocument();
+    expect(screen.getByText('Your own apps')).toBeInTheDocument();
   });
 });
 

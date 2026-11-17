@@ -42,6 +42,7 @@ import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditActorSnapshot, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
+import { MENTION_EMAIL_TEMPLATES } from './mention-email.js';
 import { createAppActivityWriter } from './app-activity-door.js';
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
@@ -626,11 +627,39 @@ export class AuditPlugin implements Plugin {
           return undefined;
         }
       };
+      // The mention e-mail's link to the record (`mention-email.ts`): a
+      // Console page, composed by the auth service's `getConsoleUrl` — the
+      // one composer of Console page links in mail. Resolved at send time;
+      // without an auth service the link stays relative.
+      const getConsoleUrl = (path: string): string | undefined => {
+        let auth: { getConsoleUrl?: (path: string) => string } | undefined;
+        try {
+          auth = ctx.getService<{ getConsoleUrl?: (path: string) => string }>('auth');
+        } catch {
+          return undefined;
+        }
+        return typeof auth?.getConsoleUrl === 'function' ? auth.getConsoleUrl(path) : undefined;
+      };
+      // The mention e-mail's text: one template per catalog locale, in the
+      // messaging service's code-declared tier (`mention-email.ts`). A
+      // messaging service without the seam renders the e-mail from the
+      // notification's title and body alone.
+      const messagingAtReady = getMessaging();
+      if (messagingAtReady && typeof messagingAtReady.registerBuiltinTemplates === 'function') {
+        try {
+          messagingAtReady.registerBuiltinTemplates(MENTION_EMAIL_TEMPLATES);
+        } catch (err: any) {
+          ctx.logger.warn('AuditPlugin: the @mention e-mail templates were NOT registered — mention e-mails carry the notification title and comment preview with no link to the record', {
+            error: err?.message ?? String(err),
+          });
+        }
+      }
       const auditWriters = installAuditWriters(engine as any, this.name, {
         getMessaging,
         getI18n,
         getLocale,
         getDefaultOrganizationId,
+        getConsoleUrl,
         admitMentionRecipients: (input) =>
           admitMentionRecipients({ engine: engine as any, getTenancyPosture, logger: ctx.logger as any }, input),
       });

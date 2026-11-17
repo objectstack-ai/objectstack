@@ -164,6 +164,16 @@ any position but a `$in` comparand, the engine refuses it loudly. ⛔ No second 
 > `FIELD in current_user.org_user_ids` names, under its own brand, never as a mode of `ReadableIds`. "No `EXISTS`, no
 > correlated form" stands. So does everything this D1 says about `ReadableIds`.
 
+> **Amendment note (2026-11-17, [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) — ruling record [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) on #33787).**
+> ADR-0155 (Accepted) revisits "No second leaf" for **one** more leaf and nothing else: the record ids that
+> `sys_record_share` grants one user on one object (provisionally `SharedRecordIds`), under its own brand, never as a
+> mode of `ReadableIds` or of ADR-0147's leaf. It is the second record to do so, and a new leaf still needs a Tier H
+> record of its own. It also revisits this D1's read-verbs sentence for that leaf alone (its ③, ruled A): the leaf's
+> write form is legal in the `where` of a predicate `update`, and nowhere else. For `ReadableIds`, for ADR-0147's leaf
+> and on `delete`, the sentence stands as written. "No `EXISTS`, no correlated form" stands. This note records a
+> decision that ADR-0155's execution cards will implement: until they land, `main` admits no such leaf, and this D1
+> holds as written for every verb.
+
 ### D2 — ObjectQL composes the scope, once per parent object per request, fail closed
 
 At the engine's executor boundary — on the final AST, after ingress parsing, the comparand doors, the middleware chain
@@ -226,6 +236,17 @@ restriction".
   > change, so it is not the inert bit the 17.0.0 rationale removed.
 - The leaf joins the per-driver conformance case-sets, so a driver that compiles it is measured and one that refuses
   is recorded as refusing.
+
+> **Amendment note (2026-11-17, [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) — ruling record [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) on #33787).**
+> The refusal bullet's "⛔ No `DriverCapabilities` bit returns" is revisited for ADR-0155's leaf alone, as ADR-0147
+> (Proposed) revisits it for its own. Under ADR-0155's ②, ruled R2 for the storage that cannot run that leaf, a driver declares
+> whether it evaluates such leaves, and the declaration is read up front: on an object whose evaluator does not
+> declare it, the producer writes no share arm and share grants are refused as inert (ADR-0111 D7, as noted there).
+> A leaf that still reaches a driver that cannot run it is refused in the refusal bullet's envelope (status 500,
+> `INTERNAL_ERROR`, logged at `error` once per driver; ADR-0155's R1). The declaration's name is ADR-0155's O1, and
+> where ADR-0147's declaration is the same one, it is built once (ADR-0155 D4). This note moves nothing this section
+> says about `ReadableIds`. It records a decision that ADR-0155's execution cards will implement: until they land,
+> `main` has no such declaration and no such leaf.
 
 ### D4 — The six consumers emit one leaf per parent object, and no pre-scan
 
@@ -400,6 +421,13 @@ change is #33696's, and by the ruling it lands only after this amendment merges.
 - **O3** — `driver-mongodb`: the cost of a pipeline form is unprototyped; it refuses until measured.
 - **O4** — `packages/plugins/plugin-sharing/src/sharing-service.ts` reads a caller's record-share grants at
   `limit: 5000` with no warning; that scope rides into the subquery unchanged. A separate finding, not this record's.
+  **Answered** (2026-11-17): [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md)
+  (Accepted; ruling record
+  [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) on #33787) decides
+  that the share arm will lower to its own engine-internal semi-join leaf over `sys_record_share`, with no cap, so
+  every grant counts. The amendment notes under D1 and D3 say what that record revisits here. This records a decision
+  that ADR-0155's execution cards will implement: the capped read above stands until the plugin-sharing switch under
+  #33787 lands, and not before.
 - **O5** — whether `controlled_by_parent`'s id set becomes a seventh consumer (D6). **Answered** (2026-10-21): the
   ruling is recorded verbatim in D6, as amended.
 

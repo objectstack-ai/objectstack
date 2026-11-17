@@ -1036,8 +1036,11 @@ export function celScope(
     return { extra: { ...vars, vars, current_user: runUserOf(context) } };
 }
 
-/** The body of {@link AutomationEngine.valueEnvelopeRefusals}, moved unedited; that method's docblock is its contract. */
-export function valueEnvelopeRefusals(value: unknown): { message: string; source: string }[] {
+/** The body of {@link AutomationEngine.valueEnvelopeRefusals}; that method's docblock is its contract. */
+export function valueEnvelopeRefusals(
+    value: unknown,
+    fieldTypes?: Readonly<Record<string, string>>,
+): { message: string; source: string }[] {
     // [#16439] Presence, asked before either primitive, because neither can
     // answer it (see rule 0 above). It is stated HERE and not as a guard in
     // {@link evaluateValueEnvelope} deliberately: a reject reason living
@@ -1080,7 +1083,13 @@ export function valueEnvelopeRefusals(value: unknown): { message: string; source
         // `superRefine` — re-prefixing would say it twice.
         return shape.error.issues.map((issue) => ({ message: issue.message, source: sourceText }));
     }
-    const parsed = validateExpression('value', value as { dialect?: string; source?: string });
+    // [#34451] Typed only where the caller hands the bound object's field
+    // types — `registerFlow`'s pass, never the evaluator below.
+    const parsed = validateExpression(
+        'value',
+        value as { dialect?: string; source?: string },
+        fieldTypes ? { fieldTypes, flowValueEnvelope: true } : undefined,
+    );
     return parsed.errors.map((e) => ({
         message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`,
         source: e.source,

@@ -7,143 +7,113 @@
  */
 
 /**
- * Standing "unpublished changes" affordance for the AI build surface
- * (objectui#5694).
+ * Standing "unpublished changes" line for the AI build surface
+ * (objectui#5694), above the composer while the conversation's bound package
+ * has pending drafts, so it survives scrolling.
  *
- * Before this bar, the ONLY way to publish a pending draft was the inline
- * 「发布 (N)」 button on whichever tool card staged it — buried however far up
- * the transcript the conversation had scrolled. In the 2026-08-22 staging E2E
- * (cloud#1584) a dashboard sat `state='draft'` through three repair rounds
- * with a working publish button off-screen the whole time; the user's actual
- * experience was a live menu entry answering 「未找到仪表板」.
+ * objectstack#34610 — the line no longer publishes. The screen has one
+ * Publish, the shell's bar for the regime the main area is in (the draft bar
+ * for changes to a published app, the unpublished-app bar for an app not
+ * published yet), and the chat points to it:
  *
- * This bar floats above the composer while the conversation's bound package
- * has pending drafts: it survives scrolling, publishes through the SAME
- * governed path as the inline button and the Home banner
- * (`POST /packages/:id/publish-drafts` — the path that orders
- * structure-before-seeds and runs the ADR-0038 L3 probes), narrates probe
- * findings via the shared {@link publishHealthFromResponse} instead of a blind
- * "Published!", and disappears when the count reaches zero.
+ *  - while the main area shows this package's draft (`draftBarShown`), the
+ *    line says where the Publish is;
+ *  - otherwise it offers to show the draft (`onShowDraft`), which puts the
+ *    main area on the app in draft mode, the draft bar on top.
  *
- * objectui#10039 — that publish now goes through `MetadataClient`, not a bare
- * `fetch`. The route answers the runtime authoring gate's per-draft advisories
- * on each `published[]` element (objectstack#9343) and the client is the seam
- * that reports them: it emits one advisory event per advised item into the
- * same sink, renderer and wording every other write door uses. A bare fetch
- * had nothing to report THROUGH, so every one of those findings was parsed by
- * nobody — while the probe findings a few lines below were already shouting.
- * PR objectui#10038 did this for the two sibling call sites;
- * this is the same move, not a second mechanism.
+ * The count is the package's pending drafts (`_drafts?package=`), the scope
+ * the draft bar, its changes panel and the draft cards read, so the chat and
+ * the bar show one number. A publish from the shell's bar lands here as a
+ * receipt (`subscribePublishReceipt`), shown until the package has pending
+ * drafts again or the user dismisses it.
  *
  * Count freshness: re-read when the package binding changes and whenever the
- * turn goes idle (`idle` flips true) — tool results that stage or publish
- * drafts land inside a turn, so idle edges are exactly when the count can
- * have changed. Sibling surfaces: `preview/UnpublishedAppBar` (the ADR-0045
- * app-level publish gate — a DIFFERENT axis: an app can be live while sibling
- * artifacts are draft, which is exactly the case above) and the Home
- * pending-drafts banner (environment-wide, not package-scoped).
+ * turn goes idle (`idle` flips true) — tool results that stage drafts land
+ * inside a turn, so idle edges are exactly when the count can have changed.
+ * The shared source (objectui#5801) also re-reads on the metadata-refresh
+ * pulse every publish sends.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { CloudUpload, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { useEffect, useState } from 'react';
+import { CheckCircle2, Eye, X } from 'lucide-react';
 import { Button } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { publishHealthFromResponse } from '@object-ui/plugin-chatbot/core';
-import { useMetadata } from '../../providers/MetadataProvider.js';
-import { useMetadataClient } from '../../views/metadata-admin/useMetadata.js';
-import { usePendingDrafts } from '../../preview/usePendingDrafts.js';
-import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
+import { appPackageOf, usePendingDrafts } from '../../preview/usePendingDrafts.js';
+import { subscribePublishReceipt } from '../../assistant/assistantBus.js';
 
 export interface PendingDraftsBarProps {
   /** The conversation's bound package (ADR-0057 A1.a); undefined = not bound yet. */
   packageId: string | undefined;
   /** True while no turn is streaming — the count refetch trigger. */
   idle: boolean;
+  /** The main area shows this package's draft, with the draft bar on top. */
+  draftBarShown?: boolean;
+  /** Put the main area on this package's draft; absent where there is no main area to move. */
+  onShowDraft?: () => void;
 }
 
-export function PendingDraftsBar({ packageId, idle }: PendingDraftsBarProps) {
-  const { refresh } = useMetadata();
-  // The advisory seam. `useMetadataClient` is the layer that hands the
-  // console's toast renderer to the client, so taking the client from here —
-  // rather than firing the route by hand — is what makes the gate's findings
-  // reach the author at all (objectui#10039).
-  const client = useMetadataClient();
+export function PendingDraftsBar({ packageId, idle, draftBarShown = false, onShowDraft }: PendingDraftsBarProps) {
   const { t } = useObjectTranslation();
-  const [publishing, setPublishing] = useState(false);
-  // objectui#5801 — the shared pending-drafts source. The hook's bus
-  // subscription replaces the post-publish `version` bump AND picks up
-  // publishes made from OTHER surfaces (Studio topbar, home banner); the
-  // idle-edge effect below keeps "refetch when the turn finishes" — the agent
-  // may have just staged drafts.
+  // The app's drafts, as the shell's draft bar counts them: its package and
+  // its customization pair (`appDraftPackages`), so the two numbers agree.
   const { count, refresh: refreshCount } = usePendingDrafts({
-    packageId,
+    appPackageId: packageId,
     enabled: Boolean(packageId),
   });
+  // The package a landed publish covered, as its receipt; shown while it is
+  // this conversation's package and nothing is pending again.
+  const [receiptFor, setReceiptFor] = useState<string | null>(null);
 
   useEffect(() => {
     if (!packageId || !idle) return;
     void refreshCount();
   }, [idle, packageId, refreshCount]);
 
-  const publish = useCallback(async () => {
-    if (!packageId || publishing) return;
-    setPublishing(true);
-    try {
-      let body: unknown;
-      try {
-        body = await client.publishPackageDrafts(packageId);
-      } catch (e) {
-        // A non-2xx now throws inside the client, carrying the server's own
-        // message and the parsed body. Same sentence the bare `fetch` showed
-        // (`parseError` reads it off `error.message`), with the ADR-0112
-        // producer-marked `userMessage` preferred when the refusal carries
-        // one — the rule `36fc74629` landed on the sibling call site.
-        const marked = readEnvelopeFailureText((e as { body?: unknown } | null)?.body);
-        const message =
-          marked ||
-          (e instanceof Error && e.message ? e.message : '') ||
-          t('console.ai.pendingDrafts.failed', { defaultValue: 'Publish failed.' });
-        toast.error(message);
-        return;
-      }
-      const health = publishHealthFromResponse(body);
-      const problems = (health?.issues ?? []).filter((i) => i.severity === 'error');
-      // objectstack#32984 — `seedFailed` is the failure; `seedError` is only
-      // the producer's own text and is absent when it sent none. The rule the
-      // chat's publish-health line reads; with no producer text the detail is
-      // that line's own sentence, from the pack.
-      const seedFailed = health?.seedFailed === true || !!health?.seedError;
-      const seedDetail = seedFailed
-        ? health?.seedError || t('chatbot.build.health.seedFailed', { defaultValue: 'Sample data failed to load.' })
-        : undefined;
-      if (seedFailed || problems.length > 0) {
-        toast.warning(
-          t('console.ai.pendingDrafts.publishedWithFindings', {
-            defaultValue: 'Published, but the runtime probes reported problems: {{detail}}',
-            detail: [seedDetail, ...problems.map((p) => p.message)].filter(Boolean).join('; '),
-          }),
-        );
-      } else {
-        toast.success(t('console.ai.pendingDrafts.published', { defaultValue: 'All pending changes are live.' }));
-      }
-      // The launcher/nav may have just gained entries — refresh the shared
-      // metadata so the user's next click finds them, and announce the publish
-      // on the bus so every other pending-drafts surface (home banner, Studio
-      // topbar) converges too (objectui#5801).
-      try {
-        await refresh?.();
-      } catch {
-        /* metadata refresh is best-effort */
-      }
-      emitMetadataRefresh();
-    } finally {
-      setPublishing(false);
-    }
-  }, [client, packageId, publishing, refresh, t]);
+  // A publish from the shell's bar that covered this package (or the whole
+  // environment) is this conversation's receipt.
+  useEffect(() => {
+    if (!packageId) return;
+    return subscribePublishReceipt((r) => {
+      if (r.packageId === null || appPackageOf(r.packageId) === appPackageOf(packageId)) setReceiptFor(packageId);
+    });
+  }, [packageId]);
+  // New drafts after the publish supersede its receipt (adjusted while
+  // rendering, the React pattern for state derived from a changed value).
+  const pending = (count ?? 0) > 0;
+  const [wasPending, setWasPending] = useState(pending);
+  if (pending !== wasPending) {
+    setWasPending(pending);
+    if (pending) setReceiptFor(null);
+  }
+  const receipt = receiptFor !== null && receiptFor === packageId;
 
-  if (!packageId || (count ?? 0) <= 0) return null;
+  if (!packageId) return null;
+
+  if (!pending) {
+    if (!receipt) return null;
+    return (
+      <div
+        data-testid="publish-receipt"
+        role="status"
+        className="pointer-events-auto flex w-full max-w-3xl items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 shadow-sm backdrop-blur dark:text-emerald-200"
+      >
+        <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          {t('console.ai.pendingDrafts.receipt', { defaultValue: 'Published. Your changes are live.' })}
+        </span>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-6 w-6 shrink-0"
+          onClick={() => setReceiptFor(null)}
+          aria-label={t('console.ai.pendingDrafts.dismissReceipt', { defaultValue: 'Dismiss' })}
+          data-testid="publish-receipt-dismiss"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -153,18 +123,30 @@ export function PendingDraftsBar({ packageId, idle }: PendingDraftsBarProps) {
       {/* objectui#13088 — the sentence wraps: it takes the row's free width
           and breaks onto more lines, never cut to one with an ellipsis. On a
           phone the row is narrower than the sentence, and the cut half is
-          the part that says users cannot see the change yet. The button is
-          `shrink-0`, so the publish action keeps its width on the bar. */}
+          the part that says where to publish. */}
       <span data-testid="pending-drafts-bar-sentence" className="min-w-0 flex-1">
-        {t('console.ai.pendingDrafts.count', {
-          defaultValue: '{{count}} change(s) are not published yet — users cannot see them.',
-          count,
-        })}
+        {draftBarShown || !onShowDraft
+          ? t('console.ai.pendingDrafts.publishFromBar', {
+              defaultValue: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+              count,
+            })
+          : t('console.ai.pendingDrafts.showDraftToPublish', {
+              defaultValue: '{{count}} unpublished changes. Show the draft to review and publish them.',
+              count,
+            })}
       </span>
-      <Button size="sm" onClick={() => void publish()} disabled={publishing} className="shrink-0">
-        {publishing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CloudUpload className="mr-1 h-3.5 w-3.5" />}
-        {t('console.ai.pendingDrafts.publish', { defaultValue: 'Publish' })}
-      </Button>
+      {!draftBarShown && onShowDraft ? (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onShowDraft}
+          className="shrink-0"
+          data-testid="pending-drafts-show-draft"
+        >
+          <Eye className="mr-1 h-3.5 w-3.5" />
+          {t('console.ai.pendingDrafts.showDraft', { defaultValue: 'Show draft' })}
+        </Button>
+      ) : null}
     </div>
   );
 }

@@ -44,6 +44,8 @@
     "ConversationSummarySchema": "ai/ConversationSummary",
     "DatasetProvenance": "ai/DatasetProvenance",
     "DatasetProvenanceSchema": "ai/DatasetProvenance",
+    "DatasetTermCandidate": "ai/DatasetTermCandidate",
+    "DatasetTermCandidateSchema": "ai/DatasetTermCandidate",
     "DatasetTermMatch": "ai/DatasetTermMatch",
     "DatasetTermMatchSchema": "ai/DatasetTermMatch",
     "DatasetTermMatchedOn": "ai/DatasetTermMatchedOn",
