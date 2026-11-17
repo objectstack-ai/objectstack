@@ -737,7 +737,10 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   (`not-shown`). A turn with no answer is `error`: the process failed or timed out, or the result line is not
   `success` (`error_max_turns` included). Both kinds are counted and named, and neither is in a denominator.
   `--regrade DIR` applies the current rules to a recorded round's answers and arm facts. A changed record keeps the
-  verdict its turn was first given as `regradedFrom`.
+  verdict its turn was first given as `regradedFrom`. Each record carries `caseHash`, a hash of its case's prompt and
+  token lists as the turn ran them. A case changed or removed since the round is set apart: it is not regraded, its
+  records are left as they are, and the summary names it outside every pass rate. A record with no hash predates the
+  hash; it is regraded against the case as it is now, and the summary counts it as unhashed.
 - **Records**: by default the round goes to `docs/qa/platform-checklist/runs/skill-evals/ROUND/` (git-ignored), or to
   `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, the answer, the skills listed
   and launched, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,

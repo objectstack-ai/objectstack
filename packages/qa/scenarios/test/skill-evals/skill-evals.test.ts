@@ -322,7 +322,8 @@ describe('--regrade grades an old answer only against the case that ran', () => 
 
   it('every record carries the hash of its case as run: prompt and both token lists, not expected_output', () => {
     expect(rec(c, '$icontains').caseHash).toBe(hashCase(c));
-    expect(hashCase({ ...c, expectedOutput: 'other' })).toBe(hashCase(c));
+    const withOutput: SkillEvalCase = { ...c, expectedOutput: 'other' };
+    expect(hashCase(withOutput)).toBe(hashCase(c));
     expect(hashCase({ ...c, prompt: 'p2' })).not.toBe(hashCase(c));
     expect(hashCase({ ...c, mustNotContain: ['x'] })).not.toBe(hashCase(c));
   });
