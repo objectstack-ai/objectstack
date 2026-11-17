@@ -1922,6 +1922,16 @@ const de = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} unveröffentlichte Änderungen. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        publishFromBar_one: '{{count}} unveröffentlichte Änderung. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        publishFromBar_other: '{{count}} unveröffentlichte Änderungen. Veröffentlichen Sie sie über die Entwurfsleiste oben.',
+        showDraftToPublish: '{{count}} unveröffentlichte Änderungen. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraftToPublish_one: '{{count}} unveröffentlichte Änderung. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraftToPublish_other: '{{count}} unveröffentlichte Änderungen. Zeigen Sie den Entwurf an, um sie zu prüfen und zu veröffentlichen.',
+        showDraft: 'Entwurf anzeigen',
+        receipt: 'Veröffentlicht. Ihre Änderungen sind live.',
+        dismissReceipt: 'Schließen',
         count: "{{count}} Änderung(en) sind noch nicht veröffentlicht — Benutzer können sie nicht sehen.",
         publish: "Veröffentlichen",
         published: "Alle ausstehenden Änderungen sind live.",
@@ -4541,6 +4551,10 @@ const de = {
       pendingHere: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen auf dieser Seite',
       pendingHere_one: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderung auf dieser Seite',
       pendingHere_other: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen auf dieser Seite',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
+      pendingInApp_one: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderung in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
+      pendingInApp_other: 'Entwurfsvorschau · {{count}} unveröffentlichte Änderungen in dieser App. Nichts hier ist live, bevor Sie veröffentlichen.',
     },
     changes: {
       title: 'Ausstehende Änderungen',
@@ -4676,6 +4690,8 @@ const de = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Diese App ist noch nicht veröffentlicht. Sie funktioniert, aber nur Builder können sie sehen. Veröffentlichen Sie sie, damit Ihre Benutzer sie sehen.',
       message: 'Unveröffentlichte App — voll funktionsfähig, aber nur für Builder sichtbar. Veröffentlichen Sie sie, damit Ihre Benutzer sie sehen.',
       publish: 'Veröffentlichen',
       publishing: 'Wird veröffentlicht…',
