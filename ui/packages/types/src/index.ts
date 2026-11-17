@@ -319,6 +319,10 @@ export type {
 // The canonical `TableColumn.type` vocabulary and the producer-seam fold that
 // keeps undeclared inference values out of that slot (`fc62bb490`).
 export { TABLE_COLUMN_TYPES, normalizeTableColumnType } from './data-display.js';
+// The narrowest an unpinned reference column is drawn where its cells edit
+// through the record picker: `GridField`'s lookup column, an editable
+// `data-table`'s foreign-key column.
+export { LOOKUP_COLUMN_MIN_WIDTH } from './data-display.js';
 
 // ============================================================================
 // Feedback Components - Status & Progress Indication

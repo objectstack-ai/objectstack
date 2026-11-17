@@ -28,7 +28,7 @@ import { toDomProps } from './toDomProps.js';
 import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import { toHostGroupProps } from './toHostGroupProps.js';
 import type { InlineGridColumn } from '@objectstack/spec/data';
-import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
+import { GRID_FIELD_RETIRED_KEYS, LOOKUP_COLUMN_MIN_WIDTH, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
 
 /**
  * GridField / LineItemsField — editable child-grid ("line items") widget.
@@ -147,7 +147,9 @@ const isNumeric = (t?: string) => t === 'number' || t === 'currency';
 const MIN_WIDTH_BY_TYPE: Record<string, number> = {
   text: 160,
   select: 132,
-  lookup: 168,
+  // The shared reference-column floor: an editable `data-table` floors its
+  // foreign-key columns at the same width (objectstack#34601).
+  lookup: LOOKUP_COLUMN_MIN_WIDTH,
   number: 104,
   currency: 116,
   date: 150,

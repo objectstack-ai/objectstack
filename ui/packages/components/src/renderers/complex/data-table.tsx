@@ -17,7 +17,7 @@ import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
 import { ComponentRegistry, compareSortValues, csvBlob, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
-import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
+import { LOOKUP_COLUMN_MIN_WIDTH, type DataTableSchema, type TableColumn, type TableSortItem, type TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
 import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation, useDisplayLocale } from '@object-ui/i18n';
@@ -1548,7 +1548,17 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       width: col.width,
       fitContent: col.fitContent,
       masked: col.masked === true,
+      // objectstack#34601 — a foreign-key column whose cells edit opens the
+      // record picker; see `pickerFloor` below.
+      pickerEdits: editable && col.foreignKey === true && col.editable !== false,
     }));
+    // objectstack#34601 — the floor of a column whose editor is the record
+    // picker: sized from the short names its cells draw, an editable lookup
+    // column left the picker's trigger a few dozen px, and the open list cut
+    // every name. Only the estimate is floored: an explicit width (an author's
+    // pin, a user's resize) is skipped above it and drawn as written.
+    const pickerFloor = (col: { pickerEdits: boolean }, width: number) =>
+      (col.pickerEdits ? Math.max(width, LOOKUP_COLUMN_MIN_WIDTH) : width);
     for (const col of cols) {
       if (col.width) continue; // Skip columns with explicit widths
       // `fitContent` columns (e.g. the row-actions column) size to their own
@@ -1571,7 +1581,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       // cell (and the header) needs to render whole, padding included.
       const drawnPx = col.masked ? undefined : drawnSizes?.px?.[col.accessorKey];
       if (drawnPx !== undefined) {
-        widths[col.accessorKey] = Math.min(400, Math.max(80, drawnPx));
+        widths[col.accessorKey] = pickerFloor(col, Math.min(400, Math.max(80, drawnPx)));
         continue;
       }
       const headerLen = (col.header || '').length;
@@ -1599,10 +1609,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
         }
       }
       // Estimate pixel width: ~8px per character + 48px padding, min 80, max 400
-      widths[col.accessorKey] = Math.min(400, Math.max(80, maxLen * 8 + 48));
+      widths[col.accessorKey] = pickerFloor(col, Math.min(400, Math.max(80, maxLen * 8 + 48)));
     }
     return widths;
-  }, [rawColumns, data, drawnSizes]);
+  }, [rawColumns, data, drawnSizes, editable]);
 
   // State management
   const [searchQuery, setSearchQuery] = useState('');

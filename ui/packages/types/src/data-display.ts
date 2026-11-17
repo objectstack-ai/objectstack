@@ -592,6 +592,16 @@ export function normalizeTableColumnType(value: unknown): TableColumnType | unde
 }
 
 /**
+ * The narrowest, in px, that an UNPINNED reference column is drawn where its
+ * cells edit through the record picker: room for the picker's trigger (search
+ * icon, the picked name, the browse-all button) to show a name. `GridField`
+ * gives its `lookup` columns this width; an editable `data-table` floors the
+ * auto-sized width of a {@link TableColumn.foreignKey} column at it. An
+ * explicit `width` (an author's pin, or a user's resize) is drawn as written.
+ */
+export const LOOKUP_COLUMN_MIN_WIDTH = 168;
+
+/**
  * Table column definition
  */
 export interface TableColumn {
@@ -842,6 +852,12 @@ export interface TableColumn {
    *
    * Unlike {@link TableColumn.masked}, it withholds nothing else: copy, CSV
    * export, inline edit, search and sort are unchanged.
+   *
+   * In an `editable` table, a column with no explicit `width` whose cells
+   * edit (`editable` is not `false`) is drawn at least
+   * {@link LOOKUP_COLUMN_MIN_WIDTH} wide, because its editor is the record
+   * picker: sized from the short names it draws, the picker had no room to
+   * show one. An explicit `width` is drawn as written.
    *
    * Written by `ObjectGrid` from the column's field type, because the table
    * cannot tell a reference from text: `type` has no reference member
