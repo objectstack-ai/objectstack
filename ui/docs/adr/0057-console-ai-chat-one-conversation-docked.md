@@ -18,11 +18,13 @@ Amendment A3 (2026-11-17) — the right-side drawer is the ONLY chat container:
 the top-bar robot toggles it, maximize fills the window in place, the
 floating button and the full page are retired and the `/ai…` addresses open
 the drawer (objectstack#34608). It supersedes §3's focus mode, A2's maximize
-clause and open questions 2 and 5.
+clause and open questions 2 and 5, and, for building, ADR-0037's split-view
+presentation and its `LiveCanvas` host: the app shows in the main area
+(objectstack#34610).
 **Author**: ObjectUI app-shell / Studio team
 **Consumers**: `@object-ui/app-shell`
 (`console/ai/AiChatPage.tsx`, `layout/ConsoleFloatingChatbot.tsx`,
-`layout/ConsoleChatbotFab.tsx`, `layout/ConsoleLayout.tsx`, `layout/agentPicker.ts`,
+`layout/ConsoleChatbotFab.tsx` (deleted by Amendment A3), `layout/ConsoleLayout.tsx`, `layout/agentPicker.ts`,
 `views/studio-design/StudioAiCopilot.tsx`, `views/studio-design/StudioDesignSurface.tsx`,
 `assistant/assistantBus.ts`, `hooks/useChatConversation.ts`,
 `hooks/useConversationList.ts`, `hooks/useAiSurface.ts`),
@@ -95,7 +97,9 @@ is **console-layer surface sprawl**, not the agent model.
 3. **Canonical presentation = a right-docked, collapsible, resizable panel**
    (the VS Code / Cursor idiom). The floating FAB **retires** to a launcher /
    shortcut that opens the same dock. Full-page `/ai` becomes the same panel
-   **maximized** (focus mode + Live Canvas), sharing the thread.
+   **maximized** (focus mode + Live Canvas), sharing the thread. *(Amendment
+   A3: there is no full page and no Live Canvas pane; maximize fills the
+   window in place and the build's app shows in the main area.)*
 4. **Runtime end-user apps keep the bubble.** A support-widget presentation is
    the right *audience* idiom; same state code, different chrome. **Presentation
    is decoupled from state.**
@@ -437,7 +441,11 @@ question 5 ("the routes are untouched"); and, with objectstack#34610 under the
 same ruling, ADR-0037's split-view presentation ("chat on the left … draft
 overlay on the right") and its `LiveCanvas` host. Everything else stands: one
 conversation context (§1), one resolver (§2), the runtime bubble (§4), one
-gate and OSS → nothing (§5, §6), A1 and A2's key decision.
+gate and OSS → nothing (§5, §6), A1 and A2's key decision, ADR-0037's draft
+overlay and its per-artifact refresh (Phase 2), and ADR-0045's regimes: a new
+or still-unpublished app is materialized, real and unlisted, and published by
+the visibility flip; changes to a published app are drafts, published by
+publishing them.
 
 **Why.** Measured on staging (epic objectstack#34571, comment 6936163971):
 the console drew one conversation in two containers, the rail and the `/ai`
@@ -468,10 +476,14 @@ It accepted the seat's recommendation as presented:
 
 **Decision.**
 
-- **One container.** The console's right-side drawer is the only place the
-  console draws the assistant's conversation: the rail on a desktop, a bottom
-  sheet on a phone. Home hosts the same drawer as every app page. There is no
-  `/ai` page.
+- **One container.** In the console shell, Home and every app page, the
+  right-side drawer is the one place the assistant's conversation is drawn:
+  the rail on a desktop, a bottom sheet on a phone. There is no `/ai` page.
+  Three surfaces keep their own chrome, as before: Studio's copilot in its
+  right slot (objectui#12725), the public `/s/:token` share page (read-only,
+  ADR-0013) and the runtime bubble (§4). Studio's maximize, which navigated to
+  `/ai/build?package=…` and so lost the Studio page, widens the copilot's slot
+  in place instead (objectstack#34610).
 - **Entry.** The top-bar robot opens and closes the drawer on the current
   page; the address does not change. It carries the plan-awaiting-approval
   marker the floating button carried (objectui#11666). The floating button is
@@ -495,14 +507,27 @@ It accepted the seat's recommendation as presented:
 - **Builder guidance.** Inside an app, a maker's empty state names both
   halves, data questions and changes, as the composer hint already did.
 - **Building (objectstack#34610, same ruling).** A build runs in the same
-  drawer, and the main area shows the app itself in the shell's draft mode
-  (`?preview=draft`), refreshed in place after each build turn. There is no
-  nested preview: the ADR-0037 `LiveCanvas` iframe host is retired, and its
+  drawer, and the main area shows the app itself, in the regime the build is
+  in (ADR-0045):
+  - a new or still-unpublished app is materialized, so the main area shows
+    the real, unlisted app;
+  - changes to a published app are drafts, so the main area shows the app in
+    the shell's draft mode (`?preview=draft`).
+  The main area refreshes in place per artifact, as ADR-0037 Phase 2 already
+  specifies, and once more when a build turn ends. There is no nested
+  preview: the ADR-0037 `LiveCanvas` iframe host is retired, and its
   split-view presentation with it (ADR-0037 is amended to match). A new
   build still starts UNBOUND (A1): the main area keeps its page until the
-  build binds a package, then shows that app's draft. The screen has one
-  publish control, the shell's draft bar, and one change count, the current
-  app's (package's) unpublished changes.
+  build binds a package, then shows that app.
+- **One publish control.** The screen has one Publish: the shell's bar for
+  the regime the main area is in. The two bars never stack (the
+  unpublished-app bar yields in draft mode). The unpublished-app bar says the
+  app has never been published and publishes it by the visibility flip. The
+  draft bar says how many unpublished changes the app has and publishes them.
+  That count is the current app's (package's) pending drafts, and the draft
+  bar, its changes panel and the chat show the same number. The chat draws no
+  Publish of its own: it points to the bar and shows a receipt once a publish
+  lands.
 
 **Consequences.** The full-page chat component is no longer routed. A page
 that is not wrapped by a drawer host can still link to an `/ai…` address and
