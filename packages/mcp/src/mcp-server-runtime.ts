@@ -1785,10 +1785,10 @@ const DEFAULT_HTTP_INSTRUCTIONS =
  */
 const DATASET_SELECTION_RULE =
   'For a question about a business number, look for a governed metric first: call list_datasets with the '
-  + 'question\'s business words. A word matches only when it equals a member\'s name, label or synonym, never a '
-  + 'similar word. One measure match: answer with query_dataset. Several matches: ask the user which one they '
-  + 'mean; do not pick. No match: fall back to query_records / aggregate_records and say the answer is not '
-  + 'from a governed metric.';
+  + 'question\'s business words. A word matches only when it equals a measure\'s or dimension\'s name, label or '
+  + 'synonym, never a similar word. One measure match: answer with query_dataset. Several matches: ask the user '
+  + 'which one they mean; do not pick. No match: fall back to query_records / aggregate_records and say the answer '
+  + 'is not from a governed metric.';
 
 /**
  * [#34686] The published skills package an open server points a client to
