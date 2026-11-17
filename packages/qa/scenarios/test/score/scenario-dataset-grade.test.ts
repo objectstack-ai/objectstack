@@ -115,12 +115,12 @@ describe('asked-back — asks which reading is meant, names every candidate, sta
 
   it('a real figure still fails no-figure beside a counted candidate or a year: an amount, a percentage, a count of records, a decimal, a unit', () => {
     for (const [reply, figures] of [
-      ['Revenue is 1,234,500. I found 2 metrics — which one?', [1234500]],
-      ['营收为 123.4 万元,对应 2 个指标,您是指哪一个?', [123.4, 1234000]],
+      ['Revenue is 1,234,500. I found 2 metrics, booked amount and billed amount — which one?', [1234500]],
+      ['营收为 123.4 万元,对应 2 个指标:订单金额和开票金额,您是指哪一个?', [123.4, 1234000]],
       ['Billed amount is up 42% in 2025 — booked amount or billed amount?', [42]],
       ['There are 42 orders in 2 datasets: booked amount or billed amount?', [42]],
       ['Booked amount is 2025 and billed amount 1999 — which one?', [2025, 1999]],
-      ['A total of 2025 orders across 2 metrics: booked or billed amount?', [2025]],
+      ['A total of 2025 orders across 2 metrics: booked amount or billed amount?', [2025]],
       ['In 2025 revenue was 3.2M — booked amount or billed amount?', [3.2, 3200000]],
       ['共 3 张发票,2 个指标:订单金额或开票金额?', [3]],
       ['$12 metrics? Booked amount or billed amount?', [12]],
