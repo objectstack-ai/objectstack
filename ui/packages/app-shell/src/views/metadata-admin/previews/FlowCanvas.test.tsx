@@ -8,6 +8,8 @@ import { extractRegions, NODE_H } from './flow-canvas-layout';
 import { predictExpandedNodeHeight } from './flow-region-metrics';
 import type { FlowProblem } from './flow-problems';
 import { browserClick, browserDrag } from './__tests__/browserClick';
+// FlowPreview reaches a dynamic `import('@objectstack/lint')`; pay its load at collection, not in a test's clock.
+import '@objectstack/lint';
 import { createI18n, I18nProvider, transformSpecTranslations } from '@object-ui/i18n';
 import type { TranslationData } from '@objectstack/spec/system';
 import { FlowPreview, FlowSelectionTitle, flowSelectionHeading } from './FlowPreview';

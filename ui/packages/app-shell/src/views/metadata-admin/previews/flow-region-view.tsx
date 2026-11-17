@@ -62,7 +62,7 @@ function RegionNode({
   const tone = nodeTone(node.type);
   const interactive = !!onSelect;
   // An approval step's label in the viewer's language, where the package translates it.
-  const label = useFlowLabelTranslationsContext()?.stepLabel(node) ?? (node.label || node.id);
+  const labelTranslations = useFlowLabelTranslationsContext();
   return (
     <div
       data-region-node-id={node.id}
@@ -99,8 +99,8 @@ function RegionNode({
         <NodeTypeIcon type={node.type} className={cn('h-4 w-4', tone.icon)} />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[12px] font-semibold leading-tight text-foreground" title={label}>
-          {label}
+        <div className="truncate text-[12px] font-semibold leading-tight text-foreground" title={labelTranslations?.stepLabel(node) ?? (node.label || node.id)}>
+          {labelTranslations?.stepLabel(node) ?? (node.label || node.id)}
         </div>
         <div className={cn('text-[10px] font-semibold uppercase tracking-[0.08em]', tone.label)}>{node.type}</div>
       </div>
