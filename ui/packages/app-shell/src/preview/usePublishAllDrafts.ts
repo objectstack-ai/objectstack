@@ -31,6 +31,7 @@ import { publishHealthFromResponse, type PublishHealth } from '@object-ui/plugin
 import { useMetadataClient } from '../views/metadata-admin/useMetadata.js';
 import { emitMetadataRefresh, emitPublishReceipt } from '../assistant/assistantBus.js';
 import { lintDraftCapabilityReferences } from './capabilityLint.js';
+import { appDraftPackages } from './usePendingDrafts.js';
 import { refusedItemsText } from './publishRefusal.js';
 import { isNavigationTargetType, useNavigationWrites } from '../hooks/useNavigationSync.js';
 // The one authority for the narrowed `t` (objectui#8261) — imported, not
@@ -46,9 +47,10 @@ export interface PublishAllResult {
 
 export interface PublishAllOptions {
   /**
-   * objectstack#34610 — publish only this package's pending drafts: the draft
-   * bar's scope, the one its count and its changes panel read. Absent, every
-   * pending draft in the environment (Home's *Publish all*).
+   * objectstack#34610 — publish only this app's pending drafts: those in its
+   * package or its paired customization package (`appDraftPackages`), the
+   * draft bar's scope, the one its count and its changes panel read. Absent,
+   * every pending draft in the environment (Home's *Publish all*).
    */
   packageId?: string | null;
 }
@@ -62,8 +64,12 @@ export function usePublishAllDrafts(t: TranslateFn) {
     const scope = opts.packageId ?? null;
     setPublishing(true);
     try {
-      const pending = ((await client.listDrafts?.(scope ? { packageId: scope } : {})) || [])
+      // One app's drafts come off the env-wide list: its customization pair
+      // may not be installed, and a `?package=` read refuses one that is not.
+      const appScope = scope ? appDraftPackages(scope) : null;
+      const pending = ((await client.listDrafts?.({})) || [])
         .filter((d) => d && typeof d.type === 'string' && typeof d.name === 'string')
+        .filter((d) => appScope === null || (typeof d.packageId === 'string' && appScope.includes(d.packageId)))
         .map((d) => ({
           type: d.type as string,
           name: d.name as string,

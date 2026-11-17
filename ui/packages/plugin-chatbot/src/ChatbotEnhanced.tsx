@@ -5493,6 +5493,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           live={buildIsLive}
                           nextSteps={builtNextSteps}
                           checklist={buildChecklist}
+                          publishFromShellBar={publishFromShellBar}
                           onOpenBuiltApp={onOpenBuiltApp}
                           openBuiltAppLabel={openBuiltAppLabel}
                           onDesignBuiltApp={onDesignBuiltApp}
@@ -6592,6 +6593,7 @@ function BuildProgressPanel({
   live = false,
   nextSteps,
   checklist,
+  publishFromShellBar = false,
   waitingLabel = 'Waiting for server…',
   stalledLabel = 'Still working…',
   offlineLabel = 'Connection lost — reconnecting…',
@@ -6614,6 +6616,12 @@ function BuildProgressPanel({
   live?: boolean;
   /** objectui#12724 — the build envelope's `nextSteps`, for the 「接下来可以说」 line. */
   nextSteps?: string[];
+  /**
+   * objectstack#34610 — {@link ChatbotEnhancedProps.publishFromShellBar}: the
+   * chat draws no Publish, so the footer does not tell the user to click one
+   * here.
+   */
+  publishFromShellBar?: boolean;
   onOpenBuiltApp?: (appName: string) => void;
   openBuiltAppLabel?: string;
   onDesignBuiltApp?: (appName: string, appSegment?: string) => void;
@@ -6872,9 +6880,12 @@ function BuildProgressPanel({
           ) : null}
         </div>
       ) : null}
-      {isDone && builtApp ? (
+      {isDone && builtApp && ((nextSteps && nextSteps.length > 0) || !publishFromShellBar) ? (
         // objectui#12724 — what to say next (the envelope's `nextSteps`) and
         // the posture of every later change, under the finished build.
+        // objectstack#34610 — under the shell's Publish the posture sentence
+        // ("click Publish here in the chat") is not drawn: there is no
+        // Publish here, and the drafts line points to the bar.
         <p
           className="mt-3 border-t pt-2.5 text-xs text-muted-foreground"
           data-testid="build-result-footer"
@@ -6889,11 +6900,13 @@ function BuildProgressPanel({
               })}{' '}
             </span>
           ) : null}
-          <span data-testid="build-result-posture">
-            {t('chatbot.build.draftPosture', {
-              defaultValue: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
-            })}
-          </span>
+          {publishFromShellBar ? null : (
+            <span data-testid="build-result-posture">
+              {t('chatbot.build.draftPosture', {
+                defaultValue: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
+              })}
+            </span>
+          )}
         </p>
       ) : null}
     </div>

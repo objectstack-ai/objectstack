@@ -11,7 +11,7 @@
  *
  * Pinned through the real `DraftPreviewBar`, on the object list route the
  * card's steps start from, against a fake `_drafts` ledger the fake metadata
- * client writes to (read as the route app's package, objectstack#34610). Each `_drafts` answer is the ledger as it stood when the
+ * client writes to (read as the route app's drafts, objectstack#34610). Each `_drafts` answer is the ledger as it stood when the
  * request was SENT, so a read sent before a write cannot count it.
  *
  * The bar's state is read from its controls and its count, not its copy: the
@@ -41,8 +41,8 @@ vi.mock('../preview/usePublishAllDrafts', () => ({
   usePublishAllDrafts: () => ({ publishAll: vi.fn(async () => ({ ok: true })), publishing: false }),
 }));
 vi.mock('../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
-// objectstack#34610 — the bar counts the current app's package drafts
-// (`_drafts?package=`), so the route's app resolves to its package.
+// objectstack#34610 — the bar counts the current app's drafts (its package
+// and its customization pair), so the route's app resolves to its package.
 vi.mock('../providers/MetadataProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadata: () => ({ apps: [{ name: 'showcase_app', _packageId: PACKAGE }] }),
@@ -66,7 +66,7 @@ const LIST_ROUTE = `/apps/showcase_app/${OBJECT}/view/${VIEW}?preview=draft`;
 function fakeServer(initial: Array<{ type: string; name: string }> = []) {
   const ledger = new Map(initial.map((d) => [`${d.type}/${d.name}`, d]));
   const draftsReads = vi.fn(async (input: RequestInfo | URL) => {
-    expect(String(input)).toBe(`/api/v1/meta/_drafts?package=${encodeURIComponent(PACKAGE)}`);
+    expect(String(input)).toBe('/api/v1/meta/_drafts');
     const answer = [...ledger.values()].map((d) => ({ ...d, packageId: PACKAGE }));
     return { ok: true, status: 200, json: async () => answer };
   });

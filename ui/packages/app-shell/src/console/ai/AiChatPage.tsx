@@ -129,6 +129,7 @@ import {
   type ShortcutLabelTranslate,
 } from '../../chrome/advertisedShortcuts.js';
 import { fetchPendingDraftCount } from '../../preview/draftStatus.js';
+import { appPackageOf } from '../../preview/usePendingDrafts.js';
 import { draftPreviewPath } from '../../preview/draftSurface.js';
 import {
   emitCanvasInvalidate,
@@ -409,6 +410,39 @@ interface PackageBearingMessage {
     builderHandoff?: { packageId?: string };
   }>;
 }
+/**
+ * objectstack#34610 — what the LAST turn drafted, read off its own tool
+ * results: the newest draft review after the last user message, or null when
+ * the turn drafted nothing. `items` are what it drafted; `packageId` is the
+ * review's (absent when the producer named none); `materialized` is
+ * ADR-0045's in-turn build. Exported for tests.
+ */
+export function turnDraftPackage(
+  messages: readonly {
+    role?: string;
+    toolInvocations?: ReadonlyArray<{
+      draftReview?: { packageId?: string; materialized?: boolean; items?: ReadonlyArray<{ type: string; name: string }> };
+    }>;
+  }[],
+): { packageId?: string; materialized?: boolean; items: ReadonlyArray<{ type: string; name: string }> } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role === 'user') return null;
+    const tools = message.toolInvocations ?? [];
+    for (let j = tools.length - 1; j >= 0; j--) {
+      const dr = tools[j].draftReview;
+      if (dr?.items && dr.items.length > 0) {
+        return {
+          items: dr.items,
+          ...(dr.packageId ? { packageId: dr.packageId } : {}),
+          ...(dr.materialized ? { materialized: true } : {}),
+        };
+      }
+    }
+  }
+  return null;
+}
+
 export function deriveBoundPackageId(
   messages: readonly PackageBearingMessage[],
   editPackageId: string | undefined,
@@ -2467,7 +2501,10 @@ export function ChatPane({
     navigate(move.to, { replace: move.replace });
   }, [showsMainArea, mainAreaTarget, location, activeAppPackageId, isLoading, navigate]);
   const showAppInMainArea = useCallback(
-    (segment: string, opts: { materialized?: boolean; path?: string } = {}) => {
+    (packageId: string, opts: { materialized?: boolean; path?: string } = {}) => {
+      // An edit to a code-shipped app is drafted into its customization pair
+      // (ADR-0146): the app it shows in is the pair's base.
+      const segment = appPackageOf(packageId);
       const materialized = opts.materialized === true || unpublishedApp(segment);
       setMainAreaState({
         conversationId,
@@ -2492,24 +2529,27 @@ export function ChatPane({
     },
     [],
   );
+  const queueInvalidations = useCallback((artifacts: ReadonlyArray<{ type: string; name: string }>) => {
+    for (const a of artifacts) {
+      if (!pendingInvalidationsRef.current.has(a.type)) pendingInvalidationsRef.current.set(a.type, a);
+    }
+    if (invalidateTimerRef.current) window.clearTimeout(invalidateTimerRef.current);
+    invalidateTimerRef.current = window.setTimeout(() => {
+      const batch = [...pendingInvalidationsRef.current.values()];
+      pendingInvalidationsRef.current.clear();
+      for (const inv of batch) emitCanvasInvalidate(inv);
+    }, 200);
+  }, []);
   const handleDraftArtifacts = useCallback(
     (artifacts: Array<{ type: string; name: string }>, appSegment?: string) => {
-      for (const a of artifacts) {
-        if (!pendingInvalidationsRef.current.has(a.type)) pendingInvalidationsRef.current.set(a.type, a);
-      }
-      if (invalidateTimerRef.current) window.clearTimeout(invalidateTimerRef.current);
-      invalidateTimerRef.current = window.setTimeout(() => {
-        const batch = [...pendingInvalidationsRef.current.values()];
-        pendingInvalidationsRef.current.clear();
-        for (const inv of batch) emitCanvasInvalidate(inv);
-      }, 200);
+      queueInvalidations(artifacts);
       // The app the draft belongs to: the drafted set's own package, else the
       // package this conversation is bound to (an edit drafts no `app`).
       // Unbound (a new build before its package exists), the page stays.
       const segment = appSegment ?? boundPackageId;
       if (liveTurnRef.current && segment) showAppInMainArea(segment);
     },
-    [boundPackageId, showAppInMainArea],
+    [boundPackageId, showAppInMainArea, queueInvalidations],
   );
   // ADR-0045: the build materialized — the real, unlisted app.
   const handleBuildMaterialized = useCallback(
@@ -2521,12 +2561,31 @@ export function ChatPane({
   // A finished turn refreshes the main area once more (and every pending
   // count): an incremental edit can land without growing the drafted set, so
   // the per-artifact signal above does not always fire for it.
+  //
+  // objectstack#34610 — for the same reason a finished turn that drafted
+  // shows its app in the main area itself: an edit that re-drafts an artifact
+  // the conversation already listed (the object a build made, edited in the
+  // next turn) never reaches `handleDraftArtifacts`, and read live it left the
+  // main area out of draft mode with the edit pending.
   const prevLoadingRef = useRef(false);
   useEffect(() => {
     const ended = prevLoadingRef.current && !isLoading;
     prevLoadingRef.current = isLoading;
-    if (ended && shownTargetRef.current) emitMetadataRefresh();
-  }, [isLoading]);
+    if (!ended) return;
+    if (liveTurnRef.current) {
+      const drafted = turnDraftPackage(messages);
+      const segment = drafted?.packageId ?? (drafted ? boundPackageId : undefined);
+      if (drafted && segment) {
+        showAppInMainArea(segment, drafted.materialized ? { materialized: true } : {});
+        // …and refreshes what it drafted, once the main area is in draft
+        // mode (the coalescing delay outlasts the move).
+        queueInvalidations(drafted.items);
+      }
+    }
+    if (shownTargetRef.current) emitMetadataRefresh();
+    // Re-runs on the other deps find no turn end (`prevLoadingRef` already
+    // holds the current value), so only the end of a turn acts.
+  }, [isLoading, messages, boundPackageId, showAppInMainArea, queueInvalidations]);
 
   // objectui#12724 — a finished build STAYS on the conversation. The
   // built-moment transition (objectui#5799) used to move the thread into the
@@ -2841,7 +2900,7 @@ export function ChatPane({
       <PendingDraftsBar
         packageId={boundPackageId}
         idle={!isLoading}
-        draftBarShown={mainAreaInPreview && Boolean(boundPackageId) && boundPackageId === activeAppPackageId}
+        draftBarShown={mainAreaInPreview && Boolean(boundPackageId && appPackageOf(boundPackageId) === activeAppPackageId)}
         onShowDraft={showsMainArea && boundPackageId ? () => showAppInMainArea(boundPackageId) : undefined}
       />
     ) : null;
