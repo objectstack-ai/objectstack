@@ -731,6 +731,7 @@ describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD 
           name: { type: 'text' },
           cb_market: { type: 'select' },
           parent: { type: 'lookup', reference: 'crm_account' },
+          markets: { type: 'multiselect' },
         },
       },
       {
@@ -854,6 +855,79 @@ describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD 
       approver: { type: 'user', lookupFilters: [{ field: 'name', operator: 'eq', value: { $record: 'acount.name' } }] },
     }));
     expect(findings.map((f) => f.path)).toEqual(['objects[0].fields.approver.lookupFilters[0].value.$record']);
+  });
+
+  // [#34378] A path that names real fields can still read a LIST. The
+  // comparand is one value under a scalar operator, so a multi-valued head
+  // (a plain path to it, or a hop through it) or a multi-valued leaf behind a
+  // single-valued hop is refused — by `isMultiValueField`, `FieldSchema`'s own
+  // predicate: an inherently multi type, or `multiple: true` on a
+  // multi-capable one.
+  describe('a path through or to a multi-valued field (#34378)', () => {
+    const multi = {
+      tags: { type: 'tags' },
+      regions: { type: 'select', multiple: true },
+      stage: { type: 'select', multiple: false },
+      accounts: { type: 'lookup', reference: 'crm_account', multiple: true },
+      partners: { type: 'lookup', reference: 'elsewhere_partner', multiple: true },
+      watchers: { type: 'user', multiple: true },
+    };
+    const refused = (path: string) => {
+      const findings = validateObjectFieldRefs(quote([entry(path)], multi));
+      expect(findings.map((f) => f.path)).toEqual([at(0)]);
+      expect(findings[0]).toMatchObject({ severity: 'error', rule: OBJECT_FIELD_REF_UNKNOWN });
+      expect(findings[0]!.hint).toContain('Point `$record` at a single-valued field');
+      return findings[0]!.message;
+    };
+
+    it('REFUSES a plain path to an inherently multi-valued field (`tags`)', () => {
+      expect(refused('tags')).toBe(
+        'fields.price_book.lookupFilters[0].value.$record "tags" names "tags", a multi-valued field on object '
+          + '"sales_quote"; a $record comparand is one value under a scalar operator.',
+      );
+    });
+
+    it('REFUSES a plain path to a `multiple: true` select', () => {
+      expect(refused('regions')).toContain('names "regions", a multi-valued field on object "sales_quote"');
+    });
+
+    it('REFUSES a hop through a `multiple: true` lookup, at the hop', () => {
+      expect(refused('accounts.cb_market')).toBe(
+        'fields.price_book.lookupFilters[0].value.$record "accounts.cb_market" goes through "accounts", a '
+          + 'multi-valued field on object "sales_quote"; a $record comparand is one value under a scalar operator.',
+      );
+    });
+
+    it('REFUSES a hop through a `multiple: true` user field, its target unjudged past the hop', () => {
+      expect(refused('watchers.department')).toContain('goes through "watchers", a multi-valued field');
+    });
+
+    it('REFUSES a hop through a multi-valued lookup to an object outside the stack: the head is this object\'s', () => {
+      expect(refused('partners.anything')).toContain('goes through "partners", a multi-valued field');
+    });
+
+    it('REFUSES a multi-valued leaf behind a single-valued hop, naming the leaf and its object', () => {
+      expect(refused('account.markets')).toBe(
+        'fields.price_book.lookupFilters[0].value.$record "account.markets" ends at "markets", a multi-valued '
+          + 'field on object "crm_account"; a $record comparand is one value under a scalar operator.',
+      );
+    });
+
+    it('reports a misspelt leaf behind a multi-valued hop once, as the miss', () => {
+      const findings = validateObjectFieldRefs(quote([entry('accounts.cb_markt')], multi));
+      expect(findings.map((f) => f.path)).toEqual([at(0)]);
+      expect(findings[0]!.message).toContain('"accounts.cb_markt" is not a field on object "crm_account"');
+    });
+
+    it('passes single-valued paths: a plain field, a single lookup, a hop, a `multiple: false` select', () => {
+      expect(validateObjectFieldRefs(quote([
+        { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } },
+        entry('account', 'cb_market'),
+        entry('account.cb_market'),
+        entry('stage'),
+        entry('account.created_at', 'valid_to'),
+      ], multi))).toEqual([]);
+    });
   });
 });
 
@@ -1184,6 +1258,7 @@ describe('[#22161] one-line verdicts — object-field-ref-unknown', () => {
       '`lookupColumns` and `lookupFilters[].field` against the REFERENCED object',
       '`lookupFilters[].value.$record`',
       'at most one relationship hop',
+      'a path through or to a multi-valued field',
       '`lookup`, `master_detail` and `user`',
       'reported once, there',
       'read verbatim',

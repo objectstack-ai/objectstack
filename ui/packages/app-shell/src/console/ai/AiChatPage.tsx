@@ -97,6 +97,7 @@ import {
   // to it, which is how this file once could not read `toolInvocations` off
   // its own function's return (objectui#4040; retired in objectui#4383 / PR
   // #4400). Pinned in the plugin's `chat-message-contract.test.ts`.
+  type ChatFilePart,
   type ChatbotEnhancedMessage as ChatMessage,
 } from '@object-ui/plugin-chatbot';
 // The side-effect-free names come through `/core` like every other app-shell
@@ -151,7 +152,12 @@ import { artifactStudioPath } from './artifactStudioPath.js';
 import { studioChangesReviewTarget } from '../../views/studio-design/studioChangesLink.js';
 import { BuildDebugDrawer } from './BuildDebugDrawer.js';
 import { isConversationZh } from './conversationLanguage.js';
-import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundAgentText.js';
+import {
+  resolveAttachmentNoteText,
+  resolveOutboundAgentText,
+  type AttachmentNoteKey,
+  type OutboundAgentTextKey,
+} from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
 import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
@@ -2377,6 +2383,10 @@ export function ChatPane({
       resolveOutboundAgentText(convZh, key, vars),
     [convZh],
   );
+  // The thread so far, read when a turn is prepared (objectstack#34461)
+  // without making the send callbacks change identity on every message.
+  const threadMessagesRef = useRef({ runtimeMessages, initialMessages });
+  threadMessagesRef.current = { runtimeMessages, initialMessages };
   const planApproveMessage = outboundText('planApproveMessage');
   const planApproveDefaultsMessage = outboundText('planApproveDefaultsMessage');
   // Same rule for the granular change-confirm card. It used to send a hard-coded
@@ -2437,36 +2447,42 @@ export function ChatPane({
   // parts carrying their `sys_file` id (`chatAttachments.ts`). Any other
   // attachment, and one over the cap or whose upload failed, is named in the
   // turn's text as not read, never dropped silently.
+  //
+  // objectstack#34462 — a turn with attachments is not ready to send until its
+  // uploads (and its sheet parse) settle, which takes seconds for a large
+  // photo, while a turn without one sends at once. So every turn is handed to
+  // `sendMessage` in the order the user sent it: a turn sent while an earlier
+  // one is still being prepared waits behind it. While any turn is being
+  // prepared the composer reads as busy (`preparingTurn`, folded into the
+  // pane's `isLoading` below), so a message typed meanwhile queues there, as
+  // it does during a running reply, instead of reaching the agent first.
   const { upload } = useUpload();
-  const sendNonSheetAttachments = useCallback(
-    async (text: string, nonSheets: File[]): Promise<void> => {
-      const outcome = await uploadChatAttachments(nonSheets, upload, window.location.href);
-      sendMessage(text + chatAttachmentNotes(outcome), undefined, outcome.parts);
-    },
-    [upload, sendMessage],
-  );
-  const doSend = useCallback(
-    (content: string, files?: File[]) => {
-      resetSuppression();
-      const sheets = (files ?? []).filter(isSpreadsheetAttachment);
-      if (!sheets.length) {
-        if (files?.length) {
-          void sendNonSheetAttachments(content, files).then(() => onSent(content));
-          return;
-        }
-        sendMessage(content);
-        onSent(content);
-        return;
-      }
-      // Retain the first sheet so ExcelImportBar can load its REAL rows into a
-      // built object (cloud#797) — the agent got a brief; the user gets an
-      // import affordance without re-picking the file.
-      setPendingSheet(sheets[0]);
-      void (async () => {
+  const [preparingTurn, setPreparingTurn] = useState(false);
+  const preparingCountRef = useRef(0);
+  const sendChainRef = useRef<Promise<void>>(Promise.resolve());
+  /** The turn's text and file parts, once its attachments are read. Never rejects. */
+  const prepareTurn = useCallback(
+    async (
+      content: string,
+      files: File[],
+    ): Promise<{ text: string; parts?: readonly ChatFilePart[]; sentText: string }> => {
+      const sheets = files.filter(isSpreadsheetAttachment);
+      const nonSheets = files.filter((f) => !isSpreadsheetAttachment(f));
+      // objectstack#34461 — the notes follow the conversation's language, as
+      // all outbound text does: the turn's own words decide it, as they will
+      // once the turn is in the thread; a turn with no words takes the
+      // thread's language so far.
+      const thread = threadMessagesRef.current;
+      const zh = content.trim()
+        ? isConversationZh([{ role: 'user', content }])
+        : isConversationZh(thread.runtimeMessages) || isConversationZh(thread.initialMessages);
+      const note = (key: AttachmentNoteKey, vars: Readonly<Record<string, string>>) =>
+        resolveAttachmentNoteText(zh, key, vars);
+      let merged = content;
+      if (sheets.length > 0) {
         const cap = (s: string) => (s.length > 40 ? `${s.slice(0, 40)}…` : s);
         const line = (r: string[]) =>
           r.slice(0, 12).map((c) => cap(String(c ?? '')).replace(/\s+/g, ' ')).join(' | ');
-        let merged = content;
         for (const f of sheets.slice(0, 2)) {
           try {
             const { parseSpreadsheetFile } = await import('@object-ui/plugin-grid');
@@ -2474,22 +2490,72 @@ export function ChatPane({
             const headers = rows[0] ?? [];
             const samples = rows.slice(1, 4);
             merged += [
-              `\n\n[附件表格 ${f.name} — ${Math.max(0, rows.length - 1)} 数据行 × ${headers.length} 列(控制台已在本地解析,文件本体未上传)]`,
-              `表头: ${line(headers)}`,
-              ...samples.map((r, i) => `样例${i + 1}: ${line(r)}`),
+              `\n\n${note('sheetBrief', {
+                name: f.name,
+                rows: String(Math.max(0, rows.length - 1)),
+                columns: String(headers.length),
+              })}`,
+              note('sheetHeaders', { cells: line(headers) }),
+              ...samples.map((r, i) => note('sheetSample', { n: String(i + 1), cells: line(r) })),
             ].join('\n');
           } catch (err) {
-            merged += `\n\n[附件表格 ${f.name}] 解析失败(${err instanceof Error ? err.message : 'unknown'})— 请引导用户改用对象列表的 Import 上传该文件。`;
+            merged += `\n\n${note('sheetParseFailed', {
+              name: f.name,
+              reason: err instanceof Error ? err.message : 'unknown',
+            })}`;
           }
         }
-        if (sheets.length > 2) merged += `\n\n(另有 ${sheets.length - 2} 个表格附件未读取 — 一次最多读取 2 个。)`;
-        const nonSheets = (files ?? []).filter((f) => !isSpreadsheetAttachment(f));
-        if (nonSheets.length > 0) await sendNonSheetAttachments(merged, nonSheets);
-        else sendMessage(merged);
-        onSent(merged);
-      })();
+        if (sheets.length > 2) merged += `\n\n${note('sheetsNotRead', { count: String(sheets.length - 2) })}`;
+      }
+      // What `onSent` is told: the sheet brief is part of it, the file notes
+      // are not (as before objectstack#34462).
+      const sentText = merged;
+      if (nonSheets.length === 0) return { text: merged, sentText };
+      const outcome = await uploadChatAttachments(nonSheets, upload, window.location.href);
+      return { text: merged + chatAttachmentNotes(outcome, zh), parts: outcome.parts, sentText };
     },
-    [resetSuppression, sendMessage, onSent, sendNonSheetAttachments, setPendingSheet],
+    [upload],
+  );
+  const doSend = useCallback(
+    (content: string, files?: File[]) => {
+      resetSuppression();
+      const attached = files ?? [];
+      // Nothing to read and nothing waiting ahead of it: send at once.
+      if (attached.length === 0 && preparingCountRef.current === 0) {
+        sendMessage(content);
+        onSent(content);
+        return;
+      }
+      // Retain the first sheet so ExcelImportBar can load its REAL rows into a
+      // built object (cloud#797) — the agent got a brief; the user gets an
+      // import affordance without re-picking the file.
+      const firstSheet = attached.find(isSpreadsheetAttachment);
+      if (firstSheet) setPendingSheet(firstSheet);
+      preparingCountRef.current += 1;
+      setPreparingTurn(true);
+      // The reading starts now, so two turns' uploads overlap; the send waits
+      // for the turn ahead of it.
+      const prepared =
+        attached.length > 0
+          ? prepareTurn(content, attached).catch(() => ({ text: content, parts: undefined, sentText: content }))
+          : Promise.resolve({ text: content, parts: undefined, sentText: content });
+      const ahead = sendChainRef.current;
+      const turn = (async () => {
+        const { text, parts, sentText } = await prepared;
+        await ahead;
+        resetSuppression();
+        if (parts && parts.length > 0) sendMessage(text, undefined, parts);
+        else sendMessage(text);
+        onSent(sentText);
+      })()
+        .catch(() => undefined)
+        .finally(() => {
+          preparingCountRef.current -= 1;
+          if (preparingCountRef.current === 0) setPreparingTurn(false);
+        });
+      sendChainRef.current = turn;
+    },
+    [resetSuppression, sendMessage, onSent, prepareTurn, setPendingSheet],
   );
 
   // Guards the empty-state first send against the conversation-id remount race:
@@ -3166,7 +3232,9 @@ export function ChatPane({
         hideClearBar
         onStop={isLoading ? stop : undefined}
         onReload={reload}
-        isLoading={isLoading}
+        // objectstack#34462 — busy while a turn's attachments are still being
+        // read, too: a message typed then queues behind that turn.
+        isLoading={isLoading || preparingTurn}
         // objectstack#33420 — a failed create is a send that never left the
         // client: the composer's not-sent notice and text restore answer it.
         error={conversationCreateError ?? (errorSuppressed ? undefined : error)}
