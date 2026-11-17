@@ -1917,6 +1917,8 @@ const ja = {
       },
       passwordsNote: "仮パスワード — 一度だけ表示され、保存されません。今すぐ保存してください。各ユーザーは初回サインイン時に変更する必要があります。",
       passwordsMore: "以降のエントリは省略されました — ダウンロードをご利用ください。",
+      positionsHint: "役職：役職のマシン名の列をマッピングできます（複数は「;」で区切ります）。各役職は Setup と同じルールで割り当てられます。存在しない役職や割り当て権限のない役職はその行にエラーとして表示され、ユーザーは作成されます。",
+      managerHint: "上司：各ユーザーの上司を示す列をマッピングできます（メールアドレス、電話番号ログインが有効な場合は電話番号）。上司はすべての行の取り込み後に関連付けられるため、ファイルの後方にいる上司も有効です。見つからない、または関連付けできない上司はその行にエラーとして表示され、ユーザーは作成されます。",
       passwordsDownload: "CSV をダウンロード",
     },
     ai: {
@@ -2256,6 +2258,9 @@ const ja = {
       fieldErrorsToast_one: "{{count}} 件の設定を確認してください：{{settings}}",
       fieldErrorsToast_other: "{{count}} 件の設定を確認してください：{{settings}}",
       cryptoRefusalTitle: "このデプロイメントはシークレットを暗号化できません",
+      platformManagedTitle: "プラットフォームが管理しています",
+      platformManagedBody: "ホスティングプラットフォームがこの環境向けに提供・設定しているため、ここでは設定しません。",
+      aiProviderManaged: "AI プロバイダー、モデル、認証情報はプラットフォームが管理しています。",
       cryptoRefusalSubjectSuffix: "は暗号化対象として宣言されているため、何も書き込まれませんでした。",
       cryptoRefusalNoSubject: "暗号化対象として宣言された値は拒否され、何も書き込まれませんでした。",
       cryptoRefusalToast: "シークレットを暗号化できません: {{subject}}",
@@ -2354,6 +2359,8 @@ const ja = {
         done: 'あなたの AI アシスタントまたは API キーが接続されています。',
         action: '接続',
       },
+      firstApp: { title: '最初のアプリを追加', todo: 'まだ独自のアプリがありません。マーケットプレイスからインストールするか作成すると、ホームに表示されます。', done: '独自のアプリがホームにあります。' },
+      firstRecord: { title: '最初のレコードを追加', todo: 'アプリでまだ誰もレコードを作成していません。', done: 'アプリでレコードが作成されました。', action: 'アプリを開く' },
     },
     error: {
       connectionFailed: "サーバーに接続できません",
@@ -2677,6 +2684,10 @@ const ja = {
       launcherLabel: "アプリランチャー",
       menuLabel: "アプリナビゲーション",
       menuEmpty: "このアプリには開けるナビゲーション項目がありません。",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "アプリのメニューバー",
+      searchMenu: "メニューを検索",
+      phoneBarHint: "星を付けた項目が下部バーに表示されます（先頭の 4 件）。",
       itemMenu: "{{name}} のその他の操作",
       openInNewTab: "新しいタブで開く",
       copyLink: "リンクをコピー",
@@ -2707,6 +2718,7 @@ const ja = {
         retry: "シングルサインオンで続行",
       },
       ssoHandoff: "{{target}} に進む",
+      ssoHandoffClient: "{{clientName}} に進むにはサインインしてください",
       devAdminHint: {
         title: "ローカル開発インスタンス",
         signIn: "開発用管理者でサインイン",
@@ -2736,6 +2748,8 @@ const ja = {
         directSignInRateLimited: "このネットワークから短時間に多くのサインインが開始されました。数秒待ってから、もう一度お試しください。",
         networkNotAllowed: "このシステムは、現在のネットワークからのサインインを許可していません。許可されたネットワーク（組織のオフィスネットワークや VPN など）から接続するか、管理者に問い合わせてください。",
         ssoAccessDenied: "サインインしたアカウントには、この環境へのアクセス権がありません。アクセス権のあるアカウントでサインインするか、この環境の組織の管理者にメンバーとして追加するよう依頼してください。",
+        ssoAccessDeniedNotMember: "サインインしたアカウントは、この環境の組織のメンバーではありません。メンバーのアカウントでサインインするか、組織の管理者に招待を依頼してください。",
+        ssoAccessDeniedInvitationPending: "この環境の組織に招待されていますが、招待はまだ承認されていません。メールから招待を承認してから、もう一度サインインしてください。",
         ssoSwitchAccount: "アカウントを切り替える",
         ssoBackToConsole: "コンソールに戻る",
         ssoSwitchAccountHint: "「アカウントを切り替える」を選ぶと、新しいタブでサインインサービスが開き、そこでサインアウトします。その後、アクセス権のあるアカウントでここから再度サインインしてください。",
@@ -3048,6 +3062,10 @@ const ja = {
       granted: "アクセスを許可しました",
       denied: "アクセスが拒否されました",
       noRedirect: "サーバーからリダイレクト URL が返されませんでした。",
+      returnToApp: "{{appName}} に戻って続行してください。このタブは閉じてかまいません。",
+      returnToUnnamedApp: "アプリケーションに戻って続行してください。このタブは閉じてかまいません。",
+      openApp: "{{appName}} を開く",
+      openUnnamedApp: "アプリケーションを開く",
       failed: "同意に失敗しました",
       footer: "アクセス権はアカウント設定からいつでも取り消せます。",
     },
@@ -3711,6 +3729,17 @@ const ja = {
       accept: "招待を承諾",
       accepted: "招待を承諾しました",
       joinedDescription: "{{orgName}} へようこそ。{{role}} として参加しました。",
+      joinedWelcome: "{{orgName}} へようこそ。",
+      verifyEmailTitle: "メールアドレスを確認してください",
+      verifyEmailDescription: "このアカウントのメールアドレスは招待されたアドレスで、確認済みである必要があります。確認してから、メールボックスの招待リンクをもう一度開いてください。",
+      proofInvalid: "この招待リンクはもう使用できません。新しい招待を依頼するか、既存のアカウントにサインインしてください。",
+      signInInstead: "既存のアカウントにサインイン",
+      proofTitle: "{{orgName}} に参加",
+      proofDescription: "招待を承諾するには、{{email}} のアカウントを設定してください。",
+      proofDivider: "またはパスワードを設定",
+      proofNameLabel: "名前",
+      proofPasswordLabel: "パスワード",
+      proofSubmit: "アカウントを作成して参加",
       continue: "続行",
       acceptFailed: "招待の承諾に失敗しました",
       decline: "辞退",
@@ -3744,6 +3773,8 @@ const ja = {
     viewApprovals: "承認を表示",
     noPendingApprovals: "承認待ちはありません",
     openApprovalsInbox: "承認ボックスを開く",
+    needsYou: "あなたの対応が必要",
+    viewApprovalDetails: "詳細を表示",
     badgeTotal: "合計 {{total}} 件",
     badgeNotifications: "未読トピック {{count}} 件",
     badgeNotifications_one: "未読トピック {{count}} 件",
@@ -3974,13 +4005,11 @@ const ja = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 利用枠の残りは {{left}} です。×N と表示されたモデルは、既定のモデルの N 倍の速さで利用枠を消費します。',
@@ -4045,6 +4074,7 @@ const ja = {
       get_metadata_schema: "メタデータの形式を調べる",
       get_package: "パッケージの情報を確認する",
       get_record_history: "このレコードの履歴を読む",
+      list_flow_runs: "フローの実行履歴を確認する",
       list_metadata: "既存のメタデータを一覧表示する",
       list_objects: "既存のオブジェクトを一覧表示する",
       list_packages: "既存のパッケージを一覧表示する",
@@ -4141,6 +4171,22 @@ const ja = {
       needsAttention: "要確認 {{count}} 件",
       needsAttention_one: "要確認 {{count}} 件",
       needsAttention_other: "要確認 {{count}} 件",
+      health: {
+        sampleRowsLive: "サンプルデータ {{count}} 件を公開済み",
+        sampleRowsLive_one: "サンプルデータ {{count}} 件を公開済み",
+        sampleRowsLive_other: "サンプルデータ {{count}} 件を公開済み",
+        views: "{{count}} 件のビュー",
+        views_one: "{{count}} 件のビュー",
+        views_other: "{{count}} 件のビュー",
+        widgets: "{{count}} 件のウィジェット",
+        widgets_one: "{{count}} 件のウィジェット",
+        widgets_other: "{{count}} 件のウィジェット",
+        seeds: "{{count}} 件のサンプルデータセット",
+        seeds_one: "{{count}} 件のサンプルデータセット",
+        seeds_other: "{{count}} 件のサンプルデータセット",
+        verified: "{{checks}} を確認済み",
+        seedFailed: "サンプルデータを読み込めませんでした。",
+      },
       unknownPhase: "不明なビルドフェーズ",
       nextStepsLead: "次はこう話しかけられます：{{steps}}",
       nextStepQuote: "「{{step}}」",
@@ -4325,13 +4371,26 @@ const ja = {
     progressBar: '承認の進捗',
     declaredActions: 'アクション',
     decisionPanelOffRequestPage: '承認の決定パネルは承認リクエストのページでのみ機能します。',
+    openNextAfterDecision: '決定後に次を開く',
+    queueDone: 'このリストの保留中のリクエストはすべて処理済みです。',
     snapshotAsSubmitted: '申請時の内容',
+    snapshotChanged: '変更あり',
+    snapshotCurrentValue: '現在の値',
+    snapshotOpenRecord: 'レコードを開く',
+    snapshotCurrentUnreadable: '現在のレコードを読み取れないため、申請後の変更は表示されません。',
+    snapshotChildCurrent: '現在の値：申請時の明細行は保存されていません。',
+    progressTitle: '承認の進捗',
+    attachmentsTitle: '添付ファイル',
     attachmentChip: '添付ファイル',
     attachmentOpenFailed: '添付ファイルを開けませんでした。もう一度お試しください',
     approveOneTitle: '「{{title}}」を承認しますか？',
     approveOneBody: 'あなたの名義でこのリクエストを承認します。コメントや添付を付ける場合は、リクエストを開いて操作してください。',
     flowOrigin: 'フロー起動',
     submittedByYou: 'あなたが提出',
+    awaitingYourDecision: 'あなたの承認待ち',
+    stepNumber: 'ステップ {{n}}',
+    submittedByName: '申請者 {{name}}',
+    moreDecisionActions: 'その他の承認操作',
     sortBy: '並び替え',
     sortRecent: '新しい順',
     sortOldest: '古い順',

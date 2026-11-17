@@ -350,6 +350,9 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // ... and a `permission-ref` field carries the object this form edits
     // (objectstack#32795), so the widget recognises the grant's name column by
     // its object and its column.
+    // (A lookup whose `lookupFilters` read `{ $record }` is stamped as a field
+    // of the record being edited by `gateFormFields`, the one step every
+    // layout draws its fields through.)
     field: withFormObject(
       withFollowedParentObject(withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName), ctx.objectSchema?.fields),
       ctx.objectName,

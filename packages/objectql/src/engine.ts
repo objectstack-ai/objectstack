@@ -146,6 +146,7 @@ import {
   type SummaryDescriptor,
 } from './summary-aggregate.js';
 import { refreshSummariesExtendedBy, summaryRefreshesSettled, type SummaryEnableRefreshReport } from './summary-enable-refresh.js';
+import { materialiseSummariesAddedSinceBoot, sealSummariesMaterialisedAtBoot, type SummaryMaterialiseOutcome } from './summary-install-materialise.js';
 import {
   DriverConnectError,
   DatasourceUnavailableError,
@@ -338,7 +339,7 @@ import { SecretsAndRoutingFacet } from './engine-secrets-and-routing.js';
 // [#29986 codemod] Migration flags, value-shape deviations, creation attestations, destroy: the methods of the same names below hand the bodies what they read (`MigrationStateHost`).
 import { MigrationStateFacet } from './engine-migration-state.js';
 // [#29986 codemod] Summary indexes, related-record expansion, file and reference hydration: the methods of the same names below hand the bodies what they read (`SummariesAndExpansionHost`).
-import { SummariesAndExpansionFacet } from './engine-summaries-and-expansion.js';
+import { SummariesAndExpansionFacet, type SummaryBatchScope } from './engine-summaries-and-expansion.js';
 // [#29986 codemod] Query lowering, search, find and findOne: the methods of the same names below hand the bodies what they read (`FindHost`).
 import { FindFacet } from './engine-find.js';
 // [#29986 codemod] Write preparation and insert: the methods of the same names below hand the bodies what they read (`InsertHost`).
@@ -445,6 +446,9 @@ export class ObjectQL implements IObjectQLEngine {
    * into a present one on every nested delete.
    */
   private readonly cascadeDeleteSets = new AsyncLocalStorage<CascadeDeleteSet>();
+
+  /** [#33795] The open roll-up batch scope (`SummaryBatchScope` says why it is ambient). */
+  private readonly summaryBatchStore = new AsyncLocalStorage<SummaryBatchScope>();
 
   /**
    * [#23221] The child delete {@link walkReferencingRelations} is issuing right
@@ -1953,6 +1957,7 @@ export class ObjectQL implements IObjectQLEngine {
     const readRegistry = () => this._registry;
     const host: ThisParameterType<typeof buildDriverOptions> = {
       isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
+      getDriver: (...a) => this.getDriver(...a),
       get txStore() { return readTxStore(); },
       transactionCoversDriverFor: (...a) => this.transactionCoversDriverFor(...a),
       get _registry() { return readRegistry(); },
@@ -4101,9 +4106,37 @@ export class ObjectQL implements IObjectQLEngine {
     return refreshSummariesExtendedBy(this, this.logger, packageId);
   }
 
+  /**
+   * [#34096] Record the roll-up `summary` fields served at the end of the
+   * boot as the ones the stored rows were computed for. `ObjectQLPlugin` calls
+   * it at `kernel:bootstrapped`; until then {@link materialiseAddedSummaries}
+   * walks nothing. Returns how many roll-ups are recorded.
+   */
+  sealSummariesMaterialisedAtBoot(): number {
+    return sealSummariesMaterialisedAtBoot(this);
+  }
+
+  /**
+   * [#34096] Compute, on every stored row still `NULL` there, the roll-up
+   * `summary` fields served now that the boot did not record — the ones a
+   * package install or upgrade added — through the child-write recompute's own
+   * aggregate and system-context `update`, then record them. {@link syncSchemas}
+   * runs it, so every install door's sync does. Never throws: an incomplete
+   * walk is logged at `error`, left unrecorded, and walked again by the next
+   * call (`summary-install-materialise.ts`).
+   */
+  materialiseAddedSummaries(): Promise<SummaryMaterialiseOutcome> {
+    return materialiseSummariesAddedSinceBoot(this, this.logger);
+  }
+
   /** [#30377] Resolves once the summary recomputes the enables so far started ({@link refreshSummariesEnabledBy}) have settled, so a door can answer after them. */
   summaryRefreshSettled(): Promise<void> {
     return summaryRefreshesSettled(this);
+  }
+
+  /** [#33795] `IObjectQLEngine.deferSummaryRecompute`: the body and its docblock are in `engine-summaries-and-expansion.ts`. */
+  deferSummaryRecompute<T>(callback: () => Promise<T>): Promise<T> {
+    return SummariesAndExpansionFacet.deferSummaryRecompute.call(summariesAndExpansionHost.of(this), callback) as Promise<T>;
   }
 
   private initializeSummaryFields(object: string, record: any): any {
@@ -5565,6 +5598,7 @@ export class ObjectQL implements IObjectQLEngine {
     const readLogger = () => this.logger;
     const host: ThisParameterType<typeof syncSchemas> = {
       getDriverForObject: (...a) => this.getDriverForObject(...a),
+      materialiseAddedSummaries: () => this.materialiseAddedSummaries(),
       get _registry() { return readRegistry(); },
       get logger() { return readLogger(); },
     };
@@ -5835,6 +5869,7 @@ export class ObjectQL implements IObjectQLEngine {
       recomputeSummaries: (...a) => engine.recomputeSummaries(...a),
       rejectCredentialAggregation: (...a) => engine.rejectCredentialAggregation(...a),
       get relatedSchemaOf() { return engine.relatedSchemaOf; },
+      relationSemiJoinServes: (...a) => engine.relationSemiJoinServes(...a),
       releaseSecretHandles: (...a) => engine.releaseSecretHandles(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
       resolveWhereTokens: (...a) => engine.resolveWhereTokens(...a),
@@ -6115,6 +6150,7 @@ export class ObjectQL implements IObjectQLEngine {
       invalidateSummaryIndex: (...a) => engine.invalidateSummaryIndex(...a),
       get logger() { return engine.logger; },
       serveReferenceNames: (...a) => engine.serveReferenceNames(...a),
+      get summaryBatchStore() { return engine.summaryBatchStore; },
       get summaryIndex() { return engine.summaryIndex; },
       set summaryIndex(v) { engine.summaryIndex = v; },
       get summaryIndexByParent() { return engine.summaryIndexByParent; },
@@ -6122,6 +6158,8 @@ export class ObjectQL implements IObjectQLEngine {
       get summaryIndexRevision() { return engine.summaryIndexRevision; },
       set summaryIndexRevision(v) { engine.summaryIndexRevision = v; },
       get summaryRetryOptions() { return engine.summaryRetryOptions; },
+      get txStore() { return engine.txStore; },
+      isClosedUnitHandle: (...a) => engine.isClosedUnitHandle(...a),
       update: (...a) => engine.update(...a),
     }));
     transactionsSectionHost.install((engine) => ({

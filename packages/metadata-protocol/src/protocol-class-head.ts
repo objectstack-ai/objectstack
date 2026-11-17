@@ -12,8 +12,8 @@
  * `onMetadataMutation`, `emitMetadataMutation`, `attachMetadataMutationPubSub`,
  * `detachMetadataMutationPubSub`, `applyRemoteMetadataMutation`,
  * `resyncMetadataMutationPubSub` (#31722, written here beside its lane),
- * `onMetaItemPublished`, `getOverlayRepo` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`; `registerUninstallGuard` (#31232) was
+ * `onMetaItemPublished`, `getOverlayRepo` moved out of `protocol.ts` whole (split
+ * by #29998 and #30954); `registerUninstallGuard` (#31232) was
  * written here in the same shape, beside `registerUninstallCleanup`.
  *
  * A MOVE, not a redesign. `ProtocolClassHeadFacet` is a stateless facet over the host
@@ -42,7 +42,7 @@ import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
 import { isPairOf } from '@objectstack/metadata-core';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { someShipperOf } from './protocol-environment-rows.js';
-import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 import type { ObjectExtensionRegistry } from './protocol-object-extension-item.js';
 import { canonicalMetaType } from './protocol-meta-type-schema.js';
@@ -201,19 +201,27 @@ export class ProtocolClassHeadFacet {
      * `deriveRestoredBody`, so nothing is written. Any other binding: the
      * caller's `artifactBacked` decides the intent, and the body writer is
      * {@link restoredBodyWriter}'s alone.
+     *
+     * [ADR-0150 D2, #34401] A restore into a package's OWN permission set,
+     * beside sets other namespaces' packages ship, overrides no shipped set,
+     * so the name-wide `artifactBacked` is narrowed by the verdict the save,
+     * publish and undo doors read ({@link isOwnPermissionSetWrite}): the
+     * store is told a runtime-only write, as that package's save is. Every
+     * restore that does override a shipped set keeps the intent it had.
      */
     static restoreWriteFor(host: Pick<ProtocolHost, 'engine' | 'overrideWriteVerdict' | 'packagedArtifactOwner' | 'restoredBodyWriter' | 'shippedArtifactsOf'>, singularType: string,
             name: string,
             binding: string | null,
             artifactBacked: boolean,
             source: string,): { intent: 'override-artifact' | 'runtime-only'; deriveRestoredBody: (historyBody: unknown) => Promise<unknown> } {
+        const overridesShipped = artifactBacked && !isOwnPermissionSetWrite(host.engine, singularType, name, binding);
         // [ADR-0150 D4, #32552] The binding is judged against every package
         // that ships the name ({@link someShipperOf}): each namespace's holder
         // has its own pair, never only the shipper registered first.
         const installed = installedManifestsOfEngine(host.engine);
-        const pairRow = artifactBacked && someShipperOf(host, singularType, name,
+        const pairRow = overridesShipped && someShipperOf(host, singularType, name,
             (owner) => owner !== undefined && isPairOf(binding, owner, installed));
-        const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !pairRow ? 'override-artifact' : 'runtime-only';
+        const intent: 'override-artifact' | 'runtime-only' = overridesShipped && !pairRow ? 'override-artifact' : 'runtime-only';
         const writeRestored = host.restoredBodyWriter(singularType, name, binding, source);
         const deriveRestoredBody = pairRow
             ? async (historyBody: unknown): Promise<unknown> => {

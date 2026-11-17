@@ -4922,6 +4922,47 @@ describe('validateTranslationReferences — hook refusals (#26170)', () => {
   });
 });
 
+describe('validateTranslationReferences — hook texts (#34374)', () => {
+  const textStack = {
+    hooks: [
+      {
+        name: 'lead_follow_up',
+        object: 'lead',
+        events: ['afterUpdate'],
+        body: { language: 'js', source: "await ctx.text('follow_up_subject', { lead: ctx.input.name });" },
+        texts: { follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] } },
+      },
+      { name: 'stamp', object: 'lead', events: ['beforeInsert'], handler: 'stamp' },
+    ],
+  };
+  const bundle = (hooks: unknown) => ({ ...textStack, translations: [{ 'zh-CN': { hooks } }] });
+
+  it('reports nothing for a translation of a declared text', () => {
+    expect(validateTranslationReferences(
+      bundle({ lead_follow_up: { texts: { follow_up_subject: { message: '跟进已认定线索：{{ lead }}' } } } }),
+    )).toEqual([]);
+  });
+
+  it('refuses a text key the hook does not declare, with the nearest declared key offered', () => {
+    const findings = validateTranslationReferences(
+      bundle({ lead_follow_up: { texts: { follow_up_subjct: { message: 'x' } } } }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.lead_follow_up.texts.follow_up_subjct');
+    expect(findings[0].message).toContain('a key hook "lead_follow_up" does not declare under `texts`');
+    expect(findings[0].message).toContain('Did you mean "follow_up_subject"?');
+  });
+
+  it('refuses a text key on a hook that declares no texts', () => {
+    const findings = validateTranslationReferences(bundle({ stamp: { texts: { anything: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].hooks.stamp.texts.anything');
+    expect(findings[0].message).toContain('hook "stamp" declares no `texts`');
+  });
+});
+
 describe('validateTranslationReferences — hook refusal reasons (#33214)', () => {
   const planStack = {
     hooks: [
@@ -5026,5 +5067,56 @@ describe('validateTranslationReferences — doc books (#26690)', () => {
       { books: { 'com.example.crm': { groups: { start: { label: 'x' } } } } },
       { manifest: { id: 'com.example.crm' } },
     )).map((f) => f.path)).toEqual(['translations[0].en.books.com.example.crm.groups.start']);
+  });
+});
+
+describe('validateTranslationReferences — text a flow writes into a record (ruling 6913660232)', () => {
+  const caseStack = {
+    flows: [
+      {
+        name: 'case_escalation',
+        type: 'record_change',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start', config: { objectName: 'crm_case', triggerType: 'record-after-update' } },
+          {
+            id: 'set_reason', type: 'update_record', label: 'Set reason',
+            config: {
+              objectName: 'crm_case',
+              filter: { id: { dialect: 'cel', source: 'record.id' } },
+              fields: {
+                escalation_reason: { dialect: 'template', source: 'Auto-escalated: {{ record.priority }} priority' },
+                status: 'escalated',
+              },
+            },
+          },
+          { id: 'tell', type: 'save_notice', label: 'Tell', config: { message: 'Escalated' } },
+        ],
+      },
+    ],
+  };
+  const bundle = (flows: unknown) => ({ ...caseStack, translations: [{ 'zh-CN': { flows } }] });
+  const keyed = (fields: Record<string, string>, nodeId = 'set_reason') =>
+    bundle({ case_escalation: { records: { [nodeId]: { fields } } } });
+
+  it('reports nothing for a field the node marks as text', () => {
+    expect(validateTranslationReferences(keyed({ escalation_reason: '自动升级：{{ record.priority }} 优先级' }))).toEqual([]);
+  });
+
+  it('refuses a key over a field whose value is a bare string — a literal is never translated', () => {
+    const findings = validateTranslationReferences(keyed({ status: '已升级' }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.case_escalation.records.set_reason.fields.status');
+  });
+
+  it('refuses a key over an UNKNOWN node, and one over a node that is not a record write', () => {
+    const unknown = validateTranslationReferences(keyed({ escalation_reason: 'x' }, 'set_reasn'));
+    expect(unknown.map((f) => f.path)).toEqual(['translations[0]["zh-CN"].flows.case_escalation.records.set_reasn']);
+    expect(unknown[0].message).toContain('Did you mean "set_reason"?');
+
+    const otherType = validateTranslationReferences(keyed({ message: 'x' }, 'tell'));
+    expect(otherType.map((f) => f.path)).toEqual(['translations[0]["zh-CN"].flows.case_escalation.records.tell']);
+    expect(otherType[0].message).toContain('`save_notice` node');
   });
 });

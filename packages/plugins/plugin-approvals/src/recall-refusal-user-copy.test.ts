@@ -324,3 +324,82 @@ describe('non-submitter recall refusal renders through the operation catalog (#1
     expect(after!.status).toBe('pending');
   });
 });
+
+/**
+ * [#34454] The deployment override of `approval_recall_not_submitter` is asked
+ * with the NEGOTIATED locale, the way objectql's catalog callers ask
+ * (`negotiatedMessageLocale`), against the same `i18n` service the plugin
+ * wires into both `messageTranslator` and `i18nServiceSource`.
+ *
+ * The service double is shaped as `FileI18nAdapter` answers: `t()` matches the
+ * locale tag EXACTLY, so asked with the raw `zh` the zh-CN override missed and
+ * a bare-`zh` caller read the built-in zh-CN sentence instead of the
+ * deployment's own.
+ */
+describe('[#34454] the recall refusal override is asked with the negotiated locale', () => {
+  const OVERRIDE = '本单只能由发起人撤回,请联系发起人。';
+  const PACKS: Record<string, Record<string, string>> = {
+    'zh-CN': { 'errors.approval_recall_not_submitter': OVERRIDE },
+  };
+  const asked: string[] = [];
+  const exactMatchI18n = {
+    getLocales: () => Object.keys(PACKS),
+    t: (key: string, locale: string, _params?: Record<string, unknown>) => {
+      asked.push(`${key}@${locale}`);
+      return PACKS[locale]?.[key] ?? key;
+    },
+  };
+
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let n = 0;
+  const baseTime = new Date('2026-02-01T09:00:00Z').getTime();
+
+  /** Wired as `approvals-plugin.ts` wires it: one service behind both seams. */
+  const svcFor = () => new ApprovalService({
+    engine: engine as any,
+    clock: { now: () => new Date(baseTime + (n++) * 1000) },
+    messageTranslator: () => (key: string, locale: string, params?: Record<string, unknown>) =>
+      exactMatchI18n.t(key, locale, params),
+    i18nServiceSource: () => exactMatchI18n,
+  });
+
+  /** The reported setup: u1 submits, the request is pending on u2, and u2 tries to recall it. */
+  const refusalFor = async (locale: string) => {
+    const svc = svcFor();
+    (engine._tables['sys_user'] ??= []).push({ id: 'u2' });
+    const req = opened(await svc.openNodeRequest({
+      object: 'opportunity', recordId: 'opp1', runId: 'run_1', nodeId: 'step_1',
+      flowName: 'record_change_approval',
+      config: { approvers: [{ type: 'user' as const, value: 'u2' }], behavior: 'first_response' as const },
+      record: { id: 'opp1', amount: 100 },
+    }, SUBMITTER));
+    const err = await svc.recall(req.id, { actorId: 'u2' }, { ...OTHER_ZH, locale })
+      .then(() => null, (e: any) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(WIRE_CODE(err.message)).toBe(true);
+    expect((await svc.getRequest(req.id, SYS))!.status).toBe('pending');
+    return err;
+  };
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    n = 0;
+    asked.length = 0;
+  });
+
+  it('a bare `zh` caller reads the deployment\'s zh-CN override', async () => {
+    const err = await refusalFor('zh');
+    expect(asked).toContain('errors.approval_recall_not_submitter@zh-CN');
+    expect(err.message).toBe(`FORBIDDEN: ${OVERRIDE}`);
+  });
+
+  it('CONTROL — a zh-CN caller reads the same override', async () => {
+    const err = await refusalFor('zh-CN');
+    expect(err.message).toBe(`FORBIDDEN: ${OVERRIDE}`);
+  });
+
+  it('CONTROL — a locale the service does not hold reads the built-in sentence', async () => {
+    const err = await refusalFor('ja-JP');
+    expect(WIRE_ERROR(err.message)).toBe(BUILTIN_OPERATION_MESSAGES['ja-JP'].approval_recall_not_submitter);
+  });
+});

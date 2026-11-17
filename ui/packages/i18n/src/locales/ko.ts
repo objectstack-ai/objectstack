@@ -1917,6 +1917,8 @@ const ko = {
       },
       passwordsNote: "임시 비밀번호 — 한 번만 표시되며 저장되지 않습니다. 지금 저장하세요. 각 사용자는 첫 로그인 시 변경해야 합니다.",
       passwordsMore: "이후 항목은 생략되었습니다 — 다운로드를 이용하세요.",
+      positionsHint: "직위: 직위 머신 이름 열을 매핑할 수 있습니다(여러 개는 \";\"로 구분). 각 직위는 Setup과 같은 규칙으로 할당됩니다. 존재하지 않거나 할당 권한이 없는 직위는 해당 행에 오류로 표시되며, 사용자는 그대로 생성됩니다.",
+      managerHint: "관리자: 각 사용자의 관리자를 나타내는 열을 매핑할 수 있습니다(이메일 주소, 전화번호 로그인이 켜져 있으면 전화번호). 관리자는 모든 행을 가져온 뒤 연결되므로 파일 뒤쪽에 있는 관리자도 인정됩니다. 찾을 수 없거나 연결할 수 없는 관리자는 해당 행에 오류로 표시되며, 사용자는 그대로 생성됩니다.",
       passwordsDownload: "CSV 다운로드",
     },
     ai: {
@@ -2254,6 +2256,9 @@ const ko = {
       fieldErrorsToast_one: "확인이 필요한 설정 {{count}}개: {{settings}}",
       fieldErrorsToast_other: "확인이 필요한 설정 {{count}}개: {{settings}}",
       cryptoRefusalTitle: "이 배포는 시크릿을 암호화할 수 없습니다",
+      platformManagedTitle: "플랫폼에서 관리합니다",
+      platformManagedBody: "호스팅 플랫폼이 이 환경을 위해 제공하고 구성하므로 여기에서 설정하지 않습니다.",
+      aiProviderManaged: "AI 공급자, 모델 및 자격 증명은 플랫폼에서 관리합니다.",
       cryptoRefusalSubjectSuffix: "은(는) 암호화 대상으로 선언되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalNoSubject: "암호화 대상으로 선언된 값이 거부되어 아무것도 기록되지 않았습니다.",
       cryptoRefusalToast: "시크릿을 암호화할 수 없습니다: {{subject}}",
@@ -2352,6 +2357,8 @@ const ko = {
         done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
         action: '연결',
       },
+      firstApp: { title: '첫 번째 앱 추가', todo: '아직 자체 앱이 없습니다. 마켓플레이스에서 설치하거나 직접 만들면 홈에 표시됩니다.', done: '자체 앱이 홈에 있습니다.' },
+      firstRecord: { title: '첫 번째 레코드 추가', todo: '아직 앱에서 레코드를 만든 사람이 없습니다.', done: '앱에서 레코드가 만들어졌습니다.', action: '앱 열기' },
     },
     error: {
       connectionFailed: "서버에 연결할 수 없습니다",
@@ -2675,6 +2682,10 @@ const ko = {
       launcherLabel: "앱 런처",
       menuLabel: "앱 탐색",
       menuEmpty: "이 앱에는 열 수 있는 탐색 항목이 없습니다.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "앱 메뉴 바",
+      searchMenu: "메뉴 검색",
+      phoneBarHint: "별표를 누르면 항목이 하단 바에 고정됩니다. 하단 바에는 처음 4개가 표시됩니다.",
       itemMenu: "{{name}} 더 많은 작업",
       openInNewTab: "새 탭에서 열기",
       copyLink: "링크 복사",
@@ -2705,6 +2716,7 @@ const ko = {
         retry: "싱글 사인온으로 계속",
       },
       ssoHandoff: "{{target}}(으)로 계속",
+      ssoHandoffClient: "{{clientName}}(으)로 계속하려면 로그인하세요",
       devAdminHint: {
         title: "로컬 개발 인스턴스",
         signIn: "개발용 관리자로 로그인",
@@ -2734,6 +2746,8 @@ const ko = {
         directSignInRateLimited: "방금 이 네트워크에서 너무 많은 로그인이 시작되었습니다. 몇 초 기다린 후 다시 시도하세요.",
         networkNotAllowed: "이 시스템은 현재 네트워크에서의 로그인을 허용하지 않습니다. 허용된 네트워크(예: 조직의 사무실 네트워크나 VPN)에서 접속하거나 관리자에게 문의하세요.",
         ssoAccessDenied: "로그인한 계정에는 이 환경에 대한 액세스 권한이 없습니다. 액세스 권한이 있는 계정으로 로그인하거나, 이 환경 조직의 관리자에게 멤버로 추가해 달라고 요청하세요.",
+        ssoAccessDeniedNotMember: "로그인한 계정은 이 환경 조직의 멤버가 아닙니다. 멤버인 계정으로 로그인하거나, 조직 관리자에게 초대를 요청하세요.",
+        ssoAccessDeniedInvitationPending: "이 환경 조직에 초대되었지만 아직 초대를 수락하지 않았습니다. 이메일에서 초대를 수락한 후 다시 로그인하세요.",
         ssoSwitchAccount: "계정 전환",
         ssoBackToConsole: "콘솔로 돌아가기",
         ssoSwitchAccountHint: "계정 전환을 누르면 새 탭에서 로그인 서비스가 열리고 그곳에서 로그아웃됩니다. 그런 다음 액세스 권한이 있는 계정으로 여기에서 다시 로그인하세요.",
@@ -3046,6 +3060,10 @@ const ko = {
       granted: "액세스가 허용되었습니다",
       denied: "액세스 거부됨",
       noRedirect: "서버가 리디렉션 URL을 반환하지 않았습니다.",
+      returnToApp: "{{appName}}(으)로 돌아가 계속하세요. 이 탭은 닫아도 됩니다.",
+      returnToUnnamedApp: "애플리케이션으로 돌아가 계속하세요. 이 탭은 닫아도 됩니다.",
+      openApp: "{{appName}} 열기",
+      openUnnamedApp: "애플리케이션 열기",
       failed: "동의 실패",
       footer: "계정 설정에서 언제든지 액세스를 취소할 수 있습니다.",
     },
@@ -3708,6 +3726,17 @@ const ko = {
       accept: "초대 수락",
       accepted: "초대를 수락함",
       joinedDescription: "{{orgName}}에 오신 것을 환영합니다. {{role}}(으)로 참여했습니다.",
+      joinedWelcome: "{{orgName}}에 오신 것을 환영합니다.",
+      verifyEmailTitle: "이메일 주소를 인증하세요",
+      verifyEmailDescription: "이 계정의 이메일 주소는 초대받은 주소여야 하며 인증되어 있어야 합니다. 인증한 다음 메일함에서 초대 링크를 다시 여세요.",
+      proofInvalid: "이 초대 링크는 더 이상 사용할 수 없습니다. 새 초대를 요청하거나 기존 계정으로 로그인하세요.",
+      signInInstead: "기존 계정으로 로그인",
+      proofTitle: "{{orgName}}에 참여",
+      proofDescription: "초대를 수락하려면 {{email}} 계정을 설정하세요.",
+      proofDivider: "또는 비밀번호 설정",
+      proofNameLabel: "이름",
+      proofPasswordLabel: "비밀번호",
+      proofSubmit: "계정 만들고 참여",
       continue: "계속",
       acceptFailed: "초대 수락 실패",
       decline: "거절",
@@ -3741,6 +3770,8 @@ const ko = {
     viewApprovals: "승인 보기",
     noPendingApprovals: "대기 중인 승인 없음",
     openApprovalsInbox: "승인 보관함 열기",
+    needsYou: "처리가 필요한 항목",
+    viewApprovalDetails: "자세히 보기",
     badgeTotal: "총 {{total}}건",
     badgeNotifications: "읽지 않은 주제 {{count}}건",
     badgeNotifications_one: "읽지 않은 주제 {{count}}건",
@@ -3971,13 +4002,11 @@ const ko = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 사용 한도가 {{left}} 남았습니다. ×N으로 표시된 모델은 기본 모델보다 N배 빠르게 한도를 사용합니다.',
@@ -4042,6 +4071,7 @@ const ko = {
       get_metadata_schema: "메타데이터 형식 살펴보기",
       get_package: "패키지 정보 확인하기",
       get_record_history: "이 레코드의 변경 기록 읽기",
+      list_flow_runs: "플로우 실행 기록 확인하기",
       list_metadata: "기존 메타데이터 나열하기",
       list_objects: "기존 오브젝트 나열하기",
       list_packages: "기존 패키지 나열하기",
@@ -4138,6 +4168,22 @@ const ko = {
       needsAttention: "확인 필요 {{count}}건",
       needsAttention_one: "확인 필요 {{count}}건",
       needsAttention_other: "확인 필요 {{count}}건",
+      health: {
+        sampleRowsLive: "샘플 데이터 {{count}}건 게시됨",
+        sampleRowsLive_one: "샘플 데이터 {{count}}건 게시됨",
+        sampleRowsLive_other: "샘플 데이터 {{count}}건 게시됨",
+        views: "뷰 {{count}}개",
+        views_one: "뷰 {{count}}개",
+        views_other: "뷰 {{count}}개",
+        widgets: "위젯 {{count}}개",
+        widgets_one: "위젯 {{count}}개",
+        widgets_other: "위젯 {{count}}개",
+        seeds: "샘플 데이터 세트 {{count}}개",
+        seeds_one: "샘플 데이터 세트 {{count}}개",
+        seeds_other: "샘플 데이터 세트 {{count}}개",
+        verified: "{{checks}} 확인 완료",
+        seedFailed: "샘플 데이터를 불러오지 못했습니다.",
+      },
       unknownPhase: "알 수 없는 빌드 단계",
       nextStepsLead: "다음으로 이렇게 말할 수 있습니다: {{steps}}",
       nextStepQuote: "“{{step}}”",
@@ -4322,13 +4368,26 @@ const ko = {
     progressBar: '결정 진행 상황',
     declaredActions: '작업',
     decisionPanelOffRequestPage: '승인 결정 패널은 승인 요청 페이지에서만 작동합니다.',
+    openNextAfterDecision: '결정 후 다음 열기',
+    queueDone: '이 목록에 대기 중인 요청이 더 이상 없습니다.',
     snapshotAsSubmitted: '제출 당시 내용',
+    snapshotChanged: '변경됨',
+    snapshotCurrentValue: '현재 값',
+    snapshotOpenRecord: '레코드 열기',
+    snapshotCurrentUnreadable: '현재 레코드를 읽을 수 없어 제출 후 변경 사항을 표시하지 않습니다.',
+    snapshotChildCurrent: '현재 값: 제출 당시 하위 행은 저장되지 않습니다.',
+    progressTitle: '승인 진행 상황',
+    attachmentsTitle: '첨부 파일',
     attachmentChip: '첨부 파일',
     attachmentOpenFailed: '첨부 파일을 열 수 없습니다. 다시 시도해 주세요',
     approveOneTitle: '"{{title}}"을(를) 승인할까요?',
     approveOneBody: '내 이름으로 이 요청을 승인합니다. 의견이나 첨부 파일을 추가하려면 요청을 열어 처리하세요.',
     flowOrigin: '플로우 시작',
     submittedByYou: '내가 제출함',
+    awaitingYourDecision: '내 승인 대기 중',
+    stepNumber: '{{n}}단계',
+    submittedByName: '제출자 {{name}}',
+    moreDecisionActions: '기타 승인 작업',
     sortBy: '정렬',
     sortRecent: '최신순',
     sortOldest: '오래된순',

@@ -104,8 +104,8 @@ Deliberately absent:
 ## TypeScript Usage
 
 ```typescript
-import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, FlowCollectionSlotSchema, FlowValueSlotSchema, GetRecordConfigSchema, MapConfigSchema, SaveNoticeConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
-import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, FlowCollectionSlot, FlowValueSlot, GetRecordConfig, MapConfig, SaveNoticeConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
+import { AssignmentConfigSchema, AssignmentExpressionValueSchema, AssignmentValueSchema, CreateRecordConfigSchema, DeleteRecordConfigSchema, EndConfigSchema, FlowCollectionSlotSchema, FlowRecordFieldValueSchema, FlowValueSlotSchema, GetRecordConfigSchema, MapConfigSchema, SaveNoticeConfigSchema, ScreenConfigSchema, ScreenFieldConfigSchema, UpdateRecordConfigSchema } from '@objectstack/spec/automation';
+import type { AssignmentConfig, AssignmentExpressionValue, AssignmentValue, CreateRecordConfig, DeleteRecordConfig, EndConfig, FlowCollectionSlot, FlowRecordFieldValue, FlowValueSlot, GetRecordConfig, MapConfig, SaveNoticeConfig, ScreenConfig, ScreenFieldConfig, UpdateRecordConfig } from '@objectstack/spec/automation';
 
 // Validate data
 const result = AssignmentConfigSchema.parse(data);
@@ -154,7 +154,7 @@ Value the variable takes: a CEL value envelope `{ dialect: 'cel', source }` eval
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to insert into |
-| **fields** | `Record<string, any>` | optional | Field values to write on the new record: each key is a field name, each value a CEL value envelope or a literal |
+| **fields** | `Record<string, any>` | optional | Field values to write on the new record: each key is a field name, each value a CEL value envelope, a text envelope (a sentence written in the organization's language) or a literal |
 | **outputVariable** | `string` | optional | Flow variable bound to the created record — a name without a leading `$` (the `$` names are the flow engine's own), read as `{{ name }}` |
 
 
@@ -213,6 +213,13 @@ CEL value envelope `{ dialect: 'cel', source }` — evaluated by the expression 
 | **meta** | `{ rationale?: string; generatedBy?: string }` | optional |  |
 
 ---
+
+
+---
+
+## FlowRecordFieldValue
+
+A field value: a CEL value envelope `{ dialect: 'cel', source }` evaluated to the value written, a text envelope `{ dialect: 'template', source }` — a sentence for people to read, written in the organization's language (its translation picked at `flows.<flow>.records.<node_id>.fields.<field>`, then its `{{ }}` holes filled; the authored text when none is held) — or a literal written as it is (a bare string is never translated; a `{…}` template token in it is refused)
 
 
 ---
@@ -340,7 +347,7 @@ A value: a CEL value envelope `{ dialect: 'cel', source }` evaluated by the expr
 | :--- | :--- | :--- | :--- |
 | **objectName** | `string` | ✅ | Object to update |
 | **filter** | `Record<string, any>` | optional | Field/value pairs identifying the record(s) to update: each operand — a field's value, an operator's comparand (`{"$ne": null}`), a list comparand's element — is a CEL value envelope `{ dialect: 'cel', source }` evaluated before the query (one that evaluates to null refuses the node), a query placeholder such as `{current_user_id}` or `{today}` the query engine resolves, or a literal; a flow `{…}` template token is refused |
-| **fields** | `Record<string, any>` | optional | Field values to write: each key is a field name, each value a CEL value envelope or a literal |
+| **fields** | `Record<string, any>` | optional | Field values to write: each key is a field name, each value a CEL value envelope, a text envelope (a sentence written in the organization's language) or a literal |
 | **multi** | `boolean` | optional | Declare bulk intent: update every row the filter matches (default false — a predicate update without it is refused by the engine) |
 
 

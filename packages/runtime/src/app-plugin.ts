@@ -315,6 +315,13 @@ export class AppPlugin implements Plugin {
     readonly securityMetadataRegistrar: AppPluginSecurityMetadataRegistrar;
     /** [#31382] The host's per-kernel scheduled-work policy for this app's jobs; absent ⇒ the deployment switch. */
     private readonly scheduledWorkPolicy: ScheduledWorkPolicySource | undefined;
+    /**
+     * [#34458] The inline boot seed's loader while it holds person references
+     * its pass 2 left NULL because no `sys_user` row answered yet — the first
+     * admin of a single-tenant install signs up after the boot seed ran. Read
+     * by {@link registerSeedPersonReferenceHandoff}; released once it holds none.
+     */
+    private heldSeedPersonReferences?: SeedLoaderService;
 
     /**
      * `this.bundle` with every package-owned collection resolved across BOTH
@@ -2173,6 +2180,11 @@ export class AppPlugin implements Plugin {
                           },
                       });
                       const result = await seedLoader.load(request);
+                      // [#34458] A person the seed names who does not exist yet
+                      // (the first admin) left a NULL; the handoff below
+                      // resolves it once a `sys_user` row is inserted.
+                      this.heldSeedPersonReferences =
+                          seedLoader.heldPersonReferenceCount() > 0 ? seedLoader : undefined;
                       // [#23354] Publish the rows this seed landed on BEFORE the
                       // source settles, so the seed-ownership claim that runs on
                       // `app:seeded` reads them: it hands over these rows and no
@@ -2194,12 +2206,21 @@ export class AppPlugin implements Plugin {
                       // that, at every level; framework#4012 fixed that half, but
                       // the level gate below is what still hides these.) One
                       // labelled entry per config app.
+                      //
+                      // A load the loader REFUSED before any dataset ran (a
+                      // `Seed.dependsOn` it cannot honour) wrote no row, so
+                      // every row counter is zero and the refusal lives only in
+                      // `errors[]`. Counted as rejected, one per error — the
+                      // shape the marketplace sample-data heal records
+                      // (`rejected: summary.errors`) — so the banner's `Seeds:`
+                      // row and the settled message say the seed failed.
+                      const refusedLoad = !result.success && result.results.length === 0 ? result.errors.length : 0;
                       recordSeedOutcome(ctx, {
                           source: String(appId),
                           inserted: totalInserted,
                           updated: totalUpdated,
                           skipped: totalSkipped,
-                          rejected: totalErrored,
+                          rejected: totalErrored + refusedLoad,
                           droppedRefs: totalRefsDropped,
                       });
                       if (result.success) {
@@ -2359,6 +2380,52 @@ export class AppPlugin implements Plugin {
 
         this.registerHotReloadSeeder(ctx, ql);
         this.registerSeedTenancyHandoff(ctx, ql);
+        this.registerSeedPersonReferenceHandoff(ctx, ql);
+    }
+
+    /**
+     * [#34458] Resolve the inline boot seed's person references the moment a
+     * person exists to resolve them to.
+     *
+     * An un-walled boot seed loads before the first admin's `sys_user` row
+     * exists, so a `Field.user()` / `Field.lookup('sys_user')` value naming
+     * that admin lands NULL and pass 2 reports it unresolved. The first-admin
+     * handoff (`claimSeedOwnership`, plugin-security) writes `owner_id` and no
+     * other column, and a later boot's replay of a create-only dataset leaves
+     * an existing row as it is, so nothing else ever filled those columns.
+     *
+     * After every `sys_user` insert while the loader holds such references,
+     * the loader retries them by its own resolution rule and writes each one
+     * that now resolves onto the row the seed landed on, only while that column
+     * is still NULL (`SeedLoaderService#resolveHeldPersonReferences`): a row
+     * the seed did not write is never touched (ADR-0138 D1), and a value set
+     * since is kept. The walled boot writes no inline seed (its per-organization
+     * replay waits for the owner's membership instead), so this never holds
+     * anything there.
+     */
+    private registerSeedPersonReferenceHandoff(ctx: PluginContext, ql: any): void {
+        if (!ql || typeof ql.registerMiddleware !== 'function') return;
+        ql.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+            await next();
+            const loader = this.heldSeedPersonReferences;
+            if (!loader) return;
+            const isUserCreate =
+                opCtx?.object === 'sys_user' &&
+                (opCtx?.operation === 'create' || opCtx?.operation === 'insert');
+            if (!isUserCreate) return;
+            try {
+                const { held } = await loader.resolveHeldPersonReferences();
+                if (held === 0 && this.heldSeedPersonReferences === loader) this.heldSeedPersonReferences = undefined;
+            } catch (e: any) {
+                // Best-effort, like the tenancy handoff beside it: the person
+                // was just created and that must stand. The references stay
+                // held and the next `sys_user` insert retries them; a failed
+                // write was already logged at `error` by the loader.
+                ctx.logger.warn('[AppPlugin] seed person-reference handoff failed; the next user insert retries it', {
+                    error: e?.message ?? String(e),
+                });
+            }
+        });
     }
 
     /**

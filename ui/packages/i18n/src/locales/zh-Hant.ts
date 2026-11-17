@@ -1961,6 +1961,10 @@ const zhHant = {
       launcherLabel: '應用啟動臺',
       menuLabel: '應用導航',
       menuEmpty: '此應用沒有你可以開啟的導航項。',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: '應用選單欄',
+      searchMenu: '搜尋選單',
+      phoneBarHint: '點星標把選單項固定到底部欄，底部欄顯示前 4 個。',
       itemMenu: '{{name}} 的更多操作',
       openInNewTab: '在新標籤頁開啟',
       copyLink: '複製連結',
@@ -2010,6 +2014,9 @@ const zhHant = {
       fieldErrorsToast_one: '{{count}} 項設定需要處理：{{settings}}',
       fieldErrorsToast_other: '{{count}} 項設定需要處理：{{settings}}',
       cryptoRefusalTitle: '此部署無法加密機密資訊',
+      platformManagedTitle: '此項由平台託管',
+      platformManagedBody: '託管平台為此環境提供並配置此項，因此無需在此設定。',
+      aiProviderManaged: 'AI 提供商、模型與憑據由平台託管。',
       cryptoRefusalSubjectSuffix: '被宣告為加密欄位，因此未寫入任何內容。',
       cryptoRefusalNoSubject: '宣告為加密的值被拒絕，因此未寫入任何內容。',
       cryptoRefusalToast: '無法加密機密資訊：{{subject}}',
@@ -2108,6 +2115,8 @@ const zhHant = {
         done: '你已連線了 AI 助手或 API 金鑰。',
         action: '連線',
       },
+      firstApp: { title: '放進第一個應用', todo: '還沒有你自己的應用。從應用市場安裝一個或自己搭建一個，它會出現在首頁。', done: '你自己的應用已在首頁。' },
+      firstRecord: { title: '新增第一條記錄', todo: '還沒有人在你的應用裡建立記錄。', done: '你的應用裡已經有人建立了記錄。', action: '開啟應用' },
     },
     error: {
       connectionFailed: '無法連線到伺服器',
@@ -2554,6 +2563,8 @@ const zhHant = {
       },
       passwordsNote: '臨時密碼——僅顯示一次，不會被儲存。請立即儲存；使用者首次登入時必須修改。',
       passwordsMore: '更多條目已省略——請使用下載。',
+      positionsHint: '崗位：可對映一列崗位機器名，多個用“;”分隔。每個崗位按 Setup 中指派崗位的同樣規則分配；不存在或你無權指派的崗位會在該行報錯，使用者照常建立。',
+      managerHint: '上級：可對映一列每位使用者的上級，填上級的郵箱(開啟手機號登入時也可填手機號)。所有行匯入後才關聯上級，所以檔案後面的上級也算數；找不到或無法關聯的上級會在該行報錯，使用者照常建立。',
       passwordsDownload: '下載 CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
@@ -2784,6 +2795,7 @@ const zhHant = {
         retry: "繼續單點登入",
       },
       ssoHandoff: '繼續前往 {{target}}',
+      ssoHandoffClient: "登入以繼續前往 {{clientName}}",
       devAdminHint: {
         title: '本地開發實例',
         signIn: '以開發管理員登入',
@@ -2806,6 +2818,8 @@ const zhHant = {
         directSignInRateLimited: "剛剛從此網路發起的登入過多。請等待幾秒後再試。",
         networkNotAllowed: "本系統不允許從你當前的網路登入。請從允許的網路（例如組織的辦公網路或 VPN）連線，或聯絡管理員。",
         ssoAccessDenied: "你登入所用的賬號無權訪問本系統。請使用有權訪問的賬號登入，或請本系統所屬組織的管理員將你新增為成員。",
+        ssoAccessDeniedNotMember: "你登入所用的賬號不是本系統所屬組織的成員。請使用該組織成員的賬號登入，或請該組織的管理員邀請你。",
+        ssoAccessDeniedInvitationPending: "你已受邀加入本系統所屬組織，但尚未接受邀請。請先在郵件中接受邀請，然後重新登入。",
         ssoSwitchAccount: "切換賬號",
         ssoBackToConsole: "返回控制台",
         ssoSwitchAccountHint: "“切換賬號”會在新標籤頁中開啟你的登入服務並在那裡退出登入。之後請在此處使用有權訪問的賬號重新登入。",
@@ -3128,6 +3142,10 @@ const zhHant = {
       granted: '已授予訪問權限',
       denied: '訪問被拒絕',
       noRedirect: '伺服器未返回跳轉地址。',
+      returnToApp: '返回 {{appName}} 繼續操作。您可以關閉此標籤頁。',
+      returnToUnnamedApp: '返回該應用繼續操作。您可以關閉此標籤頁。',
+      openApp: '開啟 {{appName}}',
+      openUnnamedApp: '開啟該應用',
       failed: '授權失敗',
       footer: '您可以隨時在賬戶設定中撤銷訪問權限。',
     },
@@ -3957,6 +3975,17 @@ const zhHant = {
       accept: '接受邀請',
       accepted: '邀請已接受',
       joinedDescription: '歡迎加入 {{orgName}}，您的身份是 {{role}}。',
+      joinedWelcome: '歡迎加入 {{orgName}}。',
+      verifyEmailTitle: '請驗證您的郵箱地址',
+      verifyEmailDescription: '此賬號的郵箱地址須是受邀地址且已驗證。請先完成驗證，再從郵箱中重新開啟邀請連結。',
+      proofInvalid: '此邀請連結已無法使用。請索取新的邀請，或登入已有賬號。',
+      signInInstead: '登入已有賬號',
+      proofTitle: '加入 {{orgName}}',
+      proofDescription: '為 {{email}} 設定賬號以接受邀請。',
+      proofDivider: '或設定密碼',
+      proofNameLabel: '姓名',
+      proofPasswordLabel: '密碼',
+      proofSubmit: '建立賬號並加入',
       continue: '繼續',
       acceptFailed: '接受邀請失敗',
       decline: '拒絕',
@@ -3993,6 +4022,8 @@ const zhHant = {
     viewApprovals: '檢視審批',
     noPendingApprovals: '暫無待審批事項',
     openApprovalsInbox: '開啟審批中心',
+    needsYou: '需要你處理',
+    viewApprovalDetails: '檢視詳情',
     badgeTotal: '共 {{total}} 項',
     badgeNotifications: '{{count}} 個未讀主題',
     badgeNotifications_one: '{{count}} 個未讀主題',
@@ -4220,13 +4251,11 @@ const zhHant = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: 'AI 額度還剩 {{left}}。標有 ×N 的模型消耗額度的速度是預設模型的 N 倍。',
@@ -4291,6 +4320,7 @@ const zhHant = {
       get_metadata_schema: '查閱中繼資料的格式',
       get_package: '檢視應用包資訊',
       get_record_history: '讀取這條記錄的修改歷史',
+      list_flow_runs: '檢視自動化執行記錄',
       list_metadata: '列出已有中繼資料',
       list_objects: '列出已有物件',
       list_packages: '列出已有應用包',
@@ -4387,6 +4417,22 @@ const zhHant = {
       needsAttention: '{{count}} 項需要處理',
       needsAttention_one: '{{count}} 項需要處理',
       needsAttention_other: '{{count}} 項需要處理',
+      health: {
+        sampleRowsLive: '{{count}} 條示例資料已上線',
+        sampleRowsLive_one: '{{count}} 條示例資料已上線',
+        sampleRowsLive_other: '{{count}} 條示例資料已上線',
+        views: '{{count}} 個檢視',
+        views_one: '{{count}} 個檢視',
+        views_other: '{{count}} 個檢視',
+        widgets: '{{count}} 個儀表盤元件',
+        widgets_one: '{{count}} 個儀表盤元件',
+        widgets_other: '{{count}} 個儀表盤元件',
+        seeds: '{{count}} 組示例資料',
+        seeds_one: '{{count}} 組示例資料',
+        seeds_other: '{{count}} 組示例資料',
+        verified: '已核對 {{checks}}',
+        seedFailed: '示例資料未能載入。',
+      },
       unknownPhase: '未知的構建階段',
       nextStepsLead: '接下來可以說：{{steps}}',
       nextStepQuote: '「{{step}}」',
@@ -4572,13 +4618,26 @@ const zhHant = {
     progressBar: '決策進度',
     declaredActions: '操作',
     decisionPanelOffRequestPage: '審批決策面板僅在審批請求頁面上可用。',
+    openNextAfterDecision: '處理後開啟下一條',
+    queueDone: '這個列表裡的待審請求已全部處理完。',
     snapshotAsSubmitted: '提交時的內容',
+    snapshotChanged: '已改動',
+    snapshotCurrentValue: '當前值',
+    snapshotOpenRecord: '開啟記錄',
+    snapshotCurrentUnreadable: '無法讀取當前記錄，提交後的改動無法標出。',
+    snapshotChildCurrent: '當前值：提交時未儲存子表資料。',
+    progressTitle: '審批進度',
+    attachmentsTitle: '附件',
     attachmentChip: '附件',
     attachmentOpenFailed: '無法開啟附件，請重試',
     approveOneTitle: '通過“{{title}}”？',
     approveOneBody: '將以你的身份通過該請求。如需填寫審批意見或附件，請開啟該請求處理。',
     flowOrigin: '流程發起',
     submittedByYou: '由你提交',
+    awaitingYourDecision: '待你審批',
+    stepNumber: '第 {{n}} 步',
+    submittedByName: '提交人 {{name}}',
+    moreDecisionActions: '更多審批操作',
     sortBy: '排序',
     sortRecent: '最新優先',
     sortOldest: '最早優先',

@@ -132,7 +132,9 @@
  * refusal catalogue: the hook must be one the stack defines (or a sibling
  * package's, through the artifact carrier), and the code one its `refusals`
  * declares — the body runner reads the key for a declared code and nothing
- * else. An unknown hook and an undeclared code are each an orphan.
+ * else. An unknown hook and an undeclared code are each an orphan. So is
+ * (#34374) a `hooks.<name>.texts.<key>` key over a text the hook's `texts`
+ * does not declare: `ctx.text` reads the key for a declared text only.
  *
  * `flows.<name>.successMessage` / `.errorMessage` (#22507), the terminal
  * toasts, are judged against the flow itself: `translateFlow` overlays a toast
@@ -247,7 +249,7 @@
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, expandViewContainer } from '@objectstack/spec';
-import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey } from '@objectstack/spec/automation';
+import { APPROVAL_NODE_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped } from '@objectstack/spec/automation';
 import {
   FLOW_TERMINAL_MESSAGE_KEYS,
   deriveImplicitPackageBook,
@@ -289,6 +291,13 @@ const END_NODE_TYPE = 'end';
  * reason.
  */
 const SAVE_NOTICE_NODE_TYPE = 'save_notice';
+
+/**
+ * [ruling 6913660232] The nodes a `flows.<name>.records.*` key addresses: a
+ * `create_record` / `update_record` node, whose `fields` values the author may
+ * MARK as text. Local consts for {@link SCREEN_NODE_TYPE}'s reason.
+ */
+const RECORD_WRITE_NODE_TYPES: ReadonlySet<string> = new Set(['create_record', 'update_record']);
 
 /**
  * The component a misplaced `components.<id>.items` key most often sits on: a
@@ -502,6 +511,13 @@ interface FlowFacts {
    */
   notices: Set<string>;
   /**
+   * [ruling 6913660232] Record-write node id → the fields whose value it
+   * MARKS as text (a `{ dialect: 'template', source }` envelope) — the only
+   * fields a `flows.<name>.records.<node_id>.fields.<field>` key translates.
+   * Every `create_record` / `update_record` node is listed, marking none or not.
+   */
+  records: Map<string, Set<string>>;
+  /**
    * The ids of the `approval` nodes — the nodes a
    * `flows.<name>.approvals.<node_id>` key addresses, at any depth.
    */
@@ -550,6 +566,8 @@ interface Universe {
    */
   /** [#26170] Each hook's declared refusal codes, and (#33214) each code's declared reasons. */
   hooks: Map<string, Map<string, Set<string>>>;
+  /** [#34374] Each hook's declared text keys (`HookSchema.texts`) — what a `hooks.<name>.texts.<key>` key may name. */
+  hookTexts: Map<string, Set<string>>;
   /** Object-less actions — the ones `globalActions.*` may name. */
   globalActions: Map<string, AnyRec>;
   /** Action name → owning object, so a misfiled `globalActions` key can say where it belongs. */
@@ -1614,6 +1632,7 @@ function buildUniverse(stack: AnyRec): Universe {
     const screens = new Map<string, ScreenFacts>();
     const refusals = new Set<string>();
     const notices = new Set<string>();
+    const records = new Map<string, Set<string>>();
     const approvals = new Set<string>();
     const otherNodes = new Map<string, string>();
     const messages = new Set<string>(FLOW_TERMINAL_MESSAGE_KEYS.filter((key) => typeof flow[key] === 'string'));
@@ -1630,6 +1649,14 @@ function buildUniverse(stack: AnyRec): Universe {
         }
         if (nodeType === APPROVAL_NODE_TYPE) approvals.add(nodeId);
         if (nodeType === SAVE_NOTICE_NODE_TYPE) notices.add(nodeId);
+        if (nodeType && RECORD_WRITE_NODE_TYPES.has(nodeType) && !records.has(nodeId)) {
+          const marked = new Set<string>();
+          const fields = isRec(node.config) ? asRecord(node.config.fields) : {};
+          for (const [fieldName, value] of Object.entries(fields)) {
+            if (isFlowTextEnvelopeShaped(value)) marked.add(fieldName);
+          }
+          records.set(nodeId, marked);
+        }
         continue;
       }
       const config = isRec(node.config) ? node.config : undefined;
@@ -1649,7 +1676,7 @@ function buildUniverse(stack: AnyRec): Universe {
         hasDescription: typeof config?.description === 'string' && config.description.length > 0,
       });
     }
-    flows.set(flowName, { screens, refusals, notices, approvals, messages, otherNodes });
+    flows.set(flowName, { screens, refusals, notices, records, approvals, messages, otherNodes });
   };
   for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
   for (const flow of artifactProvidedRecords(stack, 'flows')) {
@@ -1666,6 +1693,7 @@ function buildUniverse(stack: AnyRec): Universe {
   // the artifact carrier; the declaration this leg is JUDGING keeps the slot,
   // the flows' decision.
   const hooks = new Map<string, Map<string, Set<string>>>();
+  const hookTexts = new Map<string, Set<string>>();
   const collectHookRecord = (hook: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
     const hookName = strName(hook.name);
     if (!hookName) return;
@@ -1675,6 +1703,8 @@ function buildUniverse(stack: AnyRec): Universe {
       codes.set(code, new Set(Object.keys(asRecord(isRec(entry) ? entry.reasons : undefined))));
     }
     hooks.set(hookName, codes);
+    // [#34374] The text keys `hooks.<name>.texts.<key>` may name.
+    hookTexts.set(hookName, new Set(Object.keys(asRecord(hook.texts))));
   };
   for (const hook of recordsOf(stack.hooks)) collectHookRecord(hook, { ownDeclaration: true });
   for (const hook of artifactProvidedRecords(stack, 'hooks')) {
@@ -1783,6 +1813,7 @@ function buildUniverse(stack: AnyRec): Universe {
     dashboards,
     flows,
     hooks,
+    hookTexts,
     globalActions,
     actionOwners,
     picklists,
@@ -2466,6 +2497,39 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Save-notice translations are keyed by the \`id\` of a \`save_notice\` node.`,
           );
         }
+        // ── flows.<name>.records.<node_id>.fields.<field> (ruling 6913660232) ──
+        for (const [nodeId, rawRecord] of Object.entries(asRecord(rawFlow.records))) {
+          const marked = flow.records.get(nodeId);
+          if (!marked) {
+            const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+            orphan(
+              `${inLocale} · flow "${flowName}" · record write "${nodeId}"`,
+              `${flowPath}.records.${nodeId}`,
+              nodeType
+                ? `Translations are keyed to record write "${nodeId}", which flow "${flowName}" declares as ` +
+                  `${/^[aeiou]/.test(nodeType) ? 'an' : 'a'} \`${nodeType}\` node, not a \`create_record\` or ` +
+                  `\`update_record\`, so nothing resolves this key.`
+                : `Translations are keyed to record write "${nodeId}", a node id flow "${flowName}" does not ` +
+                  `declare, so the text it names keeps its authored language.` +
+                  suggest(nodeId, flow.records.keys()),
+              `Record-write translations are keyed by the \`id\` of a \`create_record\` or \`update_record\` node.`,
+            );
+            continue;
+          }
+          for (const fieldName of Object.keys(asRecord(isRec(rawRecord) ? rawRecord.fields : undefined))) {
+            if (marked.has(fieldName)) continue;
+            orphan(
+              `${inLocale} · flow "${flowName}" · record write "${nodeId}" · field "${fieldName}"`,
+              `${flowPath}.records.${nodeId}.fields.${fieldName}`,
+              `Translations are keyed to field "${fieldName}" of record write "${nodeId}" in flow ` +
+                `"${flowName}", whose \`fields\` value there is not marked as text, so nothing resolves this ` +
+                `key: only a \`{ dialect: 'template', source }\` value is written in the organization's language, ` +
+                `and a bare string is a value written as it is spelled.` +
+                suggest(fieldName, marked),
+              `Mark the value as text — \`{ dialect: 'template', source: '…' }\` — or drop the key.`,
+            );
+          }
+        }
         // ── flows.<name>.approvals.<node_id> ──────────────────────────────
         for (const nodeId of Object.keys(asRecord(rawFlow.approvals))) {
           if (flow.approvals.has(nodeId)) continue;
@@ -2496,7 +2560,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `${inLocale} · hook "${hookName}"`,
             hookPath,
             `Translations are keyed to hook "${hookName}", which this stack does not define, so its ` +
-              `refusals keep their declared messages.` +
+              `refusals and texts keep their declared messages.` +
               suggest(hookName, universe.hooks.keys()),
             `Match the key to a hook's \`name\`, or drop it.`,
           );
@@ -2535,6 +2599,23 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 suggest(code, declared.keys()),
             `Refusal translations are keyed by a code the hook's \`refusals\` declares; declare it there, ` +
               `or drop the key.`,
+          );
+        }
+        // ── hooks.<name>.texts.<key> (#34374) ─────────────────────────────
+        const texts = universe.hookTexts.get(hookName) ?? new Set<string>();
+        for (const key of Object.keys(asRecord(rawHook.texts))) {
+          if (texts.has(key)) continue;
+          orphan(
+            `${inLocale} · hook "${hookName}" · text "${key}"`,
+            `${hookPath}.texts.${key}`,
+            texts.size === 0
+              ? `Translations are keyed to text "${key}", but hook "${hookName}" declares no \`texts\`, so ` +
+                `nothing resolves this key.`
+              : `Translations are keyed to text "${key}", a key hook "${hookName}" does not declare under ` +
+                `\`texts\`, so nothing resolves this key.` +
+                suggest(key, texts),
+            `Text translations are keyed by a key the hook's \`texts\` declares; declare it there, or drop ` +
+              `the key.`,
           );
         }
       }

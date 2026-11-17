@@ -124,6 +124,47 @@ request arrived (REST, SDK, raw ObjectQL call).
 **On read** — `find` / `findOne` results have non-readable fields
 stripped from every record before the response leaves the engine.
 
+**Computed fields follow their inputs** — a computed field (a `formula`,
+or a stored field with an `expression`) is withheld from a caller who is
+not served whole a field it reads: a field of its own record the caller
+may not read (a permission set marks it `readable: false`, or the caller
+fails its `requiredPermissions`) or is served masked (its `maskingRule`),
+whether the expression names it directly, inside a function such as
+`label()`, or through another computed field; or a field the referenced
+object declares, on the record the expression reads through one
+reference, where the caller may not read that object, may not read the
+field, or is served it masked — a stored field there withheld for what it
+reads through a reference of its own included, however long the chain
+and wherever it comes back to an object it has already passed through.
+What is judged is the field, not the row:
+a computed field is not withheld because the caller may not read the
+particular record a reference points at (a formula reads `null` there; a
+stored one keeps the value its writer computed). A withheld computed
+field is stripped from records, refused as a filter, sort, group or
+aggregate input (a stored one; a `formula` is refused there for every
+caller), refused when a write payload names it (as is a computed field
+the caller is served masked), served by its floor name
+where it is the name of a record shown through `referenceNameVisible`,
+and left out of the fields served to that caller, including the object
+schema and the writable fields. A computed field whose expression
+reads the record in a way no field name describes (a computed key such as
+`record[record.k]`, a method or macro on `record`, `record` passed whole
+to a function, or a dialect other than CEL) is withheld whenever some other
+field of the object is not served whole to that caller, and for what it
+reads through a reference as any other computed field is. A `summary`
+roll-up is not a computed field in this sense: it does not follow the
+fields it aggregates, so mask it on its own where a set must not see it.
+The record the engine echoes for a
+public-form submission carries no computed field that reads through a
+reference. View All and Modify All lift a permission set's `readable:
+false`, not a capability gate or a masking rule, so their holders are
+withheld a computed field over such a field too. To let a permission
+set's holders read a computed field, grant that set read on every field
+the expression reads, unmasked: the capability a field's
+`requiredPermissions` names also lifts a masking rule it gates, and a
+masking rule with no gate masks the field for every caller until the
+field declares one.
+
 **On write** — `insert` / `update` requests are checked **before** the
 operation reaches the driver. If the payload contains any field the
 caller is not permitted to edit, the engine throws
@@ -159,7 +200,12 @@ out-votes another set's `false`). Until a subtractive muting layer lands
 (ADR-0066 ⑧), a `{ readable: false }` rule masks the field only as long
 as **no other set the user holds** declares it `readable: true` or holds
 View All (`viewAllRecords`, reads every field of the object) or Modify All
-(`modifyAllRecords`, reads and edits every field) on that object — so
+(`modifyAllRecords`, reads and edits every field) on that object, and
+the set that declares it does not itself hold Modify All on that object:
+the set's own View All leaves its `readable: false` binding, while its
+own Modify All still reads and edits every field of the object, its own
+rows included (`security-superuser-field-mask-inert` warns on such a row),
+until the field-axis split (#34365) — so
 protect sensitive fields by granting them only in the sets that need
 them, and treat a sensitive field on a broadly-granted object as a
 review smell — see the

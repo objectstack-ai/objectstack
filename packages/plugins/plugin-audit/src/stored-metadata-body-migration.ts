@@ -108,6 +108,14 @@ export function withheldStoredHashTokens(text: string): string {
 /** [#21207] The decision-audit table whose conflict notes named both stored hashes. */
 export const METADATA_DECISION_AUDIT_OBJECT = 'sys_metadata_audit';
 
+/**
+ * Every table {@link migrateStoredMetadataBodyCopies} rewrites: the two copy
+ * tables and the decision-audit table. The one list its run reads, and the
+ * objects `os migrate audit-metadata-bodies --apply` holds the audit seal lock
+ * for (ADR-0154 D3 as amended).
+ */
+export const STORED_METADATA_BODY_REWRITTEN_OBJECTS = [...STORED_METADATA_BODY_AUDIT_OBJECTS, METADATA_DECISION_AUDIT_OBJECT] as const;
+
 /** The persisted code of an optimistic-concurrency refusal's decision-audit row. */
 // adr0112-ok: D6b — the persisted audit column's own vocabulary, not a wire code
 const CONFLICT_NOTE_CODE = 'metadata_conflict';
@@ -434,13 +442,13 @@ export async function migrateStoredMetadataBodyCopies(
   // [#21207] The copies of a decision-audit row are read too (its conflict
   // note named both stored hashes), and so is the decision-audit table itself.
   const copiedObjects = [...STORED_METADATA_BODY_OBJECTS, METADATA_DECISION_AUDIT_OBJECT];
-  const tables: ReadonlyArray<{ object: string; where: Record<string, unknown> }> = [
-    ...STORED_METADATA_BODY_AUDIT_OBJECTS.map((object) => ({ object, where: { object_name: { $in: copiedObjects } } })),
-    // A PREDICATE on the persisted `code` column (ADR-0112 D6b, the audit
-    // column's own vocabulary), written in operator form: it reads rows by the
-    // code they carry and stamps none.
-    { object: METADATA_DECISION_AUDIT_OBJECT, where: { code: { $eq: CONFLICT_NOTE_CODE } } },
-  ];
+  // A decision-audit row is read by a PREDICATE on the persisted `code` column
+  // (ADR-0112 D6b, the audit column's own vocabulary), written in operator form:
+  // it reads rows by the code they carry and stamps none.
+  const tables: ReadonlyArray<{ object: string; where: Record<string, unknown> }> = STORED_METADATA_BODY_REWRITTEN_OBJECTS.map((object) => ({
+    object,
+    where: object === METADATA_DECISION_AUDIT_OBJECT ? { code: { $eq: CONFLICT_NOTE_CODE } } : { object_name: { $in: copiedObjects } },
+  }));
   for (const { object, where } of tables) {
     report.byObject[object] = { scanned: 0, rewritten: 0, refused: 0 };
     const sealed = amender?.isSealed(object) === true;

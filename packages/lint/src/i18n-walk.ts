@@ -133,12 +133,14 @@
  *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
  *   flows.<flow>.notices.<node_id>.message                     (#28251)
+ *   flows.<flow>.records.<node_id>.fields.<field>              (ruling 6913660232)
  *   flows.<flow>.approvals.<node_id>.label                     (#24916)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
  *       (see `authorWarnedTranslationGroups`)
  *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
  *   hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message      (#33214)
+ *   hooks.<hook>.texts.<key>.message                           (#34374)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
@@ -172,7 +174,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, templateSlotSource } from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, isFlowTextEnvelopeShaped, templateSlotSource } from '@objectstack/spec/automation';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
@@ -1755,6 +1757,9 @@ export function collectExpectedEntries(
   // ── Hook refusal catalogues (`hooks.<hook>.refusals.<CODE>.message`) ─
   walkHookRefusals(config, out);
 
+  // ── Hook texts (`hooks.<hook>.texts.<key>.message`, #34374) ─────
+  walkHookTexts(config, out);
+
   // ── Object sections (fieldGroups + authored form/page sections) ───
   // Deliberately a pass of its own: the two authoring surfaces live in
   // `objects`, `views` and `pages`, and one section may be declared by more
@@ -2079,6 +2084,14 @@ const REFUSED_OUTCOME = 'refused';
 const SAVE_NOTICE_NODE_TYPE = 'save_notice';
 
 /**
+ * [ruling 6913660232] The nodes whose `fields` values
+ * `flows.<flow>.records.<node_id>.fields.<field>` addresses: a record write
+ * whose field value is MARKED as text — a `{ dialect: 'template', source }`
+ * envelope (`FlowRecordFieldValueSchema`).
+ */
+const RECORD_WRITE_NODE_TYPES: ReadonlySet<string> = new Set(['create_record', 'update_record']);
+
+/**
  * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
  * walks use (`conversions/walk.ts`, `automation/control-flow.zod.ts`) and for
  * the same reason: a stack handed to `defineStack` is hand-built objects rather
@@ -2362,6 +2375,26 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       pushOptional(out, ['flows', flowName, 'notices', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
     }
 
+    // [ruling 6913660232] `flows.<flow>.records.<node_id>.fields.<field>` — a
+    // `create_record` / `update_record` field value MARKED as text (a
+    // `{ dialect: 'template', source }` envelope), at any depth of the same
+    // node universe. The engine reads that key (`flowRecordFieldTextKey`) in
+    // the ORGANIZATION's language before it fills the holes, so the seed is
+    // the authored template, holes and all. A bare string in `fields` is a
+    // literal value, never translated, and has no key.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || !RECORD_WRITE_NODE_TYPES.has(node.type)) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      const fields = cfg.fields && typeof cfg.fields === 'object' && !Array.isArray(cfg.fields) ? cfg.fields : {};
+      for (const [fieldName, value] of Object.entries(fields as Record<string, unknown>)) {
+        if (!isFlowTextEnvelopeShaped(value)) continue;
+        const source = inlineText((value as { source?: unknown }).source);
+        pushOptional(out, ['flows', flowName, 'records', nodeId, 'fields', fieldName], source, 'flow', scope);
+      }
+    }
+
     // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's
     // step label, the name its request shows the submitter and the approvers.
     // The approvals door reads that key in the reader's locale for the
@@ -2415,6 +2448,29 @@ function walkHookRefusals(config: any, out: ExpectedEntry[]): void {
           'hook',
         );
       }
+    }
+  }
+}
+
+/**
+ * Emit `hooks.<hook>.texts.<key>.message` for every text a hook declares
+ * (#34374, ruling 6913660232 parameter 7), seeded with the declared message.
+ *
+ * The hook runtime reads exactly that key (`hookTextMessageKey`) in the
+ * organization's language when the hook asks for the text (`ctx.text`), so
+ * each declared text is one demand, counted under the `hook` bucket like a
+ * refusal, and `os i18n extract` scaffolds it (parameter 5: the existing
+ * coverage check demands it, no new gate). Keyed by hook name.
+ */
+function walkHookTexts(config: any, out: ExpectedEntry[]): void {
+  const hooks: any[] = Array.isArray(config?.hooks) ? config.hooks : [];
+  for (const hook of hooks) {
+    const hookName = typeof hook?.name === 'string' && hook.name.length > 0 ? hook.name : undefined;
+    if (!hookName) continue;
+    const texts = hook.texts;
+    if (!texts || typeof texts !== 'object' || Array.isArray(texts)) continue;
+    for (const [key, entry] of Object.entries<any>(texts)) {
+      pushOptional(out, ['hooks', hookName, 'texts', key, 'message'], inlineText(entry?.message), 'hook');
     }
   }
 }

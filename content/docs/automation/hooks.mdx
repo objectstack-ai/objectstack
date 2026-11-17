@@ -309,11 +309,12 @@ hook, the default. An `async: true` hook is dispatched there too, but does not
 run there: see [`async: true` after hooks run after the
 commit](#async-true-after-hooks-run-after-the-commit).
 
-Four ordinary operations put a write inside such a unit:
+Five ordinary operations put a write inside such a unit:
 
 | Operation | What is inside the transaction |
 | :--- | :--- |
 | Any write to an object with an `after*` hook that can abort it: a blocking one whose `onError` is `abort` (the default), or one carrying a `condition`, whatever its `onError` and `async` (a condition that cannot be evaluated aborts the write) | The write and every `after*` hook it dispatches, so that hook's abort rolls the row back. Not opened on an object outside the default datasource, or on a driver with no transactions: there the row stays stored after an abort |
+| Any write to an object with a `before*` hook on the same verb (`beforeInsert` for an insert, `beforeUpdate` for an update, `beforeDelete` for a delete), declared in metadata, whatever its `onError` | The write, its `before*` hooks and every `ctx.api` write they make, so a refusal later in the same write (a declared validation, a later `before*` hook, a driver constraint) rolls those writes back with it. Not opened on an object outside the default datasource, or on a driver with no transactions: there a `before*` hook's writes stay stored after a refusal. A hook registered in code with `registerHook` opens no unit |
 | A by-id `delete()` that cascades to dependent records | Each **cascaded child's** `afterDelete`. The parent's own `afterDelete` runs after that unit closes, unless the row above opened one around the whole delete |
 | `batchData` / `deleteManyData` with `atomic: true` | Every member's `after*` — the batch aborts and rolls back on the first failure |
 | Any write you wrapped yourself in `ctx.api.transaction(...)` or `engine.transaction(...)` | Everything in the callback |
@@ -332,7 +333,25 @@ What this means when you write a blocking handler:
   event on its own.
 
 Before hooks carry no such caveat: they run before the write is issued, and
-throwing from one refuses the operation outright.
+throwing from one refuses the operation outright. A `before*` hook's own
+`ctx.api` writes are inside the unit its row of the table above opens, so they
+follow the same rules: a refusal anywhere in the write rolls them back, with no
+per-hook opt-out, and a write to an object on another datasource is refused
+with `CrossDatasourceTransactionWriteError`. The one exception is an
+append-only ledger on another datasource (an object whose `lifecycle.class` is
+`audit`, `telemetry` or `event`): it is written outside the unit and survives
+the rollback. Keep the objects a `before*` hook
+writes on the default datasource; on MongoDB, run it as a replica set, which
+any unit needs.
+
+On PostgreSQL a statement that fails at the database aborts the whole unit
+(`25P02`, "current transaction is aborted"), and the unit takes no savepoint
+around a hook's `ctx.api` write. A `before*` hook whose `ctx.api` statement
+fails there therefore refuses the write it belongs to, even when the hook body
+catches the error, `onError: 'log'` swallows it, or its `retryPolicy` re-runs
+it. Check the condition before writing, or make that write from an `after*`
+hook with `async: true` (not yet measured on PostgreSQL; tracked in
+[#34563](https://github.com/objectstack-ai/objectstack/issues/34563)).
 
 <Callout type="info">
 For a blocking hook this is a deliberate, ruled semantics ([#7477](https://github.com/objectstack-ai/objectstack/issues/7477)),
@@ -433,6 +452,62 @@ export const planGate = {
 
 A hook that declares no `refusals` refuses exactly as before: the thrown
 error's own `code`, `status` and message reach the caller.
+
+## Writing a sentence people read — `texts`
+
+A sentence a hook writes into a record — the subject of the follow-up task it
+opens, the summary it logs — is read by the whole organization. **Declare it**
+on the hook and ask for it by key: the runtime answers it in the
+**organization's** language, never the language of the person whose save fired
+the hook.
+
+```typescript
+export const leadFollowUp = {
+  name: 'lead_follow_up',
+  object: 'crm_lead',
+  events: ['afterUpdate'],
+  texts: {
+    follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] },
+  },
+  handler: async (ctx) => {
+    if (ctx.input.status !== 'qualified' || ctx.previous?.status === 'qualified') return;
+    const subject = await ctx.text('follow_up_subject', { lead: ctx.input.name });
+    await ctx.api.object('crm_task').insert({ subject, related_to_lead: ctx.input.id });
+  },
+};
+```
+
+- **The organization's language.** The Localization setting when somebody set
+  it (Setup → Localization), else the app's `i18n.defaultLocale`. A hook a
+  person's save fires still writes in the organization's language — the record
+  is data everyone reads, not a message to that person.
+- **Translated first, filled after.** `ctx.text` picks
+  `hooks.<hook>.texts.<key>.message` in that language, then fills the `{{ }}`
+  holes from the `params` you pass. A text that declares `params` may write
+  `{{ name }}` holes over those names, with an optional known formatter; one
+  that declares none is plain text, and a hole in it is refused when the hook
+  is saved. A hole over another name is refused at save; logic, an unknown
+  formatter, an empty hole and `{{ amount | currency }}` with no code are
+  refused by `os validate`, `compile` and the publish gate.
+- **A missing translation never fails the hook.** With no translation, or no
+  language to pick, the declared `message` is written. A translation whose
+  holes do not render is dropped for the declared `message`, filled.
+- **An unreadable Localization setting rejects.** When the settings service
+  cannot be read, `ctx.text` rejects rather than write another language over
+  the organization's choice. Catch it if the hook should write anyway.
+- **Only declared text is translated.** A string the hook builds itself is
+  written as it is. A key `texts` does not declare is refused when the hook is
+  saved if the hook names it literally in `ctx.text('key')`, otherwise when the
+  hook runs, as a `500` that names the hook and the key.
+- **It works whichever way the hook is written** — a TypeScript `handler` and a
+  sandboxed `js` body get the same `ctx.text`. An `expression` body cannot ask
+  for one, so `texts` is refused there.
+- **Translated by key.** `os i18n extract` scaffolds
+  `hooks.<hook>.texts.<key>.message` and `os i18n check` counts it. See
+  [Translations](/docs/ui/translations).
+
+Rows a hook wrote before it declared the text keep their text: nothing is
+rewritten.
 
 ## Recipe — refuse overlapping time ranges
 

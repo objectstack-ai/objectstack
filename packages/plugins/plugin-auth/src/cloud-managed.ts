@@ -25,10 +25,28 @@
  * creates the credential when the user holds none) refuse every request, with
  * the two doors that send their link or code (`/request-password-reset`,
  * `/phone-number/request-password-reset`), so nobody is sent a link the reset
- * door would refuse. A password set before stays where it is (changing one is
+ * door would refuse; and the one-step invitation acceptance
+ * (`/organization/accept-invitation-one-step`, `invitation-mailbox-proof.ts`),
+ * which creates an account with a password or sets one on an unverified
+ * account, refuses every request that carries the invitation mail's proof,
+ * before the proof is read. A password set before stays where it is (changing one is
  * `/change-password`'s, objectstack-ai/cloud#4471). ADR-0135 D5.2's
  * break-glass clause, which kept a local credential reachable by population,
  * holds on self-hosted deployments only.
+ *
+ * Membership and membership tiers are the hosting organisation's too. Every
+ * organization-family door that writes or deletes an organization membership
+ * row refuses every request, as `/organization/invite-member` does:
+ * `/organization/remove-member`, `/organization/update-member-role` (Make
+ * Owner included, which sends the owner tier to it), `/organization/leave`,
+ * `/organization/accept-invitation`, `/organization/create` (it makes the
+ * caller the new organization's owner) and `/organization/delete` (it ends
+ * every membership of the organization). The one door left open is
+ * `/organization/add-member`: it admits exactly a platform administrator,
+ * adding a membership, and is the operator's way to restore one the
+ * environment lost. The rest of the family writes no membership row (team
+ * rows, invitation rows, the session's active organization, the
+ * organization's own fields) or only reads, and answers as before.
  *
  * Every refusal is `409 RESOURCE_CONFLICT`, no code minted — the answer
  * cloud-connection's platform-managed doors give, on the same rule: the
@@ -83,6 +101,38 @@ export const CLOUD_MANAGED_REFUSAL_MESSAGES = {
   requestPasswordReset:
     "This environment is cloud-managed: you sign in through the hosting organisation's identity provider, and no "
     + 'local password is set or reset here for anyone, an administrator included. No reset link or code was sent.',
+  // `/organization/accept-invitation-one-step` with the invitation mail's proof.
+  acceptInvitationOneStep:
+    "This environment is cloud-managed: you sign in through the hosting organisation's identity provider, and no "
+    + 'local password is set here for anyone, so an invitation is not accepted with a new password. Sign in through '
+    + 'that identity provider instead. No account or password was changed.',
+  // `/organization/remove-member` (`sys_member.remove_member`).
+  removeMember:
+    'This environment is cloud-managed: its members and their roles are managed in the organisation that hosts it, '
+    + 'so a member cannot be removed here. Remove them in that organisation instead. No member was removed.',
+  // `/organization/update-member-role` (`sys_member.update_member_role` and
+  // `sys_member.transfer_ownership`, which sends the owner role to it).
+  updateMemberRole:
+    'This environment is cloud-managed: its members and their roles are managed in the organisation that hosts it, '
+    + "so a member's role cannot be changed here. Change it in that organisation instead. No role was changed.",
+  // `/organization/leave` (`sys_organization.leave_organization`).
+  leaveOrganization:
+    'This environment is cloud-managed: its members and their roles are managed in the organisation that hosts it, '
+    + 'so you cannot leave it here. Ask that organisation to remove you instead. No membership was ended.',
+  // `/organization/accept-invitation` (`sys_invitation.accept_invitation`).
+  acceptInvitation:
+    'This environment is cloud-managed: its members and their roles are managed in the organisation that hosts it, '
+    + 'so an invitation cannot be accepted here. Ask that organisation to add you instead. No membership was created.',
+  // `/organization/create` (`sys_organization.create_organization`), which
+  // makes the caller the new organization's owner.
+  createOrganization:
+    'This environment is cloud-managed: its members and their roles are managed in the organisation that hosts it, '
+    + 'so an organization, which would make you its owner, cannot be created here. No organization was created.',
+  // `/organization/delete` (`sys_organization.delete_organization`), which
+  // ends every membership of the organization.
+  deleteOrganization:
+    'This environment is cloud-managed: its members and their roles are managed in the organisation that hosts it, '
+    + 'so an organization, and every membership in it, cannot be deleted here. No organization was deleted.',
 } as const;
 
 /** The doors a cloud-managed environment narrows. */

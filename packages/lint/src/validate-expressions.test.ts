@@ -351,6 +351,46 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues).toHaveLength(0);
     });
 
+    // #34363 — `timestamp()`'s string overload over a date-only field checks
+    // clean on the `YYYY-MM-DD` text and faults on it at run time: refused,
+    // with the whole-day shift named. A date-time field's ISO instant, and the
+    // taught `isoDate(addDays(…))` shape, stay clean.
+    it('flags timestamp() over a date-only field, and names the addDays shift', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'library_loan',
+          fields: {
+            borrow_date: { type: 'date' },
+            picked_up_at: { type: 'datetime' },
+            due_measured: {
+              type: 'formula', name: 'due_measured',
+              expression: "isoDate(timestamp(record.borrow_date) + duration('168h'))",
+            },
+            due_taught: { type: 'formula', name: 'due_taught', expression: 'isoDate(addDays(record.borrow_date, 7))' },
+            due_from_instant: {
+              type: 'formula', name: 'due_from_instant',
+              expression: "isoDate(timestamp(record.picked_up_at) + duration('168h'))",
+            },
+          },
+        }],
+        flows: [{
+          name: 'loan_overdue',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'library_loan', condition: 'timestamp(borrow_date) < now()' } },
+            { id: 'end', type: 'end' },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        }],
+      });
+      expect(issues.map((i) => [i.where, i.severity])).toEqual([
+        ["flow 'loan_overdue' · node 'start' (start) condition", 'error'],
+        ["object 'library_loan' · field 'due_measured' expression", 'error'],
+      ]);
+      expect(issues[0].message).toContain('`isoDate(addDays(borrow_date, N))`');
+      expect(issues[1].message).toMatch(/^`timestamp\(record\.borrow_date\)` — /);
+      expect(issues[1].message).toContain('`isoDate(addDays(record.borrow_date, N))`');
+    });
+
     it('does NOT flag bare references in a flow condition (flattened scope)', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'crm_opportunity', fields: { stage: { type: 'select' }, amount: { type: 'currency' } } }],

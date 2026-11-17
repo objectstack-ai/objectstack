@@ -57,7 +57,7 @@ import {
   toast,
   cn,
 } from '@object-ui/components';
-import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
+import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -1096,6 +1096,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     recordIds: pageRecordIds,
     update: canEdit || inlineEditable,
     delete: canDelete,
+    // objectstack#34208 — inline cells read `update` while rendering, before any row action is used.
+    updateOnMount: inlineEditable,
   });
 
   // The projection keys and the filter, sort, search and server-paging state,
@@ -1612,7 +1614,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       exportData.forEach(record => {
         rows.push(fields.map((f: string) => escapeCsvValue(record[f])).join(','));
       });
-      downloadFile(new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' }), fileNameFor('csv'));
+      downloadFile(csvBlob(rows.join('\n')), fileNameFor('csv'));
     } else if (format === 'json') {
       const unmasked = exportData.map((record) =>
         Object.fromEntries(Object.entries(record).filter(([key]) => !isMaskedKey(key))),
@@ -2183,8 +2185,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     } as any);
     // Reject so the executor records this row under its own id in the result
     // (and the error CSV) instead of counting a failed action as succeeded.
+    // The refusal's producer-marked `userMessage` rides on the rejection, as
+    // on the aggregate path below: the row shows it, and `message` stays the
+    // whole text the error CSV keeps (objectstack#34215).
     if (!res?.success) {
-      throw new Error(res?.error || `Action ${def.name} failed`);
+      const error = new Error(res?.error || `Action ${def.name} failed`);
+      throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
   };
 

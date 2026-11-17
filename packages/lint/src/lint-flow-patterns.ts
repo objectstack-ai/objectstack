@@ -161,6 +161,7 @@ import {
   FlowNodeAction,
   flowNodeTextSlotSources,
   flowNodeValueTemplateRefusals,
+  isFlowTextEnvelopeShaped,
   textSlotTemplateRefusal,
   VALUE_SLOT_TEMPLATE_REFUSAL,
 } from '@objectstack/spec/automation';
@@ -1004,13 +1005,28 @@ function literalAt(nodeType: string, path: readonly (string | number)[]): { at: 
   return { at, hint };
 }
 
-/** `config` without its node type's `{{ }}` text slots — the strings no template renders. */
+/**
+ * `config` without its node type's `{{ }}` text slots — the strings no template
+ * renders. A slot whose text is only its MARKED values (`envelopeOnly`: a record
+ * write's `fields`, ruling 6913660232) loses only those text envelopes; its
+ * other values are value slots and stay, so a bare string there is still read
+ * as the literal it is.
+ */
 function withoutTextSlots(nodeType: unknown, config: unknown): unknown {
   if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
-  const keys = FLOW_NODE_TEXT_SLOTS.filter((slot) => slot.nodeType === nodeType).map((slot) => slot.key);
-  if (keys.length === 0) return config;
+  const slots = FLOW_NODE_TEXT_SLOTS.filter((slot) => slot.nodeType === nodeType);
+  if (slots.length === 0) return config;
   const rest: AnyRec = { ...(config as AnyRec) };
-  for (const key of keys) delete rest[key];
+  for (const slot of slots) {
+    if (!slot.envelopeOnly) {
+      delete rest[slot.key];
+      continue;
+    }
+    const map = rest[slot.key];
+    if (map && typeof map === 'object' && !Array.isArray(map)) {
+      rest[slot.key] = Object.fromEntries(Object.entries(map as AnyRec).filter(([, v]) => !isFlowTextEnvelopeShaped(v)));
+    }
+  }
   return rest;
 }
 

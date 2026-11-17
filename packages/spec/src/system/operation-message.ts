@@ -40,6 +40,7 @@
  * | `record_queue_assign_denied` | they tried to create a record in a queue they do not belong to | leave the queue blank or choose one they belong to, or ask an administrator |
  * | `master_record_edit_denied` / `master_record_read_denied` (and their `_opaque` forms) | they wrote a `controlled_by_parent` record (a detail) without the edit access (or, where the detail asks it, the read access) its master record requires | ask the master record's owner, or an administrator |
  * | `field_edit_denied` / `field_edit_denied_opaque` | they changed a field their permissions do not let them edit | undo that change, or ask an administrator |
+ * | `record_locked` (and its `_untitled`, `_unlabeled` and `_opaque` forms) | they tried to change a record an approval in progress holds | wait until that approval is complete |
  *
  * `record_write_denied` (commit aa5994e17) is NOT `record_access_denied` restated: the
  * sharing middleware's by-id write gate fires on a row the READ path already
@@ -271,6 +272,23 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * The English sentences are byte-identical to the fixed text the HTTP doors
  * answered before they were localized, so an English deployment reads no
  * change for a single field or none.
+ *
+ * The four `record_locked*` keys are the end user's sentence of plugin-approvals'
+ * per-row record lock (`409 RECORD_LOCKED`, the refusal a user reads in a toast
+ * when they save a record a live approval holds). One wire code, four
+ * sentences, chosen by what the refusing hook has in hand, and none of them
+ * names the record id or the object's API name:
+ *
+ *   - `record_locked` takes `{{object}}` (the object's LABEL in the caller's
+ *     locale) and `{{title}}` (the record's title as served to the writer);
+ *   - `record_locked_untitled` takes `{{object}}` alone, for a record with no
+ *     title the writer may be served;
+ *   - `record_locked_unlabeled` takes `{{title}}` alone, for an object with no
+ *     label;
+ *   - `record_locked_opaque` names nothing.
+ *
+ * Their English is byte-identical to the fixed sentence the hook answered
+ * before it was localized.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -319,6 +337,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     duplicate_record: 'A record with this value already exists',
     duplicate_record_field: 'A record with this {{field}} already exists',
     duplicate_record_fields: 'A record with the same {{fields}} already exists',
+    record_locked:
+      "{{object}} '{{title}}' is locked while an approval is in progress, and cannot be edited until that approval is complete",
+    record_locked_unlabeled:
+      "'{{title}}' is locked while an approval is in progress, and cannot be edited until that approval is complete",
+    record_locked_untitled:
+      'This {{object}} is locked while an approval is in progress, and cannot be edited until that approval is complete',
+    record_locked_opaque:
+      'This record is locked while an approval is in progress, and cannot be edited until that approval is complete',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -350,6 +376,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     duplicate_record: '已存在相同值的记录',
     duplicate_record_field: '已存在相同{{field}}的记录',
     duplicate_record_fields: '已存在{{fields}}均相同的记录',
+    record_locked: '{{object}}「{{title}}」正在审批中，已被锁定，审批完成前无法编辑',
+    record_locked_unlabeled: '「{{title}}」正在审批中，已被锁定，审批完成前无法编辑',
+    record_locked_untitled: '该{{object}}正在审批中，已被锁定，审批完成前无法编辑',
+    record_locked_opaque: '该记录正在审批中，已被锁定，审批完成前无法编辑',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -396,6 +426,10 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     duplicate_record: '同じ値のレコードがすでに存在します',
     duplicate_record_field: '同じ{{field}}のレコードがすでに存在します',
     duplicate_record_fields: '{{fields}}がすべて同じレコードがすでに存在します',
+    record_locked: '{{object}}「{{title}}」は承認処理中のためロックされています。承認が完了するまで編集できません',
+    record_locked_unlabeled: '「{{title}}」は承認処理中のためロックされています。承認が完了するまで編集できません',
+    record_locked_untitled: 'この{{object}}は承認処理中のためロックされています。承認が完了するまで編集できません',
+    record_locked_opaque: 'このレコードは承認処理中のためロックされています。承認が完了するまで編集できません',
   },
   'es-ES': {
     permission_denied:
@@ -443,6 +477,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     duplicate_record: 'Ya existe un registro con este valor',
     duplicate_record_field: 'Ya existe un registro con el mismo valor de {{field}}',
     duplicate_record_fields: 'Ya existe un registro con los mismos valores de {{fields}}',
+    record_locked:
+      'El registro de {{object}} «{{title}}» está bloqueado mientras hay una aprobación en curso y no se puede editar hasta que esa aprobación finalice',
+    record_locked_unlabeled:
+      'El registro «{{title}}» está bloqueado mientras hay una aprobación en curso y no se puede editar hasta que esa aprobación finalice',
+    record_locked_untitled:
+      'Este registro de {{object}} está bloqueado mientras hay una aprobación en curso y no se puede editar hasta que esa aprobación finalice',
+    record_locked_opaque:
+      'Este registro está bloqueado mientras hay una aprobación en curso y no se puede editar hasta que esa aprobación finalice',
   },
 };
 
@@ -489,7 +531,12 @@ export function renderOperationMessage(
     const key = operationMessageTranslationKey(input.messageKey);
     let override: string | undefined;
     try {
-      override = opts.translate(key, locale, params);
+      // [#34454] The override TEMPLATE is asked for, without `params`, and
+      // interpolated once below. An `II18nService.t` handed `params`
+      // interpolates them itself, and a second pass here would then expand a
+      // placeholder that arrived inside a VALUE (a record title such as
+      // `Q{{object}}`) instead of printing it as written.
+      override = opts.translate(key, locale);
     } catch {
       // A misbehaving i18n service must never turn a 409 into a 500.
       override = undefined;

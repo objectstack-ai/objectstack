@@ -8,7 +8,6 @@
 - 声明肢 = 认领评论声明 `Clause-②: yes`,与路径无关;错误的 `no` 是可审计的假申报。
 - 子代理起不来 ⇒ L2 缺席,PR 带 `needs:contract-review` 留 draft 队列外;旁路仅维护者逐次亲审
 - PASS ⇒ Tier S ready、auto-merge;Tier H 经 SKILL.md ③ 交棒;FAIL ⇒ 撤挂,补丁轮;⛔ 免 L2 不放行。
-- 落地后见欠 L2 ⇒ 按 `contract-review.md` 补审落地 head、发现照立卡门入卡,⛔ 不修已关 PR。
 - DELIBERATE CORRECTION 红(`check-empty-changeset`)⛔ 不等维护者;确认件皆须点名每个被改 note:
 - diff 只改 release 文字或注释者:派发席 ACCEPT 确认,逐句引改前与改后,免第二次同 head L2。
 - 其余(含改代码)照全套:同 head 达档 L2 PASS 记录即确认,记录逐句判改写句。
@@ -36,6 +35,7 @@
 - 逾 3,000 行须授权批准在现 head,或维护者非席位签名评论点名现 head 承接(`approval_comment`)。
 - 出队(中继 `pr_dequeue`)限三因:(a) 与基座冲突;(b) 自身改动致队列构建红,三事实判非 flake;
   (c) PR 正文签名尾行之席以签名评论自请。审计评论在先,回读离队且仍开未合才落地。
+- 该 op 实测离队见 `platform-readings.md`;在队受管面 PR 亦由落地席发(Prime Directive #14)。
 - 谁入队谁看护:冲突或自因被踢 ⇒ 一轮巡查内出队修复再入队;他人 flake 照四分支重投。
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
@@ -58,6 +58,7 @@
 - 车道 PM 的权责三件:验收(L1 清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
 - 绿即落地评论与 `pr_ready`+`automerge_enable` 一笔中继:`label-write --land`;未绿按阶梯重挂定点。
+  `--land` 拒 `!`/`(narrowing)` PR,除非卡上最新受信 os-dev-report 的 dogfood 钉 head(`os-dev.md`)。
 - 写节流拒(exit 10) ⇒ 待 `node scripts/pm/write-pace.mjs --status` 现空槽再重试。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
 - undraft 429 ⇒ 卡记 `resets at`,到点一次重试裸 op(`rest-channel.md`),⛔ 不重发评论、不报阻塞。
@@ -108,5 +109,4 @@
 - 相邻两棒同碰一个文件时,交接的是语义不是文本。
 - 前棒在回报里写明它对共享文件改动的性质:改名、提取变量、增补断言,还是纯追加。
 - PM 原样转告下一棒,并要求两个 PR 的意图叠加,⛔ 禁止机械取一边。
-- 两棒散文互锁时分工由 PM 指派,允许前棒留占位交接。
-- PM 必须在两侧接力指令里写明谁动、谁不动。
+- 两棒散文互锁时分工由 PM 指派,允许前棒留占位交接;PM 在两侧指令写明谁动、谁不动。

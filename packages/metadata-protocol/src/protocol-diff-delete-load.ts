@@ -4,8 +4,8 @@
  * [#29985 codemod] The "Diff, deleteMetaItem, loadMetaFromDb, load reports,
  * findReferencesToMeta" facet of `ObjectStackProtocolImplementation`: the
  * bodies of `diffMetaItem`, `deleteMetaItem`, `deleteMetaItemUnaudited`,
- * `loadMetaFromDb`, `findReferencesToMeta` moved out of `protocol.ts` whole by
- * `scripts/codemod-split-protocol.mjs`.
+ * `loadMetaFromDb`, `findReferencesToMeta` moved out of `protocol.ts` whole (split
+ * by #29998).
  *
  * A MOVE, not a redesign. `ProtocolDiffDeleteLoadFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -47,7 +47,7 @@ import type { ServedOverrideRow } from './served-override.js';
 import { REFERENCE_SITES } from './reference-sites.js';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import { hasMetadataRedactor, redactMetadataItem } from './metadata-redaction.js';
-import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
+import { isOwnPermissionSetWrite, isPairRowRemoval } from './protocol-packaged-base-refusal.js';
 import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf, servesSealedOverrideRow } from './protocol-package-bindings.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
@@ -66,6 +66,7 @@ import { withRefusalAudit } from './protocol-refusal-audit.js';
 import { captureStoredExpressionChange, fillStoredExpressionChange } from './protocol-stored-expression-fill.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { packagelessHolderRefusal } from './protocol-save.js';
 
 /**
  * [#33308] The row slot a `sys_metadata` row is: its bound package, or `null`
@@ -730,8 +731,32 @@ export class ProtocolDiffDeleteLoadFacet {
                     );
                     throw addressRefusal;
                 }
+                // [ADR-0150 D3/D5, red line 2, ruling A] …and the holders the
+                // read naming no package counts, as the save door asks them
+                // ({@link packagelessHolderRefusal}): two or more enabled holders
+                // are refused naming them, and a name only disabled packages hold
+                // is refused naming none, never one row removed. Over no stored
+                // row too (the delete and the draft discard answered the no-op
+                // receipt). A package-unbound row at the address is the
+                // environment's own, and its removal is left as it was.
+                if (request.packageId == null) {
+                    const holderRefusal = packagelessHolderRefusal(
+                        host, 'delete', request.type, singularTypeForRepo, request.name, member, rowsAtAddress,
+                    );
+                    if (holderRefusal) {
+                        addressRefusal = holderRefusal;
+                        throw addressRefusal;
+                    }
+                }
                 const packageId: string | null = request.packageId
                     ?? (draftAddress !== undefined ? draftAddress.key : rowsAtAddress.packageId);
+                // [ADR-0150 D2, #34401] Whether a code-shipped item sits under
+                // THIS address, which the two receipts below claim: a package's
+                // own permission set beside sets other namespaces' packages ship
+                // has none ({@link isOwnPermissionSetWrite}, the verdict its save
+                // reads), so removing it removes the set, never resets one.
+                const shippedUnderAddress = artifactBacked
+                    && !isOwnPermissionSetWrite(host.engine, singularTypeForRepo, request.name, packageId);
                 // Probe first — "no overlay exists" is a success/no-op, not
                 // a conflict. The repo would otherwise throw ConflictError.
                 const current = await repo.get(ref, { state: targetState, packageId, ...memberOption(member) });
@@ -799,7 +824,7 @@ export class ProtocolDiffDeleteLoadFacet {
                         // unchanged, verbatim.
                         message: targetState === 'draft'
                             ? `No pending draft for ${request.type}/${request.name}.`
-                            : artifactBacked
+                            : shippedUnderAddress
                                 ? `No customization overlay found for ${request.type}/${request.name} — already at artifact default.`
                                 : `No ${singularTypeForRepo} '${request.name}' found — nothing to delete.`,
                     };
@@ -987,7 +1012,7 @@ export class ProtocolDiffDeleteLoadFacet {
                     // discard reads byte for byte as before.
                     message: (request.state === 'draft')
                         ? `Draft discarded${deletedPackage} — ${request.type}/${request.name}. [seq=${result.seq}]`
-                        : artifactBacked
+                        : shippedUnderAddress
                             ? (remains
                                 ? `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} still carries another overlay: ${remainingRowsPhrase(remainingPackages, unboundRemains, 'row')}. [seq=${result.seq}]`
                                 : `Customization overlay deleted${deletedPackage} — ${request.type}/${request.name} reset to artifact default. [seq=${result.seq}]`)

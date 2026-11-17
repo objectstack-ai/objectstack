@@ -110,10 +110,29 @@ export interface ReaderLabels {
  * The locale `service` can ANSWER in, for the locale the reader asked for:
  * `resolveBundleLocale` over what `getLocales()` reports. The requested tag
  * passes through untouched when there is nothing to negotiate against (no
- * `getLocales`, a throwing or empty answer, no match).
+ * service, no `getLocales`, a throwing or empty answer, no match), and an
+ * absent request stays absent.
+ *
+ * [#34454] Every lookup this plugin asks the `i18n` service, a label or a
+ * deployment's `errors.<key>` override, asks it with this tag, the way
+ * objectql's catalog callers ask with `negotiatedMessageLocale`: a service
+ * that matches tags exactly (`FileI18nAdapter`) holds a `zh-CN` pack under
+ * `zh-CN`, so a bare `zh` asked as written reads nothing there.
  */
-function negotiatedLocale(service: ReaderLabelI18n, requested: string): string {
-  if (typeof service.getLocales !== 'function') return requested;
+export function negotiatedReaderLocale(
+  service: Partial<Pick<II18nService, 'getLocales'>> | undefined,
+  requested: string,
+): string;
+export function negotiatedReaderLocale(
+  service: Partial<Pick<II18nService, 'getLocales'>> | undefined,
+  requested: string | undefined,
+): string | undefined;
+export function negotiatedReaderLocale(
+  service: Partial<Pick<II18nService, 'getLocales'>> | undefined,
+  requested: string | undefined,
+): string | undefined {
+  if (typeof requested !== 'string' || requested.length === 0) return requested;
+  if (!service || typeof service.getLocales !== 'function') return requested;
   let available: unknown;
   try {
     available = service.getLocales();
@@ -140,7 +159,7 @@ export function readerLabelsFor(
 ): ReaderLabels | undefined {
   if (typeof requested !== 'string' || requested.length === 0) return undefined;
   if (!service || typeof service.t !== 'function') return undefined;
-  const locale = negotiatedLocale(service, requested);
+  const locale = negotiatedReaderLocale(service, requested);
   const render = (key: string, params?: Readonly<Record<string, string>>): string | undefined => {
     try {
       const text = service.t(key, locale, params);

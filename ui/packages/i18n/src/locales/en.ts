@@ -2313,6 +2313,10 @@ const en = {
       launcherLabel: 'App launcher',
       menuLabel: 'App navigation',
       menuEmpty: 'This app has no navigation entries you can open.',
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: 'App menu bar',
+      searchMenu: 'Search menu',
+      phoneBarHint: 'Star an entry to put it in the bottom bar. The bar shows the first four.',
       // objectui#12427 — the ⋯ menu a sidebar entry shows on hover (`SidebarItemMenu`).
       itemMenu: 'More actions for {{name}}',
       openInNewTab: 'Open in new tab',
@@ -2390,6 +2394,9 @@ const en = {
       // would have left a single translated string among a dozen hardcoded
       // ones — and deferred them to this card, which converts the screen whole.
       cryptoRefusalTitle: 'This deployment cannot encrypt secrets',
+      platformManagedTitle: 'Managed by the platform',
+      platformManagedBody: 'The hosting platform provides and configures this for this environment, so it is not set here.',
+      aiProviderManaged: 'The AI provider, its model and credentials are managed by the platform.',
       // `{{subject}}` is rendered as a `< code >` element by the view, so the
       // sentence is split around it rather than interpolated.
       cryptoRefusalSubjectSuffix: 'is declared encrypted, so nothing was written.',
@@ -2533,6 +2540,8 @@ const en = {
         done: 'An AI assistant or API key of yours is connected.',
         action: 'Connect',
       },
+      firstApp: { title: 'Put your first app in', todo: 'No app of your own yet. Install one from the marketplace or build one, and it shows on Home.', done: 'An app of your own is on Home.' },
+      firstRecord: { title: 'Add your first record', todo: 'Nobody has created a record in your apps yet.', done: 'A record was created in your apps.', action: 'Open app' },
     },
     error: {
       connectionFailed: 'Cannot connect to server',
@@ -3044,6 +3053,8 @@ const en = {
       },
       passwordsNote: 'Temporary passwords — shown once, never stored. Save them now; each user must change theirs at first sign-in.',
       passwordsMore: 'More entries omitted — use the download.',
+      positionsHint: 'Positions: map a column of position machine names, several separated by ";". Each is assigned as in Setup; a name that does not exist, or that you may not assign, is reported on its row, and the user is still created.',
+      managerHint: 'Manager: map a column holding each user\'s manager, by email address (or phone number where phone sign-in is on). Managers are linked once every row is in, so a manager further down the file counts; a manager that is not found, or cannot be linked, is reported on its row, and the user is still created.',
       passwordsDownload: 'Download CSV',
     },
     // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
@@ -3279,6 +3290,7 @@ const en = {
         retry: "Continue with single sign-on",
       },
       ssoHandoff: 'Continue to {{target}}',
+      ssoHandoffClient: "Sign in to continue to {{clientName}}",
       // Phone/OTP sign-in labels. `LoginForm` interpolates `{seconds}` with a
       // literal `.replace('{seconds}', …)` of its own (in `LoginForm`),
       // so those SINGLE braces must survive translation — i18next never sees
@@ -3396,6 +3408,8 @@ const en = {
         // objectstack#32992 — `access_denied`: the identity provider refused the
         // signed-in account for this environment, with its two ways on.
         ssoAccessDenied: "The account you signed in with does not have access to this environment. Sign in with an account that has access, or ask an administrator of this environment's organization to add you as a member.",
+        ssoAccessDeniedNotMember: "The account you signed in with is not a member of this environment's organization. Sign in with an account that is, or ask an administrator of the organization to invite you.",
+        ssoAccessDeniedInvitationPending: "You have been invited to this environment's organization, but the invitation has not been accepted yet. Accept the invitation from your email, then sign in again.",
         ssoSwitchAccount: "Switch account",
         ssoBackToConsole: "Back to console",
         ssoSwitchAccountHint: "Switch account opens your sign-in service in a new tab and signs you out there. Then sign in here again with an account that has access.",
@@ -3702,6 +3716,14 @@ const en = {
       granted: 'Access granted',
       denied: 'Access denied',
       noRedirect: 'No redirect URL returned by the server.',
+      // Shown in place of the consent card after a decision whose redirect is
+      // not `http(s)` (a native app's custom scheme): the tab stays here while
+      // the operating system opens the app. `{{appName}}` is the registered
+      // name; the Unnamed forms are used when the client was not identified.
+      returnToApp: 'Return to {{appName}} to continue. You can close this tab.',
+      returnToUnnamedApp: 'Return to the application to continue. You can close this tab.',
+      openApp: 'Open {{appName}}',
+      openUnnamedApp: 'Open the application',
       failed: 'Consent failed',
       footer: 'You can revoke access at any time from your account settings.',
     },
@@ -4597,6 +4619,17 @@ const en = {
       accept: 'Accept invitation',
       accepted: 'Invitation accepted',
       joinedDescription: 'Welcome to {{orgName}}. You joined as {{role}}.',
+      joinedWelcome: 'Welcome to {{orgName}}.',
+      verifyEmailTitle: 'Verify your email address',
+      verifyEmailDescription: 'The email address of this account must be the invited one, and verified. Verify it, then open the invitation link from your mailbox again.',
+      proofInvalid: 'This invitation link can no longer be used. Ask for a new invitation, or sign in to an existing account.',
+      signInInstead: 'Sign in to an existing account',
+      proofTitle: 'Join {{orgName}}',
+      proofDescription: 'Set up your account for {{email}} to accept the invitation.',
+      proofDivider: 'or set a password',
+      proofNameLabel: 'Name',
+      proofPasswordLabel: 'Password',
+      proofSubmit: 'Create account and join',
       continue: 'Continue',
       acceptFailed: 'Failed to accept invitation',
       decline: 'Decline',
@@ -4633,6 +4666,8 @@ const en = {
     viewApprovals: 'View approvals',
     noPendingApprovals: 'No pending approvals',
     openApprovalsInbox: 'Open Approvals Inbox',
+    needsYou: 'Needs your action',
+    viewApprovalDetails: 'View details',
     // Bell-badge breakdown (objectstack-ai/objectstack#7233): the badge sums unread notification topics
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.
@@ -4897,13 +4932,11 @@ const en = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     // objectstack#33660 — the composer's model picker: the allowance note and the ×20 confirmation.
     modelPicker: {
@@ -4969,6 +5002,7 @@ const en = {
       get_metadata_schema: 'Read the metadata format',
       get_package: 'Look at the package',
       get_record_history: 'Read the record history',
+      list_flow_runs: 'Check automation runs',
       list_metadata: 'List the existing metadata',
       list_objects: 'List the existing objects',
       list_packages: 'List the existing packages',
@@ -5065,6 +5099,23 @@ const en = {
       needsAttention: '{{count}} need attention',
       needsAttention_one: '{{count}} needs attention',
       needsAttention_other: '{{count}} need attention',
+      // objectstack#32984 — the publish-health line under a Published badge, which was English in every locale.
+      health: {
+        sampleRowsLive: '{{count}} sample rows live',
+        sampleRowsLive_one: '{{count}} sample row live',
+        sampleRowsLive_other: '{{count}} sample rows live',
+        views: '{{count}} views',
+        views_one: '{{count}} view',
+        views_other: '{{count}} views',
+        widgets: '{{count}} widgets',
+        widgets_one: '{{count}} widget',
+        widgets_other: '{{count}} widgets',
+        seeds: '{{count}} sample data sets',
+        seeds_one: '{{count}} sample data set',
+        seeds_other: '{{count}} sample data sets',
+        verified: '{{checks}} verified',
+        seedFailed: 'Sample data failed to load.',
+      },
       unknownPhase: 'Unknown build phase',
       nextStepsLead: 'Next, you can say: {{steps}}',
       nextStepQuote: '“{{step}}”',
@@ -5254,13 +5305,29 @@ const en = {
     progressBar: 'Decision progress',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'The approval decision panel only works on approval request pages.',
+    openNextAfterDecision: 'Open next after deciding',
+    queueDone: 'No more pending requests in this list.',
     snapshotAsSubmitted: 'As submitted',
+    snapshotChanged: 'Changed',
+    snapshotCurrentValue: 'Current value',
+    snapshotOpenRecord: 'Open record',
+    snapshotCurrentUnreadable: 'The current record cannot be read, so changes made after submission are not marked.',
+    snapshotChildCurrent: 'Current rows: the submission does not keep child rows.',
+    progressTitle: 'Approval progress',
+    attachmentsTitle: 'Attachments',
     attachmentChip: 'Attachment',
     attachmentOpenFailed: 'Could not open the attachment — please try again',
     approveOneTitle: 'Approve "{{title}}"?',
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
     submittedByYou: 'You submitted this',
+    // The approver band's status line and menu on a record under approval
+    // (objectstack#34361): the task, the step number on the served route,
+    // the submitter by name, and the menu holding every non-decision lever.
+    awaitingYourDecision: 'Awaiting your approval',
+    stepNumber: 'Step {{n}}',
+    submittedByName: 'Submitted by {{name}}',
+    moreDecisionActions: 'More approval actions',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',

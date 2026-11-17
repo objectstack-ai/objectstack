@@ -34,6 +34,10 @@ import type { Logger } from '@objectstack/spec/contracts';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { AnalyticsService, type AnalyticsServiceConfig } from '@objectstack/service-analytics';
 import { RestServer } from './rest-server';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 function mockServer() {
   return {
@@ -110,7 +114,7 @@ const body = {
   selection: { dimensions: ['stage'], measures: ['revenue'] },
 };
 
-async function post(gates: Gates) {
+async function post(gates: Gates, request: unknown = body) {
   const executed: string[] = [];
   const { logger, lines } = recordingLogger();
   const service = analytics(gates, executed, logger);
@@ -119,7 +123,7 @@ async function post(gates: Gates) {
   const logSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   let routeLog: string;
   try {
-    await route.handler({ method: 'POST', params: {}, headers: {}, body } as any, res);
+    await route.handler({ method: 'POST', params: {}, headers: {}, body: request } as any, res);
     // Read the calls BEFORE restoring: `mockRestore` clears them.
     routeLog = logSpy.mock.calls.map((args) => args.map(String).join(' ')).join('\n');
   } finally {
@@ -190,5 +194,46 @@ describe('[#25561] a read gate that could not decide answers 503 SERVICE_UNAVAIL
       expect(res.body.code).toBe(verdictCode);
       expect(res.executed).toEqual([]);
     });
+  });
+});
+
+/**
+ * [ADR-0021] A selection naming a member the dataset does not declare is
+ * refused with a list of the members THIS caller may use. That list is only
+ * ever built for a caller the read gate admits: one it denies gets the
+ * denial, and one it cannot decide for gets the 503, both with no member
+ * list — the same answers the declared query above gets.
+ */
+describe('[ADR-0021] an undeclared selection member is answered by the read gate first, through the REST door', () => {
+  const undeclared = { ...body, selection: { dimensions: ['amount'], measures: ['count'] } };
+  const NO_MEMBER_LIST = (res: { body: unknown }) => {
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain('you may use');
+    expect(text).not.toContain('revenue');
+    expect(text).not.toContain('does not declare');
+  };
+
+  it('the control: an admitted caller gets the undeclared-member refusal, naming the members it may use', async () => {
+    const res = await post({ admitObjectRead: () => true, getReadableFields: () => ['stage', 'amount'] }, undeclared);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_FIELD');
+    expect(String(res.body.message)).toContain('Measures you may use: revenue.');
+    expect(res.executed).toEqual([]);
+  });
+
+  it('a caller the read gate denies gets 403 PERMISSION_DENIED and no member list', async () => {
+    const res = await post({ admitObjectRead: () => false }, undeclared);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('PERMISSION_DENIED');
+    NO_MEMBER_LIST(res);
+    expect(res.executed).toEqual([]);
+  });
+
+  it('a caller the read gate cannot decide for gets 503 SERVICE_UNAVAILABLE and no member list', async () => {
+    const res = await post({ admitObjectRead: exploded }, undeclared);
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe('SERVICE_UNAVAILABLE');
+    NO_MEMBER_LIST(res);
+    expect(res.executed).toEqual([]);
   });
 });

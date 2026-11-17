@@ -47,7 +47,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 
 - L1 普通审核:派发 PR 皆欠;派发席或其 L1 线程照 L1 清单在定稿绿 head 读 ACCEPT,修后读 delta。
 - L2 契约审核:PR 碰 `references/contract-review.md` 契约四面才欠,加在 L1 之上,⛔ 永不替代 L1。
-- L2 档:schema、governed 规则文本、收窄 ⇒ `CONTRACT_REVIEW_TIER`;仅 `Clause-②: yes` ⇒ `TIER_DEFAULT`。
+- L2 档随面定(`contract-review.md`);L1 与 `TIER_DEFAULT` 审核恒归车道,⛔ 永不归 L2 席。
 - ⛔ L1 规则不及 L2,L2 规则不及 L1;L2 席的账号、独立性、信箱与只写记录诸规只管 L2 席。
 - GitHub PR review 与 CI check 名不属两级;旧词与旧路径只读不写,唯在座 `review#N` 席仍写原名。
 
@@ -64,9 +64,9 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `coordinator` | 以协调者身份运行(项目会话:开席位线程与卡线程、跨车道调度;接口见 `references/coordinator.md`) | — |
 | `label:<name>` | backlog 过滤标签;`label:all` = 全部 open 未认领 | `pm:queue` |
 | `repo:<owner/name>` | 扫哪个仓的 backlog(单 issue 的落地仓看它自己的 `repo:*` 标签) | `objectstack-ai/objectstack` |
-| `batch:<n>` | 运行中槽位的上限:一槽 = 一个正在运行的子代理(`Agent`、`create_session`)或卡线程,报告落地即释放;等人批、在合并队列、等 CI、等裁决四态不占槽;dev、L1/L2 审核、普查皆计,⛔ 只读不豁免;p0 见 `priority:p0` 行 | 默认 `3`;`n` 的维护者天花板 `5` |
+| `batch:<n>` | 运行中槽位的上限:一槽 = 一个在跑的子代理(`Agent`、`create_session`)或卡线程,报告落地即释放;等人批、入队、等 CI、等裁决不占槽;dev、L1/L2 审核、普查皆计,⛔ 只读不豁免;p0 见 `priority:p0` 行 | 默认 `3`,一容器 dev ≤2;`n` 的维护者天花板 `5` |
 | `rounds:<n>` | 跑 N 轮后停 | 队列清空为止 |
-| `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时 M 及以上、p1、`security` 一律 `thread` |
+| `mode:subagent` \| `mode:cloud` \| `mode:thread` | 派发后端 | 按卡分流:S+M ⇒ `subagent`,`cloud` 只留 L/XL 等保留面;席位是项目线程时 M 及以上、p1、`security` 一律 `thread`;大卡判据照 `dispatch-runbook.md` 卡线程节 |
 | `#12 #34 …` | 显式 issue 清单,整体覆盖标签查询 | — |
 
 - 无角色参数按执行姿态运行,车道由座位贴认定;角色参数令召唤词收敛为一行调用。
@@ -124,8 +124,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `target:<major>` | ⛔ 不再作发版阻塞标记:阻塞卡只升 `priority:p0`,窗与回落见 `references/filing-gate.md` 定级判据 |
 | `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
-| `priority:p0` | 插队:同轮立即派发,越过 `batch`、深度等待(`LOCK_DEPTH_HOLD`)与一切并发上限;无槽即暂停低级在飞 dev 腾位(机制 `references/execution-duties.md`);⛔ 不豁免同文件串行与认领协议 |
-| `area:*` | 功能轴:每卡恰一个;分诊首触打,与 `domain:*` 同笔;工具卡打它所护的轴;⛔ 不回填存量。四读者:维护者按轴看板;定级继承该轴清单项;父单分组;候选顺序,即「功能点位次」= 父单在「Features on the road」上的次序;同轴至多一个在飞,除非文件面不相交 |
+| `priority:p0` | 插队:同轮立即派发,越过 `batch`、深度等待(`LOCK_DEPTH_HOLD`)与一切并发上限;无槽即暂停低级在飞 dev 腾位(机制 `references/execution-duties.md`);⛔ 不豁免重叠检查(`references/area-lease.md`)与认领协议 |
+| `area:*` | 功能轴:每卡恰一个;分诊首触打,与 `domain:*` 同笔;工具卡打它所护的轴;⛔ 不回填存量。四读者:维护者按轴看板;定级继承该轴清单项;父单分组;候选顺序,即「功能点位次」= 父单在「Features on the road」上的次序;同轴可多卡在飞,排队照重叠检查 |
 | open PR 引用该单 | 已实现,L1 审核中 |
 | merged PR 带 `Fixes #n` | 完成(GitHub 关单) |
 
@@ -159,7 +159,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 ## 域车道
 
 - 锚定规则:每个包恰属一个域;`domain:*` = 修复落地包的域;`Seam:` 卡归 spec 席,默认纵向派发。
-- `domain:*` 只决定文件归属:锚定、热文件串行、单认领路径;⛔ 不是队列或优先级单位。
+- `domain:*` 只决定文件归属:锚定、单认领路径;⛔ 不是队列或优先级单位。
 - `Seam:` 卡认领申报两端;验收 = 消费端读该键(活性账本行离开 `planned`)或键随账本行退役。
 - 域由分诊读代码判定,⛔ 绝不从 issue 标题的词汇猜域;说不出修复碰哪个文件就还不可标。
 
@@ -181,7 +181,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 无分诊审计评论 ⛔ 不得认领;车道席自分诊是队列与级别的第三例外,住 `triage-duties.md`。
 - 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
-- 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 排该 PR 之后串行或让行。
+- 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 照重叠检查排队或让行。
 - 越界只五通道:跨域例外路径、跟到底的越界面、无主阻塞项、main-red 锚卡、spec.md 搭车。
 - 合并队列是共享串行资源:车道买到的是并行编写,不是并行落地。
 - 谁发现 flake 谁修或立单,⛔ 不绕行。
@@ -324,6 +324,6 @@ Metadata-protocol: added | narrowed | semantic | none (the kind of change to wha
 Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Premise: holds | corrected <comment id> | inbox (the pre-dispatch premise reading, dispatch-runbook.md 派发前置)
-Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
+Serial constraints cleared: `<点名同包的前驱 PR 与在飞认领(同文件照 references/area-lease.md 重叠检查),及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
 Resume-from: `BRANCH@SHA` (only when the card's newest `Release:` carries one; the dev starts from that sha, never from zero)
 ```

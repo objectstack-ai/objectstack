@@ -1683,6 +1683,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>   (#22507)
    *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
    *   flows.<flow_name>.approvals.<node_id>.label    (an `approval` node's step label)
+   *   flows.<flow_name>.records.<node_id>.fields.<field_name>   (text a record write keeps)
    *
    * Every user-read string slot of the flow schemas is either one of these
    * keys or recorded, with its reason, in the family pin
@@ -1824,6 +1825,32 @@ const appTranslationDataShape = () => ({
    * `objectstack validate` refuses a key over an unknown flow, an unknown
    * node, or a node that is not a `save_notice`.
    *
+   * ## `records` — the text a record write keeps (ruling 6913660232)
+   *
+   *   flows.<flow_name>.records.<node_id>.fields.<field_name>
+   *
+   * A `create_record` / `update_record` node's `fields` value MARKED as text —
+   * a text envelope, `{ dialect: 'template', source }`
+   * (`FlowRecordFieldValueSchema`) — is a sentence the record keeps for people
+   * to read ("Auto-escalated: critical priority"). Under the maintainer's
+   * ruling on objectstack#34062 (letter B, 「B 平台按组织语言挑译文」) it is
+   * translated where it is written: the engine reads
+   * `flowRecordFieldTextKey(flow, node, field)` (`system/i18n-resolver.ts`)
+   * through the `i18n` service in the ORGANIZATION's language — its
+   * Localization setting when somebody set it, else the app's declared
+   * `i18n.defaultLocale` — and only then fills the holes. Never the language
+   * of the person who started the run: stored text is data the whole
+   * organization reads. With no entry, or no language to pick, the authored
+   * text is written and the run goes on. A bare string in `fields` is a
+   * literal value and has no key.
+   *
+   * Addressed by `Flow.name`, the record node's `FlowNode.id` (at any depth,
+   * an ADR-0031 region included) and the field name, the `fields` map's own
+   * key. Judged as the text slot it translates (`flowTextSlotTranslation`).
+   * `objectstack validate` refuses a key over an unknown flow, an unknown
+   * node, a node that is not a record write, or a field the node does not
+   * mark as text.
+   *
    * ## `successMessage` / `errorMessage` — the terminal toasts (#22507)
    *
    *   flows.<flow_name>.successMessage
@@ -1907,6 +1934,7 @@ const appTranslationDataShape = () => ({
       refusal: 'refusals', ends: 'refusals',
       approval: 'approvals',
       notice: 'notices', saveNotices: 'notices',
+      record: 'records',
       // The spellings the toast pair arrives in from an action translation,
       // which spells its own success toast `successMessage` with these aliases.
       success: 'successMessage', successText: 'successMessage',
@@ -2041,6 +2069,28 @@ const appTranslationDataShape = () => ({
           + "by the engine in the triggering writer's locale in place of the authored one",
         ),
     })).optional().describe('Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node'),
+    // [ruling 6913660232] The text a record write keeps, picked by the ENGINE
+    // in the ORGANIZATION's language before its holes are filled — addressed
+    // by `FlowNode.id` like `notices`, then by the field name.
+    records: z.record(z.string(), strictObject({
+      surface: 'this flow record-write translation',
+      history: TRANSLATION_HISTORY,
+      // The map's own name on the node is `fields`; the spellings an author
+      // holding a neighbouring surface's word arrives with.
+      aliases: { values: 'fields', fieldValues: 'fields' },
+    }, {
+      // The one text-slot judge, applied to each translation exactly as
+      // `FlowRecordFieldValueSchema` applies it to the text envelope's
+      // `source`; an empty string is the untranslated skeleton slot (the
+      // authored text is written).
+      fields: z.record(z.string(), flowTextSlotTranslation()).optional().describe(
+        'Translated text keyed by field name — each a `{{ }}` template like the text envelope it translates, picked by '
+        + "the engine in the organization's language and written in its place; only a field the node marks as text "
+        + 'is translated',
+      ),
+    })).optional().describe(
+      'Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node',
+    ),
   })).optional().describe('Screen-flow translations keyed by flow name'),
 
   /**
@@ -2049,6 +2099,7 @@ const appTranslationDataShape = () => ({
    *
    *   hooks.<hook_name>.refusals.<CODE>.message                      (a declared refusal, `HookSchema.refusals`)
    *   hooks.<hook_name>.refusals.<CODE>.reasons.<REASON>.message     (a declared reason under it, #33214)
+   *   hooks.<hook_name>.texts.<key>.message                          (a declared text, `HookSchema.texts`, #34374)
    *
    * A hook's business refusal ("A current clean version is required before
    * signing.") is the sentence a user reads most often when an app says "not
@@ -2077,17 +2128,26 @@ const appTranslationDataShape = () => ({
    * posture (translated before it is rendered). A sentence whose entry declares
    * no `params` is plain text and nothing in it is filled.
    *
+   * **A declared text is picked in the organization's language (#34374,
+   * ruling 6913660232 parameter 7).** A sentence a hook writes into a record
+   * (`HookSchema.texts`) is answered by `ctx.text(key, params)` through
+   * `hookTextMessageKey(hook, key)` in the ORGANIZATION's language — the
+   * Localization setting when somebody set it, else the app's
+   * `i18n.defaultLocale` — never the caller's; the declared sentence on a miss,
+   * its holes filled after, as for a refusal.
+   *
    * `objectstack validate` refuses a key over an unknown hook, a code the hook's
-   * `refusals` does not declare, or a reason that code does not declare.
+   * `refusals` does not declare, a reason that code does not declare, or a text
+   * key the hook's `texts` does not declare.
    */
   hooks: z.record(z.string(), strictObject({
     surface: 'this hook translation',
     history: TRANSLATION_HISTORY,
-    aliases: { refusal: 'refusals', errors: 'refusals', messages: 'refusals' },
+    aliases: { refusal: 'refusals', errors: 'refusals', messages: 'refusals', text: 'texts', sentences: 'texts' },
     guidance: {
       label:
-        'A hook has no translated label — the one string of a hook a user reads is a refusal. Translate '
-        + '`refusals.<CODE>.message`.',
+        'A hook has no translated label — the strings of a hook a user reads are its refusals and the texts it '
+        + 'writes into records. Translate `refusals.<CODE>.message` or `texts.<key>.message`.',
     },
   }, {
     refusals: z.record(z.string(), strictObject({
@@ -2115,6 +2175,21 @@ const appTranslationDataShape = () => ({
         ),
       })).optional().describe("Reason translations keyed by the reason the code's `reasons` declares"),
     })).optional().describe("Refusal translations keyed by the code the hook's `refusals` declares"),
+    // [#34374] A declared text's sentence, picked in the organization's language.
+    texts: z.record(z.string(), strictObject({
+      surface: 'this hook text translation',
+      history: TRANSLATION_HISTORY,
+      // The spellings `HookTextSchema` renames onto its own `message`.
+      aliases: { text: 'message', template: 'message', value: 'message', description: 'message' },
+    }, {
+      // The declared message's own form — plain text, or a template over the
+      // entry's declared `params`; an empty string is the untranslated
+      // skeleton slot `os i18n extract` writes (the declared message is served).
+      message: z.string().optional().describe(
+        "Translated sentence of a hook's declared text — written into the record in the organization's language in "
+        + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
+      ),
+    })).optional().describe("Text translations keyed by the key the hook's `texts` declares"),
   })).optional().describe('Hook translations keyed by hook name'),
 
   /**

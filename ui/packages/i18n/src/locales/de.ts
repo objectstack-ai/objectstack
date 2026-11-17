@@ -1917,6 +1917,8 @@ const de = {
       },
       passwordsNote: "Temporäre Passwörter — einmalig angezeigt, nie gespeichert. Speichern Sie sie jetzt; jeder Benutzer muss seines bei der ersten Anmeldung ändern.",
       passwordsMore: "Weitere Einträge ausgelassen — bitte den Download verwenden.",
+      positionsHint: "Positionen: Ordnen Sie eine Spalte mit Maschinennamen von Positionen zu, mehrere durch Semikolon (;) getrennt. Jede wird wie in Setup zugewiesen; ein Name, den es nicht gibt oder den Sie nicht zuweisen dürfen, wird in seiner Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
+      managerHint: "Vorgesetzte: Ordnen Sie eine Spalte mit der vorgesetzten Person jedes Benutzers zu, per E-Mail-Adresse (oder Telefonnummer, wenn die Telefon-Anmeldung aktiv ist). Vorgesetzte werden verknüpft, wenn alle Zeilen angelegt sind, daher zählt auch eine Person weiter unten in der Datei; eine Person, die nicht gefunden oder nicht verknüpft werden kann, wird in ihrer Zeile gemeldet, und der Benutzer wird trotzdem angelegt.",
       passwordsDownload: "CSV herunterladen",
     },
     ai: {
@@ -2254,6 +2256,9 @@ const de = {
       fieldErrorsToast_one: "{{count}} Einstellung muss überprüft werden: {{settings}}",
       fieldErrorsToast_other: "{{count}} Einstellungen müssen überprüft werden: {{settings}}",
       cryptoRefusalTitle: "Diese Installation kann keine Geheimnisse verschlüsseln",
+      platformManagedTitle: "Von der Plattform verwaltet",
+      platformManagedBody: "Die Hosting-Plattform stellt dies für diese Umgebung bereit und konfiguriert es, daher wird es hier nicht eingestellt.",
+      aiProviderManaged: "Der KI-Anbieter, sein Modell und seine Zugangsdaten werden von der Plattform verwaltet.",
       cryptoRefusalSubjectSuffix: "ist als verschlüsselt deklariert, daher wurde nichts geschrieben.",
       cryptoRefusalNoSubject: "Der als verschlüsselt deklarierte Wert wurde abgelehnt, daher wurde nichts geschrieben.",
       cryptoRefusalToast: "Geheimnisse können nicht verschlüsselt werden: {{subject}}",
@@ -2352,6 +2357,8 @@ const de = {
         done: 'Ein KI-Assistent oder API-Schlüssel von Ihnen ist verbunden.',
         action: 'Verbinden',
       },
+      firstApp: { title: 'Erste App hinzufügen', todo: 'Noch keine eigene App. Installieren Sie eine aus dem Marktplatz oder erstellen Sie eine; sie erscheint auf der Startseite.', done: 'Eine eigene App ist auf der Startseite.' },
+      firstRecord: { title: 'Ersten Datensatz anlegen', todo: 'In Ihren Apps hat noch niemand einen Datensatz angelegt.', done: 'In Ihren Apps wurde ein Datensatz angelegt.', action: 'App öffnen' },
     },
     error: {
       connectionFailed: "Verbindung zum Server nicht möglich",
@@ -2675,6 +2682,10 @@ const de = {
       launcherLabel: "App-Launcher",
       menuLabel: "App-Navigation",
       menuEmpty: "Diese App hat keine Navigationseinträge, die Sie öffnen können.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "App-Menüleiste",
+      searchMenu: "Menü durchsuchen",
+      phoneBarHint: "Markieren Sie einen Eintrag mit dem Stern, um ihn in die untere Leiste zu legen. Die Leiste zeigt die ersten vier.",
       itemMenu: "Weitere Aktionen für {{name}}",
       openInNewTab: "In neuem Tab öffnen",
       copyLink: "Link kopieren",
@@ -2705,6 +2716,7 @@ const de = {
         retry: "Mit Single Sign-on fortfahren",
       },
       ssoHandoff: "Weiter zu {{target}}",
+      ssoHandoffClient: "Melden Sie sich an, um mit {{clientName}} fortzufahren",
       devAdminHint: {
         title: "Lokale Entwicklungsinstanz",
         signIn: "Als Entwickler-Admin anmelden",
@@ -2734,6 +2746,8 @@ const de = {
         directSignInRateLimited: "Von diesem Netzwerk wurden gerade zu viele Anmeldungen gestartet. Warten Sie ein paar Sekunden und versuchen Sie es dann erneut.",
         networkNotAllowed: "Dieses System erlaubt keine Anmeldung aus Ihrem Netzwerk. Verbinden Sie sich über ein zugelassenes Netzwerk (zum Beispiel das Büronetz oder VPN Ihrer Organisation), oder wenden Sie sich an Ihren Administrator.",
         ssoAccessDenied: "Das Konto, mit dem Sie sich angemeldet haben, hat keinen Zugriff auf diese Umgebung. Melden Sie sich mit einem Konto an, das Zugriff hat, oder bitten Sie einen Administrator der Organisation dieser Umgebung, Sie als Mitglied hinzuzufügen.",
+        ssoAccessDeniedNotMember: "Das Konto, mit dem Sie sich angemeldet haben, ist kein Mitglied der Organisation dieser Umgebung. Melden Sie sich mit einem Konto an, das Mitglied ist, oder bitten Sie einen Administrator der Organisation, Sie einzuladen.",
+        ssoAccessDeniedInvitationPending: "Sie wurden in die Organisation dieser Umgebung eingeladen, haben die Einladung aber noch nicht angenommen. Nehmen Sie die Einladung aus Ihrer E-Mail an und melden Sie sich dann erneut an.",
         ssoSwitchAccount: "Konto wechseln",
         ssoBackToConsole: "Zurück zur Konsole",
         ssoSwitchAccountHint: "Konto wechseln öffnet Ihren Anmeldedienst in einem neuen Tab und meldet Sie dort ab. Melden Sie sich anschließend hier erneut mit einem Konto an, das Zugriff hat.",
@@ -3046,6 +3060,10 @@ const de = {
       granted: "Zugriff gewährt",
       denied: "Zugriff verweigert",
       noRedirect: "Der Server hat keine Weiterleitungs-URL zurückgegeben.",
+      returnToApp: "Kehren Sie zu {{appName}} zurück, um fortzufahren. Sie können diesen Tab schließen.",
+      returnToUnnamedApp: "Kehren Sie zur Anwendung zurück, um fortzufahren. Sie können diesen Tab schließen.",
+      openApp: "{{appName}} öffnen",
+      openUnnamedApp: "Anwendung öffnen",
       failed: "Zustimmung fehlgeschlagen",
       footer: "Sie können den Zugriff jederzeit in Ihren Kontoeinstellungen widerrufen.",
     },
@@ -3709,6 +3727,17 @@ const de = {
       accept: "Einladung annehmen",
       accepted: "Einladung angenommen",
       joinedDescription: "Willkommen bei {{orgName}}. Sie sind als {{role}} beigetreten.",
+      joinedWelcome: "Willkommen bei {{orgName}}.",
+      verifyEmailTitle: "Bestätigen Sie Ihre E-Mail-Adresse",
+      verifyEmailDescription: "Die E-Mail-Adresse dieses Kontos muss die eingeladene und bestätigt sein. Bestätigen Sie sie und öffnen Sie dann den Einladungslink aus Ihrem Postfach erneut.",
+      proofInvalid: "Dieser Einladungslink kann nicht mehr verwendet werden. Fordern Sie eine neue Einladung an oder melden Sie sich bei einem bestehenden Konto an.",
+      signInInstead: "Bei einem bestehenden Konto anmelden",
+      proofTitle: "{{orgName}} beitreten",
+      proofDescription: "Richten Sie Ihr Konto für {{email}} ein, um die Einladung anzunehmen.",
+      proofDivider: "oder ein Passwort festlegen",
+      proofNameLabel: "Name",
+      proofPasswordLabel: "Passwort",
+      proofSubmit: "Konto erstellen und beitreten",
       continue: "Weiter",
       acceptFailed: "Einladung konnte nicht angenommen werden",
       decline: "Ablehnen",
@@ -3742,6 +3771,8 @@ const de = {
     viewApprovals: "Genehmigungen anzeigen",
     noPendingApprovals: "Keine ausstehenden Genehmigungen",
     openApprovalsInbox: "Genehmigungs-Posteingang öffnen",
+    needsYou: "Wartet auf Ihre Aktion",
+    viewApprovalDetails: "Details anzeigen",
     badgeTotal: "{{total}} insgesamt",
     badgeNotifications: "{{count}} ungelesene Themen",
     badgeNotifications_one: "{{count}} ungelesenes Thema",
@@ -3972,13 +4003,11 @@ const de = {
   //                   made without a count. `all-locales-key-parity.test.ts`
   //                   derives the required slots from `Intl.PluralRules`.
   //
-  // objectui#7481 — five `tool.*` entries are NEWER than the registry above:
-  // `get_authoring_rules` (cloud#1837), `load_tools`, `open_record`, `test_flow`
-  // and `toggle_flow` are registered by cloud `service-ai-studio` but the pinned
-  // `@objectstack/spec` snapshot does not list them yet. They are kept here on
-  // purpose: a step label the user reads must not wait on a pin bump. When the
-  // pin advances, `chatbotToolLabels-locale-parity-7481` starts checking them
-  // against the registry instead of against its own hand-held list.
+  // objectui#7481 — the `tool.*` set covers every name in the registry above,
+  // plus the parity suite's `AHEAD_OF_PIN` list for a tool the cloud registers
+  // before the pinned `@objectstack/spec` lists it: a step label the user reads
+  // must not wait on a pin bump.
+  // `toolLabels-locale-parity-7481` checks every pack against that set.
   chatbot: {
     modelPicker: {
       allowanceNote: '{{left}} deines KI-Kontingents sind noch übrig. Ein mit ×N markiertes Modell verbraucht es N-mal so schnell wie das Standardmodell.',
@@ -4043,6 +4072,7 @@ const de = {
       get_metadata_schema: "Das Metadatenformat nachlesen",
       get_package: "Das Paket ansehen",
       get_record_history: "Den Verlauf des Datensatzes lesen",
+      list_flow_runs: "Die Flow-Ausführungen prüfen",
       list_metadata: "Vorhandene Metadaten auflisten",
       list_objects: "Vorhandene Objekte auflisten",
       list_packages: "Vorhandene Pakete auflisten",
@@ -4139,6 +4169,22 @@ const de = {
       needsAttention: "{{count}} erfordern Prüfung",
       needsAttention_one: "{{count}} erfordert Prüfung",
       needsAttention_other: "{{count}} erfordern Prüfung",
+      health: {
+        sampleRowsLive: "{{count}} Beispieldatensätze live",
+        sampleRowsLive_one: "{{count}} Beispieldatensatz live",
+        sampleRowsLive_other: "{{count}} Beispieldatensätze live",
+        views: "{{count}} Ansichten",
+        views_one: "{{count}} Ansicht",
+        views_other: "{{count}} Ansichten",
+        widgets: "{{count}} Widgets",
+        widgets_one: "{{count}} Widget",
+        widgets_other: "{{count}} Widgets",
+        seeds: "{{count}} Beispieldatenpakete",
+        seeds_one: "{{count}} Beispieldatenpaket",
+        seeds_other: "{{count}} Beispieldatenpakete",
+        verified: "{{checks}} geprüft",
+        seedFailed: "Die Beispieldaten konnten nicht geladen werden.",
+      },
       unknownPhase: "Unbekannte Build-Phase",
       nextStepsLead: "Als Nächstes können Sie sagen: {{steps}}",
       nextStepQuote: "„{{step}}“",
@@ -4323,13 +4369,26 @@ const de = {
     progressBar: 'Entscheidungsfortschritt',
     declaredActions: 'Aktionen',
     decisionPanelOffRequestPage: 'Der Entscheidungsbereich für Genehmigungen funktioniert nur auf Seiten von Genehmigungsanfragen.',
+    openNextAfterDecision: 'Nach der Entscheidung die nächste öffnen',
+    queueDone: 'In dieser Liste sind keine offenen Anfragen mehr.',
     snapshotAsSubmitted: 'Wie eingereicht',
+    snapshotChanged: 'Geändert',
+    snapshotCurrentValue: 'Aktueller Wert',
+    snapshotOpenRecord: 'Datensatz öffnen',
+    snapshotCurrentUnreadable: 'Der aktuelle Datensatz kann nicht gelesen werden, daher sind Änderungen nach der Einreichung nicht markiert.',
+    snapshotChildCurrent: 'Aktuelle Zeilen: Die Einreichung speichert keine untergeordneten Zeilen.',
+    progressTitle: 'Genehmigungsfortschritt',
+    attachmentsTitle: 'Anhänge',
     attachmentChip: 'Anhang',
     attachmentOpenFailed: 'Anhang konnte nicht geöffnet werden – bitte erneut versuchen',
     approveOneTitle: '„{{title}}“ genehmigen?',
     approveOneBody: 'Die Anfrage wird mit Ihrer Identität genehmigt. Um einen Kommentar oder Anhang hinzuzufügen, öffnen Sie die Anfrage.',
     flowOrigin: 'Vom Flow gestartet',
     submittedByYou: 'Von Ihnen eingereicht',
+    awaitingYourDecision: 'Wartet auf Ihre Genehmigung',
+    stepNumber: 'Schritt {{n}}',
+    submittedByName: 'Eingereicht von {{name}}',
+    moreDecisionActions: 'Weitere Genehmigungsaktionen',
     sortBy: 'Sortieren',
     sortRecent: 'Neueste zuerst',
     sortOldest: 'Älteste zuerst',

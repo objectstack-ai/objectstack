@@ -470,6 +470,28 @@ const NOISE_FIELDS = new Set<string>([
 export { createFieldPresenceProbe, resolveRecordOrganizationField } from '@objectstack/metadata-core';
 
 /**
+ * [#33694] The `sys_audit_log.metadata` keys that ride beside `performed_by` /
+ * `on_behalf_of` when the in-product AI performed a record write for a person:
+ * the AI conversation it ran in, and the pending item the person's approval
+ * decided before it ran. Copied from `HookContext.provenance` (and from there
+ * from `ExecutionContext.performedBy`), never from the request.
+ */
+const PERFORMED_IN_CONVERSATION_KEY = 'conversation_id';
+const PERFORMED_UNDER_CONFIRMATION_KEY = 'confirmation_id';
+
+/**
+ * One server-stamped `HookContext.provenance` attribution mark, read only as a
+ * non-blank string (trimmed); anything else reads as absent.
+ */
+function provenanceMark(
+  ctx: HookContext,
+  key: 'performedByClientId' | 'performedByAgentId' | 'performedByConversationId' | 'performedByConfirmationId',
+): string | undefined {
+  const value: unknown = (ctx as any).provenance?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
  * Action name produced from a HookContext.event string.
  *
  * [#21155] Typed by the ledger's record-write vocabulary: these are the rows
@@ -718,8 +740,8 @@ type WarnSink = { warn?: (message: string) => void };
  * (ADR-0049) for `get`, the read `GET /data/{target}/{id}` performs and the
  * operation the data door's `$expand` and the dataset door's labels ask of the
  * same target. It takes no caller: it judges the target's declaration, and
- * the read that follows is scoped by whichever reader `resolveLookupTitles` is
- * handed (the system for a summary's titles, the writer for a record label).
+ * the read that follows is in the WRITER's scope (see `resolveLookupTitles`),
+ * for a summary's titles and a record label alike.
  *
  * A refused target is not read, so the summary names its records by their
  * stored ids, the answer an unresolvable reference already gets. A declaration
@@ -780,7 +802,8 @@ function referenceIdsOf(value: any): string[] {
  * (`renderMilestoneSummary`), each from its own read plan.
  *
  * An id with no entry in the map — record deleted, object unregistered, title
- * field unresolvable — falls back to the raw id, which is what this function
+ * field unresolvable, or a record or title column the writer may not read —
+ * falls back to the raw id, which is what this function
  * returned before the branch existed. The change is therefore restore-invariant:
  * it can only replace an id with a title, never a title with an id.
  *
@@ -1786,18 +1809,22 @@ export function installAuditWriters(
    *
    * ## Whose read it is
    *
-   * `reader` scopes the read and is the caller's choice. The two summary
-   * branches hand it `api.sudo()`, as they always have. The record's own label
+   * The WRITER's: an activity row names a referenced record by a title the
+   * writer may read, else by its id. Every caller — the record's own label
    * ({@link planLabelLookupRead}, an object whose `nameField` is a reference)
-   * hands it the hook's own `api`, the WRITER's scope: the label is the title
-   * the record header shows a reader who may read the target, and a writer the
-   * security layer refuses the target, or serves it without its title column,
-   * gets no title it could not have read itself — the refusal throws into the
-   * catch below, the stripped column reads as no title, and the label keeps
-   * the stored value.
+   * and both summary branches — hands `writerApi` the hook's own `api`, the
+   * scope the write itself ran in, ⛔ never an elevated one. A title is the
+   * text the record header shows a reader who may read the target, so a
+   * writer the security layer refuses the target (its object, or the row by
+   * its row scope), or serves it without its title column, writes no title it
+   * could not have read itself: a refusal throws into the catch below, a row
+   * left out of the result is an id with no title, and a stripped column reads
+   * as no title. Each of those ids keeps its stored value, per id, so one read
+   * can title the ids the writer may read and leave the rest as ids. A system
+   * write reads as the system, which is the scope it wrote in.
    */
   const resolveLookupTitles = async (
-    reader: any,
+    writerApi: any,
     plan: Map<string, Set<string>>,
   ): Promise<Map<string, Map<string, string>> | undefined> => {
     if (plan.size === 0) return undefined;
@@ -1808,7 +1835,7 @@ export function installAuditWriters(
       if (!titleField) continue;
       const ids = Array.from(idSet);
       try {
-        const rows: any[] = await reader.object(objectName).find({
+        const rows: any[] = await writerApi.object(objectName).find({
           where: { id: { $in: ids } },
           fields: ['id', titleField],
           limit: ids.length,
@@ -2181,11 +2208,33 @@ export function installAuditWriters(
     // wrote in the Console, and 「这是 AI 代替人类执行」 was not recoverable
     // from the ledger at all. Stamped from `provenance`, never from `session`,
     // because no caller-gating hook may read the client as the caller.
-    const performedByClientId: string | undefined =
-      typeof (ctx as any).provenance?.performedByClientId === 'string' &&
-      (ctx as any).provenance.performedByClientId.trim()
-        ? (ctx as any).provenance.performedByClientId.trim()
-        : undefined;
+    const performedByClientId: string | undefined = provenanceMark(ctx, 'performedByClientId');
+    // [#33694, owner ruling on objectstack-ai/cloud#3826 「3826 照建议（征询版）」]
+    // The SAME channel from its second producer: the server-constructed
+    // in-product AI path, which writes AS the signed-in person in `userId` and
+    // names the agent it ran, the conversation it ran in and, when the person
+    // confirmed the call, the confirmation. The ruling reuses the existing
+    // `performed_by` / `on_behalf_of` pair and adds no actor vocabulary, so the
+    // agent lands in `performed_by` exactly where an OAuth client does. The
+    // /mcp OAuth door and the in-product path each set only their own key
+    // (`clientId` vs `agentId`); if one envelope ever carried both, the OAuth
+    // client keeps the column it has always held.
+    //
+    // The conversation and the confirmation are the in-product path's own
+    // marks, so they are written ONLY when the in-product agent is the
+    // performer this row records — never beside an OAuth client id. That is
+    // what the spec promises a reader of `performed_by`, which holds either
+    // kind: `conversation_id` / `confirmation_id` come from the in-product
+    // path alone.
+    const performedByAgentId: string | undefined = provenanceMark(ctx, 'performedByAgentId');
+    const performedBy: string | undefined = performedByClientId ?? performedByAgentId;
+    const agentIsRecordedPerformer: boolean = !performedByClientId && performedByAgentId !== undefined;
+    const performedInConversationId: string | undefined = agentIsRecordedPerformer
+      ? provenanceMark(ctx, 'performedByConversationId')
+      : undefined;
+    const performedUnderConfirmationId: string | undefined = agentIsRecordedPerformer
+      ? provenanceMark(ctx, 'performedByConfirmationId')
+      : undefined;
     // The ADMINISTRATOR who made this write from an impersonation session. A
     // FOURTH channel, for the same reason as the agent's: `session.userId` is
     // the impersonated user — the session is theirs, the write authorizes as
@@ -2334,12 +2383,20 @@ export function installAuditWriters(
     // SCIM connection performed, beside the `svc:scim:CONNECTION_ID` actor it
     // is read from and a `user_id` that stays null. No key ⇒ no SCIM
     // connection acted.
-    if (performedByClientId || impersonatedBy || signInStamp || scimConnectionId) {
+    //
+    // `conversation_id` / `confirmation_id` (#33694) ride ONLY beside a
+    // `performed_by` naming the in-product agent: the conversation it
+    // performed the write in, and the pending item the person's approval
+    // decided for it. Each is present only when the producer stamped it — no
+    // confirmation key ⇒ the write needed none.
+    if (performedBy || impersonatedBy || signInStamp || scimConnectionId) {
       auditRow.metadata = safeStringify({
         // A sign-in stamp names its event the way a `config_change` row does
         // (`metadata.event`); every other CRUD row still carries no event.
         ...(signInStamp ? { event: SIGN_IN_STAMP_EVENT } : {}),
-        ...(performedByClientId ? { performed_by: performedByClientId, on_behalf_of: userId ?? null } : {}),
+        ...(performedBy ? { performed_by: performedBy, on_behalf_of: userId ?? null } : {}),
+        ...(performedInConversationId ? { [PERFORMED_IN_CONVERSATION_KEY]: performedInConversationId } : {}),
+        ...(performedUnderConfirmationId ? { [PERFORMED_UNDER_CONFIRMATION_KEY]: performedUnderConfirmationId } : {}),
         ...(impersonatedBy ? { [IMPERSONATED_BY_KEY]: impersonatedBy } : {}),
         ...(scimConnectionId ? { [SCIM_CONNECTION_ID_KEY]: scimConnectionId } : {}),
       });
@@ -2426,9 +2483,11 @@ export function installAuditWriters(
         //
         // The plan reads the same MASKED after-view the interpolation renders
         // from, so a credential field can no more become a read key here than
-        // it can reach the summary text.
+        // it can reach the summary text. The titles are read as the WRITER
+        // (see `resolveLookupTitles`): a token names a title the writer may
+        // read, else the stored id.
         const lookupTitles = await resolveLookupTitles(
-          api.sudo(),
+          api,
           planMilestoneTokenReads(milestone.template, summaryFields, afterView),
         );
         const rendered = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
@@ -2442,9 +2501,11 @@ export function installAuditWriters(
       } else {
         // [#7230] The read plan is built from the SAME masked views the summary
         // renders, and only reached once a milestone has declined — a write
-        // that changes no tracked reference field issues no read at all.
+        // that changes no tracked reference field issues no read at all. The
+        // titles are read as the WRITER (see `resolveLookupTitles`): each side
+        // of a change names a title the writer may read, else the stored id.
         const lookupTitles = await resolveLookupTitles(
-          api.sudo(),
+          api,
           planTrackedLookupReads(summaryFields, oldValue, newValue),
         );
         const tracked = renderTrackedChangeSummary(

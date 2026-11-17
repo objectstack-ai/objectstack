@@ -166,6 +166,8 @@
     "HookRefusal": "data/HookRefusal",
     "HookRefusalSchema": "data/HookRefusal",
     "HookSchema": "data/Hook",
+    "HookText": "data/HookText",
+    "HookTextSchema": "data/HookText",
     "ImportFieldMapping": "data/ImportFieldMapping",
     "ImportFieldMappingSchema": "data/ImportFieldMapping",
     "IndexSchema": "data/Index",

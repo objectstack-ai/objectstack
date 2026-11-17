@@ -210,6 +210,36 @@
         "must_contain": ["type: 'user'", "defaultValue: 'current_user'", "check: 'assignee == current_user.id'"],
         "must_not_contain": []
       }
+    },
+    {
+      "id": 22,
+      "prompt": "Our package `com.acme.crm` ships a position `sales_rep`, live at customers, and a sharing rule in the same package whose `sharedWith` is `{ type: 'position', value: 'sales_rep' }`. The next version must call the position `crm_sales_rep`. What changes in the package?",
+      "expected_output": "The position becomes `{ name: 'crm_sales_rep', label: 'Sales Rep', renamedFrom: ['sales_rep'], permissionSets: [...] }`: renamed in place with `renamedFrom`, never deleted and re-added, so at boot its holders (`sys_user_position`) move to the new name in every organization. Only holders move: no other reference to the old name is rewritten, so the package's own sharing rule is re-pointed in source to `sharedWith: { type: 'position', value: 'crm_sales_rep' }`, as is any approver, queue member, policy `positions` entry or `current_user.positions` predicate in the package that names `sales_rep`. Stored references in an installed environment (recipients, pending approvers, invitations) are listed by table in the boot log for an administrator to re-point in Setup.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["renamedFrom: ['sales_rep']", "value: 'crm_sales_rep'"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 23,
+      "prompt": "When an `order` is created, add a `fulfilment_job` row for the warehouse without slowing the save. Orders also arrive in atomic batches that can roll back, and a job must never exist for an order that did not survive. Our `afterFind` read-log hook carries the same flag: does it wait for the commit too?",
+      "expected_output": "An `afterInsert` hook on `order` with `async: true` and a sandboxed `body: { language: 'js', source, capabilities: ['api.write'] }` that inserts the `fulfilment_job` through `ctx.api`; nothing awaits it, so the save is not slowed. Inside a transaction (the atomic batch) it starts once the outermost transaction commits and never runs if that rolls back, a failed commit included, so no job is written for an order that did not survive; outside a transaction it starts at once. The `afterFind` hook does not wait: a rollback does not undo a read, so with the flag it starts as the read is dispatched, whatever the transaction does next.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["afterInsert", "async: true", "api.write", "commit", "afterFind"],
+        "must_not_contain": ["handler:", "HookContext"]
+      }
+    },
+    {
+      "id": 24,
+      "prompt": "Write a background hook that adds a `payment_failure` row whenever an insert on `payment` is refused or rolled back. It must not slow the save.",
+      "expected_output": "Redirects: a background (`async: true`) hook on `afterInsert` cannot do this. Inside a transaction it starts only once the outermost transaction commits and never runs when that rolls back (a failed commit included), so it never sees a refused or rolled-back insert. Record the failure in the caller, where the write is made: the caller receives the error and inserts the `payment_failure` row outside the rolled-back transaction. A sync hook is no home for this row either: its own `ctx.api` writes roll back with the write. The `async` flag stays for work that follows a committed insert.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["caller", "roll"],
+        "must_not_contain": []
+      }
     }
   ]
 }

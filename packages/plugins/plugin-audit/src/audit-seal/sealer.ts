@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { DispatchLoop } from '@objectstack/core';
+import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
 import type {
   IAuditCheckpointSigner,
   IAuditCheckpointSink,
@@ -14,9 +15,11 @@ import {
   AUDIT_SEAL_CANON_VERSION,
   CanonicalFormError,
   canonicalDatetime,
+  chainValueOf,
   leafHash,
   leafInput,
   rowIdOf,
+  sealChainFieldOf,
   sealedColumnSet,
   unsealableColumns,
   type SealedColumnSet,
@@ -42,6 +45,12 @@ import {
   type CheckpointSignedBody,
 } from './signed-body.js';
 import { dropAuditSealSecret, writeAuditSealSecret, type SealStorageDriver, type SealStorageEngine } from './signer.js';
+import {
+  AUDIT_SEAL_LOCK_NAME,
+  AUDIT_SEAL_LOCK_REWRITE_COMMANDS,
+  trySealPassLocks,
+  type AuditSealPassLocks,
+} from './seal-lock.js';
 
 /**
  * ADR-0154 D3 — the sealer: after a settle lag, one window at a time, under
@@ -81,6 +90,15 @@ import { dropAuditSealSecret, writeAuditSealSecret, type SealStorageDriver, type
  * own cursor. The watermark never advances past a window a skipped chain
  * leaves unsealed. Every other fault — the lock, the signer, the crypto
  * provider, the storage — stops the whole object's pass.
+ *
+ * D3 as amended (seat ruling 6885005594, E): beside `audit.sealer`, each
+ * pass try-locks the audit seal lock (`seal-lock.ts`), a database session lock
+ * on each sealed object's hot store, and skips the pass while another session
+ * holds it — an `os migrate audit-* --apply` run holds it for its whole run.
+ * A checkpoint is written only while both still stand; a lapse of either
+ * fails the object's pass, as any lock lapse does (S4). A database that offers
+ * no session lock adds none: there the migrations refuse to run on a sealed
+ * object without the operator's `--sealer-stopped` (B).
  *
  * Nothing here writes the sealed object, and every secret row is written
  * below the hooks, so the sealer never seals its own writes.
@@ -138,15 +156,30 @@ export interface AuditSealerEngine extends SealStorageEngine {
   datasource?(name: string): SealStorageDriver | undefined;
 }
 
+/** The signer a pass signs with: the seam's surface, plus the default signer's key-id hint. */
+type SealSigner = IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> };
+
+/** The three host seams of one pass, each resolved once at the pass's start. */
+interface PassSeams {
+  signer: SealSigner | undefined;
+  sink: IAuditCheckpointSink | undefined;
+  cluster: IClusterService | undefined;
+}
+
 export interface AuditSealerOptions {
   engine: AuditSealerEngine;
   crypto?: ICryptoProvider;
-  /** Resolved per pass: a host's `audit.checkpointSigner`, or the default one. */
-  signer: () => (IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> }) | undefined;
+  /**
+   * Resolved per pass: a host's `audit.checkpointSigner`, or the default one.
+   * Each of the three seams answers `undefined` only when nothing is
+   * registered; a registered service that cannot be resolved THROWS, and the
+   * pass then seals nothing (see {@link AuditSealer.resolveSeams}).
+   */
+  signer: () => SealSigner | undefined | Promise<SealSigner | undefined>;
   /** Resolved per pass: a host's `audit.checkpointSink`, if any. */
-  sink?: () => IAuditCheckpointSink | undefined;
+  sink?: () => IAuditCheckpointSink | undefined | Promise<IAuditCheckpointSink | undefined>;
   /** Resolved per pass: the `cluster` service, if any. */
-  cluster?: () => IClusterService | undefined;
+  cluster?: () => IClusterService | undefined | Promise<IClusterService | undefined>;
   logger: AuditSealerLogger;
   now?: () => number;
   /**
@@ -162,6 +195,8 @@ interface SealPlan {
   readonly name: string;
   readonly fields: SealedFieldTypes;
   readonly columns: SealedColumnSet;
+  /** The column each row's chain is read from ({@link chainValueOf}): `lifecycle.seal.chainField`, or `tenant_id`. */
+  readonly chainField: string;
   readonly archiveTo?: string;
 }
 
@@ -217,7 +252,32 @@ function faultOf(err: unknown): string {
   return typeof code === 'string' || typeof code === 'number' ? `${String(code)}: ${reason}` : reason;
 }
 const windowOf = (ms: number): number => Math.floor(ms / AUDIT_SEAL_WINDOW_MS) * AUDIT_SEAL_WINDOW_MS;
-const tenantOf = (row: Row): string | null => (typeof row.tenant_id === 'string' && row.tenant_id !== '' ? row.tenant_id : null);
+
+/**
+ * The locks a pass holds (D3 amended): the lease `audit.sealer`, whose fencing
+ * token each checkpoint records, and the audit seal lock on each sealed
+ * object's database.
+ */
+interface PassLock {
+  readonly fencingToken: bigint;
+  renew(ttlMs: number): Promise<void>;
+  /** The lock guarding `object`'s checkpoints that lapsed, named for a line; `null` while each still stands. */
+  lapsed(object: string): Promise<string | null>;
+}
+
+function passLockOf(lease: LockHandle, session: Extract<AuditSealPassLocks, { held: false }>['locks']): PassLock {
+  return {
+    fencingToken: lease.fencingToken,
+    renew: (ttlMs) => lease.renew(ttlMs),
+    async lapsed(object) {
+      if (!lease.isHeld()) return 'the audit.sealer lock';
+      for (const { objects, lock } of session) {
+        if (objects.includes(object) && !(await lock.isHeld())) return `the audit seal lock on the database of '${object}'`;
+      }
+      return null;
+    },
+  };
+}
 
 /** Q2 (a): with no cluster service the lock is this process's, with its own fencing counter. */
 let inProcessHeld = false;
@@ -321,6 +381,7 @@ export class AuditSealer {
       const lifecycle = object.lifecycle as { seal?: { valueFields?: string[] }; archive?: { to?: string } } | undefined;
       if (!lifecycle?.seal) continue;
       const fields = (object.fields ?? {}) as SealedFieldTypes;
+      const chainField = sealChainFieldOf(lifecycle);
       let reason: string | null = null;
       let columns: SealedColumnSet | null = null;
       try {
@@ -329,9 +390,11 @@ export class AuditSealer {
         if (refused.length > 0) {
           reason = `its column(s) ${refused.map((c) => `'${c.column}' (type '${c.type ?? 'none'}')`).join(', ')} ` +
             'have no canonical rule';
-        } else if (!Object.prototype.hasOwnProperty.call(fields, 'tenant_id')) {
-          // S3: a chain is the row's own `tenant_id`; without the column every organization would share one.
-          reason = "it declares no 'tenant_id' field, so its rows cannot be chained per organization";
+        } else if (!Object.prototype.hasOwnProperty.call(fields, chainField)) {
+          // S3: a chain is the row's own chain column (D10 note: `seal.chainField`, default `tenant_id`); without
+          // it every organization would share one. A NAMED column the object lacks is refused at authoring; this
+          // stays for the default, and for a definition that reached the registry without the parse.
+          reason = `it has no '${chainField}' field, the column its rows are chained by per organization`;
         }
       } catch (err) {
         reason = (err as Error).message;
@@ -340,29 +403,61 @@ export class AuditSealer {
         this.report(`plan:${object.name}`, () =>
           `AuditSealer: '${object.name}' declares lifecycle.seal but cannot be sealed: ${reason}. Its rows are NOT ` +
           'being sealed — no checkpoint covers them, so a change made outside the platform would not show. Fix: ' +
-          "give the object a 'tenant_id' field and only columns of a type with a canonical rule (ADR-0154 D1, D5), " +
-          'or remove lifecycle.seal.');
+          "give the object its chain column ('tenant_id', or the one lifecycle.seal.chainField names) and only " +
+          'columns of a type with a canonical rule (ADR-0154 D1, D5, D10), or remove lifecycle.seal.');
         continue;
       }
-      plans.push({ name: object.name, fields, columns, ...(lifecycle.archive?.to ? { archiveTo: lifecycle.archive.to } : {}) });
+      plans.push({ name: object.name, fields, columns, chainField, ...(lifecycle.archive?.to ? { archiveTo: lifecycle.archive.to } : {}) });
     }
     return plans;
   }
 
-  private async acquireLock(): Promise<LockHandle | null> {
-    let cluster: IClusterService | undefined;
-    try {
-      cluster = this.options.cluster?.();
-    } catch {
-      cluster = undefined;
+  /**
+   * #34280: resolve the three host seams once, at the start of a pass. Only an
+   * ABSENT seam has a stand-in — the default local signer, no off-host export,
+   * the in-process lock. A seam that IS registered but cannot be resolved (a
+   * factory that throws, a KMS client that cannot start) stops the pass: no
+   * checkpoint is signed, and the fault is reported at `error`, naming the
+   * slot, once per {@link REPORT_REPEAT_MS} while it lasts. Falling back there
+   * would sign with the local key where the host chose its own, export
+   * nothing where it chose an off-host copy, or run without its cluster lock,
+   * and nothing would say so. Resolves to `null` when the pass must stop.
+   */
+  private async resolveSeams(): Promise<PassSeams | null> {
+    const slots = [
+      ['signer', AUDIT_CHECKPOINT_SIGNER_SERVICE, this.options.signer, 'sign with the local key'],
+      ['sink', AUDIT_CHECKPOINT_SINK_SERVICE, this.options.sink, 'seal without the off-host export'],
+      ['cluster', 'cluster', this.options.cluster, 'hold the audit.sealer lock in-process only'],
+    ] as const;
+    const seams: Partial<Record<(typeof slots)[number][0], unknown>> = {};
+    let failed = false;
+    for (const [seam, slot, resolve, fallback] of slots) {
+      try {
+        seams[seam] = await resolve?.();
+        this.reported.delete(`resolve:${slot}`);
+      } catch (err) {
+        failed = true;
+        const fault = faultOf(err);
+        this.report(`resolve:${slot}`, () =>
+          `AuditSealer: the '${slot}' service is registered but could not be resolved (${fault}) — NO checkpoint is ` +
+          `signed and rows of the sealed objects are NOT being sealed until it resolves; the sealer does not ${fallback} ` +
+          'in place of a service the host registered. Each pass retries. Fix the registration of the service named here.');
+      }
     }
+    if (failed) return null;
+    return seams as PassSeams;
+  }
+
+  private async acquireLock(cluster: IClusterService | undefined): Promise<LockHandle | null> {
     if (cluster?.lock) return cluster.lock.acquire(AUDIT_SEALER_LOCK, { ttlMs: LOCK_TTL_MS, waitMs: 0 });
     if (!this.reported.has('in-process-lock')) {
       this.reported.set('in-process-lock', this.now());
       this.options.logger.info(
         'AuditSealer: no cluster service is registered, so the audit.sealer lock is held in-process only — ' +
-          'cross-replica exclusion is off by the host\'s declaration. The checkpoint table\'s unique ' +
-          '(sealed_object, chain_key, sequence) index still refuses a second checkpoint at a taken sequence.',
+          'its cross-replica exclusion is off by the host\'s declaration. The database session lock each pass ' +
+          'also takes, where the database offers one (Postgres, MySQL), still keeps two replicas\' passes apart, and ' +
+          'the checkpoint table\'s unique (sealed_object, chain_key, sequence) index still refuses a second ' +
+          'checkpoint at a taken sequence.',
       );
     }
     return acquireInProcessLock();
@@ -372,7 +467,9 @@ export class AuditSealer {
   async runPass(): Promise<number> {
     const plans = this.plans();
     if (plans.length === 0) return 0;
-    const signer = this.options.signer();
+    const seams = await this.resolveSeams();
+    if (!seams) return 0;
+    const { signer } = seams;
     if (!this.options.crypto || !signer) {
       this.report('no-crypto', () =>
         `AuditSealer: ${plans.map((p) => `'${p.name}'`).join(', ')} declare(s) lifecycle.seal, but this deployment has ` +
@@ -381,15 +478,30 @@ export class AuditSealer {
         'wire a crypto provider (AuditPluginOptions.cryptoProvider), or remove lifecycle.seal.');
       return 0;
     }
-    const lock = await this.acquireLock();
+    const lock = await this.acquireLock(seams.cluster);
     if (!lock) return 0;
+    // D3 amended (E): the audit seal lock beside audit.sealer, on each sealed object's database, or no pass.
+    let session: AuditSealPassLocks;
+    try {
+      session = await trySealPassLocks(this.options.engine, plans.map((p) => p.name));
+    } catch (err) {
+      await lock.release();
+      throw err;
+    }
+    if (session.held) {
+      await lock.release();
+      this.reportSealLockHeld(session.objects);
+      return 0;
+    }
+    this.reported.delete('seal-lock-held');
+    const passLock = passLockOf(lock, session.locks);
     try {
       let written = 0;
       for (const plan of plans) {
         // One object's fault never stops another's sealing; it is reported while it lasts.
         let pass: ObjectPass | undefined;
         try {
-          pass = new ObjectPass(this.options, plan, lock, signer, this.now());
+          pass = new ObjectPass(this.options, plan, passLock, signer, seams.sink, this.now());
           await pass.run();
           for (const cause of this.reported.keys()) if (cause.startsWith(`object:${plan.name}:`)) this.reported.delete(cause);
         } catch (err) {
@@ -405,8 +517,27 @@ export class AuditSealer {
       }
       return written;
     } finally {
+      for (const held of session.locks) await held.lock.release();
       await lock.release();
     }
+  }
+
+  /**
+   * D3 amended (E): another session holds the audit seal lock, so the pass was
+   * skipped. Expected while an `os migrate audit-*` run lasts (or another
+   * server's pass), so at `info`, once per {@link REPORT_REPEAT_MS} while it
+   * lasts; a pass that takes the lock forgets it.
+   */
+  private reportSealLockHeld(objects: readonly string[]): void {
+    const last = this.reported.get('seal-lock-held');
+    if (last !== undefined && this.now() - last < REPORT_REPEAT_MS) return;
+    this.reported.set('seal-lock-held', this.now());
+    this.options.logger.info(
+      `AuditSealer: the audit seal lock ('${AUDIT_SEAL_LOCK_NAME}') on the database of ` +
+        `${objects.map((o) => `'${o}'`).join(', ')} is held by another session — a run of ` +
+        `${AUDIT_SEAL_LOCK_REWRITE_COMMANDS}, or another server's sealer pass — so this pass is skipped and seals ` +
+        'nothing until it lets go; each pass tries again.',
+    );
   }
 }
 
@@ -435,8 +566,9 @@ class ObjectPass {
   constructor(
     private readonly options: AuditSealerOptions,
     private readonly plan: SealPlan,
-    private readonly lock: LockHandle,
-    private readonly signer: IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> },
+    private readonly lock: PassLock,
+    private readonly signer: SealSigner,
+    private readonly sink: IAuditCheckpointSink | undefined,
     private readonly now: number,
   ) {
     const { engine } = options;
@@ -518,7 +650,7 @@ class ObjectPass {
         break;
       }
       const start = windowOf(next);
-      const chains = await this.readWindow(start, (row) => start >= this.cursorOf(chainKeyOf(tenantOf(row))));
+      const chains = await this.readWindow(start, (row) => start >= this.cursorOf(chainKeyOf(chainValueOf(row, this.plan.chainField))));
       if (chains.size > 0) n += 1;
       else if (this.skipped.size > 0) idle += 1;
       await this.writeChains(chains, start, 'window', Math.max(this.watermark ?? Number.NEGATIVE_INFINITY, Math.min(start, this.stuckFrom())));
@@ -589,7 +721,7 @@ class ObjectPass {
         }
       }
       const chains = await this.readWindow(start, (row) =>
-        !ids.has(rowIdOf(row)) && start < this.cursorOf(chainKeyOf(tenantOf(row))));
+        !ids.has(rowIdOf(row)) && start < this.cursorOf(chainKeyOf(chainValueOf(row, this.plan.chainField))));
       await this.writeChains(chains, start, 'late', this.watermark ?? start);
     }
   }
@@ -665,7 +797,7 @@ class ObjectPass {
           limit: PAGE_SIZE,
         });
         for (const row of rows) {
-          const tenantId = tenantOf(row);
+          const tenantId = chainValueOf(row, this.plan.chainField);
           const key = chainKeyOf(tenantId);
           if (this.skipped.has(key)) continue; // S4: out for the rest of the pass
           try {
@@ -797,7 +929,7 @@ class ObjectPass {
       const row = byId.get(id);
       if (!row) continue;
       const at = canonicalDatetime(row.created_at, `${id}.created_at`);
-      if (windowOf(Date.parse(at)) !== start || chainKeyOf(tenantOf(row)) !== key) continue;
+      if (windowOf(Date.parse(at)) !== start || chainKeyOf(chainValueOf(row, this.plan.chainField)) !== key) continue;
       leaves.push({ id, at, hash: leafHash(leafInput(row, this.plan.columns, this.plan.fields, saltOf)) });
     }
     return leaves.sort(leafOrder);
@@ -865,7 +997,8 @@ class ObjectPass {
         sealed_at: sealedAt,
         signing_key_id: signingKeyId,
       }));
-      if (!this.lock.isHeld()) throw new Error('the audit.sealer lock lapsed before the checkpoint was written');
+      const lapsed = await this.lock.lapsed(this.plan.name);
+      if (lapsed) throw new Error(`${lapsed} lapsed before the checkpoint was written`);
       // S1: the chain's window head, re-read under the lease: a window another sealer sealed (or passed)
       // since this pass began is not sealed again. Windows of a chain are sealed oldest first, and the parts of
       // one window in order (S7), so only a later window or a part of this one at this index or past it refuses.
@@ -940,10 +1073,8 @@ class ObjectPass {
   }
 
   private async deliver(body: CheckpointSignedBody, keyId: string, signature: string): Promise<void> {
-    let sink: IAuditCheckpointSink | undefined;
     try {
-      sink = this.options.sink?.();
-      await sink?.deliver({ kind: 'checkpoint', body: body as unknown as Record<string, unknown>, keyId, signature });
+      await this.sink?.deliver({ kind: 'checkpoint', body: body as unknown as Record<string, unknown>, keyId, signature });
     } catch (err) {
       this.options.logger.warn('AuditSealer: the checkpoint sink failed to take a checkpoint; it stays stored on the host', {
         sealed_object: body.sealed_object,

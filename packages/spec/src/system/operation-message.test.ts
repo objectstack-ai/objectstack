@@ -606,3 +606,73 @@ describe('operation message catalog — the master-detail write refusal', () => 
     }
   });
 });
+
+/**
+ * plugin-approvals' record-lock refusal (`409 RECORD_LOCKED`): one wire code,
+ * four sentences, chosen by whether the hook holds the object's label and the
+ * record's title. The emitter is pinned against a real engine in
+ * `packages/plugins/plugin-approvals/src/record-lock-user-facing-message.test.ts`.
+ */
+describe('operation message catalog — the record-lock refusal', () => {
+  const KEYS = {
+    record_locked: ['{{object}}', '{{title}}'],
+    record_locked_untitled: ['{{object}}'],
+    record_locked_unlabeled: ['{{title}}'],
+    record_locked_opaque: [],
+  } as const;
+
+  it('every locale defines all four, each with exactly its own placeholders', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const [key, placeholders] of Object.entries(KEYS)) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key].match(/\{\{\w+\}\}/g) ?? [], `${locale}.${key}`).toEqual([...placeholders]);
+      }
+    }
+  });
+
+  it('the English sentences keep the wording the hook answered before it was localized', () => {
+    const tail = 'is locked while an approval is in progress, and cannot be edited until that approval is complete';
+    expect(renderOperationMessage({ messageKey: 'record_locked', params: { object: 'Opportunity', title: 'Acme renewal' } }, { locale: 'en' }))
+      .toBe(`Opportunity 'Acme renewal' ${tail}`);
+    expect(renderOperationMessage({ messageKey: 'record_locked_untitled', params: { object: 'Opportunity' } }, { locale: 'en' }))
+      .toBe(`This Opportunity ${tail}`);
+    expect(renderOperationMessage({ messageKey: 'record_locked_unlabeled', params: { title: 'Acme renewal' } }, { locale: 'en' }))
+      .toBe(`'Acme renewal' ${tail}`);
+    expect(renderOperationMessage({ messageKey: 'record_locked_opaque' }, { locale: 'en' })).toBe(`This record ${tail}`);
+  });
+
+  it('renders the caller locale, and falls back to en for a locale the catalog does not carry', () => {
+    const zh = renderOperationMessage({ messageKey: 'record_locked', params: { object: '项目', title: '华东仓储客服平台实施' } }, { locale: 'zh-CN' });
+    expect(zh).toContain('项目「华东仓储客服平台实施」');
+    expect(zh).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].record_locked.replace('{{object}}', '项目').replace('{{title}}', '华东仓储客服平台实施'));
+    expect(renderOperationMessage({ messageKey: 'record_locked_opaque' }, { locale: 'de-DE' }))
+      .toBe(BUILTIN_OPERATION_MESSAGES.en.record_locked_opaque);
+  });
+
+  /**
+   * [#34454] `{{title}}` is row content. A deployment override is interpolated
+   * ONCE, so a title that itself contains a placeholder is printed as written.
+   * The translator is shaped as `FileI18nAdapter.t` answers: handed `params`, it
+   * interpolates them itself, and a second pass over its answer would expand
+   * the placeholder that arrived inside the title.
+   */
+  it('a title containing a placeholder is printed as written on the override path', () => {
+    const interpolatingTranslate = (k: string, _locale: string, params?: Record<string, unknown>) => {
+      if (k !== 'errors.record_locked') return k;
+      const template = '{{object}}《{{title}}》审批中，暂不可改';
+      return params
+        ? template.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (params[name] != null ? String(params[name]) : m))
+        : template;
+    };
+    const title = 'Q{{object}} {{title}}';
+    expect(renderOperationMessage(
+      { messageKey: 'record_locked', params: { object: '商机', title } },
+      { locale: 'zh-CN', translate: interpolatingTranslate },
+    )).toBe(`商机《${title}》审批中，暂不可改`);
+    // CONTROL — the built-in path, which was already single-pass.
+    expect(renderOperationMessage({ messageKey: 'record_locked', params: { object: '商机', title } }, { locale: 'zh-CN' }))
+      .toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].record_locked.replace('{{object}}', '商机').replace('{{title}}', () => title));
+  });
+});

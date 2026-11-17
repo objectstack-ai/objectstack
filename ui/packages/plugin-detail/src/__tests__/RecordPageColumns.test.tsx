@@ -12,7 +12,8 @@
  * stubbed (each node draws its type, and reports the details column cap it
  * is drawn under), so what is measured here is the layout alone: where each
  * node lands, that the header is drawn once, that no tab strip and no rail
- * exist, the 动态 panel leading the right column, and each tier's measures.
+ * exist, the 动态 panel closing the right column (objectstack#34590), and each
+ * tier's measures.
  */
 
 import * as React from 'react';
@@ -35,6 +36,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 import { RecordPageColumns } from '../RecordPageColumns';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
 import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
+import { relatedDefaultOrderHash } from '../synth/relatedArrangement';
 
 const page = buildDefaultPageSchema(
   { name: 'lead', label: 'Lead', fields: { name: { name: 'name', type: 'text' } } },
@@ -56,7 +58,7 @@ const grid = (container: HTMLElement) => container.querySelector('[data-record-c
 afterEach(() => cleanup());
 
 describe('RecordPageColumns — details | the right column (objectstack#27524, Target 6)', () => {
-  it('wide (≥ 1120): one header, details | right column at 380 px, 动态 first, no tab strip', () => {
+  it('wide (≥ 1120): one header, details | right column at 380 px, 动态 last (objectstack#34590), no tab strip', () => {
     const { container } = render(
       <RecordPageColumns tier="wide" columns={columns} footer={<p data-testid="meta-footer">meta</p>} />,
     );
@@ -66,10 +68,12 @@ describe('RecordPageColumns — details | the right column (objectstack#27524, T
     expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details right');
     expect(grid(container).className).toContain('grid-cols-[minmax(0,1fr)_23.75rem]');
     expect(nodesIn(column(container, 'details'))).toEqual(['record:details']);
-    // The 动态 panel leads the right column; the related panels follow it.
+    // objectstack#34590 — the related panels lead the right column; the 动态
+    // panel closes it (supersedes objectstack#27524 Targets 5 and 8's
+    // 动态-first for the column).
     const right = column(container, 'right')!;
-    expect(right.firstElementChild?.hasAttribute('data-record-timeline-panel')).toBe(true);
-    expect(nodesIn(right)).toEqual(['record:activity', 'record:related_list', 'record:related_list']);
+    expect(right.lastElementChild?.hasAttribute('data-record-timeline-panel')).toBe(true);
+    expect(nodesIn(right)).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
     // No timeline column exists any more (「动态是面板，不是栏」).
     expect(column(container, 'timeline')).toBeNull();
     // The meta line closes the details column (objectstack#27055).
@@ -86,7 +90,8 @@ describe('RecordPageColumns — details | the right column (objectstack#27524, T
     const { container } = render(<RecordPageColumns tier="two-column" columns={columns} />);
     expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details right');
     expect(grid(container).className).toContain('grid-cols-[minmax(0,1fr)_20rem]');
-    expect(nodesIn(column(container, 'right'))).toEqual(['record:activity', 'record:related_list', 'record:related_list']);
+    // objectstack#34590 — 动态 last (supersedes objectstack#27524 Targets 5 and 8 for the column).
+    expect(nodesIn(column(container, 'right'))).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
     expect(screen.queryByRole('button', { name: /Related/ })).toBeNull();
     expect(container.querySelector('[data-testid="record-related-rail-toggle"]')).toBeNull();
     // Beside the 320 px column a details section takes two field columns at most.
@@ -119,8 +124,110 @@ describe('RecordPageColumns — the stack (< 760, objectstack#27524, Target 6)',
     expect(details.getAttribute('data-record-column')).toBe('details');
     expect(right.getAttribute('data-record-column')).toBe('right');
     expect(details.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
-    expect(nodesIn(right)).toEqual(['record:activity', 'record:related_list', 'record:related_list']);
+    // objectstack#34590 — 动态 is the right column's LAST panel (supersedes
+    // objectstack#27524 Targets 5 and 8's 动态-first for the column).
+    expect(nodesIn(right)).toEqual(['record:related_list', 'record:related_list', 'record:activity']);
     // The stack's details are the whole width: the section's own container decides.
     expect(details.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('3');
+  });
+});
+
+/**
+ * objectstack#34590 (item 1) — on the default record page 动态 comes LAST:
+ * the right column reads related → attachments → (approvals) → 动态, and the
+ * stack reads details → related → attachments → (approvals) → 动态, so at a
+ * phone's width the stream sits at the very bottom of the page. The
+ * maintainer's words 「我们同事反馈动态不常用，是否建议移动到子表最后」「「动态」在最后」
+ * supersede objectstack#27524 Targets 5 and 8's 动态-first for the column and
+ * the stack. The tab row's order is not this card's and is not pinned here.
+ */
+describe('RecordPageColumns — 动态 last in the right column and the stack (objectstack#34590)', () => {
+  const relatedLists = [
+    { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
+    { objectName: 'note', relationshipField: 'parent_id', title: 'Notes' },
+  ];
+  const synth = (opts: { files: boolean; approvals: boolean }) =>
+    buildDefaultPageColumns(
+      buildDefaultPageSchema(
+        {
+          name: 'lead',
+          label: 'Lead',
+          fields: { name: { name: 'name', type: 'text' } },
+          ...(opts.files ? { enable: { files: true } } : {}),
+        },
+        { related: relatedLists, ...(opts.approvals ? { approvals: { count: 1 } } : {}) },
+      ),
+    )!;
+  /** The right column's blocks in document order, the panel's own node for 动态. */
+  const expected = (opts: { files: boolean; approvals: boolean }) => [
+    'record:related_list',
+    'record:related_list',
+    ...(opts.files ? ['record:attachments'] : []),
+    ...(opts.approvals ? ['record:approvals'] : []),
+    'record:activity',
+  ];
+
+  const cases = [
+    { files: false, approvals: false },
+    { files: true, approvals: false },
+    { files: false, approvals: true },
+    { files: true, approvals: true },
+  ];
+  for (const tier of ['wide', 'two-column', 'stack'] as const) {
+    for (const opts of cases) {
+      it(`${tier}, attachments ${opts.files ? 'on' : 'off'}, approvals ${opts.approvals ? 'on' : 'off'}: 动态 closes the column`, () => {
+        const { container } = render(
+          <RecordPageColumns tier={tier} columns={synth(opts)} footer={<p data-testid="meta-footer">meta</p>} />,
+        );
+        const right = column(container, 'right')!;
+        expect(nodesIn(right)).toEqual(expected(opts));
+        // The 动态 panel is the column's last element: nothing of the related
+        // stack (its fold or foot lines) is drawn after it.
+        expect(right.lastElementChild?.hasAttribute('data-record-timeline-panel')).toBe(true);
+        expect(right.querySelectorAll('[data-record-timeline-panel]')).toHaveLength(1);
+        if (tier === 'stack') {
+          // One flow: the details (their footer closing them), then the panels,
+          // so 动态 is the page's last block.
+          const [details, panels] = Array.from(grid(container).children) as HTMLElement[];
+          expect(details.getAttribute('data-record-column')).toBe('details');
+          expect(panels).toBe(right);
+          expect(grid(container).lastElementChild).toBe(right);
+          expect(details.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
+        } else {
+          expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details right');
+        }
+      });
+    }
+  }
+
+  it('a reader-rearranged related stack still ends before 动态: its foot line, then the 动态 panel', () => {
+    const order = ['note.parent_id', 'task.lead_id'];
+    const { container } = render(
+      <RecordPageColumns
+        tier="stack"
+        columns={synth({ files: true, approvals: false })}
+        relatedArrangement={{ order, hidden: [], basedOn: relatedDefaultOrderHash(['task.lead_id', 'note.parent_id']) }}
+        onRelatedArrangementChange={() => {}}
+      />,
+    );
+    const right = column(container, 'right')!;
+    const lists = Array.from(right.querySelectorAll('[data-node="record:related_list"]')).map((n) => n.textContent);
+    expect(lists).toEqual(['note', 'task']);
+    expect(nodesIn(right)).toEqual(['record:related_list', 'record:related_list', 'record:attachments', 'record:activity']);
+    const foot = right.querySelector('[data-related-foot-line]');
+    expect(foot).not.toBeNull();
+    const panel = right.lastElementChild!;
+    expect(panel.hasAttribute('data-record-timeline-panel')).toBe(true);
+    expect(foot!.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a page whose stream is off draws its related panels alone — no 动态 panel', () => {
+    const bare = buildDefaultPageColumns(
+      buildDefaultPageSchema({ name: 'lead', fields: {} }, { related: relatedLists, hideDiscussion: true }),
+    )!;
+    const { container } = render(<RecordPageColumns tier="wide" columns={bare} />);
+    const right = column(container, 'right')!;
+    expect(nodesIn(right)).toEqual(['record:related_list', 'record:related_list']);
+    expect(right.querySelector('[data-record-timeline-panel]')).toBeNull();
   });
 });

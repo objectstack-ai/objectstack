@@ -971,6 +971,14 @@ export class SeedLoaderService implements ISeedLoaderService {
    * several parameters away from where the load opens it. Reset per `load`.
    */
   private landedKeyLedger?: LandedKeyLedger;
+  /**
+   * [#34458] The person references the last {@link load} left NULL because no
+   * `sys_user` row answered yet, each on a row it landed on. Reset per `load`;
+   * read and shrunk by {@link resolveHeldPersonReferences}.
+   */
+  private heldPersonReferences: HeldPersonReference[] = [];
+  /** [#34458] The retry in flight: a second one waits for it, so two never interleave. */
+  private heldPersonRetry: Promise<unknown> = Promise.resolve();
 
   constructor(engine: IDataEngine, metadata: IMetadataService, logger: Logger, options: SeedLoaderServiceOptions = {}) {
     this.engine = engine;
@@ -1006,6 +1014,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   async load(request: SeedLoaderRequestParsed): Promise<SeedLoaderResultParsed> {
     this.loadProgress = undefined;
+    this.heldPersonReferences = [];
     try {
       return await runWithAdvisoryAggregation(
         () => this.loadDatasets(request),
@@ -1014,6 +1023,94 @@ export class SeedLoaderService implements ISeedLoaderService {
     } catch (err) {
       throw this.notePartialWrites(err);
     }
+  }
+
+  /** [#34458] How many person references {@link resolveHeldPersonReferences} still holds. */
+  heldPersonReferenceCount(): number {
+    return this.heldPersonReferences.length;
+  }
+
+  /**
+   * [#34458] Retry the person references the last {@link load} left NULL
+   * because no `sys_user` row answered yet — the seed that runs before the
+   * first admin exists names that admin, and pass 2 is otherwise its last word.
+   *
+   * Each reference is resolved by the rule pass 2 used ({@link
+   * resolveReferenceItem}, the same organization), and a reference that now
+   * resolves is written onto the row the load landed on, and only while that
+   * column is still NULL: the write is a compare-and-set by the row's id, so a
+   * row the seed did not write is never reached (ADR-0138 D1), and a value
+   * someone set since is kept. A reference that resolves is released whatever
+   * the write matched; one that still misses stays held for the next call.
+   * Calls run one after another, never interleaved.
+   */
+  resolveHeldPersonReferences(): Promise<{ resolved: number; held: number }> {
+    const run = this.heldPersonRetry.then(() => this.retryHeldPersonReferences());
+    this.heldPersonRetry = run.catch(() => undefined);
+    return run;
+  }
+
+  /** The body of {@link resolveHeldPersonReferences}, one call at a time. */
+  private async retryHeldPersonReferences(): Promise<{ resolved: number; held: number }> {
+    const pending = this.heldPersonReferences;
+    if (pending.length === 0) return { resolved: 0, held: 0 };
+    const stillHeld: HeldPersonReference[] = [];
+    let resolved = 0;
+    for (const held of pending) {
+      const items = Array.isArray(held.attemptedValue) ? held.attemptedValue : [held.attemptedValue];
+      const values: unknown[] = [];
+      let missed = false;
+      for (const item of items) {
+        if (isMissing(item)) continue;
+        const outcome = await this.resolveReferenceItem(held, item, new Map(), { organizationId: held.organizationId });
+        if (outcome.status === 'resolved' || outcome.status === 'kept') {
+          values.push(outcome.value);
+          continue;
+        }
+        // [#31021] Gone on purpose: no link to write for this element.
+        if (outcome.status === 'withdrawn') continue;
+        missed = true;
+        break;
+      }
+      if (missed) {
+        stillHeld.push(held);
+        continue;
+      }
+      if (values.length === 0) continue;
+      try {
+        const written = await this.engine.update(
+          held.objectName,
+          { [held.field]: held.multiple ? values : values[0] },
+          {
+            ...this.writeOptionsFor(held.rowOrganization),
+            where: { id: held.recordId, [held.field]: null },
+            multi: true,
+          } as any,
+        );
+        if (typeof written === 'number' && written > 0) resolved += 1;
+      } catch (err) {
+        stillHeld.push(held);
+        const causeSentence = seedFailureCause(err);
+        this.logger.error(
+          `[SeedLoader] Held person reference back-fill FAILED — ${held.objectName}.${held.field} stays NULL on ` +
+            `row '${held.recordId}' although ${held.targetObject}.${held.targetField} = ` +
+            `'${this.formatAttempted(held.attemptedValue)}' now resolves. The row itself looks healthy while the ` +
+            'person the seed named is missing from it. The write is tried again at the next person insert of ' +
+            `this process; fix the error below, or set ${held.field} on that row by hand. ` +
+            `${seedCauseLabel(err, causeSentence)}: ${causeSentence}.`,
+          err instanceof Error ? err : undefined,
+          { object: held.objectName, field: held.field, recordId: held.recordId },
+        );
+      }
+    }
+    this.heldPersonReferences = stillHeld;
+    if (resolved > 0) {
+      this.logger.info(
+        `[SeedLoader] ${resolved} seed person reference(s) left NULL before their person existed now resolve, ` +
+          `on rows the seed landed on; ${stillHeld.length} still wait for their person`,
+      );
+    }
+    return { resolved, held: stillHeld.length };
   }
 
   /**
@@ -1199,9 +1296,17 @@ export class SeedLoaderService implements ISeedLoaderService {
       return this.buildEmptyResult(config, Date.now() - startTime);
     }
 
-    // 2. Build dependency graph
+    // 2. Build dependency graph. `Seed.dependsOn` adds its declared edges to
+    // the ones the lookup fields give; a declaration this load cannot honour
+    // (a name it does not seed, an edge that closes a cycle) refuses the
+    // whole load before any row is written.
     const objectNames = datasets.map(d => d.object);
-    const graph = await this.buildDependencyGraph(objectNames);
+    const declared = this.collectDeclaredDependencies(datasets, request.seeds);
+    const graph = await this.buildDependencyGraph(objectNames, declared.edges);
+    const dependsOnRefusals = [...declared.refusals, ...this.findDeclaredEdgeCycles(graph.nodes, declared.edges)];
+    if (dependsOnRefusals.length > 0) {
+      return this.refuseDeclaredDependencies(config, graph, dependsOnRefusals, Date.now() - startTime);
+    }
 
     this.logger.info('[SeedLoader] Dependency graph built', {
       objects: objectNames.length,
@@ -1310,7 +1415,18 @@ export class SeedLoaderService implements ISeedLoaderService {
     return this.buildResult(config, graph, allResults, allErrors, durationMs);
   }
 
-  async buildDependencyGraph(objectNames: string[]): Promise<ObjectDependencyGraphParsed> {
+  /**
+   * Object dependency graph of a load: one node per object, an edge per
+   * `lookup` / `master_detail` / `user` field that points at another object of
+   * the load, plus — when `declared` is given — an edge per `Seed.dependsOn`
+   * name (object → the objects it loads after). The declared names are
+   * expected to be objects of the load: {@link collectDeclaredDependencies}
+   * holds them to it before this runs.
+   */
+  async buildDependencyGraph(
+    objectNames: string[],
+    declared?: ReadonlyMap<string, ReadonlySet<string>>,
+  ): Promise<ObjectDependencyGraphParsed> {
     const nodes: ObjectDependencyNodeParsed[] = [];
     const objectSet = new Set(objectNames);
 
@@ -1374,11 +1490,17 @@ export class SeedLoaderService implements ISeedLoaderService {
         }
       }
 
+      // [Seed.dependsOn] The declared edges join the same node, after the
+      // ones the fields gave.
+      for (const target of declared?.get(objectName) ?? []) {
+        if (objectSet.has(target) && !dependsOn.includes(target)) dependsOn.push(target);
+      }
+
       nodes.push({ object: objectName, dependsOn, references });
     }
 
     // Topological sort
-    const { insertOrder, circularDependencies } = this.topologicalSort(nodes);
+    const { insertOrder, circularDependencies } = this.topologicalSort(nodes, declared);
 
     return { nodes, insertOrder, circularDependencies };
   }
@@ -3430,6 +3552,24 @@ export class SeedLoaderService implements ISeedLoaderService {
               : missingProbe?.nonMemberOf
                 ? `; the ${deferred.targetObject} row that answers to it is not a member of organization ${missingProbe.nonMemberOf}`
                 : ''));
+        // [#34458] A person can appear after the seed — the first admin signs
+        // up after the boot seed ran — so a missed person is held for
+        // `resolveHeldPersonReferences`, on the row this load landed on.
+        const heldRowId = deferred.internalId
+          ?? insertedRecords.get(deferred.objectName)?.get(deferred.recordExternalId);
+        if (stillUnresolved && deferred.targetObject === SystemObjectName.USER && heldRowId) {
+          this.heldPersonReferences.push({
+            objectName: deferred.objectName,
+            recordId: heldRowId,
+            field: deferred.field,
+            targetObject: deferred.targetObject,
+            targetField: deferred.targetField,
+            attemptedValue: deferred.attemptedValue,
+            multiple: deferred.multiple === true,
+            rowOrganization: deferred.rowOrganization,
+            organizationId,
+          });
+        }
       }
     }
   }
@@ -3983,6 +4123,7 @@ export class SeedLoaderService implements ISeedLoaderService {
    */
   private topologicalSort(
     nodes: ObjectDependencyNodeParsed[],
+    declared?: ReadonlyMap<string, ReadonlySet<string>>,
   ): { insertOrder: string[]; circularDependencies: string[][] } {
     const inDegree = new Map<string, number>();
     const adjacency = new Map<string, string[]>();
@@ -4035,15 +4176,186 @@ export class SeedLoaderService implements ISeedLoaderService {
       const cycles = this.findCycles(remaining);
       circularDependencies.push(...cycles);
 
-      // Add remaining objects to insertOrder (they'll need multi-pass)
-      for (const node of remaining) {
-        if (!insertOrder.includes(node.object)) {
-          insertOrder.push(node.object);
+      // Add remaining objects to insertOrder (they'll need multi-pass).
+      // [Seed.dependsOn] Their lookup edges are left to the deferred passes,
+      // as before, but a DECLARED edge is an order the load must keep: a
+      // dataset depending on an object that sits behind a lookup cycle is
+      // left over too, and is appended after that object. The declared edges
+      // never form a cycle here (the load refuses one before it writes), and
+      // with none declared the append order is the node order, as before.
+      for (const object of this.orderByDeclaredEdges(remaining.map(n => n.object), declared)) {
+        if (!insertOrder.includes(object)) {
+          insertOrder.push(object);
         }
       }
     }
 
     return { insertOrder, circularDependencies };
+  }
+
+  /**
+   * [Seed.dependsOn] `objects`, stably reordered so each lands after every
+   * object of the list it declared a dependency on: repeatedly the first
+   * object whose declared dependencies are all placed. An object caught on a
+   * declared cycle (which the load refuses before using this order) keeps its
+   * place at the end rather than being lost.
+   */
+  private orderByDeclaredEdges(
+    objects: string[],
+    declared: ReadonlyMap<string, ReadonlySet<string>> | undefined,
+  ): string[] {
+    if (!declared || declared.size === 0) return objects;
+    const pending = [...new Set(objects)];
+    const inList = new Set(pending);
+    const placed: string[] = [];
+    const isPlaced = new Set<string>();
+    while (pending.length > 0) {
+      const next = pending.findIndex(object =>
+        [...(declared.get(object) ?? [])].every(dep => dep === object || !inList.has(dep) || isPlaced.has(dep)));
+      const [object] = pending.splice(next === -1 ? 0 : next, 1);
+      placed.push(object);
+      isPlaced.add(object);
+    }
+    return placed;
+  }
+
+  /**
+   * [Seed.dependsOn] The declared edges of a load, pooled per object across
+   * its datasets, and the declarations the load cannot honour: a dataset that
+   * names its own object, or a name no dataset of the load seeds — told apart
+   * from a name whose datasets `env` / `locale` scoped out of this load.
+   * Only datasets this load seeds are judged.
+   */
+  private collectDeclaredDependencies(
+    datasets: Seed[],
+    requested: Seed[],
+  ): { edges: Map<string, Set<string>>; refusals: DeclaredDependencyRefusal[] } {
+    const edges = new Map<string, Set<string>>();
+    const refusals: DeclaredDependencyRefusal[] = [];
+    const loaded = new Set(datasets.map(d => d.object));
+    const scopedOut = new Set(requested.map(d => d.object).filter(object => !loaded.has(object)));
+    for (const dataset of datasets) {
+      for (const target of dataset.dependsOn ?? []) {
+        if (target === dataset.object) {
+          refusals.push({
+            object: dataset.object,
+            target,
+            message:
+              `Seed dataset '${dataset.object}' declares dependsOn its own object: a dataset cannot load after ` +
+              'itself. List the other seeded objects its hooks read, or drop the entry. The seed load was refused ' +
+              'and no row was written.',
+          });
+          continue;
+        }
+        if (!loaded.has(target)) {
+          refusals.push({
+            object: dataset.object,
+            target,
+            message: scopedOut.has(target)
+              ? `Seed dataset '${dataset.object}' declares dependsOn '${target}', whose datasets are all scoped out ` +
+                'of this load by their env or locale, so its rows would not be there when this dataset loads. ' +
+                `Scope '${dataset.object}' the same way, or widen '${target}'. The seed load was refused and no row ` +
+                'was written.'
+              : `Seed dataset '${dataset.object}' declares dependsOn '${target}', which no dataset of this load ` +
+                'seeds. dependsOn names objects that other datasets of the same load seed; check the spelling, or ' +
+                `load '${target}'s dataset together with this one. The seed load was refused and no row was written.`,
+          });
+          continue;
+        }
+        let set = edges.get(dataset.object);
+        if (!set) edges.set(dataset.object, set = new Set());
+        set.add(target);
+      }
+    }
+    return { edges, refusals };
+  }
+
+  /**
+   * [Seed.dependsOn] Every declared edge that closes a cycle of the combined
+   * graph. The rule: a declared edge `A dependsOn B` is refused when B already
+   * depends on A, directly or through any chain of edges — lookup or declared
+   * (self-references excluded, as the sort excludes them). Equivalently, the
+   * edge lies on a cycle, which is the one case where no order keeps it. A
+   * cycle made of lookup edges alone is not this rule's: those still load in
+   * deferred passes.
+   */
+  private findDeclaredEdgeCycles(
+    nodes: ObjectDependencyNodeParsed[],
+    declared: ReadonlyMap<string, ReadonlySet<string>>,
+  ): DeclaredDependencyRefusal[] {
+    if (declared.size === 0) return [];
+    const dependsOnOf = new Map<string, string[]>();
+    for (const node of nodes) {
+      const deps = dependsOnOf.get(node.object) ?? [];
+      for (const dep of node.dependsOn) if (dep !== node.object && !deps.includes(dep)) deps.push(dep);
+      dependsOnOf.set(node.object, deps);
+    }
+    /** A dependency chain from `from` to `to` (both ends included), or undefined. */
+    const chain = (from: string, to: string): string[] | undefined => {
+      const previous = new Map<string, string>();
+      const queue = [from];
+      const seen = new Set([from]);
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (current === to) {
+          const path = [to];
+          while (path[0] !== from) path.unshift(previous.get(path[0])!);
+          return path;
+        }
+        for (const dep of dependsOnOf.get(current) ?? []) {
+          if (seen.has(dep)) continue;
+          seen.add(dep);
+          previous.set(dep, current);
+          queue.push(dep);
+        }
+      }
+      return undefined;
+    };
+    const refusals: DeclaredDependencyRefusal[] = [];
+    for (const [object, targets] of declared) {
+      for (const target of targets) {
+        const back = chain(target, object);
+        if (!back) continue;
+        const cycle = [object, ...back].join(' → ');
+        refusals.push({
+          object,
+          target,
+          message:
+            `Seed dataset '${object}' declares dependsOn '${target}', and that edge closes a cycle: ${cycle} ` +
+            '(each arrow reads "loads after", from a lookup field or a dependsOn). No load order keeps it. Drop the ' +
+            'entry, or the dependency that runs the other way. The seed load was refused and no row was written.',
+        });
+      }
+    }
+    return refusals;
+  }
+
+  /**
+   * [Seed.dependsOn] The answer of a load refused for its declarations:
+   * nothing written, `success: false`, one error per refused declaration
+   * (`field: 'dependsOn'`). Returned rather than thrown, so every caller
+   * reports it the way it reports any failed load, and none falls back to
+   * writing the rows some other way.
+   */
+  private refuseDeclaredDependencies(
+    config: SeedLoaderConfigParsed,
+    graph: ObjectDependencyGraphParsed,
+    refusals: DeclaredDependencyRefusal[],
+    durationMs: number,
+  ): SeedLoaderResultParsed {
+    const errors: ReferenceResolutionError[] = refusals.map(refusal => ({
+      sourceObject: refusal.object,
+      field: 'dependsOn',
+      targetObject: refusal.target,
+      targetField: '(dataset)',
+      attemptedValue: refusal.target,
+      // The declaration is the dataset's, not a row's; no row was attempted.
+      recordIndex: 0,
+      message: refusal.message,
+    }));
+    // No log line of its own: the refusal is handed to the caller, which
+    // reports a failed load's errors (AGENTS.md, degradation log levels).
+    return this.buildResult(config, graph, [], errors, durationMs);
   }
 
   private findCycles(nodes: ObjectDependencyNodeParsed[]): string[][] {
@@ -4654,7 +4966,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         (ledger.withdrawnReferences > 0
           ? ` ${ledger.withdrawnReferences} reference(s) to such rows were left as they are rather than reported unresolved.`
           : '') +
-        ` A deliberate re-seed brings them back: the seed-replayer service called with { reseed: true }.`,
+        ` A deliberate re-seed brings them back: the seed-replayer service called with { reseed: true }, or an installed package's sample-data reseed.`,
       {
         organizationId: ledger.organizationId,
         rows,
@@ -4834,6 +5146,13 @@ export class SeedLoaderService implements ISeedLoaderService {
 // Internal Types
 // ==========================================================================
 
+/** [Seed.dependsOn] One declaration a load refuses: `object` named `target`. */
+interface DeclaredDependencyRefusal {
+  readonly object: string;
+  readonly target: string;
+  readonly message: string;
+}
+
 /**
  * Structural view of objectql's `SummaryRecomputeError` (framework#3147).
  *
@@ -4913,4 +5232,23 @@ interface DeferredUpdate {
    * organization is found by its by-id update under a walled posture.
    */
   rowOrganization?: unknown;
+}
+
+/**
+ * [#34458] A person reference pass 2 left NULL because no `sys_user` row
+ * answered to it yet, on a row this load landed on: the deferral it came
+ * from, plus the id of that row and the organization the load probed in.
+ * {@link SeedLoaderService.resolveHeldPersonReferences} retries it once a
+ * person exists.
+ */
+interface HeldPersonReference {
+  readonly objectName: string;
+  readonly recordId: string;
+  readonly field: string;
+  readonly targetObject: string;
+  readonly targetField: string;
+  readonly attemptedValue: unknown;
+  readonly multiple: boolean;
+  readonly rowOrganization?: unknown;
+  readonly organizationId?: string;
 }

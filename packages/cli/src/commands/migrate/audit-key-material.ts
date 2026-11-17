@@ -24,6 +24,7 @@ import { absentTableReads } from '../../utils/absent-table-reads.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import { archiveFailureCount, examineArchiveTargets } from '../../utils/ledger-copy-archive.js';
 import { composeRedactionSeal } from '../../utils/audit-redaction-seal.js';
+import { sealerStoppedFlag, underAuditSealLock } from '../../utils/audit-seal-lock.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -103,6 +104,7 @@ export default class MigrateAuditKeyMaterial extends Command {
       default: false,
     }),
     json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to apply)' }),
+    'sealer-stopped': sealerStoppedFlag,
   };
 
   /**
@@ -226,25 +228,34 @@ export default class MigrateAuditKeyMaterial extends Command {
         update: (object, data, options) => engine.update(object, data, options),
       };
 
-      const seal = redaction.seal(stack.kernel, engine);
-      const report = await migrateKeyMaterialCopies(readView, logger, { apply, seal });
-
-      // Each copy table's declared archive target, then the same rewrite
-      // through that datasource's driver.
-      const archive = await examineArchiveTargets({
+      const seal = await redaction.seal(stack.kernel, engine);
+      // [ADR-0154 D3 amended] An --apply run holds the audit seal lock from before its first rewrite to after its
+      // last, archive runs included, so no sealer pass seals a row it rewrites; where the database offers no session
+      // lock, a run on a sealed object needs --sealer-stopped (seat ruling 6885005594, E + B).
+      const { result: { report, archive }, lostLock } = await underAuditSealLock(
         engine,
-        kernel: stack.kernel,
-        reads: readView,
-        tables: KEY_MATERIAL_COPY_TABLES,
-        run: (driver, objects) => migrateArchivedKeyMaterialCopies(driver, logger, { apply, objects, seal }),
-      });
+        { apply, sealerStopped: flags['sealer-stopped'], objects: KEY_MATERIAL_COPY_TABLES, warn: (line) => logger.warn(line) },
+        async () => {
+          const report = await migrateKeyMaterialCopies(readView, logger, { apply, seal });
+          // Each copy table's declared archive target, then the same rewrite
+          // through that datasource's driver.
+          const archive = await examineArchiveTargets({
+            engine,
+            kernel: stack.kernel,
+            reads: readView,
+            tables: KEY_MATERIAL_COPY_TABLES,
+            run: (driver, objects) => migrateArchivedKeyMaterialCopies(driver, logger, { apply, objects, seal }),
+          });
+          return { report, archive };
+        },
+      );
       const failures = report.failures + archiveFailureCount(archive);
       const refused = report.refused + archive.reduce((n, a) => n + (a.report?.refused ?? 0), 0);
 
       if (flags.json) {
         reads.notice(true);
-        await emitJson({ database: stack.dbLabel, apply, report, archive, duration: timer.elapsed() });
-        if (failures > 0 || refused > 0) this.exit(1);
+        await emitJson({ database: stack.dbLabel, apply, report, archive, ...(lostLock ? { sealLockLost: lostLock } : {}), duration: timer.elapsed() });
+        if (failures > 0 || refused > 0 || lostLock) this.exit(1);
         return;
       }
 
@@ -299,6 +310,7 @@ export default class MigrateAuditKeyMaterial extends Command {
 
       const rewritten = report.rewritten + archive.reduce((n, a) => n + (a.report?.rewritten ?? 0), 0);
       if (refused > 0) printError(redaction.refusedLine(refused));
+      if (lostLock) printError(lostLock);
       if (failures > 0) {
         printError(`${failures} read(s), row(s) or archive datasource(s) failed — re-run to finish them.`);
       } else if (apply && rewritten > 0) {
@@ -312,7 +324,7 @@ export default class MigrateAuditKeyMaterial extends Command {
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
-      if (failures > 0 || refused > 0) this.exit(1);
+      if (failures > 0 || refused > 0 || lostLock) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

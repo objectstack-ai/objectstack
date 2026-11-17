@@ -169,6 +169,7 @@ import {
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
+  lintInlineEditBulk,
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -364,6 +365,12 @@ export interface AuthoringRuleContext {
    * authored shape the build judges (`stripInjectedSystemColumns`); and it
    * leaves out a label group every member of which already shared the label on
    * the target without the written entry, a clash the entry did not create.
+   *
+   * `validateApprovalApprovers` reads its presence only, as
+   * `validateEmailTemplateHoleGrammar` does: a flow written at the publish door is authored in the
+   * deployment, never a package's own code, so a `platform_admin` approver in
+   * it is refused there; the CLI commands read a package's source and cannot
+   * know which door will register it, so they refuse nothing.
    */
   runtimeWriteType?: string;
   /**
@@ -1638,7 +1645,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `approver.value` is just a string to Zod. It is not just a string here.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow'],
-    run: (stack) => validateApprovalApprovers(stack),
+    // At the runtime door a flow is authored in the deployment, so a
+    // `platform_admin` approver in it is refused there (`atSaveDoor`, read off
+    // `runtimeWriteType`'s presence; see that field).
+    run: (stack, ctx) => validateApprovalApprovers(stack, { atSaveDoor: ctx.runtimeWriteType !== undefined }),
   },
   // ADR-0079 — `titleFormat` is retired in favour of `nameField`, and the
   // ruling of record on #29007 (6574393684, letter B) refuses it: an object
@@ -2462,6 +2472,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       'twice. This is coverage recorded, not coverage missing: all three commands report the rule.',
     run: (stack) =>
       lintLegacyOrganizationComposites(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
+  // An inline-edited relationship whose parent or child declares
+  // `enable.apiMethods` without `bulk` (`relationship/inline-edit-needs-bulk`).
+  // The parent's form saves the rows in one cross-object `/api/v1/batch`, which
+  // asks every object in it for `bulk`, so the form fills and then 405s on save.
+  // Registered rather than left in `lintDataModel`: it forecasts a refusal at run
+  // time, not a style nudge, so all three commands report it. Advisory: a
+  // warning that refuses nothing and never fails `os build`.
+  {
+    name: 'lintInlineEditBulk',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
+    run: (stack) =>
+      lintInlineEditBulk(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.where,

@@ -187,8 +187,8 @@ describe('exportGallery — one passing, generic app', () => {
         summary: { ...(fx.scenario.card.prompt.short.en ? { en: fx.scenario.card.prompt.short.en } : {}), ...(fx.scenario.card.prompt.short.zh ? { zh: fx.scenario.card.prompt.short.zh } : {}) },
         capabilities: [...fx.scenario.card.capabilities].sort(),
         screenshots: [],
-        qa: { questions: 8, turns: 9, personas: 2 },
-        operations: 5,
+        qa: { questions: 14, turns: 16, personas: 2 },
+        operations: 6,
         framework: { version: '18.3.0', runner: 'abc1234' },
         runDate: '2026-11-06',
         run: `2026-11-06-scenario-${CARD_ID}`,
@@ -202,7 +202,7 @@ describe('exportGallery — one passing, generic app', () => {
     const t = JSON.parse(readFileSync(join(out, 'apps', CARD_ID, 'transcript.json'), 'utf8'));
     expect(t.halves.map((h: { mode: string; phase: string }) => `${h.mode}/${h.phase}`)).toEqual(['scratch/run', 'scratch/iterate-run', 'template/iterate-run']);
     const first = t.halves[0].turns;
-    expect(first).toHaveLength(9); // 8 questions, one of them asked as both personas
+    expect(first).toHaveLength(16); // 14 questions, two of them asked as both personas
     for (const turn of first) {
       expect(turn.answer.replyText.length).toBeGreaterThan(0);
       expect(turn.grade).toMatchObject({ correct: true, cited: true, leaks: [] });
@@ -348,6 +348,24 @@ describe('exportGallery — ⛔ only a run on published packages is exported or 
     const md = readFileSync(join(out, 'apps', CARD_ID, 'scorecard.md'), 'utf8').split('\n');
     expect(md[2]).toBe('packages: published 18.3.0');
     expect(JSON.parse(readFileSync(join(out, 'apps', CARD_ID, 'run-record.json'), 'utf8')).env.packagesLine).toBe('packages: published 18.3.0');
+  });
+});
+
+describe('exportGallery — a record naming its supplied template (`template`, written by `run --template`)', () => {
+  it('exports as the same record without the key: every file and the index the same, the key carried in the run record as read', async () => {
+    const fx = await runCrm();
+    const plain = await setup(fx);
+    const named = await setup({ ...fx, record: { ...fx.record, template: { file: 'crm-template.json', sha256: 'a'.repeat(64) } } });
+    const a = await exportGallery(plain.opts());
+    const b = await exportGallery(named.opts());
+    expect(b.refused).toEqual(a.refused);
+    expect(b.exported.map((e) => e.id)).toEqual([CARD_ID]);
+    const withoutRecord = (t: Record<string, string>) => Object.fromEntries(Object.entries(t).filter(([k]) => k !== `apps/${CARD_ID}/run-record.json`));
+    expect(withoutRecord(tree(named.out))).toEqual(withoutRecord(tree(plain.out)));
+    const record = JSON.parse(readFileSync(join(named.out, 'apps', CARD_ID, 'run-record.json'), 'utf8'));
+    expect(record.template).toEqual({ file: 'crm-template.json', sha256: 'a'.repeat(64) });
+    const { template: _template, ...rest } = record;
+    expect(rest).toEqual(JSON.parse(readFileSync(join(plain.out, 'apps', CARD_ID, 'run-record.json'), 'utf8')));
   });
 });
 
@@ -639,7 +657,7 @@ describe('buildTranscript — a run that asked each question turn more than once
     const record = asRecord(fx.record); // the record reader takes it: the repeat count is outside the exact `counts`
     expect(record.cardRun.askRepeats).toBe(3);
     const t = buildTranscript(fx.scenario, record, mergeRecordings([fx.recording]));
-    expect(t.halves.map((h) => h.turns.length)).toEqual([27]);
+    expect(t.halves.map((h) => h.turns.length)).toEqual([48]);
     const asks = t.halves[0]!.turns.filter((x) => x.question === 'account_count' && x.persona === 'sdr');
     const base = stepKey({ card: CARD_ID, mode: 'scratch', phase: 'run', step: 'account_count', persona: 'sdr' });
     expect(asks.map((x) => x.answer!.replyText)).toEqual([fx.recording.turns[base]!.replyText, 'I could not find that.', fx.recording.turns[`${base}/repeat-3`]!.replyText]);

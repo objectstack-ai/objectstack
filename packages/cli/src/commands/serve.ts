@@ -6,7 +6,7 @@ import fs from 'fs';
 import net from 'net';
 import chalk, { chalkStderr } from 'chalk';
 import { stampDatasourceEnvCredentialsDefault } from '../utils/datasource-env-credentials-default.js';
-import { loadConfig, bundleConfigModule } from '../utils/config.js';
+import { loadConfig, bundleConfigModule, stopConfigBundler } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
@@ -76,6 +76,7 @@ import {
   type SeedSuppressionReason,
 } from '@objectstack/spec/contracts';
 import { missingProviderMessage } from '../utils/capability-preflight.js';
+import { composeSeedSettledMessage } from '../utils/seed-settled-message.js';
 // The deployment's product name, for `AuthPlugin` — the same resolver the email
 // capability's template context reads (`resolveEmailCapabilityArg`), so the two
 // cannot disagree. Both moved to `@objectstack/plugin-email` beside the mail
@@ -908,19 +909,9 @@ export function seedingHasSettled(snapshot: SeedSettlementSnapshot | undefined):
   return !snapshot || snapshot.inFlight === 0;
 }
 
-/** Build the message from the two things the kernel already knows. */
-export function composeSeedSettledMessage(
-  snapshot: SeedSettlementSnapshot | undefined,
-  sources: SeedSourceSummary[] | undefined,
-): SeedSettledMessage {
-  const list = sources ?? [];
-  return {
-    type: 'objectstack:seed-settled',
-    ok: list.every((s) => s.rejected === 0 && (s.droppedRefs ?? 0) === 0 && !s.emptyInstall),
-    suppressed: snapshot ? [...snapshot.suppressed] : [],
-    sources: list,
-  };
-}
+// Built in its own module so a test can drive the verdict without loading
+// this file's composition graph; re-exported here, where it always lived.
+export { composeSeedSettledMessage };
 
 /** What {@link createSeedSettlementAnnouncer} needs from its host. */
 export interface SeedSettlementChannels {
@@ -2878,6 +2869,9 @@ export default class Serve extends Command {
         : flags.prebuilt
           ? { mod: await import(absolutePath.startsWith('/') ? `file://${absolutePath}` : absolutePath) }
           : await bundleConfigModule(absolutePath);
+      // The bundler's service child would otherwise outlive this process and
+      // be found in `os start`'s process group after `start` exits (#34337).
+      if (!useArtifactFallback && !flags.prebuilt) await stopConfigBundler();
 
       let config = mod.default || mod;
 

@@ -22,6 +22,7 @@ import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
 import { composeRedactionSeal } from '../../utils/audit-redaction-seal.js';
+import { sealerStoppedFlag, underAuditSealLock } from '../../utils/audit-seal-lock.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -88,6 +89,7 @@ export default class MigrateAuditMetadataBodies extends Command {
       default: false,
     }),
     json: Flags.boolean({ description: 'Output as JSON (implies non-interactive; requires --yes to apply)' }),
+    'sealer-stopped': sealerStoppedFlag,
   };
 
   async run(): Promise<void> {
@@ -177,7 +179,7 @@ export default class MigrateAuditMetadataBodies extends Command {
         throw new Error('No ObjectQL engine on this stack — cannot rewrite audit rows.');
       }
 
-      const { migrateStoredMetadataBodyCopies } = await import('@objectstack/plugin-audit');
+      const { migrateStoredMetadataBodyCopies, STORED_METADATA_BODY_REWRITTEN_OBJECTS } = await import('@objectstack/plugin-audit');
 
       const logger = flags.json
         ? { info: (m: string) => console.error(m), warn: (m: string) => console.error(m) }
@@ -207,12 +209,20 @@ export default class MigrateAuditMetadataBodies extends Command {
         update: (object, data, options) => engine.update(object, data, options),
       };
 
-      const report = await migrateStoredMetadataBodyCopies(readView, logger, { apply, seal: redaction.seal(stack.kernel, engine) });
+      const seal = await redaction.seal(stack.kernel, engine);
+      // [ADR-0154 D3 amended] An --apply run holds the audit seal lock from before its first rewrite to after its
+      // last, archive runs included, so no sealer pass seals a row it rewrites; where the database offers no session
+      // lock, a run on a sealed object needs --sealer-stopped (seat ruling 6885005594, E + B).
+      const { result: report, lostLock } = await underAuditSealLock(
+        engine,
+        { apply, sealerStopped: flags['sealer-stopped'], objects: STORED_METADATA_BODY_REWRITTEN_OBJECTS, warn: (line) => logger.warn(line) },
+        () => migrateStoredMetadataBodyCopies(readView, logger, { apply, seal }),
+      );
 
       if (flags.json) {
         reads.notice(true);
-        await emitJson({ database: stack.dbLabel, apply, report, duration: timer.elapsed() });
-        if (report.failures > 0 || report.refused > 0) this.exit(1);
+        await emitJson({ database: stack.dbLabel, apply, report, ...(lostLock ? { sealLockLost: lostLock } : {}), duration: timer.elapsed() });
+        if (report.failures > 0 || report.refused > 0 || lostLock) this.exit(1);
         return;
       }
 
@@ -228,6 +238,7 @@ export default class MigrateAuditMetadataBodies extends Command {
       console.log('');
 
       if (report.refused > 0) printError(redaction.refusedLine(report.refused));
+      if (lostLock) printError(lostLock);
       if (report.failures > 0) {
         printError(`${report.failures} row(s) could not be rewritten — re-run to finish them.`);
       } else if (apply && report.rewritten > 0) {
@@ -243,7 +254,7 @@ export default class MigrateAuditMetadataBodies extends Command {
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
-      if (report.failures > 0 || report.refused > 0) this.exit(1);
+      if (report.failures > 0 || report.refused > 0 || lostLock) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

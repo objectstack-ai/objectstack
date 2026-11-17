@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import { installEgressGuard, type EgressPolicy } from '@objectstack/core/egress';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID, effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, readOrganizationTextLocale, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type {
@@ -306,6 +307,15 @@ export interface AutomationServicePluginOptions {
      * {@link createPackageFileLoader} and {@link createPackagePathResolver}).
      */
     packageRoot?: string;
+    /**
+     * The outbound-request guard's policy for the flow `http` node's inline
+     * arm. Omitted, the open-core default applies: only public addresses,
+     * plus the targets the operator lists in `OS_EGRESS_ALLOWED_TARGETS`;
+     * link-local and cloud metadata addresses are never reachable. A
+     * multi-tenant host binds a stricter policy here (it is asked per
+     * organization and source). A malformed allowlist fails the boot.
+     */
+    egressPolicy?: EgressPolicy;
 }
 
 /**
@@ -1565,6 +1575,25 @@ export function i18nServiceReader(ctx: Pick<PluginContext, 'getService'>): () =>
 }
 
 /**
+ * [ruling 6913660232] The engine's reader of the run organization's language —
+ * the language a record write's field value MARKED as text is written in:
+ * `@objectstack/core`'s `resolveOrganizationLocale`, the one reader of the
+ * deployment-default ladder (the Localization setting when somebody set it,
+ * else the app's declared `i18n.defaultLocale`).
+ *
+ * Both services are resolved at QUESTION time, for {@link i18nServiceReader}'s
+ * reason, by core's `readOrganizationTextLocale` — the reading a hook's or
+ * action's declared text shares (#34374). A composition with neither answers
+ * `undefined`, and the text is written as authored; an unregistered
+ * Localization setting is not set; any other settings read that throws rejects.
+ */
+export function organizationLocaleReader(
+    ctx: Pick<PluginContext, 'getService'>,
+): (tenantId: string | undefined) => Promise<string | undefined> {
+    return (tenantId) => readOrganizationTextLocale((name) => ctx.getService(name), tenantId);
+}
+
+/**
  * AutomationServicePlugin — Core engine plugin
  *
  * Responsibilities:
@@ -2236,6 +2265,13 @@ export class AutomationServicePlugin implements Plugin {
         // node renders, never at boot (see `i18nServiceReader`).
         this.engine.setI18nServiceSource(i18nServiceReader(ctx));
 
+        // [ruling 6913660232] The organization's language, for a record field
+        // value marked as text: its Localization setting when somebody set it,
+        // else the app's declared `i18n.defaultLocale` — the one reader of that
+        // ladder. Both services are probed when a record node asks, never at
+        // boot, for `i18nServiceReader`'s reason.
+        this.engine.setOrganizationLocaleResolver(organizationLocaleReader(ctx));
+
         // Register as global service — other plugins access via ctx.getService('automation')
         ctx.registerService('automation', this.engine);
 
@@ -2281,7 +2317,11 @@ export class AutomationServicePlugin implements Plugin {
         // Seed the platform's built-in node executors. A bare
         // `new AutomationServicePlugin()` is thus a self-contained automation
         // capability — no companion node-pack plugins required (ADR-0018).
-        installBuiltinNodes(this.engine, ctx);
+        // The outbound-request guard the `http` node sends through, installed
+        // here so a malformed `OS_EGRESS_ALLOWED_TARGETS`, or a runtime in which
+        // the guard cannot prove it judges every connection, fails the boot.
+        const egress = await installEgressGuard({ policy: this.options.egressPolicy, logger: ctx.logger });
+        installBuiltinNodes(this.engine, ctx, { egress });
 
         if (this.options.debug) {
             ctx.hook('automation:beforeExecute', async (flowName: string) => {
@@ -2594,6 +2634,10 @@ export class AutomationServicePlugin implements Plugin {
                         ...(grants.posture ? { posture: grants.posture } : {}),
                         // [ADR-0151 D3] An AI service account runs as an agent.
                         ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
+                        // [#33661] The capabilities the user holds, read by a
+                        // dry run's admission (`requiredPermissions`) alone;
+                        // run setup does not seed them on a run.
+                        systemPermissions: grants.systemPermissions,
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });

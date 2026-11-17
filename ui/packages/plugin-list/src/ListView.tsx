@@ -51,7 +51,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -63,7 +63,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
-import { isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { canonicalAstOperator, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
@@ -1070,6 +1070,51 @@ export function objectHasOwnershipQueue(objectDef: unknown): boolean {
       ? (raw as Record<string, unknown>).queue
       : undefined;
   return !!queue && typeof queue === 'object' && (queue as { system?: unknown }).system === true;
+}
+
+/**
+ * Does the view's own filter require `owner_id` to hold a value? Then no row it
+ * returns can sit in a queue, whose rows have no owner, and the "In a queue"
+ * toggle could only ever empty the list (objectstack#34580). An affordance is
+ * offered only where it can do something.
+ *
+ * Read on the filter as it goes to the wire: lowered by the shared
+ * `toFilterNode`, so a stored rule list, an AST and a MongoDB-style object all
+ * answer alike, and the operator folded by the spec's `canonicalAstOperator`.
+ * A condition counts only as a conjunct of the top-level AND (nested ANDs
+ * included): one inside an OR group leaves the other members free to return
+ * unowned rows. Three operators require a value: equality to a non-empty
+ * scalar, membership in a list of such, and `is_not_empty`. A filter the
+ * lowering refuses pins nothing here; the list answers it with its load error.
+ */
+export function viewFilterRequiresOwner(viewFilter: unknown): boolean {
+  const lowered = toFilterNodeSafely(viewFilter);
+  return lowered.ok && conjunctsOf(lowered.node).some(requiresOwnerValue);
+}
+
+const isAstGroup = (node: unknown[], logic: 'and' | 'or') =>
+  typeof node[0] === 'string' && node[0].toLowerCase() === logic && node.slice(1).every(Array.isArray);
+
+/** The top-level AND's conjuncts: an `and` node's children, or an implicit-AND list's elements, flattened. */
+function conjunctsOf(node: unknown): unknown[][] {
+  if (!Array.isArray(node) || node.length === 0) return [];
+  if (isAstGroup(node, 'and')) return node.slice(1).flatMap(conjunctsOf);
+  if (isAstGroup(node, 'or')) return [];
+  if (Array.isArray(node[0])) return node.flatMap(conjunctsOf);
+  return [node];
+}
+
+const isOwnerValue = (value: unknown) =>
+  value !== null && value !== undefined && value !== '' && typeof value !== 'object';
+
+function requiresOwnerValue([field, operator, value]: unknown[]): boolean {
+  if (field !== SystemFieldName.OWNER_ID || typeof operator !== 'string') return false;
+  switch (canonicalAstOperator(operator)) {
+    case '=': return isOwnerValue(value);
+    case 'in': return Array.isArray(value) && value.every(isOwnerValue);
+    case 'is_not_empty': return true;
+    default: return false;
+  }
 }
 
 /**
@@ -2578,11 +2623,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // could only ever return an empty list. The flag rides the permissions
   // answer the console already holds, so a list mount reads no queue list.
   // An unknown answer (no provider, the role-based one, anonymous) hides it.
+  // Not offered on a view whose own filter pins `owner_id` to a value
+  // (`viewFilterRequiresOwner`, objectstack#34580): no row of it can sit in a
+  // queue. Withheld that way it contributes nothing and a pressed state is let
+  // go, so a view that offers it again shows it off rather than re-applying it.
   // Withheld with the user filters on a dataset-bound chart. Ephemeral like
   // the toolbar's other unpersisted toggles: it narrows what is on screen.
   const [sittingInQueueOnly, setSittingInQueueOnly] = React.useState(false);
   const { hasAnyQueue } = usePermissions();
-  const queueFilterOffered = hasAnyQueue === true && objectHasOwnershipQueue(objectDef);
+  const viewPinsOwner = React.useMemo(() => viewFilterRequiresOwner(authoredFilter), [authoredFilter]);
+  const queueFilterOffered = hasAnyQueue === true && objectHasOwnershipQueue(objectDef) && !viewPinsOwner;
+  React.useEffect(() => {
+    if (viewPinsOwner) setSittingInQueueOnly(false);
+  }, [viewPinsOwner]);
   const appliedQueueSittingConditions =
     queueFilterOffered && sittingInQueueOnly && !datasetChartOnScreen
       ? QUEUE_SITTING_CONDITIONS
@@ -5883,7 +5936,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           return needsQuoting ? `"${str.replace(/"/g, '""')}"` : str;
         }).join(','));
       });
-      const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const blob = csvBlob(rows.join('\n'));
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

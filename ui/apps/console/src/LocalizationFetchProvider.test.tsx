@@ -32,7 +32,7 @@ import { notifyDataChanged } from '@object-ui/react';
 import { resetInflightGetsForTesting } from '../../../packages/types/src/http-inflight';
 import { clearSharedDiscoveryCache } from '../../../packages/data-objectstack/src/sharedDiscovery';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
-import { __resetAppDefaultLocaleForTests, loadAppDefaultLocale } from './languageSeed';
+import { __resetPreferredLocaleForTests, loadPreferredLocale } from './languageSeed';
 // Not on the `@object-ui/auth` barrel; the vitest alias maps that barrel to
 // `packages/auth/src`, so this deep path is the SAME module instance the
 // provider's `getSessionOwnerChangeCount` reads.
@@ -403,32 +403,56 @@ describe('LocalizationFetchProvider', () => {
       authUser = null;
       window.localStorage.clear();
       resetInflightGetsForTesting();
-      __resetAppDefaultLocaleForTests();
+      __resetPreferredLocaleForTests();
+      vi.restoreAllMocks();
       clearSharedDiscoveryCache();
     });
 
-    it("with no choice on this device, the read states the app's declared default (objectstack#33231)", async () => {
-      // Discovery serves `locale.default: 'zh-CN'`; the server answers the
-      // `Accept-Language` rung with what it was told, else the browser's en-US.
+    /**
+     * Discovery serving `locale`, and a server answering the `Accept-Language`
+     * rung with what it was told — or, told nothing, with `deploymentDefault`
+     * (the organization's language, else the app's declared default).
+     */
+    function serveDiscovery(locale: { default: string; supported: string[] }, deploymentDefault = 'en-US') {
       fetchMock().mockImplementation(async (url: string, init: RequestInit) =>
         String(url).endsWith('/api/v1/discovery')
-          ? ok({ success: true, data: { locale: { default: 'zh-CN', supported: ['zh-CN'], timezone: 'UTC' } } })
+          ? ok({ success: true, data: { locale: { ...locale, timezone: 'UTC' } } })
           : ok({
               authenticated: true,
               currency: null,
-              locale: (init.headers as Record<string, string>)['Accept-Language'] ?? 'en-US',
+              locale: (init.headers as Record<string, string>)['Accept-Language'] ?? deploymentDefault,
               timezone: 'UTC',
             }),
       );
+    }
+
+    it('with no choice on this device, the read states a browser language the app ships (objectstack#33985)', async () => {
+      serveDiscovery({ default: 'en', supported: ['en', 'zh-CN'] });
+      vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('zh-CN');
       // The boot starts this read before the app mounts (`seedTenantLanguage`).
-      void loadAppDefaultLocale('');
+      void loadPreferredLocale('');
 
       renderUnderLanguage('zh-CN');
 
       await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日'));
       expect(statedOn(1)).toBe('zh-CN');
       expect(fetchMock()).toHaveBeenCalledTimes(2);
-      // The seed the next boot reads is the app's default, not the browser's.
+      // The seed the next boot reads is the browser's supported language.
+      expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('zh-CN');
+    });
+
+    it('with no choice on this device, a browser language the app does not ship states nothing, and the server decides (objectstack#34392)', async () => {
+      // The organization's language is zh-CN; the app's declared default is en.
+      serveDiscovery({ default: 'en', supported: ['en', 'zh-CN'] }, 'zh-CN');
+      vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('fr');
+      void loadPreferredLocale('');
+
+      renderUnderLanguage('zh-CN');
+
+      await waitFor(() => expect(screen.getByTestId('display')).toHaveTextContent('zh-CN|2026年10月11日'));
+      // Stating the app's `en` would have answered the request rung and hidden the organization's language.
+      expect(statedOn(1)).toBeNull();
+      expect(fetchMock()).toHaveBeenCalledTimes(2);
       expect(window.localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('zh-CN');
     });
 

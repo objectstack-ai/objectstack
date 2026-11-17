@@ -177,7 +177,7 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
             : {}),
     });
     if (this.authoringChannel !== 'package-author') {
-        await this.runAuthoringGate({ type, name, state: 'active', body });
+        await this.runAuthoringGate({ type, name, state: 'active', body, packageId: binding });
     }
 }
 
@@ -186,7 +186,7 @@ export async function runAuthoringGate(
     this: Pick<AuthoringGateHost, 'authoringGates' | 'engine' | 'isArtifactBacked'>,
     evt: {
     type: string; name: string; state: 'draft' | 'active'; body: unknown;
-    userTextLocales?: readonly (string | undefined)[];
+    userTextLocales?: readonly (string | undefined)[]; packageId?: string | null;
 }): Promise<void> {
     const singular = PLURAL_TO_SINGULAR[evt.type] ?? evt.type;
     const gate = this.authoringGates.get(singular);
@@ -208,6 +208,8 @@ export async function runAuthoringGate(
         ...(evt.userTextLocales !== undefined
             ? { userTextLocales: evt.userTextLocales.filter((l): l is string => typeof l === 'string' && l.length > 0) }
             : {}),
+        // [ADR-0150 D2, #34226] The package the write is addressed to.
+        ...(typeof evt.packageId === 'string' && evt.packageId !== '' ? { packageId: evt.packageId } : {}),
     });
 }
 

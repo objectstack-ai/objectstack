@@ -1059,6 +1059,9 @@ importers:
       '@objectstack/types':
         specifier: workspace:*
         version: link:../types
+      undici:
+        specifier: ^7.30.1
+        version: 7.30.1
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -2440,6 +2443,9 @@ importers:
       '@objectstack/driver-turso':
         specifier: workspace:*
         version: link:../../drivers/driver-turso
+      '@objectstack/metadata-protocol':
+        specifier: workspace:*
+        version: link:../../metadata-protocol
       '@objectstack/setup':
         specifier: workspace:*
         version: link:../../apps/setup
