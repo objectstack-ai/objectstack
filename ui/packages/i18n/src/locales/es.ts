@@ -3846,6 +3846,8 @@ const es = {
     viewApprovals: "Ver aprobaciones",
     noPendingApprovals: "Sin aprobaciones pendientes",
     openApprovalsInbox: "Abrir bandeja de aprobaciones",
+    needsYou: "Requiere su acción",
+    viewApprovalDetails: "Ver detalles",
     badgeTotal: "{{total}} en total",
     badgeNotifications: "{{count}} temas sin leer",
     badgeNotifications_one: "{{count}} tema sin leer",

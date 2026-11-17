@@ -3768,6 +3768,8 @@ const ja = {
     viewApprovals: "承認を表示",
     noPendingApprovals: "承認待ちはありません",
     openApprovalsInbox: "承認ボックスを開く",
+    needsYou: "あなたの対応が必要",
+    viewApprovalDetails: "詳細を表示",
     badgeTotal: "合計 {{total}} 件",
     badgeNotifications: "未読トピック {{count}} 件",
     badgeNotifications_one: "未読トピック {{count}} 件",

@@ -3766,6 +3766,8 @@ const de = {
     viewApprovals: "Genehmigungen anzeigen",
     noPendingApprovals: "Keine ausstehenden Genehmigungen",
     openApprovalsInbox: "Genehmigungs-Posteingang öffnen",
+    needsYou: "Wartet auf Ihre Aktion",
+    viewApprovalDetails: "Details anzeigen",
     badgeTotal: "{{total}} insgesamt",
     badgeNotifications: "{{count}} ungelesene Themen",
     badgeNotifications_one: "{{count}} ungelesenes Thema",

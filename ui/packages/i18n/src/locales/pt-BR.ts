@@ -3841,6 +3841,8 @@ const pt = {
     viewApprovals: "Ver aprovações",
     noPendingApprovals: "Sem aprovações pendentes",
     openApprovalsInbox: "Abrir caixa de aprovações",
+    needsYou: "Requer sua ação",
+    viewApprovalDetails: "Ver detalhes",
     badgeTotal: "{{total}} no total",
     badgeNotifications: "{{count}} tópicos não lidos",
     badgeNotifications_one: "{{count}} tópico não lido",

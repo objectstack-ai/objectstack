@@ -576,6 +576,8 @@ export function AppHeader({
     notifications,
     unreadCount,
     pendingApprovalsCount,
+    pendingApprovals,
+    refreshPendingApprovals,
     markAllRead,
     markRead: markNotificationRead,
     markManyRead,
@@ -1138,6 +1140,8 @@ export function AppHeader({
               onMarkAllRead={markAllRead}
               onMarkRead={markNotificationRead}
               onMarkManyRead={markManyRead}
+              pendingApprovals={pendingApprovals}
+              onApprovalDecided={refreshPendingApprovals}
             />
           </span>
 

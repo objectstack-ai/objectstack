@@ -4017,6 +4017,8 @@ const zh = {
     viewApprovals: '查看审批',
     noPendingApprovals: '暂无待审批事项',
     openApprovalsInbox: '打开审批中心',
+    needsYou: '需要你处理',
+    viewApprovalDetails: '查看详情',
     badgeTotal: '共 {{total}} 项',
     badgeNotifications: '{{count}} 个未读主题',
     badgeNotifications_one: '{{count}} 个未读主题',
