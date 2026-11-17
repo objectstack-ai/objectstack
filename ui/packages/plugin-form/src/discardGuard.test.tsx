@@ -400,4 +400,34 @@ describe('master-detail overlay unsaved-changes guard (objectstack#34599)', () =
     await waitFor(() => expect(mdDs.batchTransaction).toHaveBeenCalled());
     await waitFor(() => expect(reports.at(-1)).toBe(false));
   });
+
+  it('an edit save clears the reported input, though the header form stays mounted', async () => {
+    // A create remounts the header for the next entry; an edit keeps it, and
+    // its renderer still holds the opening record as its baseline.
+    const editDs: any = {
+      ...mdDs,
+      findOne: vi.fn().mockResolvedValue({ id: 'c1', title: 'Trip' }),
+      batchTransaction: vi.fn().mockResolvedValue({ results: [{ id: 'c1', title: 'Trip to Berlin' }] }),
+    };
+    const reports: boolean[] = [];
+    const report = (dirty: boolean) => { reports.push(dirty); };
+    render(
+      <FormDirtyReportContext.Provider value={report}>
+        <MasterDetailForm
+          schema={{ type: 'object-master-detail-form', objectName: 'claim', mode: 'edit', recordId: 'c1', fields: ['title'], details: subforms } as any}
+          dataSource={editDs}
+        />
+      </FormDirtyReportContext.Provider>,
+    );
+    const input = await headerInput();
+    await waitFor(() => expect(input.value).toBe('Trip'));
+    fireEvent.change(input, { target: { value: 'Trip to Berlin' } });
+    await waitFor(() => expect(reports.at(-1)).toBe(true));
+
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+
+    await waitFor(() => expect(editDs.batchTransaction).toHaveBeenCalled());
+    await waitFor(() => expect(reports.at(-1)).toBe(false));
+    expect((document.querySelector('input[name="title"]') as HTMLInputElement).value).toBe('Trip to Berlin');
+  });
 });
