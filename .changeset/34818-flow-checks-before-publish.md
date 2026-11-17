@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/lint': patch
 '@objectstack/metadata-protocol': patch
 '@objectstack/rest': patch
@@ -11,7 +11,7 @@
 feat(flow designer): the publish checks show in the Problems tab and the publish drawer before the publish, worded for the builder
 
 Clause-②: yes (widening: optional userTextLocales on GetMetaItemRequestSchema)
-Metadata-protocol: none
+Metadata-protocol: added
 
 Before, a flow's publish checks were seen only after the publish, as a toast that listed rule ids, machine names and English prose, and then disappeared.
 
