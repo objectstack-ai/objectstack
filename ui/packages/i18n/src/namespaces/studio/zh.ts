@@ -586,6 +586,7 @@ const STUDIO_ZH: Record<string, string> = {
   // Flow node inspector
   'engine.inspector.flowNode.kind': '节点',
   'engine.inspector.flowNode.close': '关闭节点',
+  'engine.inspector.flowNode.sourceLabel': '原文标签：“{label}”',
   'engine.inspector.flowNode.id': 'ID',
   'engine.inspector.flowNode.idRequired': '未重命名：节点必须有 ID。',
   'engine.inspector.flowNode.idTaken': '未重命名：此流程中已有另一个节点的 ID 是“{id}”。',
