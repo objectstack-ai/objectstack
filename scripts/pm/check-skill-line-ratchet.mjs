@@ -1538,8 +1538,8 @@ export const CEILINGS = new Map([
   // growth). Five lines: scope and precedence, the close rule (close item hit
   // and no keep item hit ⇒ close; it outranks every not-closed rule here and in
   // the filing gate; anything else stays), the close list and the keep list.
-  // One line paid: the cloud fallback now lives only in lanes/cloud.md, which the
-  // cloud line above points to. Measured delta +4; landed count, headroom 0.
+  // One line paid: the cloud fallback now lives only in lanes/cloud.md, which
+  // triage-duties.md's cloud line points to. Measured delta +4; landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 108],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
