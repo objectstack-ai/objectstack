@@ -32,9 +32,19 @@
  * ## Which conflicts count
  *
  * A conflict against the BASE is always the branch's own: both sides changed the file. A conflict against a PR
- * head counts only on a file the BRANCH changed. Merging a PR built on an older main into a branch built on a
- * newer one can also conflict on files the branch never touched — that is the PR against main, a conflict the
- * PR meets whatever this branch does; it is printed as `not yours` and does not move the exit code.
+ * head on a path the BRANCH changed is the branch's own too. A conflict on any OTHER path is judged by evidence,
+ * never by the path's name: it is `not yours` only when merging the BASE with that PR head conflicts on the same
+ * path — a PR built on an older main meets that conflict whatever this branch does. Everything else counts. A PR
+ * that renames a file the branch edits reports the conflict under the NEW name, outside the branch's change set,
+ * and base × PR merges it cleanly; so it counts (self-test: the `cli` battery's rename case). When in doubt the
+ * tool answers overlap: a needless queue costs a wait, a missed overlap costs a red queue run.
+ *
+ * ## Exit 1: queue behind whom
+ *
+ * A base conflict is not a queue: merge the base and resolve it. A PR-head conflict queues the branch behind
+ * the PR named on that line until it lands, then merge the base and re-run. Before a claim, with no commits yet,
+ * the change set is empty and the answer is 0 by construction: run it again before the first push, or start
+ * from the branch you will build on (`--branch=`).
  *
  * ## Why every merge runs with an EMPTY attribute source
  *
@@ -43,7 +53,12 @@
  * real conflict as clean — measured in this tool's self-test with a driver that resolves everything — while the
  * GitHub merge queue runs no custom driver at all. So each `merge-tree` runs as
  * `git --attr-source=<empty tree> merge-tree …`: no attribute, no driver, the plain three-way text merge the
- * queue performs, and no `os-regen-pending` written into the shared `.git/`.
+ * queue performs, and no `os-regen-pending` written into the shared `.git/`. This differs from AGENTS.md §11's
+ * mergeability probe (a throwaway bare clone with no driver registered) on purpose: the question here is only
+ * which paths conflict, an empty attribute source answers it in place without a second clone, and the self-test
+ * holds it to a driver-ON control leg.
+ *
+ * Every PR head this run fetched under `refs/overlap-check/pull/` is deleted again before it returns.
  *
  * ## Shallow clones
  *
@@ -56,7 +71,7 @@
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -197,6 +212,15 @@ function fetchPrHead(cwd, remote, number) {
 
 /** Pure orchestration over a checkout at `cwd`; `deps.get` replaces `gh api` reads. Returns `{ exit, report }`. */
 export function run(opts, { cwd = process.cwd(), get } = {}) {
+  const fetched = [];
+  try {
+    return runOnce(opts, { cwd, get, fetched });
+  } finally {
+    for (const ref of fetched) git(cwd, ['update-ref', '-d', ref]);
+  }
+}
+
+function runOnce(opts, { cwd, get, fetched }) {
   const cannot = (error) => ({ exit: EXIT.CANNOT_ANSWER, report: { verdict: 'cannot-answer', error } });
   const branchSha = resolveCommit(cwd, opts.branch);
   if (!branchSha) return cannot(`--branch ${opts.branch} names no commit here`);
@@ -228,13 +252,22 @@ export function run(opts, { cwd = process.cwd(), get } = {}) {
   for (const c of candidates) {
     const head = fetchPrHead(cwd, opts.remote, c.number);
     if (!head.ok) return cannot(head.error);
+    fetched.push(head.ref);
     const m = mergeTree(cwd, opts.branch, head.ref, opts.remote);
     if (!m.ok) return cannot(`#${c.number}: ${m.error}`);
+    const elsewhere = m.conflicts.filter((f) => !mine.has(f));
+    let theirs = [];
+    if (elsewhere.length > 0) {
+      const vsMain = mergeTree(cwd, opts.base, head.ref, opts.remote);
+      if (!vsMain.ok) return cannot(`#${c.number} against ${opts.base}: ${vsMain.error}`);
+      theirs = vsMain.conflicts;
+    }
+    const notYours = elsewhere.filter((f) => theirs.includes(f));
     report.prs.push({
       number: c.number,
       shared: c.shared,
-      conflicts: m.conflicts.filter((f) => mine.has(f)),
-      notYours: m.conflicts.filter((f) => !mine.has(f)),
+      conflicts: m.conflicts.filter((f) => !notYours.includes(f)),
+      notYours,
     });
   }
   const overlap = report.baseConflicts.length > 0 || report.prs.some((p) => p.conflicts.length > 0);
@@ -290,7 +323,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'merge-tree: a registered merge driver does not hide the conflict': 2,
   'candidates: shared files only, own PR skipped, renames count': 4,
   'open-PR read: paged through the injected reader, a failed read refuses': 3,
-  'cli: end to end against a remote carrying refs/pull/N/head': 6,
+  'cli: end to end against a remote carrying refs/pull/N/head': 9,
 });
 const SELF_TEST_BATTERY_FLOOR = 7;
 
@@ -316,7 +349,10 @@ const LINES = (edit = {}) => `${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => edit[n] ?
  *   rival    a.txt line 2                      — a real conflict with `mine`        (published as PR 7)
  *   friend   a.txt line 8                      — same file, other hunk: clean       (published as PR 8)
  *   stranger b.txt                             — disjoint files: clean              (published as PR 9)
- * plus `main2` (main moved on: a.txt line 2 again) for the base-conflict case.
+ *   mover    a.txt → moved.txt, line 2 edited  — a rename: git names the conflict
+ *            moved.txt, outside `mine`'s change set                                (published as PR 10)
+ * plus `main2` (main moved on: a.txt line 2 again) for the base-conflict case, and `mine2` (main2 plus a c.txt
+ * edit), whose merge with PR 7 conflicts on a.txt only because main2 and PR 7 do: not its own.
  */
 function buildFixture(root) {
   const remote = join(root, 'remote.git');
@@ -325,7 +361,9 @@ function buildFixture(root) {
   fixtureGit(root, ['init', '-q', '-b', 'main', work]);
   const commitOn = (branch, from, files, msg) => {
     if (from) fixtureGit(work, ['checkout', '-q', '-B', branch, from]);
-    for (const [path, text] of Object.entries(files)) writeFileSync(join(work, path), text);
+    for (const [path, text] of Object.entries(files)) {
+      if (text === null) unlinkSync(join(work, path)); else writeFileSync(join(work, path), text);
+    }
     fixtureGit(work, ['add', '-A']);
     fixtureGit(work, ['commit', '-q', '-m', msg]);
   };
@@ -335,10 +373,12 @@ function buildFixture(root) {
   commitOn('rival', 'main', { 'a.txt': LINES({ 2: 'line 2 — rival' }) }, 'rival');
   commitOn('friend', 'main', { 'a.txt': LINES({ 8: 'line 8 — friend' }) }, 'friend');
   commitOn('stranger', 'main', { 'b.txt': 'b — stranger\n' }, 'stranger');
+  commitOn('mover', 'main', { 'a.txt': null, 'moved.txt': LINES({ 2: 'line 2 — mover' }) }, 'mover');
   commitOn('main2', 'main', { 'a.txt': LINES({ 2: 'line 2 — main moved' }) }, 'main moved');
+  commitOn('mine2', 'main2', { 'c.txt': 'c — mine2\n' }, 'mine2');
   fixtureGit(work, ['remote', 'add', 'origin', remote]);
-  fixtureGit(work, ['push', '-q', 'origin', 'main', 'mine',
-    'rival:refs/pull/7/head', 'friend:refs/pull/8/head', 'stranger:refs/pull/9/head', 'main2:refs/heads/main2']);
+  fixtureGit(work, ['push', '-q', 'origin', 'main', 'mine', 'mine2',
+    'rival:refs/pull/7/head', 'friend:refs/pull/8/head', 'stranger:refs/pull/9/head', 'mover:refs/pull/10/head', 'main2:refs/heads/main2']);
   fixtureGit(work, ['fetch', '-q', 'origin']);
   fixtureGit(work, ['checkout', '-q', 'mine']);
   return { remote, work };
@@ -437,6 +477,19 @@ function selfTest() {
     const vsBase = cli(['--base=origin/main2', '--pr=9', '--json']);
     const baseJson = (() => { try { return JSON.parse(vsBase.stdout); } catch { return null; } })();
     check(L, 'a conflict with the base exits 1 and lists the file under the base', vsBase.status === 1 && baseJson?.baseConflicts?.join() === 'a.txt', `${vsBase.status}\n${vsBase.stdout}${vsBase.stderr}`);
+    const moverRun = cli(['--pr=10', '--json']);
+    const moverJson = (() => { try { return JSON.parse(moverRun.stdout); } catch { return null; } })();
+    check(L, 'a PR renaming the file the branch edits (conflict under the NEW name) exits 1, counted as yours',
+      moverRun.status === 1 && moverJson?.prs?.[0]?.conflicts?.join() === 'moved.txt' && moverJson.prs[0].notYours.length === 0,
+      `${moverRun.status}\n${moverRun.stdout}${moverRun.stderr}`);
+    const inherited = cli(['--branch=origin/mine2', '--base=origin/main2', '--pr=7', '--json']);
+    const inheritedJson = (() => { try { return JSON.parse(inherited.stdout); } catch { return null; } })();
+    check(L, 'a conflict the PR has with the base itself, off the branch\'s files, is not yours: exit 0',
+      inherited.status === 0 && inheritedJson?.prs?.[0]?.notYours?.join() === 'a.txt',
+      `${inherited.status}\n${inherited.stdout}${inherited.stderr}`);
+    const leftover = spawnSync('git', ['for-each-ref', REF_NAMESPACE], { cwd: work, encoding: 'utf8' });
+    check(L, 'no fetched PR head is left under refs/overlap-check/pull/ after the runs', leftover.status === 0 && leftover.stdout.trim() === '',
+      leftover.stdout);
     const usage = cli(['--nope']);
     check(L, 'a usage error exits 2', usage.status === 2, `${usage.status}`);
     fixtureGit(work, ['checkout', '-q', '--orphan', 'island']);
