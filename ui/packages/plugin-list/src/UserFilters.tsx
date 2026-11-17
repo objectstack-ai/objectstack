@@ -953,8 +953,8 @@ function DropdownFilters({ fields, objectDef, objectDefPending, data, onFilterCh
           ) : (
             <div className="max-h-60 overflow-y-auto space-y-0.5" data-testid={`filter-options-${f.field}`}>
               {f.options.length === 0 ? (
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  No options
+                <div className="px-2 py-3 text-center text-xs text-muted-foreground" data-testid={`filter-options-empty-${f.field}`}>
+                  {tt('fields.options.empty', 'No options available')}
                 </div>
               ) : (
                 f.options.map(opt => (

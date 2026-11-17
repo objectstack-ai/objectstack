@@ -4459,7 +4459,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         testId="object-not-found"
         icon={Database}
         title={t('empty.objectNotFound')}
-        description={t('empty.objectNotFoundDescription', { name: objectName })}
+        description={t('console.objectView.objectNotFoundDescription', { objectName })}
         actions={<BackToHomeButton testId="object-not-found-home" />}
       />
     );
