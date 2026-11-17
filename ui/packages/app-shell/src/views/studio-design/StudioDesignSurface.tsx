@@ -1462,7 +1462,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     available: false,
     planPendingCount: 0,
   });
-  const [copilotCanvasOpen, setCopilotCanvasOpen] = React.useState(false);
+  // objectstack#34610 — the copilot's expand control widens the slot in place
+  // (it used to navigate to `/ai/build`, losing this page).
+  const [copilotWide, setCopilotWide] = React.useState(false);
   const slotHasProps = slotPropsClaims > 0;
   const copilotAvailable = copilotStatus.available;
   // What the slot SHOWS: a missing half never shows.
@@ -1922,17 +1924,17 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             copilotAvailable={copilotAvailable}
             planPendingCount={copilotStatus.planPendingCount}
             propsTargetRef={setSlotPropsTarget}
-            wideWidth={copilotCanvasOpen && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
+            wideWidth={copilotWide && !isMobile ? maximizedDockWidth(window.innerWidth) : undefined}
             overlay={isMobile}
             onOverlayDismiss={() => setSlotOpen(false)}
             locale={locale}
             copilot={
               <StudioChatDock
                 packageId={packageId}
-                locale={locale}
                 surfaceLabel={surfaceLabel}
                 onStatusChange={setCopilotStatus}
-                onCanvasOpenChange={setCopilotCanvasOpen}
+                wide={copilotWide}
+                onWideChange={setCopilotWide}
               />
             }
           />

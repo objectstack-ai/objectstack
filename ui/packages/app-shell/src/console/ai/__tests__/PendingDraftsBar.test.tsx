@@ -7,29 +7,22 @@
  */
 
 /**
- * objectui#5694 — the standing unpublished-changes bar. The publish entry
- * point must not depend on where the transcript happens to be scrolled:
- * while the bound package has pending drafts the bar renders, its Publish
- * goes through the governed `publish-drafts` route, and it disappears when
- * the pending count reaches zero.
+ * objectui#5694 — the standing unpublished-changes line, above the composer
+ * while the bound package has pending drafts, gone when the count is zero.
+ *
+ * objectstack#34610 — the line publishes nothing: the screen's one Publish is
+ * the shell's bar. The line points to it while the main area shows the draft,
+ * offers to show the draft otherwise, and shows a receipt when a publish from
+ * the bar lands. Its count is the app's drafts, the draft bar's scope: its
+ * package and its ADR-0146 customization pair, off the env-wide `_drafts`.
  */
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import { PendingDraftsBar } from '../PendingDraftsBar.js';
+import { emitMetadataRefresh, emitPublishReceipt } from '../../../assistant/assistantBus.js';
 
-const refresh = vi.fn();
-// objectui#5801 — the bar reads its count from the shared `_drafts` fetch;
-// the stub routes by URL: drafts reads answer `draftRows`, publish POSTs 200.
-//
-// ⚠️ The answers are REAL `Response` objects, and that is load-bearing since
-// objectui#10039 routed the publish through `MetadataClient`: the console's
-// authenticated fetch reads `response.headers` on every `/api/` call (the
-// `set-auth-token` session rotation). A hand-rolled `{ ok, status, json }`
-// literal has no `headers`, so it threw inside the wrapper — which the bar
-// reports as a failed publish and then skips the bus pulse, leaving this
-// file's "then hides" pin failing for a reason that is entirely the fixture's.
 let draftRows: Array<Record<string, unknown>> = [];
 
 function json(body: unknown): Response {
@@ -39,25 +32,11 @@ function json(body: unknown): Response {
   });
 }
 
-vi.mock('../../../providers/MetadataProvider.js', () => ({
-  useMetadata: () => ({ refresh }),
-}));
-vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
-  publishHealthFromResponse: () => undefined,
-}));
-
 beforeEach(() => {
-  vi.clearAllMocks();
   draftRows = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: unknown) => {
-      if (String(url).includes('/meta/_drafts')) {
-        return json(draftRows);
-      }
-      return json({ success: true });
-    }),
+    vi.fn(async () => json(draftRows)),
   );
 });
 afterEach(() => {
@@ -65,45 +44,110 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('PendingDraftsBar (objectui#5694)', () => {
+const q = (c: HTMLElement, id: string) => c.querySelector(`[data-testid="${id}"]`);
+
+describe('PendingDraftsBar (objectui#5694, objectstack#34610)', () => {
   it('renders nothing when the package has no pending drafts, and nothing when unbound', async () => {
-    draftRows = [];
     const { container, rerender } = render(<PendingDraftsBar packageId="app.k9qk" idle />);
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
-        '/api/v1/meta/_drafts?package=app.k9qk',
+        '/api/v1/meta/_drafts',
         expect.objectContaining({ credentials: 'include' }),
       ),
     );
-    expect(container.querySelector('[data-testid="pending-drafts-bar"]')).toBeNull();
+    expect(q(container, 'pending-drafts-bar')).toBeNull();
     rerender(<PendingDraftsBar packageId={undefined} idle />);
-    expect(container.querySelector('[data-testid="pending-drafts-bar"]')).toBeNull();
+    expect(q(container, 'pending-drafts-bar')).toBeNull();
   });
 
-  it('shows the count while drafts are pending, publishes through publish-drafts, then hides', async () => {
-    // One pending dashboard draft (the cloud#1584 shape) until published.
-    draftRows = [{ type: 'dashboard', name: 'task_dashboard', packageId: 'app.k9qk' }];
-    const { container } = render(<PendingDraftsBar packageId="app.k9qk" idle />);
-    await waitFor(() =>
-      expect(container.querySelector('[data-testid="pending-drafts-bar"]')).toBeTruthy(),
-    );
+  it("counts the app's drafts: its package and its customization pair, never another app's", async () => {
+    draftRows = [
+      { type: 'object', name: 'task', packageId: 'app.k9qk' },
+      { type: 'view', name: 'task.all', packageId: 'app.k9qk.custom' },
+      { type: 'object', name: 'note', packageId: 'app.other' },
+      { type: 'flow', name: 'loose_flow', packageId: null },
+    ];
+    const { container } = render(<PendingDraftsBar packageId="app.k9qk" idle draftBarShown />);
+    await waitFor(() => expect(q(container, 'pending-drafts-bar')).toBeTruthy());
+    expect(q(container, 'pending-drafts-bar-sentence')?.textContent).toMatch(/^2 unpublished changes/);
+  });
 
-    // Publishing empties the pending set on the post-publish refetch (the
-    // bus pulse the publish emits drives it through the shared hook).
-    draftRows = [];
-    const bar = container.querySelector('[data-testid="pending-drafts-bar"]') as HTMLElement;
-    const button = bar.querySelector('button');
-    if (!button) throw new Error('no button. bar html: ' + bar.outerHTML.slice(0, 500));
-    fireEvent.click(button);
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        '/api/v1/packages/app.k9qk/publish-drafts',
-        expect.objectContaining({ method: 'POST', credentials: 'include' }),
-      );
-    });
-    await waitFor(() =>
-      expect(container.querySelector('[data-testid="pending-drafts-bar"]')).toBeNull(),
+  it('bound to the pair, it counts the same app', async () => {
+    draftRows = [
+      { type: 'object', name: 'task', packageId: 'app.k9qk' },
+      { type: 'view', name: 'task.all', packageId: 'app.k9qk.custom' },
+      { type: 'object', name: 'note', packageId: 'app.other' },
+    ];
+    const { container } = render(<PendingDraftsBar packageId="app.k9qk.custom" idle draftBarShown />);
+    await waitFor(() => expect(q(container, 'pending-drafts-bar')).toBeTruthy());
+    expect(q(container, 'pending-drafts-bar-sentence')?.textContent).toMatch(/^2 unpublished changes/);
+  });
+
+  it('draws no Publish: while the main area shows the draft it points to the draft bar', async () => {
+    draftRows = [
+      { type: 'dashboard', name: 'task_dashboard', packageId: 'app.k9qk' },
+      { type: 'object', name: 'task', packageId: 'app.k9qk' },
+    ];
+    const onShowDraft = vi.fn();
+    const { container } = render(
+      <PendingDraftsBar packageId="app.k9qk" idle draftBarShown onShowDraft={onShowDraft} />,
     );
-    expect(refresh).toHaveBeenCalled();
+    await waitFor(() => expect(q(container, 'pending-drafts-bar')).toBeTruthy());
+    const bar = q(container, 'pending-drafts-bar') as HTMLElement;
+    expect(bar.textContent).toContain('2 unpublished changes. Publish them from the draft bar at the top.');
+    expect(bar.querySelector('button')).toBeNull();
+  });
+
+  it('with the main area elsewhere it offers to show the draft, which is not a publish', async () => {
+    draftRows = [{ type: 'object', name: 'task', packageId: 'app.k9qk' }];
+    const onShowDraft = vi.fn();
+    const { container } = render(<PendingDraftsBar packageId="app.k9qk" idle onShowDraft={onShowDraft} />);
+    await waitFor(() => expect(q(container, 'pending-drafts-show-draft')).toBeTruthy());
+    expect(q(container, 'pending-drafts-bar')?.textContent).toContain('Show the draft to review and publish');
+    fireEvent.click(q(container, 'pending-drafts-show-draft') as HTMLElement);
+    expect(onShowDraft).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('publish-drafts'), expect.anything());
+  });
+
+  it("a publish from the shell's bar becomes the chat's receipt, until drafts are pending again", async () => {
+    draftRows = [{ type: 'object', name: 'task', packageId: 'app.k9qk' }];
+    const { container } = render(<PendingDraftsBar packageId="app.k9qk" idle draftBarShown />);
+    await waitFor(() => expect(q(container, 'pending-drafts-bar')).toBeTruthy());
+
+    // The draft bar publishes the package: the drafts go, the receipt lands.
+    draftRows = [];
+    act(() => {
+      emitPublishReceipt({ packageId: 'app.k9qk' });
+      emitMetadataRefresh();
+    });
+    await waitFor(() => expect(q(container, 'publish-receipt')).toBeTruthy());
+    expect(q(container, 'pending-drafts-bar')).toBeNull();
+    expect(q(container, 'publish-receipt')?.textContent).toContain('Published. Your changes are live.');
+
+    // The next build drafts again: the line replaces the receipt for good.
+    draftRows = [{ type: 'field', name: 'task.due', packageId: 'app.k9qk' }];
+    act(() => emitMetadataRefresh());
+    await waitFor(() => expect(q(container, 'pending-drafts-bar')).toBeTruthy());
+    expect(q(container, 'publish-receipt')).toBeNull();
+    draftRows = [];
+    act(() => emitMetadataRefresh());
+    await waitFor(() => expect(q(container, 'pending-drafts-bar')).toBeNull());
+    expect(q(container, 'publish-receipt')).toBeNull();
+  });
+
+  it("another package's publish is not this conversation's receipt; dismissing hides it", async () => {
+    const { container } = render(<PendingDraftsBar packageId="app.k9qk" idle />);
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    act(() => emitPublishReceipt({ packageId: 'app.other' }));
+    expect(q(container, 'publish-receipt')).toBeNull();
+    // The app's own publish, named by its pair, is this conversation's.
+    act(() => emitPublishReceipt({ packageId: 'app.k9qk.custom' }));
+    expect(q(container, 'publish-receipt')).toBeTruthy();
+    fireEvent.click(q(container, 'publish-receipt-dismiss') as HTMLElement);
+    expect(q(container, 'publish-receipt')).toBeNull();
+    act(() => emitPublishReceipt({ packageId: null }));
+    expect(q(container, 'publish-receipt')).toBeTruthy();
+    fireEvent.click(q(container, 'publish-receipt-dismiss') as HTMLElement);
+    expect(q(container, 'publish-receipt')).toBeNull();
   });
 });
