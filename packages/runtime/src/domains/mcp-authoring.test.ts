@@ -1,0 +1,358 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [#34766] The open MCP draft door's admission and its three read tools.
+ *
+ * The effective right is the intersection of the token's consent
+ * (`metadata:write`) and the HUMAN's own `manage_metadata` (seat ruling D1 A).
+ * The four cells of that intersection are pinned through the real `/mcp`
+ * domain (`handleMcpRequest`), with the OAuth envelopes resolved by the real
+ * identity door (`resolveExecutionContext`), never written by hand: what an
+ * agent's envelope carries is that door's derivation, and it carries no system
+ * permission under a `metadata:write`-only grant. The MCP service is a double
+ * that records what `handleHttpRequest` is handed; the MCP package's own pins
+ * (`mcp-server-runtime.authoring-scope.test.ts`) hold that an injected
+ * registry's `getAll()` is exactly what `tools/list` serves under
+ * `metadata:write`, and nothing under any other grant.
+ *
+ * Fail closed: an envelope with no user is injected nothing, and a grant
+ * resolution that throws admits nothing.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
+import { handleMcpRequest } from './mcp.js';
+import {
+  OPEN_AUTHORING_READ_TOOL_NAMES,
+  createOpenAuthoringRegistry,
+  resolveOpenAuthoringInjection,
+  type OpenAuthoringInjection,
+  type OpenAuthoringProtocol,
+} from './mcp-authoring.js';
+import { resolveExecutionContext } from '../security/resolve-execution-context.js';
+import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+/** A data engine whose user `u1` holds one permission set carrying `systemPermissions`. */
+function userQl(systemPermissions: string[]) {
+  const reads: string[] = [];
+  const tables: Record<string, any[]> = {
+    sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
+    sys_organization: [{ id: 'org_default', slug: 'default' }],
+    sys_user_permission_set: [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: 'org_default' }],
+    sys_permission_set: [{ id: 'ps_admin', name: 'admin_full_access', system_permissions: JSON.stringify(systemPermissions), object_permissions: '{}' }],
+    sys_position: [], sys_position_permission_set: [], sys_user_position: [],
+  };
+  const ql = bindCatalogFromTables({
+    async find(object: string, opts: any) {
+      reads.push(object);
+      const rows = (tables[object] ?? []).filter((row) =>
+        Object.entries(opts?.where ?? {}).every(([k, v]) =>
+          v !== null && typeof v === 'object'
+            ? (Array.isArray((v as any).$in) ? (v as any).$in.includes(row[k]) : true)
+            : (v ?? null) === (row[k] ?? null),
+        ),
+      );
+      return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+    },
+  }, tables);
+  return { ql, reads };
+}
+
+/** The envelope the real `/mcp` identity door resolves for an OAuth token with these scopes. */
+async function oauthEnvelope(scopes: string[], systemPermissions: string[]) {
+  return resolveExecutionContext({
+    acceptOAuthAccessToken: true,
+    getService: async (name: string) =>
+      name === 'auth' ? { verifyMcpAccessToken: async () => ({ userId: 'u1', scopes, clientId: 'c1' }) } : undefined,
+    getQl: async () => userQl(systemPermissions).ql,
+    request: { headers: { authorization: 'Bearer a.b.c' } },
+  } as never);
+}
+
+const ADMIN = ['manage_metadata', 'manage_users'];
+const NOT_AN_AUTHOR = ['manage_users'];
+
+function fakeProtocol() {
+  const calls: unknown[] = [];
+  const protocol: OpenAuthoringProtocol = {
+    async getMetaItems(request: any) {
+      calls.push(['getMetaItems', request]);
+      return {
+        type: request.type,
+        items: [
+          { name: 'lead_intake', label: 'Lead intake', _packageId: 'com.acme.crm', _draft: true, nodes: [] },
+          { name: 'close_won', label: 'Close won', nodes: [] },
+        ],
+      };
+    },
+    async getMetaItem(request: any) {
+      calls.push(['getMetaItem', request]);
+      if (request.name === 'missing') return { type: request.type, name: request.name, item: undefined };
+      return { type: request.type, name: request.name, version: 'v7', item: { name: request.name, label: 'Lead intake', _draft: true } };
+    },
+    async listDrafts(request: any) {
+      calls.push(['listDrafts', request]);
+      return { drafts: [{ type: 'flow', name: 'lead_intake', label: 'Lead intake', packageId: 'com.acme.crm', updatedAt: null }] } as any;
+    },
+  };
+  return { protocol, calls };
+}
+
+interface Served {
+  status: number;
+  authoring: OpenAuthoringInjection | undefined;
+  /** Whether `handleHttpRequest` was handed an `authoring` member at all. */
+  carried: boolean;
+  grantReads: string[];
+  protocolCalls: unknown[];
+  warnings: unknown[][];
+}
+
+/**
+ * One `/mcp` request through the real domain. `qlThrows` makes the grant
+ * resolution's data-engine lookup throw.
+ */
+async function serve(executionContext: unknown, opts: { systemPermissions?: string[]; qlThrows?: boolean } = {}): Promise<Served> {
+  const { ql, reads } = userQl(opts.systemPermissions ?? ADMIN);
+  const { protocol, calls } = fakeProtocol();
+  const warnings: unknown[][] = [];
+  let handed: any;
+  const mcp = {
+    async handleHttpRequest(_request: Request, handedOpts: any) {
+      handed = handedOpts;
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  };
+  const deps = {
+    resolveService: async (_ctx: unknown, name: string) => (name === 'mcp' ? mcp : name === 'protocol' ? protocol : undefined),
+    resolveServiceOrLoud: async () => undefined,
+    getObjectQL: async () => {
+      if (opts.qlThrows) throw new Error('engine lookup failed');
+      return ql;
+    },
+    error: (message: string, status: number) => ({ status, body: { success: false, error: { message } } }),
+    errorFromThrown: (e: any, status: number) => ({ status, body: { success: false, error: { message: String(e?.message ?? e) } } }),
+    logger: { warn: (...args: unknown[]) => { warnings.push(args); }, debug: () => {}, info: () => {}, error: () => {} },
+  };
+  const context = {
+    environmentId: 'env_1',
+    executionContext,
+    request: { method: 'POST', url: '/api/v1/mcp', headers: { 'content-type': 'application/json' } },
+  };
+  const body = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} };
+  const result: any = await handleMcpRequest(deps as never, body, context as never);
+  // The grant reads the door itself made (the envelope above was resolved elsewhere).
+  return {
+    status: result.response.status,
+    authoring: handed?.authoring,
+    carried: handed !== undefined && 'authoring' in handed,
+    grantReads: reads,
+    protocolCalls: calls,
+    warnings,
+  };
+}
+
+const CONTEXT = { door: 'mcp' as const, principal: { userId: 'u1' }, environmentId: 'env_1' };
+
+async function call(authoring: OpenAuthoringInjection, toolName: string, input: unknown, context: any = CONTEXT) {
+  const result = await authoring.registry.execute({ toolCallId: `t-${toolName}`, toolName, input }, context);
+  return { isError: result.isError === true, body: JSON.parse(result.output.value) };
+}
+
+// ---------------------------------------------------------------------------
+// The four cells
+// ---------------------------------------------------------------------------
+
+describe('the open draft door is served only where the token consents AND the user holds manage_metadata', () => {
+  it('a token without metadata:write is handed no authoring registry, and the user\'s grant is never read', async () => {
+    const ec = await oauthEnvelope(['data:read', 'data:write'], ADMIN);
+    expect(ec.oauthScopes).toEqual(['data:read', 'data:write']);
+    const served = await serve(ec);
+    expect(served.status).toBe(200);
+    expect(served.carried).toBe(false);
+    expect(served.grantReads).toEqual([]);
+  });
+
+  it('a metadata:write token whose user lacks manage_metadata lists no tool, and a call is refused 403 before any read', async () => {
+    const ec = await oauthEnvelope(['metadata:write'], NOT_AN_AUTHOR);
+    const served = await serve(ec, { systemPermissions: NOT_AN_AUTHOR });
+    expect(served.status).toBe(200);
+    expect(served.authoring).toBeDefined();
+    // The MCP runtime registers exactly `getAll()`: nothing, so `tools/list` omits the family.
+    expect(served.authoring!.registry.getAll()).toEqual([]);
+    const refused = await call(served.authoring!, 'list_metadata_items', { type: 'flow' });
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(served.protocolCalls).toEqual([]);
+  });
+
+  it('a metadata:write token whose user holds manage_metadata lists the three read tools, and a read is served', async () => {
+    const ec = await oauthEnvelope(['metadata:write'], ADMIN);
+    // The envelope itself carries no capability: the door read the human's grant.
+    expect(ec.systemPermissions).toEqual([]);
+    const served = await serve(ec);
+    expect(served.grantReads.length).toBeGreaterThan(0);
+    const authoring = served.authoring!;
+    expect(authoring.registry.getAll().map((t) => t.name)).toEqual([...OPEN_AUTHORING_READ_TOOL_NAMES]);
+    expect(authoring.principal).toMatchObject({ userId: 'u1', clientId: 'c1', scopes: ['metadata:write'] });
+    expect(authoring.environmentId).toBe('env_1');
+
+    const listed = await call(authoring, 'list_metadata_items', { type: 'flow' });
+    expect(listed.isError).toBe(false);
+    expect(listed.body).toEqual({
+      type: 'flow',
+      count: 2,
+      items: [
+        { name: 'lead_intake', label: 'Lead intake', packageId: 'com.acme.crm', draft: true },
+        { name: 'close_won', label: 'Close won', packageId: null, draft: false },
+      ],
+    });
+    expect(served.protocolCalls).toEqual([['getMetaItems', { type: 'flow', previewDrafts: true }]]);
+  });
+
+  it('an API key is handed no authoring registry', async () => {
+    // An API key's envelope carries no grant (`oauthScopes` undefined); the
+    // capability on it changes nothing, since the family needs the token's consent.
+    const served = await serve({ userId: 'u1', principalKind: 'human', systemPermissions: ADMIN });
+    expect(served.status).toBe(200);
+    expect(served.carried).toBe(false);
+    expect(served.grantReads).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fail closed
+// ---------------------------------------------------------------------------
+
+describe('the open draft door fails closed', () => {
+  it('an envelope with no user is injected nothing, and no grant is read', async () => {
+    let lookedUp = false;
+    const deps = {
+      resolveService: async () => undefined,
+      getObjectQL: async () => { lookedUp = true; return userQl(ADMIN).ql; },
+    };
+    const injection = await resolveOpenAuthoringInjection(
+      deps as never,
+      { environmentId: 'env_1', executionContext: { oauthScopes: ['metadata:write'], systemPermissions: ADMIN } } as never,
+      ['metadata:write'],
+    );
+    expect(injection).toBeUndefined();
+    expect(lookedUp).toBe(false);
+  });
+
+  it('a grant resolution that throws admits nothing: no tool is listed, a call is refused, and the request is still served', async () => {
+    const ec = await oauthEnvelope(['metadata:write'], ADMIN);
+    const served = await serve(ec, { qlThrows: true });
+    expect(served.status).toBe(200);
+    expect(served.authoring!.registry.getAll()).toEqual([]);
+    const refused = await call(served.authoring!, 'get_metadata_item', { type: 'flow', name: 'lead_intake' });
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(served.protocolCalls).toEqual([]);
+    expect(served.warnings.length).toBe(1);
+  });
+
+  it('a call stamped with another user than the one admitted is refused', async () => {
+    const { protocol, calls } = fakeProtocol();
+    const registry = createOpenAuthoringRegistry({ admitted: true, userId: 'u1', getProtocol: async () => protocol });
+    const result = await registry.execute(
+      { toolCallId: 't', toolName: 'list_drafts', input: {} },
+      { door: 'mcp', principal: { userId: 'u2' } },
+    );
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output.value).error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(calls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The read tools
+// ---------------------------------------------------------------------------
+
+describe('the read tools answer from the metadata protocol\'s public reads', () => {
+  const admitted = () => {
+    const { protocol, calls } = fakeProtocol();
+    const authoring: OpenAuthoringInjection = {
+      registry: createOpenAuthoringRegistry({ admitted: true, userId: 'u1', getProtocol: async () => protocol }),
+      principal: { userId: 'u1', scopes: ['metadata:write'] },
+    };
+    return { authoring, calls };
+  };
+
+  it('list_metadata_items with state active reads the published items only; with state draft keeps the drafts only', async () => {
+    const { authoring, calls } = admitted();
+    await call(authoring, 'list_metadata_items', { type: 'flow', state: 'active' });
+    const drafts = await call(authoring, 'list_metadata_items', { type: 'flow', state: 'draft' });
+    expect(calls).toEqual([
+      ['getMetaItems', { type: 'flow' }],
+      ['getMetaItems', { type: 'flow', previewDrafts: true }],
+    ]);
+    expect(drafts.body.items.map((i: any) => i.name)).toEqual(['lead_intake']);
+  });
+
+  it('list_metadata_items refuses a type the platform does not declare, as the /meta list does', async () => {
+    const { authoring } = admitted();
+    const refused = await call(authoring, 'list_metadata_items', { type: 'no_such_type' });
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+  });
+
+  it('get_metadata_item reads a draft in place of the published version by default, and the draft only on state draft', async () => {
+    const { authoring, calls } = admitted();
+    const read = await call(authoring, 'get_metadata_item', { type: 'flow', name: 'lead_intake' });
+    expect(read.body).toEqual({
+      type: 'flow', name: 'lead_intake', draft: true, version: 'v7',
+      item: { name: 'lead_intake', label: 'Lead intake', _draft: true },
+    });
+    await call(authoring, 'get_metadata_item', { type: 'flow', name: 'lead_intake', state: 'draft' });
+    await call(authoring, 'get_metadata_item', { type: 'flow', name: 'lead_intake', state: 'active' });
+    expect(calls).toEqual([
+      ['getMetaItem', { type: 'flow', name: 'lead_intake', previewDrafts: true }],
+      ['getMetaItem', { type: 'flow', name: 'lead_intake', state: 'draft' }],
+      ['getMetaItem', { type: 'flow', name: 'lead_intake' }],
+    ]);
+  });
+
+  it('get_metadata_item answers 404 for an item the protocol does not have', async () => {
+    const { authoring } = admitted();
+    const missing = await call(authoring, 'get_metadata_item', { type: 'flow', name: 'missing' });
+    expect(missing.body.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+  });
+
+  it('list_drafts passes the package through as the protocol\'s packageId', async () => {
+    const { authoring, calls } = admitted();
+    const listed = await call(authoring, 'list_drafts', { package: 'com.acme.crm' });
+    await call(authoring, 'list_drafts', {});
+    expect(listed.body.count).toBe(1);
+    expect(calls).toEqual([['listDrafts', { packageId: 'com.acme.crm' }], ['listDrafts', {}]]);
+  });
+
+  it('a coded protocol refusal keeps its code; an uncoded throw is a fault answered without its text', async () => {
+    const coded = Object.assign(new Error('No pending draft for flow lead_intake.'), { code: 'RESOURCE_NOT_FOUND', status: 404 });
+    const registry = (thrown: unknown) => createOpenAuthoringRegistry({
+      admitted: true,
+      userId: 'u1',
+      getProtocol: async () => ({ getMetaItem: async () => { throw thrown; } }),
+      logger: { warn: () => {} },
+    });
+    const run = async (thrown: unknown) => JSON.parse((await registry(thrown).execute(
+      { toolCallId: 't', toolName: 'get_metadata_item', input: { type: 'flow', name: 'lead_intake', state: 'draft' } },
+      CONTEXT,
+    )).output.value).error;
+    expect(await run(coded)).toEqual({ code: 'RESOURCE_NOT_FOUND', status: 404, message: 'No pending draft for flow lead_intake.' });
+    expect(await run(new Error('connection reset by peer'))).toEqual({ code: 'INTERNAL_ERROR', status: 500, message: 'Reading the metadata failed.' });
+  });
+});
+
+describe('the read tools\' names', () => {
+  it('collide with no hosted platform tool (seat ruling D3: not list_metadata)', () => {
+    for (const name of OPEN_AUTHORING_READ_TOOL_NAMES) {
+      expect(PLATFORM_PROVIDED_TOOL_NAMES.has(name), name).toBe(false);
+      expect(PLATFORM_TOOL_FAMILY_PREFIXES.some((prefix) => name.startsWith(prefix)), name).toBe(false);
+    }
+    expect(PLATFORM_PROVIDED_TOOL_NAMES.has('list_metadata')).toBe(true);
+  });
+});
