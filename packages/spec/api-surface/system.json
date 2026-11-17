@@ -851,6 +851,7 @@
     "WorkerStats (type)",
     "WorkerStatsSchema (const)",
     "actionRefusalMessageKey (function)",
+    "actionTextMessageKey (function)",
     "audienceAllows (function)",
     "audiencePermitsSelfRegistration (function)",
     "authorisesIrreversibleAction (function)",

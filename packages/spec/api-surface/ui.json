@@ -45,6 +45,8 @@
     "ActionSchema (const)",
     "ActionSession (type)",
     "ActionSessionSchema (const)",
+    "ActionText (type)",
+    "ActionTextSchema (const)",
     "ActionType (const)",
     "ActionType (type)",
     "AddRecordConfig (type)",
