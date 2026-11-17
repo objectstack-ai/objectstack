@@ -61,8 +61,12 @@ const entry = (id: string, objects: Row[], dependencies?: Record<string, string>
     manifest: { id, name: id, version: '1.0.0', type: 'module', ...(dependencies ? { dependencies } : {}), objects },
 });
 
-/** A composed artifact: `packages[]` and no top-level `objects`, so every reader goes through the resolver. */
-const composed = (packages: unknown): Row => ({ id: SUITE, name: 'Suite', version: '1.0.0', type: 'app', packages });
+/**
+ * A composed artifact: `packages[]` and no top-level `objects`, so every reader goes through the resolver.
+ * [#34583] Its top-level `datasources` map (empty) is what step 2a, the datasource holder, reads instead
+ * of resolving the packages; without it 2a meets the resolver's refusal first, and 2c″ is never reached.
+ */
+const composed = (packages: unknown): Row => ({ id: SUITE, name: 'Suite', version: '1.0.0', type: 'app', datasources: {}, packages });
 const WELL_FORMED = (): Row[] => [entry(`${SUITE}.core`, [ACCOUNT]), entry(`${SUITE}.leads`, [LEAD])];
 
 function makeRawApp() {
