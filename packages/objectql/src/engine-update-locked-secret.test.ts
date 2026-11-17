@@ -304,15 +304,16 @@ describe('a secret field the caller may not write keeps its stored value', () =>
     });
 
     it('control: a value a hook writes on a locked secret is kept', async () => {
+      // Every matched row's handler writes the same keys: a predicate update
+      // has one payload for all of them.
       engine.registerHook('beforeUpdate', async (ctx: any) => {
-        if (ctx.input.data.status === 'rotate-pending') {
-          ctx.input.data.status = 'locked';
+        if (ctx.input.data.name === 'pair') {
           ctx.input.data.state_key = 'hook-state';
           ctx.input.data.fixed_key = 'hook-fixed';
         }
       }, { object: CRED });
 
-      await engine.update(CRED, { status: 'rotate-pending' }, pair());
+      await engine.update(CRED, { name: 'pair' }, pair());
 
       for (const id of ['c2', 'c3']) {
         expect(opens(stored(id).state_key)).toBe('hook-state');
