@@ -263,7 +263,9 @@ function makeHarness(opts: {
       ? {
           createGrant: {
             resolveActorContext: async () => (opts.grant === 'no-context' ? undefined : ADMIN_CONTEXT),
-            runAtomically: multiOrgSeam ? runAtomically : async <T>(work: () => Promise<T>) => work(),
+            runAtomically: multiOrgSeam
+              ? (runAtomically as unknown as <T>(work: () => Promise<T>) => Promise<T>)
+              : async <T>(work: () => Promise<T>) => work(),
           },
         }
       : {}),
