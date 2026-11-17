@@ -15,12 +15,14 @@
  * so `owner_id` read right; a `Field.user()` or `Field.lookup('sys_user')`
  * column naming the owner stayed NULL.
  *
- * The control boots the same app un-walled. There the boot seed loads before
- * the dev admin exists, so its person columns have nobody to resolve to, and
- * only the first-admin handoff writes `owner_id` afterwards. That outcome is
- * measured on main and pinned here as it stands: the fix waits only for the
- * walled bootstrap's own `default` organization, so the un-walled boot must
- * read exactly as before.
+ * The second leg boots the same app un-walled. There the boot seed loads
+ * before the dev admin exists, so its person columns have nobody to resolve to
+ * when the seed runs, and the first-admin handoff writes `owner_id` and no
+ * other column. The seed loader therefore holds each person reference its last
+ * pass left NULL, on the row it landed on, and the runtime's AppPlugin retries
+ * them once a `sys_user` row is inserted, writing each one that now resolves
+ * while its column is still NULL. So the un-walled boot resolves the owner too,
+ * through its own moment rather than the walled replay's.
  *
  * ## What is real
  *
@@ -184,7 +186,7 @@ describe('the walled Default Organization’s seed resolves the platform owner i
   });
 });
 
-describe('control: the same seed on an un-walled boot reads as it did before the fix', () => {
+describe('the same seed on an un-walled boot resolves the first admin once that admin exists', () => {
   const env = legEnv([
     ['OS_TENANCY_POSTURE', undefined],
     ['OS_AUTH_MEMBERSHIP_POLICY', undefined],
@@ -201,12 +203,93 @@ describe('control: the same seed on an un-walled boot reads as it did before the
     env.restore();
   });
 
-  it('the wall is down, the seed landed once before the admin existed, and only the handoff owns the row', async () => {
+  it('the wall is down, the seed landed once before the admin existed, and every person reference naming the admin resolves to the admin', async () => {
     const tenancy: any = await booted.stack.kernel.getServiceAsync('tenancy');
     expect(tenancy.isolationActive).toBe(false);
     expect(booted.adminId).not.toBe('');
     const rows = await ownerTasks(booted.ql, {});
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ assignee: null, reviewer: null, owner_id: booted.adminId });
+    expect(rows[0]).toMatchObject({
+      assignee: booted.adminId,
+      reviewer: booted.adminId,
+      owner_id: booted.adminId,
+    });
+  });
+});
+
+/**
+ * ADR-0138 D1 on the un-walled handoff. The person the seed names here signs
+ * up after the boot (and after the dev admin), so the held reference waits
+ * past the admin's insert and resolves on that person's own insert. Only the
+ * seed's own rows are reached, and only while their column is still NULL: a
+ * row the seed did not write keeps the NULL its writer left, and a seeded row
+ * someone assigned meanwhile keeps that assignment.
+ */
+describe('un-walled: a held seed person reference fills only the seed’s own rows, and only while still NULL', () => {
+  const env = legEnv([
+    ['OS_TENANCY_POSTURE', undefined],
+    ['OS_AUTH_MEMBERSHIP_POLICY', undefined],
+  ]);
+  const LATE_NAME = 'Late Person';
+  const LATE_EMAIL = 'late.person@example.com';
+  const LATE_APP = {
+    ...APP,
+    manifest: { ...APP.manifest, id: 'com.example.seedowner.late' },
+    data: [
+      {
+        object: TASK,
+        mode: 'upsert',
+        externalId: 'name',
+        records: [
+          { name: 'Late task', assignee: LATE_NAME },
+          { name: 'Late task, assigned meanwhile', assignee: LATE_NAME },
+        ],
+      },
+    ],
+  };
+  let stack: VerifyStack;
+  let ql: any;
+  let adminId: string;
+  let lateId: string;
+  let beforeSignUp: Array<Record<string, unknown>>;
+
+  const taskNamed = async (name: string) => (await ql.find(TASK, { where: { name }, ...SYS }))[0];
+
+  beforeAll(async () => {
+    env.apply();
+    stack = await bootStack(LATE_APP as never, { extraPlugins: [new OrganizationsPlugin()] });
+    await stack.signIn();
+    ql = await stack.kernel.getServiceAsync<any>('objectql');
+    adminId = String((await ql.findOne('sys_user', { where: { email: ADMIN_EMAIL }, ...SYS }))?.id ?? '');
+    // A row the seed did not write, with no person: a guest's or a form's.
+    await ql.insert(TASK, { name: 'Guest task' }, SYS);
+    // A seeded row someone assigned by hand before the named person arrived.
+    const meanwhile = await taskNamed('Late task, assigned meanwhile');
+    await ql.update(TASK, { id: meanwhile.id, assignee: adminId }, SYS);
+    beforeSignUp = await ql.find(TASK, { where: {}, ...SYS });
+    await stack.signUp(LATE_EMAIL, undefined, LATE_NAME);
+    lateId = String((await ql.findOne('sys_user', { where: { email: LATE_EMAIL }, ...SYS }))?.id ?? '');
+  }, 120_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+    env.restore();
+  });
+
+  it('PREMISE: before the named person signs up, the seeded reference is NULL and the admin’s insert did not fill it', () => {
+    expect(adminId).not.toBe('');
+    expect(lateId).not.toBe('');
+    const byName = Object.fromEntries(beforeSignUp.map((row) => [row.name, row.assignee]));
+    expect(byName).toEqual({
+      'Late task': null,
+      'Late task, assigned meanwhile': adminId,
+      'Guest task': null,
+    });
+  });
+
+  it('the seed’s NULL reference resolves to the person once they exist; the guest row and the hand assignment stand', async () => {
+    expect((await taskNamed('Late task')).assignee).toBe(lateId);
+    expect((await taskNamed('Late task, assigned meanwhile')).assignee).toBe(adminId);
+    expect((await taskNamed('Guest task')).assignee).toBeNull();
   });
 });
