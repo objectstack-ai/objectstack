@@ -533,6 +533,7 @@ describe('a language is its pack plus its namespace partial packs', () => {
     expect(namespacePackPaths('zh-Hans')).toEqual([
       'packages/i18n/src/namespaces/marketplace/zh-Hans.ts',
       'packages/i18n/src/namespaces/developer/zh-Hans.ts',
+      'packages/i18n/src/namespaces/timesheet/zh-Hans.ts',
     ]);
   });
 

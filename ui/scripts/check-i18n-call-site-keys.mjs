@@ -1390,6 +1390,8 @@ export const PACK_NAMESPACE_FRAMES = Object.freeze({
     'apps/console/src/pages/developer/',
     'packages/app-shell/src/console/connect/',
   ]),
+  // `timesheet.*`, read under `ObjectTimesheet`'s own namespace frame.
+  'packages/i18n/src/namespaces/timesheet/': Object.freeze(['packages/plugin-timesheet/src/']),
 });
 
 /** The pack-shaped namespace directories: the keys of {@link PACK_NAMESPACE_FRAMES}. */

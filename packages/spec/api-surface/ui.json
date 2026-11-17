@@ -451,6 +451,8 @@
     "TimelineConfig (type)",
     "TimelineConfigParsed (type)",
     "TimelineConfigSchema (const)",
+    "TimesheetConfig (type)",
+    "TimesheetConfigSchema (const)",
     "TreeConfig (type)",
     "TreeConfigSchema (const)",
     "UNMAPPED_COLUMN_SUMMARIES (const)",

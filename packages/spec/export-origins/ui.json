@@ -434,6 +434,8 @@
     "TimelineConfig": "src/ui/view.zod.ts#TimelineConfig (type)",
     "TimelineConfigParsed": "src/ui/view.zod.ts#TimelineConfigParsed (type)",
     "TimelineConfigSchema": "src/ui/view.zod.ts#TimelineConfigSchema (const)",
+    "TimesheetConfig": "src/ui/view.zod.ts#TimesheetConfig (type)",
+    "TimesheetConfigSchema": "src/ui/view.zod.ts#TimesheetConfigSchema (const)",
     "TreeConfig": "src/ui/view.zod.ts#TreeConfig (type)",
     "TreeConfigSchema": "src/ui/view.zod.ts#TreeConfigSchema (const)",
     "UNMAPPED_COLUMN_SUMMARIES": "src/ui/view-grouping-query.ts#UNMAPPED_COLUMN_SUMMARIES (const)",

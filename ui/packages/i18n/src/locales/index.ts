@@ -22,8 +22,9 @@
  * Some of a language's strings are not in its pack: the `marketplace.*` group
  * is a lazy namespace (`../namespaces/marketplace/`), fetched when a
  * marketplace page mounts, and `console.developer.*` / `connectAgent.*` are
- * another (`../namespaces/developer/`), so the console's eager `en` pack does
- * not carry them.
+ * another (`../namespaces/developer/`), and `timesheet.*` a third
+ * (`../namespaces/timesheet/`), so the console's eager `en` pack does not carry
+ * them.
  * This door's two purposes both want every string, so each language it hands
  * out is its pack deep-merged with its catalogue from every such namespace:
  * the parity / drift suites keep walking the moved keys, and an app that makes
@@ -67,6 +68,17 @@ import esDeveloper from '../namespaces/developer/es.js';
 import ptBrDeveloper from '../namespaces/developer/pt-BR.js';
 import ruDeveloper from '../namespaces/developer/ru.js';
 import arDeveloper from '../namespaces/developer/ar.js';
+import enTimesheet from '../namespaces/timesheet/en.js';
+import zhHansTimesheet from '../namespaces/timesheet/zh-Hans.js';
+import zhHantTimesheet from '../namespaces/timesheet/zh-Hant.js';
+import jaTimesheet from '../namespaces/timesheet/ja.js';
+import koTimesheet from '../namespaces/timesheet/ko.js';
+import deTimesheet from '../namespaces/timesheet/de.js';
+import frTimesheet from '../namespaces/timesheet/fr.js';
+import esTimesheet from '../namespaces/timesheet/es.js';
+import ptBrTimesheet from '../namespaces/timesheet/pt-BR.js';
+import ruTimesheet from '../namespaces/timesheet/ru.js';
+import arTimesheet from '../namespaces/timesheet/ar.js';
 import type { PlatformLocaleTag } from '@objectstack/spec/system';
 
 export type { TranslationKeys } from './en.js';
@@ -80,12 +92,13 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
  * sides hold is a key defined twice, which no reader could resolve the same
  * way twice, and throws.
  */
-function complete<P extends object, M extends object, D extends object>(
+function complete<P extends object, M extends object, D extends object, T extends object>(
   pack: P,
   marketplace: M,
   developer: D,
+  timesheet: T,
   label: string,
-): P & M & D {
+): P & M & D & T {
   const merge = (into: Record<string, unknown>, from: Record<string, unknown>, at: string) => {
     const out: Record<string, unknown> = { ...into };
     for (const key of Object.keys(from)) {
@@ -102,8 +115,8 @@ function complete<P extends object, M extends object, D extends object>(
     return out;
   };
   let out = pack as Record<string, unknown>;
-  for (const partial of [marketplace, developer]) out = merge(out, partial as Record<string, unknown>, '');
-  return out as P & M & D;
+  for (const partial of [marketplace, developer, timesheet]) out = merge(out, partial as Record<string, unknown>, '');
+  return out as P & M & D & T;
 }
 
 // Export names are JavaScript identifiers, not pack keys: `zh` is the zh-Hans
@@ -113,70 +126,81 @@ function complete<P extends object, M extends object, D extends object>(
 // Annotated rather than inferred: the inferred type spells the packs' literal
 // types out inline in the emitted declaration, which outgrew what tsc will
 // serialize (TS7056). Each `typeof` is emitted as a reference.
-export const en: typeof enPack & typeof enMarketplace & typeof enDeveloper = complete(
+export const en: typeof enPack & typeof enMarketplace & typeof enDeveloper & typeof enTimesheet = complete(
   enPack,
   enMarketplace,
   enDeveloper,
+  enTimesheet,
   'en',
 );
-export const zh: typeof zhHansPack & typeof zhHansMarketplace & typeof zhHansDeveloper = complete(
+export const zh: typeof zhHansPack & typeof zhHansMarketplace & typeof zhHansDeveloper & typeof zhHansTimesheet = complete(
   zhHansPack,
   zhHansMarketplace,
   zhHansDeveloper,
+  zhHansTimesheet,
   'zh-Hans',
 );
-export const zhHant: typeof zhHantPack & typeof zhHantMarketplace & typeof zhHantDeveloper = complete(
+export const zhHant: typeof zhHantPack & typeof zhHantMarketplace & typeof zhHantDeveloper & typeof zhHantTimesheet = complete(
   zhHantPack,
   zhHantMarketplace,
   zhHantDeveloper,
+  zhHantTimesheet,
   'zh-Hant',
 );
-export const ja: typeof jaPack & typeof jaMarketplace & typeof jaDeveloper = complete(
+export const ja: typeof jaPack & typeof jaMarketplace & typeof jaDeveloper & typeof jaTimesheet = complete(
   jaPack,
   jaMarketplace,
   jaDeveloper,
+  jaTimesheet,
   'ja',
 );
-export const ko: typeof koPack & typeof koMarketplace & typeof koDeveloper = complete(
+export const ko: typeof koPack & typeof koMarketplace & typeof koDeveloper & typeof koTimesheet = complete(
   koPack,
   koMarketplace,
   koDeveloper,
+  koTimesheet,
   'ko',
 );
-export const de: typeof dePack & typeof deMarketplace & typeof deDeveloper = complete(
+export const de: typeof dePack & typeof deMarketplace & typeof deDeveloper & typeof deTimesheet = complete(
   dePack,
   deMarketplace,
   deDeveloper,
+  deTimesheet,
   'de',
 );
-export const fr: typeof frPack & typeof frMarketplace & typeof frDeveloper = complete(
+export const fr: typeof frPack & typeof frMarketplace & typeof frDeveloper & typeof frTimesheet = complete(
   frPack,
   frMarketplace,
   frDeveloper,
+  frTimesheet,
   'fr',
 );
-export const es: typeof esPack & typeof esMarketplace & typeof esDeveloper = complete(
+export const es: typeof esPack & typeof esMarketplace & typeof esDeveloper & typeof esTimesheet = complete(
   esPack,
   esMarketplace,
   esDeveloper,
+  esTimesheet,
   'es',
 );
-export const pt: typeof ptBrPack & typeof ptBrMarketplace & typeof ptBrDeveloper = complete(
+export const pt: typeof ptBrPack & typeof ptBrMarketplace & typeof ptBrDeveloper & typeof ptBrTimesheet = complete(
   ptBrPack,
   ptBrMarketplace,
   ptBrDeveloper,
+  ptBrTimesheet,
   'pt-BR',
 );
-export const ru: typeof ruPack & typeof ruMarketplace & typeof ruDeveloper = complete(
+export const ru: typeof ruPack & typeof ruMarketplace & typeof ruDeveloper & typeof ruTimesheet = complete(
   ruPack,
   ruMarketplace,
   ruDeveloper,
+  ruTimesheet,
   'ru',
 );
-export const ar: typeof arPack & typeof arMarketplace & typeof arDeveloper = complete(
+export const ar: typeof arPack & typeof arMarketplace & typeof arDeveloper & typeof arTimesheet = complete(
   arPack,
   arMarketplace,
   arDeveloper,
+  arTimesheet,
   'ar',
 );
 

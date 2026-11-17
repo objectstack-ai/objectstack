@@ -433,4 +433,9 @@ export const ZH_HANT_TARGETS = Object.freeze([
     target: 'src/namespaces/developer/zh-Hant.ts',
     generate: generateZhHantNamespaceCatalogue,
   }),
+  Object.freeze({
+    source: 'src/namespaces/timesheet/zh-Hans.ts',
+    target: 'src/namespaces/timesheet/zh-Hant.ts',
+    generate: generateZhHantNamespaceCatalogue,
+  }),
 ]);
