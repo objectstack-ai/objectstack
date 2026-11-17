@@ -1507,6 +1507,10 @@ like any banned account's, with one field added:
   resume it, and `resume` refuses while the owner is still deactivated; once the
   owner is re-activated, or a new owner is named, an administrator resumes it
   (see [AI service account](/docs/ai/agents#connect-your-ai-byo-ai-over-mcp)).
+- It also removes the user's local password. A re-activation lifts the ban and
+  restores no password, so access returns through the identity provider's
+  sign-in; the user holds a local password again only once one is set on
+  purpose.
 - The cause is told only after the password verified: a wrong password is the
   ordinary `401 INVALID_EMAIL_OR_PASSWORD`, whatever the account's state. It
   names no connection, provider or other account.

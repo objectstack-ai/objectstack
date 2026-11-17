@@ -262,6 +262,10 @@ import {
   isOwnedAccountSuspensionComplete,
   suspendAccountsOfDirectoryDeactivatedOwner,
 } from './service-account-owner-leaves.js';
+import {
+  removeDirectoryDeactivatedLocalPassword,
+  scimDeactivationPasswordRemovalIncompleteMessage,
+} from './scim-deactivation-password-removal.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -4966,6 +4970,17 @@ export class AuthManager {
    * suspension that does not finish never fails the deprovision; it is
    * reported once at `error`. An administrator's ban leaves the accounts alone.
    *
+   * An inactive state also removes the user's local password: every
+   * `sys_account` row of the user with `provider_id = 'credential'`
+   * (`scim-deactivation-password-removal.ts`, the same ruling's later step). A
+   * re-activation lifts the ban only, so access returns through SSO alone. It
+   * runs on every inactive call after the suspension and before the mark, and
+   * is idempotent: nothing to remove means no write. A refused last-
+   * administrator ban throws before it, so that refusal removes nothing. A
+   * removal that does not finish never fails the deprovision; it is reported
+   * once at `error`. The `active: true` branch and an administrator's ban and
+   * unban leave the password alone.
+   *
    * [ADR-0135 D4] This callback also writes the directory-managed mark
    * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
    * call — fail-closed and first on an active state, best-effort and after the
@@ -5048,6 +5063,11 @@ export class AuthManager {
       // re-activation resumes none of them.
       const suspension = await suspendAccountsOfDirectoryDeactivatedOwner(engine as never, state.userId);
       if (!isOwnedAccountSuspensionComplete(suspension)) this.logScimAccountSuspensionIncomplete(state.userId, suspension);
+      // ...and removes the user's local password, so a re-activation restores
+      // access through SSO only. Before the mark, which then reads the user as
+      // holding no local password (ADR-0135 D4).
+      const removal = await removeDirectoryDeactivatedLocalPassword(engine as never, state.userId);
+      if (!removal.complete) this.logScimPasswordRemovalIncomplete(state.userId, removal);
       try {
         await markDirectoryProvisionedUsers(engine as never, [state.userId]);
       } catch (e) {
@@ -5096,6 +5116,23 @@ export class AuthManager {
       failed: outcome.failed.map((f) => f.accountId),
       ...(outcome.readError !== undefined ? { error: outcome.readError } : {}),
     };
+    const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
+    if (typeof sink?.error === 'function') sink.error(message, meta);
+    else console.error(message, meta);
+  }
+
+  /**
+   * The one notice for a SCIM deprovision whose removal of the user's local
+   * password did not finish (`scim-deactivation-password-removal.ts`). Logged
+   * at `error`: the account is disabled, so nothing looks wrong, but a password
+   * left in place is still there when the directory re-activates the user.
+   */
+  private logScimPasswordRemovalIncomplete(
+    userId: string,
+    outcome: Parameters<typeof scimDeactivationPasswordRemovalIncompleteMessage>[1],
+  ): void {
+    const message = scimDeactivationPasswordRemovalIncompleteMessage(userId, outcome);
+    const meta = { object: 'sys_account', removed: outcome.removed, failed: outcome.failed };
     const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
     if (typeof sink?.error === 'function') sink.error(message, meta);
     else console.error(message, meta);
