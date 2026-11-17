@@ -352,6 +352,11 @@ otherwise as declared, with no `en` floor. The save / publish doors' `advisories
 422 `issues[]` share one element, `RuntimeAuthoringIssueSchema` (`api/protocol.zod.ts`): it
 carries an optional `userMessage` beside the stable `rule`, while `message` / `hint` stay
 developer-facing English; absent, render `message`.
+A batch publish (`POST /api/v1/packages/:id/publish-drafts`) answers `probes`, its runtime
+findings (`BuildProbeReportSchema`, same file; ADR-0038). Each `issues[]` element
+(`RuntimeBuildIssueSchema`) has two readers: `message` / `fix` are English for the agent that
+built the app, the optional `userMessage` is the sentence for the person who published. Show
+a person `userMessage`, never `message`; absent, show your own generic sentence.
 
 A flow door — `POST /api/v1/automation/{name}/trigger`, resume, `/actions`, a
 declared `type: 'flow'` endpoint — answers a failed run with `400 FLOW_FAILED`;
