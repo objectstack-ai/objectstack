@@ -2,8 +2,8 @@
   "number": 34749,
   "kind": "issue",
   "title": "console: isMailDelivering reads source 'environment' with a null value as not delivering, so the hosted setup checklist still does not tick after #32799",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "bug",
     "domain:ui",
     "finding",
-    "lease:o4-B",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T09:36:41Z",
-  "updated_at": "2026-11-17T14:14:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T15:02:12Z",
+  "closed_at": "2026-11-17T15:01:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34749",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ②: the ui follow-up the seat analysis 6931556929 names for #32799 (ruled C, record on the card), confirmed by the card thread's final report 6944198803 on PR #34731. Dedupe: `isMailDelivering environment null`; no open card.\n\nSuggested-grade: p2 (inherits #32799) · domain:ui · Blocked-by #32799\n\n## 维护者速读\n\n- 现象:#32799 的修复(PR #34731)让托管平台的邮件设置回答「在用、由运行环境提供」(source 为 environment、value 为空)。但控制台的 `isMailDelivering` 仍要求 value 非空，会把这个回答读成「未完成」;ui 的 `types.ts` 注释也还写着「value 为 null 当且仅当 source 为 none」。\n- 为什么要修：不改这里，托管版的设置清单在 #34731 合并后仍不打勾，#32799 的目标落不了地。\n- 需要你做的：无(分诊定级)。\n\n## Change\n\n1. The console's `isMailDelivering`: treat `source: 'environment'` with a null `value` as delivering, the same as the spec rule #34731 lands; a pin for that cell and for `source: 'none'`.\n2. `ui` `types.ts`: rewrite the comment to the new rule (null when `source` is `none`, or when `source` is `environment`).\n\n## Done when\n\nOn a hosted environment the setup checklist's mail item ticks.\n"

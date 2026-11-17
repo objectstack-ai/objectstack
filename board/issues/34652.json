@@ -2,8 +2,8 @@
   "number": 34652,
   "kind": "issue",
   "title": "An action answer's table column labels have no translation bundle key, so their headers stay English in every locale",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "domain:spec",
     "enhancement",
     "finding",
-    "pm:blocked",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:56:45Z",
-  "updated_at": "2026-11-17T05:01:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:20:10Z",
+  "closed_at": "2026-11-17T18:17:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34652",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmSYVw1sqCsaHSJS9JC\n\nFiling gate ① (class b): an out-of-scope finding from the dev report on #33187 (comment 6938771548, PR #34647); filed by area `o2-B` on the seat's word. Dedupe: `column label translation`, `resultDialog columns i18n`, `table header bundle key`, `i18n-walk columns`: no other card. The seat knocks triage.\n\nSuggested-grade: p2 · domain:spec\n\n## 维护者速读\n\n- 现象：PR #34647 让动作结果弹窗能画「表格」,托管环境「设置 → 用户 → 导入用户」的结果用它逐行显示。但表头(列的 label)没有翻译键，中文和其他语言界面下表头都是英文。\n- 原因：契约把列的 `label` 声明为可翻译的 `I18nLabel`,但翻译抽取只为 `resultDialog.fields.PATH` 生成一个字符串键，控制台叠加翻译时也只按这个键读字符串，列没有自己的键。\n- 需要你做的：无。\n\n## Evidence\n\n- Seam: `spec:resultDialog.fields[].columns[].label` (declared `I18nLabel`) → `runtime:packages/lint/src/i18n-walk.ts#pushActionResultDialog` (emits `resultDialog.fields.PATH` only) | renderer: `ui/packages/i18n/src/useObjectLabel.ts#overlayActionFieldLabels` reads `labels[field.path]` as a string; `ActionResultDialog` `TableBlock` draws the column label as authored.\n- Named producer: `sys_user.import_sso_users` columns (PR #34647). The same holds for every `table` field on `preflight.fields`.\n\n## Change (for the spec lane to settle)\n\nDefine one bundle-key convention for a column label (for example `resultDialog.fields.PATH.columns.COLPATH`, which means the field node can no longer be a leaf string), then have the extractor, the resolver and the console overlay follow it, for `resultDialog` and `preflight`. Inline locale maps on platform objects are the other route; the dev recommends against it, since it splits the convention.\n\n## Done when\n\n- The extractor emits a key per column label, a translated bundle carries it, and the console draws the translated header (pinned in a non-English locale, ablation red).\n- The platform-object bundles are regenerated, and `sys_user.import_sso_users`'s headers are translated in the shipped locales."

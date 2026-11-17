@@ -12,18 +12,18 @@
   },
   "labels": [
     "domain:server",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T08:36:29Z",
-  "updated_at": "2026-11-17T08:36:04Z",
+  "updated_at": "2026-11-17T19:04:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34348",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUcj2x2Wr4UErwBi12\n\nFiling gate: ① a decision a contract review escalated. Source: review#1's contract record 6911434197 on PR #34324 (S3, ③), from the os-dev's open question on #34144. Filed by area S5 (E1b). The area is winding down, so this card waits for the maintainer.\n\n## 维护者速读\n\n- 需要您决定：存储里有一行\"不属于任何包\"的记录，名字和某些包的元数据相同。这时不带包名的读和写给出了不同答案，该以哪个为准？\n  1. 同名只有已停用的包持有：读返回 404（看不到），保存却返回 200 并改了这一行（改完仍然看不到）。\n  2. 同名由两个启用的包持有：读返回 409（有歧义），保存却返回 200 并改了这一行。\n- 为什么要您定：裁定 A（#34144）给出的补救办法是\"加 `?package=`\"，但这一行不属于任何包，这个办法够不着它。裁定的措辞可以理解成覆盖这种情况，也可以理解成不覆盖。\n- 选项：\n  - (a) 保存跟读保持一致：两种情况都拒绝（409），并给出一个能指向这一行的补救方式。这会把现在的 200 收窄为 409。\n  - (b) 读跟保存保持一致：这一行就是环境自己的记录，读的时候应该能看到它。这会把读从 404/409 放宽为 200。\n  - (c) 维持现状，把这种读写不一致登记为已接受的偏差。\n- 建议：(b)。原因是不属于任何包的行，本来就按环境自己的记录来对待（D3：先找环境自己的，再找唯一持有者，最后才拒绝）。但读侧是否已经这样实现，要先在 main 上测一下。\n\n## Cells (from the record; not re-measured by the area)\n\n- A package-unbound row of a name only disabled packages ship: bare read 404, bare save 200, and the saved item stays hidden.\n- Two enabled holders plus a package-unbound row: bare read 409, bare save edits the row (200).\n\nRelated: #33210 (a package-less row beside two packages' rows: plain read vs /layers). It is in flight on the area's branch, and its fix may move the read side of the second cell. Read it before deciding.\n\nPrior rulings read: ADR-0150 D3 and D5; ruling A on #34144; PR #34324."

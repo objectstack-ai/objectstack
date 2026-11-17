@@ -1,0 +1,33 @@
+{
+  "number": 34884,
+  "kind": "issue",
+  "title": "An action body the runtime cannot compile (`const input = …` in a script action) passes validate, build and verify, then answers every run_action with an opaque 500 INTERNAL_ERROR",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:o3-C",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T15:01:12Z",
+  "updated_at": "2026-11-17T19:00:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34884",
+  "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\n## What happens\nIn the scenario half of qa#1 routine round 2 (requisition_to_receipt, subject `f6f5b50a`, workspace packages), the authored build passed `objectstack validate`, `build` and `verify`. Its script actions then answered all 14 `run_action` calls with `500 INTERNAL_ERROR \"Internal server error\"`:\n- `decide_approval_step` ×8\n- `raise_purchase_order` ×5\n- `record_goods_receipt` ×1\n\nThe MCP caller gets no hint of the cause. The agent fell back to raw writes and left the state wrong.\n\n## Reproduction\n1. Give an action `body.source: \"const input = ctx.input || {}; return 1;\"`.\n2. `objectstack build` passes.\n3. `run_action` answers 500 `INTERNAL_ERROR`. The server log says `SyntaxError: invalid redefinition of parameter name`.\n\n## Mechanism (runner's probe in the kept project)\nThe runtime wraps an action body as `(async (input, ctx) => { SOURCE })`. QuickJS rejects a body that redeclares `input` with `const`.\n\n## Expected\n- An action body that cannot compile in the runtime's wrapper is refused at validate, build or publish, naming the action and the compile error.\n- At run time, the answer names the action and the cause (a 4xx/5xx with a code), never a bare \"Internal server error\".\n- The redeclaration is an easy mistake for an AI author, because `input` reads like a free variable.\n\nFound by: `qa#1` routine round 2, scenario half (round record on #31433), requisition_to_receipt, checks `manager_approves_level_one`, `manager_approves_finance_level`, `receive_more_than_ordered` (agent half) and `raise_po_from_text`."
+}

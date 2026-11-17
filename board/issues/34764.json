@@ -2,8 +2,8 @@
   "number": 34764,
   "kind": "issue",
   "title": "qa: a weekly runner for the published skills' existing eval cases (subscription login, with- and no-skill arms), and the eval lane's weekly line",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "lease:o3-F",
     "pm:dispatched",
     "priority:p2"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T09:57:23Z",
-  "updated_at": "2026-11-17T13:40:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T17:39:48Z",
+  "closed_at": "2026-11-17T17:39:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34764",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34659（MCP 二期与问数专题）；#34691 裁定后的执行卡，⛔ 不是认领。\nRuling: S2 A, #34691 comment 6943116536, option text verbatim 「四张全部 A」 — 「#34691 四问都按推荐；p3 标准写进规则并放宽 4 行；查岗规则改一行；旧标签保留、改 ROADMAP 一句。」, recorded as \"the skills' existing eval cases are run on a weekly schedule, and the skills are iterated from those readings\". Record 6943107981 adds \"with a no-skill arm, weekly and on the touched skill; a skill fix is accepted when its failing case passes\".\n\n## 维护者速读\n\n- **做什么**：一个运行器，用订阅登录的 Claude Code 跑已发布技能里现成的 209 个评测用例，按用例自带的 must_contain / must_not_contain 机械打分，带技能、不带技能各一臂；评测席章程加一行每周一轮。\n- **为什么**：这些用例从没被拿去问过模型，唯一的机械检查只覆盖 objectui 的 34 个；技能教错只能等客户撞上。不进 CI、不拦合并、不用 API 计费密钥。\n- **需要你做的**：说一句技能评测分数能否进本仓 `eval-run` 记录：章程现只许场景卡记录带全分（`eval.md:34`）。\n\n## 现状 (objectstack `origin/main` f6f5b50a05, read 2026-11-17)\n\n- `skills/*/evals/*.json`: 26 files, 11 bundles, 209 cases (#34691 counted 208 at `a0326b06`); each has `prompt`, `expected_output`, empty `files`, `assertions` (792 `must_contain`, 378 `must_not_contain`).\n- Nothing sends them to a model. `must_contain` is read only by `ui/scripts/check-skill-eval-tokens.mjs`, `check-skill-examples.mjs` and a test.\n- That token check covers objectui only (`ui/scripts/skill-bundle-root.mjs:78-83`; `--list`: 1 bundle, 11 files, 34 evals): 175 cases are not token-checked.\n- A subscription-only guard exists: `packages/qa/scenarios/src/runner/driver.ts:169` `API_BILLING_ENV`, `:196` `subscriptionOnlyEnv`, `:208-210` refuses no login or an API-key login.\n- `.claude/skills/pm-dispatch/references/lanes/eval.md`: weekly scenario round (`:7`); scope ①–④ has no skills round (`:11-15`); the seat opens no PR (`:31`); territory `packages/qa/` (`:39`). Records: one `eval-run` issue a round (`.claude/skills/scenario-eval/SKILL.md` §5). Seat vacant (#34632 D9).\n\n## 要做的\n\n- Runner (devx) under `packages/qa/`, importing that guard, never copying it:\n  - each case by `claude -p` in a fresh temp dir: with-skill arm (bundle in `.claude/skills/`, workspace or a named `@objectstack/skills` version, `Skill` allowed) and no-skill arm; no MCP server;\n  - pass = all `must_contain` present, no `must_not_contain`; `--repeats N`; `--skills a,b` for a touched skill;\n  - record JSON in a git-ignored `--out`; per bundle: pass rate per arm, with-skill failures, cases where no-skill ≥ with-skill;\n  - `--self-test` that can fail; `--dry-run`; README: login, cost, one round's time.\n- Charter line in `eval.md` (`:7` and scope ⑤): the skills' eval cases, weekly, through the runner on the subscription; one `eval-run` a round; a with-skill failure goes to `domain:skills` as a `finding`. No issue number, date or quotation (`pnpm check:pm-skill-id-lint`).\n\n## 不做的\n\n- A CI job or merge gate; new or edited cases; API-billed runs; the Routine (the eval seat's); dataset graders (#34687).\n\n## 验收\n\n- One round, 209 cases × 2 arms, on the subscription; time and summary posted here.\n- Refuses to start with `ANTHROPIC_API_KEY` set (test); `--self-test` reds on a broken grader.\n\nGoverned: `eval.md` is `.claude/**`, Tier S in objectstack (`scripts/pm/check-governed-merges.mjs:1376`): lands on a PASS `## Contract review` for the head, checks green. Own PR, after the runner lands.\n\nReader: `domain:devx` (runner) · seat 3 area o3-F; the charter line is seat 3's.\nBlocked-by: none.\nDedupe: `gh api -X GET search/issues -f q='repo:objectstack-ai/objectstack is:issue skill evals runner weekly'` → 6 (#34691, #34632, #33785, seat posts; none this). `… \"evals\" skills runner in:title` → 0."

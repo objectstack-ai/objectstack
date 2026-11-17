@@ -10,16 +10,20 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:06:57Z",
-  "updated_at": "2026-11-17T14:06:57Z",
+  "updated_at": "2026-11-17T14:59:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34864",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\n## What happens\nA seed draft that names an object that does not exist is saved 200. Publishing then reports \"published\", and the probe's remedy, \"Publish again\", cannot work.\n\n## Reproduction\nReproduced 3 times on fresh DBs at `6091b645`.\n1. `POST /api/v1/packages` with `{\"manifest\":{\"id\":\"com.objectstack.qa.seedobs3\",\"name\":\"QA seed obs 3\",\"version\":\"0.1.0\",\"type\":\"app\"}}` → 201.\n2. Draft and publish an object `seedobs3_item`.\n3. `PUT /api/v1/meta/seed/seedobs3_bad?mode=draft&package=com.objectstack.qa.seedobs3` with `{\"object\":\"seedobs3_nope\",\"mode\":\"upsert\",\"records\":[{\"name\":\"X\"}]}` → 200.\n4. `POST …/publish-drafts` with `{}` → 200:\n   - `outcome` is \"published\";\n   - `seedApplied.success` is false (\"Object 'seedobs3_nope' not found\");\n   - the `seed_not_applied` probe's userMessage says \"…could not be read after publishing. Publish again…\".\n\n## Expected\nThe save door refuses, with a 4xx, a seed bound to an unknown object, as it now refuses permission-set grants (#28990), and the remedy names the unknown object. This partly overlaps #27393 (closed): publishing and stop-at-failure are unchanged there by design, so this card covers only the save-door acceptance and the misleading remedy.\n\nQA-source: #34859 · platform-core.seed-mode-matrix · observed beside the clauses"

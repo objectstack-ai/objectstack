@@ -10,16 +10,20 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:05:33Z",
-  "updated_at": "2026-11-17T14:05:33Z",
+  "updated_at": "2026-11-17T14:58:12Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34861",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\n## What happens\nIf `POST /api/v1/auth/sign-in/sso` never answers, the login page shows a spinner forever with the email field disabled. The 20 s sign-in watchdog (#2626) never fires on this path.\n\n## Reproduction\nReproduced twice at `6091b645`.\n1. Boot with `OS_SSO_ENABLED=true OS_AUTH_SSO_ONLY=true`.\n2. Register one OIDC provider (`qa-fixture oidc-stub`, then `POST /api/v1/auth/admin/sso/register`).\n3. Open `/_console/login` in a fresh browser and make `POST /api/v1/auth/sign-in/sso` never answer (a Playwright `page.route` that never fulfils).\n4. Type an email and click \"Sign in with SSO\".\n- Expected: after about 20 s the watchdog recovers the button with an error and a retry path.\n- Actual: at 22 s and at 32 s the button is still spinning and the email field is still disabled.\n\n## Mechanism\nThe SSO submit in `ui/packages/auth/src/LoginForm.tsx` (around line 541) is a bare `fetch('/api/v1/auth/sign-in/sso', …)` with no timeout. The watchdog (`SIGN_IN_TIMEOUT_MS` / `withTimeout`) wraps only `signInWithProvider` in `createAuthClient.ts`. Fix: send the SSO submit through the same 20 s AbortController watchdog.\n\nQA-source: #34859 · identity-auth.sso-enforced-first-paint · acceptance[3]"

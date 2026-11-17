@@ -10,16 +10,20 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:06:06Z",
-  "updated_at": "2026-11-17T14:06:06Z",
+  "updated_at": "2026-11-17T14:59:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34863",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\n## What happens\nA malformed `/batch` body is refused 400 VALIDATION_FAILED, but the answer carries raw zod `issues` and no ADR-0114 `fields[]`. The per-object doors answer the same kind of failure with `fields[]`.\n\n## Reproduction\nReproduced 3 times at `6091b645`, also noted in #34801.\n- As admin, `POST /api/v1/batch` with `{\"operations\":\"x\"}` (or `{}`) → 400 `{\"error\":\"Invalid batch request\",\"code\":\"VALIDATION_FAILED\",\"issues\":[{\"expected\":\"array\",\"code\":\"invalid_type\",\"path\":[\"operations\"],…}]}`.\n- Contrast: `POST /api/v1/data/showcase_task/updateMany` with `{\"records\":[{\"data\":{}}]}` → 400 with `fields:[{field:'records.0.id',code:'required',…}]`.\n\n## Mechanism\n`packages/rest/src/batch-routes.ts` (around line 313) returns `issues: parsed.error?.issues`. The per-object branch in the same file (around lines 572–577) maps the same kind of failure through `zodIssuesToFields`. Related, but not the same: #9559 tracks where the envelope sits; this card is about the missing `fields[]`.\n\nQA-source: #34859 · api-backend.error-envelope-ledger · observed beside the clauses"

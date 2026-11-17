@@ -1,0 +1,37 @@
+{
+  "number": 34879,
+  "kind": "pull_request",
+  "title": "fix(app-shell): upgrade links open the runtime's declared upgradeUrl",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T14:30:43Z",
+  "updated_at": "2026-11-17T16:00:27Z",
+  "closed_at": "2026-11-17T16:00:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T16:00:24Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34879",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBNgJrQDxaUNx2so1ektgf6A)_\n\nPart of #34622\n\nClause-②: no\nMetadata-protocol: none\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzfrh8TiPJf1i2kMSoa\n\n## 维护者速读\n\n- **改了什么**：控制台开始读取 `/api/v1/runtime/config` 已经下发的 `upgradeUrl`（宿主声明的 Cloud 升级/计费页绝对地址），存储已满横幅的「Upgrade to continue」、AI 用量指示器的 CTA、AI 对话的配额升级按钮，在声明了该地址时直接打开它。\n- **为什么改**：这三个链接原来打开 Cloud 根域名；单组织管理员访问 Cloud 根会被直接送回环境，升级链接永远到不了计费页（卡 #34622，阻塞 objectstack-ai/cloud#4804）。\n- **风险与回滚**：低。未声明 `upgradeUrl` 时三个链接的目标和显示/隐藏规则与改动前完全相同；回滚即 revert 本 PR。\n- **先看**：`ui/packages/app-shell/src/runtime-config.ts`（`upgradeUrl` 读取与 `getUpgradeUrl()`）、`ui/packages/app-shell/src/layout/AiUsageIndicator.tsx`（`showCta` 的门控）、`ui/packages/app-shell/src/console/ai/AiChatPage.tsx`（`onUpgrade` 一处）。\n- **两分钟验证**：`pnpm --dir ui exec vitest run -t 34622 packages/app-shell/src/runtime-config.test.ts packages/app-shell/src/layout/__tests__/StorageUsageBanner.test.tsx packages/app-shell/src/layout/__tests__/AiUsageIndicator.test.tsx packages/app-shell/src/console/ai/__tests__/AiChatPage.upgradeUrl-34622.test.tsx`，预期 24 passed。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- `runtime-config.ts` reads the top-level `upgradeUrl` that `RuntimeConfigPlugin` serves (objectstack#14514, maintainer ruling cloud#1850 option A). It takes a non-empty string verbatim; absent, empty, whitespace-only and non-string values stay absent. Nothing is composed from `cloudUrl`. Each payload re-derives the key, so a later payload without it withdraws it. The new getter is `getUpgradeUrl(): string | undefined`.\n- `StorageUsageBanner` (\"Upgrade to continue\"), `AiUsageIndicator` (the CTA's `showCta` gate and its click) and `AiChatPage` (the `onUpgrade` exit only) open `getUpgradeUrl()` when it is declared. When it is absent, each one uses `cloudConsoleUrl()` as before, with the same show/hide rule (card item 3).\n- When `upgradeUrl` is declared on a runtime whose `cloudUrl` is empty, the link is now drawn and opens the declared address. Ruling A says the console renders the link when the key is present.\n- Patch changeset for `@object-ui/app-shell`.\n\nOut of scope, per the seat's correction (comment 6947939206): the marketplace \"Open on Cloud\" link needs a new Cloud-home key (`Clause-②: yes`, back to the seat). Nothing under `packages/cloud-connection/**` changes, and the avatar menu (#34591) is untouched.\n\n## Tests\n\nMeasured at head `4a23eddd`, after a dependency-closure build (`pnpm --workspace-concurrency=2 --filter '@object-ui/app-shell^...' build`, exit 0).\n\n- The new pins follow the shared-harness rule (ruling record 6583487846). The `runtime-config`, `StorageUsageBanner` and `AiUsageIndicator` pins are top-level `describe` blocks in each component's existing test file. `AiChatPage` has no shared harness file, so its pin is the new card-named `AiChatPage.upgradeUrl-34622.test.tsx`.\n- Each link has three kinds of test. Declared: it opens the declared address. Declared with no upstream cloud: it is drawn and opens the declared address. Absent (CONTROL): today's `cloudConsoleUrl()` target, and no link when the runtime names no upstream cloud. The component pins use the real runtime-config reader; only `fetch` is replaced, for the config request.\n- Card pins: 24 passed. The four files in full: 114 passed.\n- Ablation: in `runtime-config.ts`, `? body.upgradeUrl` was replaced with `? undefined` through `scripts/ablation-replace.mjs`. The anchor went from 1 hit to 0 and the blob from `a0be844f` to `8c5e8a2c`. 9 declared-path tests went red and the 15 absent/CONTROL tests stayed green, which is the expected direction. The restore was verified: the blob matched HEAD and `git diff HEAD` was empty.\n- Affected app-shell set: every app-shell test file that names one of the four touched modules, 148 files, 1358 passed.\n- `pnpm --filter @object-ui/app-shell run type-check` exit 0. Both projects ran, and `tsconfig.test.json` compiles the test files.\n\n<details><summary>Ablation run</summary>\n\n```\nablation-replace: ok mutation landed: anchor 1 -> 0, blob a0be844f3ef8 -> 8c5e8a2c969a\n Test Files  4 failed (4)\n      Tests  9 failed | 15 passed | 90 skipped (114)\nablation-replace: ok restored: blob == HEAD (a0be844f3ef8) and `git diff HEAD` is empty\n```\n\n</details>\n\n## Acceptance notes\n\n- The AI usage CTA opens `upgradeUrl` for both of its labels, \"Upgrade to keep going\" and \"Add credits to continue\" (top-up). The runtime config has one upgrade/billing entry, and the card names the billing/plan page for the AI quota.\n- Deviation, declared: I did not run the full app-shell suite locally (2291 test files). A run started under the shared lock and was stopped after 20 minutes so that it would not hold the lock any longer. The local run was narrowed to the 148 files above, which is an import-based narrowing: it does not see tests that render these components through an unnamed parent. CI's sharded `Test UI` runs the full suite.\n\n## Verification\n\n- `node scripts/pm/dispatch-gates.mjs --commands`: 38 derived families, all run at `4a23eddd`, every one exit 0. The `--ran` reconciliation reported 38 derived, 38 run, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm --dir ui check:new-line-citations`: 0 new citations.\n- `node scripts/pm/overlap-check.mjs --branch=claude/issue-34622-upgrade-url-links`: VERDICT clean, exit 0. It merges cleanly with `origin/main` (`d947a93c`), PR #34845 and PR #34851, which both share `AiChatPage.tsx`.\n- CI check-runs: not yet concluded when this body was written.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzfrh8TiPJf1i2kMSoa)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzfrh8TiPJf1i2kMSoa -->\n"
+}

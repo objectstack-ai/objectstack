@@ -2,8 +2,8 @@
   "number": 34795,
   "kind": "issue",
   "title": "Studio 权限页：横幅和术语改成业务说法，批量按钮常显并用中文，对象不带内部名",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:ui",
     "enhancement",
     "lease:o3-C",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:53:23Z",
-  "updated_at": "2026-11-17T12:21:40Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:47:45Z",
+  "closed_at": "2026-11-17T18:46:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34795",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「studio 主要的常用界面也综合评估，看如何优化。」；看过图 21、22 后：「可以，立卡」。\n\n## 现状（读码，objectstack `origin/main` 6091b645fd；界面实测在本地 cloud 环境，自建应用「会议纪要」，zh-CN）\n\n- **横幅读不懂。** 接受了包建议的默认权限集后，顶部写的是「「app_ti8v_member_access」已为所有已登录用户(Everyone 岗位)接受。[撤销]」（`ui/packages/i18n/src/namespaces/studio/zh.ts:2406` `engine.studio.access.suggestAcceptedState`，`StudioDesignSurface.tsx:10392` 起的 `SuggestedBindingsPanel`，ADR-0090 D5/D9）。权限集用的是内部名，「接受」「Everyone 岗位」是机制用语，用户读不出「所有成员默认都有这个权限」这层意思。\n- **标题被截断**，旁边挤着三个标签。\n- **术语是平台内部说法**：「记录共享模型(OWD)」（`zh.ts:2120`、`:2248`）、「受父级控制 → {master}」（`:3289`，`PackageOwdOverviewPanel.tsx:619`）、页签「行级安全」「标签页可见性」「系统能力」（`zh.ts:2422–2426`，`PermissionMatrixEditor.tsx:522`）。\n- **批量按钮藏着且是缩写。** 对象矩阵的批量操作只在鼠标悬停或键盘聚焦的行上出现，表格下方用一行脚注解释：「批量操作(R · CRUD · All · None)显示在指针所在或获得键盘焦点的行上。」（`zh.ts:2445`，`PermissionMatrixEditor.tsx:2447`）。\n- **对象行带内部名**（`ti8v_meeting`）。\n\n## 要做的（只改文案与呈现，不改权限模型和任何接口）\n\n1. 横幅改成一句话，用权限集的显示名：已生效时「所有成员默认拥有这个权限集，新加入的人也会自动拥有。」，右边的「撤销」改为「取消默认授予」。待确认、未生效、已忽略三种状态按同样口吻改写；访客（Guest）那一句同理。\n2. 标题用「应用名 · 权限集显示名」，不截断；内部名和三个标签收到标题下的一行小字或悬停提示里。\n3. 术语（zh-CN；其他语言按同样原则）：\n   - 「记录共享模型(OWD)」→「谁能看到哪些记录」\n   - 「私有 / 公共只读 / 公共读写」→「只有负责人能看 / 所有人能看 / 所有人都能看和改」\n   - 「受父级控制 → {master}」→「跟随所属的{master}」\n   - 页签：「对象」→「对象权限」，「系统能力」→「系统功能」，「行级安全」→「数据范围规则」，「标签页可见性」→「菜单可见」\n4. 批量按钮每行常显，写成「全选 · 只读 · 清空」（对应现有的 All / R / None；CRUD 那一档并入「全选」旁的下拉或保留为第四个，由实现者定），去掉脚注。\n5. 对象行只显示名称，内部名放悬停提示。\n\n## 不做的\n\n- 不改 ADR-0090 的建议与确认机制，不改「撤销」实际做的事，只改它的叫法。\n- 不改权限矩阵的列（新建 / 查看 / 编辑 / 删除 / 导出 / 转移 / 查看全部 / 修改全部）。\n- 不动 Setup 里的权限集页面；那边若共用同一批词条会跟着变，属于预期。\n\n## 验收\n\n- 自建应用的权限页顶部读作「所有成员默认拥有这个权限集，新加入的人也会自动拥有。」，页面上不出现 `app_…_member_access` 这类内部名，也不出现「Everyone 岗位」「OWD」「CRUD」。\n- 标题完整显示。\n- 不悬停也能看到每行的「全选 · 只读 · 清空」，点了之后矩阵的勾选与现在的 All / R / None 一致。\n- 「取消默认授予」点下去的效果与现在的「撤销」相同。\n\n## 设计图（静态示意稿，标「新」的是改动；示例数据是虚构的）\n\n<details><summary>图 22 Studio 权限页</summary>\n\n![图 22 Studio 权限页](https://github.com/objectstack-ai/objectstack/blob/88e4cafc93cb6d4a48f95b95b80a5fff917e0708/22-studio-access.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ui/packages/i18n/src/namespaces/studio/`（各语言）、`ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx`、`ui/packages/app-shell/src/views/studio-design/PackageOwdOverviewPanel.tsx`、`StudioDesignSurface.tsx` 的权限栏。\n\nDedupe: `repo:objectstack-ai/objectstack Studio 权限集 Everyone 横幅`、`Studio 权限 OWD 文案` → 0（未关）。"

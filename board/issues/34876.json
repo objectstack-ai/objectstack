@@ -1,0 +1,31 @@
+{
+  "number": 34876,
+  "kind": "issue",
+  "title": "mcp: a pin for the dataset tools when the i18n service resolves but its reads throw",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T14:28:32Z",
+  "updated_at": "2026-11-17T14:53:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34876",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic). The maintainer set who files this epic's cards, in this session's chat, 2026-11-17, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported to this session by the dispatching seat `repo:objectstack#3` on #34659 (comment 6948693475); the filer did not re-read the code behind it. Source: the L1 record on PR #34833, 6948646042, N3. Left open at landing under the maintainer's merge standard for nits.\n\n## Why\n\nWhen the i18n service is present but a read throws, the dataset catalogue degrades to untranslated text on both transports. That may be the right behaviour; nothing pins it, so a later change can turn it into a refusal or a silent wrong answer unnoticed.\n\n## Evidence\n\n- Per the report: no test covers an i18n service whose `getLocales` / `getTranslations` throws; the case reaches the dataset executor as a degraded read on HTTP and stdio alike.\n\n## Scope\n\n- One pin beside `stdio-data-bridge` in `packages/mcp/src/`, and the matching HTTP-door case if it is unpinned too: the read degrades, and says so the way the door's degradation rule requires.\n\n## Done when\n\n- Both pins are green and fail when the degraded read is removed.\n\n## Relations\n\n- Parent: #34659. Related: #34787 (PR #34833)."
+}

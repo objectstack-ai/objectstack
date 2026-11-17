@@ -1,0 +1,34 @@
+{
+  "number": 34875,
+  "kind": "issue",
+  "title": "reading first: are the platform's own system datasets out of the vocabulary advisory's reach by design",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "lease:o3-F",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T14:27:58Z",
+  "updated_at": "2026-11-17T18:20:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34875",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic). The maintainer set who files this epic's cards, in this session's chat, 2026-11-17, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported to this session by the dispatching seat `repo:objectstack#3` on #34659 (comment 6947282338, gap 3); the filer did not re-read the code behind it.\n\n## Why\n\nThe platform ships seven dataset members with no vocabulary and its own lint says nothing about them. Either that is a deliberate exemption nobody wrote down, or the rule cannot see them.\n\n## Evidence\n\n- Per the report: `packages/platform-objects` `system.datasets.ts` has 7 bare members; `os lint` there reports 0 findings for `dataset-member-no-vocabulary`. Whether that is by design was not read.\n\n## Scope\n\n- Reading: why the rule reports nothing there. Post it on this card.\n- Then one of: give the seven members vocabulary; or state the exemption where the rule lives.\n\n## Done when\n\n- The reading is on the card and the outcome is one of the two.\n\n## Relations\n\n- Parent: #34659. Related: #34718."
+}

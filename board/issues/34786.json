@@ -14,18 +14,21 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
+    "lease:o3-C",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:26:44Z",
-  "updated_at": "2026-11-17T12:54:02Z",
+  "updated_at": "2026-11-17T18:57:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34786",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ②: should-fix S2 of the contract review of PR #34775 (#34664), comment 6945332987, left out of that PR's scope. Dedupe: `rollupSourceUnreadableReason editor`; no open card.\n\nSuggested-grade: p2 (inherits #34664) · domain:ui · Blocked-by #34664\n\n## What happens\n\nPR #34775 adds `rollupSourceUnreadableReason` to a permission-set field entry; the schema refuses a reason that sits beside a `readable` that is not `true`.\n\n- The console permission matrix editor (`PermissionMatrixEditor`, `updateFieldPerm`) turns Read off by deleting only `when`. On an entry that carries `rollupSourceUnreadableReason`, the result is `readable: false` with a reason beside it: a shape the schema refuses on save. The editor offers no way to clear the reason.\n- The bulk shortcut `withFieldBits` in the permission-slice helper rewrites the entry and silently drops the reason.\n\n## What is wanted\n\nTurning Read off in the editor removes the reason in the same edit (or the editor shows and lets the author clear it), and the bulk shortcut keeps the reason when `readable` stays `true` and drops it only when `readable` goes off. Pin both with tests against the spec schema.\n"

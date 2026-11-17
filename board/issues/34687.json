@@ -2,8 +2,8 @@
   "number": 34687,
   "kind": "issue",
   "title": "scenarios: ask mode can give the client a skills directory; dataset scenario cards with graders for metric-selected, asked-back and fallback-labelled",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "lease:o3-F",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T06:26:43Z",
-  "updated_at": "2026-11-17T13:55:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T19:21:00Z",
+  "closed_at": "2026-11-17T19:19:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 17,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34687",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「同意你的所有建议，开始立专题子卡」. The ruling record is #34659 comment 6940528935.\n\n## Why\n\nThe 问数 path through governed metrics is not measured at all: no open scenario card declares a dataset, and the ask client cannot be given a skill. Two rulings now rest on a measurement the runner cannot make: the published ask-data skill (D5, D7), and E2, which stays at exact matching only while a skill-only ask-back branch works.\n\nWho acts: the devx lane (`packages/qa/scenarios`, `docs/qa/scenarios`). Who reads the result: the eval seat each round, and the maintainer on E2.\n\n## Evidence (objectstack `a0326b06`, read 2026-11-17)\n\n- `ls docs/qa/scenarios/*.json` is 9 cards; `grep -l -i \"dataset\\|synonym\"` over them matches none.\n- The ask client is an empty temporary directory with `--strict-mcp-config --allowedTools mcp__app` (`packages/qa/scenarios/src/runner/driver.ts:468-483`). The authoring client does get `Skill` (`:456`).\n- A project skill placed in the client's directory is discovered by `claude -p` with no extra flag once `Skill` is allowed (this seat's pilot, 12 of 12 runs listed it).\n\n## Scope (ruled D6 = A)\n\n- An opt-in runner option that places a named skills directory in the ask client's working directory and allows the `Skill` tool. Off by default, so existing records stay comparable. The record states which skills, at which version, the ask client had.\n- Two or three open cards extended with datasets that declare synonyms and member descriptions, an ambiguous pair (one word, two members), a near-miss word and a question no dataset covers.\n- Three graders, mechanical where the transcript allows: `metric-selected` (the answer came through `query_dataset` with the expected measure), `asked-back` (the answer asks which reading is meant and states no figure), `fallback-labelled` (an object-query answer says it is not from a governed metric).\n- Borrow the cloud question kinds, not the cloud fixture.\n- File surface: `packages/qa/scenarios/**`, `docs/qa/scenarios/**`.\n\n## Done when\n\n- One ask round at five repetitions per configuration, with and without the skills directory, is on record as an `eval-run`.\n- That record answers the E2 premise in words the ruling uses: does the client ask back on a near-miss word with the skill, and does the skill cause any ask-back on a question with exactly one match.\n\n## Out of scope\n\n- A schedule for the round (the eval lane's).\n- A build-over-draft-door mode: a later milestone.\n\n## Relations\n\n- Parent: #34659. Blocked by nothing; the skill text the pilot used is on the sibling skills card.\n- Dedup, open and closed: `scenario card dataset grader in:title` 0; `scenario runner ask skills directory flag` 1 hit, #9417 (closed), a QA run record, not this."

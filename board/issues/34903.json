@@ -1,0 +1,33 @@
+{
+  "number": 34903,
+  "kind": "issue",
+  "title": "Studio flow designer ignores the package's translations: zh-CN shows the flow's English label and English approval-step labels a package ships translated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-D",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T15:28:41Z",
+  "updated_at": "2026-11-17T19:41:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34903",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nFound by the hotcrm lane while re-capturing the large-deal approval screenshot for hotcrm#2605 (PR hotcrm#2613) on @objectstack 18.5.0, signed in with zh-CN. Read in code on objectstack `main` fc5913e117.\n\n## What happens\n\nhotcrm ships `flows.opportunity_approval.label: '大额商机审批'` and `approvals.manager_review.label` / `approvals.director_signoff.label` in its zh-CN pack (hotcrm `src/sales/translations/zh-CN/app.ts` 567–572; the keys are the spec's, pinned in `packages/spec/src/system/translation.test.ts` ~1761). The Studio flow designer still shows \"Large Deal Approval\", the approval nodes' English labels, and English edge labels.\n\n## Why, in code\n\n`ui/packages/app-shell/src/views/metadata-admin/previews/` (FlowPreview, FlowCanvas, flow-canvas-parts) localizes node **types** (`translateNodeLabel` reads `engine.flowNode.<type>.label` from the studio catalogue, `metadata-admin/i18n.ts` ~592) and flow meta tokens, and renders the authored `label` as is (`selection.label ?? selection.id`, FlowPreview ~143–150). Nothing there reads the package bundle's `flows.<flow>.*` translations. The spec's `flows.<flow>` group (`packages/spec/src/system/translation.zod.ts` ~1929) has keys for screens, refusals, approvals, notices and records, but none for a decision or other node's label or for an edge label, so a package cannot ship those at all.\n\n## Asked\n\nDecide which of these Studio shows translated (it is an authoring surface, so source labels may be intended; then say so and show the translation beside it). At least the flow label and approval-step labels, which the spec lets a package translate, appear in the viewer's language where a translation exists. Say whether node and edge labels get keys.\n\n## Done when\n\nA zh-CN admin opening opportunity_approval in Studio reads 大额商机审批 and the two translated step labels, or the doc says why not."
+}

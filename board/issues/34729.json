@@ -2,8 +2,8 @@
   "number": 34729,
   "kind": "issue",
   "title": "notifications: an @mention reaches the mentioned person by email as well as the inbox (default on, mutable per person)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "lease:o3-G",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T08:53:18Z",
-  "updated_at": "2026-11-17T14:05:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T16:16:33Z",
+  "closed_at": "2026-11-17T16:15:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34729",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ③ the maintainer's direct order, in the cloud seat 5 thread on 2026-11-17: 「第一步同意，但是手机app还没上架，接 slack」. This card is the @mention item of step 1. Reader: `domain:server` (`plugin-audit` / `service-messaging`). Dedupe: `collab.mention email` found no card. Triage grades it; the seat suggests p2.\n\n## 维护者速读\n\n1. **问题**：被 @ 的人现在只在站内铃铛里收到提醒（每 60 秒刷新一次），人不在线就看不到。\n2. **改法**：@ 提醒默认同时发站内信和邮件；每个人可以在「通知设置」里把 @ 邮件关掉。\n3. **验收**：被 @ 后收到一封邮件，邮件里有原文片段和跳转链接；关掉后只进站内信；同一个人短时间被多次 @ 不会被邮件刷屏。\n4. **范围**：只改 @ 提醒走哪些渠道，不改审批等其他通知。\n5. **风险**：邮件量会增加。托管环境的平台代发有每日上限，需要合并发送或限流。\n6. **需要你做的**：无。\n\n## What exists\n\n- `plugin-audit/src/audit-writers.ts` (~:2902) emits topic `collab.mention` with no channels. `MessagingService.emit` then defaults to `['inbox']` (`messaging-service.ts` ~:1373).\n- Approvals already pass `['inbox','email']` for their main topics (`plugin-approvals/src/approval-email-templates.ts`), which is the precedent for a per-topic channel default.\n\n## Ask\n\n- `collab.mention` defaults to inbox + email, through the same per-topic default mechanism approvals use, so that `sys_notification_preference` can mute email per person.\n- An email template with a snippet and a deep link.\n- Bounded volume: a burst of mentions to one person within a short window collapses into one email, or the existing digest applies. Name the window.\n- Tests: the default delivers both; a muted preference delivers inbox only; a burst yields one email."

@@ -2,8 +2,8 @@
   "number": 34826,
   "kind": "issue",
   "title": "手写记录页在 380px 宽的容器里：页签行与右侧卡片叠在一起（先确认真实窄抽屉能否复现）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
+    "lease:o3-B",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T12:14:27Z",
-  "updated_at": "2026-11-17T12:18:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:20:18Z",
+  "closed_at": "2026-11-17T18:17:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34826",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「然后更新最新的代码，验收已开发完的功能」；看过验收结果里两处未立卡的问题后：「立卡」。\n\n## 现状（界面实测：hotcrm 本地实例，控制台是 objectstack `origin/main` 3bbda33b78 的构建，视口 1280×900，zh-CN，2026-11-17）\n\n验收 objectstack-ai/objectstack#34696（窄抽屉阶段条按容器切换）时，本地的记录抽屉是 720px，够不到 380px。我在浏览器里用脚本给抽屉的 `[role=dialog]` 加了内联样式 `width: 380px; max-width: 380px`，对象是商机（HotCRM 的手写记录页）。\n\n- 阶段条切成了紧凑样式（「第 5 步，共 6 步 · 谈判」），#34696 的部分是对的。\n- 阶段条下面，「明细 / 相关 / 互动」页签行与「商机产品明细」卡片叠在一起：卡片压在页签行和「基本信息」分组上，两边的文字互相遮挡。\n\n⚠ 证据的边界：这是强行改内联宽度得到的，不是产品里自然出现的 380px 抽屉。记录页的分栏按容器宽度决定（`recordPageTierFor`，760px 以下一列，`ui/packages/app-shell/src/views/RecordDetailView.tsx:1208` 附近），有可能是测量没有跟上我改的宽度，真实窄抽屉里并不会这样。#34696 卡面提到 o3-A 有一套「380px 抽屉、1280px 视口」的真实 RecordDetailView 测法，用那套复现最直接。\n\n## 要做的\n\n1. 用真实的 380px 记录抽屉（#34696 的 e2e 钉子 `record-path-phone-row.spec.ts` 同款布置）打开 HotCRM 商机这类带右侧卡片的手写记录页，确认页签行与右侧卡片是否重叠。\n2. 能复现：380px 容器里右侧栏整体排到主栏下面，不与页签行重叠；加一条几何钉子。\n3. 不能复现：在本卡写明测法和结果后关闭。另确认容器宽度在打开后发生变化时（拖宽、窗口缩放）分栏会重新计算。\n\n## 不做的\n\n- 不改抽屉宽度，不改默认记录页的排布。\n\n## 验收\n\n- 380px 宽的记录抽屉里，商机页的页签行、分组卡片、右侧卡片互不遮挡。\n- 或：本卡留有不能复现的测法记录。\n\nReader: `domain:ui` 车道，做过 #34696 / #34614 的座位最合适（同一套窄抽屉测法）。\n\nDedupe: `repo:objectstack-ai/objectstack record drawer 380 tabs overlap related card` → 0（未关）。"

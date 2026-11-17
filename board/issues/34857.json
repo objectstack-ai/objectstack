@@ -10,16 +10,20 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:01:27Z",
-  "updated_at": "2026-11-17T14:01:27Z",
+  "updated_at": "2026-11-17T14:57:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34857",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\nFinding reported by area o3-G while building PR #34854 (#34800), report 6950154378. It was measured. A seat-filed card: grading and `domain:*` belong to triage.\n\nSuggested-grade: p2 · domain:server · size S\nDedupe words: seed composite externalId blank component duplicate\n\n## What happens\n\nA seed record on an object with a composite `externalId` has one key component authored blank. On every load, that record inserts another row: the table went from 2 to 3 to 4 rows over three loads. Nothing warns.\n\nThe #28952 warning fires only when every record keys empty, so a record with a single blank component goes unnoticed.\n\n## Expected\n\nEither the load warns, naming the record and the blank component, or such a record is refused at validation the way an unkeyable seed is. It must not insert a duplicate on every load.\n\nRelated: #28952 (the all-empty warning), #34800 / PR #34854, #34613.\n"

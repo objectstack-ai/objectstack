@@ -1,0 +1,33 @@
+{
+  "number": 34949,
+  "kind": "pull_request",
+  "title": "fix(scenarios): make every skill-evals arm directory under the system temp directory",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T17:46:57Z",
+  "updated_at": "2026-11-17T19:22:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34949",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBLW6dHPW6sSheA32XPKZzPV)_\n\nFixes #34934\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:skill-evals 的每个 arm 工作目录固定建在系统临时目录下(`mkdtempSync(join(tmpdir(), 'skill-eval-'))`),去掉内部的 `base` 参数。\n- 为什么改:#34841 落地后 `base` 是带默认值的函数参数,dispatch-gates 的临时目录扫描读不出它,慢档自测判 UNRESOLVED,main 的 `Lint · PM dispatch-gates` 一直是红的。\n- 风险与回滚:极低;一轮评测的行为不变(原本就只用默认值),只有包内两处测试改为自行删除目录。回滚即 revert 本 PR。\n- 先看:`packages/qa/scenarios/src/skill-evals/arms.ts`(唯一的行为改动处),再看 `test/skill-evals/skill-evals.test.ts` 的清理。\n- 两分钟验证:`node scripts/pm/check-dispatch-gates.mjs --slow`,预期 `no mkdtempSync site in this tree takes a base the scan cannot read` 为 ✓、退出码 0。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `prepareArmWorkdir(arm, bundle, skillsRoot)` makes its root with `mkdtempSync(join(tmpdir(), 'skill-eval-'))`. The defaulted `base` parameter is removed. The scratch scan in `scripts/pm/dispatch-gates.mjs` cannot bind a parameter default, and it fails the build on any `mkdtempSync` site whose base it cannot read. The only production caller (`run.ts`) never passed a base, so a round behaves exactly as before.\n- The two test callers stop passing a scratch base. The `--self-test` rows already removed `d.root`. The vitest case now removes both roots in a `finally` and checks that the root lands under the system temp directory.\n- The scan and its self-test are not touched.\n- A patch changeset is included: `arms.ts` and `self-test.ts` ship inside the published `dist/` (the `skill-evals` command line). No export changes.\n\n## Tests\n\nRun at head `8f7facaa`.\n\n- `pnpm --filter @objectstack/scenarios typecheck`: exit 0.\n- `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 test/skill-evals/skill-evals.test.ts`: Test Files 1 passed (1), Tests 26 passed (26). The lock printed `VERDICT command-exit 0`.\n- `pnpm skill-evals --self-test`: `✓ skill-evals self-test: 21 rows pass.`, exit 0.\n- `node scripts/check-nul-bytes.mjs`: OK, exit 0.\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0`. The branch merges cleanly onto origin/main `d576509c80`.\n\n## Acceptance notes\n\n- The failing case is in the battery's slow tier. A plain local `pnpm check:pm-dispatch-gates` runs only the fast tier, and so does CI on `pull_request` and `merge_group`. That run was green on the unfixed tree: `2249 cases pass; 9 slow section(s) deferred`, `GATE_EXIT=0`. So the before and after readings below come from the scan itself and from `--slow`. This PR's own check-runs cannot show the fix. The next push to main or the next schedule run shows it.\n\n## Verification\n\n<details><summary>Before: unfixed tree at origin/main 189358f2</summary>\n\n- Direct read of the scan (`exposedScratchDirs({})` from `scripts/pm/dispatch-gates.mjs`, the function the failing case calls): `sites=3078 files=22703 inTree=93 exposed=0 unresolvedMkdtemp=1`, then `UNRESOLVED packages/qa/scenarios/src/skill-evals/arms.ts:83 (base is not bound in this file)`. This is the main red.\n- `pnpm check:pm-dispatch-gates` with the default tier (fast): `2249 cases pass; 9 slow section(s) deferred`, `GATE_EXIT=0`. This reading is green because the failing case is deferred, see Acceptance notes.\n\n</details>\n\n<details><summary>After: head 8f7facaa</summary>\n\n- The same direct read: `sites=3078 files=22703 inTree=93 exposed=0 unresolvedMkdtemp=0`.\n- `node scripts/pm/check-dispatch-gates.mjs --self-test`: green. Then `pnpm check:pm-dispatch-gates` (fast tier): `2249 cases pass`, `GATE_EXIT=0`.\n- `node scripts/pm/check-dispatch-gates.mjs --slow` (both tiers): `✓ no mkdtempSync site in this tree takes a base the scan cannot read`, `✓ dispatch-gates self-test: 2564 cases pass.`, `the battery (both tiers) took 1651.8s`, `GATE_EXIT=0`.\n\n</details>\n\n<details><summary>Derived gate families (`dispatch-gates.mjs --commands`, 61)</summary>\n\n- 57 exit 0.\n- NOT MEASURED, prerequisite not met (exit 3), left to CI: `node scripts/check-plugin-teardown-shape.mjs --self-test` (shallow clone, the fixture is pinned to a commit) and `pnpm check:dual-build-cjs-loads` (needs a full `pnpm build`).\n- `pnpm check:query-options-erasure`: exit 0 on a rerun with a longer budget. The first run hit the 240 s cap.\n- `pnpm check:type-check-debt`: in progress when this PR was opened. CI covers it.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzg1NmbJpZhtiWQkTir)_\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzg1NmbJpZhtiWQkTir\n"
+}

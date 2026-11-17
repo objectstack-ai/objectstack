@@ -2,8 +2,8 @@
   "number": 33952,
   "kind": "issue",
   "title": "i18n: let a dependent package's fieldPatches label/description be translated from that package's own catalog (split from #33800 half 2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "lease:o3-J",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:48:06Z",
-  "updated_at": "2026-11-17T14:04:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:18:49Z",
+  "closed_at": "2026-11-17T18:08:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33952",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nMaintainer-directed (filing gate ③): the maintainer chose 「先修新增，另开卡」 on #33800 half 2 (2026-11-15). Today (D) a dependent package's `fieldPatches` label/description shows as written in every language: the merged catalog key `objects.<obj>.fields.<f>.label` lost the package id, and #29624 deliberately ended \"whichever merges last wins\".\n\n## Design question this card answers first\n\nWhere a patching package's own catalog row sits in the precedence of ruling 6631250894 (the three-level order, `i18n-resolver.ts:432-461`) and how serving reaches it (likely a new option carrying the patching package's rows, a new exported parameter). Because it adds a precedence level and an export, the route goes back to the maintainer as a decision before any dev.\n\n## Notes\n\n- description was never translated, even in 18.2.0; label changed with #29624. Not a regression.\n- Same patched text reads Chinese on the detail page (`/i18n/translations`) and source text on the create form today; the card's design must close that gap.\n- Order: after #33800 half 1 lands (same resolver area).\n- Prior rulings read: ADR-0029 D9.2a (:513); ADR-0146 D2, D10 (:596-606); ruling 6631250894; #29624; #33800 seat ruling."

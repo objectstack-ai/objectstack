@@ -2,8 +2,8 @@
   "number": 34448,
   "kind": "issue",
   "title": "Scenario runner: restoring seeded rows through the app's write door is refused by its own state rules (VALIDATION_FAILED), so later operations go unmeasured (regression from #34338)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T19:32:29Z",
-  "updated_at": "2026-11-17T04:27:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T19:52:28Z",
+  "closed_at": "2026-11-17T19:52:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34448",
   "body": "epic:#3600#1 · hotlong · session_01Q4EjjPXwX1YfHyKJUh4agu\n\nFiling-gate category: ① regression in landed work, measured. Regressed by objectstack-ai/objectstack#34338 (Fixes #34294, epic #33595). `reach:` the seventh gallery debut refresh, 2026-11-16T18:45Z: card `asset_lifecycle`, scratch, published 18.5.0, runner at objectstack main `a121e29c`, model claude-opus-5-5. Build 154/154 and Iterate 165/165 both passed, but **three of six operations in each half were `not measured`**. The guardrail `injection_as_data` was not measured either, because no turn read the cell. This refuses the gallery export (#30349, epic objectstack-ai/cloud#3600) and will refuse it on every card with a state machine.\n\n## What happened\n\n1. `manager_approves_scrap` approves DR-0006 correctly: `submitted` → `approved`.\n2. Before the next operation, `restoreSeededRows` writes DR-0006 back to its seeded state. It goes **through the app's own write door**: `update demoasset_disposal_request dr06 {status: submitted, decided_on: null}`.\n3. The app's validation rule refuses that, correctly, with 400 `VALIDATION_FAILED`: \"That status change is not allowed: a request is approved or rejected once, and only an approved one is disposed of.\"\n4. Every following operation is reported as `not measured — restore: the rows could not be restored to the seeded state …`: `dispose_scrapped_asset`, `employee_approves_own_scrap` and `check_out_asset_in_repair`, in both halves.\n\nA one-way state rule is exactly what a well-built app declares, so a restore that must pass the app's rules cannot undo a legitimate transition.\n\n## Ask (`packages/qa/scenarios/src/runner/orchestrate.ts` `restoreSeededRows`, `seed.ts`)\n\n1. Restore through a path the app's business rules do not judge. Use the same privileged, system-context write the seed load uses, or re-seed the touched rows: delete and insert them with their seeded ids. Then a validation rule, hook or flow that guards transitions does not refuse it, and does not fire side effects. Say which you chose and why. Restoring must never run the app's flows (no record-triggered side effects).\n2. If no such path exists without weakening the platform, order or isolate operations instead, for example a fresh seeded copy per operation, and state the cost.\n3. Tests: an app with a one-way status rule, a transition operation followed by another operation, and both measured. A restore that still fails stays `not measured` with its reason.\n4. Re-run `asset_lifecycle` once (live, the daily gallery task) to show six of six measured per half.\n\nReader: `domain:devx` lane seat, from `pm:queue`; owners of #34294 / epic #33595 cc. Dedupe: `restoreSeededRows VALIDATION_FAILED`, no hit. Priority p1: it makes every card with a state machine unmeasurable and blocks every gallery export."

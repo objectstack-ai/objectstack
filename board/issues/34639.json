@@ -2,8 +2,8 @@
   "number": 34639,
   "kind": "issue",
   "title": "AI chat: send the console's resolved UI language (context.uiLocale) on the chat request, so a reply names the plan card's button as the card renders it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "lease:o3-H",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:29:54Z",
-  "updated_at": "2026-11-17T13:32:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T15:56:58Z",
+  "closed_at": "2026-11-17T15:55:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34639",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: out-of-scope finding of the cloud#4802 dev report (objectstack-ai/cloud comment 6938350298), filed by the seat. objectstack-ai/cloud#4802 (p1, child of #34571) closes only after a pin move carries this.\n\n## What happens\n\nOn staging the console rendered in English (resolved from the environment default) while the user wrote Chinese. The AI's reply told the user to click 「开始搭建」, but the plan card's button said \"Build it\". The server picks the label it names by the reply language, because it never learns the language the console renders in.\n\nAt pin `8436f67a`:\n- `ui/packages/app-shell/src/console/ai/AiChatPage.tsx`: `ChatPane` reads `const { t, language } = useObjectTranslation()` (line 1979) and calls `useObjectChat({ body: { context: { … } } })` (lines 2262-2290) without it.\n- The POST goes through `DefaultChatTransport` with `fetch: sendAwareFetch` (`ui/packages/plugin-chatbot/src/useObjectChat.ts` lines 97, 832), a bare fetch. Only the browser's `Accept-Language` reaches the server, never the language the console resolved.\n\n## Expected\n\n1. `body.context.uiLocale = language` (a string) on the AI chat request.\n2. Nothing else changes. The cloud route accepts exactly one of `PLATFORM_LOCALE_TAGS` or `PLATFORM_LOCALE_READ_ALIASES` (case-insensitive, `_` read as `-`, at most 32 characters); anything else is dropped.\n\nConsumer: objectstack-ai/cloud PR #4815 (`packages/service-ai/src/routes/agent-routes.ts` `consoleUiLocaleOf` → `exec.uiLocale` → service-ai-studio `plan-card-copy.ts` `planApproveLabel`). Until this lands the cloud side falls back to the reply language (today's behaviour).\n\nRelated: #34571 (parent topic). The console's own language resolution (browser vs environment default) is a separate question and not part of this card."

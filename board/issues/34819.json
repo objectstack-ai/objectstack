@@ -2,8 +2,8 @@
   "number": 34819,
   "kind": "issue",
   "title": "带内嵌子表的表单弹窗：取消 / 创建下方留出一段空白；分组导航在校验跳回顶部后高亮不跟着变",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "bug",
     "domain:ui",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T11:34:01Z",
-  "updated_at": "2026-11-17T13:44:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T15:56:51Z",
+  "closed_at": "2026-11-17T15:55:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34819",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「然后更新最新的代码，验收已开发完的功能」。验收 objectstack-ai/objectstack#34599、#34604、#34605 时看到的两处，三张卡的主体都通过了。\n\n## 现状（界面实测：hotcrm 本地实例，控制台是 objectstack `origin/main` 3bbda33b78 的构建，视口 1280×900，zh-CN，2026-11-17）\n\n打开 销售 › 报价 › 新建（带「明细行」内嵌子表、四个分组）。\n\n1. **底部按钮下方有空白。** 弹窗实测上沿 45、下沿 855。滚到「条款」分组时，「创建」按钮的下沿在 721，按钮下方有 134px 空白；滚到最底（明细行之后）时按钮跟着内容上移，下方空白更大。初始位置（未滚动）按钮下方也有约 55px。看上去是按钮栏贴的是滚动区的底，而滚动区比弹窗矮一截。不带子表的表单（新建商机）没有这个现象，按钮贴着弹窗底部。\n2. **分组导航高亮不跟随。** 点导航里的「条款」滚到该分组；不填必填项点「创建」，表单跳回顶部并在「报价单」上标出「2」（计数正确），但导航高亮仍停在「条款」。\n\n## 要做的\n\n1. 带内嵌子表的分支（`ui/packages/plugin-form/src/ModalForm.tsx` 里有自己的 `DialogContent` 的那条）里，按钮栏贴弹窗底部，滚动区填满标题与按钮栏之间的高度；放大后同样。\n2. 分组导航的高亮以滚动位置为准；校验把视图带到别的分组时高亮跟着变。\n\n## 不做的\n\n- 不改分组导航的计数、放大按钮和 #34599 的其余行为。\n\n## 验收\n\n- 新建报价弹窗在任何滚动位置，按钮栏下沿与弹窗下沿的距离等于弹窗的内边距；放大后同样。\n- 点「条款」后不填必填直接「创建」，导航高亮回到「报价单」。\n\nReader: `domain:ui` 车道，`ui/packages/plugin-form/src/ModalForm.tsx` 与分组导航组件（test id `form-section-nav`）。文件路径按 #34604 卡面推断，以实际为准。\n\nDedupe: `repo:objectstack-ai/objectstack ModalForm footer blank space sub-table` → 0（未关）。"

@@ -1,0 +1,31 @@
+{
+  "number": 34906,
+  "kind": "issue",
+  "title": "Dashboards: a table widget's 「导出 CSV」 exports without the export permission and writes no audit entry — bypasses 「看得到不等于导得走」",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T15:46:35Z",
+  "updated_at": "2026-11-17T16:01:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34906",
+  "body": "## What (18.5.0, measured in a browser)\n\nExport is a separate grant. A sales manager who holds no export permission on `crm_cb_order`, `crm_allocation_plan` and similar objects gets `403 EXPORT_NOT_PERMITTED` from `/api/v1/data/<obj>/export`, and list views offer no export.\n\nOn a dashboard, though, the same manager can click the download icon on a **table widget** (tooltip 「导出 CSV」) and receives a CSV of the widget's rows. For example, from 数据洞察 → 订单毛利 → 「需特批的方案」:\n\n```\n订单,方案,特批状态,毛利,平均毛利率\nSO-2026-0002,系统推荐,已批准,64247.79,3.1429 …\n```\n\nThe audit log records list exports (「导出 客户 — 王强」 with format and row count), but **this dashboard export leaves no audit entry**.\n\n## Expected\n\n- A dashboard or report widget export is subject to the same export grant as the objects behind its dataset. Without that grant, the download control is hidden and the server refuses the request.\n- Every dashboard or report export writes an audit entry (who, which widget or dataset, row count, format), the same as list exports.\n\n## Why it matters\n\nThe app's requirement is that seeing data is not the same as being allowed to export it, and that every export is logged. Field masking is unaffected: a sales rep's widget data stays masked. The gap is in the export grant and the audit trail."
+}

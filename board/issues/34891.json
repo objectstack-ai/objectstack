@@ -1,0 +1,30 @@
+{
+  "number": 34891,
+  "kind": "issue",
+  "title": "automation: /automation/_status rows of a flow name held by two or more packages carry no package, so the toggle echoes instead of reading back (and can answer enabled over a concurrent obsolete republish)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T15:12:02Z",
+  "updated_at": "2026-11-17T15:49:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34891",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\nFinding from the seat's contract review of PR #34810 (#34655 half B), N3 and N4, at head `8eee7ddbe2a23e44308b063f322536818168e144`. It is read from code and unmeasured. A seat-filed card: grading and `domain:*` belong to triage.\n\nSuggested-grade: p2 · domain:server · size S\nDedupe words: automation status co-held flow name package echo\n\n## What happens\n\n`GET /automation/_status` rows for a flow name that two or more packages hold (a co-held name) carry no package. The flow toggle door therefore cannot read back the switched slot's own state when there are two or more runtime rows, so it echoes the request instead (PR #34810's route; correct by construction today).\n\nThe echo has one gap. If the flow is republished as `obsolete` while the toggle is waiting, the door can answer `enabled: true` for a flow that is now off. A person then sees a switch reading on for a flow that will not run.\n\n## Expected\n\nStatus rows for a co-held name carry their package, so the toggle reads back the slot it switched and answers what is stored, including under a concurrent republish. With that, the echo route can go.\n\nRelated: #34655, PR #34810.\n"
+}

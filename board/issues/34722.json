@@ -22,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T08:24:29Z",
-  "updated_at": "2026-11-17T12:55:42Z",
+  "updated_at": "2026-11-17T17:10:58Z",
   "closed_at": "2026-11-17T12:52:45Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -30,7 +30,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 8,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34722",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「已安装应用中，也应该能看到升级提示什么的，我现在要进应用市场才能看到」；「然后设置左侧应用下面三个菜单也看不懂，有点混乱」\n\n## 现状（读码，objectstack `origin/main` a34eb0716a；界面实测在 staging os-4e4qa4，构建 6e8395a7）\n\n- 实测：环境里装的是 HotCRM 6.2.0，应用市场上已有 6.4.0。「设置 › 已安装应用」的表格列是 Name、ID、Version、Scope、Status、Source，五行全是 6.2.0，没有任何新版本提示，也没有去升级的入口。\n- 「有新版本」的徽标和判定只在应用市场里：`ui/packages/app-shell/src/console/marketplace/UpdateAvailableBadge.tsx`（「Update available → vX」）与 `installState.ts:54` 的 `updateTarget`（objectstack#33831）。这两处在 `console/marketplace/` 之外没有任何使用方。\n- 已安装应用页是 `ui/packages/app-shell/src/views/metadata-admin/PackagesPage.tsx:1480`（`developer:packages`，带 `source=marketplace` 参数）。\n- 同一页上还有几处读不懂的地方：\n  - 一个应用拆成五行（HotCRM 与它的四个模块包），用户装的是一个应用。\n  - ID 列是包的内部标识（`app.objectstack.hotcrm.o2c`），Scope 列写「Read-only · code」。\n  - 页头有「Import」「New Package」，表格上方有「Show platform packages (23)」。按 ADR-0146 D1，这些是开发者的操作，应在 Studio。\n\n## 要做的\n\n1. 已安装应用的每个应用上，市场有更新版本时显示「有新版本 → vX」，复用应用市场的徽标与 `updateTarget` 判定，不另写一套版本比较。\n2. 徽标旁给出去升级的入口（进入该应用在市场里的页面，升级流程本身不变）。\n3. 页头在有可升级应用时给出一句汇总（例如「1 个应用有新版本」）。\n4. 同一个应用的模块包折叠在该应用一行之下，默认只显示应用一行。\n5. 面向管理员的列：名称、版本、状态、来源、更新。包的内部 ID 与「Read-only · code」不在默认列里。\n6. 「Import」「New Package」「Show platform packages」从这页拿掉，Studio 里保留。\n\n## 不做的\n\n- 不改升级流程、升级计划与权限。\n- 不在本卡处理「打包动作」页的去向（另议）。\n\n## 验收\n\n1. 环境装了 6.2.0、市场有 6.4.0：已安装应用页上 HotCRM 一行显示「有新版本 → v6.4.0」，点击到该应用的市场页。\n2. 已是最新版本的应用没有徽标。\n3. 市场目录读不到时，这页照常列出已安装应用，并说明更新信息暂时读不到，不把它显示成「已是最新」。\n4. HotCRM 默认显示为一行，可展开看到四个模块包。\n\nReader: `domain:ui` 车道，改 `PackagesPage.tsx`，复用 `console/marketplace/` 下的 `UpdateAvailableBadge` 与 `installState.ts`。\n\nDedupe: `repo:objectstack-ai/objectstack Installed Apps update available badge packages page Setup upgrade` → 6 条命中，都是 QA 报告与席位帖，没有这件事的卡（含已关）；#33831 是当初给应用市场加徽标的那张，已关。"

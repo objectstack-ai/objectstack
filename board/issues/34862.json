@@ -10,16 +10,20 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:06:02Z",
-  "updated_at": "2026-11-17T14:06:02Z",
+  "updated_at": "2026-11-17T14:58:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34862",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\nFinding from L1-d's review of PR #34847 (#34729), verdict 6950295328, N4. It is outside that PR. **It was read from source only and not measured**, so premise first. A seat-filed card: grading and `domain:*` belong to triage.\n\nSuggested-grade: p2 · domain:server · size S (p1 if the premise holds, since the approval e-mail's only link would 404)\nDedupe words: approval email link _console, approvalUrl publicBaseUrl\n\n## What may happen\n\n`packages/plugins/plugin-approvals/src/approval-service.ts:2428` builds the approval e-mail's link (#30509) as `${publicBaseUrl}/system/approvals?request=<id>`. `os serve` mounts the Console under `/_console/` (`packages/cli/src/utils/console-route-ledger.ts`). If nothing at the site root forwards `/system/approvals` to the Console, an approver who clicks the e-mail lands on a page that is not the Console, so the request never opens.\n\n## Premise first\n\nOn an `os serve` boot with e-mail captured, trigger `approval.requested`, open the `approvalUrl` from the e-mail, and record where it lands. Also check a deployment that serves the Console at `/`, so a fix does not break one to fix the other. If it lands on the request in both, close the card with the reading.\n\n## Expected\n\nThe e-mail link opens the request in the Console on every supported mount, using one source of truth for the Console's base path.\n"

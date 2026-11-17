@@ -2,8 +2,8 @@
   "number": 34686,
   "kind": "issue",
   "title": "mcp: the open door's initialize instructions carry the ask-data selection rule and the skills install line; /mcp/skill renders from the published skill",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "lease:o3-E",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T06:26:18Z",
-  "updated_at": "2026-11-17T12:39:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:24:10Z",
+  "closed_at": "2026-11-17T17:42:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34686",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「同意你的所有建议，开始立专题子卡」. The ruling record is #34659 comment 6940528935.\n\n## Why\n\nThe open MCP server tells a connecting client one sentence, then lists 40 KB of tools. The rule for choosing between a governed metric and an object query sits inside one tool's description, which a client reads only if it already chose that tool. A client that ran `claude mcp add` and nothing else therefore has no instruction to look for a metric first.\n\nWho acts: the server lane (`packages/mcp`, `packages/runtime`). Who reads the result: every MCP client of a self-hosted app.\n\n## Evidence (objectstack `a0326b06`, `examples/app-crm` booted, admin API key, read 2026-11-17)\n\n- `initialize` → `result.instructions` is 98 bytes: `DEFAULT_HTTP_INSTRUCTIONS` (`packages/mcp/src/mcp-server-runtime.ts:1771`).\n- `tools/list` is 17 tools, 40,341 bytes.\n- `GET /api/v1/mcp/skill` is 16,625 bytes and is served as a page only (`packages/runtime/src/domains/mcp.ts:292-380`); it is not an MCP resource and not the instructions.\n- Nothing the open server sends names `@objectstack/skills` or a version to install. The hosted door does (`Published skills: @objectstack/skills <version>`).\n- `packages/mcp/README.md`, `content/docs/ai/connect-mcp.mdx`, `skills/objectstack-ai/SKILL.md` and `skills/objectstack-query/rules/aggregation.md` do not mention `list_datasets` or `query_dataset` (0 occurrences each).\n\n## Scope (ruled D5 = A, #34659 comment 6940528935)\n\n- The open server's `initialize` instructions state, in a few lines: look for a governed metric first (`list_datasets` with the question's business words), one match answers through `query_dataset`, several ask back, none falls back to the object tools and says so. Only when the dataset tools are registered for the grant.\n- The instructions name the published skills package and the version to install, taken from the server's own version.\n- The data-loop text of `/mcp/skill` is rendered from the published ask-data skill (sibling skills card), so there is one source.\n- The four documents above mention the dataset tools.\n- File surface: `packages/mcp/src/**`, `packages/runtime/src/domains/mcp.ts`, `packages/mcp/README.md`, `content/docs/ai/connect-mcp.mdx`. The two `skills/**` mentions belong to the sibling skills card.\n\n## Done when\n\n- A fresh `initialize` against `examples/app-crm` returns the selection rule and the install line, and returns neither dataset sentence for a grant without `data:read`.\n- A test pins that the `/mcp/skill` data-loop text equals the published skill's.\n- The instructions stay small: state the byte count in the PR.\n\n## Out of scope\n\n- Any change to `list_datasets` matching (E2 is ruled B with a premise).\n- The authoring (draft) tools: a later milestone of #34659.\n\n## Relations\n\n- Parent: #34659. Blocked by the sibling skills card for the single-source half only; the instructions half can land first.\n- Dedup, open and closed: `\"mcp/skill\" initialize instructions selection rule` 0; `MCP initialize instructions skill in:title` 0."

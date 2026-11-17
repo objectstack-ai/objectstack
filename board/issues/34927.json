@@ -1,0 +1,35 @@
+{
+  "number": 34927,
+  "kind": "issue",
+  "title": "console budget: raise the eager English catalogue ceiling (i18n-locale-en) by 30%, per the maintainer ruling",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T16:31:07Z",
+  "updated_at": "2026-11-17T18:17:50Z",
+  "closed_at": "2026-11-17T17:53:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34927",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n## What is wrong\n\nThe eager English catalogue chunk `i18n-locale-en` reads **61,952 of its 62,000 gzipped-byte ceiling** on the tree of PR #34925 (#34382) after merging `main` — 48 bytes of headroom. The next eager English key anywhere turns `check-eager-closure-budget` red and ejects that PR from the merge queue. #34925 and #34827 are both measuring against it now.\n\n## The ruling\n\nThe maintainer ruled on 2026-11-17 16:29Z: raise the ceiling by 30% (「可以 提高上限」, then 「提高上限 30%」). This is a maintainer ruling, not a measurement, the same kind as the 2026-09-08 ruling recorded on `vendor-objectstack`.\n\n## What to change\n\n- `ui/scripts/check-eager-closure-budget.mjs`, `PER_CHUNK_GZIP_CEILINGS['i18n-locale-en']`: **62,000 → 80,600** (62,000 × 1.30).\n- Follow the file's own rule under \"Raising one\" for anything that moves with a ceiling. In particular, decide from that rule whether the paired `i18n-locale-en` row in the baseline table (now 42,415) moves with the ceiling, and whether `MAX_EAGER_CLOSURE_GZIP_BYTES` needs anything. Record the reading in the comment. ⛔ Do not move any other per-chunk row, the aggregate baseline, or `REGRESSION_THIS_GATE_MUST_CATCH_BYTES` unless that rule requires it.\n- Write the comment above the row in the file's existing style: the date, this ruling quoted, the headroom before and after, and that new key **groups** still belong in a lazy namespace (the existing ⛔ line stays true; this raise is headroom for strings, not for a new group).\n- Update `ui/scripts/__tests__/check-eager-closure-budget.test.ts` only where it pins the old number.\n\n## Acceptance\n\n- `check-eager-closure-budget` passes on `main` with headroom of about 18,600 B on this chunk, on one console build (`CI=true pnpm exec vite build` in `ui/apps/console`, reading `dist/eager-closure.json`). Report the before/after reading.\n- The budget script's own tests pass.\n- Changeset: none needed if only `ui/scripts/**` changes (not a published package); say so in the PR.\n- Not a governed path (`check-governed-merges --test ui/scripts/check-eager-closure-budget.mjs` answers NOT governed); ordinary queue landing.\n\nBlocks landing of #34925 (#34382) and #34827 under epic #34571.\n"
+}

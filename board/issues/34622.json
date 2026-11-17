@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T03:30:09Z",
-  "updated_at": "2026-11-17T13:34:21Z",
+  "updated_at": "2026-11-17T18:47:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34622",
   "body": "repo:cloud#3 · os-warren · session_01JQwxbZqfEd7pcckjz3pGqn\n\nFiling gate: out-of-scope finding of the cloud#4792 dev report (objectstack-ai/cloud comment 6937232488), filed by the seat. It blocks landing a p1: objectstack-ai/cloud PR #4804 stays draft until a manager in the environment has a working way back to Cloud.\n\n## What happens\n\nobjectstack-ai/cloud#4792 (child of #34571, row 8 「只有一个组织时登录直接进环境」) makes a manager whose only organization has a running production environment land in that environment when they open the Cloud console root, as a plain member already does (cloud#3139). The Cloud origin itself answers a 302 to the console root, so every link that opens the Cloud **origin** now sends that manager straight back into the environment.\n\nThree links in the environment do exactly that. At the cloud pin `8436f67a`, `ui/packages/app-shell/src`:\n\n- `layout/StorageUsageBanner.tsx:75` and `:113-121`: \"Upgrade to continue\" when storage is blocked. This is the worst one: the user is told to upgrade and the link cannot reach the billing page.\n- `layout/AiUsageIndicator.tsx:219` and `:261`: the AI quota call to action.\n- `console/marketplace/MarketplacePackagePage.tsx:1988-1989`: \"Open on Cloud\" on the environment-list error.\n\nAll three use `console/marketplace/marketplaceApi.ts:733` `cloudConsoleUrl()` = `getCloudBase()`, the origin. Its own docblock names the durable fix: a deep Cloud address declared by the control plane.\n\n## Expected\n\n1. The environment knows a deep Cloud address declared by the control plane (for example the Cloud home page and the billing or plan page of the organization), not only the origin.\n2. The three links above open that deep address (billing/plan for storage and AI quota, the Cloud home for the marketplace error). A deep address is never redirected by the console-root landing.\n3. Where no address is declared (self-hosted, single tenant), the links behave as today.\n4. Ideally the same declared address feeds #34591's avatar-menu entries (「组织管理」), so the environment has one source for \"where Cloud is\".\n\nRelated: #34591 (avatar menu, organization entries by deployment shape), #34571 (parent topic). Cloud consumer: objectstack-ai/cloud#4792 / PR #4804."

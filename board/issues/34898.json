@@ -1,0 +1,36 @@
+{
+  "number": 34898,
+  "kind": "issue",
+  "title": "Draft preview: a grouped grid view fails when a draft-only field is a column (every group INVALID_FIELD) or the grouping (Error loading grid)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-A",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T15:24:48Z",
+  "updated_at": "2026-11-17T18:39:48Z",
+  "closed_at": "2026-11-17T18:37:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34898",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题）。这是 #34807 的同类派生缺陷，影响本专题的草稿预览落地（维护者 05:17Z 「如果影响本专题相关任务落地的，你也应该挂到这个专题下继续开发」）。⛔ 不是认领。\nEvidence: area o3-A's measurement on the #34807 list half (head `509f3eab79`), relayed to the seat at 2026-11-17 15:23Z. Real code, against the real door.\n\n## 维护者速读\n- 预览草稿（`?preview=draft`）时，分组表格里只要有「只存在于草稿里的字段」，表格就出错。\n- 草稿字段放在列里：每个分组都显示 INVALID_FIELD。\n- 按草稿字段分组：整张表显示「Error loading grid」。\n- 原因在表格插件自己拼查询：它把草稿字段当成已发布字段去要。\n- #34807 修好了列表视图的同类问题，这张卡补上分组表格。\n- 发布之后一切正常，只影响预览。\n\n## What happens\n\nUnder `?preview=draft`, take a grouped grid view on an object whose draft adds a field:\n- **A draft-only column** goes into each group's row-page `$select`. The door refuses it (`assertProjectionFieldsExist`), so every group shows INVALID_FIELD.\n- **Grouping by a draft-only field** sends it as `groupBy` in `queryGroupHeaders`. The door refuses it (`assertGroupByFieldsExist`), so the whole grid shows 'Error loading grid'.\n\nThe cause is in plugin-grid. `objectGridRowLoad.ts` (:256, the projection gate; :352, the grouping gate) and `serverGroupedFetch` treat a field marked `_draftOnly` as declared. #34807's list half fixed the same class in ListView (`$searchFields` and columns), but the grid builds its own `$select` and `groupBy` from the schema.\n\n## Expected\n\nA grouped grid under draft preview reads the `_draftOnly` marker the way ListView now does. It does not request draft-only fields from the door. A grouping on a draft-only field degrades visibly: the view says the grouping waits for publish, instead of failing the grid. After Publish, the column and the grouping work with no reload.\n\nSuggested-grade: p2 · domain:ui · size S\nRelated: #34807 (the ListView half), #34610.\n"
+}

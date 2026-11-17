@@ -1,0 +1,36 @@
+{
+  "number": 34941,
+  "kind": "pull_request",
+  "title": "fix(app-shell): Installed Apps module toggle names its module rows in aria-controls",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T17:09:24Z",
+  "updated_at": "2026-11-17T17:53:37Z",
+  "closed_at": "2026-11-17T17:53:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T17:53:35Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34941",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBA6p6wR5XRGmnECFZqr87FM)_\n\nRefs #34722 (follow-up to #34815; L1 6947097720 should-fix 1; seat-3 follow-up record 6953744953)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：设置 › 已安装应用里\"展开/收起模块\"按钮的 `aria-controls` 现在指向真实存在的模块行：每个模块行有自己的 id，展开时按钮列出这些 id，收起时不带 `aria-controls`（此时模块行不渲染）。`aria-expanded` 不变。\n- **为什么改**：#34815 的 L1 指出该按钮的 `aria-controls` 指向一个不存在的元素，读屏软件无从定位，axe 的 `aria-valid-attr-value` 规则会报错。\n- **风险与回滚**：只加了 DOM id 与一个无障碍属性，界面外观和交互不变；回滚＝回退本 PR。\n- **先看**：`ui/packages/app-shell/src/views/metadata-admin/PackagesPage.tsx` 的 `moduleRowDomId` 与按钮上的 `aria-controls`；测试文件新增的 aria-controls 用例。\n- **两分钟验证**：`pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/PackagesPage.installedAppsUpdates-34722.test.tsx`，预期 17/17 通过。\n- **需要你做的**：无，席位落地\n\n## What changes\n\nL1 6947097720 on #34815 found that the module toggle in Setup › Installed Apps carried `aria-controls` set to `pkg-modules-` plus the app's row id, and that no element had that id: the module lines were bare table rows. The seat ruled for ids over dropping the attribute.\n\n- Each folded module row now gets its own DOM id: the page's `React.useId()` prefix, then `pkg-module-`, then the module's row id passed through `encodeURIComponent`. The prefix keeps the id unique if the page is ever mounted twice; the encoding keeps it free of whitespace, so it is one token of an IDREF list (row ids with dots, such as `app.objectstack.hotcrm.o2c`, pass through unchanged). A module folds under exactly one app (`appOfModule`), so no id repeats across groups.\n- The toggle's `aria-controls` is the space-separated list of its module rows' ids while they are shown (by click, or opened by a search hit), and is omitted while collapsed, when those rows are not rendered.\n- `aria-expanded` is unchanged.\n\n| | Before (origin/main e05445e4f5) | After |\n|:--|:--|:--|\n| Collapsed | `aria-expanded=\"false\"`, `aria-controls` names a missing id | `aria-expanded=\"false\"`, no `aria-controls` |\n| Expanded | `aria-expanded=\"true\"`, `aria-controls` names a missing id (axe `aria-valid-attr-value` violation) | `aria-expanded=\"true\"`, `aria-controls` lists the ids of the drawn module rows; axe finds no violation |\n\nChangeset: `@object-ui/app-shell` `patch`. The package is private, but its code ships inside the built Console that `@objectstack/console` publishes, and `.changeset/config.json` versions private packages (`privatePackages.version: true`); #34815 shipped its app-shell change the same way. So a changeset is owed and `skip-changeset` is not applied.\n\n## Tests\n\nOne new case in the existing harness file `PackagesPage.installedAppsUpdates-34722.test.tsx`, inside the folding `describe`:\n\n- collapsed: the toggle has no `aria-controls`;\n- expanded: every id in `aria-controls` resolves through `document.getElementById` to a drawn module row of HotCRM, one per module (all four), each with `data-module-of` set to the app;\n- axe-core (the helper `ConsoleLayout.oneMainLandmark-13334.test.tsx` already uses in app-shell), rule `aria-valid-attr-value` only, on the expanded table: zero violations, with a control that the rule judged a node carrying `aria-controls`;\n- collapsed again: no `aria-controls`.\n\nAblation (one-shot, not kept): deleting the row `id` attribute via `scripts/ablation-replace.mjs` (anchor 1 to 0, blob 049bd99f62bb to d334c876df6c) turned the new case red (`expected [ undefined, undefined, …(2) ] to deeply equal [ …(4) ]`; 1 failed, 16 passed). Restored: blob equals HEAD (049bd99f62bb), `git diff HEAD` empty.\n\n## Verification\n\n<details><summary>Commands and exit codes (code at c0eb8ea057, changeset at 56ef17e957)</summary>\n\n- Dependency closure: `turbo run build --filter='@object-ui/app-shell^...' --concurrency=2` under `os-verify-lock.sh`: VERDICT command-exit 0 (68/68 tasks).\n- Targeted vitest under the lock, `PackagesPage.installedAppsUpdates-34722`, `PackagesPage.installedApps-13356`, `PackagesPage.source-12675`: VERDICT command-exit 0, Test Files 3 passed (3), Tests 50 passed (50).\n- `pnpm --filter @object-ui/app-shell type-check` (both `tsc --noEmit` and `tsconfig.test.json`, which includes `src/**/*.test.tsx`) under the lock: VERDICT command-exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 39 derived families, each run with its exit code recorded; `--ran`: 39 derived, 39 run, 0 NOT-MEASURED, 0 UNRUN, exit 0. Every one exited 0, including `pnpm --dir ui exec vitest run scripts/` (171 files passed, 2 skipped; 5077 tests passed). `check:query-options-erasure` and `check:type-check-debt` hit my 280 s per-command timeout on the shared box the first time and exited 0 on a rerun. The code-reading families ran at c0eb8ea057; the changeset families (the 11 the changeset added) ran at 56ef17e957, whose only delta is the changeset file.\n- `node scripts/pm/overlap-check.mjs --branch=claude/issue-34722-aria-controls-followup`: VERDICT clean exit 0 at 56ef17e957 against origin/main d576509c80.\n- CI families (Lint & Repo Gates, Test UI, Type Check UI and the rest) are CI's: not re-run here.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufziunkXbDT7wUWqfmWz)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufziunkXbDT7wUWqfmWz -->\n"
+}

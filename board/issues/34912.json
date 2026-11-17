@@ -1,0 +1,33 @@
+{
+  "number": 34912,
+  "kind": "issue",
+  "title": "console: Import Users (sys_user.import_sso_users) always fails 400 \"Unknown field(s): organizationId\": the identity-route action stamp meets the strict SSO-user door (add/remove likely too)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "lease:o3-D",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T16:06:37Z",
+  "updated_at": "2026-11-17T19:48:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34912",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\nFinding from the #34652 card thread (seat 3), measured live on current main. A seat-filed card: grading and `domain:*` belong to triage.\n\nSuggested-grade: p1 · domain:server · size S (every hosted admin who clicks 导入用户 hits it)\nDedupe words: organizationId stamp, import-sso-users unknown field, identity route target body, managed add people 400\n\n## What happens\n\nOn a showcase boot with `OS_CLOUD_MANAGED=1`, the console's Import Users action (`sys_user.import_sso_users`) always fails with **400 INVALID_REQUEST \"Unknown field(s): organizationId. Send { csv } or { rows }.\"**\n\n- The console posts `{\"params\":{\"csv\":…}}` to `/api/v1/actions/sys_user/import_sso_users`.\n- `packages/runtime/src/action-execution.ts:1641` stamps `body.organizationId`, from the caller's active organization, onto every action that forwards to an `/api/v1/auth/` target (`isIdentityRouteTarget`).\n- `packages/plugins/plugin-auth/src/pending-sso-users.ts:614` refuses any key other than `csv` or `rows`.\n- Called directly with `{csv}`, the door answers 200. The break is the stamp meeting the strict door.\n\nThe same door file also refuses unknown keys at `:544` (add-sso-user) and `:749` (remove-sso-user). Those actions very likely fail the same way, but that is unmeasured.\n\n## Expected\n\nImport, add and remove SSO users work from the console. Decide where the organization belongs, either on the door or in the stamp. Whichever side changes, the organization scope must still come from the session, never from the request body. Related: #28217 (identity-route action forwarding).\n"
+}

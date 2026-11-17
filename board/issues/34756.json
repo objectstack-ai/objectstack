@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T09:50:59Z",
-  "updated_at": "2026-11-17T14:02:37Z",
+  "updated_at": "2026-11-17T16:29:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34756",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: a flake that removed an unrelated PR from the merge queue. Dedupe: `object-designer-field-reorder` / `field-reorder dogfood`; no open card (the test's origin card #21790 is closed).\n\nSuggested-grade: p2 · domain:devx (dogfood test infrastructure) · tooling\n\n## What happened\n\nMerge-group run https://github.com/objectstack-ai/objectstack/actions/runs/44054298746 (head `2d3165fd`, job \"Dogfood Regression Gate (2/3)\") failed only in `packages/qa/dogfood/test/object-designer-field-reorder.dogfood.test.ts`: 2 of its 5 cases (lines 98 and 104) hit `Test timed out in 5000ms`. The file took 34 s in total on that shard. The PR in that group (#34666) does not touch the object designer, metadata publish or the dogfood harness, so it was removed from the queue at 09:39Z for a failure it did not cause.\n\n## What is wanted\n\nFind why the two cases exceed the 5000 ms default on a loaded shard (a real slow path in publish/read-back, or a case that needs a declared timeout because it boots more than the default allows), and fix the root: either the slow path or an explicit, justified per-case timeout. ⛔ Not a skip or a retry wrapper.\n\n## Re-check\n\n`gh api repos/objectstack-ai/objectstack/actions/jobs/133939893383/logs | grep -c 'object-designer-field-reorder.*timed out\\|Test timed out in 5000ms'`\n"

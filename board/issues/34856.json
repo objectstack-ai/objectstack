@@ -10,16 +10,20 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:01:24Z",
-  "updated_at": "2026-11-17T14:01:24Z",
+  "updated_at": "2026-11-17T14:56:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34856",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\nFinding reported by area o3-G while building PR #34854 (#34800), report 6950154378. It was measured, and main behaves the same. A seat-filed card: grading and `domain:*` belong to triage.\n\nSuggested-grade: p2 · domain:server · size S\nDedupe words: seed landed key empty component withdrawal\n\n## What happens\n\nA seed row whose key reference was deferred at landing (the reference is only fillable after a later load) lands with an empty component in its key. It is therefore recorded under no landed-key ledger key.\n\nA person then deletes that row in the app. On the next load, the seed finds no ledger entry saying the row was landed and withdrawn, so it inserts the row again. The person's delete does not stick.\n\n## Expected\n\nA seeded row the person deleted stays deleted, as it does for rows whose key is complete at landing. Either the ledger records the deferred row under the key it will carry, or under the derived id #34854 introduces.\n\nRelated: #34800 / PR #34854 (the derived id for a deferred key reference), #34613 (unkeyed seeds re-inserted on every start, a different path).\n"

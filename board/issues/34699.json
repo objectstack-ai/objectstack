@@ -2,8 +2,8 @@
   "number": 34699,
   "kind": "issue",
   "title": "i18n (zh-CN): platform-authored refusals and console strings still answer in English — approval record lock, master-record denial, not-found, masked-field filter, delegated-scope, \"No options\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T07:13:45Z",
-  "updated_at": "2026-11-17T13:12:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:46:40Z",
+  "closed_at": "2026-11-17T18:46:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34699",
   "body": "## What\n\nAn app project ran a browser end-to-end pass on 18.5.0 (zh-CN org, zh-CN browser), and its own refusals (hook refusal catalogues) answer in Chinese. Several messages and labels that the **platform** writes still answer in English and carry no localized `userMessage`. A Chinese user sees English at these points:\n\n| Where | What the user sees |\n|---|---|\n| Edit a record held by a pending approval (409 record lock) | English lock message, no `userMessage` |\n| Edit a child whose master the user may read but not edit | English denial |\n| A record id the user cannot see | `Record … not found` (English) |\n| Filter or sort on a field the user may not read (masked field) | English \"references field(s) not readable\" |\n| Security admin assigns a permission set outside their delegated scope | `Outside your delegated scope…` (English) |\n| List filter on a select with no values yet | `No options` |\n| Audit log list → action filter | some action options in English |\n| Opening by URL an object the user may not read | 「未找到对象 … 在当前配置中不存在」 instead of a no-access message |\n\nThe last row is a wording issue rather than a translation issue: telling a user the object \"does not exist in the current configuration\", when the real reason is a permission, is misleading. It should say no access, as dashboards already do (「无权访问」).\n\n## Expected\n\nEvery platform-authored refusal carries a localized `userMessage` in the request's language, the same way hook refusals do since 18.5.0. Console chrome strings such as `No options` and the audit action options are translated in the zh-CN bundle.\n\n## Repro\n\nA fresh app on 18.5.0 with a zh-CN default locale, logged in as roles without the respective permission. Every row above is reproducible over REST (`Accept-Language: zh-CN`) or in the console."

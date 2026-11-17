@@ -2,8 +2,8 @@
   "number": 34725,
   "kind": "issue",
   "title": "Studio 里的 AI 面板：与应用里的 AI 助手统一名字、入口、宽度和标题栏，放大改为原地铺满",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "lease:o3-D",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T08:42:06Z",
-  "updated_at": "2026-11-17T14:08:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T16:36:05Z",
+  "closed_at": "2026-11-17T16:09:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34725",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「刚才设计 ai 的时候，漏掉了 studio」；看过图 20 后：「可以，立卡」。\n\n与 objectstack-ai/objectstack#34608（应用里的 AI 助手右侧抽屉）是同一个方向的两半：#34608 改 `ChatDock` 一侧，没有覆盖 Studio 自己的那套组件。两张卡落地后，两处应是同一个名字、同一个入口位置、同一套标题栏。\n\n## 现状（读码，objectstack `origin/main` a34eb0716a；界面实测在本地 cloud 环境，窗口宽 1163，zh-CN）\n\n- Studio 的 AI 面板是另一套组件：`ui/packages/app-shell/src/views/studio-design/StudioAiCopilot.tsx`，放在右栏 `StudioRightSlot.tsx` 里，与「属性」二选一（objectui#12725）。\n- 名字：zh-CN 是「AI 副驾」（`ui/packages/i18n/src/namespaces/studio/zh.ts:2931` `engine.studio.aiCopilot`）；应用里叫「AI 助手」。\n- 放大是跳页：`StudioAiCopilot.tsx:229–231` 的 `openFullPage` 导航到 `/ai/build?package=…`，按钮提示「在完整页面中打开」（`engine.studio.slot.openFullPage`，test id `studio-copilot-maximize`）。\n- 宽度：实测面板 299px（`STUDIO_SLOT_WIDTH`，`studioRightSlotState.ts`；窄屏浮层是 `w-[min(360px,100vw)]`，`StudioRightSlot.tsx:113`）。上一轮问数的表格和结果卡在这个宽度里很挤。\n- 标题区实测有三行：「AI 副驾」一行、用量与放大图标一行、「构建 · 会议纪要」与分享一行。\n- 上下文提示实测写的是内部名：「正在讨论：object · ti8v_meeting」。\n- 入口：Studio 工作台顶栏没有机器人图标，用的是一个面板开关图标；应用顶栏是机器人。\n- 已有的支撑：AI 改动的草稿标记已经存在，但只画在属性面板上（`StudioDraftMark.tsx`，读草稿的 `draftChanges`，`by: 'copilot'`）；放弃草稿是整包的（`packages.discardDrafts`，`AiChatPage.tsx:2135–2139`），没有按一轮对话撤销的能力。\n\n## 要做的\n\n1. 名字统一为「AI 助手」（各语言同步；草稿来源句里的「AI 副驾」一并改）。\n2. Studio 工作台顶栏用与应用顶栏相同的机器人按钮、相同位置，只开关右侧面板；`⌘.` 保留。\n3. 标题栏收成一行：左边「属性 | AI 助手」切换，右边「历史 / 铺满 / 关闭」。用量指示与分享收进菜单或历史里。\n4. 「铺满」改为原地展开并可收回，不再导航到 `/ai/build`；与 #34608 用同一个图标和同一套行为。\n5. 默认宽度提到 420（与应用里一致），可拖宽；窗口放不下时照现有规则转浮层。\n6. 上下文提示用标签：「正在看：会议 · 记录」，不出现 `object · ti8v_meeting` 这类内部名。\n7. AI 改动在画布上可见：记录表格的列头、表单画布里的字段，凡是草稿里 `by: 'copilot'` 的，带草稿标记（数据来源与属性面板现有的标记相同，不新增服务端读取）。画布上方一条提示「AI 刚改了 N 处」，带「查看」。\n8. 面板里的结果卡不放发布按钮，发布只在 Studio 顶栏（与 objectstack-ai/objectstack#34610 的「整屏一个发布按钮」一致）。\n\n## 不做的\n\n- 不做「按一轮对话撤销」：现有能力只有整包放弃草稿。图 20 里的「撤销这次改动」在本卡里落为现有的整包放弃，并如实写成「放弃全部未发布改动」；按轮撤销需要服务端支持，另议。\n- 不改对话与上下文的绑定逻辑，不改 AI 的工具与提示词。\n\n## 验收\n\n1. 在 Studio 里打开面板，标题是「AI 助手」，标题栏一行；点铺满，地址不变、对话与输入中的草稿都在，再点收回。\n2. 默认宽度 420；1163 宽的窗口里问数的 3 列表格不出现横向裁切。\n3. 打开「会议」对象时提示是「正在看：会议 · 记录」。\n4. 让 AI 给会议加一个字段：记录表格的新列带草稿标记，画布上方出现「AI 刚改了 1 处」。\n5. 结果卡上没有发布按钮；Studio 顶栏的「发布」可用。\n\n## 设计图（静态示意稿，标「新」的是改动；示例数据是虚构的）\n\n<details><summary>图 20 Studio 里的 AI 助手</summary>\n\n![图 20 Studio 里的 AI 助手](https://github.com/objectstack-ai/objectstack/blob/b3fa247874ec27a0ae8c9462aa34dd82f9e2d0b3/20-studio-ai.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `StudioAiCopilot.tsx`、`StudioRightSlot.tsx`、`studioRightSlotState.ts`、Studio 顶栏与 `ui/packages/i18n/src/namespaces/studio/`；与 #34608 的实现者对齐铺满的行为。\n\nDedupe: `repo:objectstack-ai/objectstack StudioAiCopilot maximize in place AI 副驾 copilot slot width rename` → 0（含已关）。"

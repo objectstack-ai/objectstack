@@ -1,0 +1,32 @@
+{
+  "number": 34888,
+  "kind": "issue",
+  "title": "Eval run · control cards × 2 model configs × 1 rep · f6f5b50a · 2026-11-17",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "eval-run"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T15:07:21Z",
+  "updated_at": "2026-11-17T15:12:03Z",
+  "closed_at": "2026-11-17T15:12:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34888",
+  "body": "eval#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nThe M3 close-out run for epic #33595 (milestone acceptance). Filed by the seat from runner `session_01QSeKYnsRdNFKogbVTVhJsH`'s report; the runner made no GitHub write.\n\n## Environment\n- **Runner:** objectstack-ai/objectstack at `f6f5b50a05763850f3f9658cd475cc3059604043`, pinned for the whole run. It descends from `f59a4aa0`, as 6912067979 requires for comparison.\n- **Packages:** `published 18.5.0`, with `--create-version 18.5.0` (the latest published `create-objectstack`). Mode: `--modes scratch`.\n- **Driver and login:** `claude -p` on a subscription `oauth_token` login, firstParty, with `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` unset. Every record says `API-billed: no`. `claude --version` 2.1.326.\n- **Models served:** every author row and `Run · model` row matches the config asked: `claude-haiku-5-5 · effort medium` and `claude-opus-5-5 · effort low`. There were no `⚠ asked for` lines. Effort is the requested value only.\n- **Spend:** the CLI's nominal figure, not billed.\n\n## Scope\n- **Cards:** the three `control` cards, re-read from the files: `crm_account_with_contacts`, `invoice_with_line_items`, `project_with_tasks`. Run and Iterate halves.\n- **Configs:**\n  - tracked: `--model haiku --effort medium`, from 13:48:32Z to 14:52:24Z, exit 0;\n  - reference: `--model opus --effort low`, from 14:04:21Z to 14:48:44Z, exit 0.\n- **Repetitions:** one per config, so this run reads as a trend only (`scenario-eval` §3).\n- **Not measured, out of the denominators:**\n  - `contact_bad_email` on haiku: the build denies `partner_user` the create.\n  - The opus crm platform half, for the same reason.\n\n## Results\n\n| Config | Build | Run 问数 | Run ops | Leak flags | Build min | Ask min | Nominal $ |\n|:--|:--|:--|:--|:--|--:|--:|--:|\n| haiku medium (tracked) | 98/100 (98%) | 42/47 (89.4%) | 15/17 (88.2%) | 3 | 17.5 | 33.2 | 1.80 |\n| opus low (reference) | 96/99 (97.0%) | 44/47 (93.6%) | 17/18 (94.4%) | 0 | 6.0 | 28.3 | 23.20 |\n\nIterate halves:\n- haiku: 116/118 Build, 44/47 问数, 15/17 ops;\n- opus: 114/116 Build, 43/47 问数, 16/18 ops.\n\n| Card | haiku Run 问数 · ops | haiku Iterate | opus Run 问数 · ops | opus Iterate | Build h / o |\n|:--|:--|:--|:--|:--|:--|\n| crm_account_with_contacts | 13/16 · 5/5 | 15/16 · 5/5 | 15/16 · 6/6 | 16/16 · 6/6 | 28/28 · 26/27 |\n| invoice_with_line_items | 15/16 · 5/6 | 15/16 · 5/6 | 15/16 · 5/6 | 14/16 · 5/6 | 39/39 · 39/39 |\n| project_with_tasks | 14/15 · 5/6 | 14/15 · 5/6 | 14/15 · 6/6 | 13/15 · 5/6 | 31/33 · 31/33 |\n\n## Reading\n1. **Against #34320, by percentage only, matching rows** (haiku build × haiku ask, opus × opus):\n   - haiku: 问数 87.4% → 89.4% (+2 points), ops 60% → 88.2% (+28 points);\n   - opus: 问数 88.5% → 93.6% (+5 points), ops 80% → 94.4% (+14 points).\n2. **The operations gain** is most likely M3's `f59a4aa0`: each operation now starts from the seeded rows, so one failed write no longer cascades into the next. #34293 (a `pending_confirmation` operation must make the confirmed write) also applies.\n3. **The 问数 changes are within one-repetition noise** (about ±4 questions over the control cards, §3). Read them as no regression, not as a gain.\n4. **Variables that changed since #34320:**\n   - #34320 ran ask mode on fixed templates, asking each question 3 times; this run is scratch, each config graded on its own build with one ask;\n   - packages 18.4.0 → 18.5.0;\n   - runner `31eb2aed` → `f6f5b50a`;\n   - question counts (#34296).\n5. **Losses that recur:**\n   - `add_line` in both configs (see #34887);\n   - haiku: `add_task` refused `VALIDATION_FAILED`, `acme_discount`, and `open_tasks` as `client_viewer`;\n   - opus: `drop_relaunch_task` (Iterate), and missing lookup and master-detail checks in the builds.\n\n## Findings filed from this run\n- #34887: the scorer and card items, including `add_line` still losing points after #33977, and the three haiku leak flags. Those three are the `sys_user`-count pattern that #33744 ruling C accepted, read as scorer false positives. No account row or field was served to a persona that may not see it.\n\n## Records\nThe run JSONs, the recordings (`run.rec.json`) and the logs were in the runner's container under `/tmp/vr2/e1/haiku-medium/` and `/tmp/vr2/e1/opus-low/`, outside the tree. That container is ephemeral, so this issue is the durable record."
+}

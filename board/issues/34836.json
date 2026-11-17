@@ -2,8 +2,8 @@
   "number": 34836,
   "kind": "issue",
   "title": "metadata-protocol: the write door's patch-source echo rewrites a tenant's stored label that equals the patching package's translation, and cuts the patch source by field instead of by slot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:blocked",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T12:40:02Z",
-  "updated_at": "2026-11-17T12:42:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:19:56Z",
+  "closed_at": "2026-11-17T18:17:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34836",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRfW5u1LRmhWwaYHRp\n\nFinding from the contract review of PR #34784 (#33952), record 6948153780 at head `70347ee490bc1d77448bf784cccb191d2e38a8a7`: S1 (should-fix) and N4 (nit). Both are in the same place, the write door's inverse `restoreTranslatedEchoes` (`packages/metadata-protocol/src/protocol-translated-echo.ts`, called through `restoreTranslatedObjectEchoes` in `protocol-discovery-and-bases.ts`). By maintainer order the PR may merge with these open, and they are carried here. A seat-filed card; grading and `domain:*` are triage's.\n\nBlocked-by: #34784 (the patch source this card is about exists only on that PR's branch until it merges)\nSuggested-grade: p2 · domain:server · size S\n\n## S1: a stored tenant label equal to the patching package's translation is rewritten to the patch text\n\nNotation from the review: packaged text `Registration No.`, patch text `Tax ID`, the patching package's zh-CN `税号`.\n\nPath (read from code by the reviewer, not executed): the tenant's stored row carries `税号` on the patched slot. That is the obvious manual workaround for the gap #33952 closes. The read serves `税号` in every locale as a tenant rename. Any whole-body save of that object (any locale, any unrelated edit, the stored-row migration too) arrives with `税号`. The stored source is skipped because it equals the value; the patch source carries `Tax ID`, its zh-CN read yields `税号`, so the slot is stored as `Tax ID`. After that, every locale the package does not translate shows `Tax ID` where it showed `税号`.\n\nOn `main` a stored value of a non-injected field is never rewritten this way; the packaged base is a source only when no row is stored. The changeset on #34784 says a tenant's rename keeps its own text, and no test pins either answer.\n\nFix, one of the two the review names:\n- ask a patch source for a slot only where the stored source does not declare that slot, or carries the packaged text there (the two pinned legs of #34784 still hold: a stored `Tax ID` is explained by the stored source, and with no row the slot is the packaged text); or\n- keep the behaviour, state it in the changeset's door paragraph and in the `patchBundles` docblock, and pin it.\n\nPin either way: a stored `税号` row on a patched slot, a whole-body save in another locale with an unrelated edit, then assert the stored label.\n\n## N4: the patch source is cut by field, not by slot\n\nA patch that changes only `label` puts the whole field into the patch source, its unpatched `description` and options included. For such a slot the patch source carries the packaged text, so an author who types exactly the deployment catalog's translation of the packaged text over a tenant-renamed slot is put back to the packaged text, where `main` kept the typed text. It needs deliberate typing of an exact catalog string. A slot-level cut is tighter and would fall out of the S1 fix if that fix works per slot.\n\n## Related, not this card\n\nThe door has never passed `pairBundle` (on `main` as well), so a slot a `.custom` pair translates is not restored either. That is the same family as #34806 and is recorded there."

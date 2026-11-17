@@ -2,8 +2,8 @@
   "number": 34788,
   "kind": "issue",
   "title": "删除确认框显示「Record #<id>」而不是记录名：商机产品明细声明了 nameField 也一样",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -14,7 +14,6 @@
     "bug",
     "domain:ui",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:32:46Z",
-  "updated_at": "2026-11-17T13:57:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T16:01:27Z",
+  "closed_at": "2026-11-17T16:00:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34788",
   "body": "- 复现：商机 → 相关 → 商机产品明细，删除一行，确认框写「确定要删除\"Record #8wRAfXFRvgvxEdCf\"吗？」。这条记录 product_title（nameField）有值「Field Service Mobile」。\n- 期望：确认框用对象的 nameField 显示记录名。\n\n环境：hotcrm main 3617fbd，@objectstack 18.5.0，本地 SQLite，zh-CN（2026-11-17 标准版测试）。"

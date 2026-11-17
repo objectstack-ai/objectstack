@@ -1,0 +1,30 @@
+{
+  "number": 34923,
+  "kind": "issue",
+  "title": "skills(i18n): the action key table names the new table column label keys (resultDialog.columns / preflight.columns) from #34652",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T16:20:03Z",
+  "updated_at": "2026-11-17T16:48:48Z",
+  "closed_at": "2026-11-17T16:48:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34923",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\nSkills-docs follow-up for #34652 / PR #34915, filed by the seat as the claim template asks. Grading and `domain:*` belong to triage.\n\nSuggested-grade: p2 · domain:skills · size XS\nBlocked-by: #34652 (the keys exist only once PR #34915 merges)\n\n## What\n\nPR #34915 adds two translation bundle keys for an action answer's table column labels: `resultDialog.columns.<fieldPath>.<columnPath>` and `preflight.columns.<fieldPath>.<columnPath>`. These are siblings of the existing `resultDialog.fields.<path>` and `preflight.fields.<path>`. The published skill `skills/objectstack-i18n/SKILL.md` has an action key table that lists the `fields` keys but not the new `columns` keys. An author following the skill would leave a table's column headers in English.\n\n## Done when\n\nThe skill's action key table names both `columns` keys, with one example of a table answer whose column labels resolve in zh-CN. Its evals or line budget move only as that skill's rules require. This is a governed path (`skills/**`).\n"
+}

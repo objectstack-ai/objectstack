@@ -1,0 +1,34 @@
+{
+  "number": 34871,
+  "kind": "issue",
+  "title": "app-crm: synonyms for the cross-language words its ask scenarios use",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T14:25:48Z",
+  "updated_at": "2026-11-17T15:23:30Z",
+  "closed_at": "2026-11-17T15:23:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34871",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic). The maintainer set who files this epic's cards, in this session's chat, 2026-11-17, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported to this session by the dispatching seat `repo:objectstack#3` on #34659 (comment 6946578317); the filer did not re-read the code behind it.\n\n## Why\n\nAfter the #34720 ruling a Chinese word reaches an English-labelled member only as an authored synonym, and `candidates` compares strings, so it will not rescue a word in another language. The reference app's ask scenarios use such words.\n\n## Evidence\n\n- `examples/app-crm/src/datasets/opportunity.dataset.ts` carries synonyms for some members; #34687's cards ask with words it may not list.\n- Ruling on #34720: bundle labels in the caller's locale, other languages by synonym.\n\n## Scope\n\n- Each cross-language word #34687's cards ask with is a declared synonym of exactly one member of `crm_opportunity_metrics`, or the card is corrected.\n- File surface: `examples/app-crm/src/datasets/**`, its smoke test.\n\n## Done when\n\n- #34687's round shows no zero-match on a word that has one right member.\n\n## Relations\n\n- Parent: #34659. Related: #34687, #34718, objectstack-ai/hotcrm#2593."
+}

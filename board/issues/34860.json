@@ -10,16 +10,20 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:05:02Z",
-  "updated_at": "2026-11-17T14:05:02Z",
+  "updated_at": "2026-11-17T14:57:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34860",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\n## What happens\nMaking an app in a read-only package the default first unsets the current default. The second write is then refused, and nothing rolls back, so the deployment is left with no default app.\n\n## Reproduction\nReproduced twice on fresh loads at `6091b645`.\n1. Boot a fresh showcase and sign the admin in through the form.\n2. Make an app in a writable package the default. Here that was `mthree_app` in `com.objectstack.qa.mthree`, published with `isDefault:true`.\n3. Open `/_console/system/apps` and click \"Set Showcase as default\" on the Showcase row (package `com.example.showcase`, read-only).\n4. The page sends two writes, in this order:\n   - `PUT /api/v1/meta/app/mthree_app?package=com.objectstack.qa.mthree` with `isDefault:false` → 200.\n   - `PUT /api/v1/meta/app/showcase_app?package=com.example.showcase` with `isDefault:true` → 403 \"Cannot overlay 'app' in package 'com.example.showcase': that package is read-only…\".\n5. A toast says \"Failed to set default app\".\n6. After a reload, `GET /api/v1/meta/app` lists no app with `isDefault:true` (before: `[\"mthree_app\"]`), and the next sign-in lands on `/_console/home`.\n\n## Mechanism\n`ui/apps/console/src/pages/system/AppManagementPage.tsx` (around line 387) unsets the previous default (`saveApp(meta, prev, { ...prev, isDefault: false })`) before it saves the new one, and does not roll back when the second save is refused. This is the app twin of #33098, which fixed the same thing for list views.\n\n## Expected\nA refused set-default leaves `/meta/app` unchanged. Either write the new default first, or refuse a locked target before any write.\n\nQA-source: #34859 · platform-core.app-management-toggle · acceptance[5]"

@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T11:16:16Z",
-  "updated_at": "2026-11-17T12:21:16Z",
+  "updated_at": "2026-11-17T19:06:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34382",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nPriority p3. The maintainer asked for it on 2026-11-16, when the HotCRM PSA comparison found every PSA product enters time on a weekly grid.\n\n**Need.** Show one row per (project, task) with one editable cell per weekday plus a row total, bound to detail records (one record per row × day). Typing a value creates or updates that day's record, and clearing it deletes the record.\n\n**Today (18.5).** List views offer inline edit per record, so HotCRM's weekly entry (hotcrm PSA 2b) ships as a \"my week\" list grouped by project, with no model change.\n\n**Ask.** A list-view presentation, or an input component, that pivots detail records into a row × day editable matrix:\n- it declares the row keys, the date field, the value field and the week window;\n- it writes through the normal record doors, so hooks, validation and permissions apply per cell;\n- it shows row and column totals.\n\nHotCRM would switch its \"my week\" view to it with no data model change."

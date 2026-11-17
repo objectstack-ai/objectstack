@@ -2,8 +2,8 @@
   "number": 34763,
   "kind": "issue",
   "title": "service-analytics: list_datasets fills `candidates` with near members (name, label, synonym) on a zero-match, only from what the caller may read",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T09:56:57Z",
-  "updated_at": "2026-11-17T13:54:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T20:06:37Z",
+  "closed_at": "2026-11-17T20:01:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34763",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34659（MCP 二期与问数专题）；#34691 裁定后的执行卡，⛔ 不是认领。\nRuling: F1 B, #34691 comment 6943126855, option text verbatim 「B 零命中返回候选」 — 「现在就改服务器，list_datasets 零命中时返回候选数据集。专题席的新推荐。」, knocked to #34659 as comment 6943149235. It re-rules E2 of #34659 comment 6940528935 from \"B with a premise\" to A.\n\n## 维护者速读\n\n- **做什么**：零命中时服务器填 `candidates`：拿用户的词和成员的名字、显示名、同义词比「相近」，只从这个调用者看得到的数据集和成员里挑。\n- **为什么**：裁定要求候选由服务器给；工具说明同步写「有候选就反问，没有才回退」，产品内 AI 和 MCP 客户端读到同一份结果。\n- 「相近」是确定性字符串规则，单测可证；精确命中规则一字不改。\n- **需要你做的**：无；不碰受治理路径，规范卡落地后派发。\n\n## 现状 (objectstack `origin/main` f6f5b50a05, read 2026-11-17; code read, nothing run)\n\n- The matcher hits on equality after `normalizeDatasetTerm` over `name`, `label` (string or inline locale map), `synonyms` (`packages/services/service-analytics/src/dataset-term-matcher.ts:10-16,37-55`); a test pins no hit on a substring or neighbour (`__tests__/dataset-term-matcher.test.ts:46`).\n- It runs over admitted datasets and members only (`dataset-tools.ts:411-415,439`); matching a withheld member would disclose it (`dataset-term-matcher.ts:57-61`).\n- `list_datasets` reads metadata, no rows: row-level security is not engaged here; it applies at `query_dataset`.\n- The tool description has no candidates branch (`dataset-tools.ts:85-96`). MCP passes it through (`packages/mcp/src/mcp-http-tools.ts:2285-2300`).\n- Need, not re-measured here: on a hosted CRM `revenue`, `deals`, `customers` matched nothing though measures contain them (#34691); Chinese words 0 of 16 (PR #34675, M3).\n- Whether bundle-translated labels reach the matcher is #34720's open reading; candidates inherit it.\n\n## 要做的\n\n- A near-term function beside `matchDatasetTerms`, same normalization and admitted members, run only for terms with no hit in any entry.\n- \"Near\", proposed (the PR states its choice): after normalization the target contains the term or the reverse, both ≥ 2 code points. No edit distance, stem or embedding (D3: a string comparison belongs where it can be unit-tested).\n- Fill to the spec card's shape, order and cap; a withheld member, an unadmitted dataset or an `internal`-field member never appears.\n- Tool description: candidates → ask, listing label, dataset label, description, never pick; none → rule 4. State the byte delta (#34689).\n- Tests: unit (both directions, `金额` / `合同金额`, the floor, cap, order, a hit suppresses that term's candidates); a member over an unreadable field is never a candidate; a pin in `packages/mcp/src/mcp-dataset-tools.test.ts`; checklist `ai.mcp-dataset-tools` gains a near-miss step.\n\n## 不做的\n\n- What counts as a match, or `matches`; ranking scores; skill and `/mcp/skill` text (#34685, #34686); the cloud planner.\n\n## 验收\n\n- Showcase: `terms: ['invoice']` → no match, `candidates` holds `measures.invoice_count`; `['invoices']` → today's match, no `candidates`; `['qa_no_word']` → neither.\n- A caller who cannot read a measure's field gets no candidate naming it; the equality test is untouched.\n\nGoverned: none (`packages/services/**`, `packages/mcp/**`, `docs/qa/**`).\n\nReader: `domain:server` · seat 3 area o3-E, L1-c review. #34687's near-miss cards now measure this path.\nBlocked-by: #34761 (F1 spec sibling: `candidates` on `ListDatasetsOutputSchema`).\nDedupe: `gh api -X GET search/issues -f q='repo:objectstack-ai/objectstack is:issue list_datasets zero-match'` → 7 (#34720, #34691, #34659, #34685, #34718, #6015 open; #33829 closed; none this)."

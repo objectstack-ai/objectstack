@@ -1,0 +1,36 @@
+{
+  "number": 34892,
+  "kind": "pull_request",
+  "title": "fix(components): scroll the form tab strip in the commit that activates the tab",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T15:13:38Z",
+  "updated_at": "2026-11-17T16:09:38Z",
+  "closed_at": "2026-11-17T16:09:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T16:09:36Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34892",
+  "body": "🤖 Generated with [Claude Code](https://claude.com/claude-code)\nhttps://claude.ai/code/session_01WGufzgwLiKcfujYUug7sPs\nFixes #34782\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：表单字段页签条在手机宽度下把当前页签滚入可见区的那段逻辑，从 passive effect 改为 layout effect；对应测试多读一次\"页签被激活那一刻\"的滚动位置。\n- 为什么改：提交失败后跳到出错页签是异步触发的，滚动晚一个任务才执行，期间页签已显示为激活但仍在条外；merge queue 里这条测试因此偶发红（期望 [261]，实际 []）。\n- 风险与回滚：低。只换了 effect 的时机（提交前、绘制前执行），逻辑本身一字未改；回滚即 revert 本 PR。\n- 先看：`ui/packages/components/src/renderers/form/form.tsx` 中 `fieldTabListRef` 那段 `React.useLayoutEffect`；其次 `form-field-tabs.test.tsx` 的 \"a failed submit that jumps to an off-screen tab\" 用例。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/components/src/renderers/form/__tests__/form-field-tabs.test.tsx`，预期 14 passed。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `form.tsx`: the phone-width field-tab strip's \"scroll the active tab into the strip\" effect is a `React.useLayoutEffect` instead of a `React.useEffect`. Body unchanged. The file already uses `React.useLayoutEffect` directly in six other places (no isomorphic wrapper convention in this package), one of them for the same class of flake (a passive `reset()` racing input).\n- `form-field-tabs.test.tsx`, case \"a failed submit that jumps to an off-screen tab scrolls it into view, error dot and all\": adds a `MutationObserver` on the Activity trigger's `data-state` that snapshots `writes` in the microtask right after the activating commit, and asserts that snapshot is `[620 - 359]`. The existing `expect(writes).toEqual([620 - 359])` stays exactly as it was. No skip, no retry, no timeout change.\n- `.changeset/34782-form-tab-strip-scroll-same-commit.md`: `@object-ui/components` patch.\n\n### Cause, measured\n\nThe failed submit activates the tab from react-hook-form's async validation callback, so `setPickedFieldTab` is a non-discrete (default-lane) update. React 19 commits it in a scheduler task, calls `requestPaint()`, and the scheduler yields before the passive-effect flush, which runs in the NEXT task. The DOM mutation that sets `data-state=\"active\"` fires `waitFor`'s MutationObserver in the microtask right after the commit, `waitFor` resolves, and RTL's `asyncWrapper` then waits one `setTimeout(0)`. Whether that timer or the scheduler's `setImmediate` (the passive effect) runs first depends on whether 1 ms passed in between: on an idle box the effect wins, on a loaded merge-queue shard the timer wins and the case reads `[]`.\n\nThe choice of root: the scroll belongs in the commit that marks the tab active. That is a product fix too, not only a test fix: as a passive effect the activated tab was painted off-screen for a task. Measuring layout and writing `scrollLeft` before paint is what a layout effect is for. The alternative (have the test `waitFor` the write) would have made the case green while leaving the off-screen frame in the product.\n\n## Tests\n\n<details><summary>Race probe (temporary file, deleted before commit; not in this PR)</summary>\n\nA probe copied the exact case and ran it N times in one test, optionally stalling the box for S ms a few microtask hops after the activating commit (after `waitFor` arms its trailing timer). It logged the order of: commit observed, effect write, assertion, and the writes 20 ms later.\n\nBefore (origin/main d947a93cf8, passive effect):\n\n```\nPROBE N=200 stall=0ms empty=0  [[\"effect-write > assert\",200]]\nPROBE N=50 stall=1ms empty=50 [[\"commit-observed > stall-done > assert > effect-write > late:[261]\",50]]\nPROBE N=50 stall=3ms empty=50 [[\"commit-observed > stall-done > assert > effect-write > late:[261]\",50]]\n```\n\nSo: green 200/200 on an idle box, red 50/50 with a 1 ms stall, and the write `[261]` does land, just after the assertion.\n\nAfter (e1eb423fad, layout effect):\n\n```\nPROBE N=50 stall=1ms empty=0  [[\"effect-write > commit-observed > stall-done > assert > late:[261]\",50]]\nPROBE N=50 stall=3ms empty=0  [[\"effect-write > commit-observed > stall-done > assert > late:[261]\",50]]\nPROBE N=200 stall=0ms empty=0 [[\"effect-write > assert > late:[261]\",200]]\n```\n\nThe write now precedes the commit being observable at all.\n\n</details>\n\n<details><summary>Ablation of the fix against the new pin</summary>\n\n`node scripts/ablation-replace.mjs` swapped `React.useLayoutEffect(() => {` back to `React.useEffect(() => {` on the strip effect (anchor 1 → 0, blob 4e3a9decab84 → 900932a945ac), then ran the file 5 times: 5/5 red, `Tests 1 failed | 13 passed (14)`, each with `scrolled in the same commit that marks the tab active: expected [] to deeply equal [ 261 ]`. Restored: blob == HEAD (4e3a9decab84), `git diff HEAD` empty. So the case now fails deterministically on the old effect timing instead of one run in many.\n\n</details>\n\n<details><summary>Suites at e1eb423fad</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/components/src/renderers/form/__tests__/form-field-tabs.test.tsx`: 14 passed (14). Ten more runs with `--sequence.shuffle`: 10/10 at 14 passed (14).\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/components/src/renderers/form/`: Test Files 87 passed (87), Tests 616 passed, 17 skipped (633).\n- `pnpm --filter @object-ui/components type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0.\n\n</details>\n\n## Acceptance notes\n\n- The \"opens on an off-screen defaultFieldTab already scrolled to it\", \"scrolls the fifth tab into the strip when it is tapped\" and CONTROL cases pass unchanged under the layout effect.\n- No SSR concern was found: the form renderer already runs six other `React.useLayoutEffect` calls directly.\n\n## Verification\n\nGate readings are in the os-dev report comment on this PR.\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzgwLiKcfujYUug7sPs -->\n"
+}

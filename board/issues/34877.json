@@ -1,0 +1,31 @@
+{
+  "number": 34877,
+  "kind": "issue",
+  "title": "mcp: the object tools' description says what a field description actually carries",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T14:29:20Z",
+  "updated_at": "2026-11-17T14:54:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34877",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic). The maintainer set who files this epic's cards, in this session's chat, 2026-11-17, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported to this session by the dispatching seat `repo:objectstack#3` on #34659 (comment 6948819963, item 1); the filer did not re-read the code behind it. Source: the dev report on PR #34814 (#34721, merged `4771d66a2b`).\n\n## Why\n\nThe tool description promises a description \"where the author wrote one\". On the reference app most of that text comes from columns the platform injects, so the sentence tells a client the wrong thing about where the words came from.\n\n## Evidence\n\n- Per the report: on `examples/app-crm` most `description` values `describe_object` returns belong to platform-injected columns.\n\n## Scope\n\n- The sentence in the tool description states what the field carries: the declared description, the platform's for an injected column.\n\n## Done when\n\n- The description matches what `describe_object` returns on `examples/app-crm`.\n\n## Relations\n\n- Parent: #34659. Related: #34721."
+}

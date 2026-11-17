@@ -1,0 +1,33 @@
+{
+  "number": 34902,
+  "kind": "issue",
+  "title": "Charts: a pie or donut with six or more slices repeats colours — the default palette is the five --chart-1..5 theme vars, taken modulo 5",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-H",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T15:28:11Z",
+  "updated_at": "2026-11-17T20:11:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34902",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nFound by the hotcrm lane while re-capturing screenshots for hotcrm#2605 (PR hotcrm#2613) on @objectstack 18.5.0: a 6-slice donut on the Sales dashboard draws the first and sixth slices in the same colour, so the legend cannot tell them apart. Read in code on objectstack `main` fc5913e117.\n\n## Why, in code\n\n- `ui/packages/plugin-charts/src/AdvancedChartImpl.tsx` ~2449: `getPalette()` falls back to five entries, `hsl(var(--chart-1))` … `--chart-5`. Slices take `palette[index % palette.length]` (~1321, ~1389, ~2303, ~3041).\n- `ui/packages/plugin-dashboard/src/DashboardGridLayout.tsx` ~44: `CHART_COLORS` is the same five.\n- No `--chart-6` or later is defined in `ui/packages`.\n\n## Asked\n\nA categorical chart with more categories than the palette never reuses a colour for two visible slices: extend the theme palette (and its dark-mode twin), or derive further distinct shades, or group the tail into \"Other\". The authored `colors` prop keeps winning.\n\n## Done when\n\nA 6- to 10-slice pie or donut draws every slice in a distinct colour in light and dark themes."
+}

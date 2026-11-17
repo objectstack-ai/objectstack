@@ -1,0 +1,31 @@
+{
+  "number": 34921,
+  "kind": "issue",
+  "title": "platform-objects: the System Overview datasets carry synonyms and a description on their seven members",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T16:18:14Z",
+  "updated_at": "2026-11-17T16:54:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34921",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic); the maintainer set who files this epic's cards, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported by the dispatching seat `repo:objectstack#3` on #34659 (comment 6953691671), from area o3-F's reading on #34875 (6953644384); the filer did not re-read the code behind it.\n\n## Why\n\nAn administrator who asks \"how many users do we have\" or 「有多少用户」 in their own words should reach the platform's own governed metric. The platform now advises every app author to give a metric its business words and a definition, and its own seven members have neither; the advisory cannot see them, so nothing says so.\n\n## Evidence\n\n- Per the reading: the five System Overview datasets (7 bare members) are registered only through plugin-auth's runtime manifest at kernel start (`auth-plugin.ts:1164`), which none of the vocabulary rule's doors sees. #34875 closes by stating that reach in the rule's module note.\n- Per the reading: those members still match on their name, and on a bundle label in the caller's locale.\n- On a live hosted environment this session listed them: `user_count` \"Users\", `org_count` \"Organizations\", `session_count` \"Sessions\", `event_count` \"Events\", none with a synonym or a description.\n\n## Scope\n\n- Each of the seven members gains `synonyms` (the words an administrator types, Chinese and English) and a one-sentence `description`, with bundle entries in `packages/platform-objects`. The i18n baseline moves with it; the PR states by how much.\n- No change to the rule's reach.\n\n## Done when\n\n- `list_datasets({ terms: ['用户数'] })` and `({ terms: ['how many users'] })` each behave as the members' declared words say, with a pin.\n\n## Relations\n\n- Parent: #34659. Related: #34875, #34718, #34873. Suggested grade: p3; no user is blocked."
+}

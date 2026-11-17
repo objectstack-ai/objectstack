@@ -2,8 +2,8 @@
   "number": 34800,
   "kind": "issue",
   "title": "seed: a composite externalId that includes a reference only fillable after the first load never matches on later loads, so each load inserts another row",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "bug",
     "domain:server",
     "finding",
-    "lease:o3-G",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:55:04Z",
-  "updated_at": "2026-11-17T13:59:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T15:02:12Z",
+  "closed_at": "2026-11-17T15:01:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34800",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmPJxG4vBVaLCBWLcWJ\n\nFiling gate ①: class a (reproduced), an out-of-scope finding of the #34613 card thread (PR #34791), passed on by area `o2-A` on the seat's word. Not fixed there; that PR does not change composite-key matching.\n\nSuggested-grade: p2 · class a (reproduced) · seed loader composite-key matching (`packages/metadata-protocol/src/seed-loader.ts`)\n\n## 维护者速读\n\n- 现象：种子数据集用复合 `externalId`,而其中一个键字段是首次加载时只能留空的引用(例如还没注册的人员)。之后每次加载时该引用已能解析，复合键与首次落库的那行不再相同，于是匹配不上、再插一行。\n- 影响范围:#34613 退役 insert/replace 后，作者被引导改用默认模式 + 复合 externalId,这条路径会变得更常见。\n- 需要你做的：无。\n\n## Evidence (measured on the #34613 branch)\n\nThree boots over one database file: a dataset whose composite `externalId` includes a person reference that is NULL on the first load. Rows: 1 → 2 → 3. Composite matching is unchanged by PR #34791.\n\n## Seam\n\nHow the loader builds the composite key on replay: it resolves references before matching, so the replay's key carries the now-resolved value while the stored row still holds NULL. Whether the fix is matching on the key as first landed (the landed-key ledger), refusing a composite key over a deferred reference at authoring time, or something else is the claiming seat's call.\n\n## Dedupe words\n\n`seed composite externalId deferred reference`, `seed replay composite key null reference duplicate`\n\nRelated: #34613 (ruling 6942780880), #34542 (held person references across restarts)."

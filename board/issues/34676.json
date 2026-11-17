@@ -2,8 +2,8 @@
   "number": 34676,
   "kind": "issue",
   "title": "Record page right rail: the activity timeline card has no inner padding — icons and text are clipped by the card border",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "huangyiirene",
@@ -14,7 +14,6 @@
     "bug",
     "domain:ui",
     "lease:o3-A",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T05:50:38Z",
-  "updated_at": "2026-11-17T13:54:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T15:56:51Z",
+  "closed_at": "2026-11-17T15:55:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34676",
   "body": "### Edition\n\nObjectOS Community (self-hosted, this repository's code)\n\n### Version\n\n@objectstack 18.5.0 (`objectstack dev`, objectstack-ai/hotcrm main 3617fbd)\n\n### What happened\n\nOn a record page whose right rail carries the activity timeline card (seen on HotCRM's **Account** record page, zh-CN, desktop width ~1440px), the card's content has no inner padding and is clipped by the card border:\n\n- the round avatar/type icons of each timeline row sit on the card's left border and are cut in half;\n- the editor toolbar's send button on the right touches the right border;\n- a long row such as 「更新了 客户 \"江西黑猫炭黑股份有限公司\"：最近活动日期」 runs into the right border and is cut before it wraps;\n- the 全部动态 filter and the comment editor are flush with the card edges.\n\nThe same timeline rendered in the main column (record page → 动态 tab) has normal spacing, so this looks specific to the narrow right-rail placement.\n\n### Steps to reproduce\n\n1. HotCRM main, `pnpm dev`, sign in as a zh-CN user.\n2. Sales → Accounts → open any account (e.g. one with a few updates).\n3. Look at the 动态 card in the right rail of the 概览 tab.\n\n### Expected\n\nThe card's content keeps the same inner padding as the other right-rail cards (联系人, 活动 …); icons and text stay inside the border.\n\nScreenshot available from the reporter (customer account page, 2026-11-17).\n\nPossibly belongs under #34571 (console core business UX).\n"

@@ -1,0 +1,32 @@
+{
+  "number": 34961,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): a named import mapping names fields by their labels, and its preview survives a second file",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T19:22:54Z",
+  "updated_at": "2026-11-17T19:46:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34961",
+  "body": "Part of #34939\n\nClause-②: no\nMetadata-protocol: none\n\nThis PR carries the UI half of the card, parts (2) and (3). Part (1), a translation-bundle group for import mappings, needs a spec change and follows in its own PR. Until then the card stays open.\n\n## 维护者速读\n\n- **改了什么：** 导入向导里，已保存映射的「映射到」列改为显示字段的服务端标签（中文组织即中文名），不再显示 API 名；选中已保存映射后返回上一步重新上传文件，预览按该映射重新取列，不再变成空表。\n- **为什么改：** zh-CN 组织里映射步骤只看到 `supply_week` 这类英文 API 名；重新上传后预览列被自动匹配覆盖，与服务端实际执行的映射不一致，表头与单元格全空，而导入本身照常成功，用户看到的预览是假的。\n- **风险与回滚：** 只改 `@object-ui/plugin-grid` 的两处纯前端逻辑，请求体不变（仍只发 `mappingName`）。回滚即还原本 PR。\n- **先看：** `ui/packages/plugin-grid/src/ImportWizard.tsx` 的 `handleFileLoaded`（有已选映射时改用映射推导预览列）与 `SavedMappingSummary`（字段标签解析）；`ui/packages/plugin-grid/src/savedMapping.ts` 的 `summarizeSavedMapping`。\n- **两分钟验证：** `cd ui && pnpm exec vitest run packages/plugin-grid/src/ImportWizard.preselectOnlyMapping-13343.test.tsx`，预期 9/9 通过，其中两条新用例分别断言「映射到」列显示 `公司` / `线索来源`，以及重新上传后预览单元格为 `Globex` / `Partner`。\n- **需要你做的：** 无，席位落地。\n\n## What changes\n\nBoth changes are in `@object-ui/plugin-grid`, in the import wizard, when a saved (named) import mapping is active:\n\n- **The mapping step's summary names targets by their field labels.** `SavedMappingSummary` showed each target by its API name. It now resolves each name against the wizard's own `fields`, which carry the labels the server serves (translated in a localized organization), the way every other wizard screen already names a field. `summarizeSavedMapping` takes an optional label resolver, and a split entry's targets are resolved one by one. A target the wizard has no field for keeps its name, because there is no label to show.\n- **Loading a second file keeps the preview on the named mapping.** After Back plus a new file, the mapping stayed selected and the import still named it, but `handleFileLoaded` auto-matched the new headers against the field names. That is a mapping the server never applies. With headers unlike the field names, the preview had no columns. `handleFileLoaded` now derives the preview columns from the active mapping (`savedMappingToDisplayIndexMap`), as picking the mapping does, and auto-maps only when no named mapping is active.\n\nThe request the wizard sends is unchanged: source rows plus `mappingName`.\n\n## Tests\n\n- `ImportWizard.preselectOnlyMapping-13343.test.tsx` (the saved-mapping harness) gains a top-level describe with two pins:\n  - the summary names each target by its served label (`公司`, `线索来源`) and shows no API name;\n  - Back plus a second file under the mapping previews the mapped values (`Globex`, `Partner`).\n- `ImportWizard.savedMappingEmptyValue-8504.test.tsx`: the summary testable now receives `fields={[]}`, the prop the component now requires.\n- Ablation, one leg per fix, each through `scripts/ablation-replace.mjs` (anchor hit 1/1; restore proven as blob == HEAD and an empty `git diff HEAD`). Reverting `handleFileLoaded` to the auto-map reds the reload pin only (1 failed, 8 passed). Removing the label resolver reds the summary pin only (1 failed, 8 passed).\n\n## Acceptance notes\n\n- **Measured live in zh-CN before the fix** (showcase backend plus this branch's Console Vite, Chromium with locale zh-CN; zh-CN field labels added temporarily for the reading and since removed):\n  - the summary's Maps To column read `name`, `email`, `company`, `message`, `source`, while the preview headers for the same fields read the translated labels;\n  - a single pass with the shipped mapping previewed every value;\n  - after Back plus a file whose headers do not resemble the field names, the preview showed only the row-number column, and the import button still read 导入 2 行.\n  - The reload path is the only one found that blanks a named mapping's preview. Whether it is the reporter's path is inferred, not confirmed.\n- **Not in this PR: the mapping's own label** (`Inquiry feed (marketing CSV)` stays English in zh-CN). `GET /meta/mapping` is not translated because `mapping` has no translator and the bundle has no group for it. That is part (1) of the card, routed separately.\n- **Probably the same stale-state shape, measured from code only:** a local mapping template stays selected in the template bar after Back plus a new file, while the new file is auto-mapped. It was not reproduced live, so it is noted here and not changed.\n\n## Verification\n\nAll readings were taken at head `b0b81d0c3f` unless noted.\n\n<details><summary>Unit tests and type-check</summary>\n\n- `pnpm --filter @object-ui/plugin-grid type-check`: exit 0, run after building its dependency closure (both `tsc --noEmit` and `tsc -p tsconfig.test.json`).\n- The ImportWizard and saved-mapping suites, `cd ui && pnpm exec vitest run --maxWorkers=2` over `packages/plugin-grid/src/ImportWizard*`, `importSavedMapping.test.ts` and `__tests__/importWriteModes-12697.test.tsx`: Test Files 20 passed (20), Tests 142 passed (142).\n- The whole `packages/plugin-grid/src/` tree at `89eadc8ed0`, before merging `origin/main`: Test Files 286 passed (286), Tests 2471 passed (2471).\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 39 families at `b0b81d0c3f`. Every one ran locally with exit 0, including `check:nul-bytes`, `check:published-files`, `check:test-source-alias`, `check:type-check-coverage`, `check:type-check-debt`, the changeset gates and `pnpm --dir ui exec vitest run scripts/`.\n- Reconciliation, `--ran`: 39 derived, 39 run, 0 NOT-MEASURED, 0 UNRUN.\n- Every other CI family is left to this PR's check runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzgwLiKcfujYUug7sPs)_\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzgwLiKcfujYUug7sPs -->\n"
+}

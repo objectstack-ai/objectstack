@@ -2,8 +2,8 @@
   "number": 34794,
   "kind": "issue",
   "title": "Studio 数据栏：「添加字段」常驻工具栏，点列头改字段，名称列排第一，字段属性面板先显示名后内部名",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:ui",
     "enhancement",
     "lease:o3-C",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:52:16Z",
-  "updated_at": "2026-11-17T12:42:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T17:29:35Z",
+  "closed_at": "2026-11-17T17:28:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34794",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「studio 主要的常用界面也综合评估，看如何优化。」；看过图 21、22 后：「可以，立卡」。\n\n## 现状（读码，objectstack `origin/main` 6091b645fd；界面实测在本地 cloud 环境，自建应用「会议纪要」，窗口宽 1280，zh-CN）\n\n- **加字段的入口在屏幕外。** 「记录」页签的表格有「添加字段」这一列（`StudioDesignSurface.tsx:7439–7444` 的 `onAddColumn`），但它排在所有列之后。实测表格可见宽度 680px、内容宽 1187px，这个按钮的横坐标是 1399，要横向滚到底才看得到，而且右边还压着冻结的「操作」列。工具栏里只有「隐藏字段 / 筛选 / 分组 / 排序 / 添加记录」，没有加字段。结果是用户只在「表单」页签里找得到「添加字段」。\n- **列头单击是排序**，改字段要悬停后点列头上的小图标（`onEditColumn`，`StudioDesignSurface.tsx:7445`）。同一个 Studio 的「界面」栏里，单击列头是选中这一列并打开属性（`studio-object-records-canvas.tsx` 的 `ColumnHeaderSelect`，objectui#12725）。两栏同一个动作两种结果。\n- **第一列是平台字段。** 实测列顺序是「# / 负责人 / 会议名称 / 会议日期 / …」，`owner_id` 排在名称字段前面。\n- **字段属性面板先内部名后显示名。** `ObjectFieldInspector.tsx:1466` 的「API 名称」排在 `:1476` 的「标签」前面。\n- **删除按钮固定在面板底部**（`ObjectFieldInspector.tsx:1411–1420`，`InspectorShell` 的 `footer`），是面板里最显眼的按钮。\n- **对象标题旁带内部名**：「会议 `ti8v_meeting`」。\n\n## 要做的\n\n1. 「记录」页签的工具栏加一个「添加字段」按钮，始终可见，打开现有的 `AddFieldPopover`；表格末尾的「+」列保留。两个入口的可用条件沿用 `canAddFields`（只读包、外部对象不出现）。\n2. 「记录」页签里单击列头 = 选中这个字段并打开它的属性，与「界面」栏一致；排序、隐藏放进列头的下拉菜单。\n3. 默认列顺序：名称字段（对象的 `nameField`）排第一并冻结，平台注入的 `owner_id` 排到业务字段之后。只改 Studio 这张设计表格的默认顺序，不改运行时列表视图。\n4. 字段属性面板：「显示名」排第一；「API 名称」收进默认折叠的「开发者信息」一节（改名时的校验与提示逻辑不变）。\n5. 删除从面板底部移到标题栏的「···」菜单里，确认对话框不变。\n6. 对象标题旁不显示内部名，内部名放进对象的「设置」里或悬停提示里。\n\n## 不做的\n\n- 不改页签的排布。「记录 / 表单 / 校验 / 钩子 / 动作 / API / 设置」平铺、内容列不足 1000px 时后五个收进「高级」，是已有裁决（objectui#12450，`dataTabsFold.ts`）。图 21 里画的「校验 / 动作 / 更多」页签是示意，以现有规则为准。\n- 不改右栏的开合规则（选中即展开属性是 objectstack#26737 的裁决）；右栏的名字、宽度、标题栏归 objectstack-ai/objectstack#34725。\n- 不改字段类型、校验、扩展字段的任何逻辑。\n\n## 验收\n\n- 窗口宽 1280、右栏展开时，「记录」页签不用横向滚动就能看到并点到「添加字段」。\n- 单击「会议名称」列头，右栏打开这个字段的属性；列头菜单里能排序和隐藏。\n- 新建一个对象后，表格第一列是它的名称字段，「负责人」在业务字段之后。\n- 字段属性面板第一项是显示名；展开「开发者信息」才看到 API 名称，改名仍然可用。\n- 面板底部没有删除按钮；「···」里的删除仍有确认。\n- 只读包、外部对象上没有新增的加字段入口。\n\n## 设计图（静态示意稿，标「新」的是改动；示例数据是虚构的）\n\n<details><summary>图 21 Studio 数据栏</summary>\n\n![图 21 Studio 数据栏](https://github.com/objectstack-ai/objectstack/blob/88e4cafc93cb6d4a48f95b95b80a5fff917e0708/21-studio-data.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`（数据栏工具栏与表格）、`ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx`、`ui/packages/i18n/src/namespaces/studio/`。\n\nDedupe: `repo:objectstack-ai/objectstack Studio 添加字段 记录`、`Studio 字段属性 API 名称` → 0（未关）。"

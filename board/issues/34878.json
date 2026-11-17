@@ -1,0 +1,31 @@
+{
+  "number": 34878,
+  "kind": "issue",
+  "title": "scenarios: a thrown live ask is recorded so replay counts it, and a wrongly cased skill file is refused clearly",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T14:30:05Z",
+  "updated_at": "2026-11-17T14:54:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34878",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic). The maintainer set who files this epic's cards, in this session's chat, 2026-11-17, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported to this session by the dispatching seat `repo:objectstack#3` on #34659 (comment 6948819963, item 2); the filer did not re-read the code behind it. Source: the contract-review delta on PR #34808 (#34687), 6948332112.\n\n## Why\n\nTwo ways the ask runner can report a better or a stranger result than what happened: a failed run that disappears on replay, and a crash in place of a refusal.\n\n## Evidence\n\n- Per the report: when a live ask throws, `RecordingDriver` records no turn; on replay the counted failure becomes \"not measured\" and a row can rise from 4/5 live to 4/4.\n- Per the report: the `SKILL.md` match is case-sensitive; on a case-insensitive filesystem a top-level `skill.md` ends in a TypeError.\n\n## Scope\n\n- A thrown ask is recorded as a turn that failed, and replays as that failure.\n- A skills directory whose skill file is not spelled `SKILL.md` is refused with a sentence naming the file.\n\n## Done when\n\n- A recording with one thrown ask replays to the same row it showed live; the wrongly cased file gets the refusal.\n\n## Relations\n\n- Parent: #34659. Related: #34687 (PR #34808)."
+}

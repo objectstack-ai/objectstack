@@ -2,8 +2,8 @@
   "number": 34807,
   "kind": "issue",
   "title": "Draft preview: a field that exists only in the draft is missing from the New record form, and a draft list column on it makes the list query refused",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "lease:o3-A",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:58:27Z",
-  "updated_at": "2026-11-17T14:18:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:38:56Z",
+  "closed_at": "2026-11-17T18:37:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 13,
+  "comments": 18,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34807",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题）；#34610 实测读出、影响本专题落地的派生缺陷（维护者 05:17Z 「如果影响本专题相关任务落地的，你也应该挂到这个专题下继续开发」），⛔ 不是认领。\nEvidence: #34610 live readings, comment 6946030683, §「One reading not met, and not from this PR」, on PR #34713 head `2621daf5`.\n\n## 维护者速读\n\n- **做什么**：AI 在抽屉里给应用加了一个字段，主区域进入草稿预览后，「新建记录」表单里却没有这个字段；如果再给列表加一列这个字段，列表查询直接被拒、整页报错。要让草稿预览里的表单和列表看得到草稿字段。\n- **为什么**：#34610 的目标就是\"在主区域直接看到应用草稿本身\"。草稿字段在表单里缺席、列表一加列就坏，用户会以为 AI 没做成；发布后字段才出现，等于预览不可信。\n- **需要你做的**：无。\n\n## 现状 (objectstack `origin/main` 6dd5716329; reading on PR #34713 head 2621daf5)\n\n- Under `?preview=draft` a field that exists only in a draft object is not in the New record form (#34610 Acceptance 1 reads `false`). A fresh `?preview=draft` page load with the same draft shows the same, so it predates #34713.\n- After Publish the field shows with no reload (#34610 Acceptance 4).\n- A draft list-view column on such a field makes the list's data query refused; the #34610 script therefore drafts only the object.\n- The metadata reads do switch to the REST `?preview=draft` overlay in preview (`ui/packages/app-shell/src/providers/MetadataProvider.tsx:987-1000`, ADR-0037). Which reader the record form takes its field list from, and which door refuses the list query, is NOT read yet.\n\n## 要做的\n\n- **Premise first, on origin/main:** name the reader the New record form builds its fields from under preview, and the door and error code that refuse a list query naming a draft-only field (the request, the response verbatim). Post it as `Premise:` on this card before code. If the refusal is the data door validating against the published object, say so and stop for the seat: whether a data read may see a draft schema is a contract question.\n- If the form's gap is a client reader that bypasses the preview overlay: make it read the overlay in preview, the way the metadata reads already do.\n- For the list column: in preview, a column on a draft-only field renders empty (with the field's draft label) instead of failing the whole query, unless the premise shows the data door can answer it safely.\n- Tests that red with the fix removed: the form under preview lists the draft field; a draft column on a draft-only field does not blank the list.\n\n## 不做的\n\n- Writing records against a draft schema (preview stays read-only for data); the publish flow (#34610); Studio's ObjectFormDesigner preview (separate epic note).\n\n## 验收\n\n- The #34610 Acceptance 1 reading re-run on app `com.example.tracker`: the drafted \"Priority\" field shows in the New record form under `?preview=draft`; a drafted list column on it leaves the list rendering.\n\nReader: `domain:ui` · seat 3 area o3-A (moved from o3-D, which carries #34610's Tier H PR; triage first touch 6946151246 kept p2: it does not block #34610's landing, which reports it as not met and not from that PR).\nBlocked-by: none (independent of PR #34713; overlap with its `preview/**` files to be checked at claim).\nDedupe: `gh api -X GET search/issues -f q='repo:objectstack-ai/objectstack is:issue is:open preview=draft form field'`, `… draft preview record form field missing`, `… preview draft overlay object field`, `… draft view column list query refused` → only seat posts, epics and unrelated cards; none this.\n"

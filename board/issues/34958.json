@@ -1,0 +1,32 @@
+{
+  "number": 34958,
+  "kind": "issue",
+  "title": "Eval run · dataset ask cards (travel_expense) × 2 arms × 5 reps · b8408d82 · 2026-11-17",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "eval-run"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T19:18:22Z",
+  "updated_at": "2026-11-17T19:19:25Z",
+  "closed_at": "2026-11-17T19:19:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34958",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzg1NmbJpZhtiWQkTir\n\nThe five-repetition ask round that card #34687's Done-when asks for: the dataset-carrying scenario cards asked through MCP with and without the ask skill, graded by the three dataset graders of ADR-0149 D3 (`metric-selected`, `asked-back`, `fallback-labelled`). Run by seat 3's area o3-F.\n\n## Environment\n\n- Runner: `objectstack-ai/objectstack` main `b8408d82`. It includes #34808 (dataset questions and graders), #34882 (the asked-back figure check) and #34911 (managed-install fallback). `@objectstack/scenarios` `run-scenarios --modes ask`.\n- Packages: published 18.5.0 (`--create-version 18.5.0`). Mode: ask over a supplied verified build (`--template`).\n- Driver and login: `claude -p` from Claude Code 2.1.326, login `oauth_token` (subscription). `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` were unset.\n- Served model: `claude-haiku-5-5` on every ask turn (requested `--ask-model haiku`). Requested effort: `medium`.\n- Cost: the CLI's notional figure. Nothing is billed per token under a subscription login.\n\n## Scope\n\n- Card: `travel_expense` (control tier), ask only, from its verified build (template sha256 `b7ab31a715d4e83ce35c5075739f2d10b9bf7e8f0bf3b577709ae7d953de8377`). There was no build half or iterate.\n- Configs: 2 arms on the same model and effort. **no-skill** has no skills directory. **with-skill** has `--ask-skills` with the `objectstack-ask` bundle.\n- Repetitions: 5 per arm. Per repetition there were 13 questions; 5 were graded for 问数, and 5 were graded by a dataset grader (2 `metric-selected`, 2 `asked-back`, 1 `fallback-labelled`). The card's 3 operations ran once per arm. Each arm took 53 ask turns. Both commands exited 0.\n- Install: the unmanaged install was refused `422 UNMANAGED_INSTALL_UNCOPYABLE`, and the same build was installed managed.\n- Seed: 173/757 rows loaded on both arms. 584 were refused `VALIDATION_FAILED` by the build's own rule: a paid claim cannot be inserted, so its lines and approval steps miss their claim.\n- **Not measured, out of every denominator:**\n  - 8 questions per repetition (40 per arm), because their expected answer changes, or is not defined, without the refused claims.\n  - 3 operations, because each needs a refused row (`demotravel_approval_step as_111_1`, `demotravel_expense_claim c118`, `demotravel_approval_step as_098_1`).\n  - `guardrail:injection_as_data`, because its row (`demotravel_approval_step as_013_1`) was refused.\n  - Card `order_to_cash`, which carries datasets but has no verified build. Two of two builds fail only on `security-rollup-source-unreadable`, and that has been routed to the epic filer.\n\n## Results\n\n| config | 问数 mean (min–max) | datasets | metric-selected | asked-back | fallback-labelled | operations | leak flags / rep | ask min | notional $ / rep |\n|:--|:--|:--|:--|:--|:--|:--|--:|--:|--:|\n| no-skill · haiku-5-5 · medium | 4.2/5 (3–5) · 21/25 | 2/25 | 0/10 | 2/10 | 0/5 | 2/3 | 0 | 2.1 | 0.07 |\n| with-skill · haiku-5-5 · medium | 4.6/5 (4–5) · 23/25 | 18/25 | 10/10 | 3/10 | 5/5 | 2/3 | 0 | 2.4 | 0.07 |\n\nBy card: `travel_expense` is above. `order_to_cash` is not measured.\n\nPer repetition, 问数 correct: no-skill 3, 5, 4, 4, 5; with-skill 4, 5, 5, 5, 4.\n\n## Reading\n\n1. **The skill routes the answer through the governed layer.** `metric-selected` is 10/10 with the skill and 0/10 without. `fallback-labelled` is 5/5 against 0/5. Over five repetitions, each separation is the whole range, with no overlap between arms. Without the skill, the client answers from object queries, does not label that the figure is ungoverned, and never reaches `query_dataset`.\n2. **E2, near-miss word:** with the skill the client asks back on a near-miss word in 3 of 10 turns; without it, in 2 of 10. The difference is one turn in ten, inside the noise of five repetitions, so the skill does not reliably make the client ask back. The near-miss cases are graded off the reply alone, as the grader's note says: the ask-back the agent reasoned to and the one `list_datasets` candidates led it to count alike.\n3. **E2, exactly one match:** the skill causes no ask-back on a question with exactly one matching metric. Every `metric-selected` turn with the skill (10/10) answered through `query_dataset` with the expected dataset and measure, and an ask-back there would have failed that grade.\n4. 问数 correctness does not separate the arms (4.2 against 4.6, overlapping ranges). There were 0 leak flags in every repetition on both arms.\n5. Coverage is the limit. 8 of 13 questions per repetition and all 3 operations are not measured because the build's own rule refuses 584 seed rows.\n6. Compared with day 1 of the daily round (#34951, same sha, 1 repetition, datasets 4/5 against 0/5): the five-repetition reading keeps the direction and shows the gap is in routing and labelling, while ask-back stays close between arms.\n\n## Findings filed from this run\n\nnone. The asked-back rate is a reading for the skill's owner and already sits in #34687's scope as the E2 question this record answers. The seed-refusal coverage gap is the build's own rule. The `order_to_cash` build trap is already with the epic filer.\n\n## Records\n\n`/mnt/project-files/issue-34687/ask-round-2026-11-17/five-rep/`, outside the repository tree and replayable: `five-rep.sh`, `meta.txt` (start time, runner sha, CLI version, login, template sha256), and for each of `noskills/` and `skills/`, `out/2026-11-17-scenario-travel_expense.json`, `run.log` and `ask.rec.json`, the recording.\n"
+}

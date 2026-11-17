@@ -2,8 +2,8 @@
   "number": 34827,
   "kind": "issue",
   "title": "AI 助手抽屉：标题写「助手」，与顶栏按钮「AI 助手」不一致",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T12:15:08Z",
-  "updated_at": "2026-11-17T12:48:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:39:46Z",
+  "closed_at": "2026-11-17T18:38:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34827",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「然后更新最新的代码，验收已开发完的功能」；看过验收结果里两处未立卡的问题后：「立卡」。\n\n验收 objectstack-ai/objectstack#34608（已合并，PR #34665）时看到的收尾项，主体通过：顶栏机器人打开 420px 右侧抽屉，放大是原地铺满并可收回。\n\n## 现状（界面实测：本地 cloud 环境，控制台是 objectstack `origin/main` 3bbda33b78 的构建，视口 1280×800，zh-CN，2026-11-17）\n\n- 顶栏按钮的名字是「AI 助手」。\n- 打开后抽屉标题栏写的是「助手」；铺满后左上角同样是「助手」。\n- Studio 里那一套还叫「AI 副驾」，归 objectstack-ai/objectstack#34725 第 1 条，不在本卡。\n\n## 要做的\n\n1. 抽屉和铺满两种形态的标题都写「AI 助手」，与顶栏按钮一致；各语言同步（en 下按钮与标题也用同一个词）。\n2. 顺带检查同一面板里其他位置的自称（空状态、历史列表标题、提示文字），统一成同一个名字。\n\n## 不做的\n\n- 不改面板的布局和行为。\n- 不动 Studio 的面板（#34725）。\n\n## 验收\n\n- zh-CN 下顶栏按钮、抽屉标题、铺满后的标题是同一个名字「AI 助手」。\n\nReader: `domain:ui` 车道，`ChatDock` 一侧的标题与 `ui/packages/i18n/` 对应词条；与 #34725 的实现者对齐用词。\n\nDedupe: `repo:objectstack-ai/objectstack AI 助手 抽屉 标题 助手` → 0（未关）。"

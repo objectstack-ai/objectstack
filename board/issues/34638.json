@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:27:29Z",
-  "updated_at": "2026-11-17T12:36:01Z",
+  "updated_at": "2026-11-17T14:30:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34638",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: contract review N2 on PR #34619 (Fixes #34579, review 6938300180), passed on by area `o2-H`. Dedupe: `resumeFailure innerRefusal recall`; no open card.\n\nSuggested-grade: p2 · domain:server\n\n## 维护者速读\n\n- 现象:#34579 之后，审批决定门(通过、驳回等)在下一步被钩子拒绝时，错误体会带上拒绝原文和那句给用户看的话。但「撤回」这扇门，以及子流程把父流程卡住的那条路，是用成功响应里的 `resumeFailure` 报告「运行卡住了」,里面没有这两项，用户仍看不到为什么。\n- 为什么要修：同一种「被钩子拒绝而卡住」,从不同的门进来，用户能看到的信息不一样。\n- 需要你做的：无(分诊定级;要不要给 `ResumeFailureReport` 加这两项，若属契约放宽按常规走契约复审)。\n\n## Observed (by review)\n\nThe refusal reaches only the thrown `RESUME_FAILED` envelope. The recall door and the subflow-parent strand report a stranded run on a success answer through `resumeFailure` (`ResumeFailureReport`), which carries no `innerRefusal` / `userMessage`. The spec text already separates the two channels.\n\n## Question for the card\n\nShould `ResumeFailureReport` carry the same pair (`innerRefusal`, `userMessage`) so every door that strands a run on a hook refusal tells the caller why?\n\n## Premise check (run first)\n\nOn main after #34619 merges: an approval flow whose step after recall (or a subflow whose parent resumes into a refusing hook) is refused by a record hook. Read the recall answer's `resumeFailure`. If it already carries the refusal, close this card.\n"

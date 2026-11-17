@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T05:31:59Z",
-  "updated_at": "2026-11-17T13:17:36Z",
+  "updated_at": "2026-11-17T19:16:07Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34672",
   "body": "## What\n\nA `Field.summary` roll-up is computed by the engine from its child rows. Unless the author also adds `readonly: true`, a person's write to it is **accepted and stored**. Both `PATCH /data/<obj>/:id` and import `writeMode: 'update'` return 2xx, and the typed value stays until something triggers a recompute.\n\nNo author means a roll-up to be hand-written. The lint and validate gates do not flag a summary that lacks `readonly`.\n\n## Repro (app project, 18.5.0, booted via @objectstack/verify)\n\n- `crm_quote_line_item.cb_converted_quantity` = summary (sum of order quantities by `source_quote_line`), with no `readonly`.\n  - A sales rep `PATCH`es a draft line with `{ cb_converted_quantity: 90 }` and gets 200. The stored value is 90 while no order exists. It survives the quote's acceptance, and downstream defaults read it.\n- `crm_opportunity.cb_actual_won_amount` = summary over orders. A manager or admin `PATCH` on an open opportunity, or an import update, changes it from 619469.03 to 2.\n- The existing `crm_account.cb_order_amount` summary behaves the same way: a manager `PATCH` sets it to 55.\n- Adding `readonly: true` makes every one of these writes get dropped, and the roll-up still recomputes.\n\n## Expected\n\nA summary field is engine-owned. It should be treated as read-only for every person and import write, whether or not the author spells out `readonly`: the write is dropped and reported in `droppedFields`, as already happens for formula and readonly fields. Failing that, `os lint` should refuse a summary that does not set `readonly: true`.\n\n## Consumer\n\nAn app's 「累计已转吨数」, 「实际成交额」 and customer order totals are business figures that must not be typeable. The app is adding `readonly: true` to each summary in the meantime. This is the declared way to mark a field read-only, not a workaround."

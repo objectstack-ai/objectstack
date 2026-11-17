@@ -1,0 +1,31 @@
+{
+  "number": 34919,
+  "kind": "issue",
+  "title": "service-analytics: the dataset executor computes `nextStep` and `sourceLine`, and the MCP door returns them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T16:14:22Z",
+  "updated_at": "2026-11-17T20:04:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34919",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed by the session the maintainer set to file this epic's cards. Ruling: #34894 = A, comment 6953671481, the maintainer verbatim: 「两件都同意：构建提交进仓库，#34894 选 A」.\n\n## Why\n\nThe decision \"one match answers, several ask, near ones are offered, none falls back and says so\" is computed today in a hosted wrapper, for one client. The ruling moves it into the framework's executor so every client that calls the tool reads the same next step in the result.\n\n## Evidence (objectstack `a0326b06`; the hosted wrapper read on cloud `53a5844`)\n\n- `grep -n nextStep` over `packages/services/service-analytics/src/dataset-tools.ts` and `packages/mcp/src/mcp-http-tools.ts` finds nothing.\n- The hosted wrapper computes it from the framework's own `matches`, in the user's language, and composes the citation from the result's `provenance`. Its header records the measured reason: a model handed a finished string copies it; one that assembles it from parts often does not.\n- A tool result is read by any client that made the call. In this session's five-repetition pilot a client with no skill reached the governed route in a minority of runs.\n\n## Scope\n\n- The executor fills `nextStep` for the terms it was handed, from its own matches and from #34763's candidates, and `sourceLine` from `provenance`, to the shape of the spec card. Only over what the caller was admitted to see.\n- The sentence is written in the caller's locale by the path the door already resolves it with; the same sentence on HTTP and stdio.\n- The tool descriptions, the initialize rule and the ask-data skill (#34868) say: follow `nextStep`; cite `sourceLine`.\n- The MCP door passes both through. File surface: `packages/services/service-analytics/**`, `packages/mcp/**`.\n\n## Done when\n\n- On `examples/app-crm`: a word with one match, a word with two, a near-miss word and an unknown word each return the decision the rule gives, with a pin for each; a withheld member appears in none.\n- The daily MCP ask round (#34869) reads the skill-off arm before and after.\n\n## Relations\n\n- Parent: #34659. Decision record: #34894. The hosted wrapper's removal is the cloud PM's (#34690).\n- Blocked-by: #34763"
+}

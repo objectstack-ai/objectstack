@@ -1,0 +1,36 @@
+{
+  "number": 34872,
+  "kind": "issue",
+  "title": "mcp: list_objects and describe_object serve labels and descriptions in the caller's locale, as the REST metadata door does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T14:26:20Z",
+  "updated_at": "2026-11-17T17:17:00Z",
+  "closed_at": "2026-11-17T17:15:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34872",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic). The maintainer set who files this epic's cards, in this session's chat, 2026-11-17, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported to this session by the dispatching seat `repo:objectstack#3` on #34659 (comment 6947101471); the filer did not re-read the code behind it. Source: that seat's contract review on PR #34814, record 6947074946.\n\n## Why\n\nA business user asking in Chinese falls back to the object tools when no metric answers, and the client is shown English labels and descriptions for an app that has Chinese ones. The REST metadata door translates the same text per request.\n\n## Evidence\n\n- Neither MCP door localizes `list_objects` / `describe_object`; the REST `/meta` object door translates `objects.NAME.label` and `.description` through `translateMetadataDocument`.\n- ADR-0149 D2 binds `list_datasets` only, so this is a gap, not a breach of a ruled line.\n- #34787 does the same for stdio `list_datasets`.\n\n## Scope\n\n- Both doors return object and field labels, option labels and descriptions in the caller's locale, by the path REST uses, never a second translation routine.\n- A pin for each door: a translated label under the locale, the source label without one.\n\n## Done when\n\n- `describe_object` on a translated example app returns the bundle's labels under `Accept-Language: zh-CN`.\n\n## Relations\n\n- Parent: #34659. Related: #34721, #34787, #33824.\n- Dedup words the seat ran: `mcp describe_object locale`, `object tools i18n`; no hit reported."
+}

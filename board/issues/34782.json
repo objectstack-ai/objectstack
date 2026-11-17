@@ -2,8 +2,8 @@
   "number": 34782,
   "kind": "issue",
   "title": "ui: form-field-tabs 'failed submit scrolls the off-screen tab into view' case fails intermittently in the merge queue",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
+    "lease:o3-B",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:19:02Z",
-  "updated_at": "2026-11-17T10:21:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T16:10:41Z",
+  "closed_at": "2026-11-17T16:09:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34782",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: a new test that failed in the merge queue on a PR that does not touch `ui/**`. Dedupe: `form-field-tabs`; no open card.\n\nSuggested-grade: p2 · domain:ui · tooling. The test came in with PR #34695 (Fixes #34615, under the maintainer's ui theme #34571), so this card belongs with that theme's owner.\n\n## What happened\n\nMerge-group run https://github.com/objectstack-ai/objectstack/actions/runs/44058185304 (job \"Test UI (6/16)\") failed only in `ui/packages/components/src/renderers/form/__tests__/form-field-tabs.test.tsx`, case \"a failed submit that jumps to an off-screen tab scrolls it into view\": `expected [] to equal [261]`. The PR in that group (#34565) changes only `docs/adr/**`. The test landed on main at `e47c1cb2` (#34695) today; this is its first failure seen.\n\n## What is wanted\n\nFind why the scroll call is sometimes not observed (an async scroll after the tab switch, layout not measured in the test DOM, or ordering against another case) and make the case deterministic at the root. ⛔ Not a skip, a retry wrapper or a weaker assertion.\n\n## Re-check\n\n`gh api repos/objectstack-ai/objectstack/actions/jobs/133955361680/logs | grep -c \"scrolls it into view\"`\n"

@@ -2,8 +2,8 @@
   "number": 34706,
   "kind": "issue",
   "title": "accept-invitation follow-ups: the inbox action, the verify-email prompt copy, and the embedding host's route",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T07:25:09Z",
-  "updated_at": "2026-11-17T10:54:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T18:19:45Z",
+  "closed_at": "2026-11-17T18:18:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34706",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: contract review N1, N3 and N5 on PR #34666 (Fixes #34272, review 6941568501), passed on by area `o2-H`, one card for the family. Dedupe: `verify-email-prompt accept invitation`; no open card.\n\nSuggested-grade: p2 · domain:ui · Blocked-by #34272\n\n## 维护者速读\n\n- 现象:#34666 之后，邮件可投递时接受邀请需要已验证的邮箱;控制台接受页会把人带去验证。但还有三处没跟上：邀请收件箱里的「接受」动作没有把这个拒绝引到验证，也没在动作说明里写这个条件;验证提示页在这条入口上写着「已发送」,其实要点按钮才发;嵌入接受页的宿主必须声明 `/verify-email-prompt` 路由，否则跳转无处可去。\n- 为什么要修：用户在这三处会卡住或被误导。\n- 需要你做的：无(分诊定级)。\n\n## Change\n\n1. `sys_invitation.accept_invitation` (the inbox action): route the verified-address refusal to verification the way the accept page does, and state the condition in its `ai.description`.\n2. `/verify-email-prompt`: on this arrival, the standing copy should not say a link was sent before the person presses the button (the sign-in arrival on `main` has the same copy issue; fix both).\n3. `@object-ui/app-shell`: document, in the changeset or the page's docs, that a host embedding the accept page must declare `/verify-email-prompt`.\n\n## Done when\n\nEach of the three is fixed or documented, with a pin for 1 and 2.\n"

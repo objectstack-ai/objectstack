@@ -1,0 +1,32 @@
+{
+  "number": 34962,
+  "kind": "issue",
+  "title": "skills(objectstack-i18n): the group list does not teach the new mappings translation group (follow-up owed by #34939)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "documentation",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T19:33:23Z",
+  "updated_at": "2026-11-17T19:47:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34962",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgwLiKcfujYUug7sPs\n\nFiling gate ①: a follow-up owed by work in flight. Part 1 of #34939 (route A, ruled by seat 3 in claim amendment 6957676841) adds a `mappings` group to the translation bundle, which translates an import mapping's `label` in the reader's locale (`mappings.<name>.label`). Its changeset records `Skills-docs:` this card, keeping `skills/**` (governed, token ratchet) out of the contract PR, as the books precedent did (#26819 → #26820). Filed by seat 3 area o3-B. ⛔ Not a claim.\n\nBlocked-by: #34939 (part 1 PR, not yet open)\n\n**Business reason:** once part 1 lands, a package that ships an import mapping can show its label in the importing user's language (the showcase `showcase_inquiry_feed` is the first exhibit). An agent writing a zh-CN bundle from the skill does not know the `mappings` group exists, so it will leave the label in English or invent a key under another group, and nothing teaches otherwise.\n\n**Reader who acts:** the skills lane (`skills/**`).\n\n## Wanted\n\n- `skills/objectstack-i18n/SKILL.md`: add `mappings` to the top-level group list (label only; MappingSchema declares no description), with one short example.\n- If an eval covers the group list (for example `evals/bundles-locales-coverage.json`), one compact case expecting the `mappings` group. Pay for both under the standing ruling 「A:先削重复,余额按实测提高」 (#26302).\n\nDedupe: open issues searched for `mappings` + `objectstack-i18n` and for `objectstack-i18n` + translation group: none besides #34939 itself.\n"
+}
