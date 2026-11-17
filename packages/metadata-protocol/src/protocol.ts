@@ -266,12 +266,14 @@ import type { ImportUnmanagedPackageAnswer } from './protocol-package-install.js
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
+    draftPublishJudgement,
     draftPublishVerdict,
     refuseRestoredBodyTheSaveDoorRefuses,
     restoredBodyDerivation,
     restoredBodyWriter,
     runAuthoringGate,
 } from './protocol-authoring-gate.js';
+import type { DraftPublishJudgement } from './protocol-authoring-gate.js';
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
     carryForwardRedactedCredentials,
@@ -1235,6 +1237,7 @@ export class ObjectStackProtocolImplementation implements
             diffMetaItem: (...a) => protocol.diffMetaItem(...a),
             disabledActionsOf: (...a) => protocol.disabledActionsOf(...a),
             discardDraftInItsScope: (...a) => protocol.discardDraftInItsScope(...a),
+            draftPublishJudgement: (...a) => protocol.draftPublishJudgement(...a),
             draftPublishVerdict: (...a) => protocol.draftPublishVerdict(...a),
             dropObjectStorage: (...a) => protocol.dropObjectStorage(...a),
             dropStorageRemainingRowsRefusal: (...a) => ObjectStackProtocolImplementation.dropStorageRemainingRowsRefusal(...a),
@@ -1904,9 +1907,30 @@ export class ObjectStackProtocolImplementation implements
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
     }): Promise<RuntimeAuthoringIssue[]> {
+        return draftPublishVerdict.call(this.draftVerdictHost(), draft);
+    }
+
+    /**
+     * [#34818] {@link draftPublishVerdict}'s judgement with the gate's
+     * ADVISORIES beside its refusal: what a publish that passes would still
+     * say about the draft, which the publish returns on its 2xx and the draft
+     * read now folds into `_diagnostics.warnings` (`withPublishAdvisories`), so
+     * a flow designer shows the publish checks before Publish is pressed. The
+     * same single run of the same rules; `userTextLocales` picks the language
+     * of the advisories' user sentences and nothing else.
+     */
+    private draftPublishJudgement(draft: {
+        type: string; name: string; body: unknown; packageId: string | null;
+        userTextLocales?: readonly (string | undefined)[];
+    }): Promise<DraftPublishJudgement> {
+        return draftPublishJudgement.call(this.draftVerdictHost(), draft);
+    }
+
+    /** The host both draft verdict bodies read: the promotion's own collaborators. */
+    private draftVerdictHost(): ThisParameterType<typeof draftPublishJudgement> {
         const readAuthoringChannel = () => this.authoringChannel;
         const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof draftPublishVerdict> = {
+        const host: ThisParameterType<typeof draftPublishJudgement> = {
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
             collectBatchPendingDeclarations: (...a) => this.collectBatchPendingDeclarations(...a),
@@ -1922,7 +1946,7 @@ export class ObjectStackProtocolImplementation implements
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
-        return draftPublishVerdict.call(host, draft);
+        return host;
     }
 
     /**
@@ -4103,6 +4127,8 @@ export class ObjectStackProtocolImplementation implements
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItem(protocolHost(this), request);
@@ -4157,6 +4183,8 @@ export class ObjectStackProtocolImplementation implements
     private async readMetaItemFace(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }, face: 'served' | 'execution') {
         // [#25467 cut 31] The body moved to `protocol-meta-item-face.ts` (see `MetaItemFaceHost`).
         const readEngine = () => this.engine;
@@ -4196,6 +4224,8 @@ export class ObjectStackProtocolImplementation implements
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return readMetaItem(protocolHost(this), request, opts);
