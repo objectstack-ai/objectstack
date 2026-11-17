@@ -475,6 +475,39 @@ function isDeclaredRegisterRefusal(err: unknown): boolean {
 }
 
 /**
+ * [#34407, #34432] The answer to a package body the artifact resolver refuses
+ * before any write (`resolveStackCollection` → `resolveArtifactPackageEntries`:
+ * `INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`,
+ * `DUPLICATE_ARTIFACT_PACKAGE`, each an ADR-0112 envelope with its declared
+ * `status: 422`): that refusal's own declared status and code, the resolver's
+ * sentence, and that nothing was written. The one reader of such a refusal on
+ * this door's pre-write steps — the D5e gate (2b) and the declared renames
+ * (2c″) both read the bodies through the resolver, so the same bytes are
+ * answered the same way whichever step reads them first.
+ *
+ * `undefined` for a throw that declares no status below 500 — an undeclared
+ * throw (the resolver's own dependency-cycle error among them) or a declared
+ * 5xx: the caller rethrows it, never relabels it.
+ */
+function declaredRefusalAnswer(
+    manifestId: string,
+    err: unknown,
+): { status: number; body: { success: false; error: { code: string; message: string } } } | undefined {
+    const refusal = resolveThrownHttpError(err);
+    if (refusal.declaredStatus === undefined || refusal.status >= 500) return undefined;
+    return {
+        status: refusal.status,
+        body: {
+            success: false,
+            error: {
+                code: refusal.code,
+                message: `Package '${manifestId}' cannot be installed: ${String((err as any)?.message ?? err)} Nothing was installed or written.`,
+            },
+        },
+    };
+}
+
+/**
  * [#21490] The one `protocol` verb this plugin calls: the runner of the
  * uninstall cleanups domain plugins register through
  * `registerUninstallCleanup` — the same registry, through the same runner,
@@ -3123,20 +3156,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     `packages` the resolver refuses (ADR-0112 `code` + its declared
         //     4xx status, the refusal the `manifest` service raises on the same
         //     bytes) is answered here, before anything is written — never
-        //     thrown out of the door. An undeclared throw stays a throw.
+        //     thrown out of the door ({@link declaredRefusalAnswer}). An
+        //     undeclared throw stays a throw.
         let gate: ReturnType<MarketplaceInstallLocalPlugin['evaluateGlobalUniqueGate']>;
         try {
             gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
-        } catch (err: any) {
-            const refusal = resolveThrownHttpError(err);
-            if (refusal.declaredStatus === undefined || refusal.status >= 500) throw err;
-            return c.json({
-                success: false,
-                error: {
-                    code: refusal.code,
-                    message: `Package '${manifestId}' cannot be installed: ${String(err?.message ?? err)} Nothing was installed or written.`,
-                },
-            }, refusal.status);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
         }
         if (gate.blocked) {
             ctx.logger?.warn?.(
@@ -3204,7 +3232,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      the physical table by the driver's own rule
         //      ({@link evaluateDeclaredRenames}); a declaration it cannot
         //      honour is refused `422 VALIDATION_ERROR`, naming the field, the
-        //      old key and the reason. Asked before 2c′, so a refusal no token
+        //      old key and the reason; [#34432] a body the artifact resolver
+        //      refuses is answered with that refusal's own status and code, as
+        //      at 2b, and only a table that could not be read answers 503.
+        //      Asked before 2c′, so a refusal no token
         //      answers is never preceded by a 409 asking for one. The carry
         //      itself runs right before step 3, the last moment the running
         //      version still serves the old key.
@@ -4566,6 +4597,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * - **A refusal**: `422 VALIDATION_ERROR` (this door's body refusal),
      *   each in `details.refusals` with its object, field, old key(s) and
      *   reason. No token answers it: the package must change.
+     * - **A body the artifact resolver refuses** (a composed artifact whose
+     *   `packages` is not a list, or one of whose entries the entry contract
+     *   refuses): that refusal's own declared status and code
+     *   ({@link declaredRefusalAnswer}, step 2b's reader), before any table is
+     *   read. An undeclared throw out of the resolver is rethrown, never
+     *   relabelled.
      * - **A reading that failed** (the table could not be read): `503
      *   SERVICE_UNAVAILABLE`, never taken for "nothing to carry".
      * - Otherwise the tables to carry, which step 2f carries.
@@ -4575,7 +4612,23 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         manifestId: string,
         converted: unknown,
         installed: unknown,
-    ): Promise<{ refusal?: { body: Record<string, unknown>; status: 422 | 503 }; tables: InstallRenameTable[] }> => {
+    ): Promise<{ refusal?: { body: Record<string, unknown>; status: number }; tables: InstallRenameTable[] }> => {
+        // [#34432] The bodies the plan reads, resolved FIRST through the fold
+        // the plan reads them by ({@link packageUpgradeSideOf}: the
+        // `resolveStackCollection` reads of `objects`, `objectExtensions` and
+        // `data`), so a body the resolver refuses is told apart from a table
+        // that could not be read: the plan below then meets the same resolved
+        // bodies, and a throw out of it is the table read's. Without this, the
+        // resolver's 422 was answered as the 503 below and its author was told
+        // to retry once the database answers.
+        try {
+            packageUpgradeSideOf(converted);
+            if (installed !== null && installed !== undefined) packageUpgradeSideOf(installed);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return { tables: [], refusal: refused };
+        }
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
             plan = await planDeclaredRenames(ctx, manifestId, converted, installed);
