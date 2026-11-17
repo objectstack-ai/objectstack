@@ -3936,6 +3936,8 @@ const ru = {
     viewApprovals: "Показать утверждения",
     noPendingApprovals: "Нет ожидающих утверждений",
     openApprovalsInbox: "Открыть входящие утверждений",
+    needsYou: "Требует вашего действия",
+    viewApprovalDetails: "Подробнее",
     badgeTotal: "Всего: {{total}}",
     badgeNotifications: "{{count}} непрочитанных тем",
     badgeNotifications_one: "{{count}} непрочитанная тема",

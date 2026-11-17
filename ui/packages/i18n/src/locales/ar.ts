@@ -4084,6 +4084,8 @@ const ar = {
     viewApprovals: "عرض الموافقات",
     noPendingApprovals: "لا توجد موافقات معلقة",
     openApprovalsInbox: "فتح صندوق الموافقات",
+    needsYou: "يتطلب إجراءً منك",
+    viewApprovalDetails: "عرض التفاصيل",
     badgeTotal: "{{total}} إجمالاً",
     badgeNotifications: "مواضيع غير مقروءة: {{count}}",
     badgeNotifications_zero: "مواضيع غير مقروءة: {{count}}",

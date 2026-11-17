@@ -3766,6 +3766,8 @@ const ko = {
     viewApprovals: "승인 보기",
     noPendingApprovals: "대기 중인 승인 없음",
     openApprovalsInbox: "승인 보관함 열기",
+    needsYou: "처리가 필요한 항목",
+    viewApprovalDetails: "자세히 보기",
     badgeTotal: "총 {{total}}건",
     badgeNotifications: "읽지 않은 주제 {{count}}건",
     badgeNotifications_one: "읽지 않은 주제 {{count}}건",

@@ -4662,6 +4662,8 @@ const en = {
     viewApprovals: 'View approvals',
     noPendingApprovals: 'No pending approvals',
     openApprovalsInbox: 'Open Approvals Inbox',
+    needsYou: 'Needs your action',
+    viewApprovalDetails: 'View details',
     // Bell-badge breakdown (objectstack-ai/objectstack#7233): the badge sums unread notification topics
     // and pending approvals, then clamps at "9+". These three spell the sum
     // out inside the popover so the number is explainable.

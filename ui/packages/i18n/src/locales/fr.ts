@@ -3843,6 +3843,8 @@ const fr = {
     viewApprovals: "Voir les approbations",
     noPendingApprovals: "Aucune approbation en attente",
     openApprovalsInbox: "Ouvrir la boîte d'approbations",
+    needsYou: "Requiert votre action",
+    viewApprovalDetails: "Voir les détails",
     badgeTotal: "{{total}} au total",
     badgeNotifications: "{{count}} sujets non lus",
     badgeNotifications_one: "{{count}} sujet non lu",
