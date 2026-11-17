@@ -193,6 +193,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     }
 
     if (!pf) throw new Error('unreachable: a live round has passed its preflight');
+    // Read before the first turn: a commit landing while a long round runs is not the code that ran it.
+    const sha = runnerSha(repo);
     const startedAt = new Date();
     const roundId = `${startedAt.toISOString().slice(0, 19).replace(/[:T]/g, '-')}-skill-evals`;
     const outDir = resolve(args.out ?? join(repo, 'docs', 'qa', 'platform-checklist', 'runs', 'skill-evals', roundId));
@@ -217,7 +219,6 @@ export async function main(argv: readonly string[]): Promise<number> {
     const finishedAt = new Date();
     const summary = summariseRound(cases, exec.records, exec.notRun);
     const servedModels = [...new Set(exec.records.map((r) => r.model).filter((m): m is string => !!m))].sort();
-    const sha = runnerSha(repo);
     const wallMin = Math.round((finishedAt.getTime() - startedAt.getTime()) / 6000) / 10;
     const round = {
       schema: ROUND_RECORD_SCHEMA,
