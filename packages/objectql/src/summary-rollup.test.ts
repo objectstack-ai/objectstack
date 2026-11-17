@@ -1181,8 +1181,46 @@ describe('[#33795] deferSummaryRecompute: one roll-up batch', () => {
       expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
     });
 
-    it('a stored computed field of the parent with no bound and no rule reading it keeps the deferral', async () => {
+    it('(iii) a declared precision on the summary itself', async () => {
+      invWith({ fields: { line_count: { type: 'summary', precision: 9, summaryOperations: { object: 'inv_line', function: 'count' } } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('(iii) an object-level unique index naming the summary', async () => {
+      engine.registry.registerObject({
+        name: 'inv',
+        fields: {
+          name: { type: 'text' },
+          region: { type: 'lookup', reference: 'region' },
+          line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+          line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        },
+        indexes: [{ name: 'inv_total_once', fields: ['region', 'line_total'], unique: 'organization' }],
+      } as any);
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a declared index naming the summary that is not unique keeps the deferral', async () => {
+      engine.registry.registerObject({
+        name: 'inv',
+        fields: {
+          name: { type: 'text' },
+          region: { type: 'lookup', reference: 'region' },
+          line_total: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'sum' } },
+          line_count: { type: 'summary', summaryOperations: { object: 'inv_line', function: 'count' } },
+        },
+        indexes: [{ name: 'inv_by_total', fields: ['line_total'] }],
+      } as any);
+      expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
+    });
+
+    it('(iii) a stored computed field of the parent calculated from its summary, with no bound and no rule: its write judges it all the same', async () => {
       invWith({ fields: { doubled: { type: 'number', expression: 'record.line_total * 2' } } });
+      expect(await batchOfSix()).toEqual({ during: 6, after: 0 });
+    });
+
+    it('a stored computed field of the parent that reads no summary keeps the deferral', async () => {
+      invWith({ fields: { label: { type: 'text', expression: 'record.name' } } });
       expect(await batchOfSix()).toEqual({ during: 0, after: 3 });
     });
 
