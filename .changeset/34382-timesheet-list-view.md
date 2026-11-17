@@ -5,6 +5,7 @@
 '@object-ui/plugin-list': minor
 '@object-ui/plugin-view': minor
 '@object-ui/core': minor
+'@object-ui/types': minor
 '@object-ui/i18n': minor
 '@object-ui/app-shell': minor
 '@object-ui/cli': minor
