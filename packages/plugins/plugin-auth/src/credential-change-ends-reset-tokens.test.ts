@@ -23,10 +23,19 @@
  *    code never sent answers, and a code requested after it resets; a
  *    completed texted-code reset ends the user's outstanding links;
  *  - another user's links are untouched by this user's change (the control);
+ *  - the same for an administrator setting a password for a user with no
+ *    local one, and for a password write through the exported raw
+ *    `createObjectQLAdapter`;
  *  - with a `secondaryStorage` cache, an ended link answers what a link never
- *    issued answers from the cache's reads too;
+ *    issued answers from the cache's reads too, and an ended texted code's
+ *    cached copy is gone with it;
  *  - a password write whose tokens cannot be ended does not land: the old
- *    password stands and the outstanding link resets.
+ *    password stands and the outstanding link resets — when a delete fails,
+ *    and when a cached link's key cannot be named;
+ *  - the reset tokens are found only where identifiers are stored as issued:
+ *    the composed verification store carries no identifier-storage setting
+ *    (a closed key set), and a password write under one other than plain is
+ *    refused, as is one whose target names no user.
  */
 
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
@@ -35,6 +44,11 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { AuthPlugin } from './auth-plugin.js';
+import { createObjectQLAdapter } from './objectql-adapter.js';
+import {
+  endResetTokensOnCredentialWrite,
+  RESET_TOKEN_IDENTIFIER_REFUSAL,
+} from './credential-change-ends-reset-tokens.js';
 import { authIdentityObjects } from './manifest.js';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
@@ -216,6 +230,39 @@ async function neverIssued(s: Awaited<ReturnType<typeof stage>>) {
   return { reset: await s.reset(token, FOURTH), landing: await s.landing(token) };
 }
 
+/** The account as an identity provider leaves one: no local credential. */
+async function dropLocalPassword(s: Awaited<ReturnType<typeof stage>>) {
+  const credentials = (await s.engine.find(
+    'sys_account',
+    { where: { user_id: s.userId, provider_id: 'credential' } },
+    SYS,
+  )) as Array<{ id: string }>;
+  expect(credentials).toHaveLength(1);
+  await s.engine.delete('sys_account', { where: { id: credentials[0].id }, context: { isSystem: true } } as never);
+}
+
+/** A host `secondaryStorage` over a Map the case can read. */
+function cacheStorage() {
+  const cache = new Map<string, string>();
+  return {
+    cache,
+    secondaryStorage: {
+      get: async (key: string) => cache.get(key) ?? null,
+      set: async (key: string, value: string) => {
+        cache.set(key, value);
+      },
+      delete: async (key: string) => {
+        cache.delete(key);
+      },
+      increment: async (key: string) => {
+        const next = Number(cache.get(key) ?? 0) + 1;
+        cache.set(key, String(next));
+        return next;
+      },
+    },
+  };
+}
+
 describe("a completed reset ends the user's other reset links", () => {
   it('the earlier link answers what a link never issued answers, and the password is the one the spent link set', async () => {
     const s = await stage();
@@ -294,20 +341,49 @@ describe('a password change ends every reset link outstanding before it', () => 
     const unknown = await neverIssued(s);
     const earlier = await s.requestLink();
     const { bearer } = await s.signIn(EMAIL, FIRST);
-    // The account as an identity provider leaves one: no local credential.
-    const credentials = (await s.engine.find(
-      'sys_account',
-      { where: { user_id: s.userId, provider_id: 'credential' } },
-      SYS,
-    )) as Array<{ id: string }>;
-    expect(credentials).toHaveLength(1);
-    await s.engine.delete('sys_account', { where: { id: credentials[0].id }, context: { isSystem: true } } as never);
+    await dropLocalPassword(s);
 
     const set = await s.fire('/set-initial-password', { newPassword: SECOND }, bearer);
     expect(set.status, await set.clone().text()).toBe(200);
 
     expect(await s.reset(earlier, THIRD)).toEqual(unknown.reset);
     expect((await s.signIn(EMAIL, SECOND)).status).toBe(200);
+  }, 60_000);
+
+  it("an administrator's /admin/set-user-password for a user with no local password: an earlier link answers what a link never issued answers", async () => {
+    const s = await stage();
+    const unknown = await neverIssued(s);
+    const earlier = await s.requestLink();
+    await dropLocalPassword(s);
+
+    const set = await s.fire(
+      '/admin/set-user-password',
+      { userId: s.userId, newPassword: SECOND, mustChangePassword: false },
+      s.adminBearer,
+    );
+    expect(set.status, await set.clone().text()).toBe(200);
+
+    expect(await s.reset(earlier, THIRD)).toEqual(unknown.reset);
+    expect((await s.signIn(EMAIL, SECOND)).status).toBe(200);
+  }, 60_000);
+
+  it("the exported createObjectQLAdapter: a password write through it ends the holder's earlier link", async () => {
+    const s = await stage();
+    const unknown = await neverIssued(s);
+    const earlier = await s.requestLink();
+    const adapter = createObjectQLAdapter(s.engine as never);
+
+    const written = await adapter.updateMany({
+      model: 'account',
+      where: [
+        { field: 'user_id', operator: 'eq', value: s.userId, connector: 'AND' },
+        { field: 'provider_id', operator: 'eq', value: 'credential', connector: 'AND' },
+      ] as never,
+      update: { password: 'a-hash-the-raw-adapter-writes' },
+    });
+    expect(written).toBe(1);
+
+    expect(await s.reset(earlier, THIRD)).toEqual(unknown.reset);
   }, 60_000);
 
   it("another user's links are untouched by this user's password change", async () => {
@@ -364,39 +440,67 @@ describe('a password change ends the texted reset code outstanding before it', (
   }, 60_000);
 });
 
-describe('with a secondaryStorage cache, an ended link answers what a link never issued answers', () => {
-  it('at the landing and at the reset door, the cache read first', async () => {
-    const cache = new Map<string, string>();
-    const s = await stage({
-      // The embedded OAuth provider refuses a cache-held session store; it is
-      // not what this case is about.
-      plugins: { oidcProvider: false },
-      secondaryStorage: {
-        get: async (key: string) => cache.get(key) ?? null,
-        set: async (key: string, value: string) => {
-          cache.set(key, value);
-        },
-        delete: async (key: string) => {
-          cache.delete(key);
-        },
-        increment: async (key: string) => {
-          const next = Number(cache.get(key) ?? 0) + 1;
-          cache.set(key, String(next));
-          return next;
-        },
-      },
-    });
+describe('with a secondaryStorage cache, an ended token answers what a token never issued answers', () => {
+  // The embedded OAuth provider refuses a cache-held session store; it is not
+  // what these cases are about.
+  const cachedStage = (extra: Record<string, unknown> = {}) => {
+    const storage = cacheStorage();
+    return stage({ ...extra, plugins: { oidcProvider: false, ...((extra.plugins as Record<string, unknown>) ?? {}) }, secondaryStorage: storage.secondaryStorage })
+      .then((s) => ({ ...s, cache: storage.cache }));
+  };
+
+  it('a link: at the landing and at the reset door, the cache read first', async () => {
+    const s = await cachedStage();
     const unknown = await neverIssued(s);
     const earlier = await s.requestLink();
-    expect(cache.has(`verification:reset-password:${earlier}`), 'the link is cached as it is issued').toBe(true);
+    expect(s.cache.has(`verification:reset-password:${earlier}`), 'the link is cached as it is issued').toBe(true);
     const { bearer } = await s.signIn(EMAIL, FIRST);
 
     const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, bearer);
     expect(changed.status, await changed.clone().text()).toBe(200);
 
-    expect(cache.has(`verification:reset-password:${earlier}`)).toBe(false);
+    expect(s.cache.has(`verification:reset-password:${earlier}`)).toBe(false);
     expect(await s.landing(earlier)).toBe(unknown.landing);
     expect(await s.reset(earlier, THIRD)).toEqual(unknown.reset);
+  }, 60_000);
+
+  it('a texted code: its cached copy is ended with it', async () => {
+    const s = await cachedStage({ plugins: { phoneNumber: true }, phoneOtp: { cooldownSeconds: 0 } });
+    await s.engine.update('sys_user', { id: s.userId, phone_number: PHONE, phone_number_verified: true }, SYS);
+    const resetByCode = async (otp: string) =>
+      answer(await s.fire('/phone-number/reset-password', { phoneNumber: PHONE, otp, newPassword: THIRD }));
+    const neverSent = await resetByCode('000000');
+    const earlier = await s.requestCode();
+    expect(s.cache.has(`verification:${PHONE}-request-password-reset`), 'the code is cached as it is sent').toBe(true);
+    const { bearer } = await s.signIn(EMAIL, FIRST);
+
+    const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, bearer);
+    expect(changed.status, await changed.clone().text()).toBe(200);
+
+    expect(s.cache.has(`verification:${PHONE}-request-password-reset`)).toBe(false);
+    expect(await resetByCode(earlier)).toEqual(neverSent);
+  }, 60_000);
+
+  it("a password write whose links' cached copies cannot be named does not land", async () => {
+    const s = await cachedStage();
+    const earlier = await s.requestLink();
+    const { bearer } = await s.signIn(EMAIL, FIRST);
+
+    const engine = s.engine as unknown as {
+      resolveInternalField(object: string, ids: readonly string[], field: string): Promise<Map<string, unknown>>;
+    };
+    const resolve = engine.resolveInternalField.bind(engine);
+    const unnamed = vi.spyOn(engine, 'resolveInternalField').mockImplementation(async (object, ids, field) =>
+      object === 'sys_verification' && field === 'identifier' ? new Map() : resolve(object, ids, field),
+    );
+    const changed = await s.fire('/change-password', { currentPassword: FIRST, newPassword: SECOND }, bearer);
+    expect(changed.status).toBeGreaterThanOrEqual(400);
+    unnamed.mockRestore();
+
+    expect((await s.signIn(EMAIL, FIRST)).status).toBe(200);
+    expect((await s.signIn(EMAIL, SECOND)).status).not.toBe(200);
+    expect(s.cache.has(`verification:reset-password:${earlier}`)).toBe(true);
+    expect(await s.reset(earlier, THIRD)).toEqual({ status: 200 });
   }, 60_000);
 });
 
@@ -419,4 +523,36 @@ describe('a password write whose reset tokens cannot be ended does not land', ()
     expect((await s.signIn(EMAIL, SECOND)).status).not.toBe(200);
     expect(await s.reset(earlier, THIRD)).toEqual({ status: 200 });
   }, 60_000);
+});
+
+describe('the reset tokens are found only where identifiers are stored as issued', () => {
+  it('the composed verification store carries no identifier-storage setting, with or without a cache', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    for (const extra of [{}, { plugins: { oidcProvider: false }, secondaryStorage: cacheStorage().secondaryStorage }]) {
+      const engine = await engines.take();
+      const manager = new AuthManager({ secret: SECRET, baseUrl: ORIGIN, dataEngine: engine as never, ...extra } as never);
+      const auth = (await manager.getAuthInstance()) as unknown as { options: { verification?: Record<string, unknown> } };
+      const verification = auth.options.verification ?? {};
+      // A closed set: a key added here is a decision this rule's matching must be re-read against.
+      expect(Object.keys(verification).sort()).toEqual(
+        'secondaryStorage' in extra ? ['fields', 'modelName', 'storeInDatabase'] : ['fields', 'modelName'],
+      );
+      expect(verification.storeIdentifier).toBeUndefined();
+    }
+  });
+
+  it('a password write under an identifier-storage setting other than plain is refused before any read', async () => {
+    const untouched = {} as never;
+    for (const identifierStorage of ['hashed', { default: 'hashed' }, { default: 'plain', overrides: { 'reset-password:': 'hashed' } }]) {
+      await expect(
+        endResetTokensOnCredentialWrite(untouched, 'sys_account', { password: 'h' }, [{ user_id: 'u1' }], { identifierStorage }),
+      ).rejects.toThrow(RESET_TOKEN_IDENTIFIER_REFUSAL);
+    }
+  });
+
+  it('a password write whose target names no user is refused before any read', async () => {
+    await expect(
+      endResetTokensOnCredentialWrite({} as never, 'sys_account', { password: 'h' }, [{ id: 'acc_1' }]),
+    ).rejects.toThrow(/names no user/);
+  });
 });

@@ -889,14 +889,18 @@ export function createObjectQLAdapterFactory(
   // the callback directly, and a driver without `beginTransaction` follows
   // the engine's ADR-0119 D1 warn-once degrade.
   let wrappedAdapter: unknown = null;
-  // The host's `secondaryStorage`, read off the options better-auth builds
-  // this adapter with (below): a credential write ends the reset tokens'
-  // cache entries with their rows (`credential-change-ends-reset-tokens.ts`).
+  // The host's `secondaryStorage` and the verification store's identifier
+  // setting, read off the options better-auth builds this adapter with
+  // (below): a credential write ends the reset tokens' cache entries with
+  // their rows, and is refused where identifiers are not kept plain
+  // (`credential-change-ends-reset-tokens.ts`).
   let resetTokenCache: ResetTokenCache | undefined;
+  let resetTokenIdentifierStorage: unknown;
   const endResetTokens = (objectName: string, payload: unknown, targets: readonly unknown[]) =>
     endResetTokensOnCredentialWrite(dataEngine as never, objectName, payload, targets, {
       cache: resetTokenCache,
       internalFieldEngine,
+      identifierStorage: resetTokenIdentifierStorage,
     });
   const engineWithTx = rawDataEngine as unknown as {
     transaction?<T>(
@@ -1310,8 +1314,10 @@ export function createObjectQLAdapterFactory(
   return (options: Parameters<typeof factory>[0]) => {
     const adapter = readEverySsoProviderRowWhenUnbounded(factory(options));
     wrappedAdapter = adapter;
-    const cache = (options as { secondaryStorage?: unknown } | undefined)?.secondaryStorage as ResetTokenCache | undefined;
-    resetTokenCache = cache && typeof cache.delete === 'function' ? cache : undefined;
+    const built = options as { secondaryStorage?: unknown; verification?: { storeIdentifier?: unknown } } | undefined;
+    const cache = built?.secondaryStorage as ResetTokenCache | undefined;
+    resetTokenCache = cache ?? undefined;
+    resetTokenIdentifierStorage = built?.verification?.storeIdentifier;
     return adapter;
   };
 }
@@ -1411,10 +1417,19 @@ function readEverySsoProviderRowWhenUnbounded<A extends {
  */
 export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
   const dataEngine = withSystemContext(rawDataEngine);
+  // A password write ends the account holder's other reset tokens before it
+  // lands, as the factory's does; this adapter is handed no secondary storage
+  // (`credential-change-ends-reset-tokens.ts`).
+  const endResetTokens = (objectName: string, payload: unknown, targets: readonly unknown[]) =>
+    endResetTokensOnCredentialWrite(dataEngine as never, objectName, payload, targets, {
+      internalFieldEngine: rawDataEngine as unknown as InternalFieldResolvingEngine,
+    });
   return {
     create: async <T extends Record<string, any>>({ model, data, select: _select }: { model: string; data: T; select?: string[] }): Promise<T> => {
       const objectName = resolveProtocolName(model);
-      const result = await dataEngine.insert(objectName, normaliseIdentifierWrite(model, data));
+      const payload = normaliseIdentifierWrite(model, data);
+      await endResetTokens(objectName, payload, [payload]);
+      const result = await dataEngine.insert(objectName, payload);
       return result as T;
     },
 
@@ -1444,8 +1459,10 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
       const filter = convertWhere(model, where);
       const record = await dataEngine.findOne(objectName, { where: filter });
       if (!record) return null;
+      const patch = normaliseIdentifierWrite(model, update);
+      await endResetTokens(objectName, patch, [record]);
       const result = await dataEngine.update(objectName, {
-        ...normaliseIdentifierWrite(model, update),
+        ...patch,
         id: record.id,
       });
       return result ? result as T : null;
@@ -1456,6 +1473,7 @@ export function createObjectQLAdapter(rawDataEngine: IDataEngine) {
       const filter = convertWhere(model, where);
       const records = await dataEngine.find(objectName, { where: filter });
       const patch = normaliseIdentifierWrite(model, update);
+      await endResetTokens(objectName, patch, records);
       for (const record of records) {
         await dataEngine.update(objectName, { ...patch, id: record.id });
       }
