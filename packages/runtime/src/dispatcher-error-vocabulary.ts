@@ -597,7 +597,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             "`invitation-accept-verified-email.test.ts` pins it equal to the vendor's own entry so a " +
             "vendor rename turns the pin red rather than minting a local code. Raised " +
             "`APIError.from('FORBIDDEN', …)` from the vendor's `beforeAcceptInvitation` hook inside the " +
-            "accept endpoint (#34272), so it leaves as the vendor's own `Response` on the vendor's wire " +
+            "accept endpoint, so it leaves as the vendor's own `Response` on the vendor's wire " +
             'and never as a throw this repo classifies.',
     },
 
