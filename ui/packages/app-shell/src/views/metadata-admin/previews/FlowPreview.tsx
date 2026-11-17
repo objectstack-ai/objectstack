@@ -21,6 +21,7 @@
  */
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import {
   AlertCircle,
@@ -34,7 +35,6 @@ import {
   Variable,
   Zap,
 } from 'lucide-react';
-import { EmptyDescription } from '@object-ui/components';
 import type { MetadataPreviewProps, MetadataSelection } from '../preview-registry.js';
 import { PreviewShell, PreviewMessage, PreviewErrorBoundary } from './PreviewShell.js';
 import { appendArray } from '../inspectors/_shared.js';
@@ -47,6 +47,7 @@ import { edgeKey, type FlowDesignerEdge, type FlowDesignerNode } from './flow-ca
 import { NESTED_NODE_KIND, parseNestedNodeId, encodeNestedNodeId, locateFlowNode } from '../inspectors/flow-nested-selection.js';
 import { FlowSimulatorPanel } from './FlowSimulatorPanel.js';
 import { FlowRunsPanel } from './FlowRunsPanel.js';
+import { FlowVariablesPanel } from './FlowVariablesPanel.js';
 import { ProblemsPanel } from './ProblemsPanel.js';
 import {
   FlowRegistrationContext,
@@ -110,6 +111,19 @@ export interface FlowPreviewChrome {
    * state setter (whose identity React keeps), never a fresh closure.
    */
   onProblemsChange: (tally: FlowProblemTally) => void;
+  /**
+   * objectstack#34818 — whether the open flow has a published version, as the
+   * host read it; the Runs body says "publish to see runs" for `false` and
+   * names the engine alone for `true`. Absent: the host does not know.
+   */
+  published?: boolean;
+  /**
+   * objectstack#34818 — where the Debug section's simulator goes when the host
+   * keeps its right column elsewhere (Studio's right slot): the simulator is
+   * drawn there, in the Configuration's place, and the section keeps the
+   * canvas alone. Absent or `null`: the simulator sits beside the canvas.
+   */
+  debugTarget?: HTMLElement | null;
 }
 
 const FlowPreviewChromeContext = React.createContext<FlowPreviewChrome | null>(null);
@@ -578,28 +592,44 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
     // objectui#12454 — the host's item header holds the meta and the tab row,
     // so the preview draws neither, and no frame: the section fills the body.
     const section = chrome.section;
+    const debugTarget = chrome.debugTarget ?? null;
     const panelBody = section === 'variables' || section === 'runs' || section === 'problems';
     return (
       <PreviewErrorBoundary fallbackHint={tr('engine.flowPreview.malformed', locale)}>
         <div
           data-testid="flow-preview-section"
           data-section={section}
-          className={'grid h-full min-h-0 gap-0 ' + (section === 'debug' ? 'lg:grid-cols-[1fr_240px]' : 'grid-cols-1')}
+          className={'grid h-full min-h-0 gap-0 ' + (section === 'debug' && !debugTarget ? 'lg:grid-cols-[1fr_300px]' : 'grid-cols-1')}
         >
           {/* Kept mounted under a body section, so its pan, zoom and opened
               regions are where the author left them when the canvas returns. */}
           <div className={panelBody ? 'hidden' : 'flex min-h-0 min-w-0 flex-col'}>
             <div className="min-h-0 flex-1">{canvasEl}</div>
           </div>
-          {section === 'debug' && (
-            <div className="border-l bg-muted/20">
-              <FlowSimulatorPanel nodes={nodes} edges={edges} variables={variables} locale={locale} onRunStateChange={setRunHL} />
-            </div>
-          )}
+          {section === 'debug' &&
+            (debugTarget ? (
+              createPortal(
+                <div className="flex min-h-0 w-full flex-1 flex-col bg-muted/20" data-testid="flow-debug-in-slot">
+                  <FlowSimulatorPanel nodes={nodes} edges={edges} variables={variables} locale={locale} onRunStateChange={setRunHL} />
+                </div>,
+                debugTarget,
+              )
+            ) : (
+              <div className="border-l bg-muted/20">
+                <FlowSimulatorPanel nodes={nodes} edges={edges} variables={variables} locale={locale} onRunStateChange={setRunHL} />
+              </div>
+            ))}
           {section === 'variables' && (
             <div className="min-h-0 overflow-auto">
               <div className="mx-auto max-w-3xl space-y-2 px-6 py-5 text-xs">
-                <FlowVariablesList variables={variables} locale={locale} />
+                <FlowVariablesPanel
+                  variables={variables}
+                  nodes={nodes}
+                  edges={edges}
+                  flowText={[d.successMessage, d.errorMessage]}
+                  onPatch={canEdit ? onPatch : undefined}
+                  locale={locale}
+                />
               </div>
             </div>
           )}
@@ -607,7 +637,7 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
             <div className="min-h-0 overflow-hidden">
               <div className="mx-auto h-full max-w-3xl px-3 py-2">
                 {/* The engine keys runs by the flow's name; the host offers this section only with one. */}
-                {flowName && <FlowRunsPanel flowName={flowName} nodes={nodes} locale={locale} />}
+                {flowName && <FlowRunsPanel flowName={flowName} nodes={nodes} locale={locale} published={chrome.published} />}
               </div>
             </div>
           )}
@@ -749,7 +779,14 @@ export function FlowPreview({ draft, editing, selection, onSelectionChange, onPa
               <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
                 <Variable className="h-3 w-3" /> {tr('engine.flowPreview.variables', locale)}
               </div>
-              <FlowVariablesList variables={variables} locale={locale} />
+              <FlowVariablesPanel
+                variables={variables}
+                nodes={nodes}
+                edges={edges}
+                flowText={[d.successMessage, d.errorMessage]}
+                onPatch={canEdit ? onPatch : undefined}
+                locale={locale}
+              />
             </div>
           ) : null}
         </div>
@@ -820,40 +857,3 @@ function useCutText(ref: React.RefObject<HTMLElement | null>, enabled: boolean):
   return cut;
 }
 
-/** The flow's declared variables: the designer's side panel, and the Studio's Variables body (objectui#12454). */
-function FlowVariablesList({ variables, locale }: { variables: FlowVariable[]; locale?: string }) {
-  if (variables.length === 0) {
-    return <EmptyDescription className="text-xs italic">{tr('engine.flowPreview.noVars', locale)}</EmptyDescription>;
-  }
-  return (
-    <ul className="space-y-1.5">
-      {variables.map((v, i) => (
-        <li key={v.name || i} className="rounded border bg-background p-1.5">
-          <div className="flex items-baseline gap-1 flex-wrap">
-            <span className="font-mono">{v.name}</span>
-            {v.type && (
-              <span className="text-[10px] uppercase text-muted-foreground">
-                {v.type}
-              </span>
-            )}
-            {v.isInput && (
-              <span className="text-[9px] font-semibold uppercase px-1 rounded bg-sky-100 text-sky-700">
-                {tr('engine.flowPreview.varIn', locale)}
-              </span>
-            )}
-            {v.isOutput && (
-              <span className="text-[9px] font-semibold uppercase px-1 rounded bg-emerald-100 text-emerald-700">
-                {tr('engine.flowPreview.varOut', locale)}
-              </span>
-            )}
-          </div>
-          {v.defaultValue !== undefined && (
-            <div className="text-[10px] text-muted-foreground font-mono truncate">
-              = {String(v.defaultValue)}
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
