@@ -27,10 +27,28 @@
  * publish sentence. Every other failure (a 403, a 500, a refused `findOne`)
  * reaches the list unchanged, and outside the preview it is never installed,
  * so a missing object on the live console is still an error.
+ *
+ * objectstack#34807 (ruling 6946403206) — a list column on a field that exists
+ * only in the draft. The data door validates every `$select`, `$filter` and
+ * `$orderby` name against the PUBLISHED object, so a draft-only column refused
+ * the whole list query (`400 INVALID_FIELD`), and the list read its object
+ * definition from the adapter's published `getObjectSchema`, which does not
+ * know the field at all. Given the provider's overlay read, this wrapper's
+ * `getObjectSchema` answers {@link readDraftPreviewObjectSchema}: the
+ * published document plus each draft-only field with its draft label, marked
+ * `_draftOnly` (the form half's convention, `utils/previewFormDataSource.ts`),
+ * with the published sortability projection kept. `@object-ui/plugin-list`
+ * reads the marker and keeps those names out of every data request, drawing
+ * the column empty under its draft label. The data contract is unchanged:
+ * data reads never see a draft schema.
  */
 
+import { useMemo, useRef } from 'react';
 import { answeredLoadFailure } from '@object-ui/react';
 import type { DataSource } from '@object-ui/types';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { readDraftPreviewObjectSchema } from '../utils/previewFormDataSource.js';
+import { usePreviewDrafts } from './PreviewModeContext.js';
 
 /** The data engine's answer for an object it has not registered. */
 export const UNPUBLISHED_OBJECT_CODE = 'OBJECT_NOT_FOUND';
@@ -44,12 +62,19 @@ export function isUnpublishedObjectRefusal(err: unknown): boolean {
  * `ds`, except that a `find` the data engine refuses with
  * {@link UNPUBLISHED_OBJECT_CODE} answers an empty page and reports the
  * object through `onUnpublished`, so the caller can say why the list is empty.
- * Every other member is the source's own, bound to it.
+ * Given `readOverlay` (the draft overlay's read of one object document),
+ * `getObjectSchema` answers {@link readDraftPreviewObjectSchema} over the
+ * source's own published read. Every other member is the source's own, bound
+ * to it.
  */
 export function withUnpublishedObjectReads(
   ds: DataSource,
   onUnpublished: (objectName: string) => void,
+  readOverlay?: (objectName: string) => Promise<unknown>,
 ): DataSource {
+  const getObjectSchema = readOverlay && typeof ds.getObjectSchema === 'function'
+    ? (objectName: string) => readDraftPreviewObjectSchema(ds, readOverlay, objectName)
+    : undefined;
   return new Proxy(ds, {
     get(target, prop, receiver) {
       if (prop === 'find') {
@@ -63,8 +88,44 @@ export function withUnpublishedObjectReads(
           }
         };
       }
+      if (prop === 'getObjectSchema' && getObjectSchema) return getObjectSchema;
       const value = Reflect.get(target, prop, receiver);
       return typeof value === 'function' ? value.bind(target) : value;
     },
   });
+}
+
+const IGNORE_UNPUBLISHED = (): void => {};
+
+/**
+ * The data source a list page hands `ListView`: `ds` itself outside draft
+ * preview; inside it, {@link withUnpublishedObjectReads} over `ds`, reading
+ * draft-only fields through the provider's overlay (`useMetadata().getItem`,
+ * which reads through the preview client in preview).
+ *
+ * `revision` is the page's own draft-aware definition of the object (the
+ * provider's `objects` entry): a new one means the draft changed, and only
+ * then is a new wrapper made, so the list re-reads its definition when a
+ * field is drafted and otherwise keeps one data source identity. A page with
+ * no publish sentence of its own passes no `onUnpublished`.
+ */
+export function usePreviewListDataSource<T extends DataSource | null | undefined>(
+  ds: T,
+  revision?: unknown,
+  onUnpublished: (objectName: string) => void = IGNORE_UNPUBLISHED,
+): T {
+  const previewDrafts = usePreviewDrafts();
+  const { getItem } = useMetadata();
+  const unpublishedRef = useRef(onUnpublished);
+  unpublishedRef.current = onUnpublished;
+  return useMemo(() => {
+    if (!previewDrafts || !ds) return ds;
+    return withUnpublishedObjectReads(
+      ds,
+      (name) => unpublishedRef.current(name),
+      (name) => getItem('object', name),
+    ) as T;
+    // `revision` is read for its identity only: see the doc above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewDrafts, ds, getItem, revision]);
 }

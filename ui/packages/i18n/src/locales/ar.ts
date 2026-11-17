@@ -1043,6 +1043,7 @@ const ar = {
     removeGroup: "إزالة",
     groupingUnstoredNotice: "لا يمكن تجميع هذه القائمة حسب {{fields}}: تُحسب القيمة عند العرض ولا تُخزَّن. تُعرض القائمة دون هذا التجميع.",
     groupingUnstoredRemove: "إزالة من التجميع",
+    draftOnlyQueryDropped: "لم تتم التصفية أو الفرز حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى النشر.",
     inlineEditShort: "تحرير مضمّن",
     inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
   },
