@@ -1257,6 +1257,21 @@ function actsAsSubmitter(raw: { submitter_id?: unknown }, actorId: unknown): boo
 }
 
 /**
+ * [Maintainer ruling 2026-11-17, option B] Is request row `raw` the own
+ * request of `person` — the user the context vouches for
+ * ({@link recordedActor})? The one test behind `decideNode`'s refusal of an
+ * override approval and `viewer.can_override_approve`, so the door and the
+ * flag cannot disagree about whose request it is.
+ *
+ * A context that vouches for nobody (the SLA sweep, a bare system call) owns
+ * no request, and a request with no submitter is no one's own: both answer
+ * `false`, as {@link actsAsSubmitter} does.
+ */
+function overrideApprovesOwnRequest(raw: { submitter_id?: unknown }, person: string | null): boolean {
+  return person !== null && actsAsSubmitter(raw, person);
+}
+
+/**
  * Max hops when following an OOO delegation chain (#1322 M1): A out → B, B out
  * → C, … Bounds the walk so a mis-configured chain can't loop or resolve
  * unboundedly; a cycle or self-reference also stops it early.
@@ -2758,7 +2773,20 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     config: { excludeSubmitter?: unknown } | null | undefined,
     submitterId: unknown,
   ): Promise<string[]> {
-    if (config?.excludeSubmitter !== true || submitterId == null || String(submitterId) === '') return [];
+    if (config?.excludeSubmitter !== true) return [];
+    return this.submitterSlots(submitterId);
+  }
+
+  /**
+   * The slate slots the submitter `submitterId` acts under without naming one
+   * (`actingAddresses`: the user id and the account's email), or none for a
+   * request with no submitter. {@link excludedSubmitterSlots} reads it for a
+   * step that sets `excludeSubmitter: true`, and the reassign door reads it
+   * for a hand-off admitted only through the override
+   * ({@link assertReassignTargetIsNotSubmitter}).
+   */
+  private async submitterSlots(submitterId: unknown): Promise<string[]> {
+    if (submitterId == null || String(submitterId) === '') return [];
     const userId = String(submitterId);
     return actingAddresses({ userId, email: await this.callerAccountEmail(userId) });
   }
@@ -5693,6 +5721,22 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         + `reassign it to someone else.`,
       );
     }
+    // [Maintainer ruling 2026-11-17, option B] The #3424 override never
+    // approves a request its actor submitted, whatever `excludeSubmitter`
+    // says. It is judged on `viaOverride` — the actor was admitted ONLY by the
+    // override, holding no slot — so a submitter who holds a real slot is
+    // `excludeSubmitter`'s question above and is not touched here. A rejection
+    // approves nothing and stays theirs, as does a recall. Refused before any
+    // write, in the refusal shape of the `excludeSubmitter` check above.
+    // `attachViewers` computes `viewer.can_override_approve` from the same
+    // predicate, so the Approve control is not offered where this refuses.
+    if (input.decision === 'approve' && viaOverride && overrideApprovesOwnRequest(raw, decider)) {
+      throw new Error(
+        `FORBIDDEN: '${decider}' submitted this request and holds no slot on it, so they cannot approve it `
+        + `through the administrator override. An approver on the step decides it. To move it, reassign it `
+        + `to someone else, reject it, or recall it and send the record for approval again.`,
+      );
+    }
 
     // #3447 P2: decision outputs — validated BEFORE any write (audit included)
     // so an out-of-contract payload rejects atomically. The trust model is a
@@ -7312,7 +7356,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // AFTER the authorization branches above, so a caller who may not move
     // this slot learns nothing about the directory from the answer.
     await this.assertReassignTargetResolves(to, raw.organization_id ?? null);
-    await this.assertReassignTargetIsNotSubmitter(raw, to);
+    await this.assertReassignTargetIsNotSubmitter(raw, to, viaOverride);
     const now = this.clock.now().toISOString();
     // Audit first, then mutate — mirrors decideNode(), so a failed audit
     // write can never leave a moved slot without a trail.
@@ -7414,11 +7458,20 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * submitter can take, and `decideNode` refuses their approval, so the
    * request would wait on a slot no one can approve. Asked after the
    * authorization branches, like {@link assertReassignTargetResolves}.
+   *
+   * [Maintainer ruling 2026-11-17, option B] The same target is refused for a
+   * reassign admitted ONLY through the #3424 override (`viaOverride`: the
+   * actor holds no slot), whatever `excludeSubmitter` says. The override
+   * never approves a request its actor submitted (`decideNode`), and it never
+   * hands the request's slot to its submitter either, which would make them
+   * an ordinary approver of their own request. A slot holder's own hand-off
+   * is judged by `excludeSubmitter` alone, as before.
    */
-  private async assertReassignTargetIsNotSubmitter(raw: any, to: string): Promise<void> {
-    const submitterSlots = await this.excludedSubmitterSlots(
-      parseJson<{ excludeSubmitter?: unknown } | null>(raw.node_config_json, null), raw.submitter_id,
-    );
+  private async assertReassignTargetIsNotSubmitter(raw: any, to: string, viaOverride: boolean): Promise<void> {
+    const excludes = parseJson<{ excludeSubmitter?: unknown } | null>(raw.node_config_json, null)
+      ?.excludeSubmitter === true;
+    if (!excludes && !viaOverride) return;
+    const submitterSlots = await this.submitterSlots(raw.submitter_id);
     if (!submitterSlots.length) return;
     const position = addressedPosition(to);
     const handsBack = position !== undefined
@@ -7426,11 +7479,20 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         .every((holder) => submitterSlots.includes(holder))
       : submitterSlots.includes(to);
     if (!handsBack) return;
+    const named = position !== undefined
+      ? `the only holder of position '${position}' in this request's organization is`
+      : 'it names';
+    if (excludes) {
+      throw new Error(
+        `VALIDATION_FAILED: cannot reassign to '${to}' — ${named} the request's submitter, and this approval `
+        + `step sets excludeSubmitter, so the submitter cannot approve it. The request and its approvers are `
+        + `unchanged. Reassign to someone else.`,
+      );
+    }
     throw new Error(
-      `VALIDATION_FAILED: cannot reassign to '${to}' — ${position !== undefined
-        ? `the only holder of position '${position}' in this request's organization is`
-        : 'it names'} the request's submitter, and this approval step sets excludeSubmitter, so the submitter `
-      + `cannot approve it. The request and its approvers are unchanged. Reassign to someone else.`,
+      `VALIDATION_FAILED: cannot reassign to '${to}' — ${named} the request's submitter, and a reassign made `
+      + `through the administrator override never hands a request to the person who submitted it. The request `
+      + `and its approvers are unchanged. Reassign to someone else.`,
     );
   }
 
@@ -10710,6 +10772,14 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * even when they hold no slot. System/tokenless contexts get a both-false
    * `can_act`/`is_submitter` block (system gets `can_override` too — it may act
    * on anything). Cheap + synchronous — safe on list reads.
+   *
+   * [Maintainer ruling 2026-11-17, option B] `can_override_approve` is
+   * `can_override` minus the one decision the override does not grant: an
+   * approval of a request the viewer submitted ({@link overrideApprovesOwnRequest},
+   * the predicate `decideNode` refuses by). The Approve action ORs it in where
+   * reject / reassign / recall OR in `can_override`, so the Approve control is
+   * not offered where the server would refuse it. `can_override` itself is
+   * unchanged: the field is added beside it, never in place of it.
    */
   private attachViewers(
     rows: ApprovalRequestRow[],
@@ -10717,13 +10787,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     caller: ActingCaller | null,
   ): void {
     const uid = context?.userId != null ? String(context.userId) : null;
+    const person = recordedActor(context);
     for (const row of rows) {
       const pending = row.pending_approvers ?? [];
+      const canOverride = row.status === 'pending'
+        && this.isOverrideActor(context, (row as any).organization_id ?? null, pending);
       (row as any).viewer = {
         can_act: row.status === 'pending' && !!caller && heldSlot(pending, caller.userId, caller) !== undefined,
         is_submitter: !!uid && row.submitter_id != null && String(row.submitter_id) === uid,
-        can_override: row.status === 'pending'
-          && this.isOverrideActor(context, (row as any).organization_id ?? null, pending),
+        can_override: canOverride,
+        can_override_approve: canOverride && !overrideApprovesOwnRequest(row, person),
       };
     }
   }
