@@ -102,6 +102,7 @@ import type { HttpProtocolContext } from './http-dispatcher.js';
 import { addressedUnknownNameRefusal, refusalOfThrown, refuseDispatchToDisabledObject, runResolvedAction, type ActionRefusal } from './action-dispatch.js';
 import { admittingCredentialKind, type AdmittingCredentialKind } from './security/admitting-credential.js';
 import {
+    ENVIRONMENT_ACTION_COORDINATE,
     GLOBAL_ACTION_OBJECT_KEY,
     actionHandlerObjectKeys,
     actionHolderCoordinate,
@@ -6094,6 +6095,107 @@ export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
         if (switchedOff) return switchedOff;
     }
     return undefined;
+}
+
+
+/**
+ * What {@link environmentItemDispatchCoordinate} answers: the package
+ * coordinate the script dispatch names (`packageId` absent: none, the call
+ * that names no package), or the metadata plane failing to answer.
+ */
+export type EnvironmentItemDispatch =
+    | { packageId?: string }
+    | { degraded: true; reason: string };
+
+/**
+ * The script dispatch of a declaration through the engine registry: the
+ * handler ENTRY it reaches (`OBJECT:KEY`, the rotation of
+ * {@link executeRegisteredAction}) in one snapshot of
+ * `listRegisteredActions(options)`, with the owner label and the package
+ * coordinate the engine reports for it. `undefined` when the engine cannot
+ * enumerate its handlers or the dispatch reaches nothing.
+ */
+function reachedHandlerRow(
+    ql: any,
+    objectName: string,
+    candidates: string[],
+    options?: { packageId: string },
+): { entry: string; package?: string; coordinate?: string } | undefined {
+    if (!ql || typeof ql.listRegisteredActions !== 'function') return undefined;
+    const rows = new Map<string, { package?: string; coordinate?: string }>();
+    const listing = (options === undefined ? ql.listRegisteredActions() : ql.listRegisteredActions(options)) as
+        Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }> | undefined;
+    for (const row of listing ?? []) {
+        rows.set(`${row.objectName}:${row.actionName}`, { package: row.package, coordinate: row.coordinate });
+    }
+    const entry = reachedHandlerEntry(new Set(rows.keys()), objectName, candidates);
+    return entry === undefined ? undefined : { entry, ...rows.get(entry) };
+}
+
+/**
+ * [ADR-0150 D4] Does a dispatch naming the environment's coordinate run a
+ * handler in the environment's OWN slot ({@link ENVIRONMENT_ACTION_COORDINATE})?
+ * `false` when it would run host code's or a plugin's handler there instead,
+ * or nothing. Synchronous, so a door asks it immediately before it dispatches,
+ * with no turn of the event loop between the answer and the run.
+ */
+export function environmentSlotRunsOwnHandler(ql: any, objectName: string, candidates: string[]): boolean {
+    const reached = reachedHandlerRow(ql, objectName, candidates, { packageId: ENVIRONMENT_ACTION_COORDINATE });
+    return reached !== undefined && reached.coordinate === ENVIRONMENT_ACTION_COORDINATE;
+}
+
+/**
+ * [ADR-0150 D4] The coordinate the script dispatch of a declaration that
+ * names no package runs its handler at, so the declaration a door gated on
+ * and the handler it runs are ONE item's.
+ *
+ * Two package-less items can hold a handler under one `OBJECT:NAME` key: the
+ * environment's own item, whose handler the authored-action resync binds in
+ * the environment's slot, and the platform's (host code or a plugin), whose
+ * handler sits in its own. The registry keeps one package-less item per owner
+ * key, and the dispatch follows that item. When the declaration is the
+ * environment's own item — a
+ * package-less row the environment's store holds under its owner key and name
+ * ({@link environmentStoredActionNames}, the test the route's own holder
+ * census applies) — and the environment's slot holds the handler the
+ * dispatch reaches, the dispatch names the environment's coordinate,
+ * whichever owner registered last. A platform item, an item a package
+ * declares, and an item whose handler the environment's slot does not hold
+ * are dispatched as before.
+ *
+ * The store is read only in the one composition that can change the answer:
+ * the environment's slot holds the reached key while the unqualified slot
+ * holds another owner's handler there. A store read that throws is the
+ * metadata plane failing to answer (ADR-0110 D3): `degraded`, which the door
+ * refuses rather than run a handler it cannot attribute. An engine that
+ * registers no metadata store holds no environment row.
+ */
+export async function environmentItemDispatchCoordinate(
+    ql: any,
+    args: { action: any; objectName: string; candidates: string[]; obj?: any },
+): Promise<EnvironmentItemDispatch> {
+    const { action, objectName, candidates, obj } = args;
+    if (!dispatchesThroughHandlerRegistry(action)) return {};
+    const declaredPackage = actionDeclaringPackage(action, obj);
+    if (declaredPackage !== undefined && declaredPackage !== 'sys_metadata') return {};
+    const unqualified = reachedHandlerRow(ql, objectName, candidates);
+    if (unqualified === undefined || unqualified.package === PLANE_AUTHORED_HANDLER_PACKAGE) return {};
+    const own = reachedHandlerRow(ql, objectName, candidates, { packageId: ENVIRONMENT_ACTION_COORDINATE });
+    if (own?.entry !== unqualified.entry || own.coordinate !== ENVIRONMENT_ACTION_COORDINATE) return {};
+    const store = environmentStoredActionNames(ql);
+    if (store === undefined) return {};
+    let stored: { actions: ReadonlySet<string>; embedded: ReadonlySet<string> };
+    try {
+        stored = await store();
+    } catch (err: any) {
+        if (listingNotServed(err)) return {};
+        return { degraded: true, reason: err?.message ?? String(err) };
+    }
+    const embedded = Array.isArray(obj?.actions) && obj.actions.includes(action);
+    const environmentOwn = embedded
+        ? stored.embedded.has(`${objectName}:${action?.name}`)
+        : stored.actions.has(`${standaloneActionOwnerKey(action)}:${action?.name}`);
+    return environmentOwn ? { packageId: ENVIRONMENT_ACTION_COORDINATE } : {};
 }
 
 

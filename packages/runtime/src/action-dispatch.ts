@@ -318,6 +318,15 @@ interface Admission {
     subject: actionExec.ActionSubjectRecordLoad;
     /** [#33690] The call is handed to the person, never dispatched ({@link ResolvedActionCall.confirmationHandOff}). */
     handOff: boolean;
+    /**
+     * [ADR-0150 D4] The package coordinate the script dispatch names, the one
+     * the owner gate judged: the declaration's own, or the environment's for
+     * the environment's own item (`actionExec.environmentItemDispatchCoordinate`).
+     * `undefined`: the call names no package.
+     */
+    dispatchPackageId?: string;
+    /** The coordinate is the environment's, chosen for the environment's own item: the dispatch runs that slot's handler or none. */
+    environmentItemDispatch: boolean;
 }
 
 /**
@@ -524,6 +533,28 @@ async function admitResolvedAction(
         return refuse({ message: activationRefusal.message, status: activationRefusal.status, details: { code: activationRefusal.code } });
     }
 
+    // [ADR-0150 D4] The coordinate the script dispatch names, so the handler it
+    // runs is the declared item's: the resolved declaration's package, else —
+    // for the environment's own item whose handler the environment's slot
+    // holds — the environment's coordinate. Asked after D4 and the activation
+    // consult (it may read the store), before the owner gate, which judges
+    // the handler this dispatch runs.
+    const candidates = actionExec.resolveActionHandlerKeys(actionDef, actionName);
+    const coordinate: actionExec.EnvironmentItemDispatch = declaration.packageId !== undefined
+        ? { packageId: declaration.packageId }
+        : await actionExec.environmentItemDispatchCoordinate(ql, { action: actionDef, objectName, candidates, obj: actionSchema });
+    if ('degraded' in coordinate) {
+        return refuse({
+            message:
+                `Cannot verify which declared action owns the handler that action '${actionName}' on '${objectName}' ` +
+                `dispatches to — the metadata plane is unavailable (${coordinate.reason}). ` +
+                'Refusing rather than running it ungated.',
+            status: 503,
+            details: { code: standardErrorCodeForHttpStatus(503) },
+        });
+    }
+    const dispatchPackageId = coordinate.packageId;
+
     // The handler the dispatch reaches may be one a DIFFERENT declared action
     // owns: that owner's gates apply too. The candidates are the ones the
     // script arm hands `executeRegisteredAction`.
@@ -531,11 +562,11 @@ async function admitResolvedAction(
         ql,
         action: actionDef,
         objectName,
-        candidates: actionExec.resolveActionHandlerKeys(actionDef, actionName),
+        candidates,
         ec: wiring.ec,
         envId: wiring.envId,
         obj: actionSchema,
-        ...(declaration.packageId !== undefined ? { packageId: declaration.packageId } : {}),
+        ...(dispatchPackageId !== undefined ? { packageId: dispatchPackageId } : {}),
     });
     if (ownerRefusal) {
         return refuse({ message: ownerRefusal.message, status: ownerRefusal.status, details: { code: ownerRefusal.code } });
@@ -626,7 +657,11 @@ async function admitResolvedAction(
     // CALLER's own scope delivered the row (commit f19475c0a).
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
         wiring.callData('get', { object: objectName, id: recordId }, wiring.driver, wiring.envId, wiring.ec));
-    return { actionDef, actionType, recordId, params, subject, handOff };
+    return {
+        actionDef, actionType, recordId, params, subject, handOff,
+        ...(dispatchPackageId !== undefined ? { dispatchPackageId } : {}),
+        environmentItemDispatch: declaration.packageId === undefined && dispatchPackageId !== undefined,
+    };
 }
 
 /**
@@ -761,20 +796,23 @@ async function dispatchAdmittedAction(
         };
         // [ADR-0110 D2] "resolve, then address": the handler KEY is derived from
         // the resolved declaration; [ADR-0150 D4] the resolved holder's package
-        // picks its own handler.
-        const dispatch = await actionExec.executeRegisteredAction(
-            deps, ql, objectName,
-            actionExec.resolveActionHandlerKeys(actionDef, actionName),
-            actionContext,
-            call.declaration.packageId,
-        );
-        if (!dispatch.dispatched) {
-            // No key carried a handler: a routing miss, not a server fault.
-            return {
-                kind: 'refused',
-                refusal: { message: `Action '${actionName}' on object '${objectName}' not found`, status: 404 },
-            };
+        // picks its own handler, and the environment's own item its own slot's.
+        const candidates = actionExec.resolveActionHandlerKeys(actionDef, actionName);
+        // No key carried a handler: a routing miss, not a server fault.
+        const notFound: ActionDispatchOutcome = {
+            kind: 'refused',
+            refusal: { message: `Action '${actionName}' on object '${objectName}' not found`, status: 404 },
+        };
+        // [ADR-0150 D4] The environment's own item runs the handler in the
+        // environment's slot, or none: asked with no await before the dispatch,
+        // so the handler that runs is the one this answer read.
+        if (admission.environmentItemDispatch && !actionExec.environmentSlotRunsOwnHandler(ql, objectName, candidates)) {
+            return notFound;
         }
+        const dispatch = await actionExec.executeRegisteredAction(
+            deps, ql, objectName, candidates, actionContext, admission.dispatchPackageId,
+        );
+        if (!dispatch.dispatched) return notFound;
         // [#11519] Doubled post-success navigation — observe LOUDLY, never
         // rewrite the wire.
         const doubled = actionExec.doubledPostSuccessNavigationWarning(deps, actionDef, dispatch.result, objectName);
