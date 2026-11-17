@@ -13,8 +13,8 @@
  * objectstack#34610 — the line publishes nothing: the screen's one Publish is
  * the shell's bar. The line points to it while the main area shows the draft,
  * offers to show the draft otherwise, and shows a receipt when a publish from
- * the bar lands. Its count is the package's `_drafts?package=` read, the
- * draft bar's scope.
+ * the bar lands. Its count is the app's drafts, the draft bar's scope: its
+ * package and its ADR-0146 customization pair, off the env-wide `_drafts`.
  */
 
 import React from 'react';
@@ -51,13 +51,36 @@ describe('PendingDraftsBar (objectui#5694, objectstack#34610)', () => {
     const { container, rerender } = render(<PendingDraftsBar packageId="app.k9qk" idle />);
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
-        '/api/v1/meta/_drafts?package=app.k9qk',
+        '/api/v1/meta/_drafts',
         expect.objectContaining({ credentials: 'include' }),
       ),
     );
     expect(q(container, 'pending-drafts-bar')).toBeNull();
     rerender(<PendingDraftsBar packageId={undefined} idle />);
     expect(q(container, 'pending-drafts-bar')).toBeNull();
+  });
+
+  it("counts the app's drafts: its package and its customization pair, never another app's", async () => {
+    draftRows = [
+      { type: 'object', name: 'task', packageId: 'app.k9qk' },
+      { type: 'view', name: 'task.all', packageId: 'app.k9qk.custom' },
+      { type: 'object', name: 'note', packageId: 'app.other' },
+      { type: 'flow', name: 'loose_flow', packageId: null },
+    ];
+    const { container } = render(<PendingDraftsBar packageId="app.k9qk" idle draftBarShown />);
+    await waitFor(() => expect(q(container, 'pending-drafts-bar')).toBeTruthy());
+    expect(q(container, 'pending-drafts-bar-sentence')?.textContent).toMatch(/^2 unpublished changes/);
+  });
+
+  it('bound to the pair, it counts the same app', async () => {
+    draftRows = [
+      { type: 'object', name: 'task', packageId: 'app.k9qk' },
+      { type: 'view', name: 'task.all', packageId: 'app.k9qk.custom' },
+      { type: 'object', name: 'note', packageId: 'app.other' },
+    ];
+    const { container } = render(<PendingDraftsBar packageId="app.k9qk.custom" idle draftBarShown />);
+    await waitFor(() => expect(q(container, 'pending-drafts-bar')).toBeTruthy());
+    expect(q(container, 'pending-drafts-bar-sentence')?.textContent).toMatch(/^2 unpublished changes/);
   });
 
   it('draws no Publish: while the main area shows the draft it points to the draft bar', async () => {
@@ -116,6 +139,11 @@ describe('PendingDraftsBar (objectui#5694, objectstack#34610)', () => {
     const { container } = render(<PendingDraftsBar packageId="app.k9qk" idle />);
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     act(() => emitPublishReceipt({ packageId: 'app.other' }));
+    expect(q(container, 'publish-receipt')).toBeNull();
+    // The app's own publish, named by its pair, is this conversation's.
+    act(() => emitPublishReceipt({ packageId: 'app.k9qk.custom' }));
+    expect(q(container, 'publish-receipt')).toBeTruthy();
+    fireEvent.click(q(container, 'publish-receipt-dismiss') as HTMLElement);
     expect(q(container, 'publish-receipt')).toBeNull();
     act(() => emitPublishReceipt({ packageId: null }));
     expect(q(container, 'publish-receipt')).toBeTruthy();

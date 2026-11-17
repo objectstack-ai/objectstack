@@ -15,8 +15,12 @@
  *
  * It can, because the admission reads nothing a driver or a kernel supplies:
  * `judgeFilter` runs the engine's `where` admission against the `where`, the
- * registry's field map and the context, and stops before any driver is
- * resolved. Measured on #20158: an `ObjectQL` constructed with no driver and no
+ * registry's field map and the context, and calls no driver. The one verdict
+ * that depends on the object's driver (a nested-relation condition on a read
+ * verb, refused up front on a driver that does not declare
+ * `DriverCapabilities.readableIdsLeaf`, #33876) is taken from that driver's
+ * declared capabilities, and an engine that routes the object to no driver, as
+ * this one does, leaves it unjudged. Measured on #20158: an `ObjectQL` constructed with no driver and no
  * kernel, the stack's objects registered through its own registry, answered
  * every class the runtime engine answers — including the registry-injected
  * system columns (`created_at` compared against an unreadable value is refused

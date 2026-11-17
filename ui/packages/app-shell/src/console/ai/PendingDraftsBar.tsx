@@ -38,7 +38,7 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, Eye, X } from 'lucide-react';
 import { Button } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { usePendingDrafts } from '../../preview/usePendingDrafts.js';
+import { appPackageOf, usePendingDrafts } from '../../preview/usePendingDrafts.js';
 import { subscribePublishReceipt } from '../../assistant/assistantBus.js';
 
 export interface PendingDraftsBarProps {
@@ -54,8 +54,10 @@ export interface PendingDraftsBarProps {
 
 export function PendingDraftsBar({ packageId, idle, draftBarShown = false, onShowDraft }: PendingDraftsBarProps) {
   const { t } = useObjectTranslation();
+  // The app's drafts, as the shell's draft bar counts them: its package and
+  // its customization pair (`appDraftPackages`), so the two numbers agree.
   const { count, refresh: refreshCount } = usePendingDrafts({
-    packageId,
+    appPackageId: packageId,
     enabled: Boolean(packageId),
   });
   // The package a landed publish covered, as its receipt; shown while it is
@@ -72,7 +74,7 @@ export function PendingDraftsBar({ packageId, idle, draftBarShown = false, onSho
   useEffect(() => {
     if (!packageId) return;
     return subscribePublishReceipt((r) => {
-      if (r.packageId === null || r.packageId === packageId) setReceiptFor(packageId);
+      if (r.packageId === null || appPackageOf(r.packageId) === appPackageOf(packageId)) setReceiptFor(packageId);
     });
   }, [packageId]);
   // New drafts after the publish supersede its receipt (adjusted while

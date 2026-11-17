@@ -146,9 +146,11 @@ export const ThreadedReplies: React.FC<ThreadedRepliesProps> = ({
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
+                {/* Wraps between pieces; the time never breaks inside
+                    (objectstack#34614), as on the entry it replies to. */}
+                <div className="flex flex-wrap items-center gap-x-1.5">
                   <span className="text-xs font-medium">{reply.actor}</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-[10px] text-muted-foreground whitespace-nowrap" data-feed-when="">
                     {formatTimestamp(reply.createdAt, t, displayLocale)}
                   </span>
                   {/* A reply edited by its author reads as edited, as a root

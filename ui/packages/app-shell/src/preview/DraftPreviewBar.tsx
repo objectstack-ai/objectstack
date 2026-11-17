@@ -21,13 +21,13 @@
  * the environment, as before.
  */
 
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Eye, X, Rocket, GitCompareArrows, Sparkles } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { usePreviewDrafts, markPreviewExit, PREVIEW_QUERY_FLAG } from './PreviewModeContext.js';
-import { usePendingDrafts } from './usePendingDrafts.js';
+import { appDraftPackages, usePendingDrafts } from './usePendingDrafts.js';
 import { usePublishAllDrafts } from './usePublishAllDrafts.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
@@ -71,9 +71,16 @@ export function DraftPreviewBar() {
   // pathname effect keeps the old "drafts staged while the preview is open"
   // trigger too.
   const { count: pendingCount, entries: pendingEntries, refresh: refreshPending } = usePendingDrafts({
-    packageId,
+    appPackageId: packageId,
     enabled: Boolean(preview),
   });
+  // The changes panel lists the same drafts: the app's package and its
+  // customization pair (`appDraftPackages`), off the env-wide list.
+  const inApp = useMemo(() => {
+    if (!packageId) return undefined;
+    const scope = appDraftPackages(packageId);
+    return (entry: { packageId: string | null }) => entry.packageId !== null && scope.includes(entry.packageId);
+  }, [packageId]);
   useEffect(() => {
     if (!preview) return;
     void refreshPending();
@@ -210,7 +217,7 @@ export function DraftPreviewBar() {
             </Button>
           </div>
           <Suspense fallback={null}>
-            <DraftChangesPanel open={changesOpen} onOpenChange={setChangesOpen} packageId={packageId} />
+            <DraftChangesPanel open={changesOpen} onOpenChange={setChangesOpen} include={inApp} />
           </Suspense>
         </>
       )}

@@ -132,3 +132,40 @@ describe('an entry refusal ends on what is wrong with the entry', () => {
     expect(message).not.toContain(GLOBS);
   });
 });
+
+describe('packages that depend on each other in a cycle are refused with CYCLIC_ARTIFACT_PACKAGES', () => {
+  const pkg = (id: string, dependencies?: Record<string, string>) => ({
+    manifest: { id, name: id, version: '1.0.0', type: 'module', ...(dependencies ? { dependencies } : {}) },
+  });
+
+  it('a two-package cycle answers 422 CYCLIC_ARTIFACT_PACKAGES, naming the cycle in the message and in `details.cycle`', () => {
+    const refused = refusalOf({
+      packages: [pkg('com.example.a', { 'com.example.b': '^1.0.0' }), pkg('com.example.b', { 'com.example.a': '^1.0.0' })],
+    });
+    expect(refused).toBeInstanceOf(Error);
+    expect(refused?.code).toBe('CYCLIC_ARTIFACT_PACKAGES');
+    expect(refused?.status).toBe(422);
+    expect(refused?.details).toEqual({ cycle: ['com.example.a', 'com.example.b', 'com.example.a'] });
+    expect(refused?.message).toContain('"com.example.a" -> "com.example.b" -> "com.example.a"');
+  });
+
+  it('the cycle path skips packages outside it, and ignores a dependency on a package the artifact does not carry', () => {
+    const refused = refusalOf({
+      packages: [
+        pkg('com.example.base', { '@external/auth': '^2.0.0' }),
+        pkg('com.example.a', { 'com.example.base': '*', 'com.example.c': '*' }),
+        pkg('com.example.b', { 'com.example.a': '*' }),
+        pkg('com.example.c', { 'com.example.b': '*' }),
+      ],
+    });
+    expect(refused?.code).toBe('CYCLIC_ARTIFACT_PACKAGES');
+    expect(refused?.details).toEqual({ cycle: ['com.example.a', 'com.example.c', 'com.example.b', 'com.example.a'] });
+  });
+
+  it('control: the same packages without the closing edge resolve in dependency order', () => {
+    const resolved = resolveArtifactPackageOrder({
+      packages: [pkg('com.example.a', { 'com.example.b': '^1.0.0' }), pkg('com.example.b')],
+    }) as Array<{ id: string }>;
+    expect(resolved.map((body) => body.id)).toEqual(['com.example.b', 'com.example.a']);
+  });
+});

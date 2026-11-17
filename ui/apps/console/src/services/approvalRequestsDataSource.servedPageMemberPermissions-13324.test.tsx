@@ -210,6 +210,7 @@ const MEMBER_ANSWER: MePermissionsAuthenticatedResponse = {
   tenantId: 'org_1',
   positions: ['member'],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: ['member_default'],
   systemPermissions: [],
   objects: {

@@ -59,6 +59,7 @@ function answer(bits: Record<string, unknown>): MePermissionsAuthenticatedRespon
     tenantId: null,
     positions: ['member'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects: { [JUNCTION]: bits },
     fields: {},

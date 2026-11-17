@@ -364,6 +364,7 @@ function readerWithout(...denied: string[]): MePermissionsResponse {
     tenantId: 't1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: { '*': all } as never,
     fields: Object.fromEntries(denied.map((f) => [`showcase_expense_report.${f}`, { readable: false, editable: false }])),

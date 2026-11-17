@@ -29,7 +29,10 @@ import React from 'react';
 
 type Items = Array<{ type: string; name: string }>;
 
-const chatCtl = vi.hoisted(() => ({ setLoading: null as null | ((v: boolean) => void) }));
+const chatCtl = vi.hoisted(() => ({
+  setLoading: null as null | ((v: boolean) => void),
+  setMessages: null as null | ((v: unknown[]) => void),
+}));
 
 vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -40,9 +43,11 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
     useHitlInChat: () => ({ decide: vi.fn(), decisions: {} }),
     useObjectChat: () => {
       const [isLoading, setLoading] = R.useState(false);
+      const [messages, setMessages] = R.useState<unknown[]>([]);
       chatCtl.setLoading = setLoading;
+      chatCtl.setMessages = setMessages;
       return {
-        messages: [],
+        messages,
         isLoading,
         error: undefined,
         sendMessage: vi.fn(),
@@ -238,6 +243,72 @@ describe('the build shows its app in the main area (objectstack#34610)', () => {
     expect(at()).toBe('/ai/build/conv-1');
     act(() => chatCtl.setLoading?.(false));
     await waitFor(() => expect(at()).toBe('/apps/app.k9?preview=draft'));
+  });
+
+  // Read live: an edit re-drafting the object a build made never grows the
+  // chat's drafted set, so `onDraftArtifacts` stays silent; the turn's own
+  // draft review still moves the main area when the turn ends.
+  const editTurn = (packageId: string) => [
+    { id: 'u1', role: 'user', content: 'Add a priority field to tasks' },
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: 'Done.',
+      toolInvocations: [
+        {
+          toolCallId: 'call-edit',
+          toolName: 'apply_edit',
+          state: 'output-available',
+          draftReview: { items: [{ type: 'object', name: 'k9_task' }], packageId, kind: 'edit' },
+        },
+      ],
+    },
+  ];
+
+  it.each([
+    ['in the app package', 'app.k9'],
+    ["in the app's customization pair (ADR-0146)", 'app.k9.custom'],
+  ])('a live turn whose drafts the chat reported before still moves at its end: drafted %s', async (_label, pkg) => {
+    renderPage({ dockHost: true });
+    await paneUp();
+    act(() => chatCtl.setLoading?.(true));
+    act(() => chatCtl.setMessages?.(editTurn(pkg)));
+    act(() => chatCtl.setLoading?.(false));
+    await waitFor(() => expect(at()).toMatch(/^\/apps\/app\.k9\?preview=draft/));
+  });
+
+  // The same turn end refreshes what the turn drafted in place. Read where the
+  // pane stays mounted (no drawer host: nothing moves, so this route keeps it).
+  it('…and refreshes what that turn drafted, once, at its end', async () => {
+    const seen: CanvasInvalidation[] = [];
+    const unsubscribe = subscribeCanvasInvalidate((inv) => seen.push(inv));
+    try {
+      renderPage({ dockHost: false });
+      await paneUp();
+      act(() => chatCtl.setLoading?.(true));
+      act(() => chatCtl.setMessages?.(editTurn('app.k9')));
+      act(() => chatCtl.setLoading?.(false));
+      await waitFor(() => expect(seen.map((s) => s.type)).toEqual(['object']));
+      // No main area moved: only the conversation's own binding (A1.b) touched the URL.
+      expect(at()).toMatch(/^\/ai\/build\/conv-1(\?package=app\.k9)?$/);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('CONTROL: a turn that drafted nothing moves nothing at its end', async () => {
+    renderPage({ dockHost: true });
+    await paneUp();
+    act(() => chatCtl.setLoading?.(true));
+    act(() =>
+      chatCtl.setMessages?.([
+        { id: 'u1', role: 'user', content: 'How many tasks are open?' },
+        { id: 'a1', role: 'assistant', content: 'Three.' },
+      ]),
+    );
+    act(() => chatCtl.setLoading?.(false));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(at()).toBe('/ai/build/conv-1');
   });
 
   it('a materialized build in a live turn opens the real app, no draft overlay (ADR-0045)', async () => {

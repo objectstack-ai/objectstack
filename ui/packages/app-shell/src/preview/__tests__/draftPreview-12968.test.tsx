@@ -13,7 +13,8 @@
  *      `?preview=draft`, the app row the URL the Live Canvas already opens;
  *  (b) objectstack#34610 — the DraftPreviewBar counts ONE scope, the current
  *      app's package, on every page of the app: its line, its Changes (N) and
- *      the `_drafts?package=` read agree (the per-page line is gone);
+ *      the app's drafts agree — its package and its ADR-0146 customization
+ *      pair, off the env-wide `_drafts` (the per-page line is gone);
  *  (c) CONTROL: outside draft preview the bar draws nothing.
  */
 import '@testing-library/jest-dom/vitest';
@@ -99,7 +100,11 @@ function renderBarAt(path: string) {
 const PENDING = [
   { type: 'object', name: 'crm_account', packageId: 'app.crm' },
   { type: 'view', name: 'crm_account.pipeline', packageId: 'app.crm' },
-  { type: 'page', name: 'crm_home', packageId: 'app.crm' },
+  // A code-shipped app's edits are drafted into its pair (ADR-0146).
+  { type: 'page', name: 'crm_home', packageId: 'app.crm.custom' },
+  // Another app's draft in the same environment, and a package-less one: not this app's.
+  { type: 'object', name: 'other_note', packageId: 'app.other' },
+  { type: 'flow', name: 'loose_flow', packageId: null },
 ];
 
 describe('the DraftPreviewBar counts the app, on every page (objectstack#34610)', () => {
@@ -118,7 +123,7 @@ describe('the DraftPreviewBar counts the app, on every page (objectstack#34610)'
     );
     expect(screen.getByTestId('draft-preview-changes')).toHaveTextContent('(3)');
     expect(screen.getByTestId('draft-preview-bar')).not.toHaveTextContent(/on this page/);
-    expect(global.fetch).toHaveBeenCalledWith('/api/v1/meta/_drafts?package=app.crm', expect.anything());
+    expect(global.fetch).toHaveBeenCalledWith('/api/v1/meta/_drafts', expect.anything());
   });
 
   it('CONTROL: outside draft preview the bar draws nothing and reads nothing', () => {

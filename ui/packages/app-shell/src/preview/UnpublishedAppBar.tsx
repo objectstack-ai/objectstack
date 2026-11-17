@@ -94,7 +94,15 @@ export function UnpublishedAppBar() {
       // Whatever `hidden` the app carries rides through the spread UNTOUCHED:
       // publishing an app must not silently rewrite the author's navigation
       // choice, which is the exact regression objectstack#4829 was filed for.
-      const res = await fetch(`/api/v1/meta/app/${encodeURIComponent(routeApp)}`, {
+      //
+      // objectstack#34610 — saved under the app's own NAME. The route segment
+      // is the app's package id (ADR-0048) for every app the AI builds, and
+      // the meta door refuses an app saved under a key its `name` disagrees
+      // with, so a write keyed by the segment never published the app.
+      const appKey = typeof (app as { name?: unknown }).name === 'string' && (app as { name: string }).name
+        ? (app as { name: string }).name
+        : routeApp;
+      const res = await fetch(`/api/v1/meta/app/${encodeURIComponent(appKey)}`, {
         method: 'PUT',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

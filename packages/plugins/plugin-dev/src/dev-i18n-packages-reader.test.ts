@@ -65,17 +65,17 @@ vi.mock('@objectstack/service-i18n', () => ({
 
 vi.mock('@objectstack/objectql', () => { throw absent('@objectstack/objectql'); });
 vi.mock('@objectstack/runtime', () => { throw absent('@objectstack/runtime'); });
-// ⛔ NO `@objectstack/driver-memory` mock here, deliberately — do not copy one in
-// from the sibling harnesses. `vi.mock` counts as a DECLARATION to
-// `scripts/check-driver-memory-census.mjs`, and that package's consumer set is
-// locked by maintainer ruling (#5499 froze investment, #5704 / #6664 ruled each
-// remaining consumer). A third test consumer is the #6664 defect itself, not a
-// bookkeeping chore. Nothing here needs it: every boot below passes
-// `services: { driver: false }`, and `dev-plugin.ts`'s ONE
+// The memory driver is REPLACED, never loaded: every boot below passes
+// `services: { driver: false }`, and `dev-plugin.ts`'s one
 // `import('@objectstack/driver-memory')` sits inside `if (enabled('driver'))`,
-// so the specifier is never reached. Measured, not assumed: with the line gone
-// this suite is unchanged at 68 passed, both BOOT cases below green in 5ms and
-// 1ms — timings a real `import()` of that package would not fit in.
+// so nothing here needs the real driver. The mock exists because the file
+// reaches that lazy import, and `pnpm check:test-source-alias` asks an edited
+// test to pay such a load during collection or to mock it — paying it would
+// make this file a real consumer of a driver whose consumer set is ruled
+// (#5499, #5704, #6664). A not-found-throwing replacement is not a consumer:
+// it is ledgered as `mock-replacement` in
+// `scripts/driver-memory-census.ledger.json`, like the sibling harnesses.
+vi.mock('@objectstack/driver-memory', () => { throw absent('@objectstack/driver-memory'); });
 vi.mock('@objectstack/service-storage', () => { throw absent('@objectstack/service-storage'); });
 vi.mock('@objectstack/service-realtime', () => { throw absent('@objectstack/service-realtime'); });
 vi.mock('@objectstack/plugin-auth', () => { throw absent('@objectstack/plugin-auth'); });
@@ -285,11 +285,10 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
     expect(devI18nPluginOptions(stack)).toEqual({ defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN' });
   });
 
-  it('a dependency CYCLE between two packages throws a BARE Error — no `code`, no `status`', () => {
-    // Documented under @throws because it is the one refusal here that does not
-    // carry the ADR-0112 envelope: it comes from `resolvePluginOrder`, the
-    // platform's one topological sorter, not from the artifact gate. A caller
-    // matching on `code` alone would miss it — `DevPlugin`'s catch does not.
+  it('a dependency CYCLE between two packages is refused with the envelope: 422 CYCLIC_ARTIFACT_PACKAGES naming the cycle', () => {
+    // The sorter's verdict, answered by the artifact gate in the ADR-0112
+    // envelope its sibling refusals carry, so a caller matching on `code` sees
+    // it like the rest.
     const cyclic = {
       manifest: { id: 'com.example.a', name: 'A', version: '1.0.0', type: 'app' },
       packages: [
@@ -297,16 +296,16 @@ describe('#15232 — DevPlugin i18n auto-detect over a multi-package stack', () 
         { manifest: { id: 'com.example.b', name: 'B', version: '1.0.0', type: 'module', dependencies: { 'com.example.a': '^1.0.0' } } },
       ],
     };
-    let caught: (Error & { code?: unknown; status?: unknown }) | undefined;
+    let caught: (Error & { code?: unknown; status?: unknown; details?: unknown }) | undefined;
     try {
       devI18nPluginOptions(cyclic);
     } catch (err) {
-      caught = err as Error & { code?: unknown; status?: unknown };
+      caught = err as Error & { code?: unknown; status?: unknown; details?: unknown };
     }
     expect(caught).toBeInstanceOf(Error);
-    expect(caught?.message).toContain('Circular dependency detected');
-    expect(caught?.code).toBeUndefined();
-    expect(caught?.status).toBeUndefined();
+    expect(caught?.code).toBe('CYCLIC_ARTIFACT_PACKAGES');
+    expect(caught?.status).toBe(422);
+    expect(caught?.details).toEqual({ cycle: ['com.example.a', 'com.example.b', 'com.example.a'] });
   });
 
   it('an EMPTY top-level `translations` is not an answer — `packages[]` supplies it', () => {

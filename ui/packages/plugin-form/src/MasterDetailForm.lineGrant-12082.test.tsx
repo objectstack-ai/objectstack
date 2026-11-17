@@ -56,6 +56,7 @@ const envelope = (child: Record<string, unknown>): MePermissionsAuthenticatedRes
   userId: 'u-pin',
   tenantId: null,
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['member'],
   permissionSets: ['member'],
   objects: {
