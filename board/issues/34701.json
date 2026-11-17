@@ -1,0 +1,30 @@
+{
+  "number": 34701,
+  "kind": "issue",
+  "title": "Locked records: a record under approval shows the badge 「审批中 · 可编辑」 though every edit is refused; a PATCH of only read-only fields answers 200 and rewrites updated_by / updated_at",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T07:13:57Z",
+  "updated_at": "2026-11-17T07:46:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34701",
+  "body": "## What (18.5.0, app project, browser and REST)\n\n1. **Misleading badge.** A submitted customer rating that waits for approval is fully locked: the app's lifecycle hook refuses every user edit, and the platform approval lock holds it. The record header still shows 「审批中 · 可编辑」 (\"in approval · editable\"). Users take the badge at its word and then meet a refusal.\n2. **A no-op write still stamps the record.** On an approved, locked rating, a sales rep sends `PATCH {total_score: 100}`. `total_score` is read-only, so the value is dropped and the score is unchanged. The response is **200**, and `updated_by` / `updated_at` are rewritten to the rep. The record history now says the rep edited a locked record when nothing changed.\n\n## Expected\n\n- The approval badge says editable only when the current user can actually edit the record, judged by the same decision the server enforces: lifecycle hooks, `readonlyWhen` and the approval lock.\n- A write whose every field is dropped (read-only, masked, or unchanged) changes nothing: it does not touch `updated_by` / `updated_at` and writes no audit \"update\" entry. It reports the drop as the REST layer already does, through `droppedFields` and the `X-ObjectStack-Dropped` header."
+}

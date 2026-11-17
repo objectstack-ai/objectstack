@@ -1,0 +1,32 @@
+{
+  "number": 34711,
+  "kind": "issue",
+  "title": "cli test: serve-multi-node-gate-declaration's test-budget 58 s is off the 10 s grid, so every timings refresh's regression diff refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T07:52:32Z",
+  "updated_at": "2026-11-17T07:56:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34711",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: the refusal printed in PR #34314's body (`## Regression readings: NOT MEASURED -- the diff refused`), which the body says owes a card; area `o2-C` confirms it still reproduces on `main` at `a34eb07`. Dedupe: `serve-multi-node-gate-declaration`, `test-budget 58`; no open card.\n\nSuggested-grade: p2 · domain:server\n\n## 维护者速读\n\n- 现象：`packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts` 的耗时预算头写的是 58 秒，不在 10 秒刻度上，耗时刷新工具读到就拒绝，所以每次刷新都量不出回归读数。\n- 为什么要修：回归读数是刷新 PR 判断有没有测试变慢的唯一依据，现在整份都是「没量」。\n- 需要你做的：无(分诊定级)。\n\n## Change\n\nSet that file's `// test-budget:` header to a value on the 10 s grid, derived the way the header rule says (measured CI reading x 1.25, rounded up to the grid; ruling records 6181973363 and 6212133431), and check no other test file carries an off-grid budget.\n\n## Done when\n\n`scripts/measure-test-shard-timings.mjs`'s diff runs to the end on `main` without the refusal.\n"
+}

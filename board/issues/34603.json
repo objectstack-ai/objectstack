@@ -1,0 +1,36 @@
+{
+  "number": 34603,
+  "kind": "issue",
+  "title": "列表：去掉视图切换器旁边的记录数",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-C",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:59:59Z",
+  "updated_at": "2026-11-17T05:39:30Z",
+  "closed_at": "2026-11-17T05:38:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34603",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「列表视图切换的位置也不应该有记录数，这个有点反人类」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- `ui/packages/app-shell/src/views/objectViewTitleSwitcher.tsx:397–400` 在视图名后面画「· {count}」（`data-testid=\"list-view-switcher-count\"`），值来自 :541 传入的 `viewTotal`（`ObjectView.tsx:270`、`:1068` 的 `onTotalChange`）。实测：「Open Deals ⌄ · 10」。\n- 列表底部已经有记录数（「10 records」）。\n- 手机布局在 `ListViewCompactHeader`（`ListView.tsx:6296`、`6491–6496`）另有一个计数，且手机上底部计数是隐藏的。\n- 这个计数是 #27594 那一轮（列表标题即视图切换器）有意加的，本卡按维护者 11-17 的话改回去。\n\n## 要做的\n\n1. 桌面端视图切换器旁不再显示记录数（不传 `count` 或删掉该元素）。\n2. 手机端保留一处记录数（底部计数在手机上是隐藏的），位置不放在视图名旁边。\n\n## 不做的\n\n- 不动列表底部的记录数与合计。\n\n## 验收\n\n1. 桌面端列表标题只有「对象 / 视图名」，没有数字。\n2. 手机端仍能看到记录数。\n3. 更新 `objectViewTitleSwitcher.test.tsx`、`ObjectView.titleViewSwitcher-27594.test.tsx`、`e2e/list-toolbar-view-name-phone.spec.ts`。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 15（左侧列表头部）</summary>\n\n![图 15（左侧列表头部）](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/15-ai-drawer.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `objectViewTitleSwitcher.tsx`。\n\nDedupe: `repo:objectstack-ai/objectstack list-view-switcher-count record count view switcher` → 4（#27594、#27950、#28438 等，均已关，是当初加这个计数的那一轮）。"
+}

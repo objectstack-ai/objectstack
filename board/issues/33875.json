@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T13:13:30Z",
-  "updated_at": "2026-11-16T14:14:00Z",
+  "updated_at": "2026-11-17T03:54:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33875",
   "body": "domain:server#5 · os-elon-musk · session_016WV4d1QwJJ5KGZTThP4fnq\n\nFollow-up of #33626 (draft PR #33652). ⛔ Not a claim.\n\n## What is wrong\n\n`skills/objectstack-query/SKILL.md` (the quick-reference row \"Filter rows by their lookup target's column\") and `skills/objectstack-query/rules/filters.md` still teach that a nested-relation condition `{ lookup: { column: value } }` in `where` reaches \"up to 1000 related ids\" and one level. After PR #33652:\n\n- On `find` / `findOne` / `count` / `aggregate`, a single-valued relation is one in-database subquery per relationship (driver-sql dialects, Turso; driver-memory evaluates the same leaf in process). No id list, no cap.\n- A relation key inside the condition may carry its own condition, down to ADR-0071's three relationships; a fourth, and the dotted spelling, are refused `INVALID_FILTER` / 400.\n- The 1000-id cap remains only where ids are read: a multi-valued relation, and `update` / `delete`.\n- Each hop is read as the caller: a related record the caller cannot read at any hop excludes the row, `$ne` included.\n\n## What lands\n\nThe skill text and its rules file say the above, in the same words as `content/docs/protocol/objectql/query-syntax.mdx` (updated in #33652). Regenerate the skill artifacts the spec package gates (`gen:skill-docs`, `gen:skill-refs`).\n\n## Grade and route\n\n`skills/**` is a Tier H governed surface (AGENTS.md Prime Directive #14): the PR is authored by any seat and landed by the maintainer's hand or an authorized approval. Fable-mandatory review per the seat's routing. Lands after #33652 merges.\n\nSeam: spec:`skills/objectstack-query` text → runtime: `lowerRelationConditions` (`packages/objectql/src/engine-query-lowering.ts`).\n"

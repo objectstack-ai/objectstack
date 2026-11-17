@@ -1,0 +1,36 @@
+{
+  "number": 34587,
+  "kind": "issue",
+  "title": "审批收件箱：行内「通过」「驳回」默认可见，不要悬停才出现",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-UX",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:46:42Z",
+  "updated_at": "2026-11-17T04:01:55Z",
+  "closed_at": "2026-11-17T04:01:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34587",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 桌面列表每行最右侧有两个图标按钮（`InlineActions`），容器类是 `opacity-0 group-hover:opacity-100 focus-within:opacity-100`（`ApprovalsInboxPage.tsx:687`），鼠标悬停或键盘聚焦到该行才显示。\n- 走查时整页看不到任何行内操作，只看到底部一行快捷键提示；手机卡片上的两个按钮是常显的。\n\n## 要做的\n\n1. 桌面列表的行内「通过」「驳回」默认可见（去掉 `opacity-0` 的悬停门）。\n2. 两个按钮带文字或至少带可见的 tooltip 与 `aria-label`；需要填写决策输入的请求保持现在的禁用逻辑并说明原因。\n\n## 不做的\n\n- 不改批量操作、快捷键与手机卡片。\n\n## 验收\n\n1. 打开「待我审批」，不移动鼠标即可看到每行的通过 / 驳回。\n2. 需要决策输入的行，按钮禁用且悬停能看到原因。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 9 待审批列表</summary>\n\n![图 9 待审批列表](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/09-approval-list.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ApprovalsInboxPage.tsx` 的 `InlineActions`。\n\nDedupe: `repo:objectstack-ai/objectstack ApprovalsInboxPage inline approve reject hover opacity` → 0。"
+}

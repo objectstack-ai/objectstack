@@ -2,7 +2,7 @@
   "number": 34528,
   "kind": "pull_request",
   "title": "docs(skills): teach the lookupFilters { $record } reference and orEmpty",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T00:08:06Z",
-  "updated_at": "2026-11-17T02:07:49Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-17T02:49:56Z",
+  "closed_at": "2026-11-17T02:49:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T02:49:54Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34528",

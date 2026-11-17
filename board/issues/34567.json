@@ -2,8 +2,8 @@
   "number": 34567,
   "kind": "issue",
   "title": "skills/objectstack-ui：表单类型表把 `tabbed` 推荐给「字段组多的复杂对象」，照做得到必填项跨页签、手机上页签被截断的表单；改为默认分组堆叠，并补上折叠分组、列数、弹窗尺寸的选用指引",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "lease:o2-S",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T01:18:52Z",
-  "updated_at": "2026-11-17T01:55:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T05:55:16Z",
+  "closed_at": "2026-11-17T05:53:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34567",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：③ 维护者直派。维护者 2026-11-16 原话：「平台的技能是否需要改进也要写任务。用pm-dispatch技能写任务」；针对的现象是他同一天说的：「弹出录入的表单目前是用的tab，不方便滚动，是否建议换成分组模式。而且目前默认只有两列字段，对于复杂的业务表单，宽屏时候非常浪费。」\n\n## 技能现在怎么写\n\n`skills/objectstack-ui/SKILL.md`「Form Views」：\n\n| Type | When to Use |\n|:-----|:------------|\n| `simple` | Single-page form — suitable for objects with ≤ 15 fields |\n| `tabbed` | Tabbed sections — for complex objects with many field groups |\n| `wizard` | Step-by-step flow — guided data entry (onboarding, applications) |\n\n同一份 SKILL.md 里没有：表单分组的 `collapsed` / `collapsible`；`modalSize`（只在 `references/react-blocks.md` 的属性表里出现）；分组或表单的 `columns` 该怎么取值。\n\n## 照做的结果（实测）\n\nHotCRM 七个对象的表单都是 `tabbed`（objectstack-ai/hotcrm 已另立卡改它们）。staging 环境 os-4e4qa4 上：\n\n- 新建商机 6 个页签，必填项不在当前页签时只有页签名旁一个红点；\n- 375 宽视口下第 4 个页签被截断，第 5、6 个在屏幕外；\n- 分组一律两列，宽屏下两侧留白。\n\n同一批字段改成 `type: 'simple'`、少填的分组 `collapsed: true`、`columns: 3`、`modalSize: 'xl'` 之后（hotcrm 本机分支验证，`objectstack dev` 编译无新增警告），一页滚动即可填完，必填错误都在同一页。\n\n## 要改的文本\n\n- 表单类型表：`simple` 作为默认，去掉「≤ 15 fields」这个上限；`tabbed` 的适用条件收窄，并写明代价（必填项跨页签、窄屏页签条溢出）。\n- 补一小节：字段多时先用 `collapsed: true` 收起少填的分组，再考虑 `tabbed`；`columns` 与 `modalSize` 的选用。\n- 相应的 eval 用例（`skills/objectstack-ui/evals/`）：一个字段多的对象，期望输出是 `simple` 加折叠分组而不是 `tabbed`。\n\n## 验收\n\n1. SKILL.md 的表单类型表不再把字段多的对象导向 `tabbed`。\n2. `collapsed`、`columns`、`modalSize` 三项在 SKILL.md 里各有一句选用指引。\n3. 新增的 eval 用例通过。\n\nReader: `domain:skills` 席位，改 `skills/objectstack-ui/SKILL.md` 的 Form Views 一节与 `skills/objectstack-ui/evals/views-apps-actions-pages.json`。\n\nDedupe: `repo:objectstack-ai/objectstack \"Form Views\" tabbed \"many field groups\"` → 0；`repo:objectstack-ai/objectstack objectstack-ui tabbed simple form skill` → 24（含 closed），最近的是 #27155 / #27229 / #27305（已关，把 `FormView.type` 收窄为布局），都不涉及何时选 `tabbed` 的指引。"

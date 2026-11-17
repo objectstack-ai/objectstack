@@ -1,0 +1,36 @@
+{
+  "number": 34618,
+  "kind": "pull_request",
+  "title": "fix(fields): a lookupFilters { $record } path through or to a multi-valued field is left out with a dev warning",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:23:06Z",
+  "updated_at": "2026-11-17T04:25:54Z",
+  "closed_at": "2026-11-17T04:25:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T04:25:52Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34618",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi99ewj5JRWXTB3u38E9HLhnj)_\n\nFixes #34389\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：查找字段选择器遇到 `lookupFilters` 里 `{ $record }` 路径经过或指向多值字段(多选关联、tags、关联行上的多值字段)时，不再把列表当标量发出，也不再静默丢弃；该条过滤一律不发，并在开发构建里告警一次，点名路径和多值字段。\n- 为什么改：以前直取多值字段会把整个列表塞进 eq 之类的标量比较，经多值关联跳转则悄悄丢掉，作者看不出过滤没生效；规格(#34378 已合)写明这类路径不解析。\n- 风险与回滚：只影响写了多值 `$record` 路径的选择器(lint 本就拒收这种写法)；单值路径、字面条目、dependsOn 行为不变。回滚即撤销本 PR。\n- 先看：`ui/packages/fields/src/widgets/lookupRecordReference.ts` 的 `readRecordPath` 三处 `Array.isArray` 守卫与 `warnMultiValuedPath`；再看测试文件新增的 describe。\n- 两分钟验证：`pnpm --filter @object-ui/fields exec vitest run --root ../.. packages/fields/src/widgets/LookupField.recordReference-34197.test.tsx -t multi-valued`,预期 4 个用例全绿(三种形状 + CONTROL)。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`readRecordPath` (the picker's reader for a `lookupFilters` `{ $record }` path) now treats a list found anywhere on the path as a multi-valued path:\n\n- a plain path to a multi-valued field (`tags`) — before: sent with the whole list as the comparand of a scalar operator;\n- a hop through a `multiple: true` lookup (`accounts.cb_market`) — before: left out silently (`referencedId` finds no id in a list, so neither a read nor the unreadable-hop warning happened);\n- a hop that ends at a multi-valued field of the hop's row (`account.markets`) — before: sent as a list.\n\nIn all three the entry is left out of the candidate query and a development build warns once per path, through the file's existing dev-warning channel (now `warnLeftOut`, shared with the unreadable-hop warning; production builds stay silent as before). The warning names the path, says it is multi-valued and names where the list sits (the field, or the lookup that holds a list of records).\n\nThe spec half (merged on main) says in `LookupFilterRecordReferenceSchema`'s describe that such a path \"has no single value: it is not resolved\"; the picker now does exactly that. No `packages/spec/**` change.\n\n## Tests\n\nNew `describe` in the existing harness `ui/packages/fields/src/widgets/LookupField.recordReference-34197.test.tsx` (one shared harness per component): one case per shape (entry left out of the candidate query, warning given naming the path and the field) and a CONTROL (a single-valued field path and a single-valued one-hop path still resolve, no `[LookupField]` warning). No existing test was changed.\n\n<details><summary>Package run, type-check and ablations (fix head 2a3ed4f7e5; after the main merge to bc61296121 the card test file re-ran 16/16 on a rebuilt spec)</summary>\n\n- `pnpm --filter '@object-ui/fields^...' build` (dependency closure, under the verify lock): VERDICT command-exit 0.\n- `@object-ui/fields` `pnpm run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`; the test file is in the test program, counted with `--listFiles`): VERDICT command-exit 0.\n- `@object-ui/fields` `pnpm test`: Test Files 307 passed, 1 skipped (308); Tests 4649 passed, 7 skipped (4656); VERDICT command-exit 0.\n- Ablations through `scripts/ablation-replace.mjs` (fix committed first; each guard disabled alone as `if (false && Array.isArray(...))`, anchor 1 -> 0 on disk, restore proven blob == HEAD and `git diff HEAD` empty). The test imports `./LookupField` from source, so no dist is involved:\n  - plain-path guard off: \"a plain path to a multi-valued field…\" red; 1 failed, 3 passed.\n  - hop-lookup guard off: \"a hop through a multiple: true lookup…\" red; 1 failed, 3 passed.\n  - hop-end guard off: \"a hop ending at a multi-valued field of the row…\" red; 1 failed, 3 passed.\n  - The CONTROL stayed green in all three.\n\n</details>\n\n## Acceptance notes\n\n- Detection reads the VALUE (a list on the record or on the hop's row), not field metadata (`isMultiValueField`). The widget has no field map for the hop's target object, so a value read is the one signal available for all three shapes. Consequence: a multi-valued field that is currently null or unset is left out as an empty value without the multi-valued warning (the entry is still left out; `os lint` refuses the path at authoring time). An empty list `[]` now warns as multi-valued instead of being left out silently as empty.\n- The warning is said once per path per page load (module-level set, as the existing unreadable-hop warning already did).\n\n## Verification\n\nDispatch-gate derivation (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`) run on the final head; every derived command run locally and reconciled with `--ran`. Families CI owns are read from this PR's check-runs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSYVw1sqCsaHSJS9JC\n"
+}

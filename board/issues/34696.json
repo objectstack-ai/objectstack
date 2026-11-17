@@ -1,0 +1,33 @@
+{
+  "number": 34696,
+  "kind": "issue",
+  "title": "窄记录抽屉：阶段路径按视口而不是容器切换，桌面行在 380px 抽屉里把阶段名截成一个字母",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-A",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T07:07:30Z",
+  "updated_at": "2026-11-17T08:12:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34696",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzgh1zkZzDXL36ckWAG\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）；在飞卡 #34614 的衍生，⛔ 不是认领。\n#34614 验收 1 要求「380px 宽抽屉里…不出现只剩一个字」；o3-A 实测徽标并不截断（os-dev 报告 6941211681），截成一个字母的是阶段路径。维护者 2026-11-17 原话「如果影响本专题相关任务落地的，你也应该挂到这个专题下继续开发」。\n\n## 现状（实测 + 读码，origin/main）\n\n- `ui/packages/plugin-detail/src/renderers/record-path.tsx`：桌面行 `hidden sm:flex`（:653），每个阶段 `flex-1 min-w-0`、标签 `text-center truncate`（:665–668）；紧凑行 `flex sm:hidden`（:723）。两者都按**视口**断点切换。\n- #34595 的紧凑路径只在视口 < sm 生效，卡面写明「不改桌面端」。所以 1280px 视口下的 380px 抽屉仍画桌面行。\n- o3-A 在 Chromium 里测真实 RecordDetailView（380px 抽屉，1280px 视口，七个阶段）：每个阶段标签约 33px，读作 'P…'、'✓…'、'Pro…'（Proposal）、'Ne…'（Negotiation）；'Closed Won' / 'Closed Lost' 逐词换行。\n\n## 要做的\n\n1. 阶段路径的桌面 / 紧凑切换改为按**容器**宽度（容器查询或测量），记录页在窄抽屉里用 #34595 的紧凑路径；整页宽屏不变。\n2. 手机（视口 < sm）行为保持 #34595 的样子。\n\n## 不做的\n\n- 不改阶段路径的元数据或交互（点击推进等）。\n- 不改抽屉宽度。\n\n## 验收\n\n1. 1280px 视口、380px 抽屉里七阶段路径不出现单字母截断（走紧凑路径，或标签完整 / 带省略号与 title 且至少可读前若干字）。\n2. 宽屏整页记录页的阶段行像素不变（对照）。\n3. 一条 ui/e2e 几何钉子（同 record-path-phone-row.spec.ts 的模式），容器 380px + 视口 1280px，外加宽屏对照。\n\n## 业务理由与读者\n\n- 谁受益：在列表里点开记录抽屉看商机阶段的销售；不做则 #34614 想修的「截成一个字」在抽屉里照旧，专题第 4 项落不了地。\n- 动手的读者：3 号座位 o3-A 区，串行排在 #34595 的 PR #34684 合并之后（同文件 record-path.tsx）。\n- 查重：`is:issue record path narrow drawer` 194 条，前六条只有 #34614 相关；`is:issue record:path container query` 14 条，仅 #34614 相关；`is:issue 阶段 抽屉 截断` 3 条，无关。"
+}

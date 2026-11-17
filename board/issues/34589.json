@@ -1,0 +1,35 @@
+{
+  "number": 34589,
+  "kind": "issue",
+  "title": "通知：铃铛面板改成从右侧整高展开，待审批置顶并可直接处理",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:48:41Z",
+  "updated_at": "2026-11-17T07:08:06Z",
+  "closed_at": "2026-11-17T06:48:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34589",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「右上角的消息通知点开之后弹出框有点小」「通知是否建议类似苹果桌面从右侧展开？」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 铃铛是 Radix `Popover`：`ui/packages/app-shell/src/layout/InboxPopover.tsx:417` 宽 `w-96`（384px），三个页签的列表区各 `max-h-80`（320px，:505 / :665 / :700），一屏约 3 条。\n- 手机上是同一个浮层，只是接近全宽。\n- 仓里已有右侧 `Sheet` 的用法：`ActivityFeed.tsx:152`（`side=\"right\"`），记录抽屉 `NavigationOverlay` 也建在 `Sheet` 上。\n- 两个调用点：`AppHeader.tsx:1133`、`global-notifications-renderer.tsx:91`。\n\n## 要做的\n\n1. 把浮层换成右侧整高的 `Sheet`，宽约 420–440px，列表区占满剩余高度。\n2. 页面主体保持可见、可操作；点一条通知在主体区打开对应记录，抽屉不关。\n3. 「需要你处理」置顶：待审批项直接带通过 / 驳回 / 查看详情（复用收件箱的行内操作与禁用规则）。\n4. 「标为已读」改成悬停或聚焦时出现的图标，不常驻占一列；保留「全部标为已读」和底部「查看全部通知」。\n5. 记录详情抽屉打开时通知抽屉让位收起，两者不叠在右边。\n6. 手机上全屏。\n\n## 不做的\n\n- 不改通知的数据、分组规则与三个页签的划分。\n\n## 验收\n\n1. 1440×900 下打开通知，不滚动能看到至少 8 条。\n2. 在通知里直接通过一条待审批，列表里该条消失、角标减一。\n3. 点一条记录通知，主体区打开该记录，通知抽屉仍在。\n4. 375 宽下通知是全屏。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 5 通知</summary>\n\n![图 5 通知](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/05-notifications.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `InboxPopover.tsx` 及其两个调用点。\n\nDedupe: `repo:objectstack-ai/objectstack InboxPopover Sheet right side notifications` → 1（#6015，分诊席位贴，无关）。"
+}

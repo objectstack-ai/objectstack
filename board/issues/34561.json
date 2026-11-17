@@ -2,8 +2,8 @@
   "number": 34561,
   "kind": "issue",
   "title": "ci: the \"Fetch this commit's history and the base branch\" step times out (8 to 20 min) on main pushes and merge groups, four times on 2026-11-16/17",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "bug",
     "domain:devx",
-    "lease:o2-H",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -24,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T00:47:35Z",
-  "updated_at": "2026-11-17T01:58:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T03:38:20Z",
+  "closed_at": "2026-11-17T03:37:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 2,
   "locked": false,

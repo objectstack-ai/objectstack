@@ -1,0 +1,36 @@
+{
+  "number": 34605,
+  "kind": "issue",
+  "title": "分组表单：加分组导航，点一下滚到对应分组，并标出还有必填未填的分组",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-B",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:01:33Z",
+  "updated_at": "2026-11-17T07:30:04Z",
+  "closed_at": "2026-11-17T07:29:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34605",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「弹出录入的表单目前是用的tab，不方便滚动，是否建议换成分组模式」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- `type: 'simple'` 的表单在弹窗里是一个 `SchemaRenderer` 表单里的若干 `section-divider` 行（`ModalForm.tsx:957–1060`，分组逻辑在 `ui/packages/components/src/renderers/form/form.tsx` 约 :221–249）；整页表单用 `FormSection.tsx`。\n- `ui/` 里没有任何分组导航、锚点或目录组件；`packages/spec/src/ui/view.zod.ts` 也没有对应的键。\n- 没有导航时，字段多的分组表单只能靠滚动找分组；这是 HotCRM 七个表单选页签的原因之一（objectstack-ai/hotcrm#2566 要把它们改回分组）。\n\n## 要做的\n\n1. 给每个分组行一个稳定的 DOM 标识。\n2. 新增分组导航组件：弹窗里放在标题与滚动区之间，整页表单放在分组布局上方；点分组名滚到该分组，滚动时高亮当前分组。\n3. 有校验错误或必填未填的分组，在导航上带计数。\n4. 只在可见分组不少于 2 个、且不是页签布局时显示；被 `visibleWhen` 隐藏的分组不出现，折叠的分组点击时先展开。\n5. 不需要作者配置，默认开启。\n\n## 不做的\n\n- 不改页签布局与向导布局。\n\n## 验收\n\n1. 一个 4 个分组的表单，弹窗标题下有 4 个分组名，点第 3 个滚到第 3 个分组。\n2. 第 2 个分组有必填未填，提交后导航上该分组带「1」。\n3. 只有 1 个分组时不显示导航。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 7 宽屏复杂表单</summary>\n\n![图 7 宽屏复杂表单](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/07-wide-form.png?raw=true)\n\n</details>\n<details><summary>图 8 弹窗表单</summary>\n\n![图 8 弹窗表单](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/08-modal-form.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，新组件放 `ui/packages/plugin-form`，接入 `ModalForm.tsx` 与 `ObjectForm.tsx`。\n\nDedupe: `repo:objectstack-ai/objectstack form section anchor navigation scrollspy simple form` → 0。"
+}

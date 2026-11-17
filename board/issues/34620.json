@@ -1,0 +1,35 @@
+{
+  "number": 34620,
+  "kind": "pull_request",
+  "title": "fix(objectql): a read-only secret field keeps its stored value on update",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:24:15Z",
+  "updated_at": "2026-11-17T06:20:05Z",
+  "closed_at": "2026-11-17T06:20:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T06:20:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34620",
+  "body": "Clause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:更新记录时,`readonlyWhen` 谓词为真而锁定的 `secret` 字段、以及静态 `readonly` 的 `secret` 字段,不再接受调用方写入;按 id 与按谓词(`multi`)两条更新路径都保持存储值,并像其它只读字段一样报告丢弃(`onFieldsDropped`、`X-ObjectStack-Dropped-Fields`、`strictReadonlyWrites` 拒绝)。\n- 为什么改:规则是「调用方不可写的字段保持存储值,无论字段类型」,`secret` 字段同样适用。\n- 风险与回滚:只涉及更新路径上两道只读剥离对 `secret` 字段的作者判定,以及 `sys_secret` 行只在语句仍引用它时写入;未锁定的 `secret` 照旧加密存为引用,hook 写入的值照旧保留。回滚即 revert 本 PR。\n- 先看:`packages/objectql/src/engine-update-sealed-secrets.ts`(判定本身);`packages/objectql/src/engine-update.ts` 两个分支的调用点与两处 `persistSecretRows`;`packages/objectql/src/engine-update-locked-secret.test.ts`。\n- 两分钟验证:`pnpm --filter @objectstack/objectql exec vitest run src/engine-update-locked-secret.test.ts`,预期 12/12 通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nA field the caller may not write keeps its stored value, whatever its type. This PR makes that hold for a `secret` field on both update paths, by id and by predicate (`multi: true`):\n\n- A `secret` field locked by a TRUE `readonlyWhen`, or declared static `readonly`, takes no caller write: the stored reference is unchanged and no `sys_secret` row is written for the value sent.\n- The read-only strips report the field as they report any other: `onFieldsDropped` (`readonly_when` / `readonly`), the REST `droppedFields` body and `X-ObjectStack-Dropped-Fields` header, and the `strictReadonlyWrites` refusal (`ERR_READONLY_FIELD_REJECTED`).\n- New `packages/objectql/src/engine-update-sealed-secrets.ts`: authorship of each `secret` key is read immediately before the credential pass, and both strips (and the views they build) judge a submission in which each caller-held key carries the reference that stands for the caller's value. A sealed `sys_secret` row is written only when the payload handed to the statement still names it.\n- Unchanged: an unlocked `secret` is sealed and stored as a reference; a value a `beforeUpdate` hook writes on a locked `secret` is the hook's and is kept; hooks read `ctx.submitted` as before. As for every `readonlyWhen` field, `isSystem` does not exempt a caller value on a locked `secret`.\n\n## Tests\n\n- `packages/objectql/src/engine-update-locked-secret.test.ts` (new, 12 cases), by id and by predicate: a `readonlyWhen`-locked secret and a static `readonly` secret keep their stored value and are reported; `strictReadonlyWrites` refuses with `ERR_READONLY_FIELD_REJECTED` naming both and writes nothing; `isSystem` does not exempt the `readonlyWhen` lock; controls: an unlocked secret is sealed and stored as a reference, a hook-written value on a locked secret is kept (alone, and over a caller value).\n- `packages/rest/src/rest-update-locked-secret.test.ts` (new, 2 cases): `PATCH /data/:object/:id` on the locked secrets answers 200 with both fields in `droppedFields` and the header, stored references unchanged; control: an unlocked secret through the same door is sealed and stored as a reference.\n\n## Acceptance notes\n\n- `Clause-②: no`. The declared contract already states the rule: `packages/spec/src/data/field.zod.ts`, `readonly` — \"server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE and on INSERT ... symmetric with `readonlyWhen`\". No spec, schema, export or error code changes; no published accept set or surface widens.\n\n## Verification\n\nReadings as of head `5abed35fbe` (the branch with `origin/main` b019048335 merged in). Readings not yet taken are named NOT MEASURED with their reason; they follow to the seat, not into this body.\n\n<details><summary>Reproduction on the base (temporary probe, not committed)</summary>\n\nBase `6c7d730f16`, non-system caller, by id and by predicate: 4 of 4 rule checks failed (2 locked secrets × 2 paths), 0 drops reported. Same probe on head: NOT MEASURED (lock queue); the committed pins measure head instead.\n\n</details>\n\n<details><summary>Engine pins</summary>\n\n`pnpm --filter @objectstack/objectql exec vitest run --maxWorkers=2 src/engine-update-locked-secret.test.ts` on `8cedf9f52d` (before the merge): 11 passed, 1 failed. The failure was the multi hook control's own construction (its handler keyed on a value it rewrote, so the matched rows' handlers wrote different keys and the engine refused the write as designed); fixed in `3524713e38`. Re-run on the current head: NOT MEASURED (shared verify lock held by a sibling's full dogfood run for over an hour).\n\n</details>\n\n<details><summary>REST pin, package suites, typecheck</summary>\n\n`packages/rest/src/rest-update-locked-secret.test.ts`, `pnpm --filter @objectstack/objectql test`, `pnpm --filter @objectstack/rest test`, both packages' `typecheck`: NOT MEASURED locally (same lock queue; rest's test closure is 32 packages to build). CI's Test Core and TypeScript Type Check run them on this PR.\n\n</details>\n\n<details><summary>Ablation</summary>\n\nPlanned one-shot: the authorship view in `engine-update-sealed-secrets.ts` disabled, engine pins expected red on the locked cases and green on the controls, then restored and proven by blob hash. NOT MEASURED at open (lock queue); the reading goes to the seat.\n\n</details>\n\n<details><summary>Gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on `5abed35fbe`: 67 commands, each run, exit captured before any pipe. 63 exit 0. Not passes:\n- `check:dts-closure` exit 1: `packages/formula` and `packages/metadata-core` dists were half-written by a build a container restart killed; not from this diff. Re-run after the rebuild: NOT MEASURED.\n- `check:lean-entry-closure` exit 3, `check:dual-build-cjs-loads` exit 3: PREREQUISITE NOT MET (no built dist) — NOT MEASURED.\n- `check:type-check-debt` exit 3: its closure build never got the lock (99) — NOT MEASURED.\n\nCI's Lint & Repo Gates and TypeScript Type Check carry all four.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYn5CmmdShCJifm6WYj)_\n"
+}

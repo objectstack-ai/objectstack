@@ -2,7 +2,7 @@
   "number": 34499,
   "kind": "pull_request",
   "title": "docs(skills): teach the record write's text envelope and its organization-language key",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T23:08:02Z",
-  "updated_at": "2026-11-17T02:11:38Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-17T03:00:20Z",
+  "closed_at": "2026-11-17T03:00:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T03:00:17Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34499",

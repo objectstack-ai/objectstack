@@ -2,8 +2,8 @@
   "number": 34523,
   "kind": "issue",
   "title": "Queue-flake anchor: scripts/__tests__/check-hand-rolled-comment-mask.test.ts",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "github-actions[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:devx",
     "finding",
-    "lease:o2-C",
-    "pm:dispatched",
     "priority:p0",
     "queue-flake-anchor"
   ],
@@ -24,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T00:02:53Z",
-  "updated_at": "2026-11-17T02:09:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T03:01:20Z",
+  "closed_at": "2026-11-17T03:00:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

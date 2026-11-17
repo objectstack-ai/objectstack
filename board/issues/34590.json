@@ -1,0 +1,36 @@
+{
+  "number": 34590,
+  "kind": "issue",
+  "title": "默认记录页：右栏里「相关」排在「动态」之前，动态放最后",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-A",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:49:25Z",
+  "updated_at": "2026-11-17T06:49:56Z",
+  "closed_at": "2026-11-17T06:48:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 10,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34590",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「我们同事反馈动态不常用，是否建议移动到子表最后」「「动态」在最后」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- #27524 之后默认记录页没有页签：宽于 760px 是「详情 | 右栏」，更窄是单列堆叠（`ui/packages/plugin-detail/src/synth/recordPageColumns.ts`）。\n- 默认顺序写死在 `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts`（约 :979–1013）：details、timeline（动态）、related、approvals；右栏里动态在前，相关在后。\n- 手写的记录页按作者写的顺序画，不受影响。\n\n## 要做的\n\n1. 默认页的右栏顺序改为：相关 → 附件 → 动态；窄屏单列堆叠时同样是详情 → 相关 → 附件 → 动态。\n2. 对象可以在元数据里把动态提前（销售类对象可能依赖跟进记录）：给出一个对象级的开关或顺序键，默认是动态在最后。键名和形状由 `domain:spec` 定，本卡先落默认顺序。\n\n## 不做的\n\n- 不恢复页签布局。\n- 不动手写记录页。\n\n## 验收\n\n1. 一个没有手写记录页的对象，宽屏右栏自上而下是相关、附件、动态。\n2. 375 宽下动态在页面最下方。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 1 记录详情</summary>\n\n![图 1 记录详情](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/01-record-detail.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `buildDefaultPageSchema.ts`；对象级覆盖需要 `domain:spec` 先出键。\n\nDedupe: `repo:objectstack-ai/objectstack buildDefaultPageSchema related before activity timeline order` → 17，最近的是 #26678（已关，记录页两种宽度一套页面），没有调整动态与相关先后的卡。"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 34594,
+  "kind": "issue",
+  "title": "手机端：进入应用后底部放菜单栏（读用户固定的菜单项），完整菜单收进「更多」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:51:52Z",
+  "updated_at": "2026-11-17T07:08:36Z",
+  "closed_at": "2026-11-17T06:48:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34594",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「手机端点开进入应用之后，菜单在左侧，会不会很多人不知道」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 手机上应用菜单是侧栏的 `Sheet`（`ui/packages/components/src/ui/sidebar.tsx:216`），收在左上角一个无文字的图标后面。\n- `ui/packages/app-shell`、`ui/apps/console`、`ui/packages/components` 里没有任何底部导航组件。\n- `packages/spec/src/ui/app.zod.ts` 的菜单项上没有手机相关的键。\n- 已有可复用的机制：每个用户可以固定菜单项并排序（`useNavPins`，见 `SidebarItemMenu.tsx`、`UnifiedSidebar.tsx`）。\n\n## 要做的\n\n1. 手机宽度下，应用内各列表 / 仪表盘页底部显示菜单栏：前 4 格是该用户在这个应用里固定的菜单项，没有固定时取菜单的前 4 项；最后一格「更多」。\n2. 「更多」打开完整菜单（保留分组、可搜索）；每项带星标，点一下固定 / 取消固定，直接调用现有的 `useNavPins`，不加新的元数据键。\n3. 左上角由三条线改为返回环境首页。\n4. 记录详情页与表单页不显示底部菜单栏（底部留给记录操作和提交按钮）。\n5. 悬浮的新建按钮让到菜单栏上方。\n\n## 不做的\n\n- 不改桌面端侧栏。\n- 不新增 spec 键。\n\n## 验收\n\n1. 375 宽进入 Sales，不点任何图标就能看到底部 4 个菜单项和「更多」。\n2. 在「更多」里给某项点星标，回到列表，底部出现该项。\n3. 打开一条记录，底部是记录操作栏，没有菜单栏。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 11 手机列表（底部菜单栏）</summary>\n\n![图 11 手机列表（底部菜单栏）](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/11-mobile-list.png?raw=true)\n\n</details>\n<details><summary>图 18 手机全部菜单</summary>\n\n![图 18 手机全部菜单](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/18-mobile-menu.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，新组件挂在控制台布局（`ConsoleLayout.tsx`）并读 `useNavPins`。\n\nDedupe: `repo:objectstack-ai/objectstack mobile bottom navigation useNavPins sidebar Sheet` → 0。相邻：#27058（已关，手机端列表卡片化）。"
+}

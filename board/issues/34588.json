@@ -1,0 +1,36 @@
+{
+  "number": 34588,
+  "kind": "issue",
+  "title": "审批请求页：直接显示完整的业务记录，不止「提交时的内容」里的 6 个字段",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-A",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:47:40Z",
+  "updated_at": "2026-11-17T06:50:30Z",
+  "closed_at": "2026-11-17T06:48:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34588",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「审批页应该直接显示完整的记录；「动态」在最后」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 请求页的「As submitted / 提交时的内容」由 `RecordSnapshotSummary` 画：金额在前，然后最多 6 个声明的业务字段（`SNAPSHOT_SUMMARY_ROWS = 6`，`ui/packages/app-shell/src/views/approval-decision/snapshotSummaryPlan.ts:68`），再加附件。\n- 要看其余字段和子表，得点「记录」卡跳到业务记录页（#32850 让这张卡可点）。\n- #32854 / #32963（已关）补上了文件字段，行数上限没变。\n\n## 要做的\n\n1. 请求页在审批条下方直接显示该业务记录的完整内容：全部可读字段按对象的分组排列、子表（相关列表，只读）、附件。版式与该对象的默认记录页一致。\n2. 显示的是提交时的快照；提交后被改过的字段在旁边标出「已改动」并能看到当前值。\n3. 右栏顺序：审批进度、附件、动态（动态排最后）。\n4. 字段级权限照旧：审批人读不到的字段不显示。\n\n## 不做的\n\n- 不让审批人在请求页上编辑业务记录。\n- 不改快照的存储结构；如果快照里没有子表数据，子表按当前值显示并注明「当前值」。\n\n## 验收\n\n1. 一条带 10 个以上字段和一张子表的申请，审批人不离开请求页就能看到全部字段和子表行。\n2. 提交后改过的字段有「已改动」标记。\n3. 审批人无权读取的字段不出现。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 4 审批</summary>\n\n![图 4 审批](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/04-approval-on-record-page.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `RecordSnapshotSummary.tsx` / `snapshotSummaryPlan.ts` 与请求页 `packages/plugins/plugin-approvals/src/sys-approval-request.page.ts`。\n\nDedupe: `repo:objectstack-ai/objectstack RecordSnapshotSummary SNAPSHOT_SUMMARY_ROWS full record` → 2（#32854、#32963，均已关，补文件字段，没有取消行数上限）。"
+}

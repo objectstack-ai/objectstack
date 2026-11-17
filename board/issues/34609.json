@@ -1,0 +1,35 @@
+{
+  "number": 34609,
+  "kind": "issue",
+  "title": "AI 助手面板：内容区没有内边距，表格超出面板右边被裁",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:05:22Z",
+  "updated_at": "2026-11-17T06:00:16Z",
+  "closed_at": "2026-11-17T05:33:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34609",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「然后你看聊天框内部都没有边距」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- 面板和整页都用 `surface=\"plain\"`。消息列表容器是 `mx-auto w-full max-w-2xl px-4 py-8 sm:px-0`（`ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx:5172–5178`），输入框容器是 `… px-4 pb-4 sm:px-0`（约 :5601）。`sm:px-0` 是按视口的断点，桌面窗口下内边距一律归零，哪怕面板只有 420px 宽。\n- 实测（面板宽 419px）：正文距左边 0px；输入框距两边各 1px；Markdown 表格超出面板右边约 7px，日期列被截成「2026-12」。\n- 表格外层来自 streamdown 的 `data-streamdown=\"table-wrapper\"`；本地代码只在表格溢出时加一个展开按钮（`plugin-chatbot/src/elements/message.tsx:448–465`），没有自己的横向滚动或最大宽度。\n\n## 要做的\n\n1. 窄容器下保留内边距：把 `sm:px-0` 换成按容器的断点，或给 plain 表面一个窄容器变体；消息、卡片、输入框左右统一 16px 并对齐。\n2. 表格不超出面板：在自己的框里横向滚动；面板较窄时把记录型结果画成每条一张的小卡片（名称、次要信息、金额）。\n\n## 不做的\n\n- 不改整页宽度下的版式。\n\n## 验收\n\n1. 面板宽 420px 时，正文、表格、输入框左右各有 16px。\n2. 一张 4 列的表格在面板里不被裁，能横向滚动或显示为卡片。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 15 AI 助手 · 右侧抽屉</summary>\n\n![图 15 AI 助手 · 右侧抽屉](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/15-ai-drawer.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ChatbotEnhanced.tsx` 与 `elements/message.tsx`。\n\nDedupe: `repo:objectstack-ai/objectstack ChatbotEnhanced sm:px-0 padding dock table overflow` → 0。"
+}

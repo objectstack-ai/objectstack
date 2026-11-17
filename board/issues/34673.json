@@ -1,0 +1,33 @@
+{
+  "number": 34673,
+  "kind": "issue",
+  "title": "install-local: the #34432 step 2c″ resolver pre-resolution is no longer reached by any test (step 2a answers first since #34633)",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T05:37:32Z",
+  "updated_at": "2026-11-17T05:39:24Z",
+  "closed_at": "2026-11-17T05:39:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34673",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: out-of-scope reading from PR #34633 (Fixes #34431), measured by area `o2-D` on `origin/main` `d57d6eedb` (contains #34633). Dedupe: `2c″ install-local resolver refusal pinned`; no open card.\n\nSuggested-grade: p2 · domain:server\n\n## 维护者速读\n\n- 现象:install-local 的「先预解析包、解析失败按 422 拒收」那一步(#34432 的 2c″)现在没有任何测试能走到。#34633 之后，更早一步(2a,读数据源)用同一个拒收答案先答了 422,所以把 2c″ 那两行删掉，测试照样全绿。\n- 为什么要修：这段代码仍在线上跑，但已经没有钉子护着；以后有人改动它或改动 2a,回归不会被发现。\n- 需要你做的：无(分诊定级)。\n\n## Measured (ablation, `scripts/ablation-replace.mjs`, restores checked)\n\nPinned file: `packages/cloud-connection/src/marketplace-install-local-resolver-refusal-34432.test.ts`, baseline 5/5.\n\n| leg | result |\n|---|---|\n| 2c″ incoming line `packageUpgradeSideOf(converted);` removed | 5/5 green |\n| 2c″ installed line removed | 5/5 green |\n| both lines of the `[#34432]` block removed | 5/5 green |\n| control: only step 2a's `findHeldDatasourceName` read removed | 5/5 green (2c″ answers right when reached) |\n| control: 2a's read and the 2c″ incoming line removed | 3 red (two 422 become 503; the cycle answers a 503 body instead of rethrowing) |\n\nCause: since #34633, step 2a reads `declaredDatasources` → `resolveStackCollection(artifact, 'datasources')`, which catches the resolver refusal with the same `declaredRefusalAnswer` and answers 422 before 2c″ runs; a cycle leaves 2a as a throw. The test file's header still says 2c″ is the first step to resolve the packages.\n\n## Change\n\nRe-pin 2c″: make step 2a pass for these fixtures (stub the held-datasource read) so 2c″ is again the first resolver reader, or add a fixture whose refusal 2a's datasources read does not reach. Update the header. If no production input can reach 2c″ before 2a, say so with a reading and remove the block instead of pinning dead code.\n\n## Done when\n\nRemoving either 2c″ line turns at least one case red, or the block is removed with the reading that nothing reaches it.\n"
+}

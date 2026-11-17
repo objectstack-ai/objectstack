@@ -1,0 +1,30 @@
+{
+  "number": 34715,
+  "kind": "issue",
+  "title": "Studio 着陆页：按「要做什么」重排，说明缩成一句，「只读」换成「定制」，两张无包卡片换说法",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T08:10:55Z",
+  "updated_at": "2026-11-17T08:10:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34715",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「组织自定义元数据的概念吗？除了流程还有很多，是否建议一个统一的入口吗？」；看过效果图后：「Studio 着陆页 可以」。\n维护者 2026-11-17 原话：「右侧这个界面有必要嘛？组织流程时什么，环境目录是什么」\n\n## 现状（读码，objectstack `origin/main` a34eb0716a；界面实测在本地 HotCRM 实例，zh-CN）\n\n`ui/packages/app-shell/src/views/studio-design/BuilderLanding.tsx` 的着陆页从上到下是：\n\n- 一段说明：「在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用「定制」或「新建类似」修改其条目，修改保存在该软件包的 .custom 定制包中。」\n- 「我的软件包(可写)」，空状态「还没有可写软件包」，按钮「新建软件包(可写基座)」。\n- 「不属于软件包」下两张卡片：「组织流程」（`studio-landing-org-scope`，:436–451）和「环境目录」（`studio-landing-env-catalog`，:455–470）。\n- 「已安装(只读 · 可浏览)」，又一段讲 .custom 与升级的说明；每张卡片带「只读」徽标和包的内部 ID（如 `app.objectstack.hotcrm`）。\n\n问题：用户最可能要做的事（改已安装的应用）排在最下面并标着「只读」；「组织流程」「环境目录」「可写基座」「.custom 定制包」是架构上的叫法；两段说明在讲机制。\n\n## 要做的\n\n1. 顺序改成：已安装的应用 → 本环境的定制（另一张子卡）→ 新建自己的应用与其余入口。\n2. 页首说明缩成一句，说用户能做什么；「已安装的应用」下只留一句「应用本身由厂商升级；你的改动单独保存，升级不会冲掉」。\n3. 已安装应用的卡片：去掉「只读」徽标，放「定制」按钮（进入该应用的浏览页，行为与现在点卡片相同）；包的内部 ID 不在卡片正面显示；没有定制时写「还没有改动」。\n4. 「环境目录」改叫「岗位与权限」，说明「岗位、权限集、共享规则，所有应用共用」。位置仍在 Studio（ADR-0146 D1：设置里不放元数据编辑器），只改名字与说明。\n5. 「组织流程」改叫「未归属的流程」，带数量；数量为 0 时不显示这张卡。\n6. 「新建软件包(可写基座)」改叫「新建自己的应用」。\n7. 中英文及其他语言包同步；`.custom`、「基座」这类词不出现在着陆页正文里。\n\n## 不做的\n\n- 不改任何路由、权限与存储；不把岗位、权限集的定义挪到设置。\n\n## 验收\n\n1. zh-CN 下着陆页正文里没有「.custom」「基座」「只读」字样；第一块是已安装的应用，每张卡片有「定制」按钮。\n2. 没有无包流程的环境里看不到「未归属的流程」；有 2 条时显示「未归属的流程 2」。\n3. 现有钉住这些 test id 与文案的测试随之更新。\n\n## 设计图（静态示意稿，标「新」的是改动；示例数据是虚构的）\n\n<details><summary>图 19 Studio 着陆页</summary>\n\n![图 19 Studio 着陆页](https://github.com/objectstack-ai/objectstack/blob/69284a23681f1f94a5a0250a5f208e1293019f3c/19-studio-landing.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `BuilderLanding.tsx` 与 `ui/packages/i18n/src/namespaces/studio/`。\n\nDedupe: 同上一张子卡的查询，没有重排着陆页的卡（含已关）。"
+}

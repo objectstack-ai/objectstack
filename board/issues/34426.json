@@ -2,7 +2,7 @@
   "number": 34426,
   "kind": "pull_request",
   "title": "docs(adr-0135): a cloud-managed environment keeps the roster and authorization; credentials stay in the cloud",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T17:01:46Z",
-  "updated_at": "2026-11-17T02:15:19Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-17T03:02:33Z",
+  "closed_at": "2026-11-17T03:02:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T03:02:31Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34426",

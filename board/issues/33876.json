@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T13:13:33Z",
-  "updated_at": "2026-11-17T01:45:10Z",
+  "updated_at": "2026-11-17T07:54:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33876",
   "body": "domain:server#5 · os-elon-musk · session_016WV4d1QwJJ5KGZTThP4fnq\n\nFollow-up of #33626 (draft PR #33652), carrying the maintainer's ruling on its Q2. ⛔ Not a claim.\n\n## The ruling\n\nPosted on #33626 by the seat (comment 6889543194), the maintainer's choice on the decision card, 2026-11-15T05:06Z: **A**. A driver that cannot run a cross-object `where` (MongoDB, OData) is refused in the engine, before the driver, with `INVALID_FILTER` / 400 — not the current `INTERNAL_ERROR` / 500 from inside the driver. This needs a `DriverCapabilities` bit, which ADR-0139 currently rules out, so it carries an ADR-0139 amendment and follows the governed path (Tier H, approver lands). Q1 (comment 6889549817): driver-memory keeps evaluating the composed leaf in process.\n\n## What exists\n\nPR #33652 serves the nested-relation condition on read verbs as a `ReadableIds` semi-join leaf (planned related read, `packages/objectql/src/relation-semi-join.ts`). On `driver-mongodb` / `driver-odata` the read reaches the driver and is refused with its ADR-0139 D3 refusal (`INTERNAL_ERROR` / 500). An author cannot fix a 500, and the refusal should name the reason before any related read runs.\n\n## What lands\n\n1. ADR-0139 amendment: a driver capability bit stating that the driver compiles (or evaluates) a `ReadableIds` leaf; driver-sql, Turso and driver-memory declare it; MongoDB and OData do not.\n2. `lowerRelationConditions` refuses a single-valued nested-relation condition on a read verb with `INVALID_FILTER` / 400, naming the driver and the two-step route, before planning the related read, when the read's driver lacks the bit.\n3. Tests: the refusal envelope (code + status) on a driver double without the bit; the served path unchanged on SQL and memory.\n\n## Grade and route\n\np2. `docs/adr/**` is a Tier H governed surface: land the ADR amendment (or the whole PR) by the maintainer's hand or an authorized approval.\n\nSeam: spec:`DriverCapabilities` → runtime:`lowerRelationConditions` (`packages/objectql/src/engine-query-lowering.ts`).\n"

@@ -2,24 +2,34 @@
   "number": 34579,
   "kind": "issue",
   "title": "approvals: a hook refusal in the step after an approval answers 500 RESUME_FAILED after the decision is recorded, stranding the run and the record — surface the refusal as a 4xx before finalizing",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
     "id": 353326562,
     "type": "User"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T02:12:41Z",
-  "updated_at": "2026-11-17T02:12:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T05:00:36Z",
+  "closed_at": "2026-11-17T04:59:43Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34579",
   "body": "## What\n\nAn approval flow resumes after the approver's decision. If the next step is an `update_record` whose write is **refused by a record hook** (a business refusal declared in the hook's `refusals` catalogue, i.e. an ordinary 4xx-class refusal), then:\n\n- `POST /api/v1/approvals/requests/{id}/approve` answers **500 `RESUME_FAILED`** (finalized, repairable);\n- the approver's decision has **already been recorded** before the resume ran;\n- the flow run is stranded: the record the flow should have moved stays where it was (here a plan stays `submitted` and its order stays in Special Approval);\n- only an administrator can repair it.\n\nThe approver receives no readable refusal, and the requester's record is stuck.\n\n## Repro (app project, 18.5.0)\n\n1. A special-approval flow on an allocation plan: approval node, then on `approve` an `update_record` that sets the plan to `approved`.\n2. The plan's `beforeUpdate` hook re-checks capacity at adoption and refuses (`refuse('VALIDATION_FAILED', 'over_capacity')`) when another order took the capacity while this plan waited.\n3. The director approves, and the call returns 500 `RESUME_FAILED`. The request shows as approved, the plan stays `submitted`, and the order is stuck.\n\nRelated but distinct, all closed: #13807 (reject returning 500 while its effect lands), #26477 (approving after the flow was deleted).\n\n## Expected\n\nOne of the following:\n\n- **Preferred:** run (or dry-run) the post-decision step before the decision is finalized. If that step's write is refused, answer the approver with the hook's localized refusal as a 4xx and leave the request pending, so the approver can reject instead.\n- **At least:** when a post-decision step is refused, do not strand the run. Route it down a declared failure edge, or mark the request as failed with the refusal text visible on the request, so the flow author can handle it without an administrator.\n\n## App side\n\nThe app does not throw at that step. Instead it bounces the plan back to the rep, marked over capacity, and releases the hold. This was a design choice made to stay within what the platform can do today. As a result the director never sees why, and the request still reads approved."

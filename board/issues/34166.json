@@ -2,8 +2,8 @@
   "number": 34166,
   "kind": "issue",
   "title": "A registered host signer replaces the local trust anchor, so every checkpoint the local key signed reads `untrusted_key`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "lease:o2-I",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T22:38:23Z",
-  "updated_at": "2026-11-16T22:18:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T03:01:45Z",
+  "closed_at": "2026-11-17T03:00:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

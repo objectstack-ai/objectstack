@@ -1,0 +1,36 @@
+{
+  "number": 34601,
+  "kind": "issue",
+  "title": "内嵌行项目表格里的查找下拉和单元格一样窄，选项名被截断",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-C",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:58:53Z",
+  "updated_at": "2026-11-17T07:59:15Z",
+  "closed_at": "2026-11-17T07:58:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34601",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- `ui/packages/fields/src/widgets/LookupField.tsx:1958–1959`：下拉内容宽度是 `w-[var(--radix-popover-trigger-width)]`，跟触发器同宽。表格单元格渲染 `<LookupField compact>`（`GridField.tsx:1243–1256`）。\n- 实测（hotcrm 本地实例，报价单行项目的 Product 列）：下拉约 65px 宽，选项显示成「Data Migr…」「ObjectSta…」，看不出是哪个产品。\n- 仓里已有给下拉设最小宽度的先例：`FieldTypePicker.tsx:290`（`min-w-[18rem]`）、`InspectorComboField.tsx:251`（`min-w-[14rem]`）。\n- 查找列在表格里的最小宽度是 168px（`GridField.tsx:150`），实测只有约 65px，说明这一列带着显式的窄宽度，来源没有追到。\n\n## 要做的\n\n1. 查找下拉设最小宽度（至少 `compact` 时，建议 16rem），并以可用宽度封顶，不再跟窄单元格同宽。\n2. 查明行项目表格里 Product 列为什么比 168px 的最小宽度还窄，并修正。\n\n## 不做的\n\n- 不改查找的数据与筛选。\n\n## 验收\n\n1. 在行项目表格里打开产品下拉，能读出每个产品的完整名称。\n2. 窄屏下下拉不超出视口。\n\nReader: `domain:ui` 车道，改 `LookupField.tsx`，并追 `GridField.tsx` 的列宽来源。\n\nDedupe: `repo:objectstack-ai/objectstack LookupField popover width grid cell compact radix-popover-trigger-width` → 0。"
+}

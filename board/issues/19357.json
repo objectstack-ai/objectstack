@@ -2,8 +2,8 @@
   "number": 19357,
   "kind": "issue",
   "title": "[PM seat] domain:spec · seat 5 — ⏳ vacant · 留守 #29571 #29618 (os-warren)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-elon-musk",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T13:20:29Z",
-  "updated_at": "2026-11-03T00:34:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T03:57:42Z",
+  "closed_at": "2026-11-17T03:57:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 116,
+  "comments": 117,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19357",
   "body": "domain:spec#5 · os-warren · session_01JQwxbWR3K3h7i1ytwycVg1\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 5**. Seat 1 is #6017, seat 2 #18549, seat 3 #18883, seat 4 #18917 (⛔ this post is none of them).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-warren` · `session_01JQwxbWR3K3h7i1ytwycVg1` (project thread \"Take another spec lane seat\"), seated at opening mark 6582331677. Stood down on the maintainer's order 「spec 当前任务处理完，走下班流程」 (Warren, project chat, relayed by the coordinator). The sign-off brief is the newest comment on this post.\n- **Stay-behind:** #29442 (PR #29571) and #29574 (PR #29618). Both are ACCEPTed (6589521351 and 6590113467) and wait only on the maintainer's approval of a new key name (`objectName`, `redirectUri`), which must be quoted in the PR body before the queue. The departing session keeps its subscription to these two PRs only. On approval it quotes the approval, runs `pr_ready` + `automerge_enable`, posts the landing comment and clears `pm:dispatched`. Nothing else.\n- **Mailbox:** PR #29492 closed at stand-down; the next holder reopens one when seated.\n- **Patrol:** trig_017K2uodLCpLNNVFVvGameAt is DISABLED, not deleted, because it is bound to the departing session.\n- **Taking over:** `/pm-dispatch 接手`, then read this post and the sign-off brief first.\n\n## Ledger\n\n- **Landed this tenure:** #29382 (PR #29525), #29485 (PR #29539), #28522 (PR #29534), #29419 (PR #29570), #29543 (PR #29599), #29585 (PR #29612). All are closed `completed`.\n- **Returned to `pm:queue` with `Release:` + `Resume-from:`:**\n  - #29617 (draft PR #29651; review, ACCEPT and key-name approval owed);\n  - #29541 (draft PR #29586; lands after seat 3's PR #29589);\n  - #29415 (draft PR #29553; `Restart-when:` the protocol.ts freeze lifts).\n- **Filed this tenure:** #29610 and #29611 (follow-ups, ungraded at filing). Queue-flake anchor #29530 was closed `completed`.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- **Split with seat 3 (#18883):** seat 3 takes odd positions of the lane's total order and seat 5 takes even. The last position assigned was 24, #29617, to seat 5. Seat 3 is standing down on the same order.\n- **Freeze:** server seat 5 froze protocol.ts until 2026-11-03 06:00Z at the latest (`api/protocol.zod.ts`, `identity/protocol.ts`, `packages/metadata-protocol/src/protocol.ts`).\n"

@@ -1,7 +1,7 @@
 {
   "number": 29747,
   "kind": "issue",
-  "title": "[PM seat] domain:skills · seat 3 — 🟢 os-support-ai",
+  "title": "[PM seat] domain:skills · seat 3 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:skills",
     "pm:seat"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T03:16:22Z",
-  "updated_at": "2026-11-16T16:46:05Z",
+  "updated_at": "2026-11-17T04:01:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 11,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29747",
-  "body": "domain:skills#3 · os-support-ai · session_01WGufzgtCwPzNYSczvxDEpw\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 3**. Seat 1 is #7623, seat 2 is #19287.\n\n<sub>Refreshed 2026-11-16T16:45Z · round 1 dispatched.</sub>\n\n## Current PM\n\n🟢 **`os-support-ai`** · `session_01WGufzgtCwPzNYSczvxDEpw` · seated 2026-11-16T16:36Z · held by the os-support-ai account's project (\"objectstack spec ui server devx\", thread \"Run PM dispatch skills seat\"). Posture and ledger live in the project; the canonical ledger is below.\n\n- **Mailbox:** PR #34423 (subscribed). **Patrol:** `trig_01W5D6WHD51CTs56bzcbob8b` · `33 * * * *`.\n- **Posture:** p1/p2 only, at most 5 running cards; card threads are opened by this project's coordinator.\n- **Split with seat 2:** a queue card belongs to whichever seat's `Claim:` lands first; no card claimed by another seat is touched.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#3` + `head:claude/` PRs.\n- **In flight (round 1):** #25583 (claim 6922732879), #34191 (6922749450), #34201 (6922776400), #33184 (6922793989) — one card thread each, opened by the coordinator.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:skills#3 · os-support-ai · session_01WGufzgtCwPzNYSczvxDEpw -->\n"
+  "body": "domain:skills#3 · os-support-ai · session_01WGufzgtCwPzNYSczvxDEpw\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 3**. Seat 1 is #7623, seat 2 is #19287.\n\n<sub>Refreshed 2026-11-17T03:55Z · clocked out.</sub>\n\n## Current PM\n\n⏳ **vacant** · last held by `os-support-ai` · `session_01WGufzgtCwPzNYSczvxDEpw` (seated 2026-11-16T16:36Z, clocked out 2026-11-17T03:55Z on the account owner's word 「skills 车道当前任务处理完，合并后就下班」 of 2026-11-17T00:26Z). Mailbox PR #34423 closed; patrol `trig_01W5D6WHD51CTs56bzcbob8b` deleted. The next seat takes it on the clock-out brief below this body.\n\n- **Stay-behind:** #34210 — PR #34558, ACCEPTed (record 6937503355) on head `1a820c34`, Tier H, `pm:awaiting-merge`, reviewers os-zhuang and hotlong requested; the outgoing session lands it once APPROVED and writes nothing else.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#3` + `head:claude/` PRs.\n- **Landed this tenure:** #33184 (PR #34426, ADR), #34201 (PR #34528), #34191 (PR #34529), #34400 (PR #34557), #25583 repo half (PR #34526; card now `pm:awaiting-maintainer`, the cloud-environment setup script), #33768 two follower boxes (PR #34559; card back to `pm:queue` for N1, E1, D2, D4, N2).\n- **Open:** #34210 (stay-behind, above).\n- **Contract review routing note:** review#2 (#33258) takes only deltas of its own records (wind-down); l2-review#3 (#34475) left two hand-offs unclaimed for two hours. On the account owner's word (2026-11-17T03:06Z) this seat ran its contract reviews through an at-tier `CONTRACT_REVIEW_TIER` sub-agent, posting each with `--tier-evidence`.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:skills#3 · os-support-ai · session_01WGufzgtCwPzNYSczvxDEpw -->\n"
 }

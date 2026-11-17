@@ -1,0 +1,37 @@
+{
+  "number": 34626,
+  "kind": "issue",
+  "title": "Governed approvers: remove hotlong, keep only os-zhuang (GOVERNED_APPROVERS, CODEOWNERS, docblocks)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "lease:o2-S",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:50:57Z",
+  "updated_at": "2026-11-17T06:48:51Z",
+  "closed_at": "2026-11-17T06:48:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34626",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ② a maintainer's direct order, given in the triage session on 2026-11-17 at about 03:50Z. Verbatim: 「hotlong 从批准账户中去掉，只保留 os-zhuang」.\n\n## 维护者速读\n\n- **改什么**：能批准受管改动（AGENTS.md、workflow、CODEOWNERS 和治理脚本这类 Tier H 面）的账号，从 os-zhuang 加 hotlong 两个，减成只有 os-zhuang。\n- **为什么**：规则写明「批准账号永不跑席位或作其关联用户」（SKILL.md「用户账号仅三用」那一行）。现在分诊席、cloud 5 号席和本机的专题协调都用 hotlong 在跑，正好违规。拿掉 hotlong 的批准权，这些席位就合规了。\n- **需要你做的**：这张卡本身改的是受管面，落地要 os-zhuang 批准。之后每个受管 PR 都只认 os-zhuang 的批准。\n\n## Where the approver set lives (`origin/main` 97defd6067)\n\n- `scripts/pm/check-governed-queue-guard.mjs:782`, `export const GOVERNED_APPROVERS = Object.freeze(['os-zhuang', 'hotlong'])`. This is the single source. Its docblocks at :82, :99, :153, :776 and :1956 quote the old ruling 「os-zhuang hotlong 批准算数」 (2026-08-27).\n- `scripts/pm/check-governed-merges.mjs:11046` holds a literal `['os-zhuang', 'hotlong']`. Read it from `GOVERNED_APPROVERS`, or pin it equal. Its tests at ~9678–9684 use `hotlong` as an authorizing login and must move to `os-zhuang`. Keep one negative case asserting that a `hotlong` approval no longer authorizes.\n- `.github/CODEOWNERS:51–68`: every governed path lists `@os-zhuang @hotlong`. Drop `@hotlong`. The header comment at :13 and :39–40 records the old ruling: add the new one with its date, and do not rewrite the history.\n- Any rule text that names the approver pair. `git grep -n \"os-zhuang hotlong\\|os-zhuang 或 hotlong\" origin/main` lists them.\n\n## Done looks like\n\n1. `GOVERNED_APPROVERS` is `['os-zhuang']`, and the docblocks cite this order with its date. The 2026-08-27 ruling is kept as history, marked superseded.\n2. No second literal approver list remains, or a pin test keeps it equal to `GOVERNED_APPROVERS`.\n3. CODEOWNERS governed rows name `@os-zhuang` only.\n4. The guard tests pass. A head approved only by `hotlong` reads as unapproved.\n\n## Effects to note in the PR\n\n- **In-flight governed PRs:** one open PR has a `hotlong` review today (#33011). Any head approved only by `hotlong` needs an `os-zhuang` approval after this lands. List them in the PR body at merge time.\n- **Seats running as `hotlong`** (triage#1, repo:cloud#5, the local coordinator) become compliant with the SKILL.md account rule. No seat change is needed.\n- **No other repo carries the pair:** checked cloud, hotcrm and gallery.\n\nTier H: CODEOWNERS and the guard scripts are governed. The change lands only with an `os-zhuang` approval, which is the last approval under the old set that matters.\n\nDedupe: `GOVERNED_APPROVERS hotlong` returns no card."
+}

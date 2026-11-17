@@ -2,8 +2,8 @@
   "number": 34536,
   "kind": "issue",
   "title": "console identity import wizard: no `manager_id` column to map, although import-users accepts a manager",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T00:16:09Z",
-  "updated_at": "2026-11-17T00:27:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T06:24:19Z",
+  "closed_at": "2026-11-17T06:20:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34536",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: class a, from the final report 6933432108 of card #33113 (PR #34531), passed on by area `o2-D`. Dedupe: `identityImportFields manager`.\n\n## 维护者速读\n\n- 现象：控制台用户列表的导入向导里，可以映射的列有 email、phone_number、name、role、positions,没有 manager_id。接口本身接受 manager 列，但在界面上映射不了。\n- 需要你做的：无。\n\n## Evidence (re-check command)\n\n`grep -n \"name:\" ui/packages/app-shell/src/views/IdentityImportPanels.tsx` near `identityImportFields`, compared with the columns `packages/plugins/plugin-auth/src/admin-import-users.ts` reads.\n\n## Change\n\nDerive the wizard's mappable columns from what import-users accepts, or add `manager_id` with the same label and validation rules as the other columns. Prefer one list both sides read over a second hand-kept copy. Pin it with a test that the wizard offers every column the endpoint accepts.\n\n## Done when\n\nThe wizard maps a manager column end to end, and the pin test fails if the two lists drift.\n"

@@ -2,8 +2,8 @@
   "number": 30423,
   "kind": "issue",
   "title": "[PM seat] domain:ui · seat 6 — ⏳ vacant",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-05T10:43:50Z",
-  "updated_at": "2026-11-16T09:23:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T03:59:58Z",
+  "closed_at": "2026-11-17T03:59:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/30423",
   "body": "domain:ui#6 · os-lizheng · session_012MmDsR2MvJuPqJW5jG2YQV\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 6**. Seat 1 is #25966, seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Refreshed 2026-11-16T09:21Z at sign-off.</sub>\n\n## Current PM\n\n⏳ vacant. Successor: `/pm-dispatch 接手`, then read this post first.\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#6` + `head:claude/` PRs.\n- **Previous holder:** `os-lizheng` · session `session_012MmDsR2MvJuPqJW5jG2YQV`, two one-card tenures in this session: filed #34349 (`finding`, for the triage first touch) and #34361 (`[Decision]`, `needs-user-decision`, for the director seat to present); off duty 2026-11-16T09:21Z. `check-handover.mjs` exit 0 before this edit.\n- **In flight:** none. **Claims:** none this tenure.\n- **Patrol:** none was created. **Mailbox:** none was opened (recorded deviation, seating comments 6911521856 and 6912335688).\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n- **Excluded:** the `pm:epic` subtrees. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Sibling split:** cards held by `domain:ui#1`–`#5` are theirs; the claim stamp arbitrates an unclaimed card.\n- **Standing constraints:** changesets for ui cards go to the root `.changeset/`. No PR goes to the objectui repository. Cloud-touching cards go whole to the `repo:cloud` lane.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"

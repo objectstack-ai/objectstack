@@ -2,9 +2,9 @@
   "number": 34559,
   "kind": "pull_request",
   "title": "chore(pm): queue guard refusal hints follow PD14 dequeue; record the live pr_dequeue reading",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,7 @@
   },
   "labels": [
     "documentation",
-    "needs:contract-review",
+    "pm:awaiting-merge",
     "size/s",
     "skip-changeset"
   ],
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T00:46:15Z",
-  "updated_at": "2026-11-17T00:54:50Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 2,
+  "updated_at": "2026-11-17T03:35:53Z",
+  "closed_at": "2026-11-17T03:35:51Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T03:35:51Z",
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34559",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBTFATNfMJ3wCadH4nywTxtZ)_\n\nPart of #33768\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- **改了什么**:队列守卫两条拒收提示(受管面、超行数)的第一步改为:在队 PR 由其落地席发中继 `pr_dequeue`,其他席位或该笔未落地才请维护者手动移出;自测钉子同步。`platform-readings.md` 记一行实测出队读数,`landing-operations.md` 一行指给落地席。\n- **为什么改**:AGENTS.md 第 14 条(已落地)写明落地席可发 `pr_dequeue`,守卫提示仍说「没有席位动作能出队」,把每个席位都送去找维护者,与规则相反。\n- **风险与回滚**:只改提示文字、注释与自测钉子,判定逻辑不动;回滚 = revert 本 PR 一个提交。\n- **先看**:`scripts/pm/check-governed-queue-guard.mjs` 1990–1999 与 2959–2968(两条提示正文)、5162–5205(钉子)。\n- **两分钟验证**:`node scripts/pm/check-governed-queue-guard.mjs --self-test` → 581 cases pass。\n- **需要你做的**:批准本 PR(Tier H:守卫是受管面自身的门)。\n\n### AGENTS.md Prime Directive #14, as landed (merge `3bf9c5c4`), quoted verbatim\n\n> **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms\n> an unqueued PR; a queued one's landing seat sends the relay's `pr_dequeue` (measured live, comment 6902190812); any\n> other seat, or a stroke that does not land, asks the maintainer at once — then confirm from the remote that it is\n> in neither the queue nor `origin/main`.\n\n## What changes\n\n**Box A: the queue guard's refusal remedies follow PD14.** `renderGuardVerdict` and `renderSizeVerdict` step 1 now say: disabling auto-merge and converting to DRAFT do not take a queued PR out of the queue; its landing seat sends the relay's `pr_dequeue` AT ONCE (measured live, comment 6902190812); any other seat, or a stroke that does not land, asks the maintainer AT ONCE to remove it by hand; then disarm and confirm from the remote. The old text (\"no seat act is measured to take it out of the queue\") is gone. No new rule: the wording is PD14's.\n\nComments and pins kept in step:\n- the remedy-order pin's first position is now `its landing seat sends the relay's \\`pr_dequeue\\` AT ONCE` (was `ask the maintainer AT ONCE`); its assert name drops `MAINTAINER-`;\n- the queued pull-back battery's header comment, its `QUEUED_PULL_BACK` pins (the old \"no seat act\" and \"ask the maintainer\" pins replaced by three: not-out-of-the-queue, landing seat's `pr_dequeue`, any-other-seat asks the maintainer), its assert name and its battery name (`…: the landing seat sends the relay dequeue, never a DRAFT conversion`; the roster row renamed with it, count stays 4);\n- the self-test's closing summary sentence.\n\nThe DRAFT-dequeue detector and its fixtures are untouched: a draft conversion still does not dequeue.\n\n**Box B: the measured live dequeue.**\n- `platform-readings.md`, queue membership: new row `中继 \\`pr_dequeue\\` 实测出队(run 43767458575,审计 6902190812):mutation 200,回读离队,仍开未合。` Read off the run's job log: `pr_dequeue: POST /graphql dequeuePullRequest -> HTTP 200 · #34097 out of the merge queue and still open, unmerged · read back 25 entr(ies), none is #34097 · audit comment 6902190812`.\n- `landing-operations.md`, right after the dequeue cause lines: `该 op 实测离队见 \\`platform-readings.md\\`;在队受管面 PR 亦由落地席发(Prime Directive #14)。`\n\nPaid in-family, both files stay at their ceilings (458, 112):\n- `platform-readings.md`: the two lines \"不在 `origin/main` 上是二义读数…两者处置相反\" and \"⇒ 落地检查恒两个读数…缺一不可\" merged into one: `不在 \\`origin/main\\` 二义(在队等/没入队)⇒ 落地检查恒读两数:队列成员资格与 \\`origin/main\\`。` Cut: \"两者处置相反\" and \"缺一不可\", both carried by \"恒读两数\".\n- `landing-operations.md` §D: \"两棒散文互锁时分工由 PM 指派,允许前棒留占位交接。\" and \"PM 必须在两侧接力指令里写明谁动、谁不动。\" merged: `…允许前棒留占位交接;PM 在两侧指令写明谁动、谁不动。` Cut: \"必须\", \"接力\".\n\n## Tests\n\n- `node scripts/pm/check-governed-queue-guard.mjs --self-test`: 581 cases pass (581 at base; the battery's assertion count is unchanged).\n- Ablation (scratch copy, restored): changing the size remedy's \"So its landing seat sends\" back to an ask-the-maintainer opening → `✗ ⭐ every-size-refusal-kind-carries-the-SAME-pull-back`, 1 of 581 failed.\n\n## Acceptance notes\n\n- Tier H: `scripts/pm/check-governed-queue-guard.mjs` is the governed surface's own gate. `skip-changeset` (no published file).\n- Card boxes for the seat to tick: the two \"Follower of PR #34256\" boxes. N1, E1, D2, D4, N2 stay open.\n- E1 (removal-to-merge gap) is still not measured: the run log carries no merge, the PR was dequeued and stayed open.\n\n## Verification\n\nHead `1f35f8d4` on base `ec6b5fd3`:\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 70; 68 exit 0; 2 exit 3 (PREREQUISITE NOT MEASURED, left to CI): `pnpm --filter @objectstack/lint run check:doc-formula-expressions` (`@objectstack/formula` not built) and `pnpm check:i18n-coverage` (CLI not built). Neither reads the three files here.\n- `--ran`: 70 derived, 68 run, 2 NOT-MEASURED, 0 UNRUN, exit 0.\n- Among the 68: `check-governed-queue-guard --self-test` (581 pass), `pnpm check:pm-skill-ratchet` (platform-readings 458/458, landing-operations 112/112), `pnpm check:pm-skill-id-lint` (118 files clean), `check:pm-governed-prose`, `check:scripts-symbol-anchors`, `check:nul-bytes`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzfVcrqPWPvsYbkg1XX\n"

@@ -1,0 +1,30 @@
+{
+  "number": 34721,
+  "kind": "issue",
+  "title": "reading first: do list_objects and describe_object return the descriptions an author wrote on objects and fields",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T08:22:40Z",
+  "updated_at": "2026-11-17T08:22:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34721",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17. On the synonyms layer, verbatim: 「同意，所以hotcrm 也需要立卡改进对吧」, answering the seat's three-layer proposal (authors write synonyms; the server hints on a zero-match; the client asks back). In the same chat the maintainer agreed not to add synonyms to objects and fields; this card is what that layer needs instead.\n\n## Why\n\nWhen no governed metric answers a question, the client falls back to the object tools and has to pick an object and fields by reading what the tools return. If an author wrote \"amount, tax excluded\" on a field and the tool does not return it, the client guesses.\n\nWho acts: a read-only reading first (server lane, `packages/mcp`). Who reads the result: every MCP client on the fallback path.\n\n## Evidence (objectstack `a0326b06`, read 2026-11-17; descriptions read, results not conclusively checked)\n\n- `list_objects` describes itself as returning \"each object's name, label and field count\" (`packages/mcp/src/mcp-http-tools.ts:2526`).\n- `describe_object` describes each field as name, type, label, required, readonly, system, options, defaultValue (`:2584`). Neither description names a description or help text.\n\n## Scope\n\n- Reading: on `examples/app-crm`, call both tools for an object and a field that carry a `description`, and record what comes back.\n- If absent: return the object's and the field's existing `description`, under the caller's field-level security, with the byte cost stated. No new metadata key.\n\n## Done when\n\n- The reading is on this card; if a change follows, a pin shows the description returned for a readable field and withheld for an unreadable one.\n\n## Relations\n\n- Parent: #34659. Related: #33824 (labels beside raw values).\n- Dedup, open and closed: no query run beyond the parent's; the lane dedups on first touch."
+}

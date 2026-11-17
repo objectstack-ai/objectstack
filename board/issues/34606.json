@@ -1,0 +1,32 @@
+{
+  "number": 34606,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): cloud ci:full scope adds PRs that change repo-root test inputs",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:01:58Z",
+  "updated_at": "2026-11-17T07:57:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34606",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8ChEr57nytUsP92HAidnH8Q)_\n\nRefs objectstack-ai/cloud#4749. Follow-up to #34416. Governed (Tier H): draft, merged by the maintainer by hand.\n\n## 维护者速读\n\n1. **问题**：cloud#4746 落地后，cloud `AGENTS.md` 规定改到仓根文件（lockfile、`vitest.shared.ts`、根 `turbo.json` 等）的 PR 要加 `ci:full`；车道说明里「`ci:full` 只给 pin 轮次与改 workflow 的 PR」与之冲突。\n2. **改法**：只改 `lanes/cloud.md` 第 28 行，`ci:full` 改为三类：pin 轮次、改 `.github/workflows/**`、改仓根文件的 PR。\n3. **口径**：同一行指向 cloud `AGENTS.md` 第 7 条，仓根文件清单不在这里重述。\n4. **配套**：cloud#4754 合 main 时把同样的三类写进 `AGENTS.md` 第 7 条。\n5. **行数**：仍 28 行，该行 119 B，棘轮不动。\n6. **需要你做的**：审阅后手动合入。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/lanes/cloud.md` line 28, item ③:\n\n- before: `ci:full` only for pin rounds (`.objectstack-sha` changes) and PRs that change `.github/workflows/**`; the rest run the affected tier.\n- after: `ci:full` only for pin rounds, PRs that change `.github/workflows/**`, and PRs that change the repo-root files (pointer to cloud `AGENTS.md` rule 7).\n\n## Why\n\nThe build-and-test timeout change (cloud#4746) caps a non-`ci:full` PR at 50 minutes while a root-file change widens the affected tier to every package, so such PRs must carry `ci:full`. The seat's Go (2026-11-17 02:59Z) chose to name three classes in both places.\n\n## Verification\n\nRun in the container at head 35cf050e:\n- `pnpm check:pm-skill-ratchet` → 0 (28 lines, ceiling 28; line 28 is 119 bytes)\n- `pnpm check:pm-skill-id-lint` → 0\n- `pnpm check:pm-governed-prose` → 0\n- `pnpm check:skill-links` → 0\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1–2, 6–7 n/a (skill text only).\n- [x] 3. No formatter ran.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. Publishes nothing (`skip-changeset`).\n- [x] 8. English, apart from the lane's 维护者速读 block.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbXY2nauW96XKVHkXmW\n"
+}

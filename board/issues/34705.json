@@ -1,0 +1,31 @@
+{
+  "number": 34705,
+  "kind": "issue",
+  "title": "app-shell 在 macOS 上构建失败：`DeploymentNotice.tsx` 与 `deploymentNotice.ts` 只差大小写",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T07:23:00Z",
+  "updated_at": "2026-11-17T07:47:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34705",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：① 实测缺陷（2026-11-17，objectstack `origin/main` a34eb0716a，macOS 默认的大小写不敏感文件系统）。⛔ 不是认领。\n\n## 现象\n\n在 macOS 上 `npx turbo run build --filter=@object-ui/console...`，73 个任务成功，`@object-ui/app-shell#build` 失败：\n\n```\nsrc/console/home/HomePage.tsx(39,10): error TS2724: '\"../deployment-notice/DeploymentNotice.js\"' has no exported member named 'DeploymentNotice'. Did you mean 'hideDeploymentNotice'?\nsrc/views/DashboardView.tsx(40,10): error TS2724: （同上）\nsrc/views/DashboardView.tsx(40,34): error TS1261: Already included file name '…/deployment-notice/DeploymentNotice.ts' differs from file name '…/deploymentNotice.ts' only in casing.\n```\n\n## 原因\n\n`ui/packages/app-shell/src/console/deployment-notice/` 下同时有 `DeploymentNotice.tsx`（组件）和 `deploymentNotice.ts`（状态与解析），两者自 a77c2e9260（2026-11-06）起并存。大小写不敏感的文件系统上，`'../deployment-notice/DeploymentNotice.js'` 先解析到 `.ts`，命中的是 `deploymentNotice.ts`。Linux CI 区分大小写，所以不红。\n\n## 影响\n\n- macOS 上 `tsc` 构建 app-shell 失败。\n- 只跑 `vite build` 的话不报错，但同一条解析规则会把组件导入指到状态模块，属于静默错绑，本次没有验证运行结果。\n\n## 要做的\n\n1. 把其中一个文件改名，使两者不再只差大小写（本地验证用的是 `deploymentNotice.ts` → `deploymentNoticeState.ts`，同时改 `DeploymentNotice.tsx:49` 和 `__tests__/DeploymentNotice.test.tsx:31` 的导入；改名后 `vite build` 通过）。\n2. 加一道防回归的检查：仓里不允许同目录下只差大小写的文件名（`git ls-files` 小写化后查重即可），放进现有的 lint 或 CI 步骤。\n\n## 验收\n\n1. macOS 上 `npx turbo run build --filter=@object-ui/console...` 全部成功。\n2. 故意加一对只差大小写的文件，检查会红。\n\nReader: `domain:ui` 车道，改 `ui/packages/app-shell/src/console/deployment-notice/`。\n\nDedupe: `repo:objectstack-ai/objectstack deploymentNotice DeploymentNotice case-insensitive macOS` → 0；`file names differ only in casing TS1261` → 0（含已关）。"
+}

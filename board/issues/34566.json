@@ -2,8 +2,8 @@
   "number": 34566,
   "kind": "issue",
   "title": "照技能声明 `inlineEdit` 得到一张存不了的表单：父对象的 `apiMethods` 没有 `bulk` 时，带行保存被 405 拒绝，技能没写这个前提，编写期也没有任何提示",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "bug",
     "domain:skills",
     "finding",
-    "lease:o2-S",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T01:17:58Z",
-  "updated_at": "2026-11-17T01:55:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T05:54:47Z",
+  "closed_at": "2026-11-17T05:53:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34566",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：① 已复现的产品缺陷（出货技能照做得到错误结果，北极星第 4 条）。\nreach: 界面实测一次错误结果，且有具名真实生产者：hotcrm `origin/main` 2257cdd2 的 `crm_project_budget`（objectstack-ai/hotcrm 已另立卡修它自己的配置）。\n\n## 已实测\n\nhotcrm `origin/main` 2257cdd2，`@objectstack/*` 18.5.0，`objectstack dev` 本地实例：\n\n1. 子对象主从字段声明 `inlineEdit: 'grid'`（`crm_project_budget_line.crm_project_budget`），父对象 `enable.apiMethods: ['get','list','create','update','delete']`。\n2. 新建父记录并在内嵌表格里加一行，点 Create。\n3. 结果：`POST /api/v1/batch -> 405 [OBJECT_API_METHOD_NOT_ALLOWED]`，界面报 `API operation 'bulk' is not allowed on object 'crm_project_budget'`。\n4. 对照：同一实例给 `crm_quote` 声明同样的 `inlineEdit: 'grid'`，并在 `apiMethods` 里加上 `'bulk'`，带一行的报价单一次保存成功。\n\n`objectstack dev` 的编译阶段对第 1 步的组合没有任何输出：68 条编写期规则跑完，14 条警告全是审批人和 capability 的，没有一条提到 `bulk` 或 `inlineEdit`。\n\n## 机制\n\n- `skills/objectstack-ui/SKILL.md`「Master-Detail Forms」第 1 条：`inlineEdit` 是「default, zero UI config」，父表单「saves parent + children in one atomic `/api/v1/batch`」，「No view metadata needed」。\n- `skills/objectstack-data` 的 lint 规则 `relationship/line-items-inline-edit` 还会主动建议给 `*_line` / `*_item` 子对象加 `inlineEdit`。\n- 两处都没写：这次 batch 受父对象 `apiMethods` 里的 `bulk` 把门。在 `skills/objectstack-ui/SKILL.md` 和 `skills/objectstack-data/rules/relationships.md` 里搜 `bulk`，没有一处讲这个前提。\n- 所以作者（人或 AI）照技能做完，得到一张能填、存不了的表单，要到运行时点保存才知道。\n\n## 修复方向（由动手的席位定，列出两条都成立的路）\n\n- 文本加规则：技能在 `inlineEdit` 那一节写明父对象要允许 `bulk`；并加一条编写期规则，`inlineEdit` 的父对象显式声明了不含 `bulk` 的 `apiMethods` 时报出来，处方点名要加的值。\n- 或者改把门：表单自己的原子保存不该被 `bulk` 这个开关拦住。这条改的是 REST 接受行为，属协议增项，要走契约复审。\n\n## 验收\n\n1. 一个只照技能写的主从对象（子字段 `inlineEdit`，父对象 `apiMethods` 不含 `bulk`）：要么编译时得到点名处方的提示，要么带行保存直接成功。\n2. 技能文本里能读到这个前提（如果走第一条路）。\n\nReader: `domain:skills` 席位，改 `skills/objectstack-ui/SKILL.md` 的 Master-Detail Forms 一节与 `skills/objectstack-data/rules/relationships.md` 的 Inline Editing 一节；编写期规则归同一张卡的实施 PR。走第二条路时转 `domain:rest`。\n\nDedupe: `repo:objectstack-ai/objectstack inlineEdit apiMethods bulk` → 1（#6015，分诊席位贴，无关）；`repo:objectstack-ai/objectstack \"API operation 'bulk' is not allowed\"` → 11（含 closed），最近的是 #15416 / #16511（已关，改的是这条错误消息点名哪个条件），都不涉及 `inlineEdit` 需要 `bulk` 这个前提。"

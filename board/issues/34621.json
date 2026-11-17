@@ -1,0 +1,36 @@
+{
+  "number": 34621,
+  "kind": "pull_request",
+  "title": "fix(console): show the Approvals Inbox row's Approve / Reject by default, with their words",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:24:45Z",
+  "updated_at": "2026-11-17T04:01:14Z",
+  "closed_at": "2026-11-17T04:01:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T04:01:12Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34621",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBNyLbAX7cdzfvaZYZfq68qA)_\n\nFixes #34587\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：「审批收件箱」桌面列表每行右侧的「通过」「驳回」现在一直显示，并且图标旁带文字（随界面语言翻译）；以前要鼠标停在那一行或键盘移到那一行才出现。\n- 为什么改：走查时整页看不到任何行内操作，审批人以为只能点进去逐条处理（#34587，专题 #34571）。\n- 风险与回滚：只改控制台这一个页面的行内按钮和「操作」列宽度；批量操作、快捷键、确认弹窗、手机卡片都不变。回滚即 revert 本 PR。\n- 先看：`ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx` 的 `InlineActions`，和「操作」列从固定 80px 改为按内容宽度。\n- 两分钟验证：打开「待我审批」，不动鼠标就能看到每行的「通过」「驳回」；需要填写决策字段的请求，两个按钮是灰的，鼠标悬停显示原因。\n- 需要你做的：无，席位审核并落地。\n\n## What changes\n\n`InlineActions` (the desktop row's Approve / Reject in `ApprovalsInboxPage.tsx`):\n\n- The wrapper loses `opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity`, so both buttons render visible on every actionable row from the first paint.\n- Each button shows its word next to its icon (`tr('approve', 'Approve')`, `tr('reject', 'Reject')`, the keys the phone cards and the confirmation dialogs already use), matching the card's figure 9. The icon is `aria-hidden`; the accessible name is the visible word.\n- A request whose step declares decision outputs (#2829) keeps today's rule: both buttons disabled. The reason (`needsDecisionInputs`) is now each disabled button's `title` (its accessible description) as well as the wrapper's `title`, which still takes the hover where a disabled button swallows pointer events. Before, the reason replaced the accessible name, so a screen reader heard the hint and not \"Approve\".\n- The Actions header and cells go from a fixed `w-20` (80 px) to `w-px whitespace-nowrap`, so the column is exactly as wide as its two labelled buttons. It stays pinned right (#12816), so a narrow panel scrolls the other columns under it.\n\nNot changed: bulk approve / reject, the keyboard shortcuts (J / K / A / R / Enter), the confirmation dialogs, and the phone-width cards.\n\n## Before / after (code reading at `144cdc25`)\n\n| | Before | After |\n|:--|:--|:--|\n| Shown without hover | no: wrapper `opacity-0`, shown on `group-hover` / `focus-within` | yes: no hiding class between the button and its row |\n| Button content | icon only | icon + word |\n| Accessible name (quick row) | `Approve` / `Reject` (aria-label) | `Approve` / `Reject` (= visible word) |\n| Accessible name (decision-output row) | the hint sentence | `Approve` / `Reject`; hint is the description |\n| Hover reason (decision-output row) | wrapper `title` | wrapper `title` + button `title` |\n| Actions column | `w-20` | `w-px whitespace-nowrap` (fits content), still pinned |\n\n## Verification\n\nTree: `objectstack-ai/objectstack` branch `claude/project-thread-4nu35q` at b4a90f87 (base `144cdc25`, ≥ `ed45eb92`).\n\n- New pins `ApprovalsInboxPage.inlineActionsVisible-34587.test.tsx` (4 tests): acceptance 1 (words visible, accessible name, no hiding class up to the row), acceptance 2 (disabled + hint as button and wrapper `title`, accessible description), a CONTROL (quick row enabled, no title), and the column width.\n- Ablation: with `ApprovalsInboxPage.tsx` swapped back to `origin/main`, 3 of the 4 fail (acceptance 1, acceptance 2, column width) and the CONTROL passes. Restored after.\n- `pnpm --dir ui exec vitest run apps/console/src/pages/system/ApprovalsInboxPage` (all 17 inbox files): 87 passed, exit 0. Existing pins that query `getByRole('button', { name: 'Approve' | 'Reject' })` still pass.\n- `pnpm --filter @object-ui/console type-check`: exit 0.\n- `npx eslint` on the two touched source files: 0 errors (13 warnings, all pre-existing lines outside this diff).\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0` (no open PR on the same file).\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 37 families; all 37 ran with exit 0, and `--ran` gives `37 derived famil(ies) accounted for — 37 run, 0 NOT-MEASURED`.\n\nNOT MEASURED: real-browser reading of the row at 1024 px, reason: no live approval fixture was booted for this S card; the column change is pinned by classes only. The seat can ask for a browser leg.\n\n## Acceptance notes\n\n- The console logs `Missing translation for \"approvalsInbox.needsDecisionInputs\" (language \"en\")` in tests, falling back to the English default. This is the existing key, already used before this change (desktop wrapper and phone card); not touched here.\n- A comment near the confirmation dialogs still says \"the right-edge icons are small, easy to misclick\"; the buttons are now larger labelled buttons, but confirming both decisions stays right, so the comment was left.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzeVGVo9Dc4j5kxP1vQ\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzeVGVo9Dc4j5kxP1vQ -->\n"
+}

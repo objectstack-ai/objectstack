@@ -1,0 +1,35 @@
+{
+  "number": 34608,
+  "kind": "issue",
+  "title": "AI 助手：右侧抽屉作为唯一的聊天容器，顶栏机器人打开它，放大是原地铺满并可收回",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:04:25Z",
+  "updated_at": "2026-11-17T07:59:59Z",
+  "closed_at": "2026-11-17T07:51:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34608",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「刚才的ai问数，比较好的体验也应该是停留在前端界面，可以类似通知右侧展开，而不是跳转到聊天框。」「右侧的聊天框是不是全屏之后也可以收缩回来，类似 drawer 的效果，而不要跳转页面？」「右上角导航菜单中的机器人点开，也应该是把右侧的ai聊天面板打开对吧」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- 顶栏机器人是 `<Link to=\"/ai\">`（`ui/packages/app-shell/src/layout/AppHeader.tsx:1144–1158`）；`/ai` 在 `app-shell/src/console/ai/AiChatPage.tsx:1463–1494` 里跳到 `/ai/build`，是一个带左侧历史栏（`ConversationsSidebar`，:1798–1830）的整页。\n- 应用内右下角的悬浮按钮打开右侧面板 `ChatDockPanel`（`app-shell/src/layout/ChatDock.tsx:287–392`，默认宽 420，可拖宽）；快捷键 Ctrl/Cmd+Shift+I。面板和整页用的是同一个 `ChatPane`。\n- 面板的放大图标（`ChatDock.tsx:342–354`，「Open full page」）会离开当前页：`openDockFullPage`（`ConsoleLayout.tsx:229–241`）跳到 `/ai` 或 `/ai/build?package=…`。面板本身有原地放大的 `dock.maximize()`，现在只有实时画布在用（:305–308）。\n- 环境首页没有可停靠的外壳，它的悬浮按钮直接开整页（`HomeLayout.tsx:198–204`）。\n- 空状态：`agentEmptyState`（`AiChatPage.tsx:492–540`）与 `buildAgentSuggestions`（:3617–3633）。有搭建权限的用户被从问数升级成搭建（`surfaceAgent.ts:122–143`），于是只看到「Editing \"Sales\"」和改应用的建议，没有问数的引导。\n\n## 要做的\n\n1. 顶栏机器人改为开关右侧抽屉，不再跳转；去掉应用内右下角的悬浮按钮（入口只有一个）。\n2. 抽屉的放大改为原地铺满（复用 `dock.maximize()`），地址不变，同一个图标点一下还原为侧栏宽度。\n3. 对话历史进抽屉：侧栏宽度下是「历史」按钮，铺满时显示历史栏。\n4. 空状态与输入框提示对有搭建权限的用户同时给出问数和改应用两类引导（文案：「问数据，或者让我改这个应用」）。\n5. 环境首页也能打开同一个抽屉。\n6. 其余仍指向 `/ai/build` 的入口（`HomePage.tsx:232`、`AppManagementPage.tsx:661`）改为打开抽屉；`/ai/...` 旧地址保留并重定向到打开抽屉的状态，避免旧链接失效。\n\n## 不做的\n\n- AI 搭建时主区域显示应用草稿、去掉嵌套预览，是专题的另一张子卡。\n- 抽屉内边距与表格溢出是另一张子卡。\n- 「把问数结果应用为左侧列表的筛选」图里画了，属于新功能，本卡不做。\n\n## 验收\n\n1. 在商机列表点顶栏机器人，右侧出现抽屉，地址不变。\n2. 点放大，抽屉铺满并出现历史栏；再点还原。\n3. 有搭建权限的用户在空状态看到问数的建议词。\n4. 打开旧的 `/_console/ai/build/<对话 ID>` 链接，能看到那条对话。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 15 AI 助手 · 右侧抽屉</summary>\n\n![图 15 AI 助手 · 右侧抽屉](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/15-ai-drawer.png?raw=true)\n\n</details>\n<details><summary>图 16 AI 助手 · 铺满档</summary>\n\n![图 16 AI 助手 · 铺满档](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/16-ai-expanded.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `AppHeader.tsx`、`ChatDock.tsx`、`ConsoleLayout.tsx`、`AiChatPage.tsx`、`HomeLayout.tsx`。\n\nDedupe: `repo:objectstack-ai/objectstack ChatDock maximize openDockFullPage in place AI assistant` → 0；`… buildAgentSuggestions data questions builder dock empty state` → 0。"
+}

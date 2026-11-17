@@ -1,0 +1,37 @@
+{
+  "number": 34592,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): a compile-cache bucket opened by a counter move keeps the row sets read within the last bound",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:50:50Z",
+  "updated_at": "2026-11-17T04:25:54Z",
+  "closed_at": "2026-11-17T04:25:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T04:25:52Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34592",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9D7K4emLL9dNcp4rQPn22Dw)_\n\nFixes #34554\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么：** 元数据编译缓存(#34494 加的)在注册表计数器变动、开新桶时，不再一律清掉 `sys_metadata` 行缓存;只要这批行是在一个周期(默认 30 秒)内读到的就留着，新桶第一个周期在「这批行读到后满一个周期」时结束。行更旧才照旧清掉。\n- **为什么改：** 契约复审 S5 怀疑的情况实测成立：会把存储行注册回注册表的内核上，每次列表读都会推动 `registry.revision`,哪怕注册的东西没变。每次推动都清掉行缓存，于是列表读和其后的单项读全回到数据库。「列表 + 单项」交替时，缓存开着每轮 3 次库读，关着 1 次;三个单项时 7 对 3。\n- **风险与回滚：** 新鲜度上限不变：任何答案里的行都不超过一个周期旧，同一进程内的写入照旧立即清缓存。修后同样的交替读与关缓存时一样多。回滚 = revert 本 PR。\n- **先看：** `packages/metadata-protocol/src/meta-compile-cache.ts` 里开新桶的那段(`readThroughMetaCompileCache`),再看 `meta-overlay-cache.ts` 新增的 `readOverlayCacheGenerationSince`。\n- **两分钟验证：** `pnpm --filter @objectstack/metadata-protocol exec vitest run src/meta-compile-cache.test.ts`,预期 40 个全过。\n- **需要你做的：** 不需要。区线程审核后合入。\n\n## What changes\n\n- `meta-overlay-cache.ts`: the per-engine generation state now records `since`, the wall-clock time the current generation began (set wherever the generation moves: a `sys_metadata` write at the middleware seam, a non-`write` epoch bump, `retireMetaOverlayCache`). Every row set held under the current generation was read at or after it, because an entry is stamped with the generation its read started under. New export `readOverlayCacheGenerationSince(engine)`.\n- `meta-compile-cache.ts`: a bucket opened by a counter move (`registry.revision`, `objectRevision`, the metadata service's `revision`) no longer always retires the row cache. When the row cache's generation began less than one bound ago, the rows are kept and the bucket's first bound ends at `since + ttl`, so no answer carries a row more than one bound old, which is the bound the retirement was there to give. When it began a bound or more ago, the bucket retires the rows as before and its first bound is a full one. Confirmations are unchanged: each still retires the row cache. The module header says the same.\n\n## Tests\n\n- New group in `meta-compile-cache.test.ts`, on a harness option `hydrationMovesRevision` (the double's `registerItem` and `registerObject` move the registry's counters, as every public write of the real `SchemaRegistry` does through `registry-revision.ts`): a list read of three stored objects, then 1 or 3 item reads, four rounds. Store reads per round with the cache on equal the cache-off reads, and after the first round they are only the item count. Each round asserts the list read moved `registry.revision` (non-vacuity).\n- **Forced test edit, named:** the existing pin \"a counter move retires the row cache: a peer's write the row cache predates is in the new bucket's answer\" asserted the old rule. It is replaced by two pins: (1) within one bound of the rows' read, a counter move keeps them (no row read from the store, the earlier answer served) and the peer's write is in the answer once that bound ends; (2) once the rows are more than a bound old, a counter move retires them and the peer's write is in the new bucket's answer with no confirmation reading (the old pin's assertion, at the age the rule now names).\n- [L1 R1, rework 1] `the bucket a counter move opens ends its first bound one bound after the kept rows were read, not one bound after the move`: rows read at T, a peer's write and a counter move at T + 20 s, the earlier answer still served with no row read, and the peer's write in the answer at T + 30.001 s, less than one bound after the move. Ablation of the mutant L1 named (`confirmedUntil = now + ttlMs` in the keep arm): this pin red, `expected 'Widget' to be 'Gadget'`, 1 of 40; restored, 40 of 40.\n- Ablation (one-off, not kept): the keep branch disabled (`if (false && …)`), 3 of 39 red: the keep pin (`expected 'Gadget' to be 'Widget'`) and both alternation pins (`[3,3,3,3]` against `[3,1,1,1]`, `[7,7,7,7]` against `[7,3,3,3]`); restored, all green.\n\n## Reading (the card's acceptance)\n\nThe double's store, three stored `object` rows, `getMetaItems({ type: 'object' })` then N `getMetaItem` reads, per round, store reads counted at the engine:\n\n| | round 1 | rounds 2 to 5 |\n|:--|:--|:--|\n| before, cache on, N=1 | 3 | 3 each (list rows, the item's rows, one `findOne`) |\n| before, cache off (`OS_METADATA_COMPILE_CACHE_TTL_MS=0`), N=1 | 3 | 1 each (the `findOne`) |\n| before, cache on, N=3 | 7 | 7 each |\n| before, cache off, N=3 | 7 | 3 each |\n| after, cache on, N=1 / N=3 | 3 / 7 | 1 / 3 each |\n\n\"Cache off\" is the uncached path the compile cache's own `0` setting gives (ADR-0156 D6), not a build of `main` before #34494; the one `findOne` per item read is the same in every row and is not this cache's.\n\n## Verification\n\nRework 1 (head a6661f57, one test added, no source change): `src/meta-compile-cache.test.ts` 40 of 40, `pnpm --filter @objectstack/metadata-protocol typecheck` exit 0.\n\nAt head e62453cb:\n- `pnpm --filter @objectstack/metadata-protocol exec vitest run --maxWorkers=2`: exit 0, `Test Files 347 passed | 9 skipped (356)`, `Tests 23014 passed | 45 skipped (23059)`.\n- `pnpm --filter @objectstack/metadata-protocol typecheck`: exit 0.\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 67 families; all 67 run with `< /dev/null`, exit codes captured before any pipe. `--ran`: `67 derived famil(ies) accounted for — 65 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3)`: `check:dual-build-cjs-loads` and `check:lean-entry-closure` need a whole-workspace build; CI runs them.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmRfW5u1LRmhWwaYHRp\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRfW5u1LRmhWwaYHRp -->\n"
+}

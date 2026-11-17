@@ -1,0 +1,37 @@
+{
+  "number": 34649,
+  "kind": "pull_request",
+  "title": "fix(console): the Users import wizard maps a manager column to import-users' manager_id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T04:54:43Z",
+  "updated_at": "2026-11-17T06:20:05Z",
+  "closed_at": "2026-11-17T06:20:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T06:20:02Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34649",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi96QpUuH77yeiDEFd5Vi6Pg1)_\n\nFixes #34536\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：控制台「用户导入」向导新增可映射列 `manager_id`(标签取 sys_user 字段的「Manager」),选项面板加一句说明；11 个语言包都加了对应文案。\n- 为什么改：导入接口早就接受 manager 列(按上级的邮箱或手机号，在所有行导入后关联),但向导里映射不到，CSV 里的上级列在发请求前就被丢掉了，只能走 API。\n- 风险与回滚：只动界面的可映射列表和文案，接口接受什么不变；回滚即撤掉本 PR,向导回到不能映射上级列的旧状态。\n- 先看：`ui/packages/app-shell/src/views/IdentityImportPanels.tsx`(新增的一列与说明),`ui/packages/app-shell/src/views/__tests__/identityImportFields.endpointColumns-34536.test.ts`(读接口源码、两边漂移即红的钉子)。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/views/__tests__/identityImportFields.endpointColumns-34536.test.ts packages/app-shell/src/views/__tests__/identityImportFields.emailRule-11913.test.tsx`,预期两个文件全绿(11 个用例)。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `identityImportFields` (the Users import wizard's only list of mapping targets) offers `manager_id`, typed `text` (the cell is an identity key, not the lookup id the `sys_user` field stores) and labelled by the object's `manager_id` field (fallback `Manager`).\n- The identity import options panel carries a `managerHint` line (`console.identityImport.managerHint`, added to every locale pack under `ui/packages/i18n/src/locales/`; `zh-Hant` regenerated from `zh-Hans` by `gen-zh-hant.mjs`). It says what the cell holds (the manager's email, or phone number where phone sign-in is on), that managers are linked once every row is in, and that an unresolved manager is reported on its row while the user is still created.\n- What `POST /api/v1/auth/admin/import-users` accepts is unchanged: no file under `packages/` is edited.\n\n### Why a drift pin and not one shared list\n\n`@object-ui/app-shell` does not depend on `@objectstack/plugin-auth` (a server plugin), and the endpoint's column names are not exported: `MANAGER_COLUMN` / `POSITIONS_COLUMN` are module constants, and its `sys_user` columns are read as `data.NAME` inside `createData`. One runtime list both sides read would need either a new published export (`plugin-auth`'s index re-exports `admin-import-users.ts` wholesale) plus a console-to-server-plugin dependency, or a `packages/spec` export; both are out of this card's ruled scope. So the pin reads the endpoint's source: every `const X_COLUMN = 'NAME';` declaration (the second-pass columns) and every `data.NAME` read between `async createData(` and `async updateData(`, and requires the wizard's list to equal their union, both directions. Each extraction asserts its anchor first, so a refactor that moves the reads goes red instead of comparing nothing. `pnpm check:cross-package-test-inputs` is green with the read (Test UI's selector keeps a test that reads outside the ui workspace always-on).\n\n## Tests\n\n- `identityImportFields.endpointColumns-34536.test.ts` (new, card-named): the drift pin above (4 cases).\n- `identityImportFields.emailRule-11913.test.tsx` (existing harness for `identityImportFields`, new top-level `describe`): `manager_id` is offered as `text` with the object field's label; the options panel explains it; and end to end, the real `ImportWizard` with the real identity data source and a faked import-users endpoint: a pasted `manager_id` column is auto-mapped and every row of the sent request carries `manager_id`.\n\n## Acceptance notes\n\n- FROM, measured by the ablation below: with `manager_id` absent from the list, a pasted file's manager column is dropped before the request: the endpoint received `{ email, name }` rows with no `manager_id` (the wizard sends mapped columns only, and only the list's columns can be mapped).\n- The manager cell holds an email address, or a phone number where phone sign-in is on (`resolveManagerKey`); a user id reads as unreadable there, so the hint does not offer one.\n- Deliberately outside the pin: `image` and `locale`, which an upsert may write on an existing user (`SYS_USER_IMPORT_UPDATE_FIELDS`) but the create path does not read, and the phone column's legacy aliases (`phoneNumber`, `phone`). Not measured: whether a create row carrying `locale` or `image` drops it silently; the wizard has never offered either column.\n- `positions` keeps its literal `Positions` label: `sys_user` has no `positions` field to take a label from, and `identityImportFields` holds no translator, so the label treatment is not a one-line change.\n\n## Verification\n\nReadings on head `aa68e1cd5` unless noted.\n\nDetails\n\n- Targeted ui tests: `pnpm --dir ui exec vitest run --maxWorkers=2 packages/i18n/` plus the seven `identityImport*` / `IdentityImportPanels*` test files under `packages/app-shell/src/views/__tests__/`: the first run (head `099e1c34d`) was 1 failed / 108 passed files, `zh-hant-generated.test.ts` (the zh-Hant pack is generated); fixed by regenerating, commit `aa68e1cd5`; on `aa68e1cd5`: Test Files 109 passed (109), Tests 1939 passed / 13 skipped.\n- `pnpm --filter @object-ui/i18n run type-check` exit 0; `pnpm --filter @object-ui/app-shell run type-check` (both tsconfigs, the test one included) exit 0, after building each package's ui closure.\n- Ablation 1 (wizard side): `scripts/ablation-replace.mjs` deleted the `manager_id` entry (anchor 1 to 0, blob `f21b94a1b069` to `443f297dd4c7`): 3 failed / 8 passed, the drift pin (`manager_id` missing from the offered list) and both new wizard cases; restored, blob equals HEAD, `git diff HEAD` empty.\n- Ablation 2 (endpoint side): added `const DEPARTMENT_COLUMN = 'department';` to `admin-import-users.ts` (anchor 1 to 0, blob `14e1ed54e29d` to `78034eddc871`): the drift pin red, `department` expected and not offered; restored, blob equals HEAD. A first attempt whose replacement contained its anchor was refused by the tool before any test ran (a no-op, not a reading).\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 40 commands, every one exit 0 (`--ran`: 40 derived, 40 run, 0 NOT-MEASURED) (readings in the os-dev-report comment on #34536).\n- `ui/packages/app-shell` full suite (about 2,300 files) is left to CI's Test UI.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRXuRn93HphKp7kXEz)_\n\n<!-- signed: repo:objectstack#2 · os-steve · session_01ADHkmRXuRn93HphKp7kXEz -->\n"
+}

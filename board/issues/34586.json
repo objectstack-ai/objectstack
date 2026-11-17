@@ -1,0 +1,36 @@
+{
+  "number": 34586,
+  "kind": "issue",
+  "title": "审批：待审请求之间加上一条 / 下一条，处理完一条自动打开下一条",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-UX",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:46:11Z",
+  "updated_at": "2026-11-17T05:25:14Z",
+  "closed_at": "2026-11-17T05:22:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34586",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「审批页通常要看完整记录，如何让操作更方便」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 审批收件箱是手写页面 `ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx`。点一条请求走 `openRequest`（:967），是一次普通的 `navigate`，不带同列表的兄弟记录。\n- 请求页（`sys_approval_request` 记录页）上没有上一条 / 下一条；通过或驳回之后停在原页，要自己回列表再点下一条。\n- 记录抽屉栈已有兄弟记录切换的机制（`recordDrawerStack.tsx` 的 siblings），收件箱没有用它。\n\n## 要做的\n\n1. 从「待我审批」打开请求时，把当前筛选和排序下的待审列表作为兄弟集合带过去；请求页右上角显示「第 N 条，共 M 条」和上一条 / 下一条。\n2. 加一个「处理后打开下一条」开关（默认开，按用户记住）：通过、驳回、退回等任何让该请求离开待审的操作成功后，自动打开下一条；没有下一条时回到列表并提示已处理完。\n3. 快捷键沿用列表上已有的 J / K。\n\n## 不做的\n\n- 不改审批的权限、规则与服务端接口。\n- 不要求把收件箱重建在标准列表视图上（#25950 的方向，维护者 11-17：「审批之前的改造强调要用sdui,但是现在前端仓库合并了，我无所谓了」）。\n\n## 验收\n\n1. 待审 3 条时打开第 1 条，页面显示「第 1 条，共 3 条」；点下一条到第 2 条。\n2. 通过第 1 条后自动落在原第 2 条；全部处理完回到列表。\n3. 关掉开关后，处理完停在原页。\n4. 从通知或直接链接打开的请求（没有列表上下文）不显示条数，不报错。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 4 审批</summary>\n\n![图 4 审批](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/04-approval-on-record-page.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ApprovalsInboxPage.tsx` 的 `openRequest` 与请求页头部。\n\nDedupe: `repo:objectstack-ai/objectstack approval inbox next previous request auto-advance` → 1（#23984，已关，显示标签，无关）。相邻但不同：#34361（开，已裁 A，把审批人的操作收成一条带「更多」菜单的审批条）管的是按钮怎么摆，本卡管连续处理。"
+}

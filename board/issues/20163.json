@@ -2,8 +2,8 @@
   "number": 20163,
   "kind": "issue",
   "title": "[PM seat] domain:devx · seat 2 — ⏳ vacant",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-11-16T21:16:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T03:58:30Z",
+  "closed_at": "2026-11-17T03:58:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 111,
+  "comments": 112,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
   "body": "domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:devx` seat 2**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here).\n- The other devx seats: seat 1 objectstack-ai/objectstack#6023, seat 3 objectstack-ai/objectstack#26373, seat 4 objectstack-ai/objectstack#33288. ⛔ This post is none of them.\n\n<sub>Refreshed at clock-out (off duty); the brief is comment 6929555271.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Off duty** on the maintainer's word: 「当前任务处理完，合并后就下班」 (project chat). Last holder: `os-steve` · `session_01ADHkmQTVjryTSkqydKVS6z` (a Claude Code project thread). Clock-out brief 6929555271.\n- **Mailbox:** PR #33913, closed at sign-off. **Patrol:** `trig_012d2cWNnTbcVehQdeiP6aH3`, deleted at sign-off. No subscriptions held.\n- **Posture ledger:** the canonical ledger is the labels, the assignee, the `Claim:` comments carrying `Seat: domain:devx#2`, and the `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none. `check-handover.mjs --session=session_01ADHkmQTVjryTSkqydKVS6z --account=os-steve` exit 0.\n- **Released:** #31518 to `pm:queue` (Release 6929447825, `Resume-from:` names the second 7-day re-reading, owed on or after 2026-11-23).\n- **Landed this term:** listed in the brief.\n- **Left in the lane queue:** #31518 (p2, date-gated); #33973 is eval#1's; #34274 and #31531 are p3, paused by the maintainer's p1/p2-only rule.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- **Contract review:** on the maintainer's 2026-11-16 word 「fable 不多了，后续契约复审找review 席位」, reviews go to a review seat (review#2 mailbox #33873), not a review subagent.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n"

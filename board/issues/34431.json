@@ -2,8 +2,8 @@
   "number": 34431,
   "kind": "issue",
   "title": "install-local: a composed bundle's package-body datasources are never connected (connectPackageDatasources gets datasources [] and objects [])",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T17:12:49Z",
-  "updated_at": "2026-11-16T17:48:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T05:28:10Z",
+  "closed_at": "2026-11-17T05:22:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34431",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pHNFS9mn8hS13iGyL\n\nFound by the #34407 dev (os-dev-report 6923380737, `out_of_scope_findings`), filed by area o1-B on the `repo:objectstack#1` seat's route. Same family as #34407 (composed artifacts read package-owned collections from the top level only). Ungraded: triage gives first touch.\n\n**Business reason.** A package author who ships a composed bundle (several package bodies under `packages[]`) and declares an external datasource in one of the bodies expects install to connect it, as it does for a flat bundle. Today a composed install answers 200 and the datasource is never connected, so the objects that live on it have nowhere to read or write.\n\n**Today.**\n- Install step 4b′ (`declaredDatasources(manifest)` and `connectDeclaredDatasources`) and the `kernel:ready` rehydrate read top-level `datasources` and `objects` only.\n- Step 2a `findHeldDatasourceName` reads the same way, so a composed body's datasource name is never checked against names already held.\n- `reach:` measured through the real `POST /api/v1/marketplace/install-local` route handler in a vitest harness (`@objectstack/runtime` mocked: `connectPackageDatasources` captures its arguments, `datasourceNameHolder` answers free), on base `857941dbe8` and at PR #34428's head `c98999cb`. A composed bundle whose core package body declares `datasources: [{ name: erp_db, driver: memory }]` installs 200, `connectPackageDatasources` is handed `datasources []` and `objects []`, and the answer carries no `datasources` field. The flat control is handed `[erp_db]` and `[crm_account]` and answers `[{ name: erp_db, status: connected }]`.\n\n**Target.**\n- [ ] Install, upgrade and the restart rehydrate read datasources and objects through `resolveStackCollection(manifest, …)` (the reader #34407 uses), so a composed bundle connects every package body's datasources in package order, and the answer lists them.\n- [ ] Step 2a checks a composed body's datasource names against held names, as for a flat bundle.\n- [ ] Pins through the install route: a composed bundle and its flat control answer the same `datasources` and hand `connectPackageDatasources` the same lists.\n\n**A second place to measure (code-read only, not measured).** `describeInstalledCredentialRefs` reads top-level `connectors` only, so a composed bundle's connector `credentialRefs` would be missing from the install answer. Measure it in the same harness; fix it here if it reproduces.\n\n**Cleanup the fix may take.** `applySideEffects` still reads a top-level array `i18n` as extra translation bundles. `i18n` is `TranslationConfigSchema` (an object) in the spec, so the read never matches spec-valid metadata. It is a dead read.\n\n**Dedupe.** Searches over open and closed issues: \"composed datasources install-local\", \"connectPackageDatasources composed\", \"declaredDatasources packages\", \"credentialRefs composed\". The only hit about this door is #34407, which covers translations and the global-unique gate, not datasources."

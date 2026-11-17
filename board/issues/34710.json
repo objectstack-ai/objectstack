@@ -1,0 +1,32 @@
+{
+  "number": 34710,
+  "kind": "issue",
+  "title": "ci: widen the Test Core matrix to 10 shards so the 2026-11-16 timings fit the 1868s whole-leg cap (blocks #34314)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T07:52:29Z",
+  "updated_at": "2026-11-17T07:56:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34710",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: the shard-partitioner self-test red on PR #34314 (the 2026-11-16 Test Core timings refresh the maintainer ordered merged), read by area `o2-C` at head `5009c644` (run 44035625632, job 133877684767) and reproduced locally. Dedupe: `WHOLE_LEG_CAP_SECONDS`, `Test Core shards`; no open card (#31518 is the merge-queue cascade card, not this).\n\nSuggested-grade: p2 · domain:devx · blocks #34314\n\n## 维护者速读\n\n- 现象：按 11-16 刷新的耗时数据，Test Core 8 片里有 5 片的整包合计约 2195s,超过 1868s 上限，分片器自检拒绝,#34314 合不进去。\n- 为什么要修：不是数据坏了，也不是装箱器的 bug。79 个共有包的总耗时从 11636s 涨到 16472s,各包中位数涨了 1.36 倍,8 片下任何分法都过不了上限。数据集只决定怎么分，实际跑的时长已经是这个量级，所以现在 main 上的分片在真实 CI 里也已经超载。\n- 需要你做的：无(分诊定级)。修法照源码现有规则：加宽矩阵。动 `.github/workflows/ci.yml`,PR 会走 Tier H,由 os-zhuang 批。\n\n## Readings (area o2-C, head `5009c644`)\n\n- Self-test: `whole leg, committed dataset at 8 shards (sums 2195/663/2193/2194/1446/1445/2193/2195s)`; shards 1, 3, 4, 7, 8 past the 1868s cap; `@objectstack/objectql` and `@objectstack/plugin-security` share shard 8/8.\n- Whole packages 14524s + CLI 2245.53s (3 slices) + the declaration-reading slice's closure charge 783s; (14524 + 2245.53 + 783) / 1868 = 9.4, so at least 10 shards with CLI kept at 3 slices. 9 shards average about 1950s and still exceed the cap. Slicing CLI to 8 still leaves about 1913s and is refused by pin 3c. Slicing another package (e.g. `spec`) needs `OS_TEST_SHARD` support in that package and a generator decode change: a larger card.\n- Biggest rises: service-analytics x2.85, verify x2.55, driver-sql x2.32, spec x1.75, plugin-auth x1.60. The new window's 3 runs each ran all 82 packages; the old window's 6 runs ran 43 to 79 (less co-run contention, possibly lower readings; a guess, not measured).\n\n## Governing text\n\n`scripts/partition-test-shards.mjs`, the `WHOLE_LEG_CAP_SECONDS` docblock: \"When a refresh grows the whole legs past the cap, the remedy is a wider matrix or a finer slice, never a denser shard.\" and \"Raising this number needs a merge-queue red-rate reading at the new figure, not a balance figure\". So the cap stays and the matrix widens.\n\n## Change\n\n1. Widen the Test Core matrix from 8 to 10 shards: the `test` job's matrix in `.github/workflows/ci.yml` (including its `|| '[1, ..., 8]'` fallback) and whatever `scripts/ci-shard-matrix.mjs` `liveShardTotal('test')` and the generator's decode read, so `SHARD_COUNT` follows.\n2. Re-plan the committed dataset at 10 shards and keep every self-test pin green, including `LOAD_SENSITIVE_APART`.\n3. Then #34314 rebases onto it and lands.\n\n## Done when\n\n`node scripts/partition-test-shards.mjs --self-test` passes on `main` with the 2026-11-16 dataset of #34314, and #34314 merges.\n"
+}

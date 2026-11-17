@@ -1,0 +1,34 @@
+{
+  "number": 34593,
+  "kind": "issue",
+  "title": "Studio：工作台顶栏加「打开应用」回到运行态；包名下拉里不该出现系统包",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "lease:o3-D",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:51:02Z",
+  "updated_at": "2026-11-17T06:43:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34593",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 运行态进 Studio 的按钮在 `AppHeader.tsx`（约 :1092–1115）：可写的包是铅笔加「Edit app」，只读的包是眼睛加「Open app in Studio」；它会带着当前对象落到 Studio（实测从商机列表进去落在 Opportunity）。\n- Studio 工作台顶栏在 `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`（约 :1591–1760）：Home（去 `/studio` 落地页）、`PackageSwitcher`、五个页签、Changes、Publish。没有任何回到应用的入口；实测回应用要点三次且回不到原对象。\n- `PackageSwitcher` 已经拿到包对应的应用（`app={packageApp}`，约 :1619），只用来显示图标。\n- 包名下拉的过滤在 `packages-io.ts:104–105`，只丢弃 `manifest.scope` 为 `system` / `cloud` 的包；只有顶层 `scope` 而没有 manifest scope 的行被保留并标成 kernel（:116–118）。实测下拉里出现 `sys.env-artifact-cache` 等 5 个系统包，排在业务包前面。\n\n## 要做的\n\n1. Studio 工作台顶栏右侧加「打开应用」：回到该包对应应用的运行态；当前正在看某个对象时，落到该对象的列表，做到与「Edit app」往返对称。包里有多个应用时给出选择。\n2. 包名下拉默认不列系统包（补上只带顶层 `scope` 的那一类）；提供「显示系统包」开关。\n3. 运行态入口的图标与文字：只读包不再用无文字的眼睛，改成带文字的入口（文案待定：只读时「在 Studio 中查看」）。\n\n## 不做的\n\n- 不改 Studio 的权限门（`useStudioEntryGate`）。\n- AI 搭建入口的调整在专题的 AI 子卡里。\n\n## 验收\n\n1. 从商机列表进 Studio，再点「打开应用」，回到商机列表。\n2. 包名下拉默认只有业务包；打开开关后才看到 `sys.*`。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 14 应用与 Studio 往返</summary>\n\n![图 14 应用与 Studio 往返](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/14-app-studio-roundtrip.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道（`area:studio`），改 `StudioDesignSurface.tsx`、`PackageSwitcher.tsx`、`packages-io.ts`、`AppHeader.tsx`。\n\nDedupe: `repo:objectstack-ai/objectstack Studio header open app link PackageSwitcher` → 2（#30014、#28572，均已关，Studio 结构调整，无返回入口）；`… packages-io system packages scope dropdown sys.` → 0。相邻：#27356（已关，建议卡，含 Studio 入口的建议）。"
+}

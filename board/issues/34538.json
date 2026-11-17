@@ -2,7 +2,7 @@
   "number": 34538,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-ai says a delete_record the human named, with one record matching, is already approved",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "security",
     "size/s",
     "tooling"
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T00:17:46Z",
-  "updated_at": "2026-11-17T02:06:51Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 4,
+  "updated_at": "2026-11-17T03:13:58Z",
+  "closed_at": "2026-11-17T02:49:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T02:49:36Z",
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34538",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi99ewj5JRWXTB3u38E9HLhnj)_\n\nFixes #34456\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`objectstack-ai` 技能的 MCP 工具表里，删除一行的说法改成和工具本身一致：用户点名要删的记录、且只匹配到一条时，这句话本身就是确认，AI 直接带 `confirm: true` 删，不再二次询问；名字匹配多条或没指明哪条时，先列出候选、问清再删。\n- 为什么改：#34453 已把这条规则写进 `delete_record` 的工具说明和服务端技能，但仓库里的技能文件还写着“每次删除都先问人”，读技能的 AI 会对用户已点名的删除再问一遍。\n- 风险与回滚：只改技能文档里一行，服务端仍拒绝不带 `confirm: true` 的删除，行为不变。回滚即还原本 PR。\n- 先看：`skills/objectstack-ai/SKILL.md` MCP 工具表 `create_record`, `update_record`, `delete_record` 那一行。\n- 两分钟验证：对照 `packages/mcp/src/mcp-http-tools.ts` 的 `DELETE_NAMED_RECORD_IS_APPROVAL` 与 `DELETE_AMBIGUOUS_ASKS_FIRST`，两句意思一致。\n- 需要你做的：`skills/**` 是受管面，需要 GOVERNED_APPROVERS 批准后才转 ready。\n\n## What changes\n\n`skills/objectstack-ai/SKILL.md`, MCP tools table, the `create_record`, `update_record`, `delete_record` row. \"ask the human first, then retry\" becomes the rule the `delete_record` tool description carries since #34453 (`DELETE_NAMED_RECORD_IS_APPROVAL` and `DELETE_AMBIGUOUS_ASKS_FIRST` in `packages/mcp/src/mcp-http-tools.ts`): a request naming the record to delete, with exactly one record matching, is the human's approval, so the agent sends `confirm: true` on that call without asking again; when the name matches more than one record, or the request does not identify one, the agent lists the candidates, asks which one, and sends `confirm: true` only after the answer. The server-side refusal of a `delete_record` without `confirm: true` is unchanged.\n\nChangeset: `.changeset/34456-skill-delete-record-named-approval.md`, `@objectstack/skills` patch (`skills/**` ships in it).\n\n## Line and token readings (os-dev.md, `skills/**`)\n\n| measure | before (origin/main) | after |\n|:---|---:|---:|\n| `skills/objectstack-ai/SKILL.md` lines | 434 | 434 |\n| `skills/objectstack-ai/**` lines (whole skill) | 551 | 551 |\n| `skills/objectstack-ai/SKILL.md` tokens (`check-skills-token-ratchet`, ceiling 6801, not raised) | 6068 | 6142 |\n\n## Gates\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `b9388ff9` derived 48 families; all 48 ran and exited 0 after a full `pnpm build` (lock VERDICT command-exit 0), among them `check-skills-token-ratchet`, `check:skill-links`, `check:skill-identifier-liveness`, `check:skill-compatibility`, `check:role-word` and `check-empty-changeset`. `--ran` reconciliation: 48 derived, 48 run, 0 NOT-MEASURED.\n\nNo test change: prose only.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSYVw1sqCsaHSJS9JC\n"

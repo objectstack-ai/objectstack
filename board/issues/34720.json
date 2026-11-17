@@ -1,0 +1,30 @@
+{
+  "number": 34720,
+  "kind": "issue",
+  "title": "reading first: does list_datasets match a member's translated label from a translation bundle, or only an inline label map",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:epic"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T08:22:15Z",
+  "updated_at": "2026-11-17T08:22:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34720",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17. On the synonyms layer, verbatim: 「同意，所以hotcrm 也需要立卡改进对吧」, answering the seat's three-layer proposal (authors write synonyms; the server hints on a zero-match; the client asks back).\n\n## Why\n\nAn app that follows the platform's own convention keeps its Chinese names in a translation bundle. If the term matcher reads only what is written on the dataset itself, a user who types the Chinese name the product shows them on the dashboard still misses the metric.\n\nWho acts: a read-only reading first (server lane, `packages/services/service-analytics`); the build half waits for the reading and, if it widens what counts as a match, for the maintainer.\n\n## Evidence (objectstack `a0326b06`, read 2026-11-17; code read, not run)\n\n- `packages/services/service-analytics/src/dataset-term-matcher.ts`: the match targets are the member's `name`, \"its `label` in every locale of an inline map\", and each of its `synonyms`. `labelTargets` reads `member.label` only.\n- Whether the members handed to the matcher already carry bundle translations resolved for the caller's locale was not determined.\n\n## Scope\n\n- Reading: boot an app whose dataset member has a bundle translation and no inline map, call `list_datasets({ terms: [<the translated label>] })` under that locale, and record whether it matches. Post the reading on this card.\n- If it does not match: state the options (resolve the caller's locale before matching; match every locale's bundle value; leave it to synonyms) with what each does to ADR-0149 D1/D3, and hand the choice to the maintainer. No build before that.\n\n## Done when\n\n- The reading is on this card, and either the card closes as \"already matches\" or it names the decision it needs.\n\n## Relations\n\n- Parent: #34659. Related: objectstack-ai/hotcrm#2593.\n- Dedup, open and closed: `list_datasets synonyms` 1 hit, the parent."
+}

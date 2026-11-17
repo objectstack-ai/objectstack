@@ -1,0 +1,36 @@
+{
+  "number": 34607,
+  "kind": "issue",
+  "title": "表单弹窗：作者没写列数时按容器宽度排到 3–4 列，弹窗尺寸随之放大",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-B",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:03:35Z",
+  "updated_at": "2026-11-17T06:20:52Z",
+  "closed_at": "2026-11-17T06:20:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34607",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「目前默认只有两列字段，对于复杂的业务表单，宽屏时候非常浪费」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- 整页表单已经会自动推断列数并随容器宽度变化：`ui/packages/plugin-form/src/autoLayout.ts:551–584`（`applyAutoLayout`），`inferColumns`（:119–124）按字段数给 1/2/3/4 的上限，`CONTAINER_GRID_COLS`（:327–329）转成 `grid-cols-1 @md:2 @2xl:3 @4xl:4`。\n- 弹窗有意跳过推断：`ModalForm.tsx:486` 用 `schema.columns ?? DIALOG_DEFAULT_COLUMNS`，后者是 2（:333，objectui#12521）；没声明列数的分组也按 2（`sectionedGridLayout` 的 `UNDECLARED_SECTION_COLUMNS`）。弹窗尺寸只推断到 lg / xl（:502–512，xl 是 `sm:max-w-5xl`）。\n- `@4xl` 是容器 56rem，所以 4 列只会出现在 xl 或 full 的弹窗里。\n\n## 要做的\n\n1. 弹窗里，作者没有声明 `columns` 时，改用按容器宽度的四档栅格（`containerGridColsFor(4)`），不再固定 2 列；分组未声明列数时同样处理。\n2. 字段多的表单，弹窗尺寸推断允许到 xl；配合放大为整页（专题的另一张子卡）时能排到 4 列。\n3. 宽字段的跨列在 4 列下重新核对：长文本、子表、附件独占整行。\n4. 作者显式写了 `columns` 的，照作者写的来。\n\n## 不做的\n\n- 不改整页表单的现有推断。\n\n## 验收\n\n1. 一个 16 个字段、未声明列数的对象，在 xl 弹窗里是 3 列，放大后是 4 列，窄屏 1 列。\n2. 声明了 `columns: 2` 的表单仍是 2 列。\n3. 钉住现状的测试（objectui#12521、#12592 相关）随之更新。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 7 宽屏复杂表单</summary>\n\n![图 7 宽屏复杂表单](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/07-wide-form.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ModalForm.tsx` 与 `autoLayout.ts` 的 `sectionedGridLayout`。\n\nDedupe: `repo:objectstack-ai/objectstack DIALOG_DEFAULT_COLUMNS inferColumns dialog columns container width` → 0。"
+}

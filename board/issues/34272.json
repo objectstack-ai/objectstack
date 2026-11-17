@@ -13,18 +13,22 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
-    "priority:p1"
+    "lease:o2-H",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T03:26:19Z",
-  "updated_at": "2026-11-16T16:27:59Z",
+  "updated_at": "2026-11-17T07:49:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34272",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jVPGBoi3MCGoKbW1Hv\n\nFiling gate: ① the step-1 reading of #34257 measured this, and the seat ruled it a card of its own (Q4 B). ⛔ Not a claim.\n\n## 维护者速读\n\n- **是什么：** 接受组织邀请的原有入口(better-auth 的 accept-invitation)目前不要求账号邮箱已验证;#34257 只在新的一步接受入口上执行\"必须证明邮箱\"这条规则。\n- **影响：** 打开这项检查后，邮箱未验证的账号走原入口接受邀请会被拒绝，需先验证邮箱。这是收窄（BREAKING）。\n- **建议：** p2，在 #34257 落地之后做，并写明升级说明。\n\n## Rule\n\nAccepting an organization invitation requires a verified email address (#34257's rule). #34257 enforces it on its new accept-with-proof door and on the accept page. The vendor `/organization/accept-invitation` route plugin-auth serves still accepts for a session whose address is unverified: the vendor check runs only when asked, and plugin-auth leaves it off (`auth-manager-organization-plugin.ts:199`).\n\n## Change\n\n- Turn the vendor's `requireEmailVerificationOnInvitation` on, so that route refuses an unverified session with a typed refusal the accept page can route to verify-by-mail.\n- Declare `Clause-②: no (narrowing)`, with a BREAKING note and the ADR-0087 disposition.\n- Pin both cases: an unverified session is refused, and a verified session is accepted. Pin also that the one-step door of #34257 is unaffected.\n\nOrder: after #34257 lands, so the accept page already has the proof path before this refusal ships.\n\nPrior rulings read: the seat's Q4 ruling on #34257 (keep the vendor route unchanged there; this card carries the narrowing); ADR-0138 and ruling 6413975861 Q2 B, as #34257 amends them.\nDedupe words: requireEmailVerificationOnInvitation; accept-invitation unverified email."

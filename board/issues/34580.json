@@ -2,24 +2,35 @@
   "number": 34580,
   "kind": "issue",
   "title": "List toolbar: withhold the \"In a queue\" toggle on a view whose own filter pins owner_id — on HotCRM's \"My Open Deals\" it can only return an empty list",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "sunhaolin",
     "id": 6194896,
     "type": "User"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "bug",
+    "domain:ui",
+    "lease:o3-UX",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T02:13:36Z",
-  "updated_at": "2026-11-17T02:13:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T06:20:52Z",
+  "closed_at": "2026-11-17T06:20:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34580",
   "body": "Follow-up to #28428. Does not reopen #26359 (ruling A: the `queue` column stays on every `ownership: 'user'` object).\n\n## What happens\n\nHotCRM 6.4.0 (`@objectstack/*` 18.5.0) now declares two queues, `lead_intake` and `case_intake`, so `hasAnyQueue` is true and the **In a queue** toggle (「在队列中」) is back on every owned list.\n\nOn Opportunities → **My Open Deals** the toggle is offered, and turning it on always empties the list:\n\n- the view's own filter is `owner_id equals {current_user_id}` (plus `stage not_in [closed_won, closed_lost]`)\n- the toggle adds `owner_id is_empty` AND `queue is_not_empty` (`QUEUE_SITTING_CONDITIONS`)\n\n`owner_id = me` AND `owner_id is_empty` has no rows, whatever the data. A user reads the empty list as \"nothing is waiting in a queue\", which the list never checked.\n\n## Reading (origin/main `64c426ab22`, `ui/packages/plugin-list/src/ListView.tsx`)\n\n- line 1017: `QUEUE_SITTING_CONDITIONS`\n- line 2551: `queueFilterOffered = hasAnyQueue === true && objectHasOwnershipQueue(objectDef)`\n- line 6520: the toggle renders on `queueFilterOffered && !datasetChartOnScreen`\n\nNothing reads the active view's filter, so the contradiction is not seen.\n\n## Target\n\nDo not render the toggle when the active view's filter has a top-level AND condition that requires `owner_id` to hold a value (`equals`, `in`, `is_not_empty`). A condition inside an OR group does not count. No new key, no server reading, no contract change.\n\nSame rule as #28428 and #27831: offer an affordance only when it can do something.\n\n## Size of it in HotCRM\n\n12 view filters across 10 view files pin `owner_id equals {current_user_id}` (accounts, opportunities, forecasts, events, tasks, leads, cases, timesheets, time entries, expenses). Every one shows a toggle that cannot return a row.\n\n## Acceptance\n\n1. HotCRM Opportunities → My Open Deals: no **In a queue** toggle.\n2. Opportunities → All Opportunities: toggle unchanged.\n3. Leads and Cases lists with no owner condition: toggle unchanged, and it still returns the records sitting in `lead_intake` / `case_intake`.\n4. Switching from a pinned view to an unpinned one brings the toggle back in the off state.\n\n## Open question for the maintainer (not part of the acceptance)\n\n#28428 left per-object narrowing as a follow-up \"if the dev sees real pull\". HotCRM is now that case: none of its 32 object files declares `ownership`, so every owned list shows the toggle, while assignment rules route only `crm_lead` and `crm_case` into a queue.\n\nAny narrowing has to respect #26359 and ADR-0142 D1: a queue binds to no object, and a record of any owned object can be moved into one by hand. A signal derived from assignment rules would therefore hide the toggle on an object that does hold queued records. This is a ruling, not a dev choice, so it is raised here and left out of the target above.\n"

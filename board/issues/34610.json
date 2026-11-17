@@ -1,0 +1,33 @@
+{
+  "number": 34610,
+  "kind": "issue",
+  "title": "AI 搭建：在右侧抽屉里搭建，主区域直接显示应用草稿本身；去掉嵌套预览，整屏一个发布按钮、一个改动数",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-D",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:05:55Z",
+  "updated_at": "2026-11-17T07:24:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34610",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「你看，就右侧这个界面非常混乱」「能不能搭建也还是在右侧弹出，左侧直接看预览？」「和问数的体验差不多」\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- 搭建时右边的「Live preview」是 `ui/packages/app-shell/src/console/ai/LiveCanvas.tsx`，一个 `/apps/<应用>?preview=draft` 的 iframe（:84、:176–181），挂在 `AiChatPage.tsx:3508`。iframe 里是完整的控制台外壳：没有任何内嵌 / 无外壳的开关，顶栏和悬浮的 AI 按钮照常渲染。\n- 草稿提示条是 `app-shell/src/preview/DraftPreviewBar.tsx`（「Changes (N)」:137–142、「Exit preview」:147、「Publish to see it live」:189），由主外壳在 `ConsoleLayout.tsx:335` 渲染。\n- 聊天侧还有两处发布：结果卡上的 Publish（`ChatbotEnhanced.tsx:3949–3953`）和黄条 `PendingDraftsBar.tsx:152`。\n- 三个数字都读 `GET /meta/_drafts`，但范围不同：黄条按对话的包，iframe 的「Changes (N)」不带包、数的是整个环境，「本页 N 项」再按当前页面过滤。实测同屏出现 8、10、2。\n- 已有的支撑：面板已经能把搭建对话绑定到当前应用（`ChatDockConversation.tsx:111–117`）；`?preview=draft` 能把整个主外壳切到草稿数据并在应用内导航时保持（`PreviewModeContext.tsx`）；发布逻辑是共用的。\n- 阻碍：全新应用在第一轮搭建绑定包之前没有路由（`AiChatPage.tsx` 约 :2686 的 bind-on-create）；实时画布的「每轮刷新」与自动放大（:2412）要改成「打开主外壳的草稿模式并刷新」。\n\n## 要做的\n\n1. 搭建对话在右侧抽屉里进行（与问数同一个抽屉）。改已有应用时，主区域就是该应用，自动进入草稿模式，每轮搭建后原地刷新。\n2. 新应用：方案确认并绑定包之后，主区域切到这个新应用的草稿；绑定之前主区域保持原页面。\n3. 去掉 `LiveCanvas` 的 iframe 预览。\n4. 整屏只有一条草稿栏和一个发布按钮：保留主外壳的草稿栏，去掉聊天侧结果卡和黄条上的发布按钮（聊天里只留一句指向草稿栏的话）；发布成功后聊天里出现一条回执。\n5. 改动数只有一个口径：当前应用（包）的未发布改动数；草稿栏、改动面板、聊天里引用的数字一致。\n6. 草稿栏文案区分「这个应用还没发布过」和「有 N 项未发布的改动」。\n\n## 不做的\n\n- 方案卡与结果卡的内容和状态矛盾属于 cloud 仓的子卡。\n- 抽屉本身（入口、铺满、历史）是专题的另一张子卡，本卡依赖它。\n\n## 验收\n\n1. 在已有应用里让 AI 加一个字段，主区域原地出现该字段，顶部是草稿栏，屏幕上没有 iframe。\n2. 新建应用：确认方案后主区域变成新应用的草稿，左侧是它自己的导航菜单。\n3. 全屏只有一个「发布」按钮；草稿栏与改动面板的数字相同。\n4. 发布后聊天里有回执，草稿栏消失。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 17 AI 搭建</summary>\n\n![图 17 AI 搭建](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/17-ai-build.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `AiChatPage.tsx`、`LiveCanvas.tsx`、`DraftPreviewBar.tsx`、`PendingDraftsBar.tsx`、`ChatbotEnhanced.tsx`、`usePendingDrafts.ts`。\n\nDedupe: `repo:objectstack-ai/objectstack LiveCanvas iframe preview chromeless DraftPreviewBar` → 0；`… usePendingDrafts count scope PendingDraftsBar DraftPreviewBar` → 1（#33165，已关，Studio 打开时的草稿显示，不涉及口径统一）。"
+}

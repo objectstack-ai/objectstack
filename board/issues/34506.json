@@ -2,7 +2,7 @@
   "number": 34506,
   "kind": "pull_request",
   "title": "feat(plugin-audit, spec): audit checkpoints verify ES256 beside Ed25519, and a host signer pins the local keys",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T23:18:30Z",
-  "updated_at": "2026-11-17T02:10:36Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-17T03:00:19Z",
+  "closed_at": "2026-11-17T03:00:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-17T03:00:17Z",
   "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34506",

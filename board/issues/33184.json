@@ -2,8 +2,8 @@
   "number": 33184,
   "kind": "issue",
   "title": "docs(adr-0135): mirror cloud ADR-0024's 2026-11 hosted identity note (credentials in the cloud, roster in the environment; owners/admins projected; no hosted local break-glass)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,9 +22,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T00:32:27Z",
-  "updated_at": "2026-11-17T00:10:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T03:02:33Z",
+  "closed_at": "2026-11-17T03:02:33Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 10,
   "locked": false,

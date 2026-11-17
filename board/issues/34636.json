@@ -1,0 +1,35 @@
+{
+  "number": 34636,
+  "kind": "issue",
+  "title": "finding(lint): the two line-item inlineEdit advisories read only `inlineEdit: true`, so a relationship declaring 'grid' or 'form' is told to add inlineEdit, and an association declaring 'grid' or 'form' is never warned",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:spec",
+    "finding",
+    "lease:o2-A",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T04:25:09Z",
+  "updated_at": "2026-11-17T07:55:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34636",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmSXPDB46NVRepWVrL3\n\nFound while reviewing PR #34600 (cards #34567, #34566): L1 record 6938263188 (D2) and contract review 6938207311 (③, out-of-scope finding). Not fixed there; that PR's diff does not touch these two checks.\n\nSuggested-grade: p2 (an authoring-time advisory gives wrong advice; no runtime effect)\nSuggested-domain: `domain:objectstack` (`packages/lint/**`)\n\n## What happens\n\n`FieldSchema.inlineEdit` accepts `true`, `'grid'` and `'form'` (`packages/spec/src/data/field.zod.ts`), and the spec's own predicate and the console's `attachInlineSubforms` treat all three as \"edited inline\". Two advisories in `packages/lint/src/data-model-rules.ts` on `origin/main` 082f9c2945 read only the literal `true`:\n\n1. Line 1090, `relationship/line-items-inline-edit`: `if (isLineItemName(obj.name) && def.inlineEdit !== true)`. A `*_line` child whose relationship already declares `inlineEdit: 'grid'` or `'form'` is still told \"consider inlineEdit: true\", and the fix offered (`inlineEdit: true`) would replace the author's chosen mode.\n2. Line 1113, the association check: `if (def.inlineEdit === true && isAssociationName(obj.name))`. An association (comments, audit, activity) declaring `inlineEdit: 'grid'` or `'form'` clutters the parent's entry form the same way and gets no warning.\n\n## Repro\n\nA stack with `order` and `order_line`, where `order_line.order` is a `master_detail` with `inlineEdit: 'grid'`: `os lint` prints the line-items suggestion for it. Change the value to `true`: the suggestion disappears. An object that `isAssociationName` matches (comments, audit, activity), related to `order` with `inlineEdit: 'form'`, draws no association warning; with `true` it does. (Read from the code at the lines above; not yet run as a stack.)\n\n## Fix direction\n\nBoth checks should ask the same question the spec predicate asks (is the relationship inline-edited at all, any of the three values), ideally by calling that predicate rather than restating it. Each rule gets a test for `'grid'` and `'form'`.\n\n## Acceptance\n\n- [ ] `relationship/line-items-inline-edit` is silent when `inlineEdit` is `true`, `'grid'` or `'form'`.\n- [ ] The association check fires for `true`, `'grid'` and `'form'`.\n- [ ] Tests cover both rules for all three values."
+}

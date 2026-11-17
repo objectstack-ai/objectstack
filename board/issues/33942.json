@@ -2,8 +2,8 @@
   "number": 33942,
   "kind": "issue",
   "title": "tenant-audit census: shard the page and drop totals from prose so two PRs adding write sites stop conflicting (hot-file card B)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:44:37Z",
-  "updated_at": "2026-11-17T00:52:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T07:03:59Z",
+  "closed_at": "2026-11-17T07:03:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33942",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFiling gate ③: maintainer-directed. On 2026-11-15 the maintainer chose 「今天改规则,并立全部 6 张卡」 on the hot-file serialization decision card (consequence as shown: 取消 protocol.ts 独占、关闭 #25467 和 #24586;卡 A 到 F 交各车道立卡,大 PR 和上限门禁仍逐个等您批准). Measurements: the hot-file analysis report (project artifact), re-runnable on request. Cross-lane rule (2026-11-15): no live seat in the owning lane, so `domain:server` seat 5 files and builds it; the owning lane is notified.\n\n## Card B\n\nThe tenant-audit census page is a committed artifact every PR adding a write call site rewrites, and its prose carries totals, so two such PRs conflict.\n\n- Shard the page (one file per package or per section) and remove totals from the prose (the gate prints them).\n- Done when: two PRs that each add a write call site in different packages do not conflict on the census, shown by a merge-tree test or a scripted two-branch replay in the PR.\n- Keep the census gate's semantics unchanged."

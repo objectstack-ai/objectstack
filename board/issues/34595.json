@@ -1,0 +1,36 @@
+{
+  "number": 34595,
+  "kind": "issue",
+  "title": "手机端记录页：底部操作栏里「编辑」被自定义动作挤进更多菜单；阶段条文字全部被截断",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-A",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:52:31Z",
+  "updated_at": "2026-11-17T08:10:17Z",
+  "closed_at": "2026-11-17T08:09:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34595",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4）\n\n- 手机记录页底栏默认 2 个按钮（`PHONE_ACTION_BAR_BUTTONS = 2`，`ui/packages/components/src/renderers/layout/containers.tsx:1809`，可用 `page:header.mobileMaxVisible` 覆盖）。在底栏上，内置按钮（如编辑）排在页面自定义动作之后（约 :2503 的注释）。实测商机：底栏是「Generate Q…」「Clone Oppo…」，「Edit」在更多菜单第 5 项。\n- 阶段条在 `ui/packages/plugin-detail/src/renderers/record-path.tsx`：手机上每个阶段等分宽度，标签用省略号截断，实测 7 个阶段显示成「Pr… Q… Ne… Pr…」；`RecordPathProps` 没有紧凑模式。\n- 手写记录页的关键字段条在手机宽度下每行一个字段、每个带一支编辑笔（`HeaderHighlight.tsx` 约 :353–359 的非栅格版本）；默认页的栅格版本最少 2 列。\n\n## 要做的\n\n1. 底栏排序：当记录可编辑时，「编辑」固定占一个可见位（建议第一位），主操作（`variant: 'primary'` 的动作）占另一位，其余进「更多」。\n2. 阶段条在手机宽度下改为紧凑模式：进度条保留，文字只显示当前阶段名与「第 N / M 步」；点开可看全部阶段并切换。\n3. 手写记录页的关键字段条在手机宽度下也用两列栅格，与默认页一致。\n\n## 不做的\n\n- 不改桌面端。\n- HotCRM 把 Clone 改为只进更多菜单是它自己的配置，另立在 hotcrm 仓。\n\n## 验收\n\n1. 375 宽打开一条可编辑的商机，底栏有「编辑」。\n2. 阶段条能读出当前阶段全名和第几步。\n3. 手写记录页的 6 个关键字段在两列里排成 3 行。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 12 手机详情</summary>\n\n![图 12 手机详情](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/12-mobile-detail.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `containers.tsx` 的手机底栏排序、`record-path.tsx`、`HeaderHighlight.tsx`。\n\nDedupe: `repo:objectstack-ai/objectstack PHONE_ACTION_BAR_BUTTONS Edit overflow host buttons` → 0；`… record-path mobile compact current stage` → 7，最近 #27058 / #27055（均已关，手机列表卡片与记录页 v3），没有阶段条紧凑模式或底栏排序的卡。"
+}

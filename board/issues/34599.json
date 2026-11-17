@@ -1,0 +1,36 @@
+{
+  "number": 34599,
+  "kind": "issue",
+  "title": "带内嵌子表的表单弹窗：取消 / 保存不固定在底部，长表单要滚到最下面才看得到",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "lease:o3-B",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T02:58:17Z",
+  "updated_at": "2026-11-17T05:54:12Z",
+  "closed_at": "2026-11-17T05:53:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34599",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n\n\n## 现状（读码，objectstack `origin/main` ed45eb9288；界面实测在 staging os-4e4qa4 与 hotcrm 本地实例）\n\n- 普通表单弹窗的底栏是固定的（`ui/packages/plugin-form/src/ModalForm.tsx` 约 :1295，`shrink-0 border-t`）。\n- 带内嵌子表时走另一条分支（`ModalForm.tsx:1185–1246`，`subforms?.length && mode !== 'view'`）：`<MasterDetailForm>` 整个放在滚动区里（:1204 `flex-1 overflow-y-auto`），ModalForm 自己不画底栏；`MasterDetailForm.tsx:2233–2262` 把取消 / 保存画在内容最后（`border-t pt-4`，test id `md-form-cancel` / `md-form-submit`），于是随内容滚走。\n- 实测（hotcrm 本地实例，18.5.0）：新建报价单、新建项目预算，弹窗顶部看不到任何按钮，要滚过全部字段和行项目表格才到。\n- `MasterDetailForm` 还被 `ObjectForm.tsx:408`（整页）和 `DrawerForm.tsx:959`（抽屉）使用。同一分支也没有未保存改动的拦截和冲突对话框（:1187 直接透传 `onOpenChange`）。\n\n## 要做的\n\n1. 带内嵌子表的表单在弹窗、抽屉、整页三种容器里，取消 / 保存都固定在容器底部，与普通表单一致。建议给 `MasterDetailForm` 加一个把操作栏交给宿主渲染的口（它需要内部的 `handleSave`、`saving`、`uploadGate`，单纯的 DOM portal 不够），由 ModalForm 放进 `shrink-0 border-t` 的底栏。\n2. 这条分支补上未保存改动的关闭拦截，与普通表单一致。\n\n## 不做的\n\n- 不改保存逻辑（`/api/v1/batch`）。\n\n## 验收\n\n1. 新建一张带行项目的单据，弹窗滚动到任何位置，取消 / 保存都可见。\n2. 抽屉和整页同样。\n3. 填了内容后点关闭，有未保存提示。\n4. 现有点 `md-form-submit` 的 e2e（`e2e/live/master-detail.spec.ts`、`form-view-subforms.spec.ts` 等）通过。\n\n## 设计图（静态示意稿，标「新」的是改动；字段和文案以实际元数据为准）\n\n<details><summary>图 3 新建报价单</summary>\n\n![图 3 新建报价单](https://github.com/objectstack-ai/objectstack/blob/f1b54abdec82e8ab931335b3333c307de130dd26/03-quote-form-inline-lines.png?raw=true)\n\n</details>\n\nReader: `domain:ui` 车道，改 `ModalForm.tsx` 的子表分支与 `MasterDetailForm.tsx` 的操作栏。\n\nDedupe: `repo:objectstack-ai/objectstack MasterDetailForm action bar sticky footer ModalForm subforms` → 0。"
+}

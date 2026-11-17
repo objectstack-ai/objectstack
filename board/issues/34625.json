@@ -1,0 +1,39 @@
+{
+  "number": 34625,
+  "kind": "issue",
+  "title": "pm-dispatch: area threads check the card's premise before code, seats batch thread-opening requests, and a card thread edits its own PR body",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "lease:o2-S",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T03:48:31Z",
+  "updated_at": "2026-11-17T05:22:22Z",
+  "closed_at": "2026-11-17T05:22:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34625",
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ④: the maintainer asked for this card by name. Ruling-ref: the maintainer's words in the fleet project at 2026-11-17T03:46:59Z, 「第 2、3 、4条我现在就让席位改进命令文件，并且立卡更新 skills」, answering three process fixes the coordinator proposed. The relay added 「立卡后直接派发处理」, so this card is graded and queued by the seat under that order, and triage is told at the same time. ⛔ Not a claim.\n\n## 维护者速读\n\n- 改什么：把你批准的三条流程改进写进 pm-dispatch 技能。① 区线程和卡线程在写码前先实测卡的前提，不成立就先收窄范围再动手，PR 的结论只写实测覆盖到的范围。② 席位要开线程时攒成一批，一次请协调者开完，每条写清标题、汇报区、要读的文件。③ 卡线程自己更新自己 PR 的正文，不再请区线程代发。\n- 为什么改：这几个小时的返工(#34547 修了三轮，#34581 结论过宽被打回)多出在前提没先核;开线程逐条往返很费每小时约 60 条的消息额度;卡线程改正文要区线程转一手。\n- 需要你做的：本卡是受管文本(`.claude/**`)。落地时照常审批 PR。\n\n## Where (origin/main)\n\n- Premise check: `references/dispatch-runbook.md` 〈派发前置：前提核实〉 (around line 146) gives the pre-dispatch premise reading to the seat's read-only subagent, and to a card thread only \"before handing candidates to the coordinator\". In area mode (`references/area-lease.md` 〈区内规则〉) the area session or the card thread claims and codes, and nothing tells them to measure the premise themselves before writing code, or to keep the PR's conclusion inside what was measured.\n- Thread opening: `references/coordinator.md` (around line 26, 「coordinator 排队开线程」) and `references/dispatch-runbook.md` (around lines 136–140) describe one request per thread. Nothing tells a seat to batch its requests, or says what one request line must carry.\n- PR body: `references/dispatch-runbook.md` and `references/area-lease.md` do not say who edits a card thread's PR body. In practice, areas relayed body edits for their card threads.\n\n## Change\n\nPay for every added line under the line ratchet (`pnpm check:pm-skill-ratchet`). Each rule gets one home, and other passages point to it.\n\n1. Premise before code, for area mode: before writing code, the area session (for its own card) or the card thread measures each premise line on `origin/main`. That covers the repro, the cause sentence and its file:line, and `check-prior-rulings.mjs` against the preferred route. If the premise fails, is wider than measured, or meets a ruling, the thread stops and reports, and the seat posts a `Premise corrected` comment that narrows the card. The claim's `Premise:` line cites it. The PR body states only what was measured.\n2. Batched thread requests: a seat collects its thread-opening requests and sends them to the coordinator as one message, one line per thread (card or PR, title, reporting area, files to read, branch to continue). The coordinator opens the batch and answers with all the ids at once.\n3. A card thread edits its own PR body (through the relay's body-patch op), and the area does it only when the card thread is closed.\n\n## Done when\n\nEach of the three rules has one home in `.claude/skills/pm-dispatch/` with pointers where needed, `pnpm check:pm-skill-ratchet` and `pnpm check:pm-skill-id-lint` pass, and the PR body lists each passage before and after.\n\nSeat command files already carry these rules (`/mnt/project-files/objectstack-seat2/area-order.md`, `standard-order.md`, `large-card-order.md`, 03:47Z). This card puts them into the skill.\n"
+}

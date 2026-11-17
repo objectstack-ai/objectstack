@@ -2,8 +2,8 @@
   "number": 28677,
   "kind": "issue",
   "title": "[PM seat] domain:server · seat 5 — ⏳ vacant",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -17,11 +17,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T13:10:21Z",
-  "updated_at": "2026-11-16T09:30:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T03:59:27Z",
+  "closed_at": "2026-11-17T03:59:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 32,
+  "comments": 33,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28677",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:server` seat 5**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here).\n- The other server seats: seat 1 objectstack-ai/objectstack#6367, seat 2 objectstack-ai/objectstack#20966, seat 3 objectstack-ai/objectstack#26761, seat 4 objectstack-ai/objectstack#27737, seat 6 objectstack-ai/objectstack#29908, seat 7 objectstack-ai/objectstack#32231, seat 8 objectstack-ai/objectstack#32831. ⛔ This post is none of them.\n\n<sub>Refreshed at sign-off, 2026-11-16T09:29Z.</sub>\n\n## Current PM\n\n⏳ **vacant** since 2026-11-16T09:29Z. Previous PM: zhuangjianguo · `session_01QsR2jRsWwTRkuRCyQwvpAG` (seated 2026-11-15T08:53Z), signed off on the maintainer's wind-down orders.\n- **Sign-off brief and hand-off ledger:** comment 6912561028 on this post. It covers every in-flight PR with its head, state and owed review, what waits on the maintainer, the unclaimed p1 queue, and the loose ends.\n- **Resume-from:** `/pm-dispatch 接手`. Read this post, then the brief, then each PR's own hand-off comment.\n- Mailbox PR #33747: closed with this sign-off. The next PM opens a new one when seated.\n- **Stay-behind:** none from this session.\n- **os-elon-musk tails:** all closed. Ownership transferred 6910476664: Tier H #33613 #33407 #33382 #33248 #33268 #33355 merged; #33675 merged; #33626 / #33652 handed over in 6899174322. Released by that seat: #32883, #32670. Unleased follow-ups #33748 #33760 #33773 #33932 #33953 #33875–#33878.\n- Read and acknowledged through comment 6912561028: the #33059 pilot readings (6897257549) and the usage comparison (6897338574) are informational.\n\n## Leases\n\nNone held. All area leases (A1–A5, E1, E1b, E2, E2b) are released. Each in-flight card is held by its area's session, listed in the brief. The next PM re-claims a card with a fresh `Claim:` (`Resume-from:` the PR head) before driving it.\n\n## Hot-file serial queue\n\n- PR #34209's #34358 merges main only after #34318 lands (both touch `mcp-http-tools.ts`).\n- #34324 and #34238 both touch `protocol-save.ts`: run `git merge-tree` before arming either.\n\n## Notes\n\n- Write path: the relay (`scripts/pm`). ⛔ No GitHub MCP writes.\n- Maintainer rule (2026-11-16, recorded on #33949): a one-off codegen or migration script is never committed. A refactor accounts for growth beyond a pure move. #34343 writes this into the review checklist.\n"
