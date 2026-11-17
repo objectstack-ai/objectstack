@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin';
 import { readSeedDatasets } from './seed-datasets.js';
 import { readSeedSettlement } from './seed-settlement.js';

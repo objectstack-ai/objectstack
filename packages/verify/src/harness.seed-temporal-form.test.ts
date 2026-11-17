@@ -24,6 +24,9 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 import { cel, defineStack } from '@objectstack/spec';
 import { Field, ObjectSchema } from '@objectstack/spec/data';
 import { bootStack, type VerifyStack } from './harness.js';

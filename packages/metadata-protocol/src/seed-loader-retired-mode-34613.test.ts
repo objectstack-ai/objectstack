@@ -26,13 +26,18 @@ function createLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 }
 
-/** An in-memory engine: equality `where`, ids minted on insert. */
+/** An in-memory engine: equality `where` (a combinator is refused, not read as a field), ids minted on insert. */
 function createEngine(): { engine: IDataEngine; store: Record<string, Array<Record<string, unknown>>> } {
   const store: Record<string, Array<Record<string, unknown>>> = {};
   let next = 0;
   const find = async (object: string, query?: { where?: Record<string, unknown>; limit?: number }) => {
     let rows = store[object] ?? [];
-    if (query?.where) rows = rows.filter((r) => Object.entries(query.where!).every(([k, v]) => r[k] === v));
+    if (query?.where) {
+      rows = rows.filter((r) => Object.entries(query.where!).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`in-memory engine: unsupported operator ${k}`);
+        return r[k] === v;
+      }));
+    }
     return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
   };
   const engine = {
