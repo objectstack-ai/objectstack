@@ -300,7 +300,8 @@ import type {
   EngineMiddleware, EngineReadOptions, FieldOwnedFileReadAuthorizer, FormulaFaultSink, FormulaPlanEntry,
   FormulaRelated, FunctionEntry, FunctionRegistrationOptions, HeldFileResolver, HookEntry, HookHandler,
   IssuedAutonumber, MigrationFlagRead, OperationContext, PermissionResolution, ReadableIdsChain, ReadableIdsSecurity,
-  ReadableIdsSecurityResolution, TransactionScope, UnservableControlledByParentMaster, WriteWallVerdict,
+  ReadableIdsSecurityResolution, SearchFieldWithholder, TransactionScope, UnservableControlledByParentMaster,
+  WriteWallVerdict,
 } from './engine-top-level.js';
 // [#29986 codemod] Re-exported by name, so every importer of `./engine.js` reads what it read.
 export {
@@ -309,7 +310,8 @@ export {
   type FieldOwnedFileReadAuthorizer, type FormulaPlanEntry, type FunctionEntry, type FunctionRegistrationOptions,
   HOOK_EVENT_DISPATCH_VOCABULARY, type HeldFileResolver, type HookEntry, type HookHandler, type MigrationFlagRead,
   type OperationContext, type PermissionResolution, type PostHookWriteImageCheck, type ReadableIdsChain,
-  type ReadableIdsSecurity, SECURITY_SERVICE_SOURCE_SLOT, type UnservableControlledByParentMaster,
+  type ReadableIdsSecurity, SECURITY_SERVICE_SOURCE_SLOT, type SearchFieldWithholder, type SearchFieldWithholdingRequest,
+  type UnservableControlledByParentMaster,
   type WriteWallRowVerdict, type WriteWallVerdict, assembledViewItemRefusal, cascadeMemberKey, cascadeSetAdd,
   cascadeSetHas, collectionItemOwnerStampRefusal, declaredDatetimeLowering, declaredMultiValued, droppedFieldEvents,
   evaluateFormulaField, foldEngineOptionAliases, hookMatchesObject, insertStaticReadonlySubject, isExpressionDefault,
@@ -573,6 +575,9 @@ export class ObjectQL implements IObjectQLEngine {
     fn: EngineMiddleware;
     object?: string;
   }> = [];
+
+  // [#34700] Search-field withholders, by object (`registerSearchFieldWithholder`).
+  private searchFieldWithholders = new Map<string, SearchFieldWithholder[]>();
 
   // Action registry: key = "objectName:actionName" — the UNQUALIFIED slot, what
   // a call that names no package runs ([ADR-0150 D5, #31697]: two packages
@@ -1888,6 +1893,22 @@ export class ObjectQL implements IObjectQLEngine {
   registerMiddleware(fn: EngineMiddleware, options?: { object?: string }): void {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
     return MiddlewareAndContextFacet.registerMiddleware.call(middlewareAndContextHost.of(this), fn, options);
+  }
+
+  /**
+   * [#34700] Register a search-field withholder for `object`: a guard of the
+   * object's own (a middleware refusing a query that names some of its columns
+   * for some callers — plugin-audit's parent-field query guard, #21154) names
+   * the fields a non-blank `search` must not scan for this caller. They leave
+   * the server-resolved search set before the expansion, beside what the
+   * security service's `getQueryableFields` withholds (#25672). A field the
+   * caller names in `searchFields` is never withheld, so the guard still
+   * refuses it; context-less reads are not asked. The guard stays the
+   * enforcement (`SearchFieldWithholder`).
+   */
+  registerSearchFieldWithholder(object: string, withholder: SearchFieldWithholder): void {
+    // [#34700] The body lives in `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
+    return MiddlewareAndContextFacet.registerSearchFieldWithholder.call(middlewareAndContextHost.of(this), object, withholder);
   }
 
   /**
@@ -5913,6 +5934,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolveRelateThenLowerWhere: (...a) => engine.resolveRelateThenLowerWhere(...a),
       resolveSearchQueryableFields: (...a) => engine.resolveSearchQueryableFields(...a),
       resolveWhereTokens: (...a) => engine.resolveWhereTokens(...a),
+      get searchFieldWithholders() { return engine.searchFieldWithholders; },
       stripSearchCompanionFromRead: (...a) => engine.stripSearchCompanionFromRead(...a),
       triggerHooks: (...a) => engine.triggerHooks(...a),
     }));
@@ -6012,6 +6034,7 @@ export class ObjectQL implements IObjectQLEngine {
       getDriver: (...a) => engine.getDriver(...a),
       get logger() { return engine.logger; },
       get middlewares() { return engine.middlewares; },
+      get searchFieldWithholders() { return engine.searchFieldWithholders; },
       get organizationProbeMemo() { return engine.organizationProbeMemo; },
       set organizationProbeMemo(v) { engine.organizationProbeMemo = v; },
       probeInstallOrganizations: (...a) => engine.probeInstallOrganizations(...a),

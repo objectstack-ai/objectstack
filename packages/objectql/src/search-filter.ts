@@ -126,6 +126,16 @@ export interface ExpandSearchOptions extends SearchFieldResolutionOptions {
    * loudly there. Absent = no answer, nothing withheld.
    */
   queryableFields?: ReadonlySet<string>;
+  /**
+   * [#34700] Fields a search-field withholder registered for the object
+   * (`ObjectQL#registerSearchFieldWithholder`) says this caller may not query
+   * here — a guard of the object's own that the security service's answer
+   * does not carry. Withheld from the resolved set exactly as a field missing
+   * from {@link queryableFields}: a field the caller named in
+   * `requestedFields` is never withheld, so the guard still refuses it.
+   * Absent or empty = nothing withheld.
+   */
+  withheldFields?: ReadonlySet<string>;
 }
 
 export interface NormalizedSearch {
@@ -248,7 +258,8 @@ function companionWithinSearchFields(searchFields: readonly string[], opts: Expa
 
 /**
  * [#25672] Withhold from the resolved search set every field the caller may
- * not query, except one the caller named itself. The resolved set is the
+ * not query, except one the caller named itself. [#34700] A field a
+ * registered withholder names is withheld the same way. The resolved set is the
  * server's choice (declared `searchableFields` → auto-default), so a hidden
  * column in it is the server widening the caller's predicate past what the
  * caller could write — and the predicate guard refused the WHOLE search for
@@ -261,14 +272,15 @@ function withholdUnqueryable(
   searchFields: string[],
   requestedFields: string | string[] | undefined,
   queryable: ReadonlySet<string> | undefined,
+  withheld: ReadonlySet<string> | undefined,
 ): string[] {
-  if (!queryable) return searchFields;
+  if (!queryable && !withheld?.size) return searchFields;
   const named = new Set(
     typeof requestedFields === 'string'
       ? requestedFields.split(',').map((f) => f.trim())
       : requestedFields ?? [],
   );
-  return searchFields.filter((f) => queryable.has(f) || named.has(f));
+  return searchFields.filter((f) => named.has(f) || ((!queryable || queryable.has(f)) && !withheld?.has(f)));
 }
 
 /**
@@ -284,7 +296,7 @@ function withholdUnqueryable(
  *   would answer the search with every row. This function stays pure and
  *   non-throwing; the judgement lives at the call site every verb reaches.
  *   [#25672] A set that `queryableFields` withheld down to nothing is this
- *   case too.
+ *   case too, and [#34700] so is one `withheldFields` withheld to nothing.
  *
  * [#29394] A NON-empty set whose every field can never hold text is not the
  * second case: each term's `$or` is emitted with no arm, FALSE, so the search
@@ -299,6 +311,7 @@ export function expandSearchToFilter(raw: unknown, opts: ExpandSearchOptions): a
     resolveSearchFields({ ...opts, requestedFields }),
     requestedFields,
     opts.queryableFields,
+    opts.withheldFields,
   );
   if (searchFields.length === 0) return null;
 

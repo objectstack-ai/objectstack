@@ -405,6 +405,33 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     expect(await servedById('admin', rowIds.endedSignIn)).toBe(200);
     expect(await servedTotal('admin', { object_name: OBJ })).toBe(await totalAtRest());
   });
+
+  // [#34700] The ledger list's search box: the server-chosen search set held
+  // the `old_value` / `new_value` snapshot columns, and plugin-audit's
+  // parent-field query guard refused the WHOLE search for every caller
+  // withheld any parent field — the auditor's list turned into 「无权访问」.
+  // The columns now leave that caller's set; naming one still refuses.
+  it('[#34700] holder and non-holder: the list search answers over the columns each may query, and a search naming a snapshot column is still refused', async () => {
+    const search = (who: keyof typeof token, q: string) =>
+      stack.apiAs(token[who], 'GET', `/data/${LEDGER}?search=${encodeURIComponent(q)}&limit=50`);
+    for (const who of ['holder', 'reader'] as const) {
+      for (const q of [id.gone, VALUE.withheld]) {
+        const res = await search(who, q);
+        expect(res.status, `${who} search: ${await res.clone().text()}`).toBe(200);
+      }
+      // A value held only in a snapshot matches nothing for this caller.
+      expect(rowsOf(await (await search(who, VALUE.withheld)).json())).toHaveLength(0);
+      const named = await stack.apiAs(token[who], 'GET', `/data/${LEDGER}?search=${VALUE.withheld}&searchFields=old_value&limit=5`);
+      expect(named.status, `${who} names a snapshot column: ${await named.clone().text()}`).toBe(403);
+    }
+    // The holder is served the deleted record's rows, found by the column it may query.
+    const held = rowsOf(await (await search('holder', id.gone)).json());
+    expect(held.length, 'the holder finds the deleted record’s rows by search').toBeGreaterThanOrEqual(2);
+    // Control: the platform administrator is withheld nothing, so its search still reads the snapshots.
+    const admin = await search('admin', VALUE.withheld);
+    expect(admin.status).toBe(200);
+    expect(rowsOf(await admin.json()).length, 'the administrator’s search matches a snapshot').toBeGreaterThan(0);
+  });
 });
 
 // ── The declared scope, measured: a holder is bounded by its organization ────

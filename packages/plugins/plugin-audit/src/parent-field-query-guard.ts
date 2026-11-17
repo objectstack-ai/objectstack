@@ -102,6 +102,14 @@
  * objects' searched set. The projection (`fields`) is not a predicate: what it
  * selects is the redaction's to narrow.
  *
+ * [#34700] A search the SERVER resolved over these columns is not refused for
+ * them: each guard also registers a search-field withholder with the engine
+ * ({@link withheldSearchColumns}), so the columns this rule would refuse leave
+ * the server-chosen set before the expansion, as a field the security service
+ * says the caller may not query does (#25672). The search then answers over
+ * the columns the caller may query. A search whose `searchFields` names one
+ * of them is still refused here.
+ *
  * ## The refusal
  *
  * `PERMISSION_DENIED` / 403 with the engine's words for the same role — the
@@ -327,6 +335,21 @@ export async function readerWithholdsParentField(
 /** The engine slice the declared set is read from: its object registry. */
 export interface ParentObjectRegistryEngine extends ActivityMiddlewareEngine {
   registry?: { getAllObjects?(): ReadonlyArray<{ name?: unknown }> };
+  /**
+   * [#34700] The engine's search-field withholder seam
+   * (`ObjectQL#registerSearchFieldWithholder`). Optional: an engine without it
+   * keeps the guard alone, and a server-chosen search over a guarded column
+   * is refused as before.
+   */
+  registerSearchFieldWithholder?(
+    object: string,
+    withholder: (request: {
+      object: string;
+      where: unknown;
+      context: unknown;
+      searchFields: readonly string[];
+    }) => Promise<readonly string[] | undefined>,
+  ): void;
 }
 
 /**
@@ -405,6 +428,86 @@ export function parentFieldQueryRefusal(
   return err;
 }
 
+/**
+ * The guard's verdict on a query over `guard.object` whose `where` is `where`
+ * and which names `named`: `true` refuses. One question for the middleware
+ * and the search-field withholder, so the two cannot disagree on a query.
+ * Fails closed: a security answer that cannot be had refuses.
+ */
+async function guardRefuses(
+  engine: ParentObjectRegistryEngine,
+  guard: ParentFieldQueryGuard,
+  security: FieldVisibilitySource,
+  where: unknown,
+  named: NamedValueBearingColumns,
+  context: unknown,
+  logger: FieldRedactionLogger,
+): Promise<boolean> {
+  const parent = pinnedParentObject(where, guard.object);
+  const askEveryObject = parent === null || reachesSideCopy(guard.object, parent, named);
+  try {
+    if (!askEveryObject && parent !== null) {
+      return await readerWithholdsParentField(security, parent, context, logger);
+    }
+    return await readerWithholdsAnyDeclaredParentField(engine, security, context, logger);
+  } catch (err) {
+    logger.warn(
+      `[audit] ${guard.object} query guard: could not tell whether the caller is served every field of ` +
+        `${askEveryObject ? 'every registered object' : `'${parent}'`} — refusing the query (fail closed): ` +
+        `${(err as Error)?.message ?? err}`,
+    );
+    return true;
+  }
+}
+
+/**
+ * [#34700] Which of a search's server-resolved fields the guard would refuse
+ * this caller, so the engine leaves them out of the set
+ * (`ObjectQL#registerSearchFieldWithholder`) instead of the guard refusing the
+ * whole search — the auditor's audit-log search answered 403 for the
+ * `old_value` / `new_value` snapshot columns the server had put in it. A
+ * column the caller names in `searchFields` is never withheld, so the guard
+ * still refuses it: the oracle stays closed.
+ *
+ * Asked with the guard's own question ({@link guardRefuses}), the search
+ * naming every guarded column in the set. When that is refused and the query
+ * pins a parent `side-copy-columns.ts` lists, the carrier columns alone are
+ * what widen it to every object (`reachesSideCopy`), so the rest is asked
+ * again without them and kept when the pinned parent admits it.
+ *
+ * Costs the guard's question once more per search that resolves a guarded
+ * column for a caller the guard admits: the middleware still asks it of the
+ * expanded query.
+ */
+export async function withheldSearchColumns(
+  engine: ParentObjectRegistryEngine,
+  guard: ParentFieldQueryGuard,
+  security: FieldVisibilitySource | undefined,
+  request: { where: unknown; context: unknown; searchFields: readonly string[] },
+  logger: FieldRedactionLogger,
+): Promise<string[] | undefined> {
+  const context = request.context as { isSystem?: boolean } | undefined;
+  if (!context || context.isSystem || !security) return undefined;
+  const inSet = guard.columns.filter((c) => request.searchFields.includes(c));
+  if (inSet.length === 0) return undefined;
+  const asPredicate = (columns: string[]): NamedValueBearingColumns => ({ aggregate: [], predicate: columns });
+  if (!(await guardRefuses(engine, guard, security, request.where, asPredicate(inSet), request.context, logger))) {
+    return undefined;
+  }
+  const parent = pinnedParentObject(request.where, guard.object);
+  if (parent !== null && reachesSideCopy(guard.object, parent, asPredicate(inSet))) {
+    const carriers = SIDE_COPY_CARRIER_COLUMNS.get(guard.object) ?? [];
+    const rest = inSet.filter((c) => !carriers.includes(c));
+    if (
+      rest.length > 0 &&
+      !(await guardRefuses(engine, guard, security, request.where, asPredicate(rest), request.context, logger))
+    ) {
+      return inSet.filter((c) => carriers.includes(c));
+    }
+  }
+  return inSet;
+}
+
 /** Register the query guard for one object. */
 function installParentFieldQueryGuard(
   engine: ParentObjectRegistryEngine,
@@ -423,27 +526,16 @@ function installParentFieldQueryGuard(
       // predicate over it discloses nothing the rows do not.
       const security = getSecurity();
       if (!security) return next();
-      const parent = pinnedParentObject(ctx.ast.where, guard.object);
-      const askEveryObject = parent === null || reachesSideCopy(guard.object, parent, named);
-      let refuse = true;
-      try {
-        if (!askEveryObject && parent !== null) {
-          refuse = await readerWithholdsParentField(security, parent, ctx.context, logger);
-        } else {
-          refuse = await readerWithholdsAnyDeclaredParentField(engine, security, ctx.context, logger);
-        }
-      } catch (err) {
-        logger.warn(
-          `[audit] ${guard.object} query guard: could not tell whether the caller is served every field of ` +
-            `${askEveryObject ? 'every registered object' : `'${parent}'`} — refusing the query (fail closed): ` +
-            `${(err as Error)?.message ?? err}`,
-        );
-        refuse = true;
+      if (await guardRefuses(engine, guard, security, ctx.ast.where, named, ctx.context, logger)) {
+        throw parentFieldQueryRefusal(guard, ctx.operation, named);
       }
-      if (refuse) throw parentFieldQueryRefusal(guard, ctx.operation, named);
       return next();
     },
     { object: guard.object },
+  );
+  // [#34700] …and tell the search expansion which columns it would refuse.
+  engine.registerSearchFieldWithholder?.(guard.object, (request) =>
+    withheldSearchColumns(engine, guard, getSecurity(), request, logger),
   );
 }
 
