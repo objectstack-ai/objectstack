@@ -86,6 +86,7 @@ import {
   RECORD_APPROVAL_ACTION_LOCATION,
   RECORD_APPROVAL_EXCLUDED_ACTIONS,
 } from './recordApprovalActions.js';
+import { useApprovalQueueAdvance } from './approval-decision/approvalQueueAdvance.js';
 // Side-effect registration of `record:approvals` — synthesized record pages
 // reference the node whenever the record has approval requests (#3461), so
 // the type must resolve wherever this view renders, not only under hosts
@@ -1256,6 +1257,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   }, [pageHasRightColumn, pageRootEl, relatedSwitch, setRelatedSwitch]);
   useAdvertiseShortcut(TOGGLE_RELATED_SHORTCUT, pageHasRightColumn);
   const [pageRecord, setPageRecord] = useState<any>(null);
+  // objectstack#34586 — a request opened from the approvals queue: the top
+  // bar's 「处理后打开下一条」, and the next request once a decision takes this
+  // one out of the reader's queue.
+  const approvalQueueSwitch = useApprovalQueueAdvance(
+    !embedded && objectName === SYS_APPROVAL_REQUEST_OBJECT ? recordId : undefined,
+    pageRecord,
+  );
   // 'idle' | 'loading' | 'loaded' | 'missing' | 'forbidden' | 'failed' —
   // distinguishes "haven't tried yet" from each way the read can end. The
   // short-circuits below render a clean empty state for the last three
@@ -5166,6 +5174,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         leadingTestId="record-page-leading"
         leading={phoneBack}
         stepper={pageStepper}
+        toggles={approvalQueueSwitch ?? undefined}
       />
       {phonePathRow}
     </>
@@ -5174,7 +5183,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       leadingTestId="record-page-leading"
       leading={pageLeading}
       stepper={pageStepper}
-      toggles={panelToggles ?? undefined}
+      toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
       frame={pageReturn.collapse ? <RecordDrawerReturnLink collapse={pageReturn.collapse} /> : undefined}
     />
   );
@@ -5452,7 +5461,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   marked menu; the approver's own bar is unchanged. While the
                   bar draws the request's Recall, it is the page's one Recall:
                   `onDrawnActionsChange` is how the page learns that and tells
-                  the DetailView band below to keep its lock badge only. */}
+                  the DetailView band below to keep its lock badge only.
+
+                  objectstack#34361 (ruling A) — for the approver themselves,
+                  `foldDecisions` draws one band: a status line naming the
+                  task, the step and the submitter, the decisions as the only
+                  buttons, and every other lever in one menu. The request page
+                  (`ApprovalDecisionPanel`) draws the same band. */}
               {approvalBarMounted && (
                 <DeclaredActionsBar
                   className="mb-4"
@@ -5462,6 +5477,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   exclude={[...RECORD_APPROVAL_EXCLUDED_ACTIONS]}
                   onDone={handleApprovalActionDone}
                   foldOverrides
+                  foldDecisions
                   onDrawnActionsChange={setApprovalBarDrawn}
                 />
               )}

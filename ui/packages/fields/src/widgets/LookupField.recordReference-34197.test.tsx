@@ -302,3 +302,123 @@ describe('lookupFiltersToRecord — an unresolved { $record } never reaches the 
     expect(out[1]).toEqual({ field: 'valid_from', operator: 'lte', value: '2026-11-01' });
   });
 });
+
+/**
+ * A `{ $record }` path through or to a multi-valued field has no single value
+ * (the spec's `LookupFilterRecordReferenceSchema` rule). The picker leaves its
+ * entry out — never sends the list as a scalar comparand, never drops it
+ * unsaid — and a development build warns once, naming the path.
+ */
+describe('LookupField — a { $record } path through or to a multi-valued field (#34389)', () => {
+  const warnings = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map((c) => String(c[0]));
+
+  it('a hop through a multiple: true lookup is left out, with a warning naming the path as multi-valued', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const ds = makeDataSource({ 'account:a1': { id: 'a1', cb_market: 'm1' } });
+      const field = formField(
+        [
+          { field: 'is_active', operator: 'eq', value: true },
+          { field: 'cb_market', operator: 'eq', value: { $record: 'accounts.cb_market' } },
+        ],
+        { accounts: { type: 'lookup', reference: 'account', multiple: true } },
+      );
+      render(
+        <LookupField field={field} value={undefined} onChange={vi.fn()} dataSource={ds} dependentValues={{ accounts: ['a1', 'a2'] }} />,
+      );
+      await openPopover();
+      await waitFor(() => expect(candidateFilters(ds)).toHaveLength(1));
+      expect(candidateFilters(ds)[0]).toEqual({ is_active: true });
+      expect(ds.findOne).not.toHaveBeenCalled();
+      const said = warnings(warn).filter((m) => m.includes('"accounts.cb_market"'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('multi-valued');
+      expect(said[0]).toContain('"accounts"');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a plain path to a multi-valued field is left out, not sent as a list, with a warning naming the field', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const ds = makeDataSource();
+      render(
+        <LookupField
+          field={formField([
+            { field: 'is_active', operator: 'eq', value: true },
+            { field: 'segment', operator: 'eq', value: { $record: 'tags' } },
+          ])}
+          value={undefined}
+          onChange={vi.fn()}
+          dataSource={ds}
+          dependentValues={{ tags: ['enterprise', 'emea'] }}
+        />,
+      );
+      await openPopover();
+      await waitFor(() => expect(candidateFilters(ds)).toHaveLength(1));
+      expect(candidateFilters(ds)[0]).toEqual({ is_active: true });
+      const said = warnings(warn).filter((m) => m.includes('{ $record: "tags" }'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('multi-valued');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a hop ending at a multi-valued field of the row is left out, with a warning naming that field', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const ds = makeDataSource({ 'account:a1': { id: 'a1', markets: ['m1', 'm2'] } });
+      const field = formField(
+        [
+          { field: 'is_active', operator: 'eq', value: true },
+          { field: 'cb_market', operator: 'eq', value: { $record: 'account.markets' } },
+        ],
+        { account: { type: 'lookup', reference: 'account' } },
+      );
+      render(
+        <LookupField field={field} value={undefined} onChange={vi.fn()} dataSource={ds} dependentValues={{ account: 'a1' }} />,
+      );
+      await openPopover();
+      await waitFor(() => expect(candidateFilters(ds)).toHaveLength(1));
+      expect(ds.findOne).toHaveBeenCalledWith('account', 'a1', { $select: ['id', 'markets'] });
+      expect(candidateFilters(ds)[0]).toEqual({ is_active: true });
+      const said = warnings(warn).filter((m) => m.includes('"account.markets"'));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('multi-valued');
+      expect(said[0]).toContain('"markets"');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('CONTROL: single-valued paths — a field and a one-hop path — still resolve, with no warning', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const ds = makeDataSource({ 'account:a3': { id: 'a3', cb_market: 'm3' } });
+      const field = formField(
+        [
+          { field: 'segment', operator: 'eq', value: { $record: 'segment_code' } },
+          { field: 'cb_market', operator: 'eq', value: { $record: 'account.cb_market' } },
+        ],
+        { account: { type: 'lookup', reference: 'account' } },
+      );
+      render(
+        <LookupField
+          field={field}
+          value={undefined}
+          onChange={vi.fn()}
+          dataSource={ds}
+          dependentValues={{ segment_code: 'enterprise', account: 'a3' }}
+        />,
+      );
+      await openPopover();
+      await waitFor(() => expect(candidateFilters(ds)).toHaveLength(1));
+      expect(candidateFilters(ds)[0]).toEqual({ segment: 'enterprise', cb_market: 'm3' });
+      expect(warnings(warn).filter((m) => m.includes('[LookupField]'))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

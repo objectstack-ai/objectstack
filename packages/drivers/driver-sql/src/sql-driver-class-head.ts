@@ -147,8 +147,8 @@ export class ClassHeadFacet {
   }
 
   /** The body of `SqlDriver#dateBucketSql`; the method's docblock there is its contract. */
-  static dateBucketSql(this: Pick<ClassHeadHost, 'buildDateBucketExpr' | 'knex'>, objectName: string, field: string, granularity: DateGranularityValue): string | null {
-    const bucket = this.buildDateBucketExpr(field, granularity, objectName);
+  static dateBucketSql(this: Pick<ClassHeadHost, 'buildDateBucketExpr' | 'knex'>, objectName: string, field: string, granularity: DateGranularityValue, timezone?: string): string | null {
+    const bucket = this.buildDateBucketExpr(field, granularity, objectName, field, timezone);
     return bucket ? this.knex.raw(bucket.sql, bucket.bindings).toQuery() : null;
   }
 
