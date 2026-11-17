@@ -81,6 +81,7 @@ import { createBetterAuthLogSink } from './sso-oidc-refusal-cause.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { refuseSsoAccountOutsideProvenDomain, refuseSsoAccountWithoutAddress } from './sso-account-at-proven-domain.js';
 import { refuseSamlAccountKeyContradiction } from './sso-saml-account-key.js';
+import { acceptEachTotpCodeOnce } from './totp-code-single-use.js';
 
 /** The path better-auth declares for the email sign-up endpoint. */
 const SIGN_UP_EMAIL_PATH = '/sign-up/email';
@@ -197,7 +198,10 @@ export interface AuthInstanceHost {
 export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<any>> {
   const { betterAuth } = await import('better-auth');
   const { createAuthMiddleware, setShouldSkipSessionRefresh } = await import('better-auth/api');
-  const plugins = await this.buildPluginList();
+  // A TOTP code the two-factor plugin accepts is accepted once (RFC 6238
+  // §5.2): a before-hook on its `/two-factor/verify-totp`, appended to the
+  // plugin object in place. See `totp-code-single-use.ts`.
+  const plugins = await acceptEachTotpCodeOnce(await this.buildPluginList());
   // ADR-0069 D2: the verifier refuses a locked account by better-auth's own
   // wrong-password path; the WebContainer hasher, when there is one, is the
   // pair it wraps (`sign-in-lockout-refusal.ts`).
