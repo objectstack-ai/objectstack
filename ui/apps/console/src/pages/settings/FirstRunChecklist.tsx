@@ -871,13 +871,13 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
   if (foldable && !unfolded) {
     return (
       <section
-        className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card py-2 pl-4 pr-2"
+        className="flex items-center justify-between gap-2 rounded-xl border border-border bg-card py-2 pl-4 pr-1.5"
         data-testid="first-run-checklist"
         data-folded="true"
         aria-labelledby="first-run-checklist-title"
       >
         <p className="flex min-w-0 items-baseline gap-2">
-          <span id="first-run-checklist-title" className="truncate text-sm font-semibold tracking-tight">
+          <span id="first-run-checklist-title" className="truncate text-[13px] font-semibold tracking-tight">
             {t('console.firstRunChecklist.title')}
           </span>
           <span className="shrink-0 text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
@@ -887,7 +887,7 @@ export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunC
         <Button
           size="sm"
           variant="ghost"
-          className="shrink-0 gap-0.5 px-2 text-primary"
+          className="shrink-0 gap-0.5 px-1.5 text-primary"
           onClick={() => setUnfolded(true)}
           aria-expanded={false}
           data-testid="first-run-checklist-continue"
