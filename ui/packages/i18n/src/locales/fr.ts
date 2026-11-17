@@ -1970,6 +1970,7 @@ const fr = {
       passwordsNote: "Mots de passe temporaires — affichés une seule fois, jamais stockés. Enregistrez-les maintenant ; chaque utilisateur doit changer le sien à la première connexion.",
       passwordsMore: "Autres entrées omises — utilisez le téléchargement.",
       positionsHint: "Postes : associez une colonne de noms machine de postes, plusieurs séparés par « ; ». Chacun est attribué comme dans Setup ; un nom inexistant, ou que vous ne pouvez pas attribuer, est signalé sur sa ligne, et l’utilisateur est tout de même créé.",
+      managerHint: "Responsable : associez une colonne indiquant le responsable de chaque utilisateur, par adresse e-mail (ou numéro de téléphone si la connexion par téléphone est active). Les responsables sont liés une fois toutes les lignes importées, donc un responsable plus bas dans le fichier compte ; un responsable introuvable, ou qui ne peut pas être lié, est signalé sur sa ligne, et l’utilisateur est tout de même créé.",
       passwordsDownload: "Télécharger le CSV",
     },
     ai: {
