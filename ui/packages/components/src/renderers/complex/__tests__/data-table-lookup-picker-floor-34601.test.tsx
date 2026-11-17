@@ -13,8 +13,8 @@
  * Its cells edit through the record picker, but its width was estimated from
  * the short names they draw ('Widget A' is 112px), so the picker's trigger got
  * a few dozen px and its open list cut every option. The auto-sized width of
- * such a column is floored at `LOOKUP_COLUMN_MIN_WIDTH`, the width `GridField`
- * gives its lookup columns. Arithmetic only: happy-dom lays nothing out, so
+ * such a column is floored at 168px, the width `GridField` gives its lookup
+ * columns. Arithmetic only: happy-dom lays nothing out, so
  * the estimate reads the drawn text's length (8px a character plus 48px). The
  * pixels a browser lays out are the PR's live reading.
  */
@@ -23,7 +23,6 @@ import { render, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
-import { LOOKUP_COLUMN_MIN_WIDTH } from '@object-ui/types';
 import '../data-table';
 
 function DataTable(props: { schema: Record<string, unknown> }) {
@@ -55,8 +54,7 @@ afterEach(() => {
 });
 
 describe('an editable foreign-key column is floored at the record picker width (objectstack#34601)', () => {
-  it('is drawn at LOOKUP_COLUMN_MIN_WIDTH, not at the 112px its short name needs', () => {
-    expect(LOOKUP_COLUMN_MIN_WIDTH, 'the floor GridField gives a lookup column').toBe(168);
+  it('is drawn at 168px, not at the 112px its short name needs', () => {
     render(<DataTable schema={schema({ editable: true }, { foreignKey: true })} />);
     expect(headerWidth('Product')).toBe('168px');
   });

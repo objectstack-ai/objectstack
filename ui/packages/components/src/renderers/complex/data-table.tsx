@@ -17,7 +17,7 @@ import { useHorizontalOverflow, HOVER_SCROLLBAR_CLASSES } from '../../custom/use
 import { ActiveListRow, listRecordIdOf } from '../../custom/record-list-face';
 import { describeIgnoredBind, describeNonArrayData } from './dataTableBindDiagnostic';
 import { ComponentRegistry, compareSortValues, csvBlob, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
-import { LOOKUP_COLUMN_MIN_WIDTH, type DataTableSchema, type TableColumn, type TableSortItem, type TableColumnType } from '@object-ui/types';
+import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
 import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation, useDisplayLocale } from '@object-ui/i18n';
@@ -1129,6 +1129,15 @@ function isPinnedRightColumn(col: { className?: unknown }): boolean {
 const AUTO_WIDTH_ATTR = 'data-auto-width-key';
 
 /**
+ * The narrowest an auto-sized foreign-key column is drawn in an editable
+ * table, where its cells edit through the record picker (objectstack#34601):
+ * room for the picker's trigger to show a name. The same width `GridField`
+ * (`@object-ui/fields`) gives its lookup columns, `MIN_WIDTH_BY_TYPE.lookup`;
+ * this layer cannot import that package, so the value is spelled here.
+ */
+const LOOKUP_PICKER_MIN_WIDTH = 168;
+
+/**
  * The column an auto-width target names: only one the estimate sizes (no
  * explicit `width`, not `fitContent`), and never a masked one, whose values
  * the estimate does not read (objectui#10657). A chip column is read with an
@@ -1558,7 +1567,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     // every name. Only the estimate is floored: an explicit width (an author's
     // pin, a user's resize) is skipped above it and drawn as written.
     const pickerFloor = (col: { pickerEdits: boolean }, width: number) =>
-      (col.pickerEdits ? Math.max(width, LOOKUP_COLUMN_MIN_WIDTH) : width);
+      (col.pickerEdits ? Math.max(width, LOOKUP_PICKER_MIN_WIDTH) : width);
     for (const col of cols) {
       if (col.width) continue; // Skip columns with explicit widths
       // `fitContent` columns (e.g. the row-actions column) size to their own
