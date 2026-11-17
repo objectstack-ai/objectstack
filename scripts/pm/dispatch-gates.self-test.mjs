@@ -286,6 +286,9 @@ import {
   zeroSegmentForms,
   readByUiScriptsSuite,
   UI_SCRIPTS_SUITE_ROOTS,
+  readBySpecMigrationEntryConsumers,
+  SPEC_MIGRATION_ENTRY_ROOTS,
+  packageTestSubsetFile,
   adrAnchorTargets,
   breaksAnAdrAnchor,
   carriesACliCommandLiteral,
@@ -5542,6 +5545,86 @@ export function selfTest({ tier = 'full' } = {}) {
   t('…and so does one whose name does not narrow its runner',
     (() => { try { bindChangeKindRows([{ kind: 'k', matches: 'test-file', gates: [{ name: 'pnpm vitest run', ciJob: 'Test UI', ciRunner: 'pnpm --dir ui exec vitest run', why: 'w' }] }]); return false; } catch (e) { return String(e.message).includes('CI-job binding that is not whole'); } })());
 
+  // ── The cli guidance test a migration-entry change owes (#34760) ───────────
+  //
+  // `packages/cli/test/migrate-meta-engine-guidance.test.ts` holds every semantic
+  // entry's printed block to carry no tracker number, and CI runs it only inside
+  // Test Core's package test task, so an entry edit learned of a red one a CI
+  // round after a green local ledger. The entry stands in for that job as a
+  // PACKAGE-TEST subset (`ciSubset`): pinned here are the predicate on the entries
+  // tree and beside it, the rendering and the runnable union, the `--ran` verdict
+  // without it, the STALE branch, the name's one spelling, and the binding and the
+  // file against the live tree.
+  const GUIDE = 'pnpm --filter @objectstack/cli exec vitest run test/migrate-meta-engine-guidance.test.ts';
+  const GUIDE_SPECIMENS = Object.freeze([
+    'packages/spec/src/migrations/entries/retired-defs/17.api__CreateViewRequest.ts',
+    'packages/spec/src/migrations/entries',
+    './packages/spec/src/migrations/entries/semantic/x.ts',
+  ]);
+  const GUIDE_CONTROLS = Object.freeze([
+    'packages/spec/src/ui/view.zod.ts',
+    'packages/spec/src/migrations/registry.ts.template',
+    'packages/spec/src/migrations/entries-other/x.ts',
+    'packages/cli/test/migrate-meta-engine-guidance.test.ts',
+  ]);
+  const guideEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === GUIDE));
+  const guideGate = guideEntry[0]?.gates.find((g) => g.name === GUIDE) ?? {};
+  t('⭐ exactly one entry in the table names the cli guidance test, bound to the Test Core job and the spec-migration-entry predicate',
+    guideEntry.length === 1 && guideGate.ciJob === 'Test Core'
+      && CHANGE_KIND_ROWS.filter((r) => r.gates.some((g) => g.name === GUIDE)).map((r) => r.matches).join() === 'spec-migration-entry');
+  t('the roots are the entries directory and its subtree, in the trigger language',
+    SPEC_MIGRATION_ENTRY_ROOTS.includes('packages/spec/src/migrations/entries/**') && SPEC_MIGRATION_ENTRY_ROOTS.includes('packages/spec/src/migrations/entries'));
+  for (const specimen of GUIDE_SPECIMENS) {
+    t(`a migration-entry surface reaches the guidance test (${specimen})`, readBySpecMigrationEntryConsumers(specimen));
+  }
+  for (const control of GUIDE_CONTROLS) {
+    t(`CONTROL: ${control} is outside the entries tree`, !readBySpecMigrationEntryConsumers(control));
+  }
+  const guideResolved = (name, gate = null) => (gate?.ciJob ? name : `pnpm ${name}`);
+  const throughTableGuide = (p) => changeKindLines([p], guideResolved).some((l) => l.includes(`- ${GUIDE}   —`));
+  for (const specimen of GUIDE_SPECIMENS) {
+    t(`through the whole table, ${specimen} derives the guidance test, anchored on the delimiter`, throughTableGuide(specimen));
+    t(`…and the runnable union carries it for ${specimen}`, commandsFor({ kindGroups: changeKindGates([specimen], guideResolved) }).includes(GUIDE));
+  }
+  for (const control of GUIDE_CONTROLS) {
+    t(`…and ${control} derives no guidance line and no guidance command`,
+      !throughTableGuide(control) && !commandsFor({ kindGroups: changeKindGates([control], guideResolved) }).includes(GUIDE));
+  }
+  const guideLine = changeKindLines([GUIDE_SPECIMENS[0]], guideResolved, guideEntry).find((l) => l.includes(`- ${GUIDE}   —`)) ?? '';
+  t('the guidance line states its build prerequisite, runnably', guideLine.includes("pnpm --filter '@objectstack/cli^...' build"));
+  t('…and carries no tracker number in the text a dev is shown', guideLine !== '' && !/#\d{4,5}\b/.test(guideLine));
+  const guideDerived = commandsFor({ kindGroups: changeKindGates([GUIDE_SPECIMENS[0]], guideResolved) });
+  const guideWithout = runReconciliation({
+    derived: guideDerived,
+    record: parseRunRecord(guideDerived.filter((c) => c !== GUIDE).map((c) => `${c} :: exit 0`).join('\n')),
+  });
+  t('⭐ a run record carrying every derived command BUT the guidance test is NOT ok, and names it unrun',
+    !guideWithout.ok && guideWithout.unrun.some((u) => u.command === GUIDE));
+  const guideWith = runReconciliation({ derived: guideDerived, record: parseRunRecord(guideDerived.map((c) => `${c} :: exit 0`).join('\n')) });
+  t('CONTROL: the same record WITH the guidance test is ok', guideWith.ok);
+  const guideStale = changeKindLines([GUIDE_SPECIMENS[0]], () => null, guideEntry);
+  t('an unresolvable package-test binding renders STALE, naming the job, the runner and the file it lost',
+    guideStale.filter((l) => l.includes(`⚠ ${GUIDE}: STALE`) && l.includes("job named 'Test Core…'") && l.includes(guideGate.ciSubset ?? '\u0000')).length === 1);
+  // The name's one spelling, and the load-time refusals it backs.
+  t('the package-test subset spelling reads its FILE', packageTestSubsetFile(GUIDE) === 'test/migrate-meta-engine-guidance.test.ts');
+  t('…and refuses a second argument or another runner',
+    packageTestSubsetFile(`${GUIDE} --project unit`) === null && packageTestSubsetFile('pnpm --filter @objectstack/cli run test') === null);
+  const bindRefuses = (gate) => {
+    try { bindChangeKindRows([{ kind: 'k', matches: 'test-file', gates: [{ why: 'w', ...gate }] }]); return false; } catch (e) { return String(e.message).includes('CI-job binding that is not whole'); }
+  };
+  t('a package-test subset whose ciSubset names another file REFUSES at load',
+    bindRefuses({ name: GUIDE, ciJob: 'Test Core', ciRunner: 'set -- pnpm turbo run test', ciSubset: 'packages/cli/test/other.test.ts' }));
+  t('…and so does one without its job half', bindRefuses({ name: GUIDE, ciSubset: guideGate.ciSubset }));
+  t('CONTROL: the live row binds whole', !bindRefuses({ name: GUIDE, ciJob: guideGate.ciJob, ciRunner: guideGate.ciRunner, ciSubset: guideGate.ciSubset }));
+  // Against the LIVE tree: the job still runs the package test task, and the file the name runs is the
+  // file `ciSubset` names, inside the package `--filter` names.
+  t('⭐ the binding resolves against the LIVE workflows — Test Core still runs the package test task', ciJobRunsRunner(guideGate, discoverFamilies().workflowEntries));
+  t('⭐ the named test file exists on this tree', typeof guideGate.ciSubset === 'string' && existsSync(nodePath.join(ROOT, guideGate.ciSubset)));
+  t('…inside the package the name filters on', (() => {
+    const pkgDir = guideGate.ciSubset?.slice(0, -('/' + packageTestSubsetFile(GUIDE)).length) ?? '';
+    try { return JSON.parse(readFileSync(nodePath.join(ROOT, pkgDir, 'package.json'), 'utf8')).name === '@objectstack/cli'; } catch { return false; }
+  })());
+
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
   // The bundles' OTHER producer, and the half no owning-package test can reach:
@@ -8242,7 +8325,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 738 -> 744 (#30763): the ADR anchor corpus import and its comment.
       // 744 -> 748 (#31257): the two imported gate readers and their comment.
       // 748 -> 751 (#31292): the workspace-enumerator import and its comment.
-      'scripts/pm/dispatch-gates.mjs:751 inherited-population',
+      // 751 -> 753 (#34760): the data import and its re-export each gained SPEC_MIGRATION_ENTRY_ROOTS.
+      'scripts/pm/dispatch-gates.mjs:753 inherited-population',
       // Ninth row, added with the declaration it names: the recogniser's mailbox
       // doorbell battery pins the seven key templates verbatim in the pm-dispatch
       // references' project-forms.md, a population claim on a governed file, so
