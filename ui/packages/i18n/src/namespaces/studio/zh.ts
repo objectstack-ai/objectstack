@@ -2936,8 +2936,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.desktopHint': 'Studio 专为桌面屏幕设计。',
   'engine.studio.notFound.package': '未找到包。本部署没有安装 ID 为“{id}”的包，因此无处可构建。',
   'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面、权限或全部元数据。',
-  'engine.studio.aiCopilot': 'AI 副驾',
-  // objectui#12725 — Studio 右栏：属性或 AI 副驾二选一。
+  'engine.studio.aiCopilot': 'AI 助手',
+  // objectui#12725 — Studio 右栏：属性或 AI 助手二选一。
   'engine.studio.slot.label': '右栏',
   'engine.studio.slot.switchHint': '⌘.（Ctrl+.）切换',
   'engine.studio.slot.collapse': '收起右栏',
@@ -2946,6 +2946,17 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.slot.planPending': '方案待确认',
   'engine.studio.slot.pendingCount': '{count} 项待确认',
   'engine.studio.slot.openFullPage': '在完整页面中打开',
+  // objectstack#34725 — 右栏标题栏的「历史」按钮与拖宽手柄。
+  'engine.studio.slot.history': '历史',
+  'engine.studio.slot.resize': '调整右栏宽度',
+  // objectstack#34725 — 画布上方那条提示：AI 助手的草稿改动落在画布上时出现。
+  'engine.studio.copilotChanges.lineOne': 'AI 刚改了 {count} 处',
+  'engine.studio.copilotChanges.line': 'AI 刚改了 {count} 处',
+  'engine.studio.copilotChanges.view': '查看',
+  'engine.studio.copilotChanges.discardAll': '放弃全部未发布改动',
+  'engine.studio.copilotChanges.discardConfirm': '放弃本包的全部未发布改动（包括你自己的）？此操作不可撤销。',
+  'engine.studio.copilotChanges.discardFailed': '有改动未能放弃：{items}。',
+  'engine.studio.copilotChanges.itemSeparator': '、',
   'engine.studio.pillar.data': '数据',
   'engine.studio.pillar.automations': '自动化',
   'engine.studio.pillar.interfaces': '界面',
@@ -3216,8 +3227,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.draftMark.sourceJustNow': '由 {agent}刚刚作为草稿加入',
   'engine.studio.draftMark.sourceItems': '{items} {count} 项由 {agent}在 {when}作为草稿加入',
   'engine.studio.draftMark.sourceItemsJustNow': '{items} {count} 项由 {agent}刚刚作为草稿加入',
-  // objectstack#27176 — 谁起草的:AI 副驾,或经 MCP 构建入口的智能体。
-  'engine.studio.draftMark.agent.copilot': 'AI 副驾',
+  // objectstack#27176 — 谁起草的:AI 助手,或经 MCP 构建入口的智能体。
+  'engine.studio.draftMark.agent.copilot': 'AI 助手',
   'engine.studio.draftMark.agent.mcp': 'MCP 客户端',
   'engine.studio.draftMark.agent.mcpClient': 'MCP 客户端「{client}」',
   'engine.studio.draftMark.item': '「{label}」',

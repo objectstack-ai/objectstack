@@ -3781,7 +3781,15 @@ export async function classifyResumeResult(
  *                                  activation ledger. A flow no package ships → 409
  *                                  `RESOURCE_CONFLICT` naming that flow's own switch,
  *                                  its `status` ('obsolete' / 'active') published
- *                                  through `PUT /:name`; nothing changes (#20726)
+ *                                  through `PUT /:name`; nothing changes (#20726).
+ *                                  Switching ON a packaged flow whose own `status`
+ *                                  disables it → 409 `RESOURCE_CONFLICT` naming the
+ *                                  status; nothing changes. 200 answers
+ *                                  `{ name, enabled }` with `enabled` read back from
+ *                                  `getFlowRuntimeStates` while the name has one
+ *                                  row there (echoed by a service that does not
+ *                                  implement that read, and for a name two packages
+ *                                  hold, which reads one row per holder)
  *                                  ⚑ authoring write — `manage_metadata` (commit 266436a7f):
  *                                    enablement is environment-wide, so an
  *                                    unentitled toggle reached every organization
@@ -4422,7 +4430,31 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // [#26474] Who asked, so the ledger row and its audit row name
                 // them. The id only: this door has already judged the caller.
                 await automationService.toggleFlow(name, enabled, activationCaller(context));
-                return { handled: true, response: deps.success({ name, enabled }) };
+                // [ADR-0126 §7.2] The answer is the engine's state read back,
+                // never the request echoed: the switch moves only the ledger
+                // bit, and the flow's `status` is a second dimension it does
+                // not move, so "the write landed" and "the flow is on" are two
+                // facts. Read through `getFlowRuntimeStates`, the one reading
+                // `GET /_status` serves, so the two doors cannot disagree.
+                // That reading names the switched flow only while the name
+                // has ONE row. A name two packages hold reaches here too: by
+                // its address, or bare with one served holder left, through
+                // `flowSlotView`, whose `toggleFlow` switches one slot while
+                // the engine still reads one row per slot under the bare
+                // name ([ADR-0150 D4], `getFlowRuntimeStates`). A row picked
+                // by name there may be the other holder's, so two or more
+                // rows read back nothing. Then, as for a service that does
+                // not implement the read or holds no row of the name, the
+                // request is echoed, the legacy answer; for the engine's own
+                // service (the only one with slots) that echo is true by
+                // construction, since every toggle entry refuses switching
+                // on a flow its status keeps off.
+                const svc = automationService as Pick<IAutomationService, 'getFlowRuntimeStates'>;
+                const rows = typeof svc.getFlowRuntimeStates === 'function'
+                    ? svc.getFlowRuntimeStates().filter((s) => s.name === name)
+                    : [];
+                const state = rows.length === 1 ? rows[0] : undefined;
+                return { handled: true, response: deps.success({ name, enabled: state ? state.enabled : enabled }) };
             }
         }
 
