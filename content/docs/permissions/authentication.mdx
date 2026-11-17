@@ -1350,9 +1350,10 @@ caller's active organization there, so the key is admitted only when it
 equals the organization the caller's session is working in. A different
 organization gets `400 INVALID_REQUEST` naming both organizations; a
 non-string or empty value gets `400 INVALID_REQUEST` saying the key must be
-the id of the organization you are working in; a body organization from a
-caller whose session works in no organization gets
-`400 NO_ACTIVE_ORGANIZATION` naming the organization sent. Every refusal
+the id of the organization you are working in (a non-string value is checked
+before the session, so this is the answer even when the session has no
+organization); a string organization from a caller whose session works in no
+organization gets `400 NO_ACTIVE_ORGANIZATION` naming the organization sent. Every refusal
 comes before anything is written or any host is told. The value never
 widens or chooses scope: the organization a person joins is always read from
 the session.

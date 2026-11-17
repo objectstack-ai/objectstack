@@ -13,7 +13,10 @@ Each door now admits that one key under a constraint:
 
 - absent: unchanged;
 - equal to the session's active organization: admitted, and ignored. The organization a person joins is still read from the session, never from the body;
-- any other value, or a value that is not a non-empty string: `400 INVALID_REQUEST`, naming the organization sent and the one the session holds. Nothing is read or written and the host is not told;
-- sent by a caller whose session works in no organization: `400 NO_ACTIVE_ORGANIZATION`, nothing written.
+- a different organization: `400 INVALID_REQUEST`, naming the organization sent and the one the session holds;
+- a value that is not a non-empty string: `400 INVALID_REQUEST`, saying the key must be the id of the organization you are working in. This is checked before the session is read, so it is the answer whether or not the session has an organization;
+- a string organization sent by a caller whose session works in no organization: `400 NO_ACTIVE_ORGANIZATION`, naming the organization sent.
+
+On every refusal nothing is read or written and the host is not told.
 
 The stamp itself (`buildApiActionRequest` in `@objectstack/runtime`) is unchanged: every identity-route forward still carries it.
