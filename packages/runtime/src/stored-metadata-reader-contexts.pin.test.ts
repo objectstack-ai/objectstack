@@ -63,7 +63,7 @@ import { ObjectQLPlugin } from '@objectstack/objectql';
 import type { ObjectQL } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
-import { AuthPlugin } from '@objectstack/plugin-auth';
+import { AuthManager, AuthPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
@@ -384,27 +384,23 @@ async function signIn(who: { email: string; password: string }): Promise<string>
 }
 
 async function signUpMember(): Promise<string> {
-  // Default audience posture is invite_only: enter through a pending invitation,
-  // the same lane `@objectstack/verify`'s signUp takes.
-  const engine: any = await kernel.getServiceAsync('objectql');
-  await engine.insert(
-    'sys_invitation',
-    {
-      id: 'inv_pin_21454',
-      email: MEMBER.email,
-      status: 'pending',
-      organization_id: 'org_pin_audience_gate',
-      role: 'member',
-      inviter_id: 'usr_pin_audience_gate',
-      expires_at: new Date(Date.now() + 3_600_000),
-    },
-    { context: { isSystem: true } },
-  );
-  const res = await req('/auth/sign-up/email', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: MEMBER.email, password: MEMBER.password, name: 'pin member', invitationId: 'inv_pin_21454' }),
-  });
+  // Default audience posture is invite_only. A member bound at creation enters
+  // through the operator door — the ticket the stack's own auth manager stages
+  // for exactly this address, the lane `@objectstack/verify`'s signUp takes. A
+  // sign-up admitted by the invitation it presents joins no organization until
+  // it verifies its address and accepts.
+  const auth: any = await kernel.getServiceAsync('auth');
+  const ticket = auth.stageOperatorProvisioning(MEMBER.email);
+  let res: Response;
+  try {
+    res = await req('/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: MEMBER.email, password: MEMBER.password, name: 'pin member', [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: ticket }),
+    });
+  } finally {
+    auth.clearOperatorProvisioning(MEMBER.email);
+  }
   if (!res.ok) throw new Error(`pin signUp failed: ${res.status} ${await res.text()}`);
   const data: any = await res.json();
   return data.token;
