@@ -16,7 +16,35 @@
     "objects": ["invoice", "invoice_line", "account"],
     "minFieldsPerObject": 1,
     "selectFields": [{"object": "invoice", "field": "status", "minOptions": 3}],
-    "lookups": [{"object": "invoice", "field": "account", "to": "account"}, {"object": "invoice_line", "field": "invoice", "to": "invoice"}]
+    "lookups": [{"object": "invoice", "field": "account", "to": "account"}, {"object": "invoice_line", "field": "invoice", "to": "invoice"}],
+    "datasets": [
+      {
+        "name": "invoicing",
+        "label": "Invoicing",
+        "description": "Invoices and their totals, by status.",
+        "object": "invoice",
+        "measures": [
+          {"name": "invoiced_total", "label": "Invoiced total", "aggregate": "sum", "field": "total", "synonyms": ["invoiced", "billings", "revenue", "营收", "开票总额"], "description": "The sum of the invoices' totals, every status counted, drafts included."},
+          {"name": "invoice_count", "label": "Invoice count", "aggregate": "count", "synonyms": ["number of invoices", "发票数"], "description": "How many invoices there are."}
+        ],
+        "dimensions": [
+          {"name": "invoice_status", "label": "Invoice status", "field": "status", "description": "Where an invoice stands: draft, sent or paid."}
+        ]
+      },
+      {
+        "name": "line_sales",
+        "label": "Line sales",
+        "description": "Invoice lines: what was sold, in units and in amount.",
+        "object": "invoice_line",
+        "measures": [
+          {"name": "line_amount", "label": "Line amount", "aggregate": "sum", "field": "amount", "synonyms": ["sales", "revenue", "营收", "销售额"], "description": "The sum of the line amounts, each line's quantity times its unit price."},
+          {"name": "units_sold", "label": "Units sold", "aggregate": "sum", "field": "quantity", "synonyms": ["units", "quantity sold", "销量"], "description": "How many units the lines sold."}
+        ],
+        "dimensions": [
+          {"name": "line_product", "label": "Product", "field": "product", "synonyms": ["item", "产品"], "description": "The product a line sells."}
+        ]
+      }
+    ]
   },
   "asOf": "2026-10-31",
   "capabilities": [
@@ -262,6 +290,12 @@
       {"name": "add_invoice_line", "object": "invoice_line", "summary": "Add a line item to an invoice.", "confirm": false},
       {"name": "send_invoice", "object": "invoice", "summary": "Mark a draft invoice as sent.", "confirm": false},
       {"name": "delete_invoice_line", "object": "invoice_line", "summary": "Delete a line item; irreversible.", "confirm": true}
+    ],
+    "datasetQuestions": [
+      {"id": "dq_units_sold", "ask": {"zh": "我们的总销量是多少?", "en": "How many units have we sold in total?"}, "words": ["units", "销量"], "expect": {"kind": "metric_selected", "dataset": "line_sales", "measure": "units_sold"}},
+      {"id": "dq_revenue", "ask": {"zh": "我们的总营收是多少?", "en": "What is our total revenue?"}, "words": ["revenue", "营收"], "expect": {"kind": "asked_back", "reason": "ambiguous", "candidates": [{"dataset": "invoicing", "measure": "invoiced_total"}, {"dataset": "line_sales", "measure": "line_amount"}]}},
+      {"id": "dq_invoiced_amount", "ask": {"zh": "我们开票一共多少?", "en": "What is our invoiced amount so far?"}, "words": ["invoiced amount", "开票"], "expect": {"kind": "asked_back", "reason": "near_miss", "candidates": [{"dataset": "invoicing", "measure": "invoiced_total"}]}},
+      {"id": "dq_account_count", "ask": {"zh": "我们有多少个客户账户?", "en": "How many customer accounts do we have?"}, "words": ["accounts", "客户账户"], "expect": {"kind": "fallback_labelled", "object": "account"}}
     ]
   },
   "iterate": {
