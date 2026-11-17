@@ -1535,11 +1535,11 @@ export const CEILINGS = new Map([
   // ruling of record: comment 6943048358 on card #34153, the maintainer's
   // choice 「四张全部 A」 on decision card cmsg_01FdL1XeUyvVNxLreh3F4Qi9WwExMWYmK6rBq81gx1Ameh,
   // 2026-11-17: 「p3 标准写进规则并放宽 4 行」, ceiling at most 108 by the measured
-  // growth). Six lines: scope and precedence, the close list, the keep list
-  // (default keep) and the clause naming which neighbour rule it outranks. Two
-  // lines paid with a second home (the cloud fallback, lanes/cloud.md; the (c)
-  // metadata definition, .claude/agents/os-dev.md). Measured delta +4; landed
-  // count, headroom 0.
+  // growth). Five lines: scope and precedence, the close rule (close item hit
+  // and no keep item hit ⇒ close; it outranks every not-closed rule here and in
+  // the filing gate; anything else stays), the close list and the keep list.
+  // One line paid: the cloud fallback now lives only in lanes/cloud.md, which the
+  // cloud line above points to. Measured delta +4; landed count, headroom 0.
   ['.claude/skills/pm-dispatch/references/triage-duties.md', 108],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
