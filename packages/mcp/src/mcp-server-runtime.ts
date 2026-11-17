@@ -1802,10 +1802,12 @@ const DEFAULT_HTTP_INSTRUCTIONS =
  * (ADR-0149 D3), in the few lines `initialize` carries. It rides the
  * instructions because a client reads a tool's description only after it has
  * chosen that tool (#34659 ruling D5 = A); the full procedure stays in the
- * tools' own descriptions and in the served skill (`DATASET_TOOL_LINES` in
- * `skill-md.ts`), which say the same thing: an exact name, label or synonym is
- * the only match, one measure match answers, several are a question for the
- * user, none falls back to the object tools with the answer labelled.
+ * tools' own descriptions and in the served skill's data loop
+ * (`ASK_SKILL_DATA_LOOP`, generated from `skills/objectstack-ask/SKILL.md` and
+ * rendered by `skill-md.ts`). All three hold an exact name, label or synonym as
+ * the only match, one measure match as the answer, and several matches on one
+ * word as a question for the user; the skill also asks before it falls back
+ * when a word with no match is a loose form of several listed measures.
  * Sent only where both dataset tools register ({@link datasetToolsServed}).
  */
 const DATASET_SELECTION_RULE =

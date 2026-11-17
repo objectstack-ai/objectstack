@@ -368,6 +368,10 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.missing': 'This field no longer exists in the draft.',
   'designer.field.remove': 'Remove “{label}”',
   'designer.field.section.basic': 'Basic',
+  'designer.field.section.developer': 'Developer info',
+  'designer.field.section.developerHint': 'The internal name the API and formulas refer to. Everyday edits do not need it.',
+  'designer.field.removeConfirmTitle': 'Delete the field “{label}”?',
+  'designer.field.removeConfirmBody': 'The field leaves this object\'s draft. The change takes effect when you publish.',
   'designer.field.section.advanced': 'Advanced',
   'designer.field.section.options': '{type} options',
   'designer.field.section.computed': 'Computed value',
@@ -1391,6 +1395,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowEdge.labelHint': 'e.g. approve / reject',
   'engine.inspector.flowEdge.condition': 'Condition',
   'engine.inspector.flowEdge.conditionHint': 'CEL expression — taken when it evaluates true',
+  'engine.inspector.flowEdge.conditionRows': 'By field',
+  'engine.inspector.flowEdge.conditionFormula': 'Formula',
+  'engine.inspector.flowEdge.conditionAdd': '+ Add a condition…',
+  'engine.inspector.flowEdge.conditionRowRefused': "A row here cannot be written as this connection's condition, so nothing was saved. Change the row, or switch to Formula.",
+  'engine.inspector.flowEdge.conditionTooComplex': 'This condition goes beyond what the field rows can show. Keep editing it as a formula.',
   'engine.inspector.flowEdge.isDefault': 'Default branch (else)',
   'engine.inspector.flowEdge.hint': 'The engine follows this connection when its branch label is selected or its condition is met. The default branch is taken when no other matches.',
   'engine.inspector.flowEdge.remove': 'Remove connection',
@@ -2532,6 +2541,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.addFieldApiNameNotDerived': 'The label has no Latin letters to make an API name from. Type one: lowercase letters, digits and underscores.',
   'engine.studio.data.addFieldApiNameTaken': 'Another field is already named {name}. Type a different API name.',
   'engine.studio.data.editFieldProps': 'Edit field properties',
+  'engine.studio.data.columnMenu': 'Sort and hide',
   'engine.studio.data.draftObjectTitle': 'Unpublished new object',
   'engine.studio.data.draftObjectHint':
     'The Records grid queries real data, but this object has no table until it’s published. Design fields and groups in “Form · Layout” first, then click “Publish” in the top bar — after publishing, this becomes its live data grid.',
@@ -4038,6 +4048,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.flowCanvas.edge.backEdge': '{source} ↩ {target} (back-edge)',
   'engine.flowCanvas.summary.branches': '{count} branches',
   'engine.flowCanvas.summary.approversOne': '{count} approver',
+  'engine.flowCanvas.approvedEnd': 'Approved',
+  'engine.flowCanvas.rejectedEnd': 'Rejected',
   'engine.flowCanvas.summary.approversOther': '{count} approvers',
   'engine.flowCanvas.summary.unanimous': 'all',
   'engine.flowCanvas.summary.code': 'code',
@@ -4392,6 +4404,7 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11772 — one extra copy of a connection (`edgeRouteKey`): the
   // engine follows every copy, so the target runs once per copy.
   'engine.flowProblems.repeatedEdge': 'Connection "{sourceName}" ({source}) → "{targetName}" ({target}) is repeated; the flow runs "{targetName}" once for each copy. Remove this copy.',
+  'engine.flowProblems.approvalMissingOutcome': 'Approval "{name}" has no "{outcome}" connection, so after that decision the flow has nowhere to go. Draw a connection out of it and set its approval branch to "{outcome}".',
   // objectui#11905 — why a connection between two existing nodes is refused,
   // shown by both doors that draw one: the canvas's connect handle and the
   // connection inspector's From / To (`edgeConnectionRefusal`).
