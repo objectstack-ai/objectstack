@@ -383,7 +383,9 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                                     // string back at a tenant who renamed it.
                                     // [#33952] …and a field slot a code package's
                                     // `fieldPatches` wrote reads that package's own
-                                    // translations, as on those reads.
+                                    // translations, then its text. Unlike those
+                                    // reads, no pair `.custom` rank sits above it
+                                    // here: this route passes no `pairBundle`.
                                     const patchBundles = await patchTranslationBundlesOf(p, 'object', objectSchema?.name);
                                     objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
                                         ...this.translateOptionsFor(i18n, locale),
