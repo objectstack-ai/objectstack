@@ -207,10 +207,11 @@ export const DatasetNextStepSchema = lazySchema(() => z.object({
     + '`candidates`. A dimension the term equals is not counted',
   ),
   terms: z.array(z.string()).min(1).describe(
-    'The caller\'s terms the decision is about, each as sent in `terms`. This is the reference to the members the '
-    + 'decision rests on, which `nextStep` does not list: they are the entries carrying one of these terms in the '
-    + 'same answer, in a dataset\'s `matches` (those whose `member` is a measure) for `one_measure` and '
-    + '`several_measures`, and in `candidates` for `candidates_only`. `no_measure` rests on no member',
+    'The caller\'s terms the decision is about, each as sent in the tool\'s `terms` input. This is the reference to '
+    + 'the members the decision rests on, which `nextStep` does not list: they are the entries carrying one of '
+    + 'these terms in the same answer, in a dataset\'s `matches` (those whose `member` is a measure) for '
+    + '`one_measure` and `several_measures`, and in `candidates` for `candidates_only`. `no_measure` rests on no '
+    + 'member',
   ),
   note: z.string().min(1).describe(
     'The decision in words: finished text in the caller\'s locale, composed by the tool from this answer and never '
