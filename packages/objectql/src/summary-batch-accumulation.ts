@@ -31,6 +31,11 @@
  *   aggregation's own walker ({@link matchesAggregationFilter}), so a row the
  *   filter excludes counts for nothing, as it counts for nothing in the
  *   recompute.
+ * - [#34466] The same value reaches a field-level `parent.` predicate
+ *   (`requiredWhen: parent.line_count >= 3`): the master-detail header it
+ *   reads is one row, not a related binding, and {@link
+ *   BatchSummaryAccumulator.overlayRow} overlays it the same way. An unbound
+ *   header stays unbound.
  *
  * ## Which roll-ups accumulate exactly
  *
@@ -69,6 +74,15 @@ export interface BatchSummaryAccumulator {
    * row moves is returned as it is.
    */
   overlay(binding: RelatedRecordBinding | undefined): RelatedRecordBinding | undefined;
+  /**
+   * [#34466] `row`, a stored row of `object`, carrying the summary values the
+   * batch's admitted rows move it to: the master-detail header a field-level
+   * `parent.` predicate (`requiredWhen`) reads, which reaches the rules as one
+   * row and not as a related binding. A copy; `row` itself is never mutated.
+   * A row no admitted row moves, and an unbound header (`null` /
+   * `undefined`, the fail-closed signal), are returned as they are.
+   */
+  overlayRow<R extends Record<string, unknown> | null | undefined>(object: string, row: R): R;
   /** Count `row` in. Call it only once the row's rules have admitted it. */
   accept(row: Record<string, unknown>): void;
 }
@@ -167,25 +181,31 @@ export function createBatchSummaryAccumulator(
     }
   };
 
+  /** A copy of `row` (a stored row of `object`) with every summary the admitted rows move, or `undefined` when none moves. */
+  const patchRow = (object: string, row: Record<string, unknown>): Record<string, unknown> | undefined => {
+    const parentId = singleId(row.id);
+    if (parentId === undefined) return undefined;
+    let patched: Record<string, unknown> | undefined;
+    for (const [desc, byParent] of deltas) {
+      if (dropped.has(desc) || desc.parentObject !== object) continue;
+      if (!(desc.summaryField in row)) continue; // the reader was not handed this roll-up
+      const delta = byParent.get(parentId);
+      if (!delta) continue;
+      const value = moved(desc, row[desc.summaryField], delta);
+      if (value === undefined) continue;
+      patched ??= { ...row };
+      patched[desc.summaryField] = value;
+    }
+    return patched;
+  };
+
   const overlay = (binding: RelatedRecordBinding | undefined): RelatedRecordBinding | undefined => {
     if (!binding || deltas.size === 0) return binding;
     let out: Record<string, RelatedFieldBinding> | undefined;
     for (const [fk, entry] of Object.entries(binding)) {
       const related = entry.row;
       if (!related) continue;
-      const parentId = singleId(related.id);
-      if (parentId === undefined) continue;
-      let patched: Record<string, unknown> | undefined;
-      for (const [desc, byParent] of deltas) {
-        if (dropped.has(desc) || desc.parentObject !== entry.object) continue;
-        if (!(desc.summaryField in related)) continue; // the rule does not read this roll-up
-        const delta = byParent.get(parentId);
-        if (!delta) continue;
-        const value = moved(desc, related[desc.summaryField], delta);
-        if (value === undefined) continue;
-        patched ??= { ...related };
-        patched[desc.summaryField] = value;
-      }
+      const patched = patchRow(entry.object, related);
       if (patched) {
         out ??= { ...binding };
         out[fk] = { ...entry, row: patched };
@@ -194,5 +214,10 @@ export function createBatchSummaryAccumulator(
     return out ?? binding;
   };
 
-  return { accept, overlay };
+  const overlayRow = <R extends Record<string, unknown> | null | undefined>(object: string, row: R): R => {
+    if (!row || deltas.size === 0) return row;
+    return (patchRow(object, row) as R | undefined) ?? row;
+  };
+
+  return { accept, overlay, overlayRow };
 }

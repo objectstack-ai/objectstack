@@ -4611,6 +4611,8 @@ const zh = {
     progressBar: '决策进度',
     declaredActions: '操作',
     decisionPanelOffRequestPage: '审批决策面板仅在审批请求页面上可用。',
+    openNextAfterDecision: '处理后打开下一条',
+    queueDone: '这个列表里的待审请求已全部处理完。',
     snapshotAsSubmitted: '提交时的内容',
     attachmentChip: '附件',
     attachmentOpenFailed: '无法打开附件，请重试',

@@ -4458,6 +4458,8 @@ const fr = {
     progressBar: 'Avancement de la décision',
     declaredActions: 'Actions',
     decisionPanelOffRequestPage: 'Le panneau de décision d\'approbation ne fonctionne que sur les pages de demande d\'approbation.',
+    openNextAfterDecision: 'Ouvrir la suivante après décision',
+    queueDone: 'Plus aucune demande en attente dans cette liste.',
     snapshotAsSubmitted: 'Tel que soumis',
     attachmentChip: 'Pièce jointe',
     attachmentOpenFailed: "Impossible d'ouvrir la pièce jointe — veuillez réessayer",
