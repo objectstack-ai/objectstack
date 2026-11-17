@@ -297,6 +297,23 @@ export interface ProposedPlanCard {
 }
 
 /**
+ * One row of the result card's checklist (cloud `build-cards.schema.json`).
+ *
+ * - `object` / `view` / `sampleData`: a measured line, drawn by `status` and
+ *   the producer's `line`.
+ * - `verification` (`ChecklistVerificationLine`): appended when the build's
+ *   verdict has errors; always `failed`, and it carries the producer's `label`
+ *   and the issue `count` instead of a `line`.
+ * - `other`: a line of a kind this console does not know yet, carrying a
+ *   valid `status` and a string `line`; `kind` is the producer's kind. It is
+ *   drawn by those two fields, so a new kind needs no console change.
+ */
+export type BuildResultChecklistLine =
+  | { kind: 'object' | 'view' | 'sampleData'; status: 'passed' | 'failed'; line: string }
+  | { kind: 'verification'; status: 'failed'; label: string; count: number }
+  | { kind: 'other'; servedKind: string; status: 'passed' | 'failed'; line: string };
+
+/**
  * objectui#12724 — the keys of the result card's `checklist` that the card
  * draws, from `apply_blueprint`'s and `verify_build`'s envelopes
  * (objectstack-ai/cloud's `BuildResultCardPayload`).
@@ -306,7 +323,7 @@ export interface BuildResultChecklist {
   passed: number;
   total: number;
   /** Objects, then views, then the sample data, each measured on the build. */
-  lines: Array<{ kind: 'object' | 'view' | 'sampleData'; status: 'passed' | 'failed'; line: string }>;
+  lines: BuildResultChecklistLine[];
   /** The app 打开应用 opens. */
   app?: { name: string; label?: string };
   /** The package 在 Studio 中查看 opens. */
@@ -505,9 +522,28 @@ function liftPlanCard(raw: unknown): ProposedPlanCard | undefined {
 }
 
 const isLineStatus = (v: unknown): v is 'passed' | 'failed' => v === 'passed' || v === 'failed';
-const isLineKind = (v: unknown): v is BuildResultChecklist['lines'][number]['kind'] =>
+const isMeasuredLineKind = (v: unknown): v is 'object' | 'view' | 'sampleData' =>
   v === 'object' || v === 'view' || v === 'sampleData';
 const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+
+/**
+ * One served checklist line, or none when it does not carry its kind's keys.
+ * A known kind is read by its own shape only; a kind outside the known four is
+ * kept when it carries a valid `status` and a string `line`.
+ */
+function checklistLineOf(l: unknown): BuildResultChecklistLine[] {
+  const r = recordOf(l);
+  if (!r || !isText(r.kind)) return [];
+  if (r.kind === 'verification') {
+    return r.status === 'failed' && isText(r.label) && isCount(r.count)
+      ? [{ kind: 'verification', status: 'failed', label: r.label, count: r.count }]
+      : [];
+  }
+  if (!isLineStatus(r.status) || !isText(r.line)) return [];
+  return isMeasuredLineKind(r.kind)
+    ? [{ kind: r.kind, status: r.status, line: r.line }]
+    : [{ kind: 'other', servedKind: r.kind, status: r.status, line: r.line }];
+}
 
 /**
  * objectui#12724 — the result card's `checklist`, on `apply_blueprint`'s
@@ -521,11 +557,7 @@ export function detectBuildChecklist(result: unknown): BuildResultChecklist | un
   if (!raw || !isLineStatus(raw.status) || !isCount(raw.passed) || !isCount(raw.total) || !Array.isArray(raw.lines)) {
     return undefined;
   }
-  const lines = raw.lines.flatMap((l) => {
-    const r = recordOf(l);
-    if (!r || !isLineKind(r.kind) || !isLineStatus(r.status) || !isText(r.line)) return [];
-    return [{ kind: r.kind, status: r.status, line: r.line }];
-  });
+  const lines = raw.lines.flatMap(checklistLineOf);
   const app = recordOf(raw.app);
   return {
     status: raw.status,

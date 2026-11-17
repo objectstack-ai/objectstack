@@ -16,10 +16,14 @@
  *    remembered expanded state and width are the console's alone;
  *  - it reports to the slot whether the catalog serves it, and nothing on unmount;
  *  - an empty catalog renders nothing.
+ *
+ * objectstack#34725 — the copilot draws no title bar of its own (the slot's one
+ * header row holds History, widen and Close); behind History it lays the
+ * conversation list, Share and the usage reading over the chat.
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ChatDockOptions } from '../../../layout/ChatDock';
 import {
@@ -59,14 +63,38 @@ vi.mock('../../../console/ai/AiChatPage', () => ({
   ChatPane: () => null,
   resolveApiBase: () => '/api/v1',
 }));
+// Every option object the copilot hands the conversation hook, in order.
+const conversationArgs = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 vi.mock('../../../hooks/useChatConversation', () => ({
-  useChatConversation: () => ({ conversationId: 'c1', initialMessages: [] }),
+  useChatConversation: (args: Record<string, unknown>) => {
+    conversationArgs.push(args);
+    return { conversationId: (args.activeId as string | undefined) ?? 'c1', initialMessages: [] };
+  },
+}));
+// The list reads the network; a stub stands for its two callbacks.
+const sidebarProps = vi.hoisted(() => ({ last: null as null | Record<string, unknown> }));
+vi.mock('../../../console/ai/ConversationsSidebar', () => ({
+  ConversationsSidebar: (props: {
+    activeConversationId?: string;
+    onSelectConversation?: (c: { id: string }) => void;
+    onNewConversation?: () => void;
+  }) => {
+    sidebarProps.last = props as Record<string, unknown>;
+    return (
+      <div data-testid="stub-history-list" data-active={props.activeConversationId}>
+        <button type="button" data-testid="stub-pick-c2" onClick={() => props.onSelectConversation?.({ id: 'c2' })} />
+        <button type="button" data-testid="stub-new" onClick={() => props.onNewConversation?.()} />
+      </div>
+    );
+  },
 }));
 
 import { StudioChatDock, type StudioCopilotStatus } from '../StudioAiCopilot';
 
 beforeEach(() => {
   dockOptions.length = 0;
+  conversationArgs.length = 0;
+  sidebarProps.last = null;
   catalog.agents = [{ name: 'build' }];
   window.sessionStorage.clear();
   window.localStorage.clear();
@@ -95,7 +123,9 @@ describe('StudioChatDock as the right slot\'s copilot (#2477 item 2, objectui#12
     const reports: StudioCopilotStatus[] = [];
     const { unmount } = mountCopilot((s) => reports.push(s));
     expect(reports.at(-1)).toEqual({ available: true, planPendingCount: 0 });
-    expect(screen.getByTestId('studio-copilot-maximize')).toBeInTheDocument();
+    // objectstack#34725 — the widen control is the slot header's, not the copilot's.
+    expect(screen.queryByTestId('studio-copilot-maximize')).toBeNull();
+    expect(screen.queryByTestId('studio-copilot-history')).toBeNull();
     unmount();
     expect(reports.at(-1)).toEqual({ available: false, planPendingCount: 0 });
   });
@@ -106,5 +136,44 @@ describe('StudioChatDock as the right slot\'s copilot (#2477 item 2, objectui#12
     const { container } = mountCopilot((s) => reports.push(s));
     expect(container).toBeEmptyDOMElement();
     expect(reports.at(-1)).toEqual({ available: false, planPendingCount: 0 });
+  });
+});
+
+describe('StudioChatDock history (objectstack#34725)', () => {
+  function mountWithHistory(onHistoryOpenChange = vi.fn(), historyOpen = true) {
+    const view = render(
+      <MemoryRouter>
+        <StudioChatDock packageId="app.crm" historyOpen={historyOpen} onHistoryOpenChange={onHistoryOpenChange} />
+      </MemoryRouter>,
+    );
+    return { ...view, onHistoryOpenChange };
+  }
+
+  it('lays the list, Share and the usage reading over the chat while open', () => {
+    mountWithHistory();
+    const history = screen.getByTestId('studio-copilot-history');
+    expect(history).toContainElement(screen.getByTestId('stub-history-list'));
+    expect(screen.getByTestId('studio-copilot-share')).toBeEnabled();
+    expect(screen.getByTestId('stub-history-list')).toHaveAttribute('data-active', 'c1');
+  });
+
+  it('picking a row opens that conversation and closes the list', () => {
+    const { onHistoryOpenChange } = mountWithHistory();
+    fireEvent.click(screen.getByTestId('stub-pick-c2'));
+    expect(onHistoryOpenChange).toHaveBeenLastCalledWith(false);
+    expect(conversationArgs.at(-1)).toMatchObject({ activeId: 'c2', forceNew: false });
+  });
+
+  it('New chat asks for a fresh conversation and closes the list', () => {
+    const { onHistoryOpenChange } = mountWithHistory();
+    fireEvent.click(screen.getByTestId('stub-new'));
+    expect(onHistoryOpenChange).toHaveBeenLastCalledWith(false);
+    expect(conversationArgs.at(-1)).toMatchObject({ forceNew: true });
+  });
+
+  it('closed, the chat is all there is', () => {
+    mountWithHistory(vi.fn(), false);
+    expect(screen.queryByTestId('studio-copilot-history')).toBeNull();
+    expect(screen.queryByTestId('studio-copilot-share')).toBeNull();
   });
 });
