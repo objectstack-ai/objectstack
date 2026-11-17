@@ -57,15 +57,27 @@ function served(id: string, overrides: number, extensions: number, switchedOff: 
 
 type Answer = { status: number; body: unknown } | 'never';
 
+const OBJECT_LIST_RE = /\/meta\/object\?package=([^&]+)/;
+
 /**
  * Stub the wire: each customization request is answered from `answers` by
- * base id; every request URL is recorded.
+ * base id, and each object list (`/meta/object?package=`) from `objects` by
+ * package id when it names one; every request URL is recorded.
  */
-function stubWire(answers: Record<string, Answer>) {
+function stubWire(answers: Record<string, Answer>, objects: Record<string, unknown[]> = {}) {
   const requested: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     requested.push(url);
+    const o = OBJECT_LIST_RE.exec(url);
+    const listed = o ? objects[decodeURIComponent(o[1])] : undefined;
+    if (listed) {
+      // A real Response: the metadata client reads its headers.
+      return new Response(JSON.stringify(listed), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     const m = CUSTOMIZATIONS_RE.exec(url);
     const answer = m ? answers[decodeURIComponent(m[1])] : undefined;
     if (answer === 'never') return new Promise<Response>(() => {});
@@ -84,8 +96,13 @@ function stubWire(answers: Record<string, Answer>) {
 const customizationRequests = (requested: string[]) => requested.filter((u) => CUSTOMIZATIONS_RE.test(u));
 
 function LocationProbe() {
-  const { pathname } = useLocation();
-  return <div data-testid="location">{pathname}</div>;
+  const { pathname, search } = useLocation();
+  return (
+    <>
+      <div data-testid="location">{pathname}</div>
+      <div data-testid="location-search">{search}</div>
+    </>
+  );
 }
 
 function renderLanding() {
@@ -334,6 +351,57 @@ describe('Studio landing: "m switched off" leads to the switched-off actions (ob
     await waitFor(() =>
       expect(screen.getByTestId('location')).toHaveTextContent('/studio/com.example.showcase/metadata/action/showcase_mark_done'),
     );
+  });
+
+  // L2 M1 — an action declared inside its object has no item page: its switch
+  // is on the object's Actions view, which the link opens on it.
+  const TASK_OBJECT = {
+    name: 'showcase_task',
+    label: 'Task',
+    actions: [{ name: 'showcase_embedded_probe' }, { name: 'showcase_mark_done', objectName: 'showcase_task' }],
+  };
+  const embeddedPath = '/studio/com.example.showcase/data?surface=object%3Ashowcase_task&action=showcase_embedded_probe';
+
+  it('one switched-off action its object holds: the count opens the object\'s Actions view on it', async () => {
+    packages.list = [SHOWCASE];
+    const { requested } = stubWire(
+      { 'com.example.showcase': servedOff('com.example.showcase', [{ type: 'action', name: 'showcase_embedded_probe' }]) },
+      { 'com.example.showcase': [TASK_OBJECT, { name: 'showcase_invoice', label: 'Invoice' }] },
+    );
+    renderLanding();
+    const off = within(await readLine()).getByTestId('studio-landing-customizations-switched-off');
+    expect(off).toHaveAttribute('href', embeddedPath);
+    expect(requested.some((u) => OBJECT_LIST_RE.test(u))).toBe(true);
+    fireEvent.click(off);
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/com.example.showcase/data'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('?surface=object%3Ashowcase_task&action=showcase_embedded_probe');
+  });
+
+  it('several: each named action links where it is switched, its object\'s Actions view or its own page', async () => {
+    packages.list = [SHOWCASE];
+    stubWire(
+      {
+        'com.example.showcase': servedOff('com.example.showcase', [
+          { type: 'action', name: 'showcase_embedded_probe' },
+          { type: 'action', name: 'showcase_portfolio_snapshot' },
+        ]),
+      },
+      { 'com.example.showcase': [TASK_OBJECT] },
+    );
+    renderLanding();
+    const named = within(await readLine()).getAllByTestId('studio-landing-customizations-switched-off-action');
+    expect(named.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['showcase_embedded_probe', embeddedPath],
+      ['showcase_portfolio_snapshot', '/studio/com.example.showcase/metadata/action/showcase_portfolio_snapshot'],
+    ]);
+  });
+
+  it('no object list read when nothing switched off is an action', async () => {
+    packages.list = [SHOWCASE];
+    const { requested } = stubWire({ 'com.example.showcase': servedOff('com.example.showcase', [{ type: 'flow', name: 'showcase_nightly' }]) });
+    renderLanding();
+    await readLine();
+    expect(requested.some((u) => OBJECT_LIST_RE.test(u))).toBe(false);
   });
 
   it('flows only: the count opens Automations, with no actions link (unchanged)', async () => {
