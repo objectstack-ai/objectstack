@@ -28,7 +28,8 @@ import {
 const SEED_MODE_RETIRED_FIX =
   'Declare the rows\' identity instead: keep the default `mode: \'ignore\'` (or `\'upsert\'`) and set '
   + '`externalId` to the field that names a row, to a list of fields when no single field does (a junction '
-  + 'table\'s `[\'team\', \'project\']`), or to `\'id\'` when the records carry their own ids.';
+  + 'table\'s `[\'team\', \'project\']`, listing only fields every load can fill), or to `\'id\'` when the '
+  + 'records carry their own ids.';
 
 /**
  * The parse refusals an author meets for the two unkeyed modes (ADR-0049
@@ -52,11 +53,26 @@ const SEED_MODE_REPLACE_RETIRED =
   + 'every record and left clearing the table to the caller, and no load ever clears one, so every replay '
   + 'inserted each record again. ' + SEED_MODE_RETIRED_FIX;
 
-export const SeedMode = enumWithRetiredValues([
+/** The live seed modes, in the order the reference documents them. */
+const SEED_MODE_VALUES = [
   'update',    // Only update found records, ignore new
   'upsert',    // Create new or update existing: every replay writes the declared columns back
-  'ignore'     // Create-only (the default): insert missing rows, leave existing rows alone
-], { insert: SEED_MODE_INSERT_RETIRED, replace: SEED_MODE_REPLACE_RETIRED });
+  'ignore',    // Create-only (the default): insert missing rows, leave existing rows alone
+] as const;
+
+const SEED_MODE_RETIRED = { insert: SEED_MODE_INSERT_RETIRED, replace: SEED_MODE_REPLACE_RETIRED };
+
+/**
+ * [#34613] The retired `SeedMode` values, for the doors that hold a STORED
+ * seed (a compiled artifact, an installed package body, a stored seed item):
+ * such a door hands a dataset declaring one to the seed load, which refuses
+ * that dataset alone with `SeedMode`'s own prescription, instead of failing
+ * every other dataset and definition with it. Membership only: the
+ * prescription is always read from `SeedMode`, never restated.
+ */
+export const RETIRED_SEED_MODE_VALUES: readonly string[] = Object.freeze(Object.keys(SEED_MODE_RETIRED));
+
+export const SeedMode = enumWithRetiredValues(SEED_MODE_VALUES, SEED_MODE_RETIRED);
 
 /**
  * Seed Column — the write policy a seed dataset declares for one of its

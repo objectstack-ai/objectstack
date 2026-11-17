@@ -19,6 +19,7 @@ import {
   SeedLoaderConfigSchema,
   SeedLoaderRequestSchema,
   SeedMode,
+  RETIRED_SEED_MODE_VALUES,
   isMultiValueField,
   isTenancyDisabled,
   referenceTargetOf,
@@ -409,7 +410,7 @@ const SEED_LANDED_KEY_OBJECT = 'sys_seed_landed_key';
  * seed can still carry. Only membership is read here: the prescription a
  * refused dataset reports is `SeedMode`'s own refusal.
  */
-const RETIRED_SEED_MODES: ReadonlySet<string> = new Set(['insert', 'replace']);
+const RETIRED_SEED_MODES: ReadonlySet<string> = new Set(RETIRED_SEED_MODE_VALUES);
 
 /**
  * [#31021] The key a landed seed row is recorded under in
@@ -1556,7 +1557,11 @@ export class SeedLoaderService implements ISeedLoaderService {
    * `SeedMode` refusal, read from the schema, never restated) becomes one
    * error of the result with `success: false`, and every other dataset loads.
    * No log line of its own: the refusal is handed to the caller, which
-   * reports a failed load's errors as it reports any other.
+   * reports a failed load's errors as it reports any other. (A compiled
+   * artifact reaches here too: the artifact door parses the rest of the
+   * artifact without such a dataset, see `@objectstack/metadata`'s
+   * `artifact-retired-seed-modes.ts`; and `loadDataset` refuses the mode again
+   * for a caller that skips this funnel.)
    *
    * The publish doors do not come here. A publish has its author present, so
    * it parses the request itself and refuses the whole publish with the same
@@ -1622,6 +1627,44 @@ export class SeedLoaderService implements ISeedLoaderService {
   ): Promise<SeedLoadResultParsed> {
     const objectName = dataset.object;
     const mode = dataset.mode || config.defaultMode;
+    // [#34613] A mode outside the live `SeedMode` set refuses the dataset HERE,
+    // whatever the caller parsed: `load()` and `validate()` take requests they
+    // do not parse, and the retired `insert` / `replace` would otherwise fall to
+    // the default arm below and insert every record again on each replay. The
+    // refusal writes nothing, counts every record errored, and carries the
+    // schema's own prescription. (No mode at all, a request built without the
+    // parse's defaults, keeps its old path below.)
+    const modeVerdict = mode === undefined ? undefined : SeedMode.safeParse(mode);
+    if (modeVerdict && !modeVerdict.success) {
+      const error: ReferenceResolutionError = {
+        sourceObject: objectName,
+        field: 'mode',
+        targetObject: objectName,
+        targetField: '(dataset)',
+        attemptedValue: mode,
+        // The mode is the dataset's, not a row's; no row was attempted.
+        recordIndex: 0,
+        message: `Seed dataset for '${objectName}' was not loaded: ${modeVerdict.error.issues[0]?.message ?? `mode '${String(mode)}' is not a seed mode`}`,
+      };
+      allErrors.push(error);
+      this.logger.error(`[SeedLoader] ${error.message}`, undefined, { object: objectName, mode });
+      return {
+        object: objectName,
+        mode,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        errored: dataset.records.length,
+        total: dataset.records.length,
+        referencesResolved: 0,
+        referencesDeferred: 0,
+        referencesDropped: 0,
+        summariesStale: 0,
+        landedIds: [],
+        insertedIds: [],
+        errors: [error],
+      };
+    }
     const externalId = dataset.externalId || 'name';
     // [#25761] Left out of every write to a row this dataset MATCHED — see
     // `matchesExistingRow` in the record loop below.
@@ -3938,8 +3981,8 @@ export class SeedLoaderService implements ISeedLoaderService {
         return { action: 'inserted', id: this.extractId(result) };
       }
 
-      // The retired `insert` / `replace` (#34613) never reach here: the request
-      // parse refuses them, and `loadStored` refuses a stored one alone.
+      // The retired `insert` / `replace` (#34613) never reach here:
+      // `loadDataset` refuses a mode outside the live set before any write.
       default: {
         const result = await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.insert(objectName, record, opts)));
         return { action: 'inserted', id: this.extractId(result) };

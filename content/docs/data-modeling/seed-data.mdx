@@ -141,11 +141,12 @@ table first, and no load ever clears one. Both were removed in
 - **Authoring refuses them.** `defineSeed`, `defineStack`, `os validate`, `os build`
   and the metadata save and publish doors reject `mode: 'insert'` or
   `mode: 'replace'` with a message that names the fix.
-- **A stored dataset is refused alone.** A package built before the change, or a
-  seed already stored, can still carry one. The boot seed, the organization
+- **A stored dataset is refused alone.** A package or a compiled artifact
+  (`objectstack.json`) built before the change, or a seed already stored, can
+  still carry one. The environment still boots: the boot seed, the organization
   replay, the dev hot reload and a package install or upgrade refuse that one
-  dataset: it writes nothing, the load reports it as an error with the same
-  message, and every other dataset loads.
+  dataset. It writes nothing, the load reports it as an error with the same
+  message, and every other dataset and definition loads.
 - **Rows already duplicated stay.** Earlier replays wrote them as data; nothing
   deletes them. Remove the extra copies yourself if they matter.
 

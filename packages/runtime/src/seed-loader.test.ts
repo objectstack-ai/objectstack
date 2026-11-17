@@ -1194,7 +1194,7 @@ describe('SeedLoaderService', () => {
       });
 
       expect(result.success).toBe(true);
-      // One record, mode 'insert' ⇒ exactly ONE engine write. Seed application is
+      // One record ⇒ exactly ONE engine write. Seed application is
       // the very path where a doubled collect writes twice and stays green under
       // `toHaveBeenCalledWith` (#15607).
       expect(engine.insert).toHaveBeenCalledTimes(1);

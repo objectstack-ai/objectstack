@@ -20,6 +20,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SeedMode } from '@objectstack/spec/data';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SeedLoaderService } from './seed-loader.js';
 
 function createLogger() {
@@ -42,7 +43,10 @@ function createEngine(): { engine: IDataEngine; store: Record<string, Array<Reco
   };
   const engine = {
     find: vi.fn(find),
-    findOne: vi.fn(async (object: string, query?: any) => (await find(object, { ...query, limit: 1 }))[0] ?? null),
+    findOne: vi.fn(async (object: string, query?: any) => {
+      assertEngineFindOnePredicate(object, query);
+      return (await find(object, { ...query, limit: 1 }))[0] ?? null;
+    }),
     insert: vi.fn(async (object: string, data: any) => {
       const put = (d: Record<string, unknown>) => {
         const row = { id: `r${++next}`, ...d };
@@ -51,8 +55,14 @@ function createEngine(): { engine: IDataEngine; store: Record<string, Array<Reco
       };
       return Array.isArray(data) ? data.map(put) : put(data);
     }),
-    update: vi.fn(async (_object: string, data: any) => data),
-    delete: vi.fn(async () => ({ deleted: 0 })),
+    update: vi.fn(async (_object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
+      return data;
+    }),
+    delete: vi.fn(async (_object: string, options?: any) => {
+      assertEngineDeleteDispatch(options);
+      return { deleted: 0 };
+    }),
     count: vi.fn(async (object: string) => (store[object] ?? []).length),
     aggregate: vi.fn(async () => []),
   } as unknown as IDataEngine;
@@ -120,6 +130,34 @@ describe('loadStored — a stored dataset with a retired mode is refused alone (
     expect(store).toEqual({});
     expect(result.success).toBe(false);
     expect(result.errors.map((e) => e.sourceObject)).toEqual(['rm_source']);
+  });
+
+  it.each([['insert'], ['replace']])('`load()` itself refuses a `%s` dataset it was handed unparsed: nothing written, every record errored (S1)', async (mode) => {
+    const { engine, store } = createEngine();
+    const logger = createLogger();
+    const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
+      seeds: [
+        { object: 'rm_source', mode, externalId: 'name', records: [{ name: 'web' }, { name: 'mail' }] },
+        { object: 'rm_region', mode: 'ignore', externalId: 'name', records: [{ name: 'emea' }] },
+      ],
+      config: { dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'ignore', batchSize: 1000, transaction: false },
+    } as never);
+    expect(store.rm_source).toBeUndefined();
+    expect(store.rm_region?.map((r) => r.name)).toEqual(['emea']);
+    expect(result.success).toBe(false);
+    expect(result.results.find((r) => r.object === 'rm_source')).toMatchObject({ inserted: 0, updated: 0, errored: 2, total: 2 });
+    expect(result.errors.map((e) => e.message)).toEqual([`Seed dataset for 'rm_source' was not loaded: ${prescriptionOf(mode)}`]);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('`validate()` (the dry run) answers the same refusal a real load would, not a clean result (S1)', async () => {
+    const { engine, store } = createEngine();
+    const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).validate(
+      [{ object: 'rm_source', mode: 'insert', externalId: 'name', records: [{ name: 'web' }] }] as never,
+    );
+    expect(store).toEqual({});
+    expect(result.success).toBe(false);
+    expect(result.errors[0]!.message).toBe(`Seed dataset for 'rm_source' was not loaded: ${prescriptionOf('insert')}`);
   });
 
   it('CONTROL: with no retired dataset the answer is the load’s own', async () => {

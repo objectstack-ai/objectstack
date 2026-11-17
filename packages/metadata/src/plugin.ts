@@ -14,6 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
+import { restoreWithheldSeedDatasets, withholdRetiredSeedModes, type WithheldSeedDataset } from './artifact-retired-seed-modes.js';
 import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
@@ -1380,22 +1381,33 @@ export class MetadataPlugin implements Plugin {
 
         let metadata: Record<string, unknown[]>;
 
+        // [#34613] A seed dataset declaring a retired mode is taken out before
+        // the strict parse and handed back after it, so the seed load refuses
+        // that dataset alone instead of this parse refusing the whole artifact
+        // (see `artifact-retired-seed-modes.ts`).
+        let withheld: WithheldSeedDataset[] = [];
+        const prepare = (definition: unknown): unknown => {
+            const split = withholdRetiredSeedModes(this._convertArtifactForward(ctx, definition, label));
+            withheld = split.withheld;
+            return split.definition;
+        };
+
         const obj = raw as any;
         if (obj?.schemaVersion && obj?.commitId && obj?.metadata !== undefined) {
             const artifact = EnvironmentArtifactSchema.parse({
                 ...obj,
-                metadata: this._convertArtifactForward(ctx, obj.metadata, label),
+                metadata: prepare(obj.metadata),
             });
             metadata = artifact.metadata as Record<string, unknown[]>;
         } else if (obj?.success && obj?.data?.metadata) {
             // Unwrap cloud API envelope: { success: true, data: { metadata: {...} } }
             const artifact = EnvironmentArtifactSchema.parse({
                 ...obj.data,
-                metadata: this._convertArtifactForward(ctx, obj.data.metadata, label),
+                metadata: prepare(obj.data.metadata),
             });
             metadata = artifact.metadata as Record<string, unknown[]>;
         } else {
-            const def = ObjectStackDefinitionSchema.parse(this._convertArtifactForward(ctx, obj, label));
+            const def = ObjectStackDefinitionSchema.parse(prepare(obj));
             const canonical = JSON.stringify(def, Object.keys(def).sort());
             const checksum = createHash('sha256').update(canonical).digest('hex');
             const environmentId = this.options.environmentId ?? 'env_local';
@@ -1407,6 +1419,18 @@ export class MetadataPlugin implements Plugin {
                 metadata: def,
             });
             metadata = def as Record<string, unknown[]>;
+        }
+
+        if (withheld.length > 0) {
+            restoreWithheldSeedDatasets(metadata, withheld);
+            for (const entry of withheld) {
+                ctx.logger.warn(
+                    `[MetadataPlugin] artifact '${label}': the seed dataset for '${entry.object}' declares the retired `
+                    + `mode '${entry.mode}'. Everything else in the artifact loads; the seed load refuses that dataset `
+                    + `and writes none of it. ${entry.prescription} Rebuild the artifact after the fix.`,
+                    { object: entry.object, mode: entry.mode },
+                );
+            }
         }
 
         this.lastParsedMetadata = metadata;

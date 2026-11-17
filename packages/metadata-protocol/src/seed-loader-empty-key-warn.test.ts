@@ -159,12 +159,13 @@ describe('[#28952] the boot loader — a keyed dataset whose every record keys e
     expect(emptyKeyWarnings(logger)).toEqual([]);
   });
 
-  it('control: an `insert` dataset never matches, so it is not warned about', async () => {
+  it('control: a retired `insert` dataset is refused before any key is read, so it is not warned about (#34613)', async () => {
     const { engine } = createFaithfulEngine();
     const logger = createLogger();
-    await new SeedLoaderService(engine, createMetadata(), logger).load({
+    const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
       seeds: [dataset('no_such_field', 'insert')] as any[], config: CONFIG,
     });
+    expect(result.results[0]).toMatchObject({ inserted: 0, errored: 1 });
     expect(emptyKeyWarnings(logger)).toEqual([]);
   });
 

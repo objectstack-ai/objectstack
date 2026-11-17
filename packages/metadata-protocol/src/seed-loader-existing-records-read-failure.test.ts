@@ -180,7 +180,7 @@ const CONFIG = {
     dryRun: false,
     haltOnError: false,
     multiPass: true,
-    defaultMode: 'insert',
+    defaultMode: 'ignore',
     batchSize: 1000,
     transaction: false,
 } as never;
@@ -306,7 +306,7 @@ describe('[#8896] seed loader — an existing-records read that FAILED is not "n
             });
 
         const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
-            seeds: seedOf('insert', [{ name: 'A', sku: 'W-A' }, { name: 'B', sku: 'W-B' }]),
+            seeds: seedOf('ignore', [{ name: 'A', sku: 'W-A' }, { name: 'B', sku: 'W-B' }]),
             config: CONFIG,
         });
 

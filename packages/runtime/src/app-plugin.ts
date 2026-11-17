@@ -1959,8 +1959,8 @@ export class AppPlugin implements Plugin {
         // just contributed and every dataset lands twice. `mergeSeedDatasets`
         // is a plain `push` with no de-duplication, so both copies reach the
         // shared registry, the inline loader and every later per-org replay:
-        // for a `mode: 'insert'` dataset that is the row applied twice per
-        // boot, not merely doubled work.
+        // for a dataset whose key matches no row yet, that is the row applied
+        // twice per boot, not merely doubled work.
         const manifest = this.bundle.manifest || this.bundle;
         if (manifest && Array.isArray(manifest.data) && manifest.data !== this.collections.data) {
             seedDatasets.push(...manifest.data);
