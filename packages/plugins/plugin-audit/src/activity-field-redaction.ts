@@ -69,8 +69,9 @@
  * object titled by a reference field, a tracked reference's change, a fired
  * milestone's reference token. That title is a field of ANOTHER object, so the
  * parent's served fields do not answer for it. A text whose declared sources
- * name a reference field is served only to a reader who may read the title of
- * the object it points at, the reader `$expand` gives that title to
+ * name a reference field is served only to a reader served the title field of
+ * the object it points at and admitted to that object, the two answers
+ * `$expand` judges a target's title by at that level
  * ({@link referenceTitlesPerRead}):
  *
  *  - the reader is served the target's title field unmasked — its ADR-0079

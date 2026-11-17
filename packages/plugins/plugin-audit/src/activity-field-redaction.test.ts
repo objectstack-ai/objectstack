@@ -452,7 +452,7 @@ const refObjects = [
   },
 ];
 
-describe('an activity text naming a referenced record by its title is served only to a reader who may read that title', () => {
+describe('an activity text naming a referenced record by its title is served only to a reader served that title field and admitted to its object', () => {
   let kernel: ObjectKernel;
   let engine: ObjectQL;
   const ids: Record<string, string> = {};
@@ -596,7 +596,7 @@ describe('an activity text naming a referenced record by its title is served onl
   });
 });
 
-describe('referenceTitlesPerRead — a referenced title is served only to a reader who may read it', () => {
+describe('referenceTitlesPerRead — a referenced title is served only to a reader served its title field and admitted to its object', () => {
   const schemas: Record<string, unknown> = {
     parent: {
       name: 'parent',

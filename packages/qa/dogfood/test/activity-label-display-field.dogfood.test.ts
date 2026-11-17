@@ -294,7 +294,7 @@ const REF_PRINCIPALS: Record<'writer' | 'withheld' | 'control', string[]> = {
   control: [refBaselineSet.name],
 };
 
-describe('an activity label naming a referenced record by its title is served only to a reader who may read that title', () => {
+describe('an activity label naming a referenced record by its title is served only to a reader served that title field', () => {
   let stack: VerifyStack;
   let ql: any;
   const token: Record<string, string> = {};
