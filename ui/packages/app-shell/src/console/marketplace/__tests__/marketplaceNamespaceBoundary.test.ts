@@ -177,10 +177,18 @@ for (const file of allSources()) {
   }
 }
 
-/** A declared hook-gated door whose outside importers are all declared for it (step 4). */
+/**
+ * A declared hook-gated door whose outside importers are all declared for it
+ * and all call the namespace hook (step 4); anything less leaves it ungated.
+ */
 const isHookGated = (file: string) => {
   const allowed = HOOK_GATED_DOORS.get(file);
-  return !!allowed && [...(doors.get(file) ?? [])].every((importer) => allowed.includes(importer));
+  return (
+    !!allowed &&
+    [...(doors.get(file) ?? [])].every(
+      (importer) => allowed.includes(importer) && callsNamespaceHook(join(UI_ROOT, importer)),
+    )
+  );
 };
 
 /** Whether `file` imports {@link NAMESPACE_HOOK} from {@link NAMESPACE_MODULE} and calls it. */
