@@ -32,11 +32,11 @@ import { coreSqlDialectOf } from './sql-driver-oracle-dialect.js';
 import { emptyGroupValueFor, isComposedReadableIds } from '@objectstack/spec/data';
 import type { Knex } from 'knex';
 import type { ComposedReadableIds, DriverOptions } from '@objectstack/spec/data';
-import type { DriverQuery } from '@objectstack/spec/contracts';
+import type { DriverAggregateQuery, DriverQuery } from '@objectstack/spec/contracts';
 import { AGGREGATE_ACCUMULATION, AGGREGATE_ANSWER_KIND, aggregandOperandSql } from '@objectstack/core';
 import type { AggregandColumnClass } from '@objectstack/core';
 import {
-  refuseDateBucketedGroupBy, refuseDistinctAggregateWithoutField, unsupportedAggregationFilterError,
+  refuseDateBucketedGroupBy, refuseDistinctAggregateWithoutField, refuseZonedDateBucket, unsupportedAggregationFilterError,
 } from './sql-driver-top-level.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
@@ -65,6 +65,7 @@ export interface AggregationHost {
   getBuilder: SqlDriver['getBuilder'];
   readonly isMssql: SqlDriver['isMssql'];
   readonly isOracle: SqlDriver['isOracle'];
+  readonly isPostgres: SqlDriver['isPostgres'];
   readonly knex: SqlDriver['knex'];
   mapAggregateFunc: SqlDriver['mapAggregateFunc'];
   readonly numericFields: SqlDriver['numericFields'];
@@ -78,11 +79,25 @@ export interface AggregationHost {
 /** The bodies of the "Aggregation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class AggregationFacet {
   /** The body of `SqlDriver#aggregate`; the method's docblock there is its contract. */
-  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'isMssql' | 'isOracle' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async aggregate(this: Pick<AggregationHost, 'aggregandColumnClassOf' | 'aggregateBackendFault' | 'aliasIdentifierSql' | 'applyFilters' | 'applyTenantScope' | 'buildDateBucketExpr' | 'coercionKey' | 'config' | 'dateGranularityCapabilities' | 'dialectName' | 'foldEmptyAggregateAnswers' | 'getBuilder' | 'isMssql' | 'isOracle' | 'isPostgres' | 'knex' | 'mapAggregateFunc' | 'presentReadColumns' | 'primeMssqlGuidColumns' | 'primeOracleRawUuidColumns' | 'readPresentationKind' | 'remoteColumn'>, object: string, query: DriverAggregateQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [relation group join] The related rows each relation joins, handed by
     // the engine (`objectql` `relation-group-join.ts`); read once, judged
     // before anything compiles.
     const relationJoins = relationGroupJoinsOf(query);
+    // [#33697] The reference zone the date buckets are read in
+    // (`DriverAggregateQuery.timezone`, ADR-0053 Phase 2 D2 as amended), judged
+    // before anything compiles. Absent or `UTC` is the UTC bucket every dialect
+    // has always run. Any other zone is bucketed only on PostgreSQL (the
+    // dialect `supports.zonedDateBucketing` names) and only as the runtime's
+    // resolved IANA area/location name for itself — the one spelling the
+    // database and the in-memory path read alike; the engine sends exactly
+    // that. Everything else is refused, never read as UTC. A query with no date
+    // bucket reads no zone, so it is not judged.
+    const bucketZone = zonedBucketOf(query);
+    if (bucketZone !== undefined) {
+      if (!this.isPostgres) refuseZonedDateBucket(bucketZone, 'dialect', `dialect '${(this.config as any).client}'`);
+      if (resolvedAreaZone(bucketZone) !== bucketZone) refuseZonedDateBucket(bucketZone, 'unresolved', 'driver-sql');
+    }
     // [#33698] The per-measure `filter`s that carry a condition (`{}` is the
     // vacuous filter, same convention as `where` / `having`): each compiles
     // with the where compiler below, so each is primed and read like a `where`.
@@ -197,7 +212,12 @@ export class AggregationFacet {
       // gone. It had drifted from the declaration it was restating: `alias` was
       // missing from it and `dateGranularity` was widened to `string`, which is
       // what forced the `as any` on the `buildDateBucketExpr` call below.
+      // [#33697] The 1-based position of the select-list column the item
+      // being compiled projects: every item below adds exactly one column,
+      // and nothing is selected before the group keys.
+      let selectPosition = 0;
       for (const g of query.groupBy) {
+        if (typeof g === 'string' || (g && typeof g === 'object' && g.field)) selectPosition += 1;
         if (typeof g === 'string') {
           const column = columnOf(g);
           builder.groupBy(column);
@@ -218,7 +238,7 @@ export class AggregationFacet {
           // moves.
           const outKey = g.alias ?? g.field;
           if (g.dateGranularity) {
-            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table, columnOf(g.field));
+            const bucket = this.buildDateBucketExpr(g.field, g.dateGranularity, table, columnOf(g.field), bucketZone);
             if (!bucket) {
               // [#6212] Was a bare `throw new Error(...)`; see
               // {@link refuseDateBucketedGroupBy} for why it now carries the
@@ -229,8 +249,21 @@ export class AggregationFacet {
                 `dialect '${(this.config as any).client}'`,
               );
             }
-            builder.groupByRaw(bucket.sql, bucket.bindings);
             builder.select(this.knex.raw(`${bucket.sql} as ${this.aliasIdentifierSql(outKey)}`, [...bucket.bindings]));
+            if (bucketZone !== undefined) {
+              // [#33697] Review item (a): a zoned bucket binds the zone as a
+              // VALUE, and PostgreSQL numbers each `?` as its own parameter,
+              // so spelling the expression again in the GROUP BY would leave
+              // `$1` in the select list and `$2` in the GROUP BY — two
+              // expressions to the planner, refused 42803. The bucket is
+              // stated once, in the select list, and grouped by its position
+              // there. Only this arm does it: ordinal GROUP BY is PostgreSQL's
+              // (and MySQL's / SQLite's), not SQL Server's or Oracle's, and
+              // the UTC buckets bind identifiers only.
+              builder.groupByRaw(String(selectPosition));
+            } else {
+              builder.groupByRaw(bucket.sql, bucket.bindings);
+            }
           } else {
             const column = columnOf(g.field);
             builder.groupBy(column);
@@ -540,6 +573,36 @@ export interface RelationGroupJoin {
   readonly attrs: ReadonlyArray<{ readonly attr: string; readonly alias: string }>;
   /** The output column: `1` where a readable related record joined, `0` where none did. */
   readonly resolvedAlias: string;
+}
+
+/**
+ * [#33697] The non-UTC reference zone an `aggregate()` query's date buckets
+ * are read in, or `undefined` when there is none to read: no `timezone`, the
+ * `UTC` the engine never sends but a direct caller may, or a query with no
+ * `dateGranularity` item (no bucket reads a zone).
+ */
+function zonedBucketOf(query: DriverAggregateQuery): string | undefined {
+  const zone = query.timezone;
+  if (zone === undefined || zone === 'UTC') return undefined;
+  const bucketed = (query.groupBy ?? []).some((g) => typeof g === 'object' && g !== null && !!g.dateGranularity);
+  return bucketed ? zone : undefined;
+}
+
+/**
+ * [#33697] The runtime's resolved IANA name for `zone` when it is an
+ * area/location name (contains `/`), else `undefined` — the test ADR-0053
+ * Phase 2 D2 (as amended) states for what may be pushed down. A string the
+ * runtime cannot resolve throws there, and an offset (`+08:00`) or an
+ * abbreviation that resolves to itself (`EST5EDT`) has no `/`.
+ */
+function resolvedAreaZone(zone: string): string | undefined {
+  let resolved: string;
+  try {
+    resolved = new Intl.DateTimeFormat('en-US', { timeZone: zone }).resolvedOptions().timeZone;
+  } catch {
+    return undefined;
+  }
+  return resolved.includes('/') ? resolved : undefined;
 }
 
 /**
