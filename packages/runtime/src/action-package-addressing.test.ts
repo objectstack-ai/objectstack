@@ -2291,19 +2291,6 @@ describe('ADR-0150 D4 — an action route runs the handler of the item whose dec
         }
     });
 
-    it('the environment\'s own action that carries a body runs the handler bound for that body or none: with none bound, the route\'s routing miss, 404, and no other handler runs', async () => {
-        for (const owner of [undefined, 'plugin.platform']) {
-            freshEngine();
-            platformOnLead(owner);
-            environmentOnLead();
-            // No handler is bound for the environment's body (no action runner on this host).
-            engine.removeActionsByPackage('metadata-service');
-            const response = await post('/actions/lead/approve', onlyEnvGate);
-            expect([response.status, response.body?.data], JSON.stringify(response.body)).toEqual([404, undefined]);
-            expect(ran).toEqual([]);
-        }
-    });
-
     describe('the platform\'s action beside a handler whose environment item neither the store nor the metadata service holds any more', () => {
         /** The platform's item and handler, then the environment's (its handler on top), then its row deleted: the slot serves the platform's item. */
         const setUp = (owner?: string) => {

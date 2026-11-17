@@ -6252,11 +6252,10 @@ export function executeAttributedAction(
  *    holds under its owner key and name, standalone or embedded in a stored
  *    object row ({@link environmentStoredActionNames}, the test the route's
  *    own holder census applies) — runs the handler the resync bound for it,
- *    whichever owner registered under its key last. One that carries a
- *    `body`, whose handler can only be that one, runs it or nothing: with no
- *    such handler bound when it dispatches, the door answers its routing miss.
- *    One with no `body` of its own and no handler in the environment's slot is
- *    dispatched as before;
+ *    whichever owner registered under its key last; when that handler is
+ *    gone by the moment it dispatches, the door answers its routing miss. One
+ *    whose handler the environment's slot does not hold — no `body` of its
+ *    own, or a `body` no handler is bound for — is dispatched as before;
  *  - the PLATFORM'S item, beside a handler of the resync's on top of the
  *    unqualified slot whose source neither the store nor the metadata
  *    service's listing (the resync's two sources) still holds, runs the one
@@ -6268,9 +6267,9 @@ export function executeAttributedAction(
  * declaration a door resolves carries nothing that tells it apart from a
  * platform item of the same owner key and name.
  *
- * The store is read only when the answer can change: the declaration carries
- * a `body` or its handler sits in the environment's slot while the unqualified
- * slot holds another owner's; or the unqualified slot holds the resync's
+ * The store is read only when the answer can change: the environment's slot
+ * holds a handler the dispatch reaches while the unqualified slot holds
+ * another owner's; or the unqualified slot holds the resync's
  * handler while exactly one shared handler is held under the same key. The
  * metadata service is read only in the second case. A read that throws is the
  * metadata plane failing to answer (ADR-0110 D3): `degraded`, which the door
@@ -6301,8 +6300,7 @@ export async function attributeActionHandler(
         if (shared?.entry !== top.entry) return {};
     } else {
         const environmentSlotHolds = reachedHandlerRow(ql, objectName, candidates, { packageId: ENVIRONMENT_ACTION_COORDINATE }, inEnvironmentSlot) !== undefined;
-        const carriesBody = action.body !== undefined && action.body !== null;
-        if (!environmentSlotHolds && !carriesBody) return {};
+        if (!environmentSlotHolds) return {};
     }
     const ownerKey = standaloneActionOwnerKey(action);
     const routedKey = isObjectLessActionKey(objectName) ? GLOBAL_ACTION_OBJECT_KEY : objectName;
