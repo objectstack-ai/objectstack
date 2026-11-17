@@ -593,6 +593,7 @@ const fr = {
         "Cette vue est groupée, mais sa source de données n'implémente pas queryGroupHeaders : les groupes ne peuvent donc pas être comptés. Supprimez le regroupement pour afficher les enregistrements.",
       needsWholeRows:
         "Le regroupement a besoin de tous les enregistrements, mais cette grille n'en a reçu qu'une page : les groupes ne peuvent donc pas être comptés. Fournissez tous les enregistrements, ou laissez la grille les charger depuis une source de données qui implémente queryGroupHeaders.",
+      draftOnly: "Non regroupé par {{fields}} : ce champ n'existe que dans le brouillon jusqu'à la publication.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -959,6 +960,7 @@ const fr = {
     removeGroup: "Supprimer",
     groupingUnstoredNotice: "Cette liste ne peut pas être regroupée par {{fields}} : sa valeur est calculée à l’affichage et n’est pas stockée. La liste est affichée sans ce regroupement.",
     groupingUnstoredRemove: "Retirer du regroupement",
+    draftOnlyQueryDropped: "Non filtré ni trié par {{fields}} : ce champ n’existe que dans le brouillon jusqu’à la publication.",
     inlineEditShort: "Édition en ligne",
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
   },
@@ -2284,7 +2286,7 @@ const fr = {
       unavailableRetry: "Réessayer",
       unavailableHome: "Retour à l'accueil",
       dock: {
-        title: "Assistant",
+        title: "Assistant IA",
         description: "Discussion avec l'assistant IA",
         resize: "Redimensionner la discussion",
         collapse: "Réduire la discussion",
@@ -4857,7 +4859,7 @@ const fr = {
       securityBlockTitle_one: 'La publication sera refusée — {{count}} élément nécessite d’abord une décision',
       securityBlockTitle_many: 'La publication sera refusée — {{count}} d’éléments nécessitent d’abord une décision',
       securityBlockTitle_other: 'La publication sera refusée — {{count}} éléments nécessitent d’abord une décision',
-      securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Partage d’enregistrements, puis publiez à nouveau.',
+      securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Qui peut voir quels enregistrements, puis publiez à nouveau.',
       flowChecksTitle: 'Avant de publier : la vérification de publication signalera ceci',
       securityRule: {
         owdUnset: 'Aucune base de partage des enregistrements (sharingModel) n’est déclarée. L’exécution se rabat sur private, mais la base doit être une décision explicite.',

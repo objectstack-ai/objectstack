@@ -816,6 +816,7 @@ const en = {
         'This view is grouped, but its data source does not implement queryGroupHeaders, so the groups cannot be counted. Remove the grouping to show the records.',
       needsWholeRows:
         'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
+      draftOnly: 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
     },
     // Column-footer aggregate prefixes, keyed by the spec's `ColumnSummary`
     // vocabulary (objectui#4024). The footer already formatted its NUMBER
@@ -1223,6 +1224,7 @@ const en = {
     removeGroup: 'Remove',
     groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
     groupingUnstoredRemove: 'Remove from grouping',
+    draftOnlyQueryDropped: 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
     inlineEditShort: 'Edit inline',
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
   },
@@ -2991,7 +2993,7 @@ const en = {
       unavailableRetry: 'Try again',
       unavailableHome: 'Back to home',
       dock: {
-        title: 'Assistant',
+        title: 'AI Assistant',
         description: 'AI assistant chat',
         resize: 'Resize chat',
         collapse: 'Collapse chat',
@@ -4315,7 +4317,7 @@ const en = {
       securityBlockTitle: 'Publishing will be refused — {{count}} item(s) need a decision first',
       securityBlockTitle_one: 'Publishing will be refused — {{count}} item needs a decision first',
       securityBlockTitle_other: 'Publishing will be refused — {{count}} items need a decision first',
-      securityBlockWhere: 'Fix it on the object under Settings → Record sharing, then publish again.',
+      securityBlockWhere: 'Fix it on the object under Settings → Who can see which records, then publish again.',
       flowChecksTitle: 'Before you publish — the publish check will report these',
       // The pre-publish security rows, by the rule id of the finding (DraftChangesPanel `SECURITY_RULE_TEXT`).
       securityRule: {

@@ -583,6 +583,7 @@ const de = {
         "Diese Ansicht ist gruppiert, aber ihre Datenquelle implementiert queryGroupHeaders nicht, daher können die Gruppen nicht gezählt werden. Entfernen Sie die Gruppierung, um die Datensätze anzuzeigen.",
       needsWholeRows:
         "Die Gruppierung benötigt alle Datensätze, aber dieses Raster hat nur eine Seite davon erhalten, daher können die Gruppen nicht gezählt werden. Übergeben Sie alle Datensätze oder lassen Sie das Raster sie aus einer Datenquelle laden, die queryGroupHeaders implementiert.",
+      draftOnly: "Nicht nach {{fields}} gruppiert: Das Feld existiert nur im Entwurf, bis Sie veröffentlichen.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -934,6 +935,7 @@ const de = {
     removeGroup: "Entfernen",
     groupingUnstoredNotice: "Diese Liste kann nicht nach {{fields}} gruppiert werden: Der Wert wird bei der Anzeige berechnet und nicht gespeichert. Die Liste wird ohne diese Gruppierung angezeigt.",
     groupingUnstoredRemove: "Aus Gruppierung entfernen",
+    draftOnlyQueryDropped: "Nicht nach {{fields}} gefiltert oder sortiert: Das Feld existiert bis zur Veröffentlichung nur im Entwurf.",
     inlineEditShort: "Inline bearbeiten",
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
   },
@@ -2222,7 +2224,7 @@ const de = {
       unavailableRetry: "Erneut versuchen",
       unavailableHome: "Zurück zur Startseite",
       dock: {
-        title: "Assistent",
+        title: "KI-Assistent",
         description: "KI-Assistent-Chat",
         resize: "Chatbreite anpassen",
         collapse: "Chat einklappen",
@@ -4719,7 +4721,7 @@ const de = {
       securityBlockTitle: 'Veröffentlichen wird abgelehnt — {{count}} Element(e) benötigen zuerst eine Entscheidung',
       securityBlockTitle_one: 'Veröffentlichen wird abgelehnt — {{count}} Element benötigt zuerst eine Entscheidung',
       securityBlockTitle_other: 'Veröffentlichen wird abgelehnt — {{count}} Elemente benötigen zuerst eine Entscheidung',
-      securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Datensatzfreigabe und veröffentlichen Sie erneut.',
+      securityBlockWhere: 'Korrigieren Sie es am Objekt unter Einstellungen → Wer welche Datensätze sehen kann und veröffentlichen Sie erneut.',
       flowChecksTitle: 'Vor dem Veröffentlichen: Die Veröffentlichungsprüfung meldet Folgendes',
       securityRule: {
         owdUnset: 'Es ist keine Basis für die Datensatzfreigabe (sharingModel) deklariert. Die Laufzeit greift auf private zurück, aber die Basis muss eine bewusste Entscheidung sein.',

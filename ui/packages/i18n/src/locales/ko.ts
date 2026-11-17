@@ -583,6 +583,7 @@ const ko = {
         "이 뷰는 그룹화되어 있지만 데이터 소스가 queryGroupHeaders를 구현하지 않아 그룹 개수를 셀 수 없습니다. 레코드를 표시하려면 그룹화를 제거하세요.",
       needsWholeRows:
         "그룹화에는 모든 레코드가 필요하지만 이 그리드에는 한 페이지만 전달되어 그룹 개수를 셀 수 없습니다. 모든 레코드를 전달하거나 queryGroupHeaders를 구현하는 데이터 소스에서 그리드가 불러오도록 하세요.",
+      draftOnly: "{{fields}}(으)로 그룹화되지 않았습니다: 게시할 때까지 초안에만 존재합니다.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -934,6 +935,7 @@ const ko = {
     removeGroup: "제거",
     groupingUnstoredNotice: "{{fields}} 기준으로 이 목록을 그룹화할 수 없습니다. 값이 표시될 때 계산되며 저장되지 않습니다. 해당 그룹화 없이 목록을 표시합니다.",
     groupingUnstoredRemove: "그룹화에서 제거",
+    draftOnlyQueryDropped: "{{fields}} 기준 필터와 정렬이 적용되지 않았습니다. 초안에만 있으며 게시 후 적용됩니다.",
     inlineEditShort: "인라인 편집",
     inlineEditLabel: "레코드를 인라인으로 편집(셀을 클릭하여 편집)",
   },
@@ -2222,7 +2224,7 @@ const ko = {
       unavailableRetry: "다시 시도",
       unavailableHome: "홈으로 돌아가기",
       dock: {
-        title: "어시스턴트",
+        title: "AI 어시스턴트",
         description: "AI 어시스턴트 채팅",
         resize: "채팅 크기 조정",
         collapse: "채팅 접기",
@@ -4718,7 +4720,7 @@ const ko = {
       securityBlockTitle: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_one: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_other: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
-      securityBlockWhere: '객체의 설정 → 레코드 공유에서 수정한 후 다시 게시하세요.',
+      securityBlockWhere: '객체의 설정 → 누가 어떤 레코드를 볼 수 있는지에서 수정한 후 다시 게시하세요.',
       flowChecksTitle: '게시하기 전에 확인하세요 — 게시 검사에서 다음 사항을 알립니다',
       securityRule: {
         owdUnset: '레코드 공유 기준(sharingModel)이 선언되지 않았습니다. 런타임은 private로 처리하지만 기준은 명시적으로 결정해야 합니다.',

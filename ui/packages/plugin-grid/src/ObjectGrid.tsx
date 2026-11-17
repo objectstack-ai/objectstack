@@ -1180,6 +1180,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // grouping refusals and the fetch window (`./objectGridGroupingDecisions`).
   const {
     unmaskedGroupingFields,
+    draftOnlyGroupingFields,
     groupingRefusesNothing,
     groupingKeyReadable,
     serverGroupedFetch,
@@ -1731,6 +1732,31 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       </div>
     );
   }
+
+  // objectstack#34898 — the grouping sentences' non-blocking sibling. A
+  // grouping entry on a field only the draft declares is dropped
+  // (`draftOnlyGroupingFields`) and the grid draws ungrouped, or grouped by the
+  // published entries left. Unlike the two refusals above nothing is withheld,
+  // so this is no panel replacing the grid: it is one line drawn above the
+  // rows, under the description, by every branch that draws them (the card
+  // view and the table), in the strip `ListView` draws its own draft-preview
+  // note in, so it is read before the rows it explains.
+  const groupingDraftOnlyNote = draftOnlyGroupingFields.length > 0 ? (
+    <p
+      role="status"
+      className="px-3 sm:px-4 py-1.5 text-xs text-muted-foreground border-b bg-muted/40"
+      data-testid="grid-grouping-draft-only"
+    >
+      {t('grid.grouping.draftOnly', {
+        fields: draftOnlyGroupingFields
+          .map((field) => {
+            const fallback = (objectFields?.[field] as { label?: string } | undefined)?.label || field;
+            return schema.objectName ? resolveFieldLabel(schema.objectName, field, fallback) : fallback;
+          })
+          .join(', '),
+      })}
+    </p>
+  ) : null;
 
   // The generated columns, enriched and folded, with the persisted widths and
   // order applied (`./objectGridPersistedColumns`).
@@ -3517,6 +3543,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           data-testid="object-grid-card-scroller"
         >
         {gridDescription}
+        {groupingDraftOnlyNote}
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
@@ -4126,6 +4153,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         </div>
       )}
       {gridDescription}
+      {groupingDraftOnlyNote}
       {gridToolbar}
       {renderedGridContent}
       {isGrouped && onRowGroupsChange && (

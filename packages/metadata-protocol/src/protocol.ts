@@ -6,7 +6,7 @@ import type {
     MetadataProtocol,
     PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, recordNotFoundError } from '@objectstack/core';
+import { IDataEngine, recordNotFoundError, type UserMessageCaller } from '@objectstack/core';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { resolveQueryReadLimits } from '@objectstack/types';
 import { type TenancyPosture } from '@objectstack/spec/security';
@@ -5370,12 +5370,12 @@ export class ObjectStackProtocolImplementation implements
      * context carries no explicit `transaction`, so the probe rides the same
      * connection as the writes it guards.
      */
-    private assertRecordExists(object: string, id: string): Promise<void> {
+    private assertRecordExists(object: string, id: string, caller?: UserMessageCaller | null): Promise<void> {
         // [#25467 cut 4] The body moved to `protocol-record-reads.ts` (see `RecordReadHost`).
         const host: ThisParameterType<typeof assertRecordExists> = {
             probeRecord: (...a) => this.probeRecord(...a),
         };
-        return assertRecordExists.call(host, object, id);
+        return assertRecordExists.call(host, object, id, caller);
     }
 
     /**

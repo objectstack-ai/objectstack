@@ -629,6 +629,7 @@ const ar = {
         "هذا العرض مُجمَّع، لكن مصدر بياناته لا يطبّق queryGroupHeaders، لذا لا يمكن عدّ المجموعات. أزِل التجميع لعرض السجلات.",
       needsWholeRows:
         "يتطلب التجميع جميع السجلات، لكن هذه الشبكة تلقّت صفحة واحدة منها فقط، لذا لا يمكن عدّ المجموعات. مرّر جميع السجلات، أو دع الشبكة تجلبها من مصدر بيانات يطبّق queryGroupHeaders.",
+      draftOnly: "لم يتم التجميع حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى تقوم بالنشر.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -1043,6 +1044,7 @@ const ar = {
     removeGroup: "إزالة",
     groupingUnstoredNotice: "لا يمكن تجميع هذه القائمة حسب {{fields}}: تُحسب القيمة عند العرض ولا تُخزَّن. تُعرض القائمة دون هذا التجميع.",
     groupingUnstoredRemove: "إزالة من التجميع",
+    draftOnlyQueryDropped: "لم تتم التصفية أو الفرز حسب {{fields}}: هذا الحقل موجود في المسودة فقط حتى النشر.",
     inlineEditShort: "تحرير مضمّن",
     inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
   },
@@ -2477,7 +2479,7 @@ const ar = {
       unavailableRetry: "إعادة المحاولة",
       unavailableHome: "العودة إلى الرئيسية",
       dock: {
-        title: "المساعد",
+        title: "مساعد الذكاء الاصطناعي",
         description: "محادثة مساعد الذكاء الاصطناعي",
         resize: "تغيير حجم المحادثة",
         collapse: "طي المحادثة",
@@ -5284,7 +5286,7 @@ const ar = {
       securityBlockTitle_few: 'سيتم رفض النشر — {{count}} عناصر بحاجة إلى قرار أولاً',
       securityBlockTitle_many: 'سيتم رفض النشر — {{count}} عنصرًا بحاجة إلى قرار أولاً',
       securityBlockTitle_other: 'سيتم رفض النشر — {{count}} عنصر بحاجة إلى قرار أولاً',
-      securityBlockWhere: 'أصلحه في الكائن ضمن الإعدادات ← مشاركة السجلات، ثم انشر مرة أخرى.',
+      securityBlockWhere: 'أصلحه في الكائن ضمن الإعدادات ← من يمكنه رؤية أي السجلات، ثم انشر مرة أخرى.',
       flowChecksTitle: 'قبل النشر: سيُبلغ فحص النشر عمّا يلي',
       securityRule: {
         owdUnset: 'لم يُعرَّف أساس مشاركة السجلات (sharingModel). يعود وقت التشغيل إلى private، لكن يجب أن يكون الأساس قرارًا صريحًا.',
