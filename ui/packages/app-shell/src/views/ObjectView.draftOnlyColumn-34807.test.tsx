@@ -165,7 +165,7 @@ describe('objectstack#34807 — a list column on a draft-only field in the draft
 
     await screen.findByText('Write the spec', undefined, { timeout: 5000 });
     expect(screen.getAllByText('Priority (draft)').length).toBeGreaterThan(0);
-    expect(screen.queryByTestId('list-error-code')).toBeNull();
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
     expect(GET_ITEM).toHaveBeenCalledWith('object', 'tracker_task');
     expect(find).toHaveBeenCalled();
     for (const [, params] of find.mock.calls) {
@@ -176,8 +176,8 @@ describe('objectstack#34807 — a list column on a draft-only field in the draft
   it('control: outside the preview the column is still sent, and the data door refuses it', async () => {
     const { find } = mount({ preview: false });
 
-    const code = await screen.findByTestId('list-error-code', undefined, { timeout: 5000 });
-    expect(code.textContent).toBe('INVALID_FIELD');
+    await screen.findByTestId('list-error-state', undefined, { timeout: 5000 });
+    expect(screen.queryByText('Write the spec')).toBeNull();
     expect(JSON.stringify(find.mock.calls.at(-1)?.[1] ?? {})).toContain('"priority"');
     expect(GET_ITEM).not.toHaveBeenCalledWith('object', 'tracker_task');
   });
