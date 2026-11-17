@@ -21,6 +21,12 @@
  * flow run carries and a hook refusal does not, so the runtime cannot render
  * it either. It is refused with the spelling that names the code.
  *
+ * [#34374] A hook's declared texts (`HookSchema.texts`) are the same kind of
+ * sentence, filled by the same engine from the same closed scope, so an entry
+ * of `texts` that declares `params` is judged here too, at `texts.<key>.message`
+ * — a text that cannot render would otherwise reach the business record with
+ * its braces.
+ *
  * Every finding is an ERROR: `objectstack validate` and `compile` fail, and the
  * publish gate refuses a `hook` write carrying one (the `hook` write type runs
  * this pass with the hook-`condition` walk it sits beside). An entry that
@@ -52,43 +58,50 @@ function currencyWithoutCode(holeText: string, inner: string): string | undefine
   if (formatter !== 'currency') return undefined;
   const path = inner.slice(0, bar).trim() || 'amount';
   return (
-    `\`${holeText}\` formats in the organization's default currency, which a hook refusal does not carry, so the `
+    `\`${holeText}\` formats in the organization's default currency, which a hook sentence does not carry, so the `
     + 'sentence would be served with its braces. Name the code in the hole: '
     + `\`{{ ${path} | currency:EUR }}\`.`
   );
 }
 
 /**
- * The findings for every hook refusal sentence of `stack` whose entry declares
- * `params` (see the module header).
+ * The findings for every hook sentence of `stack` whose entry declares
+ * `params` — each refusal entry's `message` and `reasons[*].message`, and
+ * (#34374) each declared text's `message` (see the module header).
  */
 export function hookRefusalTemplateIssues(stack: AnyRec): ExprIssue[] {
   const issues: ExprIssue[] = [];
   for (const hook of recordsOf(stack.hooks)) {
     const hookName = typeof hook.name === 'string' ? hook.name : '?';
-    if (!isRec(hook.refusals)) continue;
-    for (const [code, entry] of Object.entries(hook.refusals)) {
-      if (!isRec(entry)) continue;
-      const params = paramsOf(entry);
-      if (params.length === 0) continue;
-      const sentences: Array<{ path: string; text: unknown }> = [{ path: `refusals.${code}.message`, text: entry.message }];
-      if (isRec(entry.reasons)) {
-        for (const [reason, sentence] of Object.entries(entry.reasons)) {
-          sentences.push({ path: `refusals.${code}.reasons.${reason}.message`, text: isRec(sentence) ? sentence.message : undefined });
+    const sentences: Array<{ path: string; text: unknown }> = [];
+    if (isRec(hook.refusals)) {
+      for (const [code, entry] of Object.entries(hook.refusals)) {
+        if (!isRec(entry) || paramsOf(entry).length === 0) continue;
+        sentences.push({ path: `refusals.${code}.message`, text: entry.message });
+        if (isRec(entry.reasons)) {
+          for (const [reason, sentence] of Object.entries(entry.reasons)) {
+            sentences.push({ path: `refusals.${code}.reasons.${reason}.message`, text: isRec(sentence) ? sentence.message : undefined });
+          }
         }
       }
-      for (const { path, text } of sentences) {
-        if (typeof text !== 'string') continue;
-        const where = `hook '${hookName}' ${path}`;
-        const refuse = (message: string, source: string): void => {
-          issues.push({ where, message, source, severity: 'error' });
-        };
-        for (const m of text.matchAll(HOLE)) {
-          const refusal = currencyWithoutCode(m[0], m[1]!);
-          if (refusal !== undefined) refuse(refusal, m[0]);
-        }
-        for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
+    }
+    if (isRec(hook.texts)) {
+      for (const [key, entry] of Object.entries(hook.texts)) {
+        if (!isRec(entry) || paramsOf(entry).length === 0) continue;
+        sentences.push({ path: `texts.${key}.message`, text: entry.message });
       }
+    }
+    for (const { path, text } of sentences) {
+      if (typeof text !== 'string') continue;
+      const where = `hook '${hookName}' ${path}`;
+      const refuse = (message: string, source: string): void => {
+        issues.push({ where, message, source, severity: 'error' });
+      };
+      for (const m of text.matchAll(HOLE)) {
+        const refusal = currencyWithoutCode(m[0], m[1]!);
+        if (refusal !== undefined) refuse(refusal, m[0]);
+      }
+      for (const e of validateExpression('template', text).errors) refuse(e.message, e.source);
     }
   }
   return issues;
