@@ -61,14 +61,17 @@ import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases } from './summary-batch-accumulation.js';
+import type { SummaryDependents } from './summary-batch-accumulation.js';
+import { SUMMARY_GROUPED_AGGREGATE_CHUNK } from './summary-aggregate.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external-driver-floor.js';
 import { ENGINE_UPDATE_REJECT_MESSAGE, engineUpdateDispatchRejectError, resolveEngineUpdateDispatch } from './engine-update-dispatch.js';
 import type { EngineUpdateDispatchData, EngineUpdateDispatchInput } from './engine-update-dispatch.js';
 import {
-  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyStoredExpressionsToPatch,
+  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
   computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, hydrateWriteFormulas,
-  lowerWhereFilterArray, masterIdOf, planStoredExpressions, rejectUnknownEngineOptions,
+  lowerWhereFilterArray, masterIdOf, planFormulaProjection, planStoredExpressions, rejectUnknownEngineOptions,
+  storedExpressionsReading,
   replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
   stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, writeFailureLogMeta,
   callerInputRefusalLogMeta,
@@ -2094,6 +2097,9 @@ export class UpdateFacet {
                          (updateSchema as any)?.fields,
                        )
                      : undefined;
+                   if (summaryFold) {
+                       summaryFold.setDependents(await loadSummaryFoldDependents(this, summaryFold.foldedSummaries(), opCtx.context, permissionResolution));
+                   }
                    const foldMaster = summaryFold && parentForRow ? resolveMasterDetailRelation(updateSchema as any)?.master : undefined;
                    for (const [i, row] of matchedRows.entries()) {
                        try {
@@ -2348,4 +2354,69 @@ export class UpdateFacet {
 
      return opCtx.result;
   }
+}
+
+/**
+ * [#34465] What computes, for the parents a predicate update's summary fold
+ * moves, their fields calculated from the folded roll-ups: a `formula`
+ * (computed on read) or a stored computed field (an `expression` on a field
+ * that is not a formula, computed on the recompute's write), directly or
+ * through another such field (`remaining = budget - spent`, `spent` a
+ * roll-up). A rule reading `record.project.remaining` reads such a field, and
+ * one by one it would read it over the roll-up the earlier rows moved.
+ *
+ * One read of the parents the fold reads (their stored rows, as SYSTEM, like
+ * the base aggregates), and the formula plan's own permission map, one-hop
+ * related rows and option labels, resolved ONCE over those rows: none of
+ * them moves while the update is judged, only the roll-ups do. Each overlay
+ * then evaluates the plan over the stored parent with the folded roll-ups in
+ * place, synchronously, with the read path's own evaluator
+ * ({@link applyFormulaPlan}). An object no such field reads a folded roll-up
+ * of reads nothing.
+ */
+async function loadSummaryFoldDependents(
+  host: Pick<UpdateHost, 'facade' | 'getSchema' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels'>,
+  folded: Map<string, { fields: Set<string>; parentIds: Set<string> }>,
+  context: Parameters<UpdateHost['resolveFormulaPermissions']>[3],
+  resolution: Parameters<UpdateHost['resolveFormulaPermissions']>[4],
+): Promise<SummaryDependents> {
+  const served = new Map<string, {
+    plan: ReturnType<typeof planStoredExpressions>;
+    rows: Map<string, Record<string, unknown>>;
+    permissions: Awaited<ReturnType<UpdateHost['resolveFormulaPermissions']>>;
+    related: Awaited<ReturnType<UpdateHost['resolveFormulaRelated']>>;
+    optionLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+  }>();
+  const systemCtx = { ...(context ?? {}), isSystem: true } as typeof context;
+  for (const [object, { fields, parentIds }] of folded) {
+    const schema = host.getSchema(object) as any;
+    if (!schema) continue;
+    const plan = storedExpressionsReading([...planStoredExpressions(schema), ...planFormulaProjection(schema, undefined).plan], fields);
+    if (plan.length === 0 || parentIds.size === 0) continue;
+    const rows = new Map<string, Record<string, unknown>>();
+    const ids = [...parentIds];
+    for (let start = 0; start < ids.length; start += SUMMARY_GROUPED_AGGREGATE_CHUNK) {
+      const found = await host.facade.find(object, { where: { id: { $in: ids.slice(start, start + SUMMARY_GROUPED_AGGREGATE_CHUNK) } }, context: systemCtx } as any) as Array<Record<string, unknown>>;
+      for (const row of found ?? []) if (row?.id != null) rows.set(String(row.id), row);
+    }
+    if (rows.size === 0) continue;
+    const stored = [...rows.values()];
+    served.set(object, {
+      plan,
+      rows,
+      permissions: await host.resolveFormulaPermissions(object, plan, stored, context, resolution),
+      related: await host.resolveFormulaRelated(schema, plan, stored, context),
+      optionLabels: host.formulaOptionLabels(schema, plan, context),
+    });
+  }
+  return (object, parentId, moved) => {
+    const entry = served.get(object);
+    const stored = entry?.rows.get(parentId);
+    if (!entry || !stored) return undefined;
+    const scratch: Record<string, unknown> = { ...stored, ...moved };
+    applyFormulaPlan(entry.plan, [scratch], context, entry.permissions, undefined, entry.related, entry.optionLabels);
+    const values: Record<string, unknown> = {};
+    for (const step of entry.plan) values[step.name] = scratch[step.name];
+    return values;
+  };
 }

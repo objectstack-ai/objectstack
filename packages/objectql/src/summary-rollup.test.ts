@@ -1419,6 +1419,10 @@ describe('[#34465] a predicate update judges each matched row against the parent
         low: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'min' } },
         mean: { type: 'summary', summaryOperations: { object: 'inv_line', field: 'amount', function: 'avg' } },
         memo_total: { type: 'summary', summaryOperations: { object: 'memo_line', field: 'amount', function: 'sum' } },
+        budget: { type: 'number' },
+        // Calculated from a roll-up: on read (a formula) and on write (a stored computed field).
+        remaining: { type: 'formula', expression: 'record.budget - record.total', returnType: 'number' },
+        headroom: { type: 'number', expression: { dialect: 'cel', source: 'record.budget - record.total' } },
       },
     } as any);
     engine.registry.registerObject({
@@ -1437,6 +1441,9 @@ describe('[#34465] a predicate update judges each matched row against the parent
         { name: 'total_cap', type: 'script', severity: 'error', message: 'invoice total over 100', condition: "record.tag == 'cap' && record.inv.total > 100" },
         { name: 'mean_cap', type: 'script', severity: 'error', message: 'invoice mean over 50', condition: "record.tag == 'mean' && record.inv.mean != null && record.inv.mean > 50" },
         { name: 'low_floor', type: 'script', severity: 'error', message: 'invoice low at 50 or more', condition: "record.tag == 'low' && record.inv.low != null && record.inv.low >= 50" },
+        // Rules reading a field calculated from a roll-up, not the roll-up itself.
+        { name: 'remaining_floor', type: 'script', severity: 'error', message: 'invoice remaining below 0', condition: "record.tag == 'rem' && record.inv.remaining < 0" },
+        { name: 'headroom_floor', type: 'script', severity: 'error', message: 'invoice headroom below 0', condition: "record.tag == 'head' && record.inv.headroom < 0" },
       ],
     } as any);
     // CONTROL object: a roll-up of it exists, but no rule reads one.
@@ -1500,6 +1507,16 @@ describe('[#34465] a predicate update judges each matched row against the parent
     expect(inv(p.id).total).toBe(80);
   });
 
+  it('predicate update, the other direction: a row main refused is admitted when the row before it moves the total under the cap, as one by one admits it', async () => {
+    const p = await engine.insert('inv', { name: 'P' });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 60, tag: 'free' }, { inv: p.id, amount: 60, tag: 'cap' }]);
+    expect(inv(p.id).total).toBe(120);
+    // One by one: the first (no cap) lowers the total to 70; the second reads 70 and is admitted.
+    // Read as stored (main), the second read 120 and refused the whole update.
+    expect(await engine.update('inv_line', { amount: 10 }, { where: { inv: p.id }, multi: true })).toBe(2);
+    expect(inv(p.id).total).toBe(20);
+  });
+
   it('predicate update (avg): the second row reads the mean the first row moves, rows outside the match included', async () => {
     const p = await engine.insert('inv', { name: 'P' });
     await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'mean' }, { inv: p.id, amount: 40, tag: 'mean' }, { inv: p.id, amount: 40, tag: 'other' }]);
@@ -1515,6 +1532,37 @@ describe('[#34465] a predicate update judges each matched row against the parent
     // One by one: the first reads 5 (admitted; min then 50, the row outside); the second reads 50.
     expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id, tag: 'low' }, multi: true })), 'invoice low at 50 or more');
     expect(inv(p.id).low).toBe(5);
+  });
+
+  it('one by one (the reference answer): a rule reading a formula over the roll-up refuses the second line', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 100 });
+    const a = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'rem' });
+    const b = await engine.insert('inv_line', { inv: p.id, amount: 40, tag: 'rem' });
+    await engine.update('inv_line', { id: a.id, amount: 70 });
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { id: b.id, amount: 70 })), 'invoice remaining below 0');
+  });
+
+  it('predicate update, a rule reading a FORMULA calculated from the roll-up: the second row reads it over the total the first row moves', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 100 });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'rem' }, { inv: p.id, amount: 40, tag: 'rem' }]);
+    // One by one: the first reads remaining 20 (admitted; total then 110); the second reads -10.
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })), 'invoice remaining below 0');
+    expect(inv(p.id).total).toBe(80);
+  });
+
+  it('predicate update, a rule reading a STORED computed field calculated from the roll-up: the same', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 100 });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'head' }, { inv: p.id, amount: 40, tag: 'head' }]);
+    expect(inv(p.id).headroom).toBe(20);
+    expectRuleRefusal(await refusalOf(engine.update('inv_line', { amount: 70 }, { where: { inv: p.id }, multi: true })), 'invoice headroom below 0');
+    expect(inv(p.id).headroom).toBe(20);
+  });
+
+  it('predicate update, a rule reading a formula over the roll-up, under the line: admitted', async () => {
+    const p = await engine.insert('inv', { name: 'P', budget: 100 });
+    await engine.insert('inv_line', [{ inv: p.id, amount: 40, tag: 'rem' }, { inv: p.id, amount: 40, tag: 'rem' }]);
+    expect(await engine.update('inv_line', { amount: 50 }, { where: { inv: p.id }, multi: true })).toBe(2);
+    expect(inv(p.id).total).toBe(100);
   });
 
   it('predicate update that reparents: the header a parent. predicate reads counts the rows moved before', async () => {
@@ -1562,7 +1610,8 @@ describe('[#34465] a predicate update judges each matched row against the parent
     expect(await engine.update('inv_line', { amount: 3 }, { where: { inv: p.id }, multi: true })).toBe(2);
     const write = log.findIndex((e, i) => i >= start && e.op === 'updateMany');
     const before = log.slice(start, write).filter((e) => e.object === 'aggregate:inv_line');
-    // primaries, line_count, total, low, mean: every roll-up of inv_line a rule or predicate reads.
+    // primaries, line_count, total, low, mean: every roll-up of inv_line a rule or predicate reads
+    // (total twice over: directly, and through remaining and headroom).
     expect(before).toHaveLength(5);
     expect(before.every((e) => Array.isArray(e.ast.groupBy) && e.ast.groupBy[0] === 'inv')).toBe(true);
   });

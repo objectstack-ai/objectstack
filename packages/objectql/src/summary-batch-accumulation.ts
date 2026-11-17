@@ -409,7 +409,18 @@ export interface PredicateUpdateSummaryFold {
   overlayRow<R extends Record<string, unknown> | null | undefined>(object: string, row: R): R;
   /** Matched row `i` has been judged: from here on it counts in the state the update leaves it. */
   advance(i: number): void;
+  /** The roll-ups this fold moves, per parent object: their fields and the parents they are read for. */
+  foldedSummaries(): Map<string, { fields: Set<string>; parentIds: Set<string> }>;
+  /** Hand the fold what computes a parent's fields calculated from its folded roll-ups ({@link SummaryDependents}). */
+  setDependents(dependents: SummaryDependents): void;
 }
+
+/**
+ * The fields of parent `parentId` (a row of `object`) calculated from its
+ * roll-ups, computed over that parent with `moved` (the folded roll-up
+ * values) in place of the stored ones; `undefined` when none is.
+ */
+export type SummaryDependents = (object: string, parentId: string, moved: Readonly<Record<string, number | null>>) => Record<string, unknown> | undefined;
 
 /** What one row adds to one parent's roll-up. */
 interface Contribution { parentId: string; value: number | undefined }
@@ -515,16 +526,38 @@ export function createPredicateUpdateSummaryFold(
     }
   };
 
+  let dependents: SummaryDependents | undefined;
+
   const patchRow = (object: string, row: Record<string, unknown>): Record<string, unknown> | undefined => {
     const parentId = singleId(row.id);
     if (parentId === undefined) return undefined;
-    let patched: Record<string, unknown> | undefined;
+    const moved: Record<string, number | null> = {};
+    let any = false;
     for (const desc of live.keys()) {
-      if (desc.parentObject !== object || !(desc.summaryField in row)) continue;
+      if (desc.parentObject !== object) continue;
       const value = valueOf(desc, parentId);
       if (value === undefined) continue;
+      moved[desc.summaryField] = value;
+      any = true;
+    }
+    if (!any) return undefined;
+    let patched: Record<string, unknown> | undefined;
+    for (const [field, value] of Object.entries(moved)) {
+      if (!(field in row)) continue;
       patched ??= { ...row };
-      patched[desc.summaryField] = value;
+      patched[field] = value;
+    }
+    // A formula or stored computed field of the parent calculated from a
+    // folded roll-up (`remaining = budget - spent`) is computed again over
+    // the parent with the folded values, as the recompute's write and the
+    // next read would compute it.
+    const computed = dependents?.(object, parentId, moved);
+    if (computed) {
+      for (const [field, value] of Object.entries(computed)) {
+        if (!(field in row)) continue;
+        patched ??= { ...row };
+        patched[field] = value;
+      }
     }
     return patched;
   };
@@ -557,5 +590,16 @@ export function createPredicateUpdateSummaryFold(
     }
   };
 
-  return { overlay, overlayRow, advance };
+  const foldedSummaries = (): Map<string, { fields: Set<string>; parentIds: Set<string> }> => {
+    const out = new Map<string, { fields: Set<string>; parentIds: Set<string> }>();
+    for (const [desc, byParent] of live) {
+      let entry = out.get(desc.parentObject);
+      if (!entry) out.set(desc.parentObject, (entry = { fields: new Set(), parentIds: new Set() }));
+      entry.fields.add(desc.summaryField);
+      for (const id of byParent.keys()) entry.parentIds.add(id);
+    }
+    return out;
+  };
+
+  return { overlay, overlayRow, advance, foldedSummaries, setDependents: (fn) => { dependents = fn; } };
 }

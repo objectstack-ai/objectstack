@@ -226,6 +226,30 @@ describe('[#34465] createPredicateUpdateSummaryFold — consecutive by-id update
   });
 });
 
+describe('[#34465] the fold hands the folded roll-ups to what computes the parent fields calculated from them', () => {
+  it('patches a calculated field the row carries, with the folded values; leaves the rest of the row and a field it does not carry', () => {
+    const sum = desc({});
+    const matched: MatchedRowStates[] = [
+      { previous: { id: 'a', order: 'o1', amount: 40 }, next: { id: 'a', order: 'o1', amount: 70 } },
+      { previous: { id: 'b', order: 'o1', amount: 40 }, next: { id: 'b', order: 'o1', amount: 70 } },
+    ];
+    const fold = createPredicateUpdateSummaryFold(new Map([[sum, new Map([['o1', { count: 0, sum: 80, nonNull: 0, min: null, max: null }]])]]), matched, CHILD_FIELDS)!;
+    expect(fold.foldedSummaries()).toEqual(new Map([['xt_order', { fields: new Set(['total']), parentIds: new Set(['o1']) }]]));
+    const asked: unknown[] = [];
+    fold.setDependents((object, parentId, moved) => {
+      asked.push([object, parentId, { ...moved }]);
+      return { remaining: 100 - (moved.total ?? 0), other: 'x' };
+    });
+    // A binding that names only the calculated field (the rule reads `record.order.remaining`).
+    const binding: RelatedRecordBinding = { order: { object: 'xt_order', row: { id: 'o1', remaining: 20 } } };
+    expect(fold.overlay(binding)!.order!.row).toEqual({ id: 'o1', remaining: 20 });
+    fold.advance(0);
+    expect(fold.overlay(binding)!.order!.row).toEqual({ id: 'o1', remaining: -10 });
+    expect(binding.order!.row).toEqual({ id: 'o1', remaining: 20 });
+    expect(asked).toEqual([['xt_order', 'o1', { total: 80 }], ['xt_order', 'o1', { total: 110 }]]);
+  });
+});
+
 describe('[#34465] loadPredicateUpdateSummaryBases — the base a predicate update folds over', () => {
   const recorder = (answer: (query: any) => any[]) => {
     const calls: any[] = [];
