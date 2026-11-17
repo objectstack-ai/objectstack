@@ -189,8 +189,8 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     await screen.findByText('Acme CRM');
     expect(screen.queryByTestId('studio-landing-recent')).not.toBeInTheDocument();
     expect(screen.queryByText('Recently viewed')).not.toBeInTheDocument();
-    expect(screen.getByText('My packages (writable)')).toBeInTheDocument();
-    expect(screen.getByTestId('studio-landing-org-scope')).toBeInTheDocument();
+    expect(screen.getByText('Your own apps')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-landing-env-catalog')).toBeInTheDocument();
   });
 
   it('the package cards stay beside the recent row', async () => {
@@ -200,7 +200,7 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     await screen.findByText('Recently viewed');
     // Once in the recent row, once as its writable card.
     expect(screen.getAllByText('Acme CRM')).toHaveLength(2);
-    expect(screen.getByText('My packages (writable)')).toBeInTheDocument();
+    expect(screen.getByText('Your own apps')).toBeInTheDocument();
   });
 });
 
