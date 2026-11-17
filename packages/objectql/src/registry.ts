@@ -3634,6 +3634,36 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#33952, ADR-0146 D10] For each CODE `extend` contributor of an object
+   * that patches its fields (`fieldPatches`), the packaged base
+   * ({@link getPackagedObjectBase}) with THAT package's patches applied and no
+   * other's — the text the package writes on each slot it patches — beside
+   * its package id. Highest precedence first: the fold applies contributors
+   * in ascending order, so where two packages patch one slot the first entry
+   * is the one the served object carries.
+   *
+   * The serving layer reads it to translate a patched slot from the patching
+   * package's own translations (`TranslateDocumentOptions.patchBundles` in
+   * `@objectstack/spec/system`), and asks of it only which package wrote the
+   * served value: the comparison that decides a slot is patched stays
+   * {@link getPackagedObjectBase}'s, which never folds a patch in. Nothing is
+   * stamped on the served document (ADR-0029 D9.2a): this is read off the
+   * contributors, by the filter {@link getPackagedObjectBase} reads added
+   * fields with — a code artifact body, a package that is not disabled. A
+   * tenant overlay and an extension of tenant provenance add nothing: their
+   * text is authored, and keeps its own. Each patch reaches the owner's own
+   * fields only, as the fold applies it; the tenant yield is not applied, so
+   * an entry carries what the package ships even where a tenant renamed the
+   * slot (the served value then matches no entry).
+   *
+   * `[]` where {@link getPackagedObjectOwner} answers `undefined`, and where no
+   * code extender patches a field.
+   */
+  getPackagedFieldPatchBases(name: string): Array<{ packageId: string; base: ServiceObject }> {
+    return PlatformGlobalFacet.getPackagedFieldPatchBases.call(platformGlobalHost.of(this), name);
+  }
+
+  /**
    * [#28574] {@link extendContributionRefusal}, asked of the registry by the
    * metadata doors (which reach this registry through the engine and do not
    * import this package).
@@ -6244,6 +6274,7 @@ export class SchemaRegistry {
       get extensionSpellingWarned() { return registry.extensionSpellingWarned; },
       foldExtenders: (...a) => registry.foldExtenders(...a),
       getObjectOwner: (...a) => registry.getObjectOwner(...a),
+      getPackagedObjectBase: (...a) => registry.getPackagedObjectBase(...a),
       getPackagedObjectOwner: (...a) => registry.getPackagedObjectOwner(...a),
       invalidateAll: (...a) => registry.invalidateAll(...a),
       isPackageDisabled: (...a) => registry.isPackageDisabled(...a),

@@ -1938,6 +1938,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onDirtyChange={setPillarDirty}
+                packageLabel={pkgEntry?.id === packageId ? pkgEntry.name : undefined}
               />
             ) : (
               // objectui#11203 / objectui#11232 — keyed by package. A package
@@ -10112,6 +10113,7 @@ export function AccessPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onDirtyChange,
+  packageLabel,
 }: {
   packageId: string;
   publishNonce?: number;
@@ -10126,6 +10128,8 @@ export function AccessPillar({
    * beforeunload). Reports `false` when the pillar unmounts, same contract as
    * PermissionMatrixEditPage's own onDirtyChange. */
   onDirtyChange?: (dirty: boolean) => void;
+  /** objectstack#34795 — the open app's name: the open set's title reads "app · set". */
+  packageLabel?: string;
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -10858,23 +10862,27 @@ export function AccessPillar({
                 if (isMobile) setRailOpen(false);
               }}
               icon={<Shield className="h-4 w-4 shrink-0 text-muted-foreground" />}
-              // objectui#12456 — two-line rows (label, then the api name in
-              // mono) at 36 px: the one height the shared rail lets differ.
-              className="h-9"
               trailing={
                 <>
                   <RailCustomizationMark row={{ type: 'permission', ...p }} marks={railMarks} locale={locale} />
                   {p.isDefault ? (
-                    <span className="text-[9px] uppercase tracking-wide text-muted-foreground/60">default</span>
+                    <span className="text-[10px] text-muted-foreground/70">{t('perm.badge.default', locale)}</span>
                   ) : null}
                 </>
               }
             >
-              {/* objectui#11862 — the set's label first, its machine name as
-                  secondary text. A set listed from its draft header alone
-                  has no label in hand (the header carries none), so its
-                  name is the text, as before. */}
-              <StudioNameLabel label={p.label} name={p.name} />
+              {/* objectui#11862 — the set's label. objectstack#34795: the
+                  machine name is no longer drawn as secondary text; it is the
+                  row's tooltip. A set listed from its draft header alone has
+                  no label in hand (the header carries none), so its name is
+                  the text, as before. */}
+              <span
+                className="flex min-w-0 flex-1"
+                title={p.label.trim() && p.label !== p.name ? p.name : undefined}
+                data-testid={`access-rail-set-${p.name}`}
+              >
+                <StudioNameLabel label={p.label.trim() ? p.label : p.name} />
+              </span>
             </StudioRailRow>
           ))}
         </StudioRail>
@@ -10926,6 +10934,7 @@ export function AccessPillar({
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,
+                appLabel: packageLabel || undefined,
                 onCloneSourceRead,
                 leading: accessRailToggleEl,
                 chips: currentAddedIn ? (

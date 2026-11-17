@@ -16,6 +16,18 @@ import { normalizeColumns } from './objectGridColumns';
 import { DEFAULT_FETCH_BATCH_SIZE, NO_GROUPING_REFUSAL, resolvePageSize } from './objectGridDefaults';
 import type { ObjectGridExternalPaginationProps } from './objectGridProps';
 
+/**
+ * Is `def` a field only the draft declares? The console's draft preview
+ * (`?preview=draft`) answers `getObjectSchema` with the published definition
+ * plus each field only the draft adds, carrying the `_draftOnly` marker
+ * (`@object-ui/app-shell`'s preview data source sets it). An underscore-private
+ * convention, never an authoring key: outside the preview no definition
+ * carries it and this answers false for every field.
+ */
+function isDraftOnlyField(def: unknown): boolean {
+  return !!def && typeof def === 'object' && (def as { _draftOnly?: unknown })._draftOnly === true;
+}
+
 export function useObjectGridGroupingDecisions({
   schema,
   objectName,
@@ -31,7 +43,7 @@ export function useObjectGridGroupingDecisions({
 }: {
   schema: ObjectGridSchema;
   objectName: string | undefined;
-  objectFields: Readonly<Record<string, { type?: unknown } | undefined>> | undefined;
+  objectFields: Readonly<Record<string, { type?: unknown; _draftOnly?: unknown } | undefined>> | undefined;
   objectTypesPending: boolean;
   perms: ReturnType<typeof usePermissions>;
   dataSource: DataSource | undefined;
@@ -73,14 +85,38 @@ export function useObjectGridGroupingDecisions({
       warned: refused.filter((field) => isMaskedGridColumn(columnTypeOf(field), objectFields?.[field]?.type, false)),
     });
   }, [groupingFieldsRaw, schema.columns, objectFields, objectTypesPending]);
+  // objectstack#34898 — a field only the DRAFT declares is REFUSED as a
+  // grouping key too. Under the console's draft preview (`?preview=draft`) the
+  // object definition carries each field only the draft adds, marked
+  // `_draftOnly` (see `isDraftOnlyField`), while the data door still judges
+  // every `groupBy` name against the PUBLISHED object and refuses one it does
+  // not know, which failed the whole grid. So the entry is dropped exactly as
+  // a masked one is: the grid groups by the published entries left, or draws
+  // flat, and names the dropped field in a note (`grid.grouping.draftOnly`)
+  // rather than an error. Read off the same catalogue as the masked rule, so
+  // after Publish the marker is gone and the entry groups again on the next
+  // definition read, with no reload. Outside the preview no field carries the
+  // marker and this list is always empty.
+  const draftOnlyGroupingKey = JSON.stringify(
+    usableGroupingFields(groupingFieldsRaw)
+      .map((gf) => gf.field)
+      .filter((field) => isDraftOnlyField(objectFields?.[field])),
+  );
+  const draftOnlyGroupingFields = React.useMemo(
+    () => JSON.parse(draftOnlyGroupingKey) as string[],
+    [draftOnlyGroupingKey],
+  );
   // Keyed on the authored array and the signature STRING, never on a memo's
   // identity (AGENTS.md #10). Read only when something was refused: the
   // unmasked path below hands `useGroupedData` the authored config itself.
   const unmaskedGroupingFields = React.useMemo(() => {
     const { refused }: { refused: string[] } = JSON.parse(maskedGroupingSignature);
-    return usableGroupingFields(groupingFieldsRaw).filter((gf) => !refused.includes(gf.field));
-  }, [groupingFieldsRaw, maskedGroupingSignature]);
-  const groupingRefusesNothing = maskedGroupingSignature === NO_GROUPING_REFUSAL;
+    const draftOnly: string[] = JSON.parse(draftOnlyGroupingKey);
+    return usableGroupingFields(groupingFieldsRaw)
+      .filter((gf) => !refused.includes(gf.field) && !draftOnly.includes(gf.field));
+  }, [groupingFieldsRaw, maskedGroupingSignature, draftOnlyGroupingKey]);
+  const groupingRefusesNothing = maskedGroupingSignature === NO_GROUPING_REFUSAL
+    && draftOnlyGroupingFields.length === 0;
   useEffect(() => {
     const { warned: masked }: { warned: string[] } = JSON.parse(maskedGroupingSignature);
     if (masked.length === 0) return;
@@ -115,9 +151,15 @@ export function useObjectGridGroupingDecisions({
   // masked type — NOT less the entries merely withheld while the object's
   // types are still loading, or the first render would fetch one flat window
   // it is about to throw away.
-  const groupingRefusedKnownMasked = React.useMemo(
-    () => (JSON.parse(maskedGroupingSignature) as { warned: string[] }).warned,
-    [maskedGroupingSignature],
+  // objectstack#34898: a draft-only entry is refused on a KNOWN fact as well
+  // (the definition that marks it has landed), so it counts nowhere below: it
+  // neither makes the grid group on the server nor asks for a header query.
+  const groupingRefusedKnown = React.useMemo(
+    () => [
+      ...(JSON.parse(maskedGroupingSignature) as { warned: string[] }).warned,
+      ...(JSON.parse(draftOnlyGroupingKey) as string[]),
+    ],
+    [maskedGroupingSignature, draftOnlyGroupingKey],
   );
   // A grouping field this principal may not READ is not a key the server may
   // group by: a header row carries every key's raw value, so grouping by it
@@ -130,7 +172,7 @@ export function useObjectGridGroupingDecisions({
     && !!objectName
     && typeof dataSource?.queryGroupHeaders === 'function'
     && usableGroupingFields(groupingFieldsRaw).some(
-      (gf) => !groupingRefusedKnownMasked.includes(gf.field) && groupingKeyReadable(gf.field),
+      (gf) => !groupingRefusedKnown.includes(gf.field) && groupingKeyReadable(gf.field),
     );
   // [objectui#10881] The refusal: this grid would fetch its own rows and group
   // them, and its data source cannot answer the group header query. There is
@@ -148,7 +190,7 @@ export function useObjectGridGroupingDecisions({
     && !!objectName
     && !!dataSource
     && typeof dataSource.queryGroupHeaders !== 'function'
-    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnownMasked.includes(gf.field));
+    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnown.includes(gf.field));
   // [objectui#10881] The second refusal: rows a host handed in that the SAME
   // host declares to be one page of more — the external-pagination props
   // (`externalManualPagination`) with a `rowCount` above the rows it handed.
@@ -167,7 +209,7 @@ export function useObjectGridGroupingDecisions({
     externalManualPagination
     && Array.isArray(handedRows)
     && (hostRowCount as number) > handedRows.length
-    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnownMasked.includes(gf.field));
+    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnown.includes(gf.field));
   // What the load effect's ONE flat fetch asks for (objectui#9853, ruling
   // 5824040487, structure B). Where the rows it holds ARE the page on screen,
   // that is the display page size. Where this grid buckets the rows it holds
@@ -188,7 +230,7 @@ export function useObjectGridGroupingDecisions({
   const bucketsFetchedWindow =
     !serverGroupedFetch
     && !groupingNeedsHeaderQuery
-    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnownMasked.includes(gf.field));
+    && usableGroupingFields(groupingFieldsRaw).some((gf) => !groupingRefusedKnown.includes(gf.field));
   const fetchWindow = bucketsFetchedWindow
     ? resolvePageSize(schema, DEFAULT_FETCH_BATCH_SIZE)
     : serverPageSize;
@@ -209,6 +251,7 @@ export function useObjectGridGroupingDecisions({
 
   return {
     unmaskedGroupingFields,
+    draftOnlyGroupingFields,
     groupingRefusesNothing,
     groupingKeyReadable,
     serverGroupedFetch,

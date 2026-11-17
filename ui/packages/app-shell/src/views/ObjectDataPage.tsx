@@ -78,6 +78,7 @@ import {
   PREVIEW_QUERY_FLAG,
   PREVIEW_QUERY_VALUE,
 } from '../preview/PreviewModeContext.js';
+import { usePreviewListDataSource } from '../preview/unpublishedObjectReads.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
@@ -262,6 +263,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     () => (objects || []).find((o: any) => o.name === objectName),
     [objects, objectName],
   );
+  // objectstack#34807 — in the draft preview the list reads its object
+  // definition with the draft-only fields marked, so a column on one is drawn
+  // empty instead of refusing the whole list query; outside it, the adapter.
+  const listDataSource = usePreviewListDataSource(dataSource, objectDef);
 
   // ADR-0047 filter persistence — same wiring as InterfaceListPage: restore
   // `uf_*` once at mount, mirror selection changes back (replace, no history
@@ -711,7 +716,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         {schema && (
           <ListView
             schema={schema as any}
-            dataSource={dataSource}
+            dataSource={listDataSource}
             userFilterSelections={initialUfSelections}
             onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
             onRowClick={handleRecordClick}
