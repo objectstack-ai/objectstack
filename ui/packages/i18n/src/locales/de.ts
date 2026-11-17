@@ -2680,6 +2680,10 @@ const de = {
       launcherLabel: "App-Launcher",
       menuLabel: "App-Navigation",
       menuEmpty: "Diese App hat keine Navigationseinträge, die Sie öffnen können.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "App-Menüleiste",
+      searchMenu: "Menü durchsuchen",
+      phoneBarHint: "Markieren Sie einen Eintrag mit dem Stern, um ihn in die untere Leiste zu legen. Die Leiste zeigt die ersten vier.",
       itemMenu: "Weitere Aktionen für {{name}}",
       openInNewTab: "In neuem Tab öffnen",
       copyLink: "Link kopieren",

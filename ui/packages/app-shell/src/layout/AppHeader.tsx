@@ -68,7 +68,9 @@ import {
   Eye,
   MoreHorizontal,
   Info,
+  ChevronLeft,
 } from 'lucide-react';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, type RefObject } from 'react';
 import { useOffline } from '@object-ui/react';
@@ -444,6 +446,10 @@ export function AppHeader({
   // landing, so the chrome cannot offer a second, contradicting "home".
   const homePath = useHomePath();
   useGoHomeShortcut(isApp, homePath);
+  // objectstack#34594 — on a phone inside an app the menu is the bottom bar
+  // (its 「More」 opens the drawer), so the bar's leftmost control goes back
+  // to the environment's home instead of opening the drawer.
+  const phone = usePhoneViewport();
   const { isOnline } = useOffline();
   // Idempotent, direct open of the ⌘K command palette (ADR-0054 C1). Replaces a
   // synthetic `⌘K` KeyboardEvent re-dispatch that did nothing under automation.
@@ -875,12 +881,24 @@ export function AppHeader({
     <div className="flex items-center justify-between w-full h-full">
       {/* ── LEFT: Logo / App / Object path ── */}
       <div className="flex items-center min-w-0 flex-1">
-        {/* The shell's one sidebar trigger, at every width (objectui#12429):
-            the drawer button on a phone, the collapse/expand toggle for the
-            sidebar and its icon rail above that. It is the bar's leftmost
-            control inside an app, so it never moves when the sidebar
-            collapses; the sidebar itself carries no trigger. */}
-        {isApp ? (
+        {/* The shell's one sidebar trigger (objectui#12429): the
+            collapse/expand toggle for the sidebar and its icon rail from
+            768 px up. It is the bar's leftmost control inside an app, so it
+            never moves when the sidebar collapses; the sidebar itself carries
+            no trigger. On a phone that slot goes back to the environment's
+            home, and the drawer opens from the bottom menu bar's 「More」
+            (objectstack#34594). */}
+        {isApp && phone ? (
+          <Link
+            to={homePath}
+            data-testid="app-bar-phone-home"
+            aria-label={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            title={t('layout.appSwitcher.backToHome', { defaultValue: 'Back to home' })}
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronLeft className="h-5 w-5" aria-hidden />
+          </Link>
+        ) : isApp ? (
           <LocalizedSidebarTrigger className="shrink-0 mr-1 max-md:size-11 max-md:mr-0" aria-label={t('common.toggleSidebar', { defaultValue: 'Toggle sidebar' })} />
         ) : (
           // objectui#12605 — the product mark sits at the same x on every

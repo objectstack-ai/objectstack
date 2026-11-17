@@ -2680,6 +2680,10 @@ const ko = {
       launcherLabel: "앱 런처",
       menuLabel: "앱 탐색",
       menuEmpty: "이 앱에는 열 수 있는 탐색 항목이 없습니다.",
+      // objectstack#34594 — the phone's bottom menu bar and the full menu its More opens.
+      phoneBarLabel: "앱 메뉴 바",
+      searchMenu: "메뉴 검색",
+      phoneBarHint: "별표를 누르면 항목이 하단 바에 고정됩니다. 하단 바에는 처음 4개가 표시됩니다.",
       itemMenu: "{{name}} 더 많은 작업",
       openInNewTab: "새 탭에서 열기",
       copyLink: "링크 복사",
