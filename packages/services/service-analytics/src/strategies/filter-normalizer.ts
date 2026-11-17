@@ -619,7 +619,20 @@ function comparand(v: unknown): unknown {
  */
 export type NormalizedFilterNode =
   | { kind: 'leaf'; member: string; operator: string; values: unknown[] }
-  | { kind: 'const'; value: boolean }
+  /**
+   * [#34384] `member` is set on ONE constant: the TRUE an empty `$nin` folds to.
+   * It names the field the author wrote the leaf on, because that TRUE is still
+   * a condition on that field: on a member the native compile reads through a
+   * relationship path it holds only for a row whose parent exists ("no parent
+   * never matches, whatever the operator", `cross-object-where.ts`). The member
+   * gates need no second reading of it: the shared lowering wraps every `$nin`
+   * in the NULL escape (`{ $or: [{ f: { $null: true } }, { f: { $nin: [] } }] }`),
+   * so the escape's `notSet` leaf names the same member beside it (see
+   * {@link collectFilterLeaves}), and a `$not` never meets the constant bare
+   * ({@link notOf} receives the escape's `$or`). Every other constant names no
+   * member.
+   */
+  | { kind: 'const'; value: boolean; member?: string }
   | { kind: 'and'; children: NormalizedFilterNode[] }
   | { kind: 'or'; children: NormalizedFilterNode[] }
   | { kind: 'not'; child: NormalizedFilterNode }
@@ -1251,8 +1264,14 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // NULL-safe `$not` rewrite below to stay correct: a dropped conjunct
         // inside a negation flips the whole negation's answer, while `1 = 0`
         // negates to `1 = 1` the way `read-scope-sql.ts` already has it.
+        //
+        // [#34384] The empty `$nin`'s TRUE keeps the member it was written on
+        // (see the `const` row of {@link NormalizedFilterNode}): folded to a bare
+        // TRUE, a related field's `$nin: []` selected the detail rows with no
+        // parent on the native path, which no other operator does. The empty
+        // `$in`'s FALSE selects no row, parent or not, and names nothing.
         if ((opKey === '$in' || opKey === '$nin') && Array.isArray(wrapper[opKey]) && (wrapper[opKey] as unknown[]).length === 0) {
-          out.push({ kind: 'const', value: opKey === '$nin' });
+          out.push(opKey === '$nin' ? { kind: 'const', value: true, member: key } : { kind: 'const', value: false });
           continue;
         }
 
@@ -2480,7 +2499,10 @@ export function collectFilterLeaves(
   // it are the engine's to judge, as the caller, when it reads that object.
   if (node.kind === 'relation') return [{ member: node.member, operator: 'relation', values: [] }];
   // A boolean constant names no member — it constrains rows, not columns — so
-  // it contributes nothing to the cross-object envelope check.
+  // it contributes nothing to the cross-object envelope check. The empty
+  // `$nin`'s TRUE names its member too, and is not read here: the shared
+  // lowering wraps every `$nin` in its NULL escape, whose `notSet` leaf names
+  // the same member, so every gate already reads that member for it.
   if (node.kind === 'const') return [];
   if (node.kind === 'not') return collectFilterLeaves(node.child);
   return node.children.flatMap(collectFilterLeaves);

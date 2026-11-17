@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { isServiceNotRegisteredError } from '@objectstack/core';
 import type { KeyMaterialMigrationOptions } from '@objectstack/plugin-audit';
 import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
 import { oneShotCrypto, type OneShotCrypto } from './one-shot-settings.js';
@@ -23,11 +24,21 @@ import { oneShotCrypto, type OneShotCrypto } from './one-shot-settings.js';
 /** The `seal` option the three rewrites take. */
 export type RedactionSeal = NonNullable<KeyMaterialMigrationOptions['seal']>;
 
+/** The boot's kernel, as far as {@link RedactionSealRun.seal} reads it. */
+export interface RedactionSealKernel {
+  getService(name: string): unknown;
+  getServiceAsync?(name: string): Promise<unknown>;
+}
+
 export interface RedactionSealRun {
   /** Composed into the boot beside the data-migration plugins. */
   readonly plugins: readonly unknown[];
-  /** The rewrite's `seal`, once the boot is up. */
-  seal(kernel: { getService(name: string): unknown }, engine: unknown): RedactionSeal;
+  /**
+   * The rewrite's `seal`, once the boot is up. Rejects when the host registers
+   * a checkpoint signer or sink that cannot be resolved (#34519): only an
+   * ABSENT signer leaves the run to the local key.
+   */
+  seal(kernel: RedactionSealKernel, engine: unknown): Promise<RedactionSeal>;
   /** The line a run that refused `refused` sealed rows ends with: why, and the fix. */
   refusedLine(refused: number): string;
 }
@@ -42,7 +53,7 @@ export async function composeRedactionSeal(): Promise<RedactionSealRun> {
   }
   return {
     plugins: crypto?.plugins ?? [],
-    seal(kernel, engine) {
+    async seal(kernel, engine) {
       let provider: RedactionSeal['crypto'];
       if (crypto) {
         try {
@@ -54,18 +65,11 @@ export async function composeRedactionSeal(): Promise<RedactionSealRun> {
           unavailable = error instanceof Error ? error.message : String(error);
         }
       }
-      const service = <T>(name: string): T | undefined => {
-        try {
-          return (kernel.getService(name) as T | undefined) ?? undefined;
-        } catch {
-          return undefined;
-        }
-      };
       return {
         engine: engine as RedactionSeal['engine'],
         ...(provider ? { crypto: provider } : {}),
-        signer: service<RedactionSeal['signer']>(AUDIT_CHECKPOINT_SIGNER_SERVICE),
-        sink: service<RedactionSeal['sink']>(AUDIT_CHECKPOINT_SINK_SERVICE),
+        signer: await hostSeam<RedactionSeal['signer']>(kernel, AUDIT_CHECKPOINT_SIGNER_SERVICE, 'sign with the local key'),
+        sink: await hostSeam<RedactionSeal['sink']>(kernel, AUDIT_CHECKPOINT_SINK_SERVICE, 'amend without the off-host export'),
       };
     },
     refusedLine(refused) {
@@ -78,4 +82,41 @@ export async function composeRedactionSeal(): Promise<RedactionSealRun> {
       );
     },
   };
+}
+
+/**
+ * #34519: a host seam the redaction seal reads (`audit.checkpointSigner`,
+ * `audit.checkpointSink`), in three states — the rule the sealer follows
+ * (#34280). Never registered ⇒ `undefined`, and the run keeps its stand-in
+ * (the local signer, no export). Registered and resolved ⇒ the service.
+ * Registered and NOT resolvable — a factory that throws, a KMS client that
+ * cannot start — ⇒ the run stops with an error naming the slot, instead of
+ * amending sealed rows under the local key where the host chose its own.
+ *
+ * The kernel's async accessor tells the first and third apart with the
+ * branded "never registered" rejection (`isServiceNotRegisteredError`), ⛔ not
+ * message text, and builds a factory-registered seam the sync accessor
+ * refuses. A kernel with no async accessor has no factories, so "not
+ * registered" is the only fault its sync accessor reports.
+ */
+async function hostSeam<T>(kernel: RedactionSealKernel, slot: string, fallback: string): Promise<T | undefined> {
+  if (typeof kernel.getServiceAsync === 'function') {
+    try {
+      return ((await kernel.getServiceAsync(slot)) as T | undefined) ?? undefined;
+    } catch (error) {
+      if (isServiceNotRegisteredError(error)) return undefined;
+      const fault = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Audit redaction seal: the '${slot}' service is registered but could not be resolved (${fault}) — no sealed row is amended or ` +
+          `rewritten; the run does not ${fallback} in place of a service the host registered. Fix the registration of ` +
+          'the service named here, then run again.',
+        { cause: error },
+      );
+    }
+  }
+  try {
+    return (kernel.getService(slot) as T | undefined) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }

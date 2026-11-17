@@ -3331,6 +3331,19 @@ jobs:
         continue-on-error: true
         run: pnpm check:select-shard-packages
 
+      # History fetch self-test (#34561). ci.yml's five "Fetch this commit's
+      # history and the base branch" steps run scripts/ci/fetch-history.sh, and
+      # its one property that a healthy run never exercises is the stall bound:
+      # an attempt that writes nothing is killed with its process group and
+      # retried, and one that keeps moving is not. A stub `git fetch` plays a
+      # silent hang, a hang after progress, a slow transfer and fast failures
+      # against a throwaway upstream, and the last section pins that all five
+      # ci.yml steps call the script. Offline; ~40 s.
+      - name: History fetch self-test
+        id: history-fetch-self-test
+        continue-on-error: true
+        run: pnpm check:fetch-history
+
       # Rationale: `scripts/ci/scheduled-full-run.mjs` header (#16467).
       - name: Scheduled full run self-test and concurrency gate
         id: scheduled-full-run-self-test-and-concurrency
