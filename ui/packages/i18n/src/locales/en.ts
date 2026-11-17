@@ -2628,6 +2628,16 @@ const en = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+        publishFromBar_one: '{{count}} unpublished change. Publish it from the draft bar at the top.',
+        publishFromBar_other: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+        showDraftToPublish: '{{count}} unpublished changes. Show the draft to review and publish them.',
+        showDraftToPublish_one: '{{count}} unpublished change. Show the draft to review and publish it.',
+        showDraftToPublish_other: '{{count}} unpublished changes. Show the draft to review and publish them.',
+        showDraft: 'Show draft',
+        receipt: 'Published. Your changes are live.',
+        dismissReceipt: 'Dismiss',
         count: '{{count}} change(s) are not published yet — users cannot see them.',
         publish: 'Publish',
         published: 'All pending changes are live.',
@@ -4154,6 +4164,10 @@ const en = {
       pendingHere: 'Draft preview · {{count}} unpublished changes on this page',
       pendingHere_one: 'Draft preview · {{count}} unpublished change on this page',
       pendingHere_other: 'Draft preview · {{count}} unpublished changes on this page',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
+      pendingInApp_one: 'Draft preview · {{count}} unpublished change in this app. Nothing here is live until you publish.',
+      pendingInApp_other: 'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
       // Magic-moment hint: a freshly-built draft renders empty (dashboards at 0,
       // lists "Nothing here yet") because seed/sample rows only load on publish.
       // Say so plainly so an empty preview never reads as a broken build.
@@ -4305,6 +4319,8 @@ const en = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'This app is not published yet. It works, but only builders can see it. Publish to make it visible to your users.',
       message: 'Unpublished app — fully functional, but only builders can see it. Publish to make it visible to your users.',
       publish: 'Publish',
       publishing: 'Publishing…',
