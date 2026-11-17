@@ -3682,6 +3682,7 @@ const zh = {
       securityBlockTitle_one: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_other: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockWhere: '请在对象的“设置 → 记录共享模型”中修改后重新发布。',
+      flowChecksTitle: '发布前请先看 —— 发布检查会提出以下几点',
       securityRule: {
         owdUnset: '未声明记录共享模型（sharingModel）。运行时会按 private 处理，但这个基线必须是明确做出的决定。',
         owdAlias: '记录共享模型（sharingModel）不是规范取值，运行时会按 private 处理此对象。',

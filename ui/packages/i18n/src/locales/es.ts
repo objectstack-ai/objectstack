@@ -4841,6 +4841,7 @@ const es = {
       securityBlockTitle_many: 'La publicación será rechazada: {{count}} de elementos necesitan una decisión primero',
       securityBlockTitle_other: 'La publicación será rechazada: {{count}} elementos necesitan una decisión primero',
       securityBlockWhere: 'Corríjalo en el objeto en Configuración → Uso compartido de registros y vuelva a publicar.',
+      flowChecksTitle: 'Antes de publicar: la comprobación de publicación señalará lo siguiente',
       securityRule: {
         owdUnset: 'No se ha declarado la base de uso compartido de registros (sharingModel). El entorno de ejecución usa private, pero la base debe ser una decisión explícita.',
         owdAlias: 'La base de uso compartido de registros (sharingModel) no es un valor canónico, así que el entorno de ejecución trata el objeto como private.',

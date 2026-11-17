@@ -4837,6 +4837,7 @@ const fr = {
       securityBlockTitle_many: 'La publication sera refusée — {{count}} d’éléments nécessitent d’abord une décision',
       securityBlockTitle_other: 'La publication sera refusée — {{count}} éléments nécessitent d’abord une décision',
       securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Partage d’enregistrements, puis publiez à nouveau.',
+      flowChecksTitle: 'Avant de publier : la vérification de publication signalera ceci',
       securityRule: {
         owdUnset: 'Aucune base de partage des enregistrements (sharingModel) n’est déclarée. L’exécution se rabat sur private, mais la base doit être une décision explicite.',
         owdAlias: 'La base de partage des enregistrements (sharingModel) n’est pas une valeur canonique : l’exécution traite donc l’objet comme private.',
