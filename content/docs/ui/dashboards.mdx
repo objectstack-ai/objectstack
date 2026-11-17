@@ -703,14 +703,23 @@ export const projectTasksDataset = defineDataset({
   label: 'Project Tasks',
   object: 'project_task',
   dimensions: [
-    { name: 'status', field: 'status', type: 'string' },
-    { name: 'priority', field: 'priority', type: 'string' },
-    { name: 'completed_month', field: 'completed_at', type: 'date', dateGranularity: 'month' },
+    { name: 'status', field: 'status', type: 'string', synonyms: ['state', 'progress'] },
+    { name: 'priority', field: 'priority', type: 'string', synonyms: ['urgency', 'importance'] },
+    {
+      name: 'completed_month', field: 'completed_at', type: 'date', dateGranularity: 'month',
+      synonyms: ['month completed', 'finish month'],
+    },
   ],
   measures: [
-    { name: 'open_count', aggregate: 'count', filter: { status: { $ne: 'done' } } },
-    { name: 'done_count', aggregate: 'count', filter: { status: 'done' } },
-    { name: 'task_count', aggregate: 'count' },
+    {
+      name: 'open_count', aggregate: 'count', filter: { status: { $ne: 'done' } },
+      synonyms: ['open tasks', 'unfinished tasks'],
+    },
+    {
+      name: 'done_count', aggregate: 'count', filter: { status: 'done' },
+      synonyms: ['done tasks', 'completed tasks'],
+    },
+    { name: 'task_count', aggregate: 'count', synonyms: ['tasks', 'number of tasks'] },
   ],
 });
 ```

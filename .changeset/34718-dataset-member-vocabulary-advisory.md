@@ -6,7 +6,7 @@
 
 feat(lint): a dataset measure or dimension that declares neither `synonyms` nor a `description` is advised
 
-Clause-②: no
+Clause-②: yes (widening) — @objectstack/lint gains three exports on its "." entry: validateDatasetMemberVocabulary, DATASET_MEMBER_NO_VOCABULARY and the DatasetMemberVocabularyFinding type; nothing accepted before is refused
 Metadata-protocol: none
 
 A dataset member answers a business question through its vocabulary (ADR-0149 D1): `synonyms`, the words a person types for it, and `description`, a short business definition. Both keys are optional, so a dataset that declares neither on a member passes every check, and that member then answers only to its own name and label. A person who asks in other words, or in another language, matches nothing and gets a number from a plain object query instead of the governed metric.
