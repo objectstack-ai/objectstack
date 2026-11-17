@@ -541,6 +541,7 @@
     "checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization (function)",
     "checkListViewChartBinding (function)",
+    "checkListViewTimesheetBinding (function)",
     "checkPageDefaultPlacement (function)",
     "checkPageMainRegionWidth (function)",
     "checkPagePrintComposition (function)",

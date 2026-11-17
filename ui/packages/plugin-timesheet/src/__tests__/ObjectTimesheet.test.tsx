@@ -93,6 +93,16 @@ describe('ObjectTimesheet', () => {
     await waitFor(() => expect(ds.update).toHaveBeenCalledWith('time_entry', 'r1', { hours: 1234.6 }));
   });
 
+  it('reads a typed `1,000` in the display locale (en-US) as a thousand, never one', async () => {
+    const ds = makeDataSource([{ id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 2 }]);
+    renderTimesheet(ds);
+    await waitFor(() => expect(screen.getAllByTestId('timesheet-row')).toHaveLength(1));
+    const monday = screen.getAllByTestId('timesheet-cell')[1] as HTMLInputElement;
+    fireEvent.change(monday, { target: { value: '1,000' } });
+    fireEvent.blur(monday);
+    await waitFor(() => expect(ds.update).toHaveBeenCalledWith('time_entry', 'r1', { hours: 1000 }));
+  });
+
   it('pivots records into rows and days with row, day and week totals', async () => {
     const ds = makeDataSource([
       { id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 2 },

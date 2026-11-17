@@ -3299,6 +3299,43 @@ export function checkListViewChartBinding(
   ctx.addIssue({ code: 'custom', path: ['chart'], message: LIST_VIEW_CHART_NEEDS_BINDING });
 }
 
+/** [#34382] `type: 'timesheet'` with no `timesheet` block — refused at `timesheet`. */
+const LIST_VIEW_TIMESHEET_NEEDS_BINDING =
+  "This list view is `type: 'timesheet'` but declares no `timesheet` block, so the weekly grid has no "
+  + "rows, day or value to pivot. Declare `timesheet: { rowFields: ['<field>'], dateField: '<date_field>', "
+  + "valueField: '<number_field>' }`: `rowFields` names the 1 to 3 fields whose distinct values make the "
+  + 'rows, `dateField` the date each record falls on, and `valueField` the number each cell edits. There is '
+  + 'no default binding to fall back on. A view that is not meant to be a timesheet takes another `type`.';
+
+/**
+ * [#34382] A `type: 'timesheet'` list view must bind its grid: a `timesheet`
+ * block naming its row fields, date field and value field.
+ *
+ * - No block ⇒ one issue at `timesheet`.
+ * - A declared block ⇒ nothing here: {@link TimesheetConfigSchema} is strict
+ *   and requires all three keys, at `timesheet.*`.
+ *
+ * Without the block the renderer has nothing to fall back on (only the
+ * author knows which fields make the rows, the day and the value), so it
+ * draws only its "configuration required" screen — the fully inert case
+ * ADR-0078 §1 grades an error. The type is new in this release, so refusing
+ * the block-less shape here narrows nothing a published version accepted;
+ * the six older binding rows in `kernel/functional-completeness.ts` stay
+ * warnings because escalating THEM would be that narrowing.
+ *
+ * Reads `type` as the door hands it, exactly as
+ * {@link checkListViewChartBinding} does, and is attached beside it at the
+ * same three list-view doors, exported for the same reason: a mirror built
+ * from `ListViewSchema.shape` re-attaches it.
+ */
+export function checkListViewTimesheetBinding(
+  view: { type?: unknown; timesheet?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (view.type !== 'timesheet' || view.timesheet !== undefined) return;
+  ctx.addIssue({ code: 'custom', path: ['timesheet'], message: LIST_VIEW_TIMESHEET_NEEDS_BINDING });
+}
+
 /**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
@@ -3736,7 +3773,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 export const ListViewSchema = lazySchema(() =>
   ListViewShapeSchema
     .superRefine(checkListViewCalendarVisualization)
-    .superRefine(checkListViewChartBinding));
+    .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding));
 
 /**
  * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
@@ -5686,7 +5724,8 @@ export const ObjectListViewSchema = lazySchema(() =>
     // authoring surface — as the one door where a calendar-enabled view with
     // no `calendar:` block, or a chart view binding no dataset, parses clean.
     .superRefine(checkListViewCalendarVisualization)
-    .superRefine(checkListViewChartBinding));
+    .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding));
 
 /**
  * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
@@ -7201,6 +7240,7 @@ const ListViewOverlayWireSchema = lazySchema(() =>
     .superRefine(checkListOverlayTypeNeedsColumns)
     .superRefine(checkListViewCalendarVisualization)
     .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding)
     .overwrite(applyListOverlayTypeDefault),
 );
 

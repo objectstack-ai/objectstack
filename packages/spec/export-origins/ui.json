@@ -524,6 +524,7 @@
     "checkGlobalFilterDateDefaultValue": "src/ui/dashboard.zod.ts#checkGlobalFilterDateDefaultValue (function)",
     "checkListViewCalendarVisualization": "src/ui/view.zod.ts#checkListViewCalendarVisualization (function)",
     "checkListViewChartBinding": "src/ui/view.zod.ts#checkListViewChartBinding (function)",
+    "checkListViewTimesheetBinding": "src/ui/view.zod.ts#checkListViewTimesheetBinding (function)",
     "checkPageDefaultPlacement": "src/ui/page.zod.ts#checkPageDefaultPlacement (function)",
     "checkPageMainRegionWidth": "src/ui/page.zod.ts#checkPageMainRegionWidth (function)",
     "checkPagePrintComposition": "src/ui/page.zod.ts#checkPagePrintComposition (function)",

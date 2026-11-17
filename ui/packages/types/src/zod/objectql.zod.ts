@@ -88,6 +88,7 @@ import {
   // attachable there; in the authored `list-view` node's bag the kind is the
   // spec's own `type`, so `ListViewPropsBag` below attaches it.
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
 } from '@objectstack/spec/ui';
 // objectui#11266 — one inline master-detail grid column, the closed shape
 // `@objectstack/spec` 17.6.0 judges `FormViewSchema.subforms[].columns` by
@@ -5390,10 +5391,11 @@ function checkListViewBagDatasetChartFilter(
  *     instead: `properties.data` and `properties.type`. ⛔ No fallback
  *     acceptance and no second spelling.
  *
- * The spec's two object-level list view checks are attached, both by
+ * The spec's three object-level list view checks are attached, each by
  * reference: `checkListViewCalendarVisualization`, as on the flat mirror, and
- * `checkListViewChartBinding`, which the flat mirror cannot attach (its view
- * kind is `viewType`) and the bag can, because its `type` is the spec's. So is
+ * `checkListViewChartBinding` and `checkListViewTimesheetBinding`, which the
+ * flat mirror cannot attach (its view kind is `viewType`) and the bag can,
+ * because its `type` is the spec's. So is
  * objectui's own dataset-chart filter refusal, read in the bag
  * ({@link checkListViewBagDatasetChartFilter}).
  *
@@ -5408,7 +5410,7 @@ const ListViewPropsBag = z
   .extend({
     type: ViewKindEnum.optional().describe(
       'The list kind — `@objectstack/spec`\'s list view `type` (grid, kanban, gallery, calendar, timeline, gantt, '
-        + 'map, chart, tree), by reference. Absent, the list is a grid, or the kind of the saved view the node\'s '
+        + 'map, chart, tree, timesheet), by reference. Absent, the list is a grid, or the kind of the saved view the node\'s '
         + '`dataSource.view` names.',
     ),
     objectName: aliasKeyRefusal('objectName', 'properties.data', 'a page `list-view` node', LIST_VIEW_PAGE_OBJECT_NAME_RETIRED),
@@ -5416,6 +5418,7 @@ const ListViewPropsBag = z
   })
   .superRefine(checkListViewCalendarVisualization)
   .superRefine(checkListViewChartBinding)
+  .superRefine(checkListViewTimesheetBinding)
   .superRefine(checkListViewBagDatasetChartFilter);
 
 /**

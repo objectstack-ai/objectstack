@@ -149,17 +149,45 @@ describe('planCellWrite', () => {
 
 describe('parseCellInput and rowValuesComplete', () => {
   it('parses numbers, clears on empty, refuses text', () => {
-    expect(parseCellInput(' 7.5 ')).toBe(7.5);
-    expect(parseCellInput('1,5')).toBe(1.5);
-    expect(parseCellInput('')).toBeNull();
-    expect(parseCellInput('abc')).toBe('invalid');
+    expect(parseCellInput(' 7.5 ', 'en')).toBe(7.5);
+    expect(parseCellInput('-2', 'en')).toBe(-2);
+    expect(parseCellInput('', 'en')).toBeNull();
+    expect(parseCellInput('abc', 'en')).toBe('invalid');
+    // Number() would take these; a typed hour never means them.
+    expect(parseCellInput('0x10', 'en')).toBe('invalid');
+    expect(parseCellInput('1e3', 'en')).toBe('invalid');
   });
 
-  it('reads the ungrouped display back, and refuses a grouped number rather than misread it', () => {
-    expect(parseCellInput('1234.5')).toBe(1234.5);
-    expect(parseCellInput('1234,5')).toBe(1234.5);
-    expect(parseCellInput('1,234.5')).toBe('invalid');
-    expect(parseCellInput('1,234,5')).toBe('invalid');
+  it('reads the ungrouped display back in its own locale', () => {
+    expect(parseCellInput('1234.5', 'en')).toBe(1234.5);
+    expect(parseCellInput('1234,5', 'de')).toBe(1234.5);
+  });
+
+  it("en: a comma groups thousands, so `1,000` is a thousand, never one (#34382 L2 S2)", () => {
+    expect(parseCellInput('1,000', 'en')).toBe(1000);
+    expect(parseCellInput('1,234', 'en')).toBe(1234);
+    expect(parseCellInput('1,234.5', 'en')).toBe(1234.5);
+    expect(parseCellInput('12,345,678', 'en')).toBe(12345678);
+    // A comma that is not between whole groups of three is refused, not read as a decimal.
+    expect(parseCellInput('1,5', 'en')).toBe('invalid');
+    expect(parseCellInput('1,234,5', 'en')).toBe('invalid');
+    expect(parseCellInput('1.2.3', 'en')).toBe('invalid');
+  });
+
+  it('de: a comma is the decimal and a dot groups thousands, so `1.000` is a thousand', () => {
+    expect(parseCellInput('1,5', 'de')).toBe(1.5);
+    expect(parseCellInput('1.000', 'de')).toBe(1000);
+    expect(parseCellInput('1.234', 'de')).toBe(1234);
+    expect(parseCellInput('1.234,5', 'de')).toBe(1234.5);
+    expect(parseCellInput('1,000', 'de')).toBe(1);
+    expect(parseCellInput('7.5', 'de')).toBe('invalid');
+    expect(parseCellInput('1,2,3', 'de')).toBe('invalid');
+  });
+
+  it('a locale that groups with a space takes a space there; a locale with its own decimal mark reads Latin input', () => {
+    expect(parseCellInput('1 234,5', 'fr')).toBe(1234.5);
+    expect(parseCellInput('1\u202f234,5', 'fr')).toBe(1234.5);
+    expect(parseCellInput('7.5', 'ar-EG')).toBe(7.5);
   });
 
   it('requires every row field', () => {

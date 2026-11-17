@@ -365,7 +365,10 @@ export function checkFieldCompleteness(def: unknown): CompletenessFinding[] {
  *   the "Timesheet configuration required" refusal
  *   (`data-testid="timesheet-missing-binding"`). `TimesheetConfigSchema`
  *   requires all three keys, so a present block is a complete binding and
- *   only an absent one can reach the refusal.
+ *   only an absent one can reach the refusal. The spec's list-view doors
+ *   refuse that absent block outright (`checkListViewTimesheetBinding`,
+ *   `ui/view.zod.ts`), so this row is what a stack meets before it parses
+ *   (`os validate` over source); it stays a warning like its six siblings.
  *
  * RE-MEASUREMENT HISTORY. [#17445] corrected the `calendar` row, reading
  * objectui `main` at `0cf2d6644` (2026-09-21), and found the `gantt`,

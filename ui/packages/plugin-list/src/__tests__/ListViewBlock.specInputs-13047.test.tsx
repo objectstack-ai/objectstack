@@ -730,12 +730,9 @@ describe('objectui#13047 — each kind\'s own block, handed to the node of the v
   });
 
   it('`timesheet`: the `rowFields` / `dateField` / `valueField` binding reaches the grid', async () => {
-    const control = mount({ type: 'timesheet' });
-    await loaded(control.dataSource);
-    expect(lastHanded('object-timesheet')?.timesheet).toBeUndefined();
-    cleanup();
-    resetHanded();
-
+    // No block-less control here: the spec refuses `type: 'timesheet'` without a
+    // `timesheet` block (checkListViewTimesheetBinding), so, as for `chart`, the
+    // fixture always carries one.
     const block = { rowFields: ['owner'], dateField: 'due', valueField: 'amount' };
     const { dataSource } = mount({ type: 'timesheet', timesheet: block });
     await handedTo('object-timesheet');

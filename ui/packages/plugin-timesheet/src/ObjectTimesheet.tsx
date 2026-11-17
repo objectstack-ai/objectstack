@@ -321,7 +321,7 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
 
   const writeCell = async (row: TimesheetRow, day: string, cell: TimesheetCell, text: string) => {
     const id = cellId(row.key, day);
-    const parsed = parseCellInput(text);
+    const parsed = parseCellInput(text, locale);
     if (parsed === 'invalid') {
       setDrafts((d) => ({ ...d, [id]: { text, error: t('timesheet.invalidNumber') } }));
       return;

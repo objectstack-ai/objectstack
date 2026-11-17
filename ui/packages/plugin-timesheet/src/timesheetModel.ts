@@ -200,17 +200,52 @@ export function buildTimesheetRows(
   return { rows: [...rows.values()], dayTotals, weekTotal };
 }
 
+/** The decimal and digit-group marks `locale` writes numbers with. */
+function numberMarks(locale: string | undefined): { decimal: string; group: string } {
+  try {
+    const parts = new Intl.NumberFormat(locale).formatToParts(12345.6);
+    const decimal = parts.find((p) => p.type === 'decimal')?.value ?? '.';
+    const group = parts.find((p) => p.type === 'group')?.value ?? ',';
+    // A locale that writes its own decimal mark (Arabic's `٫`) gets the Latin
+    // marks: a typed number there is ASCII, and its own digits never parse.
+    if (decimal !== '.' && decimal !== ',') return { decimal: '.', group: ',' };
+    return { decimal, group };
+  } catch {
+    return { decimal: '.', group: ',' };
+  }
+}
+
 /**
  * What a typed cell value means: `null` clears the cell, a number sets it, and
  * `'invalid'` is text that is neither (the cell shows "Enter a number").
+ *
+ * Read in the display `locale`'s own marks (#34382): its decimal mark, at most
+ * once, and its digit-group mark only between whole groups of three — so in
+ * `en` `1,000` is a thousand and `1,5` is refused, and in `de` `1.000` is a
+ * thousand and `1,5` is one and a half. A locale grouping with a space
+ * (`fr`, `ru`) takes any space there. Any other mark, an exponent or a hex
+ * prefix is refused rather than guessed at. The grid displays without
+ * grouping in the same locale, so what it shows always reads back.
  */
-export function parseCellInput(text: string): number | null | 'invalid' {
+export function parseCellInput(text: string, locale?: string): number | null | 'invalid' {
   const trimmed = text.trim();
   if (trimmed === '') return null;
-  // One `,` is a decimal comma (de, fr, ru…); the grid displays without digit
-  // grouping, so a `,` never stands for a thousands separator here.
-  if ((trimmed.match(/,/g) ?? []).length > 1 || (trimmed.includes(',') && trimmed.includes('.'))) return 'invalid';
-  const n = Number(trimmed.replace(',', '.'));
+  const { decimal, group } = numberMarks(locale);
+  const negative = trimmed.startsWith('-');
+  const body = negative ? trimmed.slice(1) : trimmed;
+  const decimalAt = body.indexOf(decimal);
+  if (decimalAt !== body.lastIndexOf(decimal)) return 'invalid';
+  const whole = decimalAt < 0 ? body : body.slice(0, decimalAt);
+  const fraction = decimalAt < 0 ? '' : body.slice(decimalAt + 1);
+  if (!/^\d*$/.test(fraction)) return 'invalid';
+  let digits = whole;
+  if (!/^\d*$/.test(whole)) {
+    const groups = whole.split(/\s/.test(group) ? /\s/ : group);
+    if (!/^\d{1,3}$/.test(groups[0]) || groups.slice(1).some((g) => !/^\d{3}$/.test(g))) return 'invalid';
+    digits = groups.join('');
+  }
+  if (digits === '' && fraction === '') return 'invalid';
+  const n = Number(`${negative ? '-' : ''}${digits || '0'}${fraction ? `.${fraction}` : ''}`);
   return Number.isFinite(n) ? n : 'invalid';
 }
 

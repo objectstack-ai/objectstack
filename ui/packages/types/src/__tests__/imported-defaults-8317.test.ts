@@ -141,6 +141,7 @@ import {
   navItemVisibleDataNeedsDataSource,
   checkListViewCalendarVisualization,
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
   checkPageSourceCompleteness,
   checkDashboardWidgetStageOrder,
   checkDashboardWidgetMetricMeasureArity,
@@ -757,6 +758,8 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // `ListViewSchema`, attached on the authored page `list-view` node's bag
       // (`ListViewPropsBag`), whose `type` is the spec's view kind.
       ['checkListViewChartBinding', checkListViewChartBinding],
+      // objectstack#34382: the timesheet-binding check, attached beside it on the same bag.
+      ['checkListViewTimesheetBinding', checkListViewTimesheetBinding],
       // objectstack#28450: the spec's `AppSchema.landing` check, re-attached on
       // `AppComponentSchema` under the objectui#7715 ruling.
       ['checkAppLandingItems', checkAppLandingItems],
