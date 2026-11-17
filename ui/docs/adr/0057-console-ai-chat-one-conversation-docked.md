@@ -433,7 +433,9 @@ A1.b had kept product-only. Implemented under objectui#10926.
 **What it changes.** §3's focus mode ("`/ai` = the same panel maximized"), A2's
 maximize clause ("Maximize goes to `/ai/build?package=PKG`"), open question 2
 (the floating button stays as the dock's collapsed affordance) and open
-question 5 ("the routes are untouched"). Everything else stands: one
+question 5 ("the routes are untouched"); and, with objectstack#34610 under the
+same ruling, ADR-0037's split-view presentation ("chat on the left … draft
+overlay on the right") and its `LiveCanvas` host. Everything else stands: one
 conversation context (§1), one resolver (§2), the runtime bubble (§4), one
 gate and OSS → nothing (§5, §6), A1 and A2's key decision.
 
@@ -458,6 +460,9 @@ It accepted the seat's recommendation as presented:
   entry.
 - Old `/ai` and `/ai/build` links, shared links included, redirect to the
   opened drawer.
+- With it (objectstack#34610, ruled the same day, comment 6937505798): a
+  build happens in the same right drawer with the app draft itself in the
+  main area; no nested preview; one publish button and one change count.
 - Kept: A1, a new build starts UNBOUND (no empty app is created first).
   ADR-0063 stays compatible: the product is still chosen by principal.
 
@@ -489,13 +494,22 @@ It accepted the seat's recommendation as presented:
   to address.
 - **Builder guidance.** Inside an app, a maker's empty state names both
   halves, data questions and changes, as the composer hint already did.
+- **Building (objectstack#34610, same ruling).** A build runs in the same
+  drawer, and the main area shows the app itself in the shell's draft mode
+  (`?preview=draft`), refreshed in place after each build turn. There is no
+  nested preview: the ADR-0037 `LiveCanvas` iframe host is retired, and its
+  split-view presentation with it (ADR-0037 is amended to match). A new
+  build still starts UNBOUND (A1): the main area keeps its page until the
+  build binds a package, then shows that app's draft. The screen has one
+  publish control, the shell's draft bar, and one change count, the current
+  app's (package's) unpublished changes.
 
 **Consequences.** The full-page chat component is no longer routed. A page
 that is not wrapped by a drawer host can still link to an `/ai…` address and
 reach the drawer. A surface whose state matters for deep-linking (ui ADR-0054
 C3) reaches the drawer through those addresses, not through a query
-parameter on every page. Implemented under objectstack#34608; the Live Canvas
-presentation (ADR-0037) follows in objectstack#34610.
+parameter on every page. Implemented under objectstack#34608 (the drawer)
+and objectstack#34610 (building with the app draft in the main area).
 
 ## Open design questions
 
