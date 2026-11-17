@@ -7,9 +7,7 @@
 - [Best Practices](#best-practices) · [Error Handling](#error-handling) · [References](#references)
 
 Reference companion to `objectstack-data/SKILL.md`, and the catalog's anchor for
-data hooks. Covers the lifecycle events, the sandboxed `body` (and the deprecated
-inline `handler`), the `HookContext` API, registration, and the canonical patterns
-(delete guards, audit trails, cross-object writes, read masking).
+data hooks.
 `check:skill-examples` skips the unmarked blocks: fragments, shapes, and pattern 4's bare `any`.
 
 
@@ -61,7 +59,7 @@ ObjectStack provides lifecycle events organized by operation type:
 | **Purpose** | Validation, enrichment, transformation | Side effects, notifications, logging |
 | **Can modify** | `ctx.input` (mutable) | `ctx.result` (mutable) |
 | **Can abort** | Yes (throw error → rollback) | A sync after-hook's throw still rolls back the transaction (see error handling) |
-| **Transaction** | One transaction with the outer write: a refusal anywhere in it (a validation, a later hook, a driver constraint) rolls back the hook's `ctx.api` writes too; no per-hook opt-out. Exits: a transaction the caller opened decides; an object off the default datasource, or a default driver with no transactions (turso's remote transport), opens none, so those writes stay stored; a hook registered in code (`registerHook`) opens none. MongoDB needs a replica set (read in code, not measured) | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
+| **Transaction** | One transaction with the outer write: a refusal anywhere in it (a validation, a later hook, a driver constraint) rolls back the hook's `ctx.api` writes too; no per-hook opt-out. Exits: a transaction the caller opened decides; an object off the default datasource, or a default driver with no transactions (turso's remote transport), opens none, so those writes stay stored after a refusal; a hook registered in code (`registerHook`) opens none. MongoDB needs a replica set (read in code, not measured) | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
 | **Error handling** | Aborts by default (`onError: 'abort'`) | **Also aborts by default** — `onError` defaults to `'abort'` unconditionally; set `onError: 'log'` on side-effect hooks |
 
 ---
@@ -191,14 +189,9 @@ in neither). So:
   object) — the engine refuses the batch whole, before any write, when two rows'
   key sets differ (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`, status 400; ADR-0058
   Amendment II.3).
-- **`after*` hooks fire PER ROW, so a bulk write needs no special
-  condition.** A predicate (`multi: true`) update/delete dispatches its `after*`
-  hooks **once per matched row**, each on a single-record-shaped context —
-  `previous` is that row's pre-image, `record` is that row's real state (not the
-  bare payload), and `input.id` (`handler`; a `body`: `ctx.previous.id`) names the row. A transition condition therefore
-  **is** available on `afterUpdate` / `afterDelete`: write it once and it means
-  the same thing whether the write carried an id or a predicate, with no
-  bulk-aware branch of its own.
+- **`after*` hooks dispatch once per matched row too** (`record` is that row's
+  real state, not the bare payload), so a transition condition on `afterUpdate` /
+  `afterDelete` means the same whether the write carried an id or a predicate.
 - **Guard optional values with `!= null`, never with `has(...)`.** A declared
   field holding `null` is *present*, so `has(record.spent)` is uniformly true and
   `has(record.spent) && record.spent > record.budget` still faults on
@@ -686,7 +679,7 @@ A `body` cannot do this: it writes back only `ctx.input`, and its `ctx.result` i
 > set or position), prefer declarative **field-level metadata** (secret/masked
 > fields) — it applies on every read path automatically. Use an `afterFind` hook
 > only for masking that depends on runtime logic the field metadata can't
-> express. A single `afterFind` subscription covers both `find` and `findOne`.
+> express.
 
 ```typescript
 const maskSensitiveData = defineHook({
@@ -772,9 +765,7 @@ with no start or end is neither checked nor counted.
 ## Registration Methods
 
 **1. Declarative — `defineStack({ hooks })`, the default.** `AppPlugin` auto-binds
-these at startup: no `register*Hook` boilerplate, and the declarative fields
-(`condition`, `async`, `retryPolicy`, `timeoutMs`, `onError`, `priority`) are honoured
-**only** on this path. A string-named `handler` (deprecated) resolves through the stack's
+these at startup: no `register*Hook` boilerplate. A string-named `handler` (deprecated) resolves through the stack's
 `functions` map.
 
 ```typescript
@@ -813,9 +804,10 @@ cross-object operations; refuse a business rule by a
 
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); write
 business records to another datasource from a `before*` hook through `ctx.api`
-(refused there with `CrossDatasourceTransactionWriteError`; only an append-only
-ledger, `lifecycle.class` `audit` / `telemetry` / `event`, is written outside the
-transaction and survives its rollback); let a hook re-trigger itself; use `object: '*'` unless you mean every object; throw in
+(its transaction refuses that write with `CrossDatasourceTransactionWriteError`;
+only an append-only ledger, `lifecycle.class` `audit` / `telemetry` / `event`, is
+written outside it and survives its rollback); let a hook re-trigger itself;
+use `object: '*'` unless you mean every object; throw in
 `after*` unless the failure must abort the operation; react to a refused or
 rolled-back write from an `async: true` hook, which never runs then — use a sync
 hook (its `ctx.api` writes roll back with the write) or record it in the caller,
