@@ -21,12 +21,20 @@
  * - an `en` default: today's answer — the authored labels, and no hit for the
  *   zh-CN bundle term;
  * - an i18n service the host cannot resolve (its resolver throws), or none:
- *   the untranslated list, never an error.
+ *   the untranslated list, never an error;
+ * - an i18n service that resolves but whose `getLocales` / `getTranslations`
+ *   throws, over the REAL executor: a degraded read on both dataset tools
+ *   (seat ruling A, its own describe below).
  */
 
 import { describe, it, expect } from 'vitest';
 import type { ListDatasetsOutput } from '@objectstack/spec/ai';
-import { matchDatasetTerms, type MatchableMember } from '@objectstack/service-analytics';
+import {
+  AnalyticsServicePlugin,
+  matchDatasetTerms,
+  type AnalyticsService,
+  type MatchableMember,
+} from '@objectstack/service-analytics';
 import { createStdioDataBridge, type StdioDataBridgeDeps, type StdioDatasetToolsService } from './stdio-data-bridge.js';
 
 const PRINCIPAL = { userId: 'u_key', tenantId: 'org_1' };
@@ -139,5 +147,89 @@ describe('[ADR-0149 D2] stdio list_datasets is localized for the workspace defau
   it('a host with no i18n service leaves the list untranslated', async () => {
     const answer = await bridgeWith(undefined).listDatasets!({});
     expect(answer.datasets[0].measures.map((m) => m.label)).toEqual(['Total Amount']);
+  });
+});
+
+/**
+ * [ADR-0149 D2] An i18n service that RESOLVES but whose reads throw is not the
+ * unresolvable service above. `translationBundleOf` calls `getLocales` and
+ * `getTranslations` unguarded, so `translateMetaList` rejects with the i18n
+ * error, and `loadDatasets` leaves that rejection to throw. The executor here
+ * is the REAL one (the analytics service `AnalyticsServicePlugin` registers,
+ * admission wired), so the answer is the executor's own degraded-read
+ * contract: `list_datasets` lists nothing, says `partial` and names the error;
+ * `query_dataset` refuses 503 `SERVICE_UNAVAILABLE` for a server-side fault.
+ *
+ * Pinned on purpose under seat ruling A: the catalogue degrades and says so.
+ * A follow-up (B: serve the untranslated text on a translation fault, inside
+ * the shared translator) would flip these expectations deliberately, on both
+ * transports at once.
+ */
+describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but its reads throw', () => {
+  /** The analytics service AnalyticsServicePlugin registers, so the executor is the platform's own. */
+  async function wiredAnalytics(): Promise<AnalyticsService> {
+    const registered: Record<string, unknown> = {};
+    const ctx = {
+      getService: (name: string) => registered[name],
+      registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+      replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+      logger: { info() {}, warn() {}, error() {}, debug() {} },
+    };
+    await new AnalyticsServicePlugin().init(ctx as never);
+    const analytics = registered.analytics as AnalyticsService;
+    expect(analytics.hasPluginWiredAdmission()).toBe(true);
+    return analytics;
+  }
+
+  /** A resolved i18n service whose `read` throws `message`; the other read answers the zh-CN bundle. */
+  function i18nWhoseReadThrows(read: 'getLocales' | 'getTranslations', message: string) {
+    return {
+      getLocales: () => {
+        if (read === 'getLocales') throw new Error(message);
+        return ['zh-CN', 'en'];
+      },
+      getTranslations: (locale: string) => {
+        if (read === 'getTranslations') throw new Error(message);
+        return locale === 'zh-CN' ? ZH_CN : {};
+      },
+      getDefaultLocale: () => 'zh-CN',
+    };
+  }
+
+  async function bridgeOverRealExecutor(read: 'getLocales' | 'getTranslations', message: string) {
+    return createStdioDataBridge({
+      engine: {} as any,
+      metadataService: { list: async () => [] } as any,
+      protocol: () => ({ getMetaItems: async () => ({ items: [METRICS] }) }) as any,
+      resolvePrincipal: async () => PRINCIPAL as any,
+      datasetTools: await wiredAnalytics(),
+      i18n: () => i18nWhoseReadThrows(read, message),
+    });
+  }
+
+  const CASES = [
+    { read: 'getLocales' as const, message: 'locales exploded' },
+    { read: 'getTranslations' as const, message: 'bundle offline' },
+  ];
+
+  it.each(CASES)('$read throwing: list_datasets lists nothing, says partial and names the i18n error', async ({ read, message }) => {
+    const bridge = await bridgeOverRealExecutor(read, message);
+    const answer = await bridge.listDatasets!({ terms: TERMS });
+    expect(answer).toEqual({ datasets: [], partial: true, warning: expect.stringContaining(message) });
+    expect(answer.warning).toMatch(/^The dataset catalogue could not be read: /);
+  });
+
+  it.each(CASES)('$read throwing: query_dataset refuses 503 SERVICE_UNAVAILABLE, naming the failed read', async ({ read, message }) => {
+    const bridge = await bridgeOverRealExecutor(read, message);
+    const refused = await bridge
+      .queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 })
+      .then(
+        () => undefined,
+        (e: unknown) => e as { code?: unknown; status?: unknown; message?: unknown },
+      );
+    expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    // The failed read's own 503 (naming the i18n error), not the executor's
+    // "not available on this deployment" one.
+    expect(refused?.message).toContain(`the dataset read failed (${message})`);
   });
 });
