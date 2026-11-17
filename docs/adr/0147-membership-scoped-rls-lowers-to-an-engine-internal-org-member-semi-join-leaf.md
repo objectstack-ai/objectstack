@@ -167,6 +167,18 @@ when the read runs, where the array was read when the request was resolved ([Con
   With no active organization the leaf composes to the plain `$in: [caller]`, and no subquery is issued.
 - **The name.** `OrgMemberIds` is the proposed name, a new export of `@objectstack/spec` beside `ReadableIds` (O1).
 
+> **Amendment note (2026-11-17, [ADR-0155](./0155-sharing-scope-share-grants-lower-to-an-engine-internal-semi-join-leaf.md) — ruling record [`6942854600`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-6942854600) on #33787).**
+> ADR-0155 (Accepted) adds a third leaf over `sys_record_share`, and the executor seam that passes an
+> arrives-composed leaf through is built once for both leaves (its D4, "Built once"). That seam holds one recipient
+> rule for both: every identity a composed leaf names is compared with what the reading context itself carries. For
+> this record's leaf it compares the anchor's caller and organization, together, with the anchor the reading context
+> carries (D-e), and admits the leaf only when both are equal; a system context is exempt; a mismatch, or a reading
+> context that carries no anchor, is a composition fault refused in ADR-0139 D3's envelope. Nothing is re-derived from
+> the context's `userId` or `tenantId`, and the delegator's rebuilt context of D-c carries the live principal's anchor
+> and is admitted under it. The rule checks the anchor; it changes neither what the anchor carries nor where it is
+> captured (this D-a and D-c), and nothing else in this record moves. Its cases are pinned on the card that adds this
+> leaf to the seam (ADR-0155 plan step 2).
+
 ### D-b — The inner filter: exactly today's read
 
 The subquery is the resolver's own read, restated as SQL, with nothing added:
