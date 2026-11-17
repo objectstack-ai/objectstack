@@ -12,8 +12,15 @@ import { normalizeDatasetTerm } from '@objectstack/spec/ui';
  * dataset schema's own vocabulary validation uses (NFKC, case-fold, trim,
  * collapse whitespace, `_` and `-` folded to a space) — and EQUALITY is a hit.
  * A substring, a stem or a near neighbour is not a hit. The match targets are
- * the member's `name`, its `label` in every locale of an inline map, and each
- * of its `synonyms`.
+ * the member's `name`, its `label` in every locale of an inline map, plus the
+ * translation bundle's label in the caller's locale only, and each of its
+ * `synonyms`; a word in another language hits only as an authored synonym
+ * (ADR-0149 D3 rule 1's amendment note, ruled 「A+C 本语言标签+同义词」).
+ *
+ * This function never reads the bundle: the transport localizes the catalogue
+ * before it runs (the HTTP door for the request's locale, stdio for the i18n
+ * service's default), and where the bundle answers for a member that value is
+ * the `label` handed in, in place of the authored string or inline map.
  *
  * Rules 2–5 (one hit wins, several hits ask, no hit falls back to the object
  * query labelled 「非指标口径」, a dimension hit alone is no answer) are the
@@ -24,7 +31,10 @@ import { normalizeDatasetTerm } from '@objectstack/spec/ui';
 /** A member's match targets, as the dataset declares them. */
 export interface MatchableMember {
   readonly name: string;
-  /** A string, or an inline locale map (every locale is a target). */
+  /**
+   * A string, or an inline locale map (every locale is a target); a bundle
+   * label arrives already resolved to the caller's locale, as a string.
+   */
   readonly label?: unknown;
   readonly synonyms?: readonly unknown[];
 }
