@@ -215,7 +215,9 @@ describe('IAutomationService.dryRun — the contract (#33757)', () => {
             'no other flow, no audit row.',
             'never send or call anything',
             'no child run starts.',
-            'every named user.',
+            'is admitted to a\n     *    dry run for the named user',
+            'The run is\n     *    never elevated: every read and every permission judgement is the\n     *    named user\'s.',
+            'the widening is the dry run\'s alone.',
             "`status: 'condition_not_met'`",
             "`'not_judged'` never means allowed.",
             'the simulated fields laid over it',
@@ -233,6 +235,12 @@ describe('IAutomationService.dryRun — the contract (#33757)', () => {
         ]) {
             expect(doc, sentence).toContain(sentence);
         }
+        // Ruling B (record 6917953931) replaced the by-name refusal of an
+        // elevated self-triggered draft; the refusal sentence is gone.
+        expect(doc).not.toContain('is refused for\n     *    every named user.');
+        // After ruling B no dry-run admission rule reads the definition's `type`.
+        expect(doc).toContain("judged on the supplied definition's `runAs`\n     * and `requiredPermissions` against the named user.");
+        expect(doc).not.toContain("judged on the supplied definition's `type`");
     });
 
     it('a faulting start condition follows the live run only on the default error strategy (#33935)', () => {

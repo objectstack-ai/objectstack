@@ -167,8 +167,8 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **title** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **description** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
 | **acknowledge** | `string \| Record<string, string>` | optional | Acknowledge button label, e.g. "I have saved this" |
-| **format** | `Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>` | optional | Default format for fields without their own format. Defaults to json when omitted. |
-| **fields** | `{ path: string; label?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'> }[]` | optional | Which fields from result.data to render. Omit to dump full JSON. |
+| **format** | `Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'>` | optional | Default format for fields without their own format: any field format but `table`, which needs the field's own `columns`. Defaults to json when omitted. |
+| **fields** | `{ path: string; label?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json' \| 'table'>; columns?: object[] }[]` | optional | Which fields from result.data to render. Omit to dump full JSON. A field with `format: 'table'` draws an array of objects as rows, one cell per entry of its `columns`, in order; the columns are never guessed from the elements' keys. |
 
 ### Nested Shape: `Action.preflight`
 
@@ -176,7 +176,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | :--- | :--- | :--- | :--- |
 | **read** | `{ url: string; method?: 'GET' }` | ✅ | The read request — the same-origin endpoint the preflight reads |
 | **path** | `string` | optional | Dotted path selecting the sub-tree of the answer the preflight shows and seeds from, e.g. `data` in a `{ success, data }` envelope; omitted, the whole answer |
-| **fields** | `{ path: string; label?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json'> }[]` | optional | Which values of the selected answer the panel shows, in `resultDialog.fields`' row and format set. Omit to show the selected answer as JSON. |
+| **fields** | `{ path: string; label?: string \| Record<string, string>; format?: Enum<'qrcode' \| 'code-list' \| 'secret' \| 'text' \| 'json' \| 'table'>; columns?: object[] }[]` | optional | Which values of the selected answer the panel shows, in `resultDialog.fields`' row and format set — `table` and its `columns` included, drawn by the same renderer contract. Omit to show the selected answer as JSON. |
 | **seed** | `{ param: string; path: string }[]` | optional | Answer-to-param seeding: each entry writes the value at `path` in the selected answer into the named param, which the dialog draws read-only and submits as shown. Each param is seeded once. |
 
 ### Nested Shape: `Action.ai`
