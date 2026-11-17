@@ -113,12 +113,12 @@
     },
     {
       "id": 12,
-      "prompt": "In zh-CN the `import_leads` action on `crm_lead` shows the per-row table in its result dialog with English column headers, though `resultDialog.fields.rows` is translated. The `rows` field is `format: 'table'` and its `columns` declare the paths `email` and `error.message`.",
+      "prompt": "In zh-CN the `import_leads` action on `crm_lead` shows the per-row table in its result dialog with English column headers, though `resultDialog.fields.rows` is translated. The `rows` field is `format: 'table'` and its `columns` declare the paths `email` and `error.message`. Which bundle key carries the headers?",
       "expected_output": "`objects.crm_lead._actions.import_leads.resultDialog.columns.rows`, a sibling of `resultDialog.fields` and never nested inside the `rows` entry there, which stays the field's label string. It is keyed by the table field's literal `path`, then by each column's literal `path`: `email` and `'error.message'` (one key, dots included, never split into nested objects), each value the translated header string itself — `columns: { rows: { email: '邮箱', 'error.message': '原因' } }`. A preflight table takes the same shape under `preflight.columns`. A field path that is no declared `format: 'table'` field, or a column path that field's `columns` does not list, is `translation-target-unknown`.",
       "files": [],
       "assertions": {
-        "must_contain": ["_actions", "import_leads", "resultDialog", "columns: { rows:", "error.message", "translation-target-unknown"],
-        "must_not_contain": ["fields: { rows: {", "error: {"]
+        "must_contain": ["_actions", "import_leads", "resultDialog.columns.rows", "error.message", "translation-target-unknown"],
+        "must_not_contain": ["error: {"]
       }
     }
   ]
