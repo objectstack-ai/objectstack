@@ -542,8 +542,10 @@ async function readUpdateTargets(candidates: readonly UpdateCandidate[], appBase
  * The badge's words are the lazy `marketplace` namespace's
  * (`marketplace.detail.updateAvailable`), so the cell draws only once that
  * namespace answers `ready` for the instance's language — the rule
- * `MarketplaceNamespaceGate` keeps for the marketplace pages; until then it
- * holds a placeholder, and a namespace that cannot be fetched draws nothing.
+ * `MarketplaceNamespaceGate` keeps for the marketplace pages. Until then the
+ * cell holds a placeholder, never an empty cell that would read as "up to
+ * date"; a namespace that cannot be fetched still draws the target version
+ * and the way to upgrade, without the badge's words.
  */
 function InstalledAppUpdateCell({ rowId, read }: { rowId: string; read: UpdateRead }) {
   const locale = useMetadataLocale();
@@ -552,7 +554,7 @@ function InstalledAppUpdateCell({ rowId, read }: { rowId: string; read: UpdateRe
     return <Skeleton className="h-5 w-24" data-testid={`pkg-update-reading-${rowId}`} />;
   }
   const target = read.targets.get(rowId);
-  if (!target || namespace.status !== 'ready') return null;
+  if (!target) return null;
   return (
     <Link
       to={target.href}
@@ -560,7 +562,11 @@ function InstalledAppUpdateCell({ rowId, read }: { rowId: string; read: UpdateRe
       className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
       data-testid={`pkg-update-${rowId}`}
     >
-      <UpdateAvailableBadge version={target.version} className="text-xs" />
+      {namespace.status === 'ready' ? (
+        <UpdateAvailableBadge version={target.version} className="text-xs" />
+      ) : (
+        <span data-testid={`pkg-update-version-${rowId}`}>→ v{target.version}</span>
+      )}
       <span>{t('engine.packages.installedApps.upgrade', locale)}</span>
     </Link>
   );
