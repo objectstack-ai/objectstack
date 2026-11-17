@@ -2284,7 +2284,7 @@ const fr = {
       unavailableRetry: "Réessayer",
       unavailableHome: "Retour à l'accueil",
       dock: {
-        title: "Assistant",
+        title: "Assistant IA",
         description: "Discussion avec l'assistant IA",
         resize: "Redimensionner la discussion",
         collapse: "Réduire la discussion",
