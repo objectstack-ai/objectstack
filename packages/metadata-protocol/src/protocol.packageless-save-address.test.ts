@@ -668,7 +668,11 @@ describe('[ADR-0150 D4] a package-less save of an ACTION on an object the holder
         expect(stored(rows('action', NAME))).toEqual([[WRITABLE, 'invoice', 'p'], [null, 'task', 'env']]);
     });
 
-    it('PROBE: an ENABLED holder on `task` beside a DISABLED holder on `invoice`: the save on `task` is the enabled holder\'s', async () => {
+    // The at-object judgment declines here (no disabled holder on `task`), so
+    // the name's own judgment answers, as on main: the disabled holder on
+    // `invoice` is not a served holder. Read through the at-object address
+    // alone, the save fell to the two-binding refusal (409 naming both).
+    it('an ENABLED holder on `task` beside a DISABLED holder on `invoice`: the save on `task` is the enabled holder\'s, as on main (never 409 naming both)', async () => {
         const { protocol, rows } = makeProtocol();
         await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'p', 'task'), packageId: WRITABLE });
         await protocol.saveMetaItem({ type: 'action', name: NAME, item: action(NAME, 'q', 'invoice'), packageId: OTHER_WRITABLE });

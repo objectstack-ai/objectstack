@@ -833,10 +833,18 @@ export class ProtocolSaveFacet {
             // package's row, never a new package-unbound row beside an
             // enabled holder, and a refusal names only the served holders.
             // [ADR-0150 D4] For an action some holder binds to another object,
-            // judged over the holders at the body's object only.
-            const served = environmentOwnAction ? undefined : await servedPackagelessSaveAddress(
-                host, writeType, request.name, itemDiscriminator(writeType, request.item), keyed ?? address, keyed !== undefined,
-            );
+            // judged over the holders at the body's object first. When no
+            // holder there is disabled, that judgment declines, and the
+            // name's own judgment answers as it does for every other save: a
+            // disabled holder on another object is never a served holder, so
+            // the one enabled holder on the body's object takes the write.
+            const member = itemDiscriminator(writeType, request.item);
+            const served = environmentOwnAction
+                ? undefined
+                : (keyed !== undefined
+                    ? await servedPackagelessSaveAddress(host, writeType, request.name, member, keyed, true)
+                    : undefined)
+                    ?? await servedPackagelessSaveAddress(host, writeType, request.name, member, address);
             if (environmentOwnAction) {
                 // The package-unbound row: `packageId` stays empty.
             } else if (served !== undefined) {
