@@ -96,7 +96,17 @@ async function boot() {
   engine.registerApp({
     id: Q, name: 'expenses', version: '1.0.0', namespace: 'crm', type: 'app',
     objects: [{ name: O, label: 'Expense', fields: { name: { name: 'name', label: 'Name', type: 'text' }, amount: { name: 'amount', label: 'Amount', type: 'number' } } }],
-    views: [{ object: O, listViews: { all: { label: 'All expenses', type: 'grid', data: { provider: 'object', object: O }, columns: [{ field: 'name' }, { field: 'amount' }, { field: 'crm_project' }], sort: [{ field: 'crm_project', order: 'asc' }] } } }],
+    views: [{
+      object: O,
+      listViews: {
+        all: { label: 'All expenses', type: 'grid', data: { provider: 'object', object: O }, columns: [{ field: 'name' }, { field: 'amount' }, { field: 'crm_project' }], sort: [{ field: 'crm_project', order: 'asc' }] },
+        // A code-registered view that never passed a write door, with a typo'd column: the read still warns on it.
+        typo: { label: 'Typo', type: 'grid', data: { provider: 'object', object: O }, columns: [{ field: 'name' }, { field: 'crm_projcet' }] },
+      },
+      formViews: {
+        main: { type: 'simple', data: { provider: 'object', object: O }, sections: [{ label: 'Main', columns: 2, fields: ['name', 'crm_project'] }] },
+      },
+    }],
   } as any);
   engine.registerApp({
     id: P, name: 'projects', version: '1.0.0', namespace: 'crm', type: 'app', dependencies: { [Q]: '^1.0.0' },
@@ -198,5 +208,87 @@ describe('[#34901] a view over a field a disabled package contributes', () => {
     expect(refused).toMatchObject({ ok: false, status: 422 });
     expect((refused as any).rules).toEqual(['page-field-unknown']);
     expect(await save('name'), 'control: a served field saves').toEqual({ ok: true });
+  });
+
+  // [#34901 L2 N5] Every view rule that reads the object's fields is judged
+  // against the same fold, not only the column and the sort. Each position is
+  // pinned with its control: the same position spelling a typo is refused,
+  // which proves the rule judges that position at all.
+  const POSITIONS: Array<[string, (field: string) => (config: any) => any, string]> = [
+    ['a filter', (field) => (c) => ({ ...c, filter: [{ field, operator: 'equals', value: 'x' }] }), 'config.filter[0].field'],
+    ['a grouping level', (field) => (c) => ({ ...c, grouping: { fields: [{ field }] } }), 'config.grouping.fields[0].field'],
+    ['a searchable field', (field) => (c) => ({ ...c, searchableFields: ['name', field] }), 'config.searchableFields[1]'],
+  ];
+  for (const [label, edit, path] of POSITIONS) {
+    it(`${label} naming the withheld field saves while P is off; a typo there is refused`, async () => {
+      const { registry, protocol } = await boot();
+      registry.disablePackage(P);
+      const saved = await outcome(async () => protocol.saveMetaItem({ type: 'view', name: VIEW, item: await servedViewBody(protocol, edit('crm_project')), packageId: PAIR }));
+      expect(saved).toEqual({ ok: true });
+      const typo = await outcome(async () => protocol.saveMetaItem({ type: 'view', name: VIEW, item: await servedViewBody(protocol, edit('crm_projcet')), packageId: PAIR }));
+      expect(typo).toMatchObject({ ok: false, status: 422 });
+      expect((typo as any).message).toContain(path);
+    });
+  }
+
+  // A form section's unknown field is an ADVISORY at the door (`form-field-unknown`
+  // never refuses: the field just does not render), carried on the save's 2xx.
+  it('a form section naming the withheld field saves while P is off with no advisory on it; a typo is advised', async () => {
+    const { registry, protocol } = await boot();
+    registry.disablePackage(P);
+    const form = async (field: string) => {
+      const { _packageId, _provenance, _diagnostics, ...body } = (await protocol.getMetaItem({ type: 'view', name: FORM })).item;
+      const config = { ...body.config, sections: [{ label: 'Main', columns: 2, fields: ['name', field] }] };
+      return { ...body, config, overrides: { package: Q, basedOn: '1.0.0' } };
+    };
+    const advised = (result: any) => ((result?.advisories ?? []) as any[]).map((a) => `${a.rule}@${a.path}`);
+    const saved = await protocol.saveMetaItem({ type: 'view', name: FORM, item: await form('crm_project'), packageId: PAIR });
+    expect(saved.success).toBe(true);
+    expect(advised(saved).filter((a) => a.startsWith('form-field-unknown'))).toEqual([]);
+    const typo = await protocol.saveMetaItem({ type: 'view', name: FORM, item: await form('crm_projcet'), packageId: PAIR });
+    expect(advised(typo).filter((a) => a.startsWith('form-field-unknown')), 'control: the position is judged').toHaveLength(1);
+  });
+});
+
+/** Every warning a served view's `_diagnostics` carries, as `path: message`. */
+function warningsOf(item: any): string[] {
+  return ((item?._diagnostics?.warnings ?? []) as any[]).map((w) => `${w.path}: ${w.message}`);
+}
+
+const FORM = 'crm_expense.main';
+
+describe('[#34901 L2 S1] a served view judges the withheld field as the save door does', () => {
+  it('a view the door accepts reads back with no field warning on the withheld name; a typo still warns', async () => {
+    const { registry, protocol } = await boot();
+    registry.disablePackage(P);
+    const body = await servedViewBody(protocol, (c) => ({
+      ...c,
+      filter: [{ field: 'crm_project', operator: 'equals', value: 'x' }],
+      grouping: { fields: [{ field: 'crm_project' }] },
+      searchableFields: ['name', 'crm_project'],
+    }));
+    expect(await outcome(() => protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, packageId: PAIR }))).toEqual({ ok: true });
+
+    const served = (await protocol.getMetaItem({ type: 'view', name: VIEW })).item;
+    expect(served.config.columns.map((c: any) => c.field), 'precondition: the saved view still names it').toContain('crm_project');
+    expect(warningsOf(served).filter((w) => w.includes('crm_project'))).toEqual([]);
+    expect(warningsOf(served).filter((w) => w.includes('list-view-field-unknown') || w.includes('is not a field'))).toEqual([]);
+
+    const layered = await protocol.getMetaItemLayered({ type: 'view', name: VIEW });
+    expect(warningsOf({ _diagnostics: layered._diagnostics }).filter((w) => w.includes('crm_project')), 'the layered read too').toEqual([]);
+
+    const typo = (await protocol.getMetaItem({ type: 'view', name: 'crm_expense.typo' })).item;
+    expect(warningsOf(typo).filter((w) => w.includes('crm_projcet')), 'control: a typo still warns').toHaveLength(1);
+  });
+
+  it('a form section naming the withheld field reads back with no form-field-unknown; with P on there was none either', async () => {
+    const { registry, protocol } = await boot();
+    const on = (await protocol.getMetaItem({ type: 'view', name: FORM })).item;
+    expect(on.config.sections[0].fields, 'precondition: the form names it').toContain('crm_project');
+    expect(warningsOf(on).filter((w) => w.includes('crm_project'))).toEqual([]);
+
+    registry.disablePackage(P);
+    const off = (await protocol.getMetaItem({ type: 'view', name: FORM })).item;
+    expect(warningsOf(off).filter((w) => w.includes('crm_project'))).toEqual([]);
   });
 });
