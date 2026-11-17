@@ -1,24 +1,22 @@
 /**
- * CurrentOrganizationIndicator — read-only "which organization am I in" for
- * users who have exactly ONE membership (objectui#5287).
+ * CurrentOrganizationIndicator — read-only "which organization am I in" on a
+ * walled deployment, at any membership count (objectui#5287).
  *
- * `WorkspaceSwitcher` is a multi-membership affordance: with one organization
- * there is nothing to switch to, so it renders nothing — and it is also the
- * only place the console ever showed the organization name. On a walled
- * deployment that left a single-membership business user with no indication
- * anywhere of which organization they were looking at, while every list on the
- * page was silently scoped to it. Found in a downstream multi-tenant
- * acceptance run (case S20-001).
+ * On a walled posture every list on the page is silently scoped to the active
+ * organization, so the top bar must say which one without the user opening
+ * anything. Found in a downstream multi-tenant acceptance run (case S20-001)
+ * for a single-membership user, who had no organization name anywhere.
  *
- * This is the other half of that surface, deliberately a SEPARATE component:
+ * The organization switcher is not in the top bar: the left of the bar is the
+ * product mark and the app switcher, and switching lives in the avatar menu
+ * (`WorkspaceSwitcherMenu`, objectstack-ai/objectstack#34591). So this
+ * indicator is the bar's only organization name, at one membership and at two
+ * or more alike (seat ruling repo:objectstack#3 on that card).
  *
- *   - the switcher's visibility rule is unchanged (`orgList.length <= 1` still
- *     renders nothing — a one-entry dropdown was the rejected option);
- *   - this renders in exactly the case the switcher declines, and renders no
- *     control at all: no trigger, no menu, no click target. The name is
- *     context, not navigation. Members / workspace management stay reachable
- *     from the avatar menu's "My Workspaces" entry (objectstack#8096), which
- *     is what covers this configuration.
+ * It renders no control at all: no trigger, no menu, no click target. The name
+ * is context, not navigation; a read-only name is not a switcher. Switching and
+ * members / workspace management stay in the avatar menu ("Switch
+ * organization", "My Organizations").
  *
  * ## Why it is gated on the tenancy posture, not on "an org exists"
  *
@@ -35,7 +33,8 @@
  *
  * Inside the mobile shell, when it announces `showConnectionSwitcher`, this
  * renders nothing: `WorkspaceSwitcher` then draws the same badge and name, at
- * the same widths, as the button that opens the shell's native switcher.
+ * the same widths, as the top-bar button that opens the shell's native
+ * switcher.
  *
  * An absent or unrecognized posture (older server, config fetch still in
  * flight or failed) renders nothing, matching how every other posture-keyed
@@ -61,11 +60,10 @@ export function CurrentOrganizationIndicator() {
   // exactly as it is today. Also covers the not-yet-resolved config.
   if (!postureHasOrgWall(posture)) return null;
 
-  const orgList = organizations ?? [];
-
-  // Exactly one membership. Two or more is the switcher's case and it must
-  // stay the only affordance there; zero means no organization context at all.
-  if (orgList.length !== 1) return null;
+  // Any membership count names the organization: the switcher is in the
+  // avatar menu, so this is the bar's only organization name. Zero memberships
+  // means no organization context at all.
+  if ((organizations ?? []).length === 0) return null;
 
   // The organization the SERVER reports as active, never a guess from the
   // membership list (objectui#12698): a session with no active organization —

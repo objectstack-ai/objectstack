@@ -160,12 +160,23 @@ export function artifactToEvalGraph(artifact: unknown): EvalGraph {
 
   const datasets = collection('datasets').map((raw, i) => {
     const d = named(raw, `datasets[${i}]`);
+    const membersOf = (kind: 'measure' | 'dimension', list: unknown) =>
+      (Array.isArray(list) ? list : [])
+        .filter(isBag)
+        .filter((m): m is Record<string, unknown> & { name: string } => typeof m.name === 'string')
+        .map((m) => ({
+          kind,
+          name: m.name,
+          synonyms: Array.isArray(m.synonyms) ? m.synonyms.filter((w): w is string => typeof w === 'string') : [],
+          // A description is a string or an inline locale map (`I18nLabelSchema`); either, non-empty, declares one.
+          described: (typeof m.description === 'string' && m.description.trim() !== '') || (isBag(m.description) && Object.values(m.description).some((v) => typeof v === 'string' && v.trim() !== '')),
+        }));
+    const measures = membersOf('measure', d.measures);
     return {
       name: d.name,
-      measures: (Array.isArray(d.measures) ? d.measures : [])
-        .filter(isBag)
-        .map((m) => m.name)
-        .filter((n): n is string => typeof n === 'string'),
+      ...(typeof d.object === 'string' ? { object: d.object } : {}),
+      measures: measures.map((m) => m.name),
+      members: [...measures, ...membersOf('dimension', d.dimensions)],
     };
   });
 

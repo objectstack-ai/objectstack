@@ -34,7 +34,13 @@ import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { PackageFormDialog } from '../metadata-admin/PackageFormDialog.js';
 import { isMarketplaceEnabled } from '../../runtime-config.js';
 import { fetchPackages, fetchListedPackageIds, duplicatePackage, isSpecPackageId, type PkgEntry } from './packages-io.js';
-import { fetchPackageCustomizationCounts, type PackageCustomizationCounts } from './packageCustomizations-io.js';
+import {
+  customizationCountsOf,
+  fetchPackageCustomizations,
+  type PackageCustomizationCounts,
+  type PackageCustomizations,
+} from './packageCustomizations-io.js';
+import { LandingCustomizationsPanel, type AppCustomizationRead } from './LandingCustomizationsPanel.js';
 import {
   readActionObjects,
   switchedOffActionListPath,
@@ -70,6 +76,7 @@ type CustomizationLine =
   | {
       kind: 'read';
       counts: PackageCustomizationCounts;
+      read: PackageCustomizations;
       /**
        * objectstack#34724 — which object holds each switched-off action, read
        * only when the base has one (`readActionObjects`); empty when that read
@@ -190,13 +197,17 @@ export function BuilderLanding(): React.ReactElement {
     if (!customizationTargetKey) return;
     let cancelled = false;
     for (const id of customizationTargetKey.split('\n')) {
-      fetchPackageCustomizationCounts(id)
-        .then(async (counts) => {
+      // objectstack#34714 — the whole answer is kept: the card draws its two
+      // numbers off it and the "Customizations in this environment" panel its
+      // rows, so one read serves both and the panel's total is the cards' sum.
+      fetchPackageCustomizations(id)
+        .then(async (read) => {
+          const counts = customizationCountsOf(read);
           // objectstack#34724 — a switched-off action's link needs its object,
           // which the ledger row does not name: read it before drawing the line.
-          if (!counts.switchedOffActions?.length) return { counts };
+          if (!counts.switchedOffActions?.length) return { counts, read };
           const actionObjects = await readActionObjects(metadataClient, id).catch((): ActionObjects => ({}));
-          return { counts, actionObjects };
+          return { counts, read, actionObjects };
         })
         .then(
           (line) => {
@@ -215,6 +226,21 @@ export function BuilderLanding(): React.ReactElement {
     // client identity must not read every card again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customizationTargetKey]);
+  // objectstack#34714 — the panel's apps are the cards' bases, in card order;
+  // its reads are the same answers the cards draw.
+  const customizationApps = React.useMemo(
+    () => readonly.filter((p) => !isCustomizationPackage(p.id)).map((p) => ({ id: p.id, name: p.name })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customizationTargetKey, pkgs],
+  );
+  const customizationReads = React.useMemo(() => {
+    const out: Record<string, AppCustomizationRead> = {};
+    for (const [id, line] of Object.entries(customizationLines)) {
+      out[id] = line.kind === 'read' ? { kind: 'read', read: line.read } : line;
+    }
+    return out;
+  }, [customizationLines]);
+
   // objectui#11553 — how many flows belong to no package: the same published
   // and draft union the package-less scope lists (`loadPackageLessSurfaces`).
   // The entry is drawn once the read says there is at least one; a failed read
@@ -502,6 +528,15 @@ export function BuilderLanding(): React.ReactElement {
           </div>
         </section>
       )}
+
+      {/* objectstack#34714 — every change this deployment made to its
+        * installed apps, in one list, under the apps themselves. */}
+      <LandingCustomizationsPanel
+        apps={customizationApps}
+        reads={customizationReads}
+        locale={locale}
+        headingClass={headingClass}
+      />
 
       <h2 className={headingClass}>{t('engine.studio.landing.ownHeading', locale)}</h2>
       <div data-testid="studio-landing-own" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">

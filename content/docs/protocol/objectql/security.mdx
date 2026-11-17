@@ -219,7 +219,7 @@ rowLevelSecurity:
 
 ## 3. Field-Level Security
 
-Field permissions are a map on the permission set keyed by `<object>.<field>`, each with two boolean flags and an optional row condition (`FieldPermissionSchema`):
+Field permissions are a map on the permission set keyed by `<object>.<field>`, each with two boolean flags, an optional row condition and, on a roll-up summary column, an optional authoring-time acknowledgement (`FieldPermissionSchema`):
 
 ```yaml
 # sales_rep.permission.yml (continued)
@@ -259,11 +259,14 @@ fields:
     readable: true | false   # default true  — can see the field
     editable: true | false   # default false — can modify the field
     when: "status == 'approved'"   # optional — a row condition on the EDIT vote, in RLS `using`'s CEL
+    rollupSourceUnreadableReason: "…"   # optional — meaningful on a summary column: why this set reads the roll-up without its child data (read by `os lint`, never at runtime)
 ```
 
 > There is no separate `create` flag for fields. `editable` governs both create-time and update-time writes; read stripping is governed by `readable`.
 
 > `when` narrows **where** the entry votes: on a matching row it votes as declared, on every other row it is absent (as if the set had not declared the field). The write gate judges the stored row before an update and each incoming row of an insert, in process; a row it cannot judge (a predicate update, a stored row the caller cannot read, a condition that does not resolve for the request) applies the entry as its lock. `readable: false` beside a `when` is refused at parse time, and `objectstack validate` judges the condition like an RLS predicate. Readers that hold no row (`/auth/me/permissions`, `os explain`) report the entry as its lock; the record-scoped projection (`GET /data/{object}/{id}/field-access`, the answer a record's edit form reads) judges the stored row exactly as the write gate does. See [Field-level security](/docs/permissions/field-level-security#row-conditioned-edit-locks-when).
+
+> The runtime does not read `rollupSourceUnreadableReason`, but the entry carrying it votes like any declaring entry (`readable: true` by default), so on a set that had no entry for the column, adding one restores the column for holders whose other sets mask it. A set that reads a roll-up `summary` column but not the child data it aggregates draws the `security-rollup-source-unreadable` warning from `os lint`, `os validate` and `os build`; a non-blank reason on the set's entry for that column turns that one warning into a note quoting the reason. A blank reason, or one beside `readable: false`, is refused at parse time. See [Calculation types](/docs/data-modeling/fields#calculation-types).
 
 ### Static `readonly` fields on the write path
 

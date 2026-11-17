@@ -5183,6 +5183,17 @@ export class AuthPlugin implements Plugin {
               consoleResetPasswordUrl: () => this.authManager!.getConsoleUrl('/reset-password'),
               noteMustChangePasswordIssued: () => this.authManager!.noteMustChangePasswordIssued(),
               createGrant: createGrantFor(c),
+              // ADR-0093 D3 amendment (ruling on #34535) — in multi-org mode each
+              // imported row joins the administrator's current organization, read
+              // as create-user reads it.
+              getTenancy: () => this.tenancy ?? undefined,
+              getCallerActiveOrganizationId: async () => {
+                const authApi: any = await this.authManager!.getApi();
+                const session = (await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers))) as
+                  | { session?: { activeOrganizationId?: string | null } }
+                  | null;
+                return session?.session?.activeOrganizationId ?? null;
+              },
               logger: ctx.logger,
             },
             c.req.raw,
