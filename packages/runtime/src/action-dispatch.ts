@@ -319,14 +319,13 @@ interface Admission {
     /** [#33690] The call is handed to the person, never dispatched ({@link ResolvedActionCall.confirmationHandOff}). */
     handOff: boolean;
     /**
-     * [ADR-0150 D4] The package coordinate the script dispatch names, the one
-     * the owner gate judged: the declaration's own, or the environment's for
-     * the environment's own item (`actionExec.environmentItemDispatchCoordinate`).
-     * `undefined`: the call names no package.
+     * [ADR-0150 D4] The package coordinate the owner gate judged: the
+     * declaration's own, or the attributed holder's
+     * (`actionExec.attributeActionHandler`). `undefined`: none.
      */
     dispatchPackageId?: string;
-    /** The coordinate is the environment's, chosen for the environment's own item: the dispatch runs that slot's handler or none. */
-    environmentItemDispatch: boolean;
+    /** [ADR-0150 D4] Whose handler the script dispatch runs, when the declaration names no package and its holder is attributed: that holder's handler, or none. */
+    holder?: actionExec.ActionHandlerHolder;
 }
 
 /**
@@ -533,27 +532,32 @@ async function admitResolvedAction(
         return refuse({ message: activationRefusal.message, status: activationRefusal.status, details: { code: activationRefusal.code } });
     }
 
-    // [ADR-0150 D4] The coordinate the script dispatch names, so the handler it
-    // runs is the declared item's: the resolved declaration's package, else —
-    // for the environment's own item whose handler the environment's slot
-    // holds — the environment's coordinate. Asked after D4 and the activation
-    // consult (it may read the store), before the owner gate, which judges
-    // the handler this dispatch runs.
+    // [ADR-0150 D4] Whose handler the script dispatch runs, so it is the
+    // declared item's: the resolved declaration's package, else — for a
+    // declaration that names none — the holder `attributeActionHandler`
+    // attributes. Asked after D4 and the activation consult (it may read the
+    // store), before the owner gate, which judges the handler this dispatch runs.
     const candidates = actionExec.resolveActionHandlerKeys(actionDef, actionName);
-    const coordinate: actionExec.EnvironmentItemDispatch = declaration.packageId !== undefined
+    const attribution: actionExec.ActionHandlerAttribution = declaration.packageId !== undefined
         ? { packageId: declaration.packageId }
-        : await actionExec.environmentItemDispatchCoordinate(ql, { action: actionDef, objectName, candidates, obj: actionSchema });
-    if ('degraded' in coordinate) {
+        : await actionExec.attributeActionHandler(ql, {
+            action: actionDef, objectName, candidates, obj: actionSchema,
+            readServiceActions: async () => {
+                const meta: any = await deps.resolveService(requestContext, 'metadata', wiring.envId);
+                return typeof meta?.loadMany === 'function' ? ((await meta.loadMany('action')) ?? []) : undefined;
+            },
+        });
+    if ('degraded' in attribution) {
         return refuse({
             message:
                 `Cannot verify which declared action owns the handler that action '${actionName}' on '${objectName}' ` +
-                `dispatches to — the metadata plane is unavailable (${coordinate.reason}). ` +
+                `dispatches to — the metadata plane is unavailable (${attribution.reason}). ` +
                 'Refusing rather than running it ungated.',
             status: 503,
             details: { code: standardErrorCodeForHttpStatus(503) },
         });
     }
-    const dispatchPackageId = coordinate.packageId;
+    const dispatchPackageId = attribution.packageId;
 
     // The handler the dispatch reaches may be one a DIFFERENT declared action
     // owns: that owner's gates apply too. The candidates are the ones the
@@ -660,7 +664,7 @@ async function admitResolvedAction(
     return {
         actionDef, actionType, recordId, params, subject, handOff,
         ...(dispatchPackageId !== undefined ? { dispatchPackageId } : {}),
-        environmentItemDispatch: declaration.packageId === undefined && dispatchPackageId !== undefined,
+        ...(attribution.holder !== undefined ? { holder: attribution.holder } : {}),
     };
 }
 
@@ -796,22 +800,18 @@ async function dispatchAdmittedAction(
         };
         // [ADR-0110 D2] "resolve, then address": the handler KEY is derived from
         // the resolved declaration; [ADR-0150 D4] the resolved holder's package
-        // picks its own handler, and the environment's own item its own slot's.
+        // picks its own handler, and an attributed holder its own.
         const candidates = actionExec.resolveActionHandlerKeys(actionDef, actionName);
         // No key carried a handler: a routing miss, not a server fault.
         const notFound: ActionDispatchOutcome = {
             kind: 'refused',
             refusal: { message: `Action '${actionName}' on object '${objectName}' not found`, status: 404 },
         };
-        // [ADR-0150 D4] The environment's own item runs the handler in the
-        // environment's slot, or none: asked with no await before the dispatch,
-        // so the handler that runs is the one this answer read.
-        if (admission.environmentItemDispatch && !actionExec.environmentSlotRunsOwnHandler(ql, objectName, candidates)) {
-            return notFound;
-        }
-        const dispatch = await actionExec.executeRegisteredAction(
-            deps, ql, objectName, candidates, actionContext, admission.dispatchPackageId,
-        );
+        // [ADR-0150 D4] An attributed holder runs its own handler or none: the
+        // entry is chosen and run in one synchronous step.
+        const dispatch = admission.holder !== undefined
+            ? await actionExec.executeAttributedAction(ql, objectName, candidates, actionContext, admission.holder)
+            : await actionExec.executeRegisteredAction(deps, ql, objectName, candidates, actionContext, admission.dispatchPackageId);
         if (!dispatch.dispatched) return notFound;
         // [#11519] Doubled post-success navigation — observe LOUDLY, never
         // rewrite the wire.

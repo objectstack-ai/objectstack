@@ -32,7 +32,7 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
     actionHandlerOwnerRefusal, actionPermissionRefusal, executeRegisteredAction, resolveActionHandlerKeys,
-    resolveAddressedRouteActionDeclaration, resolveRouteActionDeclaration,
+    invokeBusinessAction, readMergedItems, resolveAddressedRouteActionDeclaration, resolveRouteActionDeclaration,
     type ActionExecutionDeps,
 } from './action-execution.js';
 import { requestContextWiring, runResolvedAction } from './action-dispatch.js';
@@ -2094,8 +2094,10 @@ describe('ADR-0150 D4 — a route serves the package-less action on its own key,
  * runs are ONE item's. The environment's own `approve` bound to `lead` (its
  * stored row, and the handler the authored-action resync binds for it) and the
  * platform's package-less `approve` bound to `lead` (host code, or a plugin)
- * hold one key; the route serves the environment's item, so the dispatch runs
- * the environment's handler or refuses, and never runs the platform's.
+ * hold one key: the dispatch runs the handler of the item the route serves, or
+ * refuses, and never runs the other item's. Also with `lead` registered, where
+ * the object serves the environment's item inside its own `actions`, at the
+ * bare route, the `_env` address and MCP `run_action`.
  *
  * Real: `ObjectQL` (registry and action engine), the protocol's execution
  * read, the runtime's `HttpDispatcher` `/actions` door and the admitted
@@ -2129,26 +2131,32 @@ describe('ADR-0150 D4 — an action route runs the handler of the item whose dec
         };
     };
     /** The environment's own `approve` bound to `lead`: its item, its stored row, and the handler the resync binds for it. */
-    const environmentOnLead = () => {
-        const def = { name: 'approve', label: 'env', type: 'script', objectName: 'lead', requiredPermissions: ['env_gate'], body };
-        engine.registry.registerItem('action', { ...def } as never, 'name' as never);
+    const environmentOnLead = (extra: Record<string, unknown> = {}, stamp: Record<string, unknown> = {}) => {
+        const def = { name: 'approve', label: 'env', type: 'script', objectName: 'lead', requiredPermissions: ['env_gate'], body, ...extra };
+        engine.registry.registerItem('action', { ...def, ...stamp } as never, 'name' as never);
         storedRows = [{ id: 'env-approve', type: 'action', name: 'approve', state: 'active', package_id: null, metadata: JSON.stringify(def) }];
         engine.registerAction('lead', 'approve', () => { ran.push('env'); return 'ran env'; }, 'metadata-service');
     };
     /** The platform's package-less `approve` bound to `lead` (host code with no owner, or a plugin), and its handler. */
-    const platformOnLead = (owner?: string) => {
+    const platformItemOnLead = () => {
         engine.registry.registerItem('action', {
             name: 'approve', label: 'platform', type: 'script', objectName: 'lead', target: 'approve',
             requiredPermissions: ['platform_gate'],
         } as never, 'name' as never);
+    };
+    const platformHandlerOnLead = (owner?: string) => {
         engine.registerAction('lead', 'approve', () => { ran.push('platform'); return 'ran platform'; }, owner);
+    };
+    const platformOnLead = (owner?: string) => {
+        platformItemOnLead();
+        platformHandlerOnLead(owner);
     };
     const onlyEnvGate = { userId: 'u_env', isSystem: false, systemPermissions: ['env_gate'] };
     const onlyPlatformGate = { userId: 'u_platform', isSystem: false, systemPermissions: ['platform_gate'] };
 
     /** `POST /api/v1/<path>` through the runtime's dispatcher, as the caller `ec`. */
-    const post = async (path: string, ec: Record<string, unknown>) => {
-        const services: Record<string, unknown> = { objectql: engine, data: engine, protocol };
+    const post = async (path: string, ec: Record<string, unknown>, extraServices: Record<string, unknown> = {}) => {
+        const services: Record<string, unknown> = { objectql: engine, data: engine, protocol, ...extraServices };
         const get = (name: string) => services[name] ?? null;
         const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (name: string) => get(name) };
         const dispatcher = new HttpDispatcher(kernel);
@@ -2236,6 +2244,94 @@ describe('ADR-0150 D4 — an action route runs the handler of the item whose dec
             expect([response.status, response.body?.data], JSON.stringify(response.body)).toEqual([200, 'ran platform']);
             expect(ran).toEqual(['platform']);
         }
+    });
+
+    describe('with the routed object registered, and the environment\'s action served inside it', () => {
+        const registeredLead = () => engine.registry.registerObject({
+            name: 'lead', label: 'Lead', fields: { name: { name: 'name', type: 'text', label: 'Name' } },
+        } as never, 'com.acme.crm');
+        /**
+         * The platform's item registers first; the environment's row is hydrated
+         * after it (the hydration's `_provenance` stamp) with the handler the
+         * resync binds; the platform's handler registers last.
+         */
+        const setUp = async (owner?: string) => {
+            freshEngine();
+            registeredLead();
+            platformItemOnLead();
+            environmentOnLead({ ai: { exposed: true, description: 'Approve a lead.' } }, { _provenance: 'org' });
+            platformHandlerOnLead(owner);
+            // The composition: the object's served `actions` carry the environment's item.
+            expect((engine.getSchema('lead') as any)?.actions?.find((a: any) => a?.name === 'approve')).toMatchObject({ label: 'env' });
+        };
+        /** MCP `run_action` over the protocol's merged listings, as the bridge wires it. */
+        const runViaMcp = (ec: Record<string, unknown>) => invokeBusinessAction(deps, { request: {} } as any, 'approve', { objectName: 'lead' }, {
+            driver: engine, ec, getMeta: () => undefined,
+            readObjects: () => readMergedItems(protocol, 'object'),
+            readActions: () => readMergedItems(protocol, 'action'),
+            callData: async () => ({}),
+        } as any);
+
+        for (const [who, owner] of [['host code', undefined], ['a plugin', 'plugin.platform']] as const) {
+            for (const route of ['/actions/lead/approve', '/actions/_env/lead/approve']) {
+                it(`${route}: the environment's own action runs its own handler, not the one ${who} holds on its key`, async () => {
+                    await setUp(owner);
+                    const response = await post(route, onlyEnvGate);
+                    expect([response.status, response.body?.data], JSON.stringify(response.body)).toEqual([200, 'ran env']);
+                    expect(ran).toEqual(['env']);
+                });
+            }
+
+            it(`MCP run_action: the environment's own action runs its own handler, not the one ${who} holds on its key`, async () => {
+                await setUp(owner);
+                const answer: any = await runViaMcp(onlyEnvGate);
+                expect([answer?.ok, answer?.result], JSON.stringify(answer)).toEqual([true, 'ran env']);
+                expect(ran).toEqual(['env']);
+            });
+        }
+    });
+
+    it('the environment\'s own action that carries a body runs the handler bound for that body or none: with none bound, the route\'s routing miss, 404, and no other handler runs', async () => {
+        for (const owner of [undefined, 'plugin.platform']) {
+            freshEngine();
+            platformOnLead(owner);
+            environmentOnLead();
+            // No handler is bound for the environment's body (no action runner on this host).
+            engine.removeActionsByPackage('metadata-service');
+            const response = await post('/actions/lead/approve', onlyEnvGate);
+            expect([response.status, response.body?.data], JSON.stringify(response.body)).toEqual([404, undefined]);
+            expect(ran).toEqual([]);
+        }
+    });
+
+    describe('the platform\'s action beside a handler whose environment item neither the store nor the metadata service holds any more', () => {
+        /** The platform's item and handler, then the environment's (its handler on top), then its row deleted: the slot serves the platform's item. */
+        const setUp = (owner?: string) => {
+            freshEngine();
+            platformOnLead(owner);
+            environmentOnLead();
+            storedRows = [];
+            platformItemOnLead();
+        };
+
+        for (const [who, owner] of [['host code', undefined], ['a plugin', 'plugin.platform']] as const) {
+            it(`runs the platform's own handler (${who}), gated on its own requirements`, async () => {
+                setUp(owner);
+                expect((await post('/actions/lead/approve', onlyEnvGate)).status).toBe(403);
+                const response = await post('/actions/lead/approve', onlyPlatformGate, { metadata: { loadMany: async () => [] } });
+                expect([response.status, response.body?.data], JSON.stringify(response.body)).toEqual([200, 'ran platform']);
+                expect(ran).toEqual(['platform']);
+            });
+        }
+
+        it('a metadata service read that fails while the dispatch attributes the handler refuses 503, and runs no handler', async () => {
+            setUp('plugin.platform');
+            const response = await post('/actions/lead/approve', onlyPlatformGate, {
+                metadata: { loadMany: async () => { throw new Error('metadata service unreachable'); } },
+            });
+            expect([response.status, response.body?.error?.code], JSON.stringify(response.body)).toEqual([503, 'SERVICE_UNAVAILABLE']);
+            expect(ran).toEqual([]);
+        });
     });
 
     it('CONTROL — the platform\'s action, with no stored row of the environment\'s on its key, runs its own handler beside a handler the environment\'s slot still holds', async () => {
