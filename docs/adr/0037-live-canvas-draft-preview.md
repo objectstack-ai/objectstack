@@ -1,6 +1,7 @@
 # ADR-0037: Live Canvas — draft-overlay live preview while you build
 
 **Status**: Accepted (2026-06-10) — all four phases implemented: `previewDrafts` reads (`runtime/http-dispatcher.ts`), objectui LiveCanvas/PreviewModeContext/DraftPreviewBar, draft-data preview via `service-analytics/preview-evaluator.ts` (+test), assistantBus back-channel (Phase 4 the least exercised).
+**Amended**: 2026-11-17 by ui ADR-0057 Amendment A3 (objectstack#34608, objectstack#34610) — the presentation changes: the build chat is the console's one right-side drawer and the canvas is the app itself in the main area, not a split-view iframe host. The main area shows the app in the regime the build is in: the real unpublished app for a new or still-unpublished app (ADR-0045 §5, §7), and draft mode (`?preview=draft`) for changes to a published app. The draft-overlay mechanism, the per-artifact refresh and the four phases' data plane are unchanged; the screen's one Publish is the shell's bar for the regime shown.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0033](./0033-ai-assisted-metadata-authoring.md) (AI authors metadata as DRAFTS; publish is the human gate), [ADR-0021](./0021-analytics-dataset-semantic-layer.md) (datasets as the single analytics form — what dashboards render from), [ADR-0005](./0005-metadata-customization-overlay.md) (the overlay model the draft state lives in)
 **Consumers**: `@objectstack/runtime` + `@objectstack/objectql` (preview data plane — mostly already present), `@objectstack/service-analytics` (Phase 3 draft-data queries), `../objectui` (`data-objectstack` preview client, `app-shell` Live Canvas + assistant bus, view/dashboard renderers), `../cloud` (Build-with-AI entry surface)
@@ -19,7 +20,7 @@ Everything hard about live preview already exists in the platform; it has simply
 2. The chat already knows, in real time, **which artifact just changed**: the streaming build tree (`data-build-progress` parts) and every authoring tool's `drafted` envelope name the exact `(type, name)`.
 3. The chat and the host app already share an **event bus** (`assistantBus` in objectui app-shell) with an editor-context primitive.
 
-**Decision.** Ship a split-view **Live Canvas**: chat on the left, the user's app rendered from the **draft overlay** on the right, refreshed per-artifact by the existing stream events. Four phases: (1) static draft preview behind a `?preview=draft` mode + watermark; (2) event-driven live refresh during builds and edits; (3) draft **data** preview (seed rows visible pre-publish — the only genuinely new mechanism); (4) canvas→chat back-channel ("change *this*" while pointing). Publish remains the only commit point; the canvas is a read-only window onto the draft layer.
+**Decision.** Ship a ~~split-view~~ **Live Canvas**: ~~chat on the left, the user's app rendered from the **draft overlay** on the right~~ *(amended 2026-11-17, ui ADR-0057 Amendment A3: the build chat is the console's right-side drawer and the canvas is the user's app itself in the main area, no nested preview. Changes to a published app render from the **draft overlay** through the shell's `?preview=draft` mode; a new or still-unpublished app is the real unpublished app, per ADR-0045)*, refreshed per-artifact by the existing stream events. Four phases: (1) static draft preview behind a `?preview=draft` mode + watermark; (2) event-driven live refresh during builds and edits; (3) draft **data** preview (seed rows visible pre-publish — the only genuinely new mechanism); (4) canvas→chat back-channel ("change *this*" while pointing). Publish remains the only commit point; the canvas is a read-only window onto the draft layer.
 
 **Open-core boundary**: the preview data plane (`preview=draft` reads, draft-data query overlay) is **open mechanism** (framework). The Live Canvas surface, the chat wiring, and the build intelligence stay in objectui/cloud.
 
@@ -68,11 +69,11 @@ The 2026-06-10 reliability batch closed the failure modes a live canvas would ha
 ### Phase 2 — event-driven live canvas (objectui, ~3–4 days)
 
 - `assistantBus`: `emitCanvasInvalidate({ type, name })` / `subscribeCanvasInvalidate` (mirrors the existing review-request pattern).
-- Both chat hosts (`ConsoleFloatingChatbot`, `AiChatPage`) emit invalidations from (a) `buildProgress.items` diffs and (b) `drafted` envelopes — the data is already in hand; this is wiring.
-- A `LiveCanvas` split-view host: opens automatically for Build-with-AI sessions; re-keys/refetches the affected renderer per `(type, name)`; a ~200 ms coalescing window prevents invalidation storms during whole-app builds.
+- Both chat hosts (`ConsoleFloatingChatbot`, `AiChatPage`) *(amended 2026-11-17, ui ADR-0057 A3: the console's one drawer)* emit invalidations from (a) `buildProgress.items` diffs and (b) `drafted` envelopes — the data is already in hand; this is wiring.
+- ~~A `LiveCanvas` split-view host~~ *(amended 2026-11-17, ui ADR-0057 A3: no separate host; the console's own shell is the canvas, beside the drawer: in draft mode for changes to a published app, and the real unpublished app for a new or still-unpublished app per ADR-0045)*: opens automatically for Build-with-AI sessions; re-keys/refetches the affected renderer per `(type, name)`; a ~200 ms coalescing window prevents invalidation storms during whole-app builds.
 - Renderers accept an external refresh key (most already expose a reload hook).
 
-**Acceptance**: during `apply_blueprint` the right pane grows artifact-by-artifact in step with the build tree; an incremental "add a field" edit reflects in the rendered form/kanban in < 1 s.
+**Acceptance**: during `apply_blueprint` the ~~right pane~~ main area *(amended 2026-11-17, ui ADR-0057 A3)* grows artifact-by-artifact in step with the build tree; an incremental "add a field" edit reflects in the rendered form/kanban in < 1 s.
 
 ### Phase 3 — draft data preview (framework, ~1–2 weeks; the only new mechanism)
 
@@ -132,7 +133,7 @@ All write paths converge on the same draft rows; **Publish remains the single co
 
 1. **One truth.** The canvas has NO store of its own — no "AI workspace" parallel repository. It renders the same `sys_metadata` rows Studio edits.
 2. **The canvas never edits in place.** It renders and *selects* (point at a widget/field); changing anything goes through exactly two doors — say it (chat → authoring tools → draft) or **"Open in Studio"** (the existing review/designer deep-link). This rule is what guarantees the canvas can never grow into a second Studio.
-3. **There is one chat.** The canvas ships no chat of its own; in build sessions the existing `ChatbotEnhanced` (same conversation, same component) becomes the left pane and the canvas is its result pane. The floating button keeps its role as the everywhere intent-entry; the canvas appears only in building contexts.
+3. **There is one chat.** The canvas ships no chat of its own; in build sessions the existing `ChatbotEnhanced` (same conversation, same component) ~~becomes the left pane~~ is the right-side drawer *(amended 2026-11-17, ui ADR-0057 A3)* and the canvas is its result pane. ~~The floating button keeps its role as the everywhere intent-entry;~~ *(Amended 2026-11-17 by ui ADR-0057 Amendment A3, objectstack#34608: the floating button is retired; the top-bar robot, which opens the console's one chat drawer, is the everywhere intent-entry.)* The canvas appears only in building contexts.
 4. **No new lifecycle semantics.** The canvas's Publish calls the existing endpoints; Review deep-links to Studio's diff. Nothing new to govern.
 
 **Relationship to Studio's existing previews**: Studio's dataset-designer live preview (ADR-0021) is *artifact-level* preview; the canvas is *app-level* preview. Both consume the same primitives (`preview=draft` reads; `queryDataset` already accepts inline draft definitions — the hook originally added for Studio preview), so the mechanism is shared, not duplicated. Canvas selection and Studio deep-links ride the same `assistantBus` — three surfaces, one context bus.
