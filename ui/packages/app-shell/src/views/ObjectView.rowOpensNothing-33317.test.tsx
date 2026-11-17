@@ -134,6 +134,7 @@ function answer(apiOperations?: string[]): MePermissionsAuthenticatedResponse {
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['admin'],
     systemPermissions: [],
     objects: {

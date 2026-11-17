@@ -24,6 +24,9 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// The page reaches a dynamic `@objectstack/lint` import; its first load is paid
+// here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import React from 'react';
 import { act, render, screen, cleanup } from '@testing-library/react';
 import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
@@ -130,6 +133,7 @@ const payload = (systemPermissions?: string[]): MePermissionsAuthenticatedRespon
     tenantId: 'acme',
     positions: ['everyone'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member_default'],
     ...(systemPermissions ? { systemPermissions } : {}),
     objects: {},

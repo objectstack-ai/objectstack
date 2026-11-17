@@ -2074,6 +2074,9 @@ const fr = {
           title: "Modification de « {{app}} »",
           titleGeneric: "Modifier cette application",
           description: "Que souhaitez-vous changer ? Je modifie cette application sur place — ajouter un champ, un objet, une vue ou un tableau de bord, ou ajuster l'existant.",
+          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
+          askOrChangeDescription:
+            "Posez une question sur les données de cette application — comptages, listes et synthèses — ou dites-moi quoi changer, et je modifie l’application sur place : un champ, un objet, une vue ou un tableau de bord.",
         },
       },
       clearConversation: "Effacer",
@@ -2272,6 +2275,11 @@ const fr = {
         resize: "Redimensionner la discussion",
         collapse: "Réduire la discussion",
         maximize: "Ouvrir en pleine page",
+        // objectstack#34608 — the drawer's History button and its in-place expand / restore.
+        history: "Historique",
+        backToChat: "Retour à la conversation",
+        expand: "Agrandir",
+        restore: "Restaurer le panneau latéral",
         open: "Ouvrir l'assistant",
         planAwaitingApproval: "Un plan proposé attend votre approbation",
       },
