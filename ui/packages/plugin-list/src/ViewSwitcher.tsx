@@ -20,6 +20,7 @@ import {
   Map,        // map
   ChartColumn,  // chart
   ListTree,   // tree
+  CalendarClock, // timesheet
   Check,
   ChevronDown,
 } from 'lucide-react';
@@ -92,6 +93,7 @@ const VIEW_ICONS: Record<ListViewVisualization, React.ReactNode> = {
   map: <Map className="h-4 w-4" />,
   chart: <ChartColumn className="h-4 w-4" />,
   tree: <ListTree className="h-4 w-4" />,
+  timesheet: <CalendarClock className="h-4 w-4" />,
 };
 
 /**
@@ -119,6 +121,7 @@ const VIEW_LABEL_KEYS: Record<ListViewVisualization, string> = {
   map: 'console.objectView.viewTypeMap',
   chart: 'console.objectView.viewTypeChart',
   tree: 'console.objectView.viewTypeTree',
+  timesheet: 'console.objectView.viewTypeTimesheet',
 };
 
 /**
@@ -141,6 +144,7 @@ const VIEW_LABEL_DEFAULTS: Record<string, string> = {
   'console.objectView.viewTypeMap': 'Map',
   'console.objectView.viewTypeChart': 'Chart',
   'console.objectView.viewTypeTree': 'Tree',
+  'console.objectView.viewTypeTimesheet': 'Timesheet',
 };
 
 const useViewSwitcherTranslation = createSafeTranslation(

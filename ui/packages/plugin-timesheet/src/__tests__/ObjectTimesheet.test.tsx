@@ -1,0 +1,181 @@
+import React from 'react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { ObjectTimesheet } from '../ObjectTimesheet';
+
+afterEach(cleanup);
+
+// Monday 16 November 2026; the test runner's locale is en-US, whose week
+// starts on Sunday 15 November.
+const WEDNESDAY = new Date(2026, 10, 18);
+
+const objectSchema = {
+  name: 'time_entry',
+  fields: {
+    project: { name: 'project', type: 'text', label: 'Project' },
+    work_date: { name: 'work_date', type: 'date', label: 'Date' },
+    hours: { name: 'hours', type: 'number', label: 'Hours' },
+  },
+};
+
+function makeDataSource(rows: Record<string, unknown>[]) {
+  let store = rows.map((r) => ({ ...r }));
+  let nextId = 100;
+  return {
+    getObjectSchema: vi.fn(async () => objectSchema),
+    find: vi.fn(async () => ({ data: store.map((r) => ({ ...r })), total: store.length })),
+    create: vi.fn(async (_object: string, data: Record<string, unknown>) => {
+      const record = { id: `n${nextId++}`, ...data };
+      store.push(record);
+      return record;
+    }),
+    update: vi.fn(async (_object: string, id: string, data: Record<string, unknown>) => {
+      store = store.map((r) => (r.id === id ? { ...r, ...data } : r));
+      return store.find((r) => r.id === id);
+    }),
+    delete: vi.fn(async (_object: string, id: string) => {
+      store = store.filter((r) => r.id !== id);
+      return true;
+    }),
+  };
+}
+
+const view = {
+  type: 'object-timesheet' as const,
+  objectName: 'time_entry',
+  timesheet: { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' },
+};
+
+function renderTimesheet(ds: ReturnType<typeof makeDataSource>, schema: any = view) {
+  return render(<ObjectTimesheet schema={schema} dataSource={ds as any} initialDate={WEDNESDAY} />);
+}
+
+describe('ObjectTimesheet', () => {
+  it('shows the missing-binding screen for a view with no timesheet block', () => {
+    renderTimesheet(makeDataSource([]), { type: 'object-timesheet', objectName: 'time_entry' });
+    expect(screen.getByTestId('timesheet-missing-binding').textContent).toContain('Timesheet configuration required');
+  });
+
+  it('queries the displayed week on the date field, joined with the view filter', async () => {
+    const ds = makeDataSource([]);
+    renderTimesheet(ds, { ...view, filter: [['project', '=', 'Apollo']] });
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+    const [object, params] = ds.find.mock.calls[0] as any[];
+    expect(object).toBe('time_entry');
+    const filter = JSON.stringify(params.$filter);
+    expect(filter).toContain('["work_date",">=","2026-11-15"]');
+    expect(filter).toContain('["work_date","<","2026-11-22"]');
+    expect(filter).toContain('Apollo');
+  });
+
+  it('pivots records into rows and days with row, day and week totals', async () => {
+    const ds = makeDataSource([
+      { id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 2 },
+      { id: 'r2', project: 'Apollo', work_date: '2026-11-17', hours: 3 },
+      { id: 'r3', project: 'Hermes', work_date: '2026-11-17', hours: 1 },
+    ]);
+    renderTimesheet(ds);
+    await waitFor(() => expect(screen.getAllByTestId('timesheet-row')).toHaveLength(2));
+    const totals = screen.getAllByTestId('timesheet-row-total').map((el) => el.textContent);
+    expect(totals).toEqual(['5', '1']);
+    const dayTotals = screen.getAllByTestId('timesheet-day-total').map((el) => el.textContent);
+    expect(dayTotals).toEqual(['0', '2', '4', '0', '0', '0', '0']);
+    expect(screen.getByTestId('timesheet-week-total').textContent).toBe('6');
+  });
+
+  it('shows a cell holding two records as a read-only sum', async () => {
+    const ds = makeDataSource([
+      { id: 'r1', project: 'Apollo', work_date: '2026-11-17', hours: 2 },
+      { id: 'r2', project: 'Apollo', work_date: '2026-11-17', hours: 1.5 },
+    ]);
+    renderTimesheet(ds);
+    const cell = await screen.findByTestId('timesheet-cell-readonly');
+    expect(cell.textContent).toBe('3.5');
+    expect(cell.getAttribute('title')).toContain('2 records');
+  });
+
+  it('updates a one-record cell through the record door', async () => {
+    const ds = makeDataSource([{ id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 2 }]);
+    renderTimesheet(ds);
+    await waitFor(() => expect(screen.getAllByTestId('timesheet-row')).toHaveLength(1));
+    const cells = screen.getAllByTestId('timesheet-cell');
+    // Sunday first: Monday is the second day column.
+    const monday = cells[1] as HTMLInputElement;
+    expect(monday.value).toBe('2');
+    fireEvent.change(monday, { target: { value: '6' } });
+    fireEvent.blur(monday);
+    await waitFor(() => expect(ds.update).toHaveBeenCalledWith('time_entry', 'r1', { hours: 6 }));
+    await waitFor(() => expect(screen.getByTestId('timesheet-week-total').textContent).toBe('6'));
+  });
+
+  it('creates a record when an empty cell is typed into, and deletes it when cleared', async () => {
+    const ds = makeDataSource([{ id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 2 }]);
+    renderTimesheet(ds);
+    await waitFor(() => expect(screen.getAllByTestId('timesheet-row')).toHaveLength(1));
+    const tuesday = screen.getAllByTestId('timesheet-cell')[2] as HTMLInputElement;
+    fireEvent.change(tuesday, { target: { value: '4' } });
+    fireEvent.keyDown(tuesday, { key: 'Enter' });
+    await waitFor(() =>
+      expect(ds.create).toHaveBeenCalledWith('time_entry', { project: 'Apollo', work_date: '2026-11-17', hours: 4 }),
+    );
+    await waitFor(() => expect(screen.getByTestId('timesheet-week-total').textContent).toBe('6'));
+
+    const monday = screen.getAllByTestId('timesheet-cell')[1] as HTMLInputElement;
+    fireEvent.change(monday, { target: { value: '' } });
+    fireEvent.blur(monday);
+    await waitFor(() => expect(ds.delete).toHaveBeenCalledWith('time_entry', 'r1'));
+  });
+
+  it('keeps a refused write on its cell with the server message', async () => {
+    const ds = makeDataSource([{ id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 2 }]);
+    ds.update.mockRejectedValueOnce(new Error('Hours must be 24 or less'));
+    renderTimesheet(ds);
+    await waitFor(() => expect(screen.getAllByTestId('timesheet-row')).toHaveLength(1));
+    const monday = screen.getAllByTestId('timesheet-cell')[1] as HTMLInputElement;
+    fireEvent.change(monday, { target: { value: '30' } });
+    fireEvent.blur(monday);
+    const alert = await screen.findByTestId('timesheet-cell-error');
+    expect(alert.textContent).toBe('Not saved: Hours must be 24 or less');
+    expect(monday.getAttribute('aria-invalid')).toBe('true');
+    expect(monday.value).toBe('30');
+  });
+
+  it('refuses text that is not a number without writing', async () => {
+    const ds = makeDataSource([]);
+    renderTimesheet(ds, view);
+    await screen.findByTestId('timesheet-empty');
+    fireEvent.click(screen.getByTestId('timesheet-add-row'));
+    const dialog = await screen.findByTestId('timesheet-add-row-dialog');
+    fireEvent.click(within(dialog).getByTestId('timesheet-add-row-confirm'));
+    expect(within(dialog).getByTestId('timesheet-row-incomplete')).toBeTruthy();
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Zeus' } });
+    fireEvent.click(within(dialog).getByTestId('timesheet-add-row-confirm'));
+    await waitFor(() => expect(screen.getAllByTestId('timesheet-row')).toHaveLength(1));
+
+    const cell = screen.getAllByTestId('timesheet-cell')[3] as HTMLInputElement;
+    fireEvent.change(cell, { target: { value: 'lots' } });
+    fireEvent.blur(cell);
+    expect((await screen.findByTestId('timesheet-cell-error')).textContent).toBe('Enter a number');
+    expect(ds.create).not.toHaveBeenCalled();
+
+    fireEvent.change(cell, { target: { value: '5' } });
+    fireEvent.keyDown(cell, { key: 'Enter' });
+    await waitFor(() =>
+      expect(ds.create).toHaveBeenCalledWith('time_entry', { project: 'Zeus', work_date: '2026-11-18', hours: 5 }),
+    );
+  });
+
+  it('moves between weeks', async () => {
+    const ds = makeDataSource([]);
+    renderTimesheet(ds);
+    await waitFor(() => expect(ds.find).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId('timesheet-next-week'));
+    await waitFor(() => expect(ds.find).toHaveBeenCalledTimes(2));
+    expect(JSON.stringify((ds.find.mock.calls[1] as any[])[1].$filter)).toContain('"2026-11-22"');
+    fireEvent.click(screen.getByTestId('timesheet-prev-week'));
+    fireEvent.click(screen.getByTestId('timesheet-prev-week'));
+    await waitFor(() =>
+      expect(JSON.stringify((ds.find.mock.calls.at(-1) as any[])[1].$filter)).toContain('"2026-11-08"'),
+    );
+  });
+});

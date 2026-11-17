@@ -106,6 +106,14 @@ ComponentRegistry.registerLazy('object-tree', () => import('@object-ui/plugin-tr
   namespace: 'plugin-tree',
   category: 'view',
 });
+
+// objectstack#34382 — the editable row × weekday grid a `type: 'timesheet'`
+// list view draws (`ListView` composes the `object-timesheet` node). Lazy like
+// every view plugin, and its strings ride their own lazy locale namespace.
+ComponentRegistry.registerLazy('object-timesheet', () => import('@object-ui/plugin-timesheet'), {
+  namespace: 'plugin-timesheet',
+  category: 'view',
+});
 // ⛔ The bare `tree` node type key is RETIRED (objectui#10859 batch 8, the
 // objectui#10393 route) — `object-tree` above is the surviving spelling. The
 // STORED / host view type `tree` is a different layer and is untouched:

@@ -229,8 +229,8 @@ function pickFlatMapConfig(
   );
 }
 
-/** The eight per-kind blocks a list view carries at its top level. */
-const LIST_VIEW_KIND_BLOCKS = ['kanban', 'calendar', 'gallery', 'timeline', 'gantt', 'map', 'chart', 'tree'] as const;
+/** The nine per-kind blocks a list view carries at its top level. */
+const LIST_VIEW_KIND_BLOCKS = ['kanban', 'calendar', 'gallery', 'timeline', 'gantt', 'map', 'chart', 'tree', 'timesheet'] as const;
 
 /**
  * [#25923] The per-kind blocks a host `views` entry declares, by reference,

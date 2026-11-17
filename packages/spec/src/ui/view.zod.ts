@@ -1903,6 +1903,7 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
   'map',
   'chart',
   'tree',
+  'timesheet',
 ]).describe('Visualization type that users can switch to'));
 
 /**

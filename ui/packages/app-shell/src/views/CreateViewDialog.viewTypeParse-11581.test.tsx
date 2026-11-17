@@ -201,6 +201,11 @@ const PARSE_ROWS: Record<string, ParseRow> = {
     block: { chartType: 'bar', dataset: 'deal_metrics', values: ['total_amount'], dimensions: ['stage'] },
   },
   tree: { picks: [['parentField', 'Parent deal']], block: { parentField: 'parent' } },
+  // objectstack#34382 — one row field, written as the spec's list.
+  timesheet: {
+    picks: [['rowFields', 'Stage'], ['dateField', 'Start'], ['valueField', 'Amount']],
+    block: { rowFields: ['stage'], dateField: 'start_date', valueField: 'amount' },
+  },
 };
 
 /**

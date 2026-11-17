@@ -66,6 +66,7 @@ const VIEW_TYPE_LABEL_KEYS: Record<ListViewVisualization, string> = {
   map: 'engine.inspector.view.type.map',
   chart: 'engine.inspector.view.type.chart',
   tree: 'engine.inspector.view.type.tree',
+  timesheet: 'engine.inspector.view.type.timesheet',
 };
 
 /**

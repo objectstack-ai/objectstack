@@ -82,6 +82,7 @@
     "@object-ui/plugin-markdown": "workspace:*",
     "@object-ui/plugin-report": "workspace:*",
     "@object-ui/plugin-timeline": "workspace:*",
+    "@object-ui/plugin-timesheet": "workspace:*",
     "@object-ui/plugin-tree": "workspace:*",
     "@object-ui/plugin-view": "workspace:*",
     "@object-ui/react": "workspace:*",

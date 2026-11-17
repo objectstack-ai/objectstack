@@ -67,6 +67,7 @@ const VIEW_TYPE_LABELS: Record<ListViewVisualization, string> = {
   map: 'Map',
   chart: 'Chart',
   tree: 'Tree',
+  timesheet: 'Timesheet',
 };
 
 const VIEW_TYPE_OPTIONS = Object.entries(VIEW_TYPE_LABELS).map(([value, label]) => ({ label, value }));
@@ -359,6 +360,12 @@ const LIST_VIEW_INPUTS: ComponentInput[] = [
     type: 'object',
     description:
       'The chart a `type: "chart"` list draws, bound to an ADR-0021 dataset: `{ dataset, values, dimensions, chartType }`. There is no default binding.',
+  },
+  {
+    name: 'timesheet',
+    type: 'object',
+    description:
+      'The editable row × weekday grid a `type: "timesheet"` list draws: `{ rowFields, dateField, valueField }`. All three are required; each typed cell creates, updates or deletes one record.',
   },
 ];
 

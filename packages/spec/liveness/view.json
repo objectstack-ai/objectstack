@@ -130,22 +130,22 @@
         "timesheet": {
           "status": "live",
           "evidenceScope": "in-repo",
-          "evidence": "ui/packages/plugin-list/src/ListView.tsx `case 'timesheet'` forwards the view's `timesheet` block into an `object-timesheet` node; ui/packages/plugin-timesheet/src/ObjectTimesheet.tsx `resolveTimesheetConfig` reads `rowFields` (row key and the values written onto a created record), `dateField` (the week-window filter and the day column) and `valueField` (the cell value, each per-cell create/update/delete, and the totals), and renders the \"Timesheet configuration required\" refusal when any of the three is missing. Pinned by ui/packages/plugin-timesheet/src/__tests__/ObjectTimesheet.test.tsx.",
+          "evidence": "ui/packages/plugin-list/src/ListView.tsx `case 'timesheet'` forwards the view's `timesheet` block into an `object-timesheet` node; ui/packages/plugin-timesheet/src/timesheetModel.ts `resolveTimesheetConfig` (called by ObjectTimesheet.tsx) reads `rowFields` (row key and the values written onto a created record), `dateField` (the week-window filter and the day column) and `valueField` (the cell value, each per-cell create/update/delete, and the totals), and renders the \"Timesheet configuration required\" refusal when any of the three is missing. Pinned by ui/packages/plugin-timesheet/src/__tests__/ObjectTimesheet.test.tsx and timesheetModel.test.ts.",
           "children": {
             "rowFields": {
               "status": "live",
               "evidenceScope": "in-repo",
-              "evidence": "ui/packages/plugin-timesheet/src/ObjectTimesheet.tsx `resolveTimesheetConfig` reads `rowFields`; `buildTimesheetRows` keys each row on the records' values for these fields, and a created record carries the row's values for them."
+              "evidence": "ui/packages/plugin-timesheet/src/timesheetModel.ts `resolveTimesheetConfig` reads `rowFields`; `buildTimesheetRows` keys each row on the records' values for these fields, and `planCellWrite` gives a created record the row's values for them."
             },
             "dateField": {
               "status": "live",
               "evidenceScope": "in-repo",
-              "evidence": "ui/packages/plugin-timesheet/src/ObjectTimesheet.tsx `resolveTimesheetConfig` reads `dateField`; the fetch filters it to the displayed week and `buildTimesheetRows` places each record on its day column."
+              "evidence": "ui/packages/plugin-timesheet/src/timesheetModel.ts `resolveTimesheetConfig` reads `dateField`; ObjectTimesheet.tsx's fetch filters it to the displayed week and `buildTimesheetRows` places each record on its day column."
             },
             "valueField": {
               "status": "live",
               "evidenceScope": "in-repo",
-              "evidence": "ui/packages/plugin-timesheet/src/ObjectTimesheet.tsx `resolveTimesheetConfig` reads `valueField`; each cell shows and writes it (create, update, or delete on a cleared cell) and the row, day and week totals sum it."
+              "evidence": "ui/packages/plugin-timesheet/src/timesheetModel.ts `resolveTimesheetConfig` reads `valueField`; `planCellWrite` writes it on each cell edit (create, update, or delete on a cleared cell) and `buildTimesheetRows` sums it into the row, day and week totals."
             }
           }
         },

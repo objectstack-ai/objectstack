@@ -1,0 +1,12 @@
+{
+  // Type-checks this package's tests, which `tsconfig.json` excludes.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    "composite": false,
+    // Resolve workspace deps through their built typings.
+    "paths": {}
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

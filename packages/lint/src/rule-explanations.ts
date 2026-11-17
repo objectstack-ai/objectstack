@@ -207,10 +207,11 @@ const VIEW_LAYOUT_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
   rule: 'view/layout-without-binding',
   covers: 'what each view type renders without its block',
   paragraphs: [
-    'Six list-view types read their layout from a config block named after the type: `kanban`, ' +
-      '`calendar`, `gantt`, `timeline`, `map` and `tree`. A view of one of them with no block parses ' +
-      'and publishes clean, but the surface the author asked for is not the one that renders. What ' +
-      'renders instead differs by type, as read from the renderer below; the rule is a warning on all six.',
+    'Seven list-view types read their layout from a config block named after the type: `kanban`, ' +
+      '`calendar`, `gantt`, `timeline`, `map`, `tree` and `timesheet`. A view of one of them with no ' +
+      'block parses and publishes clean, but the surface the author asked for is not the one that ' +
+      'renders. What renders instead differs by type, as read from the renderer below; the rule is a ' +
+      'warning on all seven.',
     '`calendar`: no date axis, and the renderer does not invent one. objectui\'s `ListView.tsx` ' +
       'calendar branch forwards only the bindings the view declared, so `getCalendarConfig` ' +
       '(`ObjectCalendar.tsx`) resolves `null` and the view renders its "Calendar configuration ' +
@@ -241,6 +242,11 @@ const VIEW_LAYOUT_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
       'authoring reports success. For `tree` a block is not the whole story either: every `tree` key ' +
       'is optional, and a tree with no resolvable parent pointer renders flat — that is ' +
       '`view/tree-without-parent-field`.',
+    '`timesheet`: objectui\'s `ListView.tsx` timesheet branch hands the block to `ObjectTimesheet` ' +
+      '(`@object-ui/plugin-timesheet`) as declared, and its `resolveTimesheetConfig` resolves `null` ' +
+      'without all three keys, so the view renders its "Timesheet configuration required" screen ' +
+      'instead of a grid, on any object. Declare `timesheet.rowFields`, `timesheet.dateField` and ' +
+      '`timesheet.valueField`, the three keys `TimesheetConfigSchema` requires.',
     'A `gallery` view is not judged: no `gallery` key is required, and its fallback mis-titles ' +
       'cards rather than emptying the view.',
   ],

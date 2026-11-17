@@ -89,6 +89,7 @@ A List View controls how a collection of records is presented. It supports multi
 | `map` | Geographic map pins | Location-based data |
 | `chart` | Aggregate chart visualization | Dashboards and summaries |
 | `tree` | Self-referencing hierarchy (tree-grid) | Org charts, category trees |
+| `timesheet` | Editable row × weekday entry grid | Weekly time entry, daily quantities |
 
 ### List View Properties
 
@@ -358,7 +359,7 @@ see [Element data sources](/docs/ui/pages#element-data-sources).
 
 Each non-grid visualization reads its settings from a **nested config block
 named after the type** (`kanban`, `calendar`, `gantt`, `gallery`, `timeline`,
-`chart`, `tree`) — not from top-level keys.
+`chart`, `tree`, `timesheet`) — not from top-level keys.
 
 #### Kanban
 
@@ -396,6 +397,38 @@ gantt: {
   dependenciesField: 'depends_on',
 }
 ```
+
+#### Timesheet
+
+A timesheet pivots detail records into rows × the days of one week, and every cell is
+editable. Each record lands in the row its `rowFields` values name and the day its
+`dateField` falls on; the cell shows its `valueField`.
+
+```typescript
+type: 'timesheet',
+columns: ['project', 'task', 'work_date', 'hours'],
+timesheet: {
+  rowFields: ['project', 'task'],   // 1–3 fields; one row per distinct combination
+  dateField: 'work_date',           // date or datetime; places the record on a day
+  valueField: 'hours',              // number, currency or percent; the cell value
+}
+```
+
+- **One record per cell.** Typing into an empty cell creates a record carrying the row's
+  field values, the day and the number; changing a cell updates that record; clearing it
+  deletes the record. Each cell is its own call on the record API, so the object's hooks,
+  validation rules and permissions judge it, and a refusal stays on that cell with the
+  server's message.
+- **A cell holding several records** shows their sum and is read-only; edit those records
+  in a grid view.
+- **The week** starts on the viewer's locale first day, with previous / this / next
+  navigation. Row, day and week totals are always shown.
+- **Add row** asks for the row field values first; the row is kept until a typed cell
+  creates its first record. The view's `filter` applies to the week's query, so a row the
+  filter excludes disappears on the next read.
+
+All three keys are required: a `timesheet` view without them shows "Timesheet
+configuration required", and `os validate` warns (`view/layout-without-binding`).
 
 ### Switching views
 
