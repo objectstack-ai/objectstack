@@ -113,6 +113,7 @@ import { resolveViewId } from '../utils/resolveViewId.js';
 import { getProductName, getLogoUrl } from '../runtime-config.js';
 import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
 import { PreviewBadge } from './PreviewBadge.js';
+import { AssistantTopBarButton } from './AssistantTopBarButton.js';
 import { AboutDialog } from './AboutDialog.js';
 import { getConsoleBuild } from '../buildIdentity.js';
 import { GO_HOME_SHORTCUT, useAdvertiseShortcut, type ShortcutChord } from '../chrome/advertisedShortcuts.js';
@@ -1176,20 +1177,9 @@ export function AppHeader({
           </span>
 
           {/* AI Assistant — only when the runtime serves AI (hidden on
-              Community Edition so it can't dead-end on an agent-less chat). */}
-          {aiEnabled && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 max-md:size-11 shrink-0"
-              asChild
-              aria-label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
-            >
-              <Link to="/ai">
-                <Bot className="h-4 w-4" />
-              </Link>
-            </Button>
-          )}
+              Community Edition so it can't dead-end on an agent-less chat).
+              objectstack#34608: it opens and closes the drawer in place. */}
+          {aiEnabled && <AssistantTopBarButton />}
 
           {/* Help & Documentation — an aggregated menu rather than a bare
               external link: contextual "This app's docs" (only when the

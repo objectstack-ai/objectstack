@@ -109,6 +109,7 @@ function permissions(apiOperations?: string[]): MePermissionsAuthenticatedRespon
     userId: 'usr_1',
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: [],
     permissionSets: [],
     objects: { [OBJECT]: { allowRead: true, ...(apiOperations ? { apiOperations } : {}) } },
