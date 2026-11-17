@@ -70,7 +70,8 @@ function mount(initial: Draft, select: MetadataSelection, locale: SupportedLocal
 }
 
 const clickRemove = (locale: SupportedLocale = 'en-US') =>
-  fireEvent.click(screen.getByRole('button', { name: t('engine.inspector.flowNode.remove', locale) }));
+  fireEvent.pointerDown(screen.getByRole('button', { name: t('engine.inspector.flowNode.moreActions', locale) }), { button: 0, ctrlKey: false });
+  fireEvent.click(screen.getByRole('menuitem', { name: t('engine.inspector.flowNode.remove', locale) }));
 const refusal = () => screen.queryByRole('alert')?.textContent ?? null;
 
 /** Approval `x`, read by a branch and attached to by a boundary event. */

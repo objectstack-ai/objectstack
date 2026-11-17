@@ -273,7 +273,7 @@ function rowTexts(group: HTMLElement): string[] {
 }
 
 /** The view item name the object page's panel shows beneath its title. */
-const shownView = () => screen.queryByTestId('list-view-name')?.textContent ?? null;
+const shownView = () => screen.queryByTestId('studio-list-view-inspector')?.getAttribute('data-view-id') ?? null;
 
 /** Every view row's read settled: the drafts headers and the draft-overlaid list. */
 async function viewsRead() {

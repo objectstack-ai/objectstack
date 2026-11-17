@@ -183,7 +183,7 @@ async function openSwitcher(): Promise<string[]> {
 }
 
 /** The view item name the panel shows beneath its title. */
-const shownView = () => screen.getByTestId('list-view-name').textContent;
+const shownView = () => screen.getByTestId('studio-list-view-inspector').getAttribute('data-view-id');
 
 const typeCard = (type: string) =>
   Array.from(document.querySelectorAll<HTMLButtonElement>('button[data-testid^="create-view-type-"]')).find(

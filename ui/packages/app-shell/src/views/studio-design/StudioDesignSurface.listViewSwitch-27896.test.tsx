@@ -208,7 +208,7 @@ const panelTitle = () =>
   screen.getByTestId('studio-list-view-inspector').parentElement?.parentElement?.querySelector('div.mt-1[title]')?.textContent;
 
 /** The view item name the panel shows beneath its title. */
-const shownView = () => screen.queryByTestId('list-view-name')?.textContent;
+const shownView = () => screen.queryByTestId('studio-list-view-inspector')?.getAttribute('data-view-id');
 
 function viewSaves(): Array<[string, string, Record<string, unknown>, Record<string, unknown>]> {
   return mockClient.save.mock.calls.filter((c: unknown[]) => c[0] === 'view') as never;

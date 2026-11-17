@@ -149,7 +149,8 @@ function insertOnTheOnlyEdge() {
 }
 
 function removeSelectedNode() {
-  fireEvent.click(screen.getByRole('button', { name: t('engine.inspector.flowNode.remove', 'en-US') }));
+  fireEvent.pointerDown(screen.getByRole('button', { name: t('engine.inspector.flowNode.moreActions', 'en-US') }), { button: 0, ctrlKey: false });
+  fireEvent.click(screen.getByRole('menuitem', { name: t('engine.inspector.flowNode.remove', 'en-US') }));
 }
 
 /** The "+" under a node card — select-then-append, as in the card's step 4. */

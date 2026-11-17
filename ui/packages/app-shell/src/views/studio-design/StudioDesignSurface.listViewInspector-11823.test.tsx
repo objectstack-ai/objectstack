@@ -227,9 +227,8 @@ describe('an object leaf\'s Properties panel edits its list view (objectui#11823
   it('creates a view the object does not have yet at the first edit, seeded with the default columns', async () => {
     views = {};
     const panel = await openObjectLeaf();
-    // objectui#13151 — the notice names the view by the object's label and its
-    // role (the object is "Task", its nav entry "Tasks"), never `<object>.<key>`.
-    await waitFor(() => expect(within(panel).getByTestId('list-view-not-created')).toHaveTextContent('“Default view”'));
+    // objectstack#34796 — the notice is one sentence, and never `<object>.<key>`.
+    await waitFor(() => expect(within(panel).getByTestId('list-view-not-created')).toHaveTextContent('Changes save as a draft first.'));
     expect(within(panel).getByTestId('list-view-not-created')).not.toHaveTextContent('showcase_task.default');
     // Nothing is saved yet, and the canvas shows the list the running app
     // shows an object with no view: its default columns.

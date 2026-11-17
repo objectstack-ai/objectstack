@@ -792,13 +792,13 @@ export function FlowNodeInspector({
       headerActions={
         nested ? undefined : (
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger asChild disabled={readOnly}>
               <button
                 type="button"
                 data-testid="flow-node-more"
                 aria-label={t('engine.inspector.flowNode.moreActions', locale)}
                 title={t('engine.inspector.flowNode.moreActions', locale)}
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
               >
                 <MoreHorizontal className="h-4 w-4" />
               </button>

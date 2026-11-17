@@ -1436,9 +1436,9 @@ export function ObjectListViewInspector({
         ) : null
       }
     >
-      <div data-testid="studio-list-view-inspector" className="space-y-3">
-        {/* objectstack#34796 — no `object.view` machine name under the title:
-            the panel names the view by its label alone. */}
+      {/* objectstack#34796 — no `object.view` machine name under the title: the
+          panel names the view by its label alone; the name stays an attribute. */}
+      <div data-testid="studio-list-view-inspector" data-view-id={target.viewId} className="space-y-3">
         {readOnly ? (
           <p className="rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground" data-testid="list-view-read-only">
             {t('engine.studio.inspector.listView.readOnly', locale)}

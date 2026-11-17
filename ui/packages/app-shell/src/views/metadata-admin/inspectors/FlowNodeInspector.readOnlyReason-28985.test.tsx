@@ -79,10 +79,10 @@ function mount({ readOnly, readOnlyReason }: { readOnly: boolean; readOnlyReason
   );
 }
 
-/** The panel's form controls, Remove node included — the ones the reason is about. */
+/** The panel's form controls, the "···" menu that holds Remove node included — the ones the reason is about. */
 const controls = (root: HTMLElement) => [
   ...root.querySelectorAll<HTMLElement>('input, select, textarea, button[role="combobox"]'),
-  screen.getByRole('button', { name: t('engine.inspector.flowNode.remove', 'en-US') }),
+  screen.getByRole('button', { name: t('engine.inspector.flowNode.moreActions', 'en-US') }),
 ];
 
 describe('Flow node inspector, read-only with a reason from its host (objectstack#28985)', () => {
@@ -95,7 +95,7 @@ describe('Flow node inspector, read-only with a reason from its host (objectstac
     expect(body).toHaveAccessibleName('Set status');
 
     const all = controls(body);
-    // ID, Label, Node Type and Remove node alone are four; a vacuous pass is not one.
+    // ID, Label, Node Type and the "···" menu alone are four; a vacuous pass is not one.
     expect(all.length).toBeGreaterThanOrEqual(4);
     for (const el of all) {
       expect(body).toContainElement(el);
@@ -103,10 +103,10 @@ describe('Flow node inspector, read-only with a reason from its host (objectstac
     }
   });
 
-  it('hovering the disabled "Remove node" opens a tooltip with the reason', async () => {
+  it('hovering the disabled "···" menu (it holds Remove node) opens a tooltip with the reason', async () => {
     const user = userEvent.setup();
     mount({ readOnly: true, readOnlyReason: REASON });
-    const remove = screen.getByRole('button', { name: t('engine.inspector.flowNode.remove', 'en-US') });
+    const remove = screen.getByRole('button', { name: t('engine.inspector.flowNode.moreActions', 'en-US') });
     expect(remove).toBeDisabled();
     await user.hover(remove);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(REASON);
