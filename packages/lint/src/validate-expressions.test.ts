@@ -6603,3 +6603,81 @@ describe('[#22227] settledWhen — the deadline settle predicate in the field-ru
     expect(issues.filter((i) => /master_detail/.test(i.message))).toEqual([]);
   });
 });
+
+// [#34451] A flow VALUE envelope (`update_record` / `create_record` `fields.*`,
+// `assignment` values) is typed with the object the run binds as `record`, for
+// the date-text verdict family alone: `timestamp(record.<date field>)` checks
+// clean as CEL and faults on the `YYYY-MM-DD` text on every run. The engine's
+// `registerFlow` refuses the same set (service-automation's
+// `assignment-value-envelope.test.ts`).
+describe('validateStackExpressions — flow value envelopes take the date-text family (#34451)', () => {
+  const LOAN = {
+    name: 'library_loan',
+    fields: {
+      borrow_date: { type: 'date' },
+      due_date: { type: 'date' },
+      picked_up_at: { type: 'datetime' },
+      title: { type: 'text' },
+    },
+  };
+  const MEASURED = "isoDate(timestamp(record.borrow_date) + duration('168h'))";
+  type Slot = 'update_record' | 'create_record' | 'assignment';
+  const envelope = (source: string) => ({ dialect: 'cel', source });
+  const nodeFor = (slot: Slot, source: string) =>
+    slot === 'assignment'
+      ? { id: 'n1', type: 'assignment', config: { assignments: { due: envelope(source) } } }
+      : {
+        id: 'n1', type: slot,
+        config: {
+          objectName: 'library_loan',
+          ...(slot === 'update_record' ? { filter: { id: envelope('record.id') } } : {}),
+          fields: { due_date: envelope(source) },
+        },
+      };
+  const stackWith = (slot: Slot, source: string, start: Record<string, unknown> = {
+    objectName: 'library_loan', triggerType: 'record-after-update',
+  }) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_due',
+      nodes: [{ id: 'start', type: 'start', config: start }, nodeFor(slot, source), { id: 'end', type: 'end' }],
+      edges: [{ id: 'e1', source: 'start', target: 'n1' }, { id: 'e2', source: 'n1', target: 'end' }],
+    }],
+  });
+  const SLOT_KEY: Record<Slot, string> = {
+    update_record: 'config.fields.due_date',
+    create_record: 'config.fields.due_date',
+    assignment: 'config.assignments.due',
+  };
+
+  it.each(['update_record', 'create_record', 'assignment'] as const)(
+    'refuses timestamp() over a date field in %s, alone or inside + duration(), naming the addDays shift',
+    (slot) => {
+      for (const source of [MEASURED, 'timestamp(record.borrow_date)']) {
+        const issues = validateStackExpressions(stackWith(slot, source));
+        expect(issues.map((i) => [i.severity, i.path]), source).toEqual([['error', `flows[0].nodes[1].${SLOT_KEY[slot]}`]]);
+        expect(issues[0].message).toContain('`timestamp(record.borrow_date)`');
+        expect(issues[0].message).toContain('`isoDate(addDays(record.borrow_date, N))`');
+      }
+    },
+  );
+
+  it('types a time-relative flow\'s envelope with the swept object', () => {
+    const issues = validateStackExpressions(stackWith('update_record', MEASURED, {
+      schedule: '0 * * * *', timeRelative: { object: 'library_loan', dateField: 'due_date', offsetDays: 1 },
+    }));
+    expect(issues.filter((i) => /isoDate\(addDays\(record\.borrow_date, N\)\)/.test(i.message))).toHaveLength(1);
+  });
+
+  it('CONTROL: a datetime field in the same envelope, and the taught shift, stay clean', () => {
+    for (const source of ["isoDate(timestamp(record.picked_up_at) + duration('168h'))", 'isoDate(addDays(record.borrow_date, 7))']) {
+      expect(validateStackExpressions(stackWith('update_record', source)), source).toEqual([]);
+    }
+  });
+
+  it('CONTROL: only the date-text family reaches the envelope — a text field in arithmetic stays silent here', () => {
+    // A flow condition over the same object gets the type-mismatch verdict; the envelope does not.
+    expect(validateStackExpressions(stackWith('update_record', 'record.title * 2'))).toEqual([]);
+    expect(validateStackExpressions(stackWith('update_record', 'record.due_date + 1'))).toEqual([]);
+  });
+});
