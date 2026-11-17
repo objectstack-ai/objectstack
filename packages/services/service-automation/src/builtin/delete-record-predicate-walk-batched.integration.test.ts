@@ -175,11 +175,13 @@ describe('[#27004] a multi delete_record walks its matched rows as a set', () =>
       const res: any = await sweep(PARENT.name, 'counted');
       expect(res.success, JSON.stringify(res)).toBe(true);
       const probesOf = (object: string) => finds.mock.calls.filter((call) => call[0] === object).length;
-      // ⌈1,001 / 500⌉ = 3 batches. The master_detail is read twice per batch
-      // (the cascade set is collected, then walked); the lookup and the
-      // multiple lookup once each. Per row it was 2,002, 1,001 and 1,001.
+      // ⌈1,001 / 500⌉ = 3 batches, each relation read once per batch. The
+      // master_detail is read by the collection walk, and the deleting walk
+      // takes that answer instead of reading it again (ruling 6893104201 c1:
+      // nothing has written in between); it was 6 before. Per row it was
+      // 2,002, 1,001 and 1,001.
       expect({ detail: probesOf(DETAIL.name), link: probesOf(LINK.name), tags: probesOf(TAGS.name) })
-        .toEqual({ detail: 6, link: 3, tags: 3 });
+        .toEqual({ detail: 3, link: 3, tags: 3 });
       expect(deletes.mock.calls.filter((call) => call[0] === PARENT.name)).toHaveLength(3);
     } finally {
       finds.mockRestore();
