@@ -3414,7 +3414,7 @@ describe('runHalf — a replay of a recording made before the card declared data
     expect(Object.keys(live.recording.turns).filter((k) => k.includes('/dq_'))).toEqual([]);
 
     const replay = new RecordedDriver(JSON.parse(JSON.stringify(live.recording)) as Recording);
-    const ref = { card: CARD, mode: 'scratch', phase: 'run' } as const;
+    const ref = { card: scenario.card.id, mode: 'scratch', phase: 'run' } as const;
     const half = await runHalf(namespacedScenario(withDatasets()), new FakeApp(), replay, ref, citationLabels(withDatasets()));
     expect(half.datasetQuestions!.map((q) => q.question)).toEqual(['dq_staff', 'dq_contacts']);
     for (const q of half.datasetQuestions!) {
