@@ -159,6 +159,8 @@ describe('[ADR-0149 D2] stdio list_datasets is localized for the workspace defau
  * admission wired), so the answer is the executor's own degraded-read
  * contract: `list_datasets` lists nothing, says `partial` and names the error;
  * `query_dataset` refuses 503 `SERVICE_UNAVAILABLE` for a server-side fault.
+ * The control case lists the dataset over the same harness, so the empty
+ * catalogue is the failed read's doing, not the harness's.
  *
  * Pinned on purpose under seat ruling A: the catalogue degrades and says so.
  * A follow-up (B: serve the untranslated text on a translation fault, inside
@@ -166,16 +168,34 @@ describe('[ADR-0149 D2] stdio list_datasets is localized for the workspace defau
  * transports at once.
  */
 describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but its reads throw', () => {
-  /** The analytics service AnalyticsServicePlugin registers, so the executor is the platform's own. */
+  /**
+   * The analytics service AnalyticsServicePlugin registers, so the executor is
+   * the platform's own; over an open security double and an engine double
+   * that declares `crm_opportunity`, so a dataset the load hands over IS
+   * listed (the control case below), and an empty catalogue is the load's doing.
+   */
   async function wiredAnalytics(): Promise<AnalyticsService> {
-    const registered: Record<string, unknown> = {};
+    const fields = { id: { type: 'text' }, stage: { type: 'text' }, amount: { type: 'number' } };
+    const engine = {
+      execute: async () => ({ rows: [{ stage: 'won', total_amount: 100 }] }),
+      hasObjectMiddleware: () => false,
+      getObject: (name: string) => (name === 'crm_opportunity' ? { fields } : undefined),
+      resolveEffectiveDatasource: () => undefined,
+    };
+    const security = {
+      getReadFilter: async () => undefined,
+      canReadObject: () => true,
+      getReadableFields: async () => Object.keys(fields),
+      getQueryableFields: async () => Object.keys(fields),
+    };
+    const registered: Record<string, unknown> = { data: engine, security };
     const ctx = {
       getService: (name: string) => registered[name],
       registerService: (name: string, svc: unknown) => { registered[name] = svc; },
       replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
       logger: { info() {}, warn() {}, error() {}, debug() {} },
     };
-    await new AnalyticsServicePlugin().init(ctx as never);
+    await new AnalyticsServicePlugin({ queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }) }).init(ctx as never);
     const analytics = registered.analytics as AnalyticsService;
     expect(analytics.hasPluginWiredAdmission()).toBe(true);
     return analytics;
@@ -196,14 +216,14 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     };
   }
 
-  async function bridgeOverRealExecutor(read: 'getLocales' | 'getTranslations', message: string) {
+  async function bridgeOverRealExecutor(i18n: () => unknown) {
     return createStdioDataBridge({
       engine: {} as any,
       metadataService: { list: async () => [] } as any,
       protocol: () => ({ getMetaItems: async () => ({ items: [METRICS] }) }) as any,
       resolvePrincipal: async () => PRINCIPAL as any,
       datasetTools: await wiredAnalytics(),
-      i18n: () => i18nWhoseReadThrows(read, message),
+      i18n,
     });
   }
 
@@ -212,15 +232,22 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
     { read: 'getTranslations' as const, message: 'bundle offline' },
   ];
 
+  it('control: the same harness lists the dataset, in the bundle labels, when the reads answer', async () => {
+    const bridge = await bridgeOverRealExecutor(() => i18nService('zh-CN'));
+    const answer = await bridge.listDatasets!({});
+    expect(answer.partial).toBeUndefined();
+    expect(answer.datasets.map((d) => [d.name, d.label])).toEqual([['opp_metrics', '商机指标']]);
+  });
+
   it.each(CASES)('$read throwing: list_datasets lists nothing, says partial and names the i18n error', async ({ read, message }) => {
-    const bridge = await bridgeOverRealExecutor(read, message);
+    const bridge = await bridgeOverRealExecutor(() => i18nWhoseReadThrows(read, message));
     const answer = await bridge.listDatasets!({ terms: TERMS });
     expect(answer).toEqual({ datasets: [], partial: true, warning: expect.stringContaining(message) });
     expect(answer.warning).toMatch(/^The dataset catalogue could not be read: /);
   });
 
   it.each(CASES)('$read throwing: query_dataset refuses 503 SERVICE_UNAVAILABLE, naming the failed read', async ({ read, message }) => {
-    const bridge = await bridgeOverRealExecutor(read, message);
+    const bridge = await bridgeOverRealExecutor(() => i18nWhoseReadThrows(read, message));
     const refused = await bridge
       .queryDataset!({ datasetName: 'opp_metrics', selection: { measures: ['total_amount'] } }, { maxRows: 10 })
       .then(
