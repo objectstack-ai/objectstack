@@ -263,7 +263,7 @@ function resolveSections(
 
 /**
  * A declared field's value, through the record page's own cell. A declared
- * deadline is judged against `record`, the row the value comes from
+ * deadline's `settledWhen` is judged against `record`, the row the value comes from
  * (objectui#11815): the snapshot's date against the snapshot's own state, the
  * current date against the current row's.
  */
