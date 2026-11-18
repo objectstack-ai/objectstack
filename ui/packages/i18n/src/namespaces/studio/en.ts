@@ -2698,9 +2698,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
     'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish the app (top bar), as in Data and Interfaces.',
-  'engine.studio.access.banner': 'This app’s objects · applies on publish',
+  'engine.studio.access.banner': 'This app’s objects · live on publish',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · applies on publish',
+  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on publish',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': 'Included with the app',
   // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.

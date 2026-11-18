@@ -2409,9 +2409,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.subtitle': '对象权限 · 字段级读写',
   'engine.studio.access.bannerTitle':
     '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动先保存为草稿，点击顶栏「发布」后随应用一起生效（与数据、界面一致）。',
-  'engine.studio.access.banner': '本应用的对象 · 发布后生效',
+  'engine.studio.access.banner': '本应用对象 · 发布后生效',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': '本应用及 {package} 的对象 · 发布后生效',
+  'engine.studio.access.bannerPair': '本应用及 {package} 对象 · 发布后生效',
   // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
   'engine.studio.access.origin.app': '随应用提供',
   // objectstack#35018 — the word before the open item's label on the copilot's 「正在看」 line.
