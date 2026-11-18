@@ -173,14 +173,15 @@ function skillFileOf(dir: string): string | undefined {
  * turn would be given a skill on one machine and none on the next. Refused too
  * when any SKILL.md of a skill carries a front-matter key outside the ask
  * turn's closed set ({@link frontMatterRefusal}): a skill must not widen the
- * turn beyond the app's tools and `Skill`.
+ * turn beyond the app's tools and `Skill`. `flag` names the option the
+ * refusals cite (`--ask-skills`, or door mode's `--door-skills`).
  */
-export function readAskSkills(dirArg: string): AskSkillsBundle {
+export function readAskSkills(dirArg: string, flag = '--ask-skills'): AskSkillsBundle {
   const dir = resolve(dirArg);
-  if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`--ask-skills names \`${dirArg}\`, which is no directory`);
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new Error(`${flag} names \`${dirArg}\`, which is no directory`);
   const misspelt = (shown: string) =>
     new Error(
-      `--ask-skills names \`${dirArg}\`, which holds \`${shown}\`: a skill file is spelled \`${SKILL_FILE}\` exactly, ` +
+      `${flag} names \`${dirArg}\`, which holds \`${shown}\`: a skill file is spelled \`${SKILL_FILE}\` exactly, ` +
         `or a session reads it on one filesystem and misses it on another; rename it to \`${SKILL_FILE}\``,
     );
   const skillDirs: Array<[string, string]> = [];
@@ -201,7 +202,7 @@ export function readAskSkills(dirArg: string): AskSkillsBundle {
     }
   }
   if (skillDirs.length === 0) {
-    throw new Error(`--ask-skills names \`${dirArg}\`, which holds no skill: give a directory holding ${SKILL_FILE}, or a directory of skill directories that each hold one`);
+    throw new Error(`${flag} names \`${dirArg}\`, which holds no skill: give a directory holding ${SKILL_FILE}, or a directory of skill directories that each hold one`);
   }
   const files = new Map<string, Map<string, Buffer>>();
   const skills: AskSkill[] = [];
@@ -213,7 +214,7 @@ export function readAskSkills(dirArg: string): AskSkillsBundle {
       const why = frontMatterRefusal(bytes.toString('utf8'));
       if (why !== undefined) {
         throw new Error(
-          `--ask-skills: skill \`${name}\` is refused: ${why} (${join(at, rel)}). An ask turn may use the app's tools and \`${SKILL_TOOL}\` alone, ` +
+          `${flag}: skill \`${name}\` is refused: ${why} (${join(at, rel)}). An ask turn may use the app's tools and \`${SKILL_TOOL}\` alone, ` +
             `and a skill's front matter can grant tools, another model or effort, hooks or a subagent beyond them; ` +
             `a skill given to an ask turn carries only ${[...ASK_SKILL_KEYS].map((k) => `\`${k}\``).join(', ')}`,
         );
