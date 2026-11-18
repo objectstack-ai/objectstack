@@ -164,6 +164,8 @@ const RECIPES: Record<string, Recipe> = {
   query: { invoke: (b) => b.query('vault', {}), writesRecords: false },
   get: { invoke: (b) => b.get('vault', 'row-1'), writesRecords: false },
   aggregate: { invoke: (b) => b.aggregate('vault', {}), writesRecords: false },
+  // [#35138] The caller's locale codes: no engine read, no record.
+  userTextLocales: { invoke: (b) => b.userTextLocales(), writesRecords: false },
 
   // ── write faces: an engine write result rides (or could ride) the response ──
   create: { invoke: (b) => b.create('vault', { name: CONTROL }), writesRecords: true },

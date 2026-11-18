@@ -475,6 +475,7 @@ const BRIDGE_MEMBERS: Record<string, string> = {
   create: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',
   update: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',
   remove: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',
+  userTextLocales: 'no row body — the principal\'s locale codes and the i18n default',
 };
 
 /**
