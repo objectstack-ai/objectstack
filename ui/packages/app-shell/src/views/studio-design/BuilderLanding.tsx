@@ -182,6 +182,15 @@ export function BuilderLanding(): React.ReactElement {
   const writable = cards.filter((p) => p.writable);
   const readonly = cards.filter((p) => !p.writable);
 
+  // objectstack#35018 — "Recently viewed" is drawn only when it adds something
+  // to the cards above it. When its entries are exactly the apps those cards
+  // already show (one recent visit to the only app, say), the row repeats the
+  // page and is left out; any entry the cards do not show, or any card it does
+  // not repeat, keeps the whole row.
+  const cardIds = new Set(cards.map((p) => p.id));
+  const recentRepeatsCards =
+    recentPackages.length === cardIds.size && recentPackages.every((item) => cardIds.has(item.name));
+
   // ADR-0146 D3 — each read-only BASE's card carries "n customized, m switched
   // off", the server's counts (`GET /packages/:id/customizations`), one read
   // per card drawn. A pair (`<base>.custom`) draws no line and is never sent:
@@ -542,7 +551,10 @@ export function BuilderLanding(): React.ReactElement {
       <div data-testid="studio-landing-own" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
         {writable.map((p) => (
           <div key={p.id} data-package-id={p.id} className="rounded-lg border bg-background">
-            <div className="flex items-center gap-2.5 px-3 py-2.5">
+            {/* objectstack#35018 — the app's id is not on the card's face, only
+              * in its hover title, as on an installed app's card. Every app in
+              * this section is writable, so the card carries no badge saying so. */}
+            <div title={p.id} className="flex items-center gap-2.5 px-3 py-2.5">
               <button
                 type="button"
                 onClick={() => open(p.id)}
@@ -553,12 +565,8 @@ export function BuilderLanding(): React.ReactElement {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px] font-medium">{p.name}</span>
-                  <span className="block truncate font-mono text-[10px] text-muted-foreground">{p.id}</span>
                 </span>
               </button>
-              <span className="rounded bg-emerald-400/15 px-1.5 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-300">
-                {t('engine.studio.pkg.writable', locale)}
-              </span>
               {/* ADR-0070 D4 — Duplicate clones a writable base: the copy is a new
                 * writable package holding the base's sys_metadata rows. It is
                 * offered here, on writable bases only; a read-only package's card
@@ -642,8 +650,9 @@ export function BuilderLanding(): React.ReactElement {
 
       {/* objectui#11863 — the packages last opened here. objectstack#34715
         * orders the page by the errand: installed apps first, the author's own
-        * apps next, then the other entries, this one among them. */}
-      {recentPackages.length > 0 && (
+        * apps next, then the other entries, this one among them.
+        * objectstack#35018 — left out when it only repeats those cards. */}
+      {recentPackages.length > 0 && !recentRepeatsCards && (
         <>
           <h2 className={headingClass}>{t('engine.home.recent', locale)}</h2>
           <div data-testid="studio-landing-recent" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
