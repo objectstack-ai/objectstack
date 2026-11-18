@@ -392,6 +392,7 @@ describe('aggregate_records — a lookup group names its record beside the id, r
       parent: { type: 'master_detail', reference: 'account' },
       partner: { type: 'lookup', reference: 'sys_partner' },
       stage: { type: 'select', options: [{ value: 'won' }, { value: 'lost' }] },
+      ref_code: { type: 'text' },
       amount: { type: 'number' },
     },
   };
@@ -447,14 +448,14 @@ describe('aggregate_records — a lookup group names its record beside the id, r
     expect(aliased.rows).toEqual([{ p: 'a2', p__label: 'Globex', n: 2 }]);
   });
 
-  it('CONTROL — a second key that is not a lookup carries no label', async () => {
-    const bridge = lookupBridge([{ account: 'a1', stage: 'won', n: 2 }, { account: 'a2', stage: 'lost', n: 1 }]);
-    const out = await answer(bridge, { aggregations: COUNT, groupBy: ['account', 'stage'] });
+  it('CONTROL — a second key that is not a lookup carries no label, even where its value is a record id', async () => {
+    const bridge = lookupBridge([{ account: 'a1', ref_code: 'a2', n: 2 }, { account: 'a2', ref_code: 'a1', n: 1 }]);
+    const out = await answer(bridge, { aggregations: COUNT, groupBy: ['account', 'ref_code'] });
     expect(out.rows).toEqual([
-      { account: 'a1', account__label: 'Acme', stage: 'won', n: 2 },
-      { account: 'a2', account__label: 'Globex', stage: 'lost', n: 1 },
+      { account: 'a1', account__label: 'Acme', ref_code: 'a2', n: 2 },
+      { account: 'a2', account__label: 'Globex', ref_code: 'a1', n: 1 },
     ]);
-    for (const row of out.rows) expect(row).not.toHaveProperty('stage__label');
+    for (const row of out.rows) expect(row).not.toHaveProperty('ref_code__label');
   });
 
   it('CONTROL — a record the caller\'s read does not return and a deleted record answer the same, with no label', async () => {
