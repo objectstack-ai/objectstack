@@ -23,9 +23,9 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
-import { SKILLS_PACKAGE, isExactVersion, type SkillsCatalog } from './skills-catalog.js';
+import { SKILLS_PACKAGE, SKILL_NAME, isExactVersion, isSafePathSegment, type SkillsCatalog } from './skills-catalog.js';
 
 /** The record's file name, inside the skills directory. */
 export const SKILLS_MANIFEST_FILE = '.objectstack-skills.json';
@@ -95,9 +95,8 @@ export function readSkillsManifest(dir: string): SkillsManifest | null {
     throw refuse(`does not record ${SKILLS_PACKAGE} at an exact version with its skills.`);
   }
   for (const [name, files] of Object.entries(record.skills)) {
-    const bad = !files || typeof files !== 'object' || Array.isArray(files)
-      || Object.entries(files).some(([path, hash]) => typeof hash !== 'string' || path.split('/').includes('..'))
-      || name.includes('/') || name.includes('\\') || name.startsWith('.');
+    const bad = !SKILL_NAME.test(name) || !files || typeof files !== 'object' || Array.isArray(files)
+      || Object.entries(files).some(([path, hash]) => typeof hash !== 'string' || !path.split('/').every(isSafePathSegment));
     if (bad) throw refuse(`records the skill '${name}' in a shape it cannot read.`);
   }
   return record as SkillsManifest;
@@ -181,19 +180,36 @@ export function planSkillsWrite(dir: string, catalog: SkillsCatalog, manifest: S
 }
 
 /**
+ * `target` resolved, refused unless it lies strictly under `root`: the last
+ * guard between a catalog path and the disk, whatever the reader admitted.
+ */
+function underRoot(root: string, target: string): string {
+  const base = resolve(root);
+  const resolved = resolve(target);
+  if (!resolved.startsWith(base + sep)) {
+    throw new Error(`Refusing to write ${resolved}: it resolves outside the skills directory ${base}. Nothing outside it is touched.`);
+  }
+  return resolved;
+}
+
+/**
  * Write `catalog` into `dir` along `plan`: remove each dropped skill, replace
  * each recorded one and each conflict (the caller decided those may go), add
  * the rest, then write the record last. Only directories the plan names are
  * touched.
  */
 export function applySkillsWrite(dir: string, catalog: SkillsCatalog, plan: SkillsWritePlan): SkillsManifest {
+  // Every target is judged before the first write, so a refusal leaves the directory as it was.
+  const dropped = plan.dropped.map((name) => underRoot(dir, join(dir, name)));
+  const writes = [...catalog.skills].map(([name, files]) => {
+    const root = underRoot(dir, join(dir, name));
+    return { root, files: [...files].map(([path, bytes]) => ({ target: underRoot(root, join(root, ...path.split('/'))), bytes })) };
+  });
   mkdirSync(dir, { recursive: true });
-  for (const name of plan.dropped) rmSync(join(dir, name), { recursive: true, force: true });
-  for (const [name, files] of catalog.skills) {
-    const root = join(dir, name);
+  for (const target of dropped) rmSync(target, { recursive: true, force: true });
+  for (const { root, files } of writes) {
     rmSync(root, { recursive: true, force: true });
-    for (const [path, bytes] of files) {
-      const target = join(root, ...path.split('/'));
+    for (const { target, bytes } of files) {
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, bytes);
     }

@@ -58,7 +58,16 @@ const NPM_PACK_TIMEOUT_MS = 120_000;
 const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** A skill directory name: one path segment, no leading dot. */
-const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Whether one `/`-separated path segment stays inside its directory on every
+ * platform: not empty, not `.` or `..`, and no `\` (a separator on Windows)
+ * and no `:` (a drive letter or an alternate data stream there).
+ */
+export function isSafePathSegment(segment: string): boolean {
+  return segment !== '' && segment !== '.' && segment !== '..' && !segment.includes('\\') && !segment.includes(':');
+}
 
 /** Whether `value` names one release exactly (no range, no dist-tag). */
 export function isExactVersion(value: string): boolean {
@@ -154,7 +163,7 @@ export function npmPackInvocation(spec: string, destination: string, cwd: string
   const shell = platform === 'win32';
   return {
     command: 'npm',
-    args: ['pack', spec, '--pack-destination', destination, '--json'],
+    args: ['pack', spec, '--pack-destination', shell ? `"${destination}"` : destination, '--json'],
     options: { cwd, timeout: NPM_PACK_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, shell },
   };
 }
@@ -308,7 +317,7 @@ export function catalogFromTarball(tgz: Buffer, version: string): SkillsCatalog 
   for (const entry of entries) {
     if (!entry.path.startsWith(TARBALL_SKILLS_PREFIX)) continue;
     const parts = entry.path.slice(TARBALL_SKILLS_PREFIX.length).split('/').filter((part, i, all) => !(part === '' && i === all.length - 1));
-    if (parts.some((part) => part === '' || part === '.' || part === '..')) {
+    if (!parts.every(isSafePathSegment)) {
       throw refuse(`carries the path '${entry.path}', which leaves its own tree.`);
     }
     if (entry.type === '5') continue;
