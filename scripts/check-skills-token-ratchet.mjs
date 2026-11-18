@@ -1328,20 +1328,28 @@ export const CEILINGS = new Map([
   // another passage (the 85 bytes above were what there was), so the same ruling's second
   // half carries it: the file is 11106 -> 11231 bytes -> 2808 tokens, zero headroom before,
   // ceiling +31, pinned AT the measurement.
-  // 2808 -> 2982: an action body refuses by code. One paragraph under the `ctx` section (which
+  // 2808 -> 2957: an action body refuses by code. One paragraph under the `ctx` section (which
   // action may declare `refusals`; that the catalogue, the throws and the checks are a hook's,
   // taught in objectstack-data and only pointed at here; the bundle key the sentence is translated
   // at; that an authored `errorMessage` replaces the sentence in the console's toast), and the
   // Add Line example declares one entry and throws its code where it threw a sentence. PAID DOWN
-  // FIRST by 26 bytes of true restatement in this file: the label line "**Script-typed action**:"
-  // above the Add to Campaign example (the block's own `type: 'script'` says it, under the H2
-  // "Examples"). Two reads of the file found no other passage restating another, so the same
-  // ruling's second half carries the rest. Arithmetic: the text adds 721 bytes, the cut removes
-  // 26, so the file is 11231 -> 11926 bytes -> 2982 tokens, zero headroom before, ceiling +174,
-  // the measured remainder only, pinned AT the measurement. Same ruling as the lines above
+  // FIRST by 124 bytes of true restatement in this file, five cuts: the label line
+  // "**Script-typed action**:" above the Add to Campaign example (26; the block's own
+  // `type: 'script'` says it, under the H2 "Examples"); the label "**Flow-typed action**" and the
+  // parentheses it held the `onSuccess` note in (19 net, the note now says "the flow run"; the
+  // block's own `type: 'flow'` says it); "`openIn: 'new-tab'` opens it in a new tab," (35 net,
+  // `'self'` now spelled `openIn: 'self'`; the H3 "`openIn: 'new-tab'`" under the H2 "Opening in
+  // a New Tab" and the example's `openIn: 'new-tab'` line say it); " on success / failure" on
+  // the `successMessage` / `errorMessage` bullet (21; the two key names, that bullet's
+  // "Action completed" half and the refusals paragraph's "failure toast … `errorMessage`" say
+  // it); "(`{ field: 'email' }`)" beside "field-backed params" (23; the `{ field: … }` params of
+  // the Reassign Lead, Add to Campaign and Add Line examples show the shape). The same ruling's
+  // second half carries the rest. Arithmetic: the text adds 721 bytes, the cuts remove 124, so
+  // the file is 11231 -> 11828 bytes -> 2957 tokens, zero headroom before, ceiling +149, the
+  // measured remainder only, pinned AT the measurement. Same ruling as the lines above
   // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11926 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 2982],
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11828 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2957],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

@@ -482,8 +482,8 @@ every plugin contributes its own `objects.*` slice.
 
 ## Shipped examples
 
-`examples/app-crm` — the bundled layout (one `crm.translation.ts`, `en` + `zh-CN`).
-`examples/app-todo` — the per-locale layout (`{en,zh-CN,ja-JP}.ts` + `index.ts`).
+`examples/app-crm` — the bundled layout (`en` + `zh-CN`).
+`examples/app-todo` — the per-locale layout.
 
 ---
 
