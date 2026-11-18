@@ -35,6 +35,7 @@ export const en: TranslationData = {
         nav_account_profile: { label: 'Profile' },
         nav_account_mobile_app: { label: 'Mobile App' },
         nav_account_notifications: { label: 'Notifications' },
+        nav_account_notification_settings: { label: 'Notification Settings' },
         nav_account_approvals: { label: 'Approvals' },
         nav_account_memberships: { label: 'My Organizations' },
         nav_account_linked: { label: 'Linked Accounts' },

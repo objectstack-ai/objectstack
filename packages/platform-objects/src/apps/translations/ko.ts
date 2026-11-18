@@ -20,6 +20,7 @@ export const ko: TranslationData = {
         nav_account_profile: { label: '프로필' },
         nav_account_mobile_app: { label: '모바일 앱' },
         nav_account_notifications: { label: '알림' },
+        nav_account_notification_settings: { label: '알림 설정' },
         nav_account_approvals: { label: '내 승인 대기' },
         nav_account_memberships: { label: '내 조직' },
         nav_account_linked: { label: '연결된 계정' },
