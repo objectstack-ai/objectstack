@@ -511,6 +511,24 @@ describe('the drawer follows the app (objectstack#35014)', () => {
     expect(window.localStorage.getItem(cacheKey('app:app.crm:build'))).toBe('conv-crm');
   });
 
+  it("picking app B in the scope switcher switches to B's thread and never re-binds A's thread to B", async () => {
+    server.set('conv-crm', boundTurns('app.crm'));
+    window.localStorage.setItem(cacheKey('app:app.crm:build'), 'conv-crm');
+    const host = renderHost('app.crm');
+    expect(await settledConversationId()).toBe('conv-crm');
+
+    // The switcher's own call (`openAssistant({ agent: 'build', packageId })`).
+    state.chat = undefined;
+    await open({ agent: 'build', packageId: 'app.notes' });
+    await onBlankStartOf('app.notes', 'Meeting Notes');
+    for (const [id, pkg] of state.pairs) if (id === 'conv-crm') expect(pkg).toBe('app.crm');
+    expect(window.localStorage.getItem(cacheKey('app:app.crm:build'))).toBe('conv-crm');
+
+    // Entering B keeps B's thread; the header and the content still agree.
+    host.switchApp('app.notes');
+    await onBlankStartOf('app.notes', 'Meeting Notes');
+  });
+
   it("app A's thread is not shown at Home or in the built-in Setup app, nor in app B after a remount", async () => {
     server.set('conv-crm', boundTurns('app.crm'));
     renderHost('app.crm');
