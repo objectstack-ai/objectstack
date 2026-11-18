@@ -68,7 +68,8 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { AccessPillar, AutomationsPillar, DataPillar } from './StudioDesignSurface';
-import { StudioRail, StudioRailRow, railAbbreviation } from './StudioRail';
+import { StudioRail, StudioRailRow } from './StudioRail';
+import { railAbbreviation } from './railAbbreviation';
 import {
   STUDIO_PILLARS_HOST,
   STUDIO_RAIL_FLOATING,
