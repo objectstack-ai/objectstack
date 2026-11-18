@@ -72,6 +72,9 @@ const DIGEST_KEY: Record<DigestCadence, string> = {
   weekly: 'notificationSettings.digestWeekly',
 };
 
+/** The quiet-hours face of `@object-ui/fields`, resolved once (lazy: render inside `Suspense`). */
+const QuietHours = getLazyFieldWidget('quiet-hours');
+
 const SOURCE_KEY: Record<PreferenceSource, string> = {
   own: 'notificationSettings.sourceOwn',
   default: 'notificationSettings.sourceDefault',
@@ -161,7 +164,6 @@ export function NotificationSettingsPage() {
   const { prefs } = load;
   const userId = user?.id;
   const canWrite = !!userId && !!adapter && !saving;
-  const QuietHours = getLazyFieldWidget('quiet-hours');
   const quietValue = quietDraft === undefined ? prefs.general.quietHours.value : quietDraft;
 
   const topicLabel = (topic: PreferenceTopic) =>
