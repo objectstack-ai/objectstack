@@ -261,9 +261,16 @@ files only: no model, no network, and no score of its own — every figure is th
   record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
   `this run’s from-scratch build` takes that run's scratch author.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
-  driver (a replay is its own driver), and the ask skills (`--ask-skills`: names and sha256; a record without them
-  reads `none`). When they do not, that table is refused with a line naming each difference and
+  driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
+  reads `none`), and the card file they graded (`card`, below; a record without it reads `card: not recorded`).
+  When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
+- **The card stamp**: every record names the card file it graded at its top level, `card: { id, sha256 }` (the sha256
+  of the card file's bytes as the runner loaded them, before it moved the dates or prefixed the names), and the
+  scorecard prints it under the packages line: `card: travel_expense (sha256 3f2a9c01b7de)`. A change to a card's
+  questions, outcomes or seed moves the hash, so a round graded before it is told from one graded after it; a
+  replay grades on the card as it is now, and stamps that card. Two hashes in one table refuse it as above, the line
+  naming each hash and the records holding it.
 - **Older records**: a field a record predates (served models, ask cost and time, the package source) reads
   `not recorded`, never a zero. An effort set only through `CLAUDE_CODE_EFFORT_LEVEL` was never recorded, so runs that
   differ only in it share a row.
