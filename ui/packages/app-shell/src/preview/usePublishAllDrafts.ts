@@ -98,7 +98,7 @@ export function usePublishAllDrafts(t: TranslateFn) {
       const orphans = pending.filter((d) => d.packageId === null);
 
       const seedProblems: string[] = [];
-      const probeProblems: string[] = [];
+      const probeProblems: NonNullable<PublishHealth['issues']> = [];
       let seededRows = 0;
       const recordHealth = (health: PublishHealth | undefined) => {
         if (!health) return;
@@ -114,7 +114,7 @@ export function usePublishAllDrafts(t: TranslateFn) {
         }
         if (typeof health.seededRows === 'number') seededRows += health.seededRows;
         for (const issue of health.issues ?? []) {
-          if (issue.severity === 'error') probeProblems.push(issue.message);
+          if (issue.severity === 'error') probeProblems.push(issue);
         }
       };
 
@@ -171,9 +171,22 @@ export function usePublishAllDrafts(t: TranslateFn) {
       }
 
       if (probeProblems.length > 0) {
+        // objectstack#32984 ruling B, as the chat's publish-health line reads
+        // it: a finding speaks only through its producer's customer sentence
+        // (`userMessage`, already in the request's language). `message` and
+        // `fix` are the agent's text and never reach the toast. With no
+        // sentence on any error, the line's generic sentence for an error set.
+        const voiced = probeProblems.find((issue) => issue.userMessage)?.userMessage;
         toast.warning(
           t('home.pendingDrafts.probeWarn', { defaultValue: 'Published, but verification found problems.' }),
-          { description: probeProblems[0] },
+          {
+            description:
+              voiced ??
+              t('chatbot.build.issuesSummary', {
+                defaultValue:
+                  'Some parts of this build need fixing before it is ready. Reply "fix the problems" and the assistant will repair them.',
+              }),
+          },
         );
       } else if (seedProblems.length > 0) {
         toast.warning(
