@@ -9,6 +9,7 @@ import {
   KanbanConfigSchema,
   CalendarConfigSchema,
   GanttConfigSchema,
+  TimesheetConfigSchema,
   ListColumnSchema,
   FormFieldSchema,
   SelectionConfigSchema,
@@ -4937,5 +4938,62 @@ describe('view row bound — `pagination.pageSize` is the one bound; no per-kind
       expect(refused, `${label} accepts a per-kind row ceiling it should not declare`)
         .toContain('limit');
     }
+  });
+});
+
+/**
+ * [#34382] The timesheet list view: its binding block's bounds, and the door
+ * check that a `type: 'timesheet'` view declares one.
+ *
+ * `TimesheetConfigSchema` is strict and requires all three keys; `rowFields`
+ * names 1 to 3 fields. A `type: 'timesheet'` view with no block renders only
+ * the "configuration required" screen, so `checkListViewTimesheetBinding`
+ * refuses it at `timesheet` at every list-view door, beside the chart-binding
+ * check. Both halves are pinned here so neither can be quietly relaxed
+ * (ADR-0078 §6).
+ */
+describe('TimesheetConfigSchema and the timesheet binding (#34382)', () => {
+  const BLOCK = { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' } as const;
+  const paths = (r: { success: boolean; error?: z.ZodError }) =>
+    r.success ? [] : flattenUnionIssues(r.error!.issues).map((i) => i.path.join('.'));
+
+  it('accepts a block of one to three row fields with a date field and a value field', () => {
+    expect(TimesheetConfigSchema.safeParse(BLOCK).success).toBe(true);
+    expect(TimesheetConfigSchema.safeParse({ ...BLOCK, rowFields: ['project', 'task', 'phase'] }).success).toBe(true);
+  });
+
+  it('refuses no row fields and four row fields', () => {
+    expect(paths(TimesheetConfigSchema.safeParse({ ...BLOCK, rowFields: [] }))).toContain('rowFields');
+    expect(paths(TimesheetConfigSchema.safeParse({ ...BLOCK, rowFields: ['a', 'b', 'c', 'd'] }))).toContain('rowFields');
+  });
+
+  it.each(['rowFields', 'dateField', 'valueField'] as const)('refuses a block missing `%s`', (key) => {
+    const { [key]: _dropped, ...rest } = BLOCK;
+    expect(paths(TimesheetConfigSchema.safeParse(rest))).toContain(key);
+  });
+
+  it('refuses an unknown key in the block', () => {
+    const r = TimesheetConfigSchema.safeParse({ ...BLOCK, weekStart: 'monday' });
+    expect(r.success).toBe(false);
+  });
+
+  describe.each(viewDoorsCarryingObjectLevelChecks)('%s', (_label, parse) => {
+    it("REFUSES `type: 'timesheet'` with no `timesheet` block, at `timesheet`", () => {
+      const r = parse({ type: 'timesheet', columns: ['project'] });
+      expect(r.success).toBe(false);
+      const issue = flattenUnionIssues((r as { error: z.ZodError }).error.issues)
+        .find((i) => i.path.join('.') === 'timesheet');
+      expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.message).toContain("`type: 'timesheet'` but declares no `timesheet` block");
+    });
+
+    it('ACCEPTS the same view once it binds a block — the lit control', () => {
+      const r = parse({ type: 'timesheet', columns: ['project'], timesheet: BLOCK });
+      expect(r.success, JSON.stringify(r.success ? null : (r as { error: z.ZodError }).error.issues)).toBe(true);
+    });
+
+    it('does not judge a block-less view of another type', () => {
+      expect(parse({ type: 'grid', columns: ['project'] }).success).toBe(true);
+    });
   });
 });

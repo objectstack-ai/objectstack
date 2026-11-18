@@ -607,7 +607,6 @@ export function HomePage({ checklist }: HomePageProps = {}) {
         {checklist?.('top')}
         <DeploymentNotice placement="home" />
         <RecoveryPasswordReminder t={t} />
-        <ConnectAssistantCard />
         <div className="flex flex-1 items-center justify-center p-6">
         {/*
           Role-aware empty state. ADMINS get the AI-first magic moment as the
@@ -686,6 +685,12 @@ export function HomePage({ checklist }: HomePageProps = {}) {
           </Empty>
         )}
         </div>
+        {/* objectstack#30895 — connect an AI assistant: after the page's own
+            content, never above it (objectstack#35017). The frame collapses
+            (`empty:hidden`) when the card draws nothing. */}
+        <div className="px-4 pb-6 sm:px-6 lg:px-8 empty:hidden">
+          <ConnectAssistantCard className="mx-auto max-w-[1120px]" />
+        </div>
       </div>
     );
   }
@@ -697,8 +702,6 @@ export function HomePage({ checklist }: HomePageProps = {}) {
       {/* objectstack#30120 — see the empty-state branch above. */}
       <DeploymentNotice placement="home" />
       <RecoveryPasswordReminder t={t} />
-      {/* objectstack#30895 — every person: connect an AI assistant, until they have or hide it. */}
-      <ConnectAssistantCard />
 
       {/* The content column (objectui#12601): 1120 px, centred, 28 px above the
           first section and 28 px between sections. No bordered card around the
@@ -918,6 +921,12 @@ export function HomePage({ checklist }: HomePageProps = {}) {
             }
             t={t}
           />
+
+          {/* objectstack#30895 — every person: connect an AI assistant, until
+              they have or hide it. After the greeting, My apps and My work, so
+              a first screen opens on the person's own things (objectstack#35017);
+              with no My work it follows the apps. */}
+          <ConnectAssistantCard />
 
           {/* Continue where you left off + ambient activity. The activity column
               exists only for a caller who may read `sys_activity`

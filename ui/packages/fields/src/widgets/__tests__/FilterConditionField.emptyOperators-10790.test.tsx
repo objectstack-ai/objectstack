@@ -138,6 +138,20 @@ async function addRow() {
   fireEvent.click(add);
 }
 
+/**
+ * The `amount` comparand box once the object schema has typed its column.
+ *
+ * A stored criteria seeds its rows before `getObjectSchema` resolves, and until
+ * then `amount` is untyped: its box is a text input and an edit is emitted as
+ * the string `"6"`. A number input's role is `spinbutton`, so waiting for that
+ * role waits for the typed render, not for whichever box is drawn first.
+ */
+async function findTypedAmountBox() {
+  const box = await screen.findByRole('spinbutton');
+  expect(box).toHaveValue(5);
+  return box;
+}
+
 /** Drive a REAL Radix dropdown by its trigger's index in the document. */
 async function pickFrom(index: number, label: string) {
   const triggers = screen.getAllByRole('combobox');
@@ -262,7 +276,7 @@ describe('RE-SAVE — a legacy rule is written as `$empty` once it is edited (ob
     { name: 'objectui#10790 "is not empty"', old: legacyIsNotEmpty('name'), fresh: isNotEmpty('name') },
   ])('a $name row is rewritten when ANOTHER row is edited', async ({ old, fresh }) => {
     const { onChange } = renderWidget(JSON.stringify({ ...old, amount: 5 }));
-    const box = await screen.findByDisplayValue('5');
+    const box = await findTypedAmountBox();
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(box, { target: { value: '6' } });
     const stored = lastEmitted(onChange);
@@ -315,7 +329,7 @@ describe('GROUPS — the "is empty" row round-trips inside a group (objectui#108
     const stored = { $or: [{ amount: 5 }, isEmpty('name')] };
     expectAcceptedByTheFaces(JSON.stringify(stored));
     const { onChange } = renderWidget(JSON.stringify(stored));
-    const box = await screen.findByDisplayValue('5');
+    const box = await findTypedAmountBox();
     expect(screen.getAllByRole('combobox').map((t) => t.textContent)).toEqual([
       'Amount', 'Equals', 'Name', 'Is empty',
     ]);
@@ -326,7 +340,7 @@ describe('GROUPS — the "is empty" row round-trips inside a group (objectui#108
   it('a legacy entry inside an OR group is re-written as `$empty` once the group is edited', async () => {
     const stored = { $or: [{ amount: 5 }, legacyIsEmpty('name')] };
     const { onChange } = renderWidget(JSON.stringify(stored));
-    const box = await screen.findByDisplayValue('5');
+    const box = await findTypedAmountBox();
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(box, { target: { value: '6' } });
     expect(lastEmitted(onChange)).toBe(JSON.stringify({ $or: [{ amount: 6 }, isEmpty('name')] }));
