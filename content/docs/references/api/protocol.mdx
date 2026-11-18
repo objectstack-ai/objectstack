@@ -172,7 +172,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **title** | `string` | optional | Title / summary |
 | **agentId** | `string` | optional | Agent this conversation is bound to |
 | **userId** | `string` | optional | Owning user |
-| **messages** | `({ role: Enum<'system' \| 'user' \| 'assistant' \| 'tool'>; content?: any; parts?: any[]; turnId?: string } & Record<string, any>)[]` | ✅ | Message history |
+| **messages** | `({ role: Enum<'system' \| 'user' \| 'assistant' \| 'tool'>; content?: any; parts?: any[]; turnId?: string \| null } & Record<string, any>)[]` | ✅ | Message history |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO 8601) |
 | **metadata** | `Record<string, any>` | optional | Conversation metadata |
@@ -184,7 +184,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **role** | `Enum<'system' \| 'user' \| 'assistant' \| 'tool'>` | ✅ | Message role |
 | **content** | `any` | optional | Message content: a string, or an array of content parts |
 | **parts** | `any[]` | optional | Vercel AI SDK v6 message parts (alternative to `content`) |
-| **turnId** | `string` | optional | The turn the server stamped on the message: the `turnId` of the chat request that wrote it. Absent on a message stored with no turn |
+| **turnId** | `string \| null` | optional | The turn the server stamped on the message: the `turnId` of the chat request that wrote it. Absent or null on a message stored with no turn |
 
 
 ---
@@ -198,7 +198,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **role** | `Enum<'system' \| 'user' \| 'assistant' \| 'tool'>` | ✅ | Message role |
 | **content** | `any` | optional | Message content: a string, or an array of content parts |
 | **parts** | `any[]` | optional | Vercel AI SDK v6 message parts (alternative to `content`) |
-| **turnId** | `string` | optional | The turn the server stamped on the message: the `turnId` of the chat request that wrote it. Absent on a message stored with no turn |
+| **turnId** | `string \| null` | optional | The turn the server stamped on the message: the `turnId` of the chat request that wrote it. Absent or null on a message stored with no turn |
 
 
 ---
@@ -2292,7 +2292,7 @@ Install package response
 | **title** | `string` | optional | Title / summary |
 | **agentId** | `string` | optional | Agent this conversation is bound to |
 | **userId** | `string` | optional | Owning user |
-| **messages** | `({ role: Enum<'system' \| 'user' \| 'assistant' \| 'tool'>; content?: any; parts?: any[]; turnId?: string } & Record<string, any>)[]` | ✅ | Message history |
+| **messages** | `({ role: Enum<'system' \| 'user' \| 'assistant' \| 'tool'>; content?: any; parts?: any[]; turnId?: string \| null } & Record<string, any>)[]` | ✅ | Message history |
 | **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
 | **updatedAt** | `string` | ✅ | Last update timestamp (ISO 8601) |
 | **metadata** | `Record<string, any>` | optional | Conversation metadata |

@@ -26,12 +26,20 @@ service (`service-ai`: `routes/saved-question-routes.ts`,
 `routes/feedback-routes.ts`, `saved/saved-question-store.ts`,
 `saved/source-artifact.ts`, `feedback/answer-feedback-store.ts`). Every
 success body is the platform envelope `{ success: true, data }` and each
-response schema here is the `data` payload; every failure body is
-`{ success: false, error }` with `error` one of the three route errors below.
+response schema here is the `data` payload. A failure body is
+`{ success: false, error }` with `error` one of the three route errors below,
+whose `code` lists hold both the route handler's codes and the framework
+door's. The door answers ahead of the handler, with no `details`: 401
+UNAUTHENTICATED for a caller with no session (`packages/runtime`
+`domains/ai.ts`; a route mounted on the HTTP server answers the flat
+`{ error, code, message }` body instead, `dispatcher-plugin.ts`, ADR-0112),
+501 NOT_IMPLEMENTED when the deployment serves no AI, and 503
+SERVICE_UNAVAILABLE before the AI routes are published.
 
 Every route is the signed-in caller's own: a saved question that is not the
 caller's answers 404, and a conversation that is not the caller's answers 403
-on the artifact and feedback routes.
+when a question is saved from one of its answers, and on the artifact and
+feedback routes.
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/ai-answer.zod.ts`
@@ -67,7 +75,7 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'RESOURCE_NOT_FOUND' \| 'NOT_IMPLEMENTED' \| 'INTERNAL_ERROR'>` | ✅ | Error code |
+| **code** | `Enum<'UNAUTHENTICATED' \| 'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'RESOURCE_NOT_FOUND' \| 'NOT_IMPLEMENTED' \| 'INTERNAL_ERROR' \| … +1 more>` | ✅ | Error code |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
@@ -76,6 +84,17 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `{ reason: Enum<'report_authoring_requires_manage_metadata' \| 'report_authoring_walled' \| …>; issues?: any }` | optional | Present on a named refusal |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Allowed Values: `AiAnswerArtifactError.code`
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `RESOURCE_NOT_FOUND`
+* `NOT_IMPLEMENTED`
+* `INTERNAL_ERROR`
+* `SERVICE_UNAVAILABLE`
 
 ### Nested Shape: `AiAnswerArtifactError.details`
 
@@ -91,12 +110,14 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 
 ### Allowed Values
 
+* `UNAUTHENTICATED`
 * `PERMISSION_DENIED`
 * `MISSING_REQUIRED_FIELD`
 * `VALIDATION_ERROR`
 * `RESOURCE_NOT_FOUND`
 * `NOT_IMPLEMENTED`
 * `INTERNAL_ERROR`
+* `SERVICE_UNAVAILABLE`
 
 
 ---
@@ -153,7 +174,7 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'VALUE_TOO_LONG' \| 'RESOURCE_NOT_FOUND' \| 'INTERNAL_ERROR'>` | ✅ | Error code |
+| **code** | `Enum<'UNAUTHENTICATED' \| 'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'VALUE_TOO_LONG' \| 'RESOURCE_NOT_FOUND' \| 'INTERNAL_ERROR' \| … +2 more>` | ✅ | Error code |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
@@ -163,6 +184,18 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 | **details** | `any` | optional | Additional error context (e.g. field validation errors) |
 | **requestId** | `string` | optional | Request ID for tracking |
 
+### Allowed Values: `AiAnswerFeedbackError.code`
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `VALUE_TOO_LONG`
+* `RESOURCE_NOT_FOUND`
+* `INTERNAL_ERROR`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
+
 
 ---
 
@@ -170,12 +203,15 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 
 ### Allowed Values
 
+* `UNAUTHENTICATED`
 * `PERMISSION_DENIED`
 * `MISSING_REQUIRED_FIELD`
 * `VALIDATION_ERROR`
 * `VALUE_TOO_LONG`
 * `RESOURCE_NOT_FOUND`
 * `INTERNAL_ERROR`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
 
 
 ---
@@ -230,7 +266,7 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'VALUE_TOO_LONG' \| 'RESOURCE_NOT_FOUND' \| 'RESOURCE_CONFLICT' \| 'INTERNAL_ERROR'>` | ✅ | Error code |
+| **code** | `Enum<'UNAUTHENTICATED' \| 'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'VALUE_TOO_LONG' \| 'RESOURCE_NOT_FOUND' \| 'RESOURCE_CONFLICT' \| … +3 more>` | ✅ | Error code |
 | **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
 | **message** | `string` | ✅ | Readable error message |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
@@ -239,6 +275,19 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 | **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
 | **details** | `{ reason: Enum<'saved_question_has_no_query' \| 'saved_question_run_failed'>; question?: string }` | optional | Present on a run refusal |
 | **requestId** | `string` | optional | Request ID for tracking |
+
+### Allowed Values: `AiSavedQuestionError.code`
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `VALUE_TOO_LONG`
+* `RESOURCE_NOT_FOUND`
+* `RESOURCE_CONFLICT`
+* `INTERNAL_ERROR`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
 
 ### Nested Shape: `AiSavedQuestionError.details`
 
@@ -254,6 +303,7 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 
 ### Allowed Values
 
+* `UNAUTHENTICATED`
 * `PERMISSION_DENIED`
 * `MISSING_REQUIRED_FIELD`
 * `VALIDATION_ERROR`
@@ -261,6 +311,8 @@ const result = AiAnswerArtifactDraftSchema.parse(data);
 * `RESOURCE_NOT_FOUND`
 * `RESOURCE_CONFLICT`
 * `INTERNAL_ERROR`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
 
 
 ---
