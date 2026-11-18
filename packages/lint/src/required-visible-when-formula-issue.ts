@@ -22,6 +22,13 @@
  *    (`engine-top-level.ts`); this reads the same three marks off the same
  *    sources (the member reader for reads and hops, `label(` as the engine's
  *    `planCallsOptionLabel` spells it, a `can` receiver call off the parse).
+ *    A `can` call is the one the engine does compute on a write that picks a
+ *    permission-gated option (that write resolves the permission map), so the
+ *    message says the verdict for such a field can differ between writes.
+ *    The engine's fourth mark, a formula that reads the acting user on a
+ *    write with none (a system write, logged `no-acting-user`), draws no
+ *    warning: such a formula is computed per writer on every write that has
+ *    one, and the counts-as-shown fallback there is the strict direction.
  *
  * A warning, never a refusal: the server accepts the field, and a predicate it
  * cannot evaluate keeps exactly the unconditional `required` the field had
@@ -152,6 +159,11 @@ export function requiredVisibleWhenFormulaIssue(
     message +=
       ` Worse, ${blocked.join('; ')}, which the write path does not compute: the server counts the field as SHOWN ` +
       `on every write, so it stays required on every record, the ones the form hides it on included.`;
+    if (blocked.some((b) => b.includes('calls current_user.can()'))) {
+      message +=
+        ' (A `current_user.can()` call is computed on a write that picks a permission-gated option, which resolves ' +
+        'the permission map, so on such a write the formula is judged on its value instead.)';
+    }
   }
   return { where: `object '${objectName}' · field '${fname}' visibleWhen`, message, source, severity: 'warning' };
 }

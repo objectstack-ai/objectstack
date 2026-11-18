@@ -36,7 +36,11 @@
  * any formula read. A formula the server cannot compute on a save at all (it
  * reads through a reference, calls `label()` or `current_user.can()`, or reads
  * such a formula) keeps the field required on every save, which the advisory
- * says too. The lint's `required-visible-when-formula-issue.ts` is the same
+ * says too; a `can` call only on a save that picks no permission-gated option
+ * (a save that picks one resolves the permission map, and the server computes
+ * it). The server's fourth mark, a formula reading the acting user on a system
+ * write with no user, is not advised: a save from Studio's form always has a
+ * user. The lint's `required-visible-when-formula-issue.ts` is the same
  * verdict at `objectstack validate`.
  *
  * ## The reads are found by the parser, never by a pattern

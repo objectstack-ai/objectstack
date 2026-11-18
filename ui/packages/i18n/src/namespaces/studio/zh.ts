@@ -502,7 +502,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.requiredVisibleWhenFormula':
     '该字段为必填，服务器每次保存时按这条可见条件判断是否必填，其中的 {fields} 按要保存的记录计算。表单显示的是上次读取的公式值，编辑时不会重新计算（新建记录时没有值），因此保存可能因该字段被拒绝，而表单仍隐藏它。如需表单随编辑变化，请改为直接读取公式本身的输入字段。',
   'designer.field.requiredVisibleWhenFormulaUnservable':
-    '{fields} 经由引用字段读取、调用了 label() 或 current_user.can()（直接或通过其他公式），服务器保存时无法计算，因此按「显示」处理：所有记录（包括此条件隐藏该字段的记录）都仍要求填写。',
+    '{fields} 经由引用字段读取、调用了 label() 或 current_user.can()（直接或通过其他公式），服务器保存时无法计算（current_user.can() 仅在保存未选择受权限控制的选项时无法计算），因此按「显示」处理：所有记录（包括此条件隐藏该字段的记录）都仍要求填写。',
   // Bulk multi-select (Tier 2)
   'designer.canvas.bulkSelected': '已选 {n} 项',
   'designer.canvas.bulkMoveTo': '移至分组',

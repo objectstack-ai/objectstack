@@ -305,7 +305,8 @@ two sides can differ; see the formula paragraph below.
 gate reads) and `parent` where the write resolves a header. Binding the user
 makes the requirement depend on who writes, which is what "required when shown"
 means for a role-gated field; a system write with no acting user takes the fault
-arm. The lint refuses `current_user` in a field `visibleWhen` at authoring (see
+arm, logged as `no-acting-user`, whether the predicate reads the user directly or
+through a `formula` that reads it (below). The lint refuses `current_user` in a field `visibleWhen` at authoring (see
 the fence below), so that binding serves older stored metadata. `features`,
 `app` and `page` are never bound on the server.
 
@@ -323,12 +324,20 @@ that does not compute is answered by the reason, in two arms:
   the form judges: usually hidden. Not a fault of the predicate.
 - *A value only a read can have* — the formula reads through a reference (the
   write path follows no hop), calls `label()` (no option labels are read on a
-  write), or calls `current_user.can()` and the write resolved no permission
-  map; or it reads such a formula, at any depth of the formulas it reads. A
+  write), calls `current_user.can()` and the write resolved no permission
+  map (it resolves one only when it picks a permission-gated option, so such a
+  formula is computed on that write and not on another), or reads the acting
+  user (`current_user` and its ADR-0068 aliases) on a write that has none, a
+  system write, where a read would compute it for its reader; or it reads such
+  a formula, at any depth of the formulas it reads. A
   formula over one can compute cleanly over the `null` it reads on the write
   path and still not be the value a read serves, so the whole read closure
   counts. The predicate is a fault, which counts as shown: the field keeps the
-  unconditional `required`. The lint warns about it (below).
+  unconditional `required`, and the log names the chain (`reason:
+  'no-acting-user'` when the missing user alone blocks it). The lint warns
+  about the first three marks (below); it does not warn about the acting-user
+  mark, since a formula reading the user is computed per writer on every write
+  that has one.
 
 **Known limit: the form does not recompute a formula.** The form judges the
 predicate on the formula value it last read, over its live values

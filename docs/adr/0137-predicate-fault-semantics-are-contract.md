@@ -157,8 +157,12 @@ makes "blank" a declared **third** state rather than a spelling of "no rule".
 > left in force — and it is D3's direction carried to the server: a faulting
 > `visibleWhen` shows the field, and a shown required field must be filled.
 > A `formula` field the predicate reads whose read value the write path cannot
-> know (it reads through a reference, calls `label()` or `can`, or reads such a
-> formula) is such a fault. A formula that faults for a reason a read shares (an
+> know (it reads through a reference, calls `label()`, calls `can` on a write
+> that resolved no permission map, reads the acting user on a write that has
+> none, or reads such a formula) is such a fault; the acting-user case is
+> logged as `no-acting-user`, as the direct `current_user` spelling is. A
+> formula calling `can` is computed on a write that picks a permission-gated
+> option, which resolves the map. A formula that faults for a reason a read shares (an
 > empty operand) is not: the predicate is judged on the `null` a read serves. A
 > clean verdict that is not TRUE (FALSE, or `null`) is not a fault: it hides the
 > field, as the form reads it.
