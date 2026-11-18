@@ -67,7 +67,7 @@ import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonl
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import {
   WRITE_PRECONDITION_OPTION, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
-  droppedFieldEvents, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
+  droppedFieldEvents, formulaValuesFor, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
   planStoredExpressions, recomputeAutonumberReaders, replacedStoredExpressionFields, shouldSkipStateMachine,
   storedExpressionsReading, stripComputedWriteFields, undeclaredWriteFieldErrors, withholdInsertReadonlyFromHooks,
   callerInputRefusalLogMeta, writeFailureLogMeta,
@@ -1359,7 +1359,9 @@ export class InsertFacet {
             // `ReadonlyValueScope` (record-validator.ts).
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
-            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+            // [ADR-0113 D1, as amended] `'deferred'`: a field required only when shown
+            // is judged by `evaluateValidationRules` below, against its visibility.
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues }, 'deferred');
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             // [ADR-0144 D2, amended] A child amount's code is its parent's, laid on a copy of the row.
@@ -1374,7 +1376,7 @@ export class InsertFacet {
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
             if (referencesFirst) await checkReferences();
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentOf(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentOf(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]), formulaValues: formulaValuesFor(schemaForValidation, opCtx.context, insertPermissionsFor(rows[i])) }), this.logger, object);
             if (!referencesFirst) await checkReferences();
             // [#25579] Admitted: a later row of this batch reads it in the summary.
             batchSummaries?.accept(rows[i]);

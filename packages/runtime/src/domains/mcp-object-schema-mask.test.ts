@@ -330,6 +330,51 @@ describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the
         expect(JSON.stringify(await staff.bridge.listObjects())).toBe(JSON.stringify(readable));
     });
 
+    /**
+     * [#35137] `fieldVisibilityOf`, the two answers `query_records` and
+     * `get_record` name withheld fields from: the served schema (the same
+     * projection `describe_object` serves) and the security service's readable
+     * answer, both asked as this request's caller. The tool layer names a field
+     * the first shows and the second leaves out
+     * (`packages/mcp/src/query-records-withheld-fields.test.ts`).
+     */
+    const withheldBy = (v: { served: readonly string[]; readable: readonly string[] }) =>
+        v.served.filter((name) => !v.readable.includes(name));
+
+    it('withheld fields: an exempt author whose schema shows the denied field has it withheld from reads', async () => {
+        const { bridge, describe: described } = await readBoth(PERSONAS.author);
+        const visibility = await bridge.fieldVisibilityOf(OBJ);
+        expect(visibility.served).toEqual(described.fields.map((f: any) => f.name));
+        expect(visibility.served).toContain(DENIED);
+        expect(visibility.readable).not.toContain(DENIED);
+        expect(withheldBy(visibility)).toEqual([DENIED]);
+    });
+
+    it('withheld fields: a member whose schema hides the denied field is never answered it', async () => {
+        const { bridge } = await readBoth(PERSONAS.member);
+        const visibility = await bridge.fieldVisibilityOf(OBJ);
+        expect(visibility.served).not.toContain(DENIED);
+        expect(withheldBy(visibility)).toEqual([]);
+    });
+
+    it('withheld fields: with object-schema masking off the member\'s schema shows the denied field, so it is withheld from reads', async () => {
+        process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV] = '1';
+        const { bridge, describe: described } = await readBoth(PERSONAS.member);
+        const visibility = await bridge.fieldVisibilityOf(OBJ);
+        expect(visibility.served).toEqual(described.fields.map((f: any) => f.name));
+        expect(visibility.served).toContain(DENIED);
+        expect(withheldBy(visibility)).toEqual([DENIED]);
+    });
+
+    it('withheld fields: CONTROL — an unrestricted member is withheld nothing, and no security service answers nothing', async () => {
+        const { bridge } = await readBoth(PERSONAS.staff);
+        const visibility = await bridge.fieldVisibilityOf(OBJ);
+        expect(visibility.served).toContain(DENIED);
+        expect(withheldBy(visibility)).toEqual([]);
+        const unsecured = await bridgeFor(kernelOver({ ...services, security: undefined }), PERSONAS.staff);
+        expect(await unsecured.bridge.fieldVisibilityOf(OBJ)).toBeUndefined();
+    });
+
     it('a member denied every field is refused on both doors, never served an object with no fields', async () => {
         const { bridge, describe: refused, meta } = await readBoth(PERSONAS.walled);
         expect(meta.status).toBe(503);
@@ -1793,5 +1838,27 @@ describe('describe_object never lists the hidden search companion — the real e
         expect(names).toEqual(expect.arrayContaining(['name', 'email', 'created_at', 'updated_at', 'organization_id']));
         const { bridge } = await bridgeFor(kernelOver(services), CALLER);
         expect(JSON.stringify(await bridge.describeObject(OBJ))).not.toContain(SEARCH_COMPANION_FIELD);
+    });
+
+    // [#35137] The served-schema half of `fieldVisibilityOf` is the field list
+    // `describe_object` serves this caller, read off that very answer: on an
+    // object whose served definition carries a column `describe_object` does
+    // not list, the two still agree, and only the field the readable answer
+    // leaves out of that list is withheld. Under masking off (ADR-0106 D8),
+    // where the caller's schema is the whole declaration.
+    it('withheld fields: the served list is describe_object\'s field list, on an object served with a column it does not list', async () => {
+        process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV] = '1';
+        const describedFields = await describedNames();
+        const security = {
+            canReadObject: async () => true,
+            getReadableFields: vi.fn(async () => describedFields.filter((name) => name !== 'email')),
+        };
+        const { bridge } = await bridgeFor(kernelOver({ ...services, security }), CALLER);
+        const definition = Object.keys((await bridge.servedObjectDefinitionOf(OBJ)).fields);
+        expect(definition, 'precondition: the served definition carries a column describe_object does not list').toContain(SEARCH_COMPANION_FIELD);
+        const visibility = await bridge.fieldVisibilityOf(OBJ);
+        expect(visibility.served).toEqual(((await bridge.describeObject(OBJ)) as any).fields.map((f: any) => f.name));
+        expect(visibility.served.filter((name: string) => !visibility.readable.includes(name))).toEqual(['email']);
+        expect(security.getReadableFields).toHaveBeenCalledWith(OBJ, expect.objectContaining({ userId: CALLER.userId }));
     });
 });
