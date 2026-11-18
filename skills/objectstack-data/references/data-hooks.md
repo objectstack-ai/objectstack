@@ -885,6 +885,6 @@ export default defineHook({
 - `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Hook schema definition, HookContext interface
 - [objectstack-platform/references/plugin-hooks.md](../../objectstack-platform/references/plugin-hooks.md) — plugin/kernel hooks (a different extension point)
 - [objectstack-automation](../../objectstack-automation/SKILL.md) — Flows and Workflows
-- [objectstack-platform/SKILL.md](../../objectstack-platform/SKILL.md) — hook test harnesses (vitest units, `LiteKernel`)
+- [objectstack-project/SKILL.md](../../objectstack-project/SKILL.md) — testing an app's hooks (`bootStack`); a plugin's: objectstack-platform
 
 ---
