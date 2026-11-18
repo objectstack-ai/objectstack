@@ -22,6 +22,7 @@ import { render, waitFor, fireEvent, screen, act } from '@testing-library/react'
 import React from 'react';
 
 import { ObjectForm } from './ObjectForm';
+import { ModalForm } from './ModalForm';
 import { registerAllFields } from '@object-ui/fields';
 import { SchemaRendererContext } from '@object-ui/react';
 
@@ -254,6 +255,32 @@ describe('ObjectForm — a create form opened with a lookup value fills its decl
     await pick('product', 'Gadget');
     await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('250'));
     expect(valueOf(container, 'description')).toBe('A gadget');
+  });
+
+  it('the opening fill is not an edit: an untouched form closes without the discard prompt, a touched one still asks', async () => {
+    const ds = makeDS();
+    const onOpenChange = vi.fn();
+    render(
+      <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+        <ModalForm
+          schema={{ objectName: 'quote_line', mode: 'create', open: true, onOpenChange, initialValues: { product: 'p1' } } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererContext.Provider>,
+    );
+    const price = await input(document.body, 'unit_price');
+    await waitFor(() => expect(price.value).toBe('100'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByText('Discard changes?')).toBeNull();
+
+    // The guard is live in this form: the user's own edit is one.
+    onOpenChange.mockClear();
+    fireEvent.change(await input(document.body, 'note'), { target: { value: 'typed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(await screen.findByText('Discard changes?')).toBeTruthy();
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it('control: an edit form fills nothing from the record it loaded', async () => {

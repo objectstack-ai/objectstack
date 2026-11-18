@@ -1217,7 +1217,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
    * The record is the one hydration reads for the chip's label (an expanded
    * reference value is its own record), so the fill costs no second read. It
    * runs once per opening value, and not at all once the field holds anything
-   * else: from then on a pick fills, by the pick rule.
+   * else: from then on a pick fills, by the pick rule. The opening record is
+   * kept as this widget's earlier pick, so the next pick replaces what it
+   * filled exactly as it replaces what a pick filled.
    */
   const openingValue = props.openingValue;
   const openingFilledRef = useRef<string | null>(null);
@@ -1237,6 +1239,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       expanded ?? hydratedRecords.find((r) => String(recordValue(r, idField)) === key);
     if (!row) return;
     openingFilledRef.current = key;
+    setPickedRecords((prev) => mergeRowsByValue(prev, [row], idField));
     const patch = declaredLookupAutofillPatch(
       autofillPairs.map(({ target, source }) => ({ target, source })),
       row,
