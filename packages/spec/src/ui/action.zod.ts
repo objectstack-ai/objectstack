@@ -1,5 +1,22 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+/**
+ * Action protocol schemas — `ActionSchema`, the `action` metadata type, and the parts it is built from.
+ *
+ * An action is a command a user or an AI agent runs: a button on a record
+ * header, a list row or a list toolbar, or on a page. Its `type` names the
+ * dispatch route — a `script` body or handler, a `url`, a `flow`, an `api`
+ * endpoint, a `modal` or a `form` — and `locations` names the surfaces that
+ * draw it. Declare one with `defineAction`.
+ *
+ * Beside {@link ActionSchema}: {@link ActionParamSchema} (one input of the
+ * param dialog), {@link ActionLocationSchema} (the surfaces),
+ * {@link ActionAiSchema} (how an agent is offered the action),
+ * {@link ActionRefusalSchema} (one entry of the `refusals` catalogue a
+ * `script` body refuses through) and {@link InlineActionSchema} (an action
+ * declared inline on a page element instead of registered by name).
+ */
+
 import { z } from 'zod';
 import { retiredKey } from '../shared/retired-key';
 import { FieldType } from '../data/field.zod';
