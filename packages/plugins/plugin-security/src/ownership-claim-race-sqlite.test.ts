@@ -152,7 +152,7 @@ describe('[ADR-0142 D4] the unit around the engine body keeps the gate\'s refusa
   it('a row that is gone still answers 404 RECORD_NOT_FOUND', async () => {
     const engine = await boot({ sharingModel: 'private', beforeHook: true });
     await seed(engine, { id: 'case_gone', name: 'parked', owner_id: null, queue: QUEUE });
-    await engine.delete(CASE, { where: { id: 'case_gone' } } as never, SYS);
+    await engine.delete(CASE, { where: { id: 'case_gone' }, context: { isSystem: true } } as never);
     const err = await claim(engine, 'case_gone', A).then(() => undefined, (e: unknown) => e);
     expect(err).toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
   });
