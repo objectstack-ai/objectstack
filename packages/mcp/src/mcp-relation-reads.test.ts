@@ -240,6 +240,19 @@ describe('get_record related — the tool', () => {
     });
   }
 
+  it('each list names the fields withheld from its own rows, as a plain read of that object does', async () => {
+    const { bridge } = makeBridge();
+    bridge.fieldVisibilityOf = async (name: string) =>
+      name === OPP
+        ? { served: ['name', 'account', 'probability'], readable: ['name', 'account'] }
+        : { served: ['name'], readable: ['name'] };
+    const answer = await call(bridge, 'get_record', { objectName: ACCOUNT, recordId: 'a1', related: [{ object: OPP }] });
+    expect(answer.payload.related[0].withheldFields).toEqual(['probability']);
+    expect(answer.payload.record.withheldFields).toBeUndefined();
+    const plain = await call(bridge, 'query_records', { objectName: OPP });
+    expect(plain.payload.withheldFields).toEqual(answer.payload.related[0].withheldFields);
+  });
+
   it('a multi-value link field is matched with $contains', async () => {
     const { bridge, calls } = makeBridge();
     await call(bridge, 'get_record', { objectName: ACCOUNT, recordId: 'a1', related: [{ object: NOTE }] });

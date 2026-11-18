@@ -253,9 +253,12 @@ describe('query_records expand and get_record related over MCP on the CRM exampl
     expect(ids(rowsOf(deals))).toEqual([opp.x1, opp.x2].sort());
     expect(ids(rowsOf(deals))).not.toContain(opp.lost);
     for (const row of rowsOf(deals)) expect(row.probability).toBeUndefined();
-    // …and the list names it as withheld, as a plain read of the deals does.
-    expect(deals.withheldFields).toContain('probability');
-    expect(payload.record.withheldFields).toContain('annual_revenue');
+    // …and the list says what is withheld exactly as a plain read of the
+    // deals does, and the record as a plain get_record does.
+    const plainDeals = await ok(tok.a, 'query_records', { objectName: OPP, where: { account: acct.a1 } });
+    expect(deals.withheldFields).toEqual(plainDeals.withheldFields);
+    const plainRecord = await ok(tok.a, 'get_record', { objectName: ACCOUNT, recordId: acct.a1 });
+    expect(payload.record.withheldFields).toEqual(plainRecord.withheldFields);
     expect(deals.truncated).toBeUndefined();
     const acts = listOf(payload, ACTIVITY);
     expect(rowsOf(acts).map((r) => r.subject).sort()).toEqual(['RR call 1', 'RR call 2']);
