@@ -273,6 +273,7 @@ import {
     restoredBodyDerivation,
     restoredBodyWriter,
     runAuthoringGate,
+    sealedFlowNodeTypeVocabulary,
 } from './protocol-authoring-gate.js';
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
@@ -1869,6 +1870,7 @@ export class ObjectStackProtocolImplementation implements
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
         return assertRuntimeAuthoringRules.call(host, evt);
@@ -1939,6 +1941,7 @@ export class ObjectStackProtocolImplementation implements
             resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
+            sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
         return host;
@@ -2234,6 +2237,26 @@ export class ObjectStackProtocolImplementation implements
             get getServicesRegistry() { return readGetServicesRegistry(); },
         };
         return rlsMembershipResolverKeys.call(host);
+    }
+
+    /**
+     * The node types the registered automation engine runs, read through its
+     * `getSealedNodeTypeVocabulary()` — the input the runtime publish gate
+     * refuses a flow node no executor runs with (`flow-node-type-no-executor`).
+     *
+     * Read per publish, as {@link rlsMembershipResolverKeys} reads its service,
+     * and recorded nowhere. `undefined` — the CLI's reading, under which no node
+     * type is judged — when this host has no registry, no automation service, or
+     * an engine that has not sealed its vocabulary yet: before the seal a plugin
+     * may still contribute a type, so "no executor" is not a verdict anyone may
+     * act on (AGENTS.md "Startup registry reads").
+     */
+    private sealedFlowNodeTypeVocabulary(): readonly string[] | undefined {
+        const readGetServicesRegistry = () => this.getServicesRegistry;
+        const host: ThisParameterType<typeof sealedFlowNodeTypeVocabulary> = {
+            get getServicesRegistry() { return readGetServicesRegistry(); },
+        };
+        return sealedFlowNodeTypeVocabulary.call(host);
     }
 
     /**

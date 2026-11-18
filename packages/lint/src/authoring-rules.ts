@@ -151,6 +151,9 @@ import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
+import { validateActionObjectBinding } from './validate-action-object-binding.js';
+import { validateFlowNodeExecutors } from './validate-flow-node-executors.js';
+import { validateInertObjectDeclarations } from './validate-inert-object-declarations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
 import { validateFlowRegionShape } from './validate-flow-region-shape.js';
@@ -490,6 +493,18 @@ export interface AuthoringRuleContext {
    * nobody owns).
    */
   membershipKeyOwners?: MembershipKeyOwners;
+  /**
+   * The node types the deployment's automation engine runs, handed in only
+   * once the host has declared that vocabulary CLOSED
+   * (`AutomationEngine.getSealedNodeTypeVocabulary()`, answered after
+   * `sealNodeTypeVocabulary()` at `kernel:bootstrapped`). Set only by the
+   * runtime publish gate, and only on a sealed engine; ABSENT on the three CLI
+   * commands, whose stack does not say which plugins the deployment loads.
+   * Read by `validateFlowNodeExecutors` only, which judges nothing without it:
+   * a verdict drawn from a vocabulary still filling at boot is one the boot can
+   * contradict (AGENTS.md "Startup registry reads").
+   */
+  flowNodeTypeVocabulary?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -1839,6 +1854,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
   },
+  // A standalone action that declares a location but no `objectName` binds to
+  // no object, so the button it declares never renders (every location is an
+  // object's surface) and the object's action route answers "not found".
+  // Gating: nothing about the declaration can work. On the runtime door for an
+  // `action` write, whose snapshot carries the written action itself.
+  {
+    name: 'validateActionObjectBinding',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-object-binding.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action'],
+    run: (stack) => validateActionObjectBinding(stack),
+  },
   // [ADR-0142 D5] An assignment rule naming a user id carries one
   // organization's data in package metadata, and one targeting a declared queue
   // with no member parks every row it matches. Advisory: the engine never
@@ -1871,6 +1901,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
+  },
+  // A required checkbox (the form refuses an unchecked box, so only "on" can be
+  // saved) and a state machine with no `initialStates` (a record can be born
+  // in any state). Gating: each declaration works against its author on every
+  // record. Reads the object's own body alone, so it judges an `object` write
+  // at the runtime door exactly as on the CLI.
+  {
+    name: 'validateInertObjectDeclarations',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-inert-object-declarations.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) => validateInertObjectDeclarations(stack),
   },
   // ADR-0089 D3b — a mis-layered binding root, plus (#6128) the bare-identifier
   // gate and (#6253) the syntax gate. This entry used to read "pre-parse: the
@@ -2060,7 +2105,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `error` gates. Three do today: `flow-runas-unscoped` (#3760 — metadata the
   // runtime REFUSES to execute), plus `flow-branch-label-unmatched` and
   // `flow-default-edge-with-condition` (#4414 — a declaration that is inert, so
-  // the route silently differs from what the author wrote). The bar for
+  // the route silently differs from what the author wrote), and others since,
+  // `flow-approval-decision-unrouted` among them (an approval whose edges do not
+  // claim both decisions runs every branch on either). The bar for
   // promoting one is stated at the top of `lint-flow-patterns.ts`.
   {
     name: 'lintFlowPatterns',
@@ -2089,6 +2136,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         // render this finding in the request's language.
         ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
+  },
+  // A flow node whose `type` no executor runs fails every run with
+  // NO_EXECUTOR. Judged only against the SEALED vocabulary the runtime gate
+  // hands in (`AuthoringRuleContext.flowNodeTypeVocabulary`); the CLI commands
+  // have none, so there the entry runs and judges nothing — the vocabulary is
+  // the deployment's, not the stack's.
+  {
+    name: 'validateFlowNodeExecutors',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-node-executors.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack, ctx) => validateFlowNodeExecutors(stack, ctx.flowNodeTypeVocabulary),
   },
   // A credential typed as a LITERAL into a flow position every flow reader is
   // served — an `http` node's `headers` or `url` query, a node's

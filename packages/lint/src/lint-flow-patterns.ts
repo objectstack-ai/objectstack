@@ -377,6 +377,18 @@ export const FLOW_LOOP_BODY_UNCONTAINED = 'flow-loop-body-uncontained';
  * See {@link scanTryCatchWithoutCatch}.
  */
 export const FLOW_TRY_CATCH_WITHOUT_CATCH = 'flow-try-catch-without-catch';
+/**
+ * An `approval` node whose out-edges do not claim both decisions. `error`: the
+ * engine routes the decision by out-edge `label`, matched exactly, and a
+ * decision no edge claims falls back to EVERY out-edge. See
+ * {@link scanApprovalDecisionEdges}.
+ */
+export const FLOW_APPROVAL_DECISION_UNROUTED = 'flow-approval-decision-unrouted';
+/**
+ * An `http` node with no `config.timeoutMs`. `warning`: the executor arms its
+ * timer only when the key is set. See {@link scanHttpTimeouts}.
+ */
+export const FLOW_HTTP_TIMEOUT_MISSING = 'flow-http-timeout-missing';
 
 /**
  * Node types that ship in the box. `config.condition` is only ever READ on the
@@ -1822,6 +1834,74 @@ function scanBulkUpdatesMovingStoredInputs(
   }
 }
 
+/**
+ * An approval decision continues ONLY down an out-edge whose `label` is exactly
+ * `approve` or `reject` (`APPROVAL_BRANCH_LABELS`, `@objectstack/spec/automation`):
+ * the engine narrows the out-edges to that label (`traverseNext`), and a label no
+ * edge carries falls back to every out-edge. So an approval whose edges are
+ * labelled `Approved` / `通过`, or that claims one decision and not the other,
+ * publishes clean and then runs the approving AND the rejecting branch on the
+ * same decision. An approval with no out-edge at all ends the flow on either
+ * decision and is not reported; a `fault` edge routes failures, not decisions,
+ * and is not counted.
+ */
+function scanApprovalDecisionEdges(
+  at: string,
+  nodes: AnyRec[],
+  edges: AnyRec[],
+  findings: FlowLintFinding[],
+  sites?: FlowNodeSites,
+): void {
+  for (const node of nodes) {
+    if (node.type !== APPROVAL_NODE_TYPE || typeof node.id !== 'string') continue;
+    const outs = edges.filter((e) => e.source === node.id && e.type !== 'fault');
+    if (outs.length === 0) continue;
+    const labels = new Set(outs.map((e) => (typeof e.label === 'string' ? e.label : '')));
+    const missing = (['approve', 'reject'] as const).filter((d) => !labels.has(d));
+    if (missing.length === 0) continue;
+    const written = [...labels].map((l) => (l ? `'${l}'` : '(none)')).join(', ');
+    findings.push({
+      severity: 'error',
+      where: `${at} · approval '${node.id}'`,
+      ...(sites?.nodes.get(node) ? { path: sites.nodes.get(node)!.path } : {}),
+      message:
+        `approval '${node.id}' has no out-edge labelled ${missing.map((d) => `'${d}'`).join(' or ')} ` +
+        `(its out-edge labels: ${written}). The decision is routed by an exact edge label, and a decision no ` +
+        'edge claims runs EVERY out-edge — approving and rejecting branches alike.',
+      hint:
+        "Label the out-edge the approved request takes `label: 'approve'` and the rejected one " +
+        "`label: 'reject'`, exactly as written.",
+      rule: FLOW_APPROVAL_DECISION_UNROUTED,
+    });
+  }
+}
+
+/**
+ * An `http` node with no `config.timeoutMs` has no timer of its own: the
+ * executor arms one only when the key is set (`service-automation`
+ * `builtin/http-nodes.ts`), so an endpoint that never answers holds the run —
+ * and a record-triggered run holds the save that started it — for as long as
+ * the transport waits. A warning, not an error: the run is held, not lost.
+ */
+function scanHttpTimeouts(at: string, nodes: AnyRec[], findings: FlowLintFinding[], sites?: FlowNodeSites): void {
+  for (const node of nodes) {
+    if (node.type !== 'http') continue;
+    const cfg = (node.config ?? {}) as AnyRec;
+    if (cfg.timeoutMs !== undefined) continue;
+    const nodeId = typeof node.id === 'string' ? node.id : 'http';
+    findings.push({
+      severity: 'warning',
+      where: `${at} · node '${nodeId}' (http)`,
+      ...(sites?.nodes.get(node) ? { path: `${sites.nodes.get(node)!.path}.config` } : {}),
+      message:
+        `http node '${nodeId}' sets no \`config.timeoutMs\`, so the call has no timeout of its own: an endpoint ` +
+        'that never answers holds the run, and a record-triggered run holds the save that started it.',
+      hint: 'Set `config.timeoutMs` to a number of milliseconds, e.g. `timeoutMs: 10000`.',
+      rule: FLOW_HTTP_TIMEOUT_MISSING,
+    });
+  }
+}
+
 function scanApprovalReviseLoops(
   at: string,
   nodes: AnyRec[],
@@ -2631,6 +2711,12 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
 
       // (c) ADR-0044 — approval send-back-for-revision loop footguns.
       scanApprovalReviseLoops(at, graphNodes, graphEdges, findings);
+
+      // (c') An approval whose out-edges do not claim both decisions runs every
+      //      branch on either decision; an http node without a timeout can hold
+      //      its run indefinitely.
+      scanApprovalDecisionEdges(at, graphNodes, graphEdges, findings, sites);
+      scanHttpTimeouts(at, graphNodes, findings, sites);
 
       // (d) #3863 — an edge labelled like an error path but typed 'default' is an
       //     unconditional out-edge: the handler runs on every SUCCESS, in parallel
