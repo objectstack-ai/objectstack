@@ -315,7 +315,6 @@ describe('[#35138] stdio door: the answer names only what the caller can see', (
     const security = securityDoubleFor(testCase);
     const engine = {
       find: async () => { throw refusing(); },
-      findOne: async () => { throw refusing(); },
       count: async () => { throw refusing(); },
       aggregate: async () => { throw refusing(); },
     } as unknown as IDataEngine;
