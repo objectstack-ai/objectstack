@@ -85,9 +85,13 @@ export function useConsoleChatDock({
   // target stays stored, so coming back shows it again. The app is read at the
   // moment of the call, not from a closure: a child's effect (the build that
   // binds a package and moves the page) can call in the commit that changes it.
+  // A layout effect, because every layout effect of a commit runs before any
+  // passive one, the children's included.
   const ambientApp = ambientAppPackage(appPackageId);
   const ambientAppRef = React.useRef(ambientApp);
-  ambientAppRef.current = ambientApp;
+  React.useLayoutEffect(() => {
+    ambientAppRef.current = ambientApp;
+  }, [ambientApp]);
   const [target, setTargetState] = React.useState<ChatDockTarget | undefined>(() =>
     placeDockTarget(readStoredDockTarget(), ambientApp),
   );
