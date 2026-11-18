@@ -345,7 +345,11 @@ describe('the narrow-window fold (objectstack#27593)', () => {
 
   it('Esc folds it; an Esc another layer already handled does not', () => {
     renderShell(1280);
-    expandRail();
+    // Floated by a press on the edge, which moves no focus: the trigger's
+    // float focuses an entry, whose hidden tooltip would take the Esc
+    // (objectstack#28078, below).
+    fireEvent.click(screen.getByTestId('console-sidebar-edge'));
+    expect(panel()).toHaveAttribute('data-console-rail', 'overlay');
     const handled = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     handled.preventDefault();
     act(() => {
