@@ -459,6 +459,8 @@ describe('runFlowProof — the local flow run', () => {
   it('an outbound node is not executed: the run stops there, the node is named, and no request leaves', async () => {
     const mark = outboundHits.length;
     const report = await runFlowProof(stack, fixtureStack, { flow: OUTBOUND });
+    // First: nothing left the process.
+    expect(outboundHits.slice(mark), formatFlowRunReport(report)).toEqual([]);
     expect(report.confinement.outbound).toContain('http');
     expect(report.verdict, formatFlowRunReport(report)).toBe('stopped');
     expect(report.firstFailure).toMatchObject({ kind: 'outbound_not_run', nodeId: 'call', nodeType: 'http' });
@@ -467,7 +469,6 @@ describe('runFlowProof — the local flow run', () => {
       ['start', 'success'],
       ['call', 'failure'],
     ]);
-    expect(outboundHits.slice(mark)).toEqual([]);
     expect(await stack.rows(LEDGER, { name: 'after the call' })).toEqual([]);
     // Not a defect of the flow: it does not fail `os verify`.
     expect(report.summary.hardFailures).toBe(0);
