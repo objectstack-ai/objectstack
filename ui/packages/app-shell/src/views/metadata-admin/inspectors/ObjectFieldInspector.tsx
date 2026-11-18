@@ -857,9 +857,9 @@ export function ObjectFieldInspector({
     return out;
   }, [view]);
   const visibleWhenReferenceReads = useRequiredVisibleWhenReferenceReads(entry?.def ?? null, siblingTypes);
-  // …and a formula it reads is computed over the saved record there, while the
-  // form judges the value it last read; one the server cannot compute keeps it
-  // required on every save.
+  // …and a formula it reads is computed over the saved record there, and that
+  // value decides; one the server cannot compute keeps it required on every
+  // save, and the form shows it.
   const siblingDefs = React.useMemo(() => {
     const out: Record<string, Record<string, unknown> | undefined> = {};
     for (const e of view.entries) out[e.name] = e.def as Record<string, unknown> | undefined;

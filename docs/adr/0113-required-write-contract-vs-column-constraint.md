@@ -350,13 +350,19 @@ it judges the field rules: the object form renderer over its `ruleRecord`
 (`FormPage.tsx`), both through `planObjectFormulas` (`@object-ui/core`,
 `formulaRecord.ts`) with the canonical `@objectstack/formula` engine in the
 read order, binding the signed-in user's id and positions as
-`applyFormulaPlan` binds them. A formula the form cannot compute (it reads
+`applyFormulaPlan` binds them. What is left: a wizard's final-submit gate
+(`gateFinalSubmit`, `WizardForm.tsx`) still judges `resolveFieldRuleState` over
+its merged form values with no formula plan, and a form whose data source has
+no `getObjectSchema`, or whose schema read fails, gets no plan
+(`objectFormulas.ts`) and computes nothing, so both judge the formula value
+last read, none on a create. A formula the form cannot compute (it reads
 through a reference, calls `label()` or `current_user.can()`, reads `os`,
 reads the user when nobody is signed in, is served without its expression, or
 reads such a formula) drops the `visibleWhen` that reads it: the field is shown
 and keeps its `required` flag, and the server, which judges the write, decides.
-For a formula that reads `os` or calls `can()` the form can be stricter than
-the server, which may compute it and hide the field. The server's answer is
+For a formula that reads `os`, calls `can()` or is served without its
+expression (a field-level-security mask) the form can be stricter than the
+server, which may compute it and hide the field. The server's answer is
 the one ruling item 2 asks for.
 
 **Author-time fence (narrowed from the ruling's item 4).** The ruling asked for a

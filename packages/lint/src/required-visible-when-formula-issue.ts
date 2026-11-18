@@ -6,18 +6,21 @@
  *
  * The server judges the requirement on every write from that predicate, with
  * each formula it reads computed over the record being written, the value a
- * read of that record would serve. Two gaps the author can see at build time:
+ * read of that record would serve. Two things the author can see at build time:
  *
- *  - **The form does not recompute a formula.** It judges the predicate on the
- *    formula value it last read, while the user edits, and a create form has
- *    none. A create, or an edit that moves the formula into the condition, is
- *    judged by the server on a value the form never showed, and can be refused
- *    naming a field the form keeps hidden.
+ *  - **The server's computed value decides.** The form computes the object's
+ *    formulas over the record being edited before it judges the predicate
+ *    (ADR-0113, as amended), so for a formula it can compute it judges what
+ *    the server judges. A check that computes none, a wizard's final-submit
+ *    check or a form whose data source serves no object schema, judges the
+ *    formula value last read, none on a create, and can disagree with the
+ *    server; the warning is the reminder that the server's value decides.
  *  - **Some formulas the write path cannot compute at all.** A formula that
  *    reads through a reference, calls `label()` or calls `current_user.can()`,
  *    or reads such a formula at any depth: the server cannot know the value a
  *    read serves, counts the predicate as SHOWN, and the field stays required
- *    on every write, the records the form hides it on included. The engine's
+ *    on every write. The form cannot compute such a formula either: it shows
+ *    the field and keeps it required. The engine's
  *    classifier is `unservableReason` in `@objectstack/objectql`
  *    (`engine-top-level.ts`); this reads the same three marks off the same
  *    sources (the member reader for reads and hops, `label(` as the engine's
@@ -150,15 +153,16 @@ export function requiredVisibleWhenFormulaIssue(
 
   const named = formulas.map((f) => `'${f}'`).join(', ');
   let message =
-    `Field '${fname}' is \`required\`, and its \`visibleWhen\` reads the formula field ${named}. The server judges ` +
-    `that requirement on the formula computed over the record being written (ADR-0113 D1); the form judges it on ` +
-    `the formula value it last read, does not recompute it while the user edits, and has none on a create. So a ` +
-    `create, or an edit that moves the formula into the condition, can be refused naming a field the form keeps ` +
-    `hidden. Read the formula's own inputs in the predicate if the form should follow the edit.`;
+    `Field '${fname}' is \`required\`, and its \`visibleWhen\` reads the formula field ${named}. A reminder: the ` +
+    `server judges that requirement on the formula value it computes over the record being written (ADR-0113 D1). ` +
+    `The form computes the same formula over the record being edited; a check that does not (a wizard's ` +
+    `final-submit check, or a form whose data source serves no object schema) judges the value last read, none ` +
+    `on a create, and can disagree with the server.`;
   if (blocked.length > 0) {
     message +=
       ` Worse, ${blocked.join('; ')}, which the write path does not compute: the server counts the field as SHOWN ` +
-      `on every write, so it stays required on every record, the ones the form hides it on included.`;
+      `on every write, so it stays required on every record. The form cannot compute it either: it shows the ` +
+      `field and keeps it required.`;
     if (blocked.some((b) => b.includes('calls current_user.can()'))) {
       message +=
         ' (A `current_user.can()` call is computed on a write that picks a permission-gated option, which resolves ' +

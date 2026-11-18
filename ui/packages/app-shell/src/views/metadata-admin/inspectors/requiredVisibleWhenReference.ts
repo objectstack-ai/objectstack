@@ -30,15 +30,18 @@
  * ## A `formula` the predicate reads
  *
  * The server computes each formula the predicate reads over the record being
- * saved; the form judges the formula value it last read, does not recompute it
- * while the user edits, and has none on a create. So a save can be
- * refused naming a field the form keeps hidden, and the advisory says so for
- * any formula read. A formula the server cannot compute on a save at all (it
- * reads through a reference, calls `label()` or `current_user.can()`, or reads
- * such a formula) keeps the field required on every save, which the advisory
- * says too; a `can` call only on a save that picks no permission-gated option
- * (a save that picks one resolves the permission map, and the server computes
- * it). The server's fourth mark, a formula reading the acting user on a system
+ * saved, and that value decides. The form computes the same formulas over the
+ * record being edited; a check that computes none (a wizard's final-submit
+ * check, or a form whose data source serves no object schema) judges the
+ * formula value last read, none on a create, and can disagree with the server.
+ * The advisory is that reminder, for any formula read. A formula the server
+ * cannot compute on a save at all (it reads through a reference, calls
+ * `label()` or `current_user.can()`, or reads such a formula) keeps the field
+ * required on every save, and the form, which cannot compute it either, shows
+ * the field and keeps it required; the advisory says that too. A `can` call is
+ * uncomputed on the server only on a save that picks no permission-gated
+ * option (a save that picks one resolves the permission map, and the server
+ * computes it). The server's fourth mark, a formula reading the acting user on a system
  * write with no user, is not advised: a save from Studio's form always has a
  * user. The lint's `required-visible-when-formula-issue.ts` is the same
  * verdict at `objectstack validate`.
@@ -110,10 +113,9 @@ const LABEL_CALL = /\blabel\s*\(/;
  * formula at any depth (the server's `unservableReason`). Both empty when the
  * field is not required, has no predicate, or the predicate reads no formula.
  *
- * Any formula read draws the advisory: the form judges the predicate on the
- * formula value it last read and does not recompute it, while the server
- * judges the record being saved. An unservable one keeps the field required on
- * every save.
+ * Any formula read draws the advisory: a reminder that the server judges the
+ * predicate on the formula value it computes over the record being saved. An
+ * unservable one keeps the field required on every save, and the form shows it.
  */
 export function formulaReadsInRequiredVisibleWhen(
   def: Record<string, unknown> | null | undefined,

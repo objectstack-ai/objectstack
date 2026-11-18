@@ -6897,10 +6897,10 @@ describe('a `required` field\'s `visibleWhen` the server cannot use to lift the 
     expect(issues[0].message).toContain('`storage.notNull: true`');
   });
 
-  // A formula the predicate reads: the form shows the value it last read and
-  // does not recompute it, and a formula the write path cannot compute (a hop,
-  // `label()`, `can`, at any depth) keeps the field required on every write.
-  it('warns when the predicate reads a formula field: the form does not recompute it', () => {
+  // A formula the predicate reads: a reminder that the server judges it on the
+  // formula value it computes, and a formula the write path cannot compute (a
+  // hop, `label()`, `can`, at any depth) keeps the field required on every write.
+  it('warns when the predicate reads a formula field: the server judges it on the formula it computes', () => {
     const issues = at(run(order({
       amount: { type: 'number', label: 'Amount' },
       risk: { type: 'formula', label: 'Risk', expression: "record.amount > 100 ? 'high' : 'low'", returnType: 'text' },
@@ -6909,7 +6909,7 @@ describe('a `required` field\'s `visibleWhen` the server cannot use to lift the 
     expect(issues).toHaveLength(1);
     expect(issues[0].severity).toBe('warning');
     expect(issues[0].message).toContain("reads the formula field 'risk'");
-    expect(issues[0].message).toContain('does not recompute it');
+    expect(issues[0].message).toContain('the formula value it computes over the record being written');
     expect(issues[0].message).not.toContain('counts the field as SHOWN');
   });
 
