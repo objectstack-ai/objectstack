@@ -2260,10 +2260,11 @@ async function doorMode(original: LoadedScenario, driver: AgentDriver, ops: Proj
     const drafts = await app.listDrafts!(target.id);
     mode.door.drafts = { answer: installAnswerOf(drafts), items: drafts.drafts };
     const published = await app.publishDrafts!(target.id);
-    mode.door.publish = doorPublishOf(published);
-    if (!published.ok) {
-      const failed = mode.door.publish.failed?.map((f) => `${f.type} ${f.name}${f.code ? ` (${f.code})` : ''}`).join(', ');
-      mode.findings.push(`the publish of \`${target.id}\` answered ${mode.door.publish.outcome ?? `${published.status} ${published.code ?? ''}`.trim()}${failed ? `: ${failed}` : ''}`);
+    const publish = (mode.door.publish = doorPublishOf(published));
+    // A refusal answers on a 200 (`outcome: refused` under `data`): only a whole `published` is a clean publish.
+    if (!published.ok || publish.outcome !== 'published' || publish.failed?.length) {
+      const failed = publish.failed?.map((f) => `${f.type} ${f.name}${f.code ? ` (${f.code})` : ''}`).join(', ');
+      mode.findings.push(`the publish of \`${target.id}\` answered ${publish.outcome ?? `${published.status} ${published.code ?? ''}`.trim()}${failed ? `: ${failed}` : ''}`);
     }
     // What the environment serves now is the build, as a person meets it.
     const served = withoutItems(await app.metadataAsArtifact(DOOR_COLLECTIONS), baseline);
