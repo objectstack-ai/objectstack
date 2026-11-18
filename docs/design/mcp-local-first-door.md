@@ -79,6 +79,8 @@ Tools, registered by a new open registry behind `metadata:write`, each checking 
 | `delete_metadata_draft({ type, name })` | Discards a pending draft | |
 | `list_drafts({ package? })` | Pending drafts with their verdicts | The review queue, as the client sees it |
 
+> **Note (2026-11-17):** the two read tools are named `list_metadata_items` and `get_metadata_item`, because `list_metadata` is a cloud platform tool (`packages/spec/src/system/constants/platform-tool-names.ts:97`) and the open registry must not collide with it (seat ruling D3 on #34766, 2026-11-17).
+
 - No publish tool, no `force`: a draft executes nothing, and the destructive-change confirmation stays at the human publish.
 - `initialize` instructions and discovery state `Authoring contract: @objectstack/spec <version>` and the install line for `@objectstack/skills@<version>`.
 - The open runtime serves `GET /api/v1/discovery/restriction-profile` (mount what the CLI already reads).
