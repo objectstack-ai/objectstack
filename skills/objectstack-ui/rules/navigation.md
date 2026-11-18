@@ -13,12 +13,13 @@ its own package id; a flat composition puts them under one and is refused.
 Audiences sharing one product and its objects stay
 `requiredPermissions`-gated groups **inside** one app.
 
-Keys by item type ([the ten types](../SKILL.md#navigation-item-types); each
-takes `label`, `icon`): `group` `expanded`, `children[]`; `object`
+Keys by type ([the ten](../SKILL.md#navigation-item-types); `label`, `icon`
+on all but `separator`): `group` `expanded`, `children[]`; `object`
 `objectName`, `viewName?`, `recordId?`, `filters?`; `dashboard`
 `dashboardName`; `report` `reportName?`; `page` `pageName`; `url` `url`;
-`action` `actionDef` (`{ actionName, params? }`); `component` `componentRef`
-(a colon-joined registry key, `metadata:resource`), `params?`; `doc` `book?` / `doc?` (one required).
+`action` `actionDef` (`{actionName, params?}`); `component` `componentRef`
+(a colon-joined registry key, `metadata:resource`), `params?`; `doc` `book?` /
+`doc?` (one required).
 
 > **`requiresObject` / `requiresService`** hide an item whose optional
 > system object or kernel service is missing — never hard-code conditional UI.

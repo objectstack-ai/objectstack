@@ -18,9 +18,9 @@ The Navigation Item Types, Action Types and Report Types tables stay in `SKILL.m
 Where the rest moved, each under its old heading text:
 
 - `rules/list-views.md` now carries **Form Views** (the three types, the long-form paragraph, the public form), **Master-Detail Forms (parent + child line items)** and **Field Conditional Rules in Forms**, plus the column-count pitfall under Column Features.
-- `rules/navigation.md` opens with `App.create`, the one-App-per-package rule, each navigation item type's keys, `requiresObject` / `requiresService` and the `AppContextSelector` note.
-- `rules/actions.md` opens with what an action is, where it is registered, and why a record button needs a placement and a `js` body with `api.write`; its `visible` bullet says a bare field ref fails `os validate`.
+- `rules/navigation.md` opens with `App.create`, the one-App-per-package rule, each navigation item type's keys (`label` and `icon` on every type but `separator`), `requiresObject` / `requiresService` and the `AppContextSelector` note.
+- `rules/actions.md` opens with what an action is, where it is registered, and why a record button needs a placement and a `js` body with `api.write`; a bare field ref in `visible` or `disabled` fails `os validate`, and a parameterized bulk mutation is `script`.
 - `rules/dashboards.md` says an omitted widget `layout` auto-flows, `position` is not a widget key, and a widget binding that resolves to nothing declared fails `os validate`.
 - `rules/pages.md` points at objectstack-query `rules/filters.md` for relative-date placeholders.
 
-A reader who linked `SKILL.md#date-macros--filter-placeholders`, `#master-detail-forms-parent--child-line-items`, `#form-views`, `#common-pitfalls` or `#verify-your-work` finds those headings gone from `SKILL.md`: the first is trap 4 and objectstack-query `rules/filters.md`, the second and third are in `rules/list-views.md`, the rest are the traps and first check 4.
+A reader who linked `SKILL.md#date-macros--filter-placeholders`, `#master-detail-forms-parent--child-line-items`, `#form-views`, `#common-pitfalls` or `#verify-your-work` finds those headings gone from `SKILL.md`: the first is trap 4 and objectstack-query `rules/filters.md`; the second and third are in `rules/list-views.md`; `#common-pitfalls` is in `rules/list-views.md` (Column Features) and `rules/dashboards.md`; `#verify-your-work` is first check 4, with what the gate catches in `rules/actions.md` and `rules/dashboards.md`.

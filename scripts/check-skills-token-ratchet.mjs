@@ -917,7 +917,7 @@ export const CEILINGS = new Map([
   // above; same standing ruling (record 6513306068). 15569 bytes (15549 priced) -> 15704
   // (15684 priced) -> 3921 tokens, pinned AT the measurement, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(15684 / 4)
-  // 3921 -> 2240 (#34770 part 1, the entry file becomes a router; decision record
+  // 3921 -> 2239 (#34770 part 1, the entry file becomes a router; decision record
   // 6943107981, S3 = A, whose target reads "a router-sized `SKILL.md` (6–9 KB, at most 500
   // lines)" with "pointers to the contract instead of restated lists"): LOWERED. The entry
   // keeps four first checks (the installed version, what the project already has, the
@@ -934,10 +934,10 @@ export const CEILINGS = new Map([
   // (a bare field ref, an unresolved widget binding) -> `rules/actions.md` and
   // `rules/dashboards.md`; the `layout` auto-flow clause -> `rules/dashboards.md`. The
   // Detailed Rules list and the CRM blueprint are the routing table now. 15704 bytes
-  // (15684 priced) -> 8978 (8958 priced) -> 2240 tokens; the ceiling follows the file down
+  // (15684 priced) -> 8974 (8954 priced) -> 2239 tokens; the ceiling follows the file down
   // to the measurement, the ratchet's ordinary direction.
-  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(8958 / 4)
-  ['skills/objectstack-ui/SKILL.md', 2240],
+  //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(8954 / 4)
+  ['skills/objectstack-ui/SKILL.md', 2239],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -1349,22 +1349,23 @@ export const CEILINGS = new Map([
   // half carries it: the file is 11106 -> 11231 bytes -> 2808 tokens, zero headroom before,
   // ceiling +31, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11231 / 4)
-  // 2808 -> 3032 (#34770 part 1): RECEIVES text the router split moved out of SKILL.md,
+  // 2808 -> 3031 (#34770 part 1): RECEIVES text the router split moved out of SKILL.md,
   // no new teaching: from § Actions the two-sentence intro (what an action is, where it is
   // registered, a link back to the Action Types table) and the placement / write detail
   // the entry's Actions section no longer spells (`objectName` folds the action into
   // record surfaces, `rowActions` / `bulkActions` name it, the two lint codes, why the
-  // body is `js` and why it declares `api.write`); from § Verify your work one clause on
-  // the `visible` bullet (a bare field ref, `done` for `record.done`, fails
-  // `os validate`). The file is 11231 -> 12126 bytes (+895) -> 3032 tokens, zero headroom
-  // before, ceiling +224, pinned AT the measurement. Authority: the ruling of record that
+  // body is `js` and why it declares `api.write`); from § Verify your work one sentence
+  // on the `disabled` bullet (a bare field ref in `visible` or `disabled`, `done` for
+  // `record.done`, fails `os validate`); from the CRM blueprint's User actions row, that a
+  // parameterized bulk mutation is `script`. The file is 11231 -> 12123 bytes (+892) ->
+  // 3031 tokens, zero headroom before, ceiling +223, pinned AT the measurement. Authority: the ruling of record that
   // orders the entry file down to router size, decision record 6943107981 S3 = A (this
   // header: a ruling of record that orders text into a file authorises its own measured
   // delta), quoted in the PR body beside the standing 2026-10-27 ruling
   // 「A:先削重复,余额按实测提高」 (record 6513306068). The seven hand-authored
-  // objectstack-ui files net -141 bytes across the move (100990 -> 100849).
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(12126 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3032],
+  // objectstack-ui files net -149 bytes across the move (100990 -> 100841).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(12123 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3031],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
@@ -1453,13 +1454,14 @@ export const CEILINGS = new Map([
   // 2184 -> 2564 (#34770 part 1): RECEIVES SKILL.md § App Navigation, no new teaching:
   // the `App.create` / `defineStack({ apps })` sentence, the one-App-per-package paragraph
   // whole, the Navigation Item Types table's Properties column as one keys-by-type
-  // sentence with the `componentRef` registry-key gloss (the type and purpose columns stay
+  // sentence (`label` and `icon` on every type but `separator`, as that column had it)
+  // with the `componentRef` registry-key gloss (the type and purpose columns stay
   // in SKILL.md, where the Leg 2 binding reads them), the `requiresObject` /
   // `requiresService` callout, and the `AppContextSelector` bullet of § Date Macros. The
-  // file is 8727 -> 10256 bytes (+1529) -> 2564 tokens, the row's 2 tokens of headroom
+  // file is 8727 -> 10255 bytes (+1528) -> 2564 tokens, the row's 2 tokens of headroom
   // absorbed, ceiling +380, pinned AT the measurement. Authority as the `rules/actions.md`
   // row above.
-  //   ceil($(wc -c < skills/objectstack-ui/rules/navigation.md) / 4) == ceil(10256 / 4)
+  //   ceil($(wc -c < skills/objectstack-ui/rules/navigation.md) / 4) == ceil(10255 / 4)
   ['skills/objectstack-ui/rules/navigation.md', 2564],
   // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +191 tokens,

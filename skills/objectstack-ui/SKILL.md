@@ -41,7 +41,7 @@ metadata:
    JSON Schema (`GET /api/v1/meta/types`, `entries[].schema`): a defaulted
    key reads as required and a bare-string predicate as `{}`.
 4. **Verify before reporting done.** `os validate` (`npm run validate` in a
-   scaffolded project; `os build` runs the same gates). The traps below pass
+   scaffolded project; `os build` runs the same gates). Most traps below pass
    it.
 
 ## Traps — each parses, then fails at run time
@@ -79,8 +79,8 @@ Two more: [List Views](#list-views), [Actions](#actions).
 | Authoring | In | Open first |
 |:--|:--|:--|
 | A list, board, calendar, gallery or gantt: columns, `filter`, quick filters, toolbar search, sorting, grouping | `src/views/*.view.ts` | [List Views](./rules/list-views.md) |
-| A form (`simple` / `tabbed` / `wizard`), master-detail (a parent with line items), a public form, field conditional rules | `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
-| An app and its navigation; who sees or opens it; object nav, a `filters` slice or an interface page; form width, columns and `sections` | `src/apps/*.app.ts` | [Navigation](./rules/navigation.md) |
+| A form (`simple` / `tabbed` / `wizard`): width, columns and `sections`; master-detail (a parent with line items), a public form, field conditional rules | `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
+| An app and its navigation; who sees or opens it; object nav, a `filters` slice or an interface page | `src/apps/*.app.ts` | [Navigation](./rules/navigation.md) |
 | What a record page shows: related lists, a slotted or full page, drawer or page | the object | [Record Page](./rules/record-page.md) |
 | A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx` | `src/actions/*.actions.ts` | [Actions](./rules/actions.md) |
 | A number, chart, KPI or report over records: datasets, widgets, dashboard filters, `compareTo`, date bucketing, drilldown, cubes | `src/datasets/*.dataset.ts`, `src/dashboards/*.dashboard.ts`, `src/reports/*.report.ts` | [Dashboards](./rules/dashboards.md) |
