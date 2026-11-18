@@ -1341,6 +1341,17 @@ export interface AIObjectResult<T> {
 // ---------------------------------------------------------------------------
 
 /**
+ * One message of a persisted conversation: a Vercel `ModelMessage` plus the
+ * turn it belongs to, the `turnId` it was written under
+ * ({@link IAIConversationService.addMessage}). Absent on a message stored with
+ * no turn. The wire shape is `AiConversationMessageSchema` (`api/protocol.zod.ts`).
+ */
+export type AIConversationMessage = ModelMessage & {
+    /** The turn the message was written under. */
+    turn_id?: string;
+};
+
+/**
  * A persistent AI conversation with message history
  */
 export interface AIConversation {
@@ -1352,8 +1363,8 @@ export interface AIConversation {
     agentId?: string;
     /** User who owns the conversation */
     userId?: string;
-    /** Messages in the conversation */
-    messages: ModelMessage[];
+    /** Messages in the conversation, each with the turn it was written under */
+    messages: AIConversationMessage[];
     /** Creation timestamp (ISO 8601) */
     createdAt: string;
     /** Last update timestamp (ISO 8601) */
