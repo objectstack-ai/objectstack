@@ -67,6 +67,8 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
+// The pillars reach `@objectstack/lint` through a dynamic import; paid here, at collection, not in a case's clock.
+import '@objectstack/lint';
 import { AccessPillar, AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { StudioRail, StudioRailRow } from './StudioRail';
 import { railAbbreviation } from './railAbbreviation';
