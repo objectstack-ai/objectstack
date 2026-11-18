@@ -141,6 +141,8 @@ function railRows(): string[] {
   const newObject = t('engine.studio.data.newObject', 'en');
   return within(nav as HTMLElement)
     .getAllByRole('button')
+    // objectstack#35061 — the narrow rail's 「»」 control is no row.
+    .filter((b) => b.getAttribute('data-testid') !== 'studio-rail-float')
     .map((b) => (b.textContent ?? '').trim())
     .filter((text) => text !== newObject);
 }

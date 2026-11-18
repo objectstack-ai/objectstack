@@ -562,15 +562,15 @@ const LATEST_PER_MAX_KEYS = 3;
 /**
  * [latest per group] `query_records`' answer under `latestPer`, from the
  * bridge's `{ object, records, hasMore }`: the records (at most `limit`
- * groups), `hasMore`, and `truncated: true` when more groups exist than came
- * back (present only then, never `false`). No `total`: a
- * row count is no group count. An answer that is not that shape — a bridge
- * that served the read as an ordinary list — is no answer, and is refused.
+ * groups) and `hasMore`, which {@link servedQueryPage} turns into
+ * `truncated: true` as for any capped page. No `total`: a row count is no
+ * group count. An answer that is not that shape — a bridge that served the
+ * read as an ordinary list — is no answer, and is refused.
  */
 function latestPerAnswer(
   objectName: string,
   result: unknown,
-): { object: unknown; records: unknown[]; hasMore: boolean; truncated?: true } {
+): { object: unknown; records: unknown[]; hasMore: boolean } {
   const answer = result as { object?: unknown; records?: unknown; hasMore?: unknown; total?: unknown } | null;
   if (!answer || !Array.isArray(answer.records) || typeof answer.hasMore !== 'boolean' || answer.total !== undefined) {
     const err = new Error(
@@ -585,7 +585,6 @@ function latestPerAnswer(
     object: answer.object ?? objectName,
     records: answer.records,
     hasMore: answer.hasMore,
-    ...(answer.hasMore ? { truncated: true as const } : {}),
   };
 }
 
@@ -1842,6 +1841,54 @@ function wireCodeOf(err: unknown, thrownCode: string): string {
 }
 
 /**
+ * [#35138] May `query_records` read one row past its page, to learn whether
+ * the page was capped?
+ *
+ * The data door's read window REFUSES, never clamps, a read asking for more
+ * rows than `OS_DATA_MAX_PAGE_SIZE` or walking past `OS_DATA_QUERY_ROW_BUDGET`
+ * (`@objectstack/types`' `query-read-limits.ts`). A probe row that crosses
+ * either would turn a page the caller may read into a refusal, so there the
+ * page is read exactly as asked and the door's counted `hasMore` decides
+ * ({@link servedQueryPage}).
+ */
+function queryPageProbeFits(page: number, offset: number | undefined): boolean {
+  const { maxPageSize, rowBudget } = resolveQueryReadLimits();
+  if (maxPageSize !== undefined && page + 1 > maxPageSize) return false;
+  if (rowBudget !== undefined && (offset ?? 0) + page + 1 > rowBudget) return false;
+  return true;
+}
+
+/**
+ * [#35138] Serve one `query_records` page, and say when it was capped.
+ *
+ * A page read with a probe (`probed`: the bridge was asked for `page + 1`
+ * rows) is capped when the probe row came back: the extra row is dropped and
+ * the answer carries `truncated: true`. A page read without one is capped
+ * when the door's own counted `hasMore` says so. `truncated` is present only
+ * when true, so an answer whose page holds every matching row (exactly
+ * `page` rows included) is unchanged. `hasMore`, where the bridge answers it,
+ * states the same fact: it was counted against the probe-widened read, so it
+ * is restated from the probe rather than left one row out.
+ *
+ * Anything that is not a `{ records: [...] }` object is served as it came —
+ * the {@link withDelegationNotice} posture: no wrapper is invented to carry a
+ * flag about a shape this tool cannot read.
+ */
+function servedQueryPage(result: unknown, page: number, probed: boolean): unknown {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return result;
+  const answer = result as Record<string, unknown>;
+  const records = answer.records;
+  if (!Array.isArray(records)) return result;
+  const truncated = probed ? records.length > page : answer.hasMore === true;
+  return {
+    ...answer,
+    records: probed ? records.slice(0, page) : records,
+    ...(probed && typeof answer.hasMore === 'boolean' ? { hasMore: truncated } : {}),
+    ...(truncated ? { truncated: true as const } : {}),
+  };
+}
+
+/**
  * [ADR-0090 D10 — ruling 2026-09-08, consequence 2] Attach the D10 narrowing
  * notice to a query result WITHOUT reshaping it.
  *
@@ -2952,6 +2999,11 @@ export function registerObjectTools(
         description:
           'Query records from an object with optional filter, field selection, sorting and pagination. ' +
           'Runs under the caller\'s permissions and row-level security. ' +
+          // [#35138] A capped page is one page, never the set: the model is
+          // told not to sum, count or rank it as if whole.
+          'The answer is one page of at most limit rows. When more records match, it carries "truncated": true: ' +
+          'the rows are not all of them, so do not sum, count or rank them as if whole; read on with offset, ' +
+          'or, where it is offered, use aggregate_records for totals and breakdowns. ' +
           'A filter value "{current_user_id}" stands for you. ' +
           // [#32442] The console's My Pending list, filter for filter: the
           // participant read alone also serves requests the caller submitted
@@ -3030,22 +3082,30 @@ export function registerObjectTools(
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
-          const result = await bridge.query(objectName, {
-            where,
-            fields,
-            limit: Math.min(limit ?? maxLimit, maxLimit),
-            offset,
-            orderBy,
-            ...(latestPer !== undefined ? { latestPer } : {}),
-          });
-          if (latestPer !== undefined) {
-            const served = latestPerAnswer(objectName, result);
-            const diagnosedPer = typeof bridge.diagnoseDelegation === 'function'
-              ? await bridge.diagnoseDelegation(objectName).catch(() => undefined)
-              : undefined;
-            if (!diagnosedPer?.narrowed || !diagnosedPer.statement) return textResult(served);
-            return textResult(withDelegationNotice(served, diagnosedPer.statement));
-          }
+          // [#35138] A capped page says so: one row past the page is asked
+          // for, and its coming back is the cap (`servedQueryPage`).
+          const page = Math.min(limit ?? maxLimit, maxLimit);
+          // [latest per group] One record per group: the door reads its own
+          // probe group and answers `hasMore`, so the page is served unprobed
+          // here and `truncated` is the same key, set the same way.
+          const probed = latestPer === undefined && queryPageProbeFits(page, offset);
+          const result = latestPer !== undefined
+            ? servedQueryPage(
+              latestPerAnswer(objectName, await bridge.query(objectName, { where, fields, limit: page, offset, orderBy, latestPer })),
+              page,
+              false,
+            )
+            : servedQueryPage(
+              await bridge.query(objectName, {
+                where,
+                fields,
+                limit: probed ? page + 1 : page,
+                offset,
+                orderBy,
+              }),
+              page,
+              probed,
+            );
           // [ADR-0090 D10 — ruling 2026-09-08, consequence 2] A delegated read
           // the agent ceiling NARROWED is served with the narrowing stated. The
           // rows are still served — a partial answer is the most useful true

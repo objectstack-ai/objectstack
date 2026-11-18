@@ -240,6 +240,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Fertig",
           fields: {
             email: "E-Mail",
+            pendingAgain: "Bereits ausstehend",
             notApplied: "Bereits ausstehend, daher nicht übernommen (am Datensatz festlegen)",
             managerError: "Führungskraft",
             "host.reason": "Einladung nicht gesendet"

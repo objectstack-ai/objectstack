@@ -240,6 +240,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完成",
           fields: {
             email: "電子郵件",
+            pendingAgain: "已在待啟用中",
             notApplied: "此人仍待啟用，以下內容未套用（請在其記錄上設定）",
             managerError: "主管",
             "host.reason": "邀請未送出"
