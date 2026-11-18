@@ -44,7 +44,22 @@ export interface DatasetGrade {
   checks: CheckResult[];
   /** What the turn did on the way, for the reader; never graded (the skill it loaded, the candidates a tool offered). */
   notes: string[];
+  /** The grader's rule revision ({@link DATASET_GRADER_REVISIONS}); absent ⇒ revision 1, the rule before any change. */
+  revision?: number;
 }
+
+/**
+ * Each dataset grader's rule revision, stamped on its grade
+ * ({@link DatasetGrade.revision}) and shown in the scorecard, so a round
+ * graded before a rule change is never compared like for like with one graded
+ * after. Bump a grader's number in the same change that alters what it passes;
+ * a grader not listed, and a grade recorded before this table, is revision 1.
+ *
+ *   - `asked-back` 2: an option named by its place (`option 2`, `the 3rd one`,
+ *     「第 1 个」) and a date whose year follows a time word (`through
+ *     2026-11-17`) are no figure.
+ */
+export const DATASET_GRADER_REVISIONS: Readonly<Partial<Record<DatasetGrader, number>>> = { 'asked-back': 2 };
 
 /**
  * The app tools that answer a question from object records: the MCP door's
@@ -123,6 +138,14 @@ const OPTION_COUNT = new RegExp(
 const YEAR_FOLLOWERS = String.raw`(?:sales|earnings|revenues|profits|results|figures|numbers|totals|margins|costs|expenses|this|its|his|was|has|is|as|thus|plus|versus|across)`;
 
 /**
+ * The year of a date (`through 2026-11-17`, `in 2026-01-01T09:30Z`, `since
+ * 2026/11/17`) is not a year written alone: left whole, the date is skipped
+ * by `numbersIn` as one; with its year cut away, the month and day it leaves
+ * (`-11-17`) read as figures.
+ */
+const NOT_A_DATE_YEAR = String.raw`(?!-\d{2}-\d{2}(?!\d)|/\d{1,2}/\d{1,2}(?!\d))`;
+
+/**
  * A year written alone (`revenue in 2025?`, 「2025 年的营收」): a 19xx/20xx
  * number behind a word that puts a time on it, or before 年. It names a
  * period, it counts nothing. Without that word it stays a figure (`Revenue is
@@ -134,19 +157,40 @@ const YEAR_FOLLOWERS = String.raw`(?:sales|earnings|revenues|profits|results|fig
  */
 const BARE_YEAR = new RegExp(
   [
-    String.raw`(?<=\b(?:in|for|during|since|from|through|until|till|before|after|year|fiscal year|calendar year|FY)\s+)(?:19|20)\d{2}${NUMBER_AFTER}(?!\s*(?:万|亿|元|thousand|million|billion|mn|bn|dollars?|yuan|USD|EUR|RMB|CNY|[kKmMbB]\b))(?!\s+(?:(?!${YEAR_FOLLOWERS}\b)[A-Za-z]+s|people|staff)\b)`,
+    String.raw`(?<=\b(?:in|for|during|since|from|through|until|till|before|after|year|fiscal year|calendar year|FY)\s+)(?:19|20)\d{2}${NUMBER_AFTER}${NOT_A_DATE_YEAR}(?!\s*(?:万|亿|元|thousand|million|billion|mn|bn|dollars?|yuan|USD|EUR|RMB|CNY|[kKmMbB]\b))(?!\s+(?:(?!${YEAR_FOLLOWERS}\b)[A-Za-z]+s|people|staff)\b)`,
     String.raw`${NUMBER_BEFORE}(?:19|20)\d{2}(?=\s*年)`,
   ].join('|'),
   'gi',
 );
 
+/** Two or more option places in a row (`1 or 3`, `1, 2 and 3`): each place's pattern, then its repeats. */
+const placesAfter = (place: string): string => String.raw`${place}(?:\s*(?:,|/|&|\bor\b|\band\b)\s*(?:the\s+)?${place})*`;
+
 /**
- * The figures a reply states, an option list's numbering, a count of the
- * options it offers ({@link OPTION_COUNT}) and a year written alone
- * ({@link BARE_YEAR}) left out.
+ * An option named by its place in the list the reply offers (`option 2`,
+ * `options 1 or 3`, `the 3rd one`, 「第 1 个或第 3 个」, 「选项 2」): it points at
+ * a candidate, it counts nothing. English needs a candidate noun from the
+ * closed lists beside the number (`the 3rd quarter`, `2nd largest` stay
+ * figures); Chinese reads 第 or 选项/方案 before a one- or two-digit number. A
+ * place written as a word (`the first one`, 「第三个」) has no digit to read.
+ */
+const OPTION_PLACE = new RegExp(
+  [
+    String.raw`\b(?:options?|choices?|candidates?|readings?|interpretations?|definitions?)\s+${placesAfter(String.raw`#?\d{1,2}${NUMBER_AFTER}\b`)}`,
+    String.raw`\b${placesAfter(String.raw`\d{1,2}(?:st|nd|rd|th)\b`)}\s+(?:ones?|options?|choices?|candidates?|readings?|interpretations?|definitions?|metrics?|measures?)\b`,
+    String.raw`(?:第|选项|方案)\s*\d{1,2}${NUMBER_AFTER}`,
+  ].join('|'),
+  'gi',
+);
+
+/**
+ * The figures a reply states, an option list's numbering, an option named by
+ * its place ({@link OPTION_PLACE}), a count of the options it offers
+ * ({@link OPTION_COUNT}) and a year written alone ({@link BARE_YEAR}) left
+ * out; a date is skipped by `numbersIn` itself.
  */
 export function statedFigures(replyText: string): number[] {
-  return numbersIn(replyText.replace(LIST_MARKER, '').replace(OPTION_COUNT, ' ').replace(BARE_YEAR, ' '));
+  return numbersIn(replyText.replace(LIST_MARKER, '').replace(OPTION_PLACE, ' ').replace(OPTION_COUNT, ' ').replace(BARE_YEAR, ' '));
 }
 
 /**
@@ -265,5 +309,6 @@ export function gradeDatasetQuestion(datasets: readonly DatasetExpectation[], qu
     );
     checks.push(check(`${grader}:label`, labelsFallback(turn.replyText), 'the reply does not say the figure is not from a governed metric'));
   }
-  return { grader, pass: checks.every((c) => c.pass), checks, notes };
+  const revision = DATASET_GRADER_REVISIONS[grader];
+  return { grader, pass: checks.every((c) => c.pass), checks, notes, ...(revision !== undefined ? { revision } : {}) };
 }

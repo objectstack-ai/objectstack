@@ -185,7 +185,7 @@
       "title": "Every translatable surface localizes on a zh-CN session — one pass over the full translation-group vocabulary, plus the runtime i18n routes it resolves through",
       "since": "v15",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin on a zh-CN session"],
@@ -268,7 +268,7 @@
           "evidence": "the /i18n/locales response"
         },
         {
-          "clause": "GET /i18n/translations/:locale returns a non-empty bundle whose key paths all sit within the declared translation-group vocabulary (ServedTranslationDataSchema — the SERVED document is the merged tree's platform face, PlatformTranslationDataSchema's seventeen groups (TranslationDataSchema's sixteen per-app groups, hooks included, plus the platform-only `settings`), less metadataForms, the one server-resolved group (SERVER_RESOLVED_TRANSLATION_GROUPS), so sixteen groups: apps, books, dashboards, datasets, flows, globalActions, hooks, messages, objects, pages, permissions, picklists, positions, reports, settings, settingsCommon) — a key outside the declared groups, or a raw dotted key handed to a consumer, is the silent-strip class",
+          "clause": "GET /i18n/translations/:locale returns a non-empty bundle whose key paths all sit within the declared translation-group vocabulary (ServedTranslationDataSchema — the SERVED document is the merged tree's platform face, PlatformTranslationDataSchema's eighteen groups (TranslationDataSchema's seventeen per-app groups, hooks and mappings included, plus the platform-only `settings`), less metadataForms, the one server-resolved group (SERVER_RESOLVED_TRANSLATION_GROUPS), so seventeen groups: apps, books, dashboards, datasets, flows, globalActions, hooks, mappings, messages, objects, pages, permissions, picklists, positions, reports, settings, settingsCommon) — a key outside the declared groups, or a raw dotted key handed to a consumer, is the silent-strip class",
           "oracle": "api",
           "verify": "translations for zh-CN is non-empty; spot-check that sampled keys resolve under objects/_views/_actions/_sections/apps.navigation/dashboards/pages/settings groups, not a fourth dialect",
           "evidence": "the /translations/zh-CN response + the key check"
@@ -321,7 +321,7 @@
         "ref": "objectui code under ui/, for acceptance[5]'s dialog COPY only: ui/packages/components/src/__tests__/page-header-action-i18n.test.tsx ('renders the translated button AND opens the confirm dialog with the translated body', 'passes the translated successMessage to the toast') + ui/packages/plugin-detail/src/renderers/__tests__/record-quick-actions.actionText-i18n.test.tsx ('resolves the button AND the confirm dialog body from the same bundle entry', 'resolves successMessage from the same entry'). Each runs the real ActionRunner under a real I18nProvider holding a zh-CN `_actions.NAME` entry, but the action handler, the confirm handler and the toast handler are vi.fn stubs: no request leaves the test, so acceptance[5]'s network clause (the toast attached to a real 2xx round-trip) stays the run's. Run them from this checkout's ui/ directory, where the vitest config lives: neither package carries its own, and each package's test script is `vitest run --root ../..`. The command is `cd ui && pnpm exec vitest run --maxWorkers=1 packages/components/src/__tests__/page-header-action-i18n.test.tsx packages/plugin-detail/src/renderers/__tests__/record-quick-actions.actionText-i18n.test.tsx` and cite the output naming the commit (QA run #23951 ran them in objectui at daeb77fc84dd, 2 files, 7/7). acceptance[6], [7] and [9] have no pin: packages/qa/dogfood/test/showcase-anonymous-deny-surfaces.dogfood.test.ts reaches the i18n routes over HTTP (I18N_FACES, the signed-in member's 200 control), but asserts only that en and zh-CN are among the locales and one translated label, never the exact locale set, the group vocabulary or the zz-ZZ empty-map shape. Every other clause still needs the run"
       },
       "source": [
-        "packages/spec/src/system/translation.zod.ts#appTranslationDataShape (appTranslationDataShape — the fifteen-group vocabulary an APPLICATION may author: objects (with _views/_actions/_sections), picklists, apps (navigation), messages, globalActions, dashboards, datasets, reports, pages, flows, positions, permissions, books, metadataForms, settingsCommon. `settings` is platform-only since #15178 and lives in platformSettingsShape, spread into PlatformTranslationDataSchema only — TranslationItemSchema refuses it too since #19620)",
+        "packages/spec/src/system/translation.zod.ts#appTranslationDataShape (appTranslationDataShape — the seventeen-group vocabulary an APPLICATION may author: objects (with _views/_actions/_sections), picklists, apps (navigation), messages, globalActions, dashboards, datasets, reports, pages, flows, hooks, positions, permissions, books, mappings, metadataForms, settingsCommon. `settings` is platform-only since #15178 and lives in platformSettingsShape, spread into PlatformTranslationDataSchema only — TranslationItemSchema refuses it too since #19620)",
         "examples/app-showcase/src/system/translations/index.ts (full-column coverage rationale)",
         "packages/services/service-i18n/src/i18n-service-plugin.ts#i18n (GET /i18n/locales | /translations/:locale | /labels/:object/:locale; { success, data } envelope #3636/#3675; resolveObjectFieldLabels nested shape #3778/#3833; the plugin mount and the dispatcher /i18n domain serve the same routes interchangeably)",
         "packages/services/service-i18n/src/file-i18n-adapter.ts#getLocales (getLocales / getTranslations — unloaded locale → {}; fallbackLocale applies per-KEY in t(), not to the bulk route)",
@@ -368,6 +368,12 @@
           "date": "2026-11-15",
           "change": "verify-, step- and fixture-text correction, no clause change. acceptance[2].verify: the showcase's coverage baseline reads 317, not 414. fixtures.knownGaps[3]: the revoke confirm has now been driven live. steps[18]: the task record page draws no activity timeline; the feed is read on the inbox popover's 活动动态 tab or GET /api/v1/data/sys_activity. Read from source at base 895783a1. Source records: QA record #33853 (comment 6894307378) on #33761. Batch D of the #33761 close-out, card #33966",
           "ref": "#33984"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-17",
+          "change": "acceptance[7].clause and the appTranslationDataShape source line: count-and-list correction, no change of the clause's meaning. The clause still scores every served key against the declared vocabulary; that vocabulary gained the `mappings` group (a named import mapping's label, mappings.NAME.label), so the served platform face is eighteen groups, the per-app face seventeen, and the scored set seventeen with mappings named. The source line also named fifteen groups without hooks, stale before this change; it now names all seventeen. The showcase bundle serves mappings.showcase_inquiry_feed, which the old list would have scored as outside the vocabulary. Read from source at base 0465f4aa",
+          "ref": "#34939"
         }
       ]
     },

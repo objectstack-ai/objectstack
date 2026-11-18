@@ -3323,7 +3323,9 @@ export function metaTranslateOptions(
  *    ADR-0131 D6), but a `.custom` pair's declared override replaces the
  *    base's item on every read (ADR-0146 D2), so the served document can
  *    differ from the one the catalog translates (`getPackagedPageBase`,
- *    `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`).
+ *    `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`);
+ *    an import `mapping` is an ADR-0146 D2 listed overridable type as well
+ *    (`getPackagedMappingBase`).
  *    The label order the base feeds is ruling record 6631250894's: a
  *    translation in the pair ({@link pairTranslationBundleOf}), then the
  *    override's own label, then the base's translation.
@@ -3344,6 +3346,7 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['dataset', 'getPackagedDatasetBase'],
     ['app', 'getPackagedAppBase'],
     ['book', 'getPackagedBookBase'],
+    ['mapping', 'getPackagedMappingBase'],
 ]);
 
 /**
@@ -3352,8 +3355,8 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
  * per-type resolver over {@link PACKAGED_BASE_ACCESSORS}: an `object` answers
  * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`,
  * a `view` `getPackagedViewBase(name)`, a `report`
- * `getPackagedReportBase(name)`, and [#30062] a `page`, `dataset`, `app` or
- * `book` its own `getPackaged<Type>Base(name)`.
+ * `getPackagedReportBase(name)`, and [#30062] a `page`, `dataset`, `app`,
+ * `book` or `mapping` its own `getPackaged<Type>Base(name)`.
  *
  * `undefined` on every uncertainty — a type with no row, an empty name, a
  * protocol without the accessor (they are server-only extensions, so
