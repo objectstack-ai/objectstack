@@ -14,6 +14,9 @@
  * page reads is stubbed, `t` echoes the key.
  */
 
+// HomePage reaches `import('@objectstack/lint')` (usePublishAllDrafts →
+// capabilityLint); pay that load at collection, not inside a case's timeout.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
