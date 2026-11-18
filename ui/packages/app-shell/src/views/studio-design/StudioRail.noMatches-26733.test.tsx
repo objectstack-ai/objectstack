@@ -75,7 +75,7 @@ import { railAbbreviation } from './railAbbreviation';
 import {
   STUDIO_PILLARS_HOST,
   STUDIO_RAIL_FLOATING,
-  STUDIO_RAIL_NARROW_CONTENT_WIDTH,
+  STUDIO_RAIL_NARROW_HOST_WIDTH,
   STUDIO_RAIL_NARROW_WIDTH,
   STUDIO_RAIL_ROW_ABBR,
   STUDIO_RAIL_WIDTH,
@@ -275,9 +275,9 @@ describe('the rails\' narrow form (objectstack#35061)', () => {
     expect(railAbbreviation(undefined, 'en')).toBe('');
   });
 
-  it('every narrow-form class reads the pillars host at 900 px of content beside the 240 px rail', () => {
+  it('every narrow-form class reads the pillars host, rail and content together, at 900 px', () => {
     expect(STUDIO_RAIL_WIDTH).toBe('w-60');
-    expect(STUDIO_RAIL_NARROW_CONTENT_WIDTH).toBe(900);
+    expect(STUDIO_RAIL_NARROW_HOST_WIDTH).toBe(900);
     expect(STUDIO_PILLARS_HOST).toBe('group/studio-pillars @container/studio-pillars');
     const narrow = Object.entries(studioTokens).filter(
       ([name, value]) => name.startsWith('STUDIO_RAIL_') && typeof value === 'string' && value.includes('studio-pillars'),
@@ -286,7 +286,7 @@ describe('the rails\' narrow form (objectstack#35061)', () => {
     for (const [, value] of narrow) {
       for (const cls of (value as string).split(/\s+/).filter((c) => c.includes('studio-pillars'))) {
         expect(cls).toContain('group-data-[studio-slot=open]/studio-pillars:');
-        expect(cls).toContain(`@max-[${STUDIO_RAIL_NARROW_CONTENT_WIDTH + 240}px]/studio-pillars:`);
+        expect(cls).toContain(`@max-[${STUDIO_RAIL_NARROW_HOST_WIDTH}px]/studio-pillars:`);
       }
     }
   });
