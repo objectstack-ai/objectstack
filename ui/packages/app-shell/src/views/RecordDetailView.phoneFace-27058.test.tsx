@@ -550,3 +550,110 @@ describe('one ⋯ per screen on a record pending approval (objectstack#35016)', 
     expect(screen.queryByTestId('declared-actions-decision-menu')).toBeNull();
   });
 });
+
+/**
+ * objectstack#35099 — the phone bar's first slot goes to a pressable action
+ * whatever turns Edit off, not only the approval lock (objectstack#35016,
+ * pinned above):
+ *
+ *  - `userActions.edit.disabledWhen` holding on the record;
+ *  - `editLockedByState` — every field the edit form shows read-only by its
+ *    `readonlyWhen` — with its badge still drawn as the reason;
+ *
+ * each time Edit sits in the bar's `⋯`, still drawn and still off, and the
+ * first declared action leads the bar. Controls: the desktop row keeps Edit
+ * greyed in place for all three reasons, and a `disabledWhen` that does not
+ * hold leaves Edit leading the bar, pressable.
+ */
+const LOCKS_NEW = "record.status == 'new'";
+
+function leadWithDisabledEdit(when: string) {
+  const [lead, ...rest] = objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')]);
+  return [{ ...lead, userActions: { edit: { disabledWhen: when } } }, ...rest];
+}
+
+function leadLockedByState() {
+  const [lead, ...rest] = objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')]);
+  const fields = Object.fromEntries(
+    Object.entries(lead.fields).map(([name, def]) => [name, name === 'id' ? def : { ...def, readonlyWhen: LOCKS_NEW }]),
+  );
+  return [{ ...lead, fields }, ...rest];
+}
+
+/** The desktop header row's Edit, read before any menu opens. */
+async function desktopRowEdit(): Promise<HTMLButtonElement> {
+  return waitFor(
+    () => {
+      const header = document.querySelector('[data-record-page-root] header') as HTMLElement | null;
+      expect(header).toBeTruthy();
+      const row = within(header!).getByRole('toolbar');
+      const edit = within(row).getAllByRole('button').find((b) => b.textContent?.trim() === 'Edit');
+      expect(edit).toBeTruthy();
+      return edit as HTMLButtonElement;
+    },
+    { timeout: 5000 },
+  );
+}
+
+async function expectEditInBarOverflowOff() {
+  await barDrawn();
+  await waitFor(() => expect(barButtons()).toEqual(['Convert Lead', 'Assign', 'More actions']));
+  const first = actionBar()!.querySelector('[role="toolbar"] button') as HTMLButtonElement;
+  expect(first.disabled).toBe(false);
+  fireEvent.pointerDown(within(actionBar()!).getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  const menu = await screen.findByRole('menu');
+  const edit = within(menu).getAllByRole('menuitem').find((i) => i.textContent?.trim() === 'Edit');
+  expect(edit).toBeTruthy();
+  expect(edit!.getAttribute('aria-disabled')).toBe('true');
+}
+
+describe('a phone bar never leads with an Edit that is off, for any reason (objectstack#35099)', () => {
+  beforeEach(() => {
+    __resetRecordApprovalsStore();
+  });
+
+  it('phone, edit.disabledWhen holds: Edit is in the bar\'s ⋯, off, and Convert Lead leads', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit(LOCKS_NEW));
+    await expectEditInBarOverflowOff();
+  });
+
+  it('phone, editLockedByState: Edit is in the bar\'s ⋯, off, Convert Lead leads, and the badge states why', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadLockedByState());
+    await waitFor(() => expect(screen.getByTestId('record-state-lock').textContent).toBe('Not editable in its current state'), { timeout: 5000 });
+    await expectEditInBarOverflowOff();
+  });
+
+  it('control, phone: a disabledWhen that does not hold keeps [Edit][Convert Lead][⋯] with Edit pressable', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit("record.status == 'closed'"));
+    await barDrawn();
+    await waitFor(() => expect(barButtons()).toEqual(['Edit', 'Convert Lead', 'More actions']));
+    const first = actionBar()!.querySelector('[role="toolbar"] button') as HTMLButtonElement;
+    expect(first.disabled).toBe(false);
+  });
+
+  it('control, desktop: edit.disabledWhen keeps Edit greyed in place in the header row', async () => {
+    setWidth(1440);
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit(LOCKS_NEW));
+    const edit = await desktopRowEdit();
+    await waitFor(() => expect(edit.disabled).toBe(true));
+    expect(actionBar()).toBeNull();
+  });
+
+  it('control, desktop: editLockedByState keeps Edit greyed in place in the header row', async () => {
+    setWidth(1440);
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadLockedByState());
+    const edit = await desktopRowEdit();
+    await waitFor(() => expect(edit.disabled).toBe(true));
+    expect(actionBar()).toBeNull();
+  });
+
+  it('control, desktop: the approval lock keeps Edit greyed in place in the header row', async () => {
+    setWidth(1440);
+    stubApprovals(PENDING_REQUEST);
+    mountApprovalPage();
+    await screen.findByTestId('declared-actions-decision-menu', undefined, { timeout: 5000 });
+    const edit = await desktopRowEdit();
+    await waitFor(() => expect(edit.disabled).toBe(true));
+    expect(actionBar()).toBeNull();
+  });
+});
