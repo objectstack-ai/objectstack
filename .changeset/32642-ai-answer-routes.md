@@ -1,11 +1,11 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 feat(spec): declare the AI answer follow-up routes (saved questions, answer artifact, answer feedback) and carry `turnId` on a conversation's messages
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 `@objectstack/spec/api` now declares the request, response and error shapes of the AI answer follow-up routes the cloud AI service serves, so the console and the client SDK can type them instead of guessing:
 
