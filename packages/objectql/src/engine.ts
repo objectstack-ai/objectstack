@@ -5470,6 +5470,7 @@ export class ObjectQL implements IObjectQLEngine {
     objectName: string,
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
+    explicitTransaction?: unknown,
   ): void {
     // [#25522 cut 7] The body moved to `engine-execute-transactions.ts`, its docblock with it (see `ExecuteTransactionsHost`).
     const readTxStore = () => this.txStore;
@@ -5480,7 +5481,7 @@ export class ObjectQL implements IObjectQLEngine {
       isSystemLedgerObject: (...a) => this.isSystemLedgerObject(...a),
       get logger() { return readLogger(); },
     };
-    return enforceTransactionOrigin.call(host, objectName, driver, operation);
+    return enforceTransactionOrigin.call(host, objectName, driver, operation, explicitTransaction);
   }
 
   // ============================================

@@ -44,6 +44,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
 import { isFederatedObject } from './federated-object.js';
 import { cascadeBatchIdsOf } from './engine-top-level.js';
+import { trioTransactionScopeOf } from './engine-execute-transactions.js';
 import type { EngineMiddleware, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
@@ -415,16 +416,17 @@ export class MiddlewareAndContextFacet {
    * `TransactionScope` (#5724) records the owner for every transaction the
    * engine opens, and `transaction()` also threads that same handle down as
    * `execCtx.transaction`, so the dominant explicit-threading path is covered
-   * by identity-matching the handle back to the store entry. What is NOT
-   * covered:
+   * by identity-matching the handle back to the store entry.
+   * `ScopedContext`'s discrete `beginTransaction`/`commit`/`rollback` trio
+   * threads its handle across `setImmediate` boundaries where
+   * AsyncLocalStorage does not survive, and so never populates txStore; but
+   * the trio knows the owning driver at `beginTransaction`, and records it
+   * until the handle closes (`trioTransactionScopeOf`, #35028), so its
+   * handles are attributed by that record instead. What is NOT covered is
+   * any handle an outside caller obtained elsewhere and passed in as
+   * `execCtx.transaction`.
    *
-   * - `ScopedContext`'s discrete `beginTransaction`/`commit`/`rollback` trio,
-   *   which threads the handle across `setImmediate` boundaries where
-   *   AsyncLocalStorage does not survive, and so never populates txStore;
-   * - any handle an outside caller obtained elsewhere and passed in as
-   *   `execCtx.transaction`.
-   *
-   * For those the engine holds an opaque driver object with no back-reference
+   * For that one the engine holds an opaque driver object with no back-reference
    * to its driver, so there is no honest comparison to make. Guessing — say,
    * assuming an unattributed handle belongs to the default driver — would
    * refuse legitimate single-datasource work on one side and carve out writes
@@ -437,7 +439,10 @@ export class MiddlewareAndContextFacet {
     const store = this.txStore.getStore();
     // The scope describes the handle in the store. An explicitly-threaded
     // handle is covered by it only when it IS that handle.
-    const scope = store !== undefined && tx === store.transaction ? store.scope : undefined;
+    // [#35028] Any other handle is attributed by the record `ScopedContext`'s
+    // discrete trio keeps for the handles it opened (its owner is known at
+    // `beginTransaction`); a handle it never opened stays unattributed.
+    const scope = store !== undefined && tx === store.transaction ? store.scope : trioTransactionScopeOf(tx);
     if (!scope) return true;
     return this.getDriver(object) === scope.driver;
   }
