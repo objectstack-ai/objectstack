@@ -1233,6 +1233,18 @@ function enforceApiKeyManagementCredential(object: string, action: string): void
 }
 
 /**
+ * [#35137] The field names a {@link describeServedObject} answer lists, in its
+ * order: the served-schema half of `fieldVisibilityOf`. The HTTP twin is
+ * `describedFieldNames` in `packages/runtime/src/domains/mcp.ts`.
+ */
+function describedFieldNames(described: Record<string, unknown>): string[] {
+  const fields = described.fields;
+  return Array.isArray(fields)
+    ? fields.map((f) => String((f as { name?: unknown } | null)?.name ?? '')).filter(Boolean)
+    : [];
+}
+
+/**
  * Build the stdio transport's principal-bound data bridge.
  *
  * `aggregate` is attached only when the engine implements it, so a partial
@@ -1256,6 +1268,27 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // from, through the wrapper `plugin.ts` puts on the view the
   // `objectstack://objects` resources read, so the two answer alike.
   const localizedView = servedLocaleObjectView(servedView, { i18n: deps.i18n, protocol });
+
+  /**
+   * `describe_object`'s answer for the principal: the object as they are
+   * served it ({@link callerObjectView}), [#34872] in the locale this
+   * transport speaks ({@link servedLocaleObjectView}), [#32435] each field and
+   * rule carrying what a write needs ({@link describeServedObject}), with
+   * `readonly` judged on the declaration that view masked
+   * ({@link readObjectWithDeclaration}; `declared` is read for that verdict
+   * alone). `null` for an object not served. [#35137] Also the served-schema
+   * half of `fieldVisibilityOf`, so the fields `withheldFields` may name are
+   * exactly the ones this answer lists.
+   */
+  const describeForPrincipal = async (name: string): Promise<Record<string, unknown> | null> => {
+    const { served: def, declared } = await readObjectWithDeclaration(localizedView, name);
+    if (!def) return null;
+    // The field list is an ARRAY here, not the stored map: `validate_expression`
+    // reads `Array.isArray(def.fields)` off this very value, and the HTTP
+    // bridge projects the same shape. A map would type-check and silently
+    // leave that tool with zero fields in scope.
+    return describeServedObject(def as ServedObjectDef, declared as ServedObjectDef);
+  };
 
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {
@@ -1306,16 +1339,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // twin judges it ({@link readObjectWithDeclaration}): only that boolean
     // is read off the declaration.
     async describeObject(name: string): Promise<unknown | null> {
-      // [#34872] …in the locale this transport speaks ({@link servedLocaleObjectView});
-      // `declared` is read for the `readonly` verdict alone.
-      const { served: def, declared } = await readObjectWithDeclaration(localizedView, name);
-      if (!def) return null;
-      // The field list is an ARRAY here, not the stored map: `validate_expression`
-      // reads `Array.isArray(def.fields)` off this very value, and the HTTP
-      // bridge projects the same shape. A map would type-check and silently
-      // leave that tool with zero fields in scope.
-      // [#32435] …each field and rule carrying what a write needs.
-      return describeServedObject(def as ServedObjectDef, declared as ServedObjectDef);
+      return describeForPrincipal(name);
     },
 
     // [#28715] From the object `describeObject` reads: the protocol's served
@@ -1381,8 +1405,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     /**
      * [#35137] The two answers `query_records` and `get_record` name withheld
      * fields from ({@link McpFieldVisibility}), both asked as the principal:
-     * the object as `describe_object` serves it to them ({@link servedView},
-     * the object-schema mask) and the security service's readable answer.
+     * the field names `describe_object` lists for them, read off the very
+     * answer it serves ({@link describeForPrincipal}, so whatever it leaves
+     * out is left out here too), and the security service's readable answer.
      * No security service, an object not served, or no readable answer:
      * `undefined`, and nothing is named.
      */
@@ -1390,11 +1415,11 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const surface = security?.();
       if (typeof surface?.getReadableFields !== 'function') return undefined;
       const context = await resolvePrincipal();
-      const def = (await servedView.getObject(object)) as ObjectDef | undefined;
-      if (!def) return undefined;
+      const described = await describeForPrincipal(object);
+      if (!described) return undefined;
       const readable = await surface.getReadableFields(object, context);
       if (!Array.isArray(readable)) return undefined;
-      return { served: Object.keys(def.fields ?? {}), readable };
+      return { served: describedFieldNames(described), readable };
     },
 
     async get(object, id) {

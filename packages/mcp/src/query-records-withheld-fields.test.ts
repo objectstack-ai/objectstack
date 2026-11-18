@@ -29,6 +29,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { OBJECT_SCHEMA_MASK_DISABLE_ENV } from '@objectstack/metadata-core';
+import { SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { registerObjectTools, type McpDataBridge, type McpFieldVisibility } from './mcp-http-tools.js';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
@@ -168,15 +169,19 @@ const denyingSecurity = () => ({
   canReadObject: async () => true,
 });
 
-async function stdioSession(context: Record<string, unknown>, security?: Record<string, unknown>) {
+async function stdioSession(
+  context: Record<string, unknown>,
+  security?: Record<string, unknown>,
+  declared: () => ReturnType<typeof DECLARED> = DECLARED,
+) {
   const engine = {
     find: vi.fn(async () => [{ ...SERVED_ROW }]),
   } as unknown as IDataEngine;
   const bridge = createStdioDataBridge({
     engine,
     metadataService: {
-      listObjects: async () => [DECLARED()],
-      getObject: async (name: string) => (name === OBJECT ? DECLARED() : undefined),
+      listObjects: async () => [declared()],
+      getObject: async (name: string) => (name === OBJECT ? declared() : undefined),
     } as unknown as IMetadataService,
     resolvePrincipal: async () => ({ ...context }) as unknown as ExecutionContext,
     ...(security ? { security: () => security } : {}),
@@ -249,6 +254,23 @@ describe('stdio bridge — withheldFields from the served schema and the readabl
     const session = await stdioSession(MEMBER, denyingSecurity());
     try {
       expect((await session.query()).payload.withheldFields).toEqual([HIDDEN]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('the served list is describe_object\'s field list, on an object served with a column describe_object does not list', async () => {
+    const withCompanion = () => {
+      const def = DECLARED();
+      return { ...def, fields: { ...def.fields, [SEARCH_COMPANION_FIELD]: { name: SEARCH_COMPANION_FIELD, type: 'text', label: 'Search' } } };
+    };
+    const session = await stdioSession(AUTHOR, denyingSecurity(), withCompanion as unknown as typeof DECLARED);
+    try {
+      const described = (await session.describe()).payload.fields.map((f: { name: string }) => f.name);
+      expect(described, 'precondition: describe_object does not list the column').not.toContain(SEARCH_COMPANION_FIELD);
+      for (const { payload } of [await session.query(), await session.get()]) {
+        expect(payload.withheldFields).toEqual([HIDDEN]);
+      }
     } finally {
       await session.close();
     }
