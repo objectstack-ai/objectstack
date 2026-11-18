@@ -1835,12 +1835,17 @@ const DATASET_SELECTION_RULE =
  * override, not a package version. No line when the manifest cannot be read
  * (`PACKAGE_VERSION` undefined), since an unversioned install takes the
  * registry's `latest`, which may be another major's catalog.
+ * [#34773] The install is `os skills install --version`, the CLI's command
+ * that needs no project, so a client that only connected over MCP can follow
+ * it in an empty directory; the `npx -p @objectstack/cli@VERSION` form is for
+ * a machine without the CLI. The CLI is in the same `fixed` group.
  */
 function skillsInstallLine(version: string | undefined): string | undefined {
   if (!version) return undefined;
   return `Published skills: @objectstack/skills ${version}. To give a coding agent the ObjectStack procedures, `
-    + `install that version in the project (pnpm add -D @objectstack/skills@${version}) and follow the package `
-    + 'README to sync the skills into the agent\'s skills directory.';
+    + `install that version into the agent's skills directory with the ObjectStack CLI, with or without a project: `
+    + `os skills install --version ${version} (where the CLI is not installed: `
+    + `npx -p @objectstack/cli@${version} os skills install --version ${version}).`;
 }
 
 /**
