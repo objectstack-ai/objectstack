@@ -88,6 +88,7 @@ import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
 import { activationReading } from '../setup/packagedFlows.js';
 import { DATA_CONTENT_CONTAINER, DATA_TAB_FLAT_ONLY, DATA_TAB_FOLDED_ONLY } from './dataTabsFold.js';
+import { RECORDS_SCROLLBAR_VISIBLE, revealColumn } from './recordsGridChrome.js';
 import { StudioRail, StudioRailGroup, StudioRailRow } from './StudioRail.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
 import {
@@ -6964,6 +6965,18 @@ export function DataPillar({
   const gridAddFieldButton = React.useRef<HTMLElement | null>(null);
   // Scopes the selected-header outline rule to this records body.
   const recordsColumnsScope = React.useId();
+  // objectstack#35061 — a field selected while the Records grid is open (by
+  // its header, or from the field list) has its column scrolled into view:
+  // not under the frozen name column, not past the right edge.
+  const recordsBodyRef = React.useRef<HTMLDivElement | null>(null);
+  const selectedFieldId = fieldSel?.kind === 'field' ? fieldSel.id : null;
+  React.useEffect(() => {
+    if (viewMode !== 'grid' || selectedFieldId === null) return;
+    const header = Array.from(recordsBodyRef.current?.querySelectorAll('thead th[data-column-key]') ?? []).find(
+      (th) => th.getAttribute('data-column-key') === selectedFieldId,
+    );
+    if (header) revealColumn(header);
+  }, [viewMode, selectedFieldId]);
   // objectstack#34794 — what the Records toolbar's Add field creates with.
   const gridAddFieldCreate = React.useMemo<StudioGridAddFieldValue>(
     () => ({ onCreate: addField, takenNames: addFieldTakenNames, extensionField: extendsBase }),
@@ -7673,7 +7686,11 @@ export function DataPillar({
                 * per-column edit affordance opens the field editor, and dragging a
                 * column header reorders the object's fields (all via the context). */}
               <div
-                className="relative min-h-0 flex-1 overflow-auto bg-background"
+                ref={recordsBodyRef}
+                // objectstack#35061 — the grid's sideways scrollbar is drawn at
+                // rest (`recordsGridChrome.ts`), so a pane the right slot
+                // narrows still shows there are columns to the right.
+                className={cn('relative min-h-0 flex-1 overflow-auto bg-background', RECORDS_SCROLLBAR_VISIBLE)}
                 data-testid="data-records-body"
                 data-records-columns={recordsColumnsScope}
                 onClickCapture={(e) => {
