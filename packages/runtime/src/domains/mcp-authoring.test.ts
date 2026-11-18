@@ -872,6 +872,20 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect((await call(authoring, 'list_drafts', { package: STUDIO_BASE })).body.drafts).toEqual([]);
   });
 
+  it('a save the schema refuses answers its structured findings beside the headline, and writes nothing', async () => {
+    const protocol = await realProtocol();
+    const { authoring } = await authorThroughDomain({ protocol });
+    const refused = await call(authoring, 'save_metadata_draft', {
+      type: 'flow', name: 'crm_opportunity_followup', item: { ...unroutable, bogus_key: 1 }, package: STUDIO_BASE,
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    // The message is the face's headline; the finding that names the key is in `issues`.
+    expect(refused.body.error.message).not.toContain('bogus_key');
+    expect(JSON.stringify(refused.body.error.issues)).toContain('bogus_key');
+    expect((await call(authoring, 'list_drafts', {})).body.drafts).toEqual([]);
+  });
+
   it('an inherited member\'s name as `type`, which the fold keeps as sent, is refused and writes nothing', async () => {
     const protocol = await realProtocol();
     const { authoring } = await authorThroughDomain({ protocol });

@@ -563,8 +563,8 @@ export function createOpenAuthoringRegistry(opts: {
                 toolName: toolCall.toolName,
                 output: { type: 'text', value: JSON.stringify(body, null, 2) },
             });
-            const refuse = (code: ErrorCode, message: string, status: number): OpenAuthoringToolResult => ({
-                ...answer({ error: { code, message, status } }),
+            const refuse = (code: ErrorCode, message: string, status: number, issues?: unknown[]): OpenAuthoringToolResult => ({
+                ...answer({ error: { code, message, status, ...(issues ? { issues } : {}) } }),
                 isError: true,
             });
 
@@ -864,7 +864,12 @@ export function createOpenAuthoringRegistry(opts: {
                 const code = (error as { code?: unknown } | null)?.code;
                 const status = (error as { status?: unknown } | null)?.status;
                 if (typeof code === 'string' && code.length > 0 && typeof status === 'number' && status < 500) {
-                    return refuse(code as ErrorCode, error instanceof Error ? error.message : String(error), status);
+                    // The structured findings travel beside the message: the save
+                    // states the `meta-dispatch` face, whose spec-validation refusal
+                    // trims its message to a headline because the face carries
+                    // `issues[]` (`specValidationFindings`), so they are relayed here.
+                    const issues = (error as { issues?: unknown } | null)?.issues;
+                    return refuse(code as ErrorCode, error instanceof Error ? error.message : String(error), status, Array.isArray(issues) ? issues : undefined);
                 }
                 (opts.logger ?? console).warn?.(`[MCP] ${toolCall.toolName} failed`, {
                     error: error instanceof Error ? error.message : String(error),
