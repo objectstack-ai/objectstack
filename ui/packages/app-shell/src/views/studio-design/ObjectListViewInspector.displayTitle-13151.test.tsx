@@ -20,6 +20,8 @@
  *  - CONTROL: a view with a label is headed by that label, as before.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -140,10 +142,11 @@ describe('the list-view panel names the view by its display name (objectui#13151
     const notice = await loaded('list-view-not-created');
 
     expect(headerTitle()).toBe('Default view');
-    expect(notice).toHaveTextContent('There is no list view “Default view” yet.');
-    expect(notice).not.toHaveTextContent('acme_loan.default');
-    // The machine name stays, as the secondary line.
-    expect(screen.getByTestId('list-view-name')).toHaveTextContent('acme_loan.default');
+    // objectstack#34796 — one sentence, and no `object.view` machine name in the panel.
+    expect(notice).toHaveTextContent('Changes save as a draft first.');
+    const panel = screen.getByTestId('studio-list-view-inspector');
+    expect(panel).not.toHaveTextContent('acme_loan.default');
+    expect(panel).toHaveAttribute('data-view-id', 'acme_loan.default');
   });
 
   it('reads in the designer locale', async () => {
@@ -151,8 +154,8 @@ describe('the list-view panel names the view by its display name (objectui#13151
     const notice = await loaded('list-view-not-created');
 
     expect(headerTitle('zh-CN')).toBe('默认视图');
-    expect(notice).toHaveTextContent('还没有列表视图「默认视图」。');
-    expect(notice).not.toHaveTextContent('acme_loan.default');
+    expect(notice).toHaveTextContent('改动先存为草稿。');
+    expect(screen.getByTestId('studio-list-view-inspector')).not.toHaveTextContent('acme_loan.default');
   });
 
   it('an unlabelled named view is headed by the key the nav entry names it by', async () => {
@@ -166,7 +169,8 @@ describe('the list-view panel names the view by its display name (objectui#13151
     await loaded('list-view-columns');
 
     expect(headerTitle()).toBe('open');
-    expect(screen.getByTestId('list-view-name')).toHaveTextContent('acme_loan.open');
+    expect(screen.getByTestId('studio-list-view-inspector')).toHaveAttribute('data-view-id', 'acme_loan.open');
+    expect(screen.getByTestId('studio-list-view-inspector')).not.toHaveTextContent('acme_loan.open');
   });
 
   it('an unlabelled item that is not a list view: the not-list sentence names the same title', async () => {
@@ -197,6 +201,6 @@ describe('the list-view panel names the view by its display name (objectui#13151
 
     await waitFor(() => expect(headerTitle()).toBe('Active loans'));
     expect(screen.queryByTestId('list-view-not-created')).not.toBeInTheDocument();
-    expect(screen.getByTestId('list-view-name')).toHaveTextContent('acme_loan.default');
+    expect(screen.getByTestId('studio-list-view-inspector')).toHaveAttribute('data-view-id', 'acme_loan.default');
   });
 });

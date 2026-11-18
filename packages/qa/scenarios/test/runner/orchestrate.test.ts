@@ -3561,3 +3561,116 @@ describe('runHalf — a replay of a recording made before the card declared data
     expect(graded(half.questions)).toEqual(graded(run.modes[0]!.run!.questions));
   });
 });
+
+// ── A live turn that throws: recorded as a failed turn, and replayed as the same failure ──
+
+/** Throws on the named question, dataset question and operation steps, as a live driver throws when a turn cannot run (`write EPIPE`). */
+class ThrowsOn implements AgentDriver {
+  constructor(
+    private readonly inner: AgentDriver,
+    private readonly steps: ReadonlySet<string>,
+  ) {}
+  info(): DriverInfo {
+    return this.inner.info();
+  }
+  author(task: AuthorTask) {
+    return this.inner.author(task);
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    if (this.steps.has(task.step)) throw new Error(`write EPIPE (${task.step})`);
+    return this.inner.ask(task);
+  }
+}
+
+describe('runHalf — a live turn that throws is recorded as a failed turn, and its replay counts the row it counted live', () => {
+  const CARD = 'crm_account_with_contacts';
+  const ref = { card: CARD, mode: 'ask', phase: 'run' } as const;
+  // A dataset question (a missing turn reads not measured there), a question and an operation.
+  const THROWN = new Set(['dq_staff', 'tech_accounts', 'add_contact']);
+  const recordLive = async () => {
+    const { ops, driver: scripted } = setup({ scenario: withDatasets() });
+    const live = new RecordingDriver(new ThrowsOn(new DatasetRoutes(scripted), THROWN));
+    const run = await runCard(withDatasets(), live, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    return { recording: JSON.parse(JSON.stringify(live.recording)) as Recording, half: run.modes[0]!.run! };
+  };
+  const replay = (recording: Recording) => runHalf(namespacedScenario(withDatasets()), new FakeApp(), new RecordedDriver(recording), ref, citationLabels(withDatasets()));
+  const counted = (rs: ReadonlyArray<{ question: string; persona?: string | null; error?: string; notMeasured?: string; grade?: unknown }>) =>
+    rs.map((r) => ({ question: r.question, persona: r.persona, error: r.error, notMeasured: r.notMeasured, grade: r.grade }));
+  const thrownOp = (h: { operations: OperationResult[] }) => h.operations.filter((o) => o.operation === 'add_contact').map((o) => ({ error: o.error, notMeasured: o.notMeasured }));
+  const measuredQuestions = (qs: QuestionResult[]) => ({ total: qs.filter((q) => !q.notMeasured).length, notMeasured: qs.filter((q) => q.notMeasured).length });
+
+  it('the recording holds each thrown turn: an empty turn naming the error; a replay counts the same rows, the dataset question 1/2 as live, never 1/1', async () => {
+    const { recording, half: live } = await recordLive();
+    // Live, each throw is a counted failure.
+    expect(live.datasetQuestions!.find((q) => q.question === 'dq_staff')!.error).toBe('write EPIPE (dq_staff)');
+    expect(datasetTally(live)).toMatchObject({ passed: 1, total: 2, notMeasured: 0 });
+
+    const replayed = await replay(recording);
+    expect(datasetTally(replayed)).toEqual(datasetTally(live));
+    expect(recording.turns[`${CARD}/ask/run/dq_staff/-`]).toEqual({ replyText: '', toolCalls: [], meta: {}, thrown: { name: 'Error', message: 'write EPIPE (dq_staff)' } });
+    expect(recording.turns[`${CARD}/ask/run/add_contact/sdr`]!.thrown).toEqual({ name: 'Error', message: 'write EPIPE (add_contact)' });
+    expect(counted(replayed.datasetQuestions!)).toEqual(counted(live.datasetQuestions!));
+    expect(counted(replayed.questions)).toEqual(counted(live.questions));
+    expect(measuredQuestions(replayed.questions)).toEqual(measuredQuestions(live.questions));
+    expect(thrownOp(replayed)).toEqual([{ error: 'write EPIPE (add_contact)', notMeasured: undefined }]);
+    expect(thrownOp(replayed)).toEqual(thrownOp(live));
+  });
+
+  it('a recording without the throw marker (made before throws were recorded) replays as it always did: no turn, so the dataset question is not measured', async () => {
+    const { recording } = await recordLive();
+    // The thrown steps' keys removed: the recording a run made before this change, which recorded nothing for a throw.
+    const turns = Object.fromEntries(Object.entries(recording.turns).filter(([key]) => !THROWN.has(key.split('/')[3]!)));
+    const replayed = await replay({ ...recording, turns });
+    const dq = replayed.datasetQuestions!.find((q) => q.question === 'dq_staff')!;
+    expect([typeof dq.notMeasured, dq.error, dq.grade]).toEqual(['string', undefined, undefined]);
+    expect(datasetTally(replayed)).toMatchObject({ passed: 1, total: 1, notMeasured: 1 });
+    expect(replayed.questions.find((q) => q.question === 'tech_accounts')!.error).toBe(`no recorded turn for \`${CARD}/ask/run/tech_accounts/-\``);
+  });
+
+  it('the driver: a live throw is rethrown as it was thrown; a replay throws its name and message again, writes no file, and a recording of that replay holds the same turn', async () => {
+    const boom = new TypeError('spawn claude ENOENT');
+    const inner: AgentDriver = {
+      info: () => ({ driver: 'live-stand-in', apiBilled: false }),
+      author: async () => {
+        throw boom;
+      },
+      ask: async () => {
+        throw boom;
+      },
+    };
+    const live = new RecordingDriver(inner);
+    const askTask = { card: 'c', mode: 'scratch', phase: 'run', step: 'q', prompt: 'p', mcp: { url: 'http://x', apiKey: 'k' } } as const;
+    const authorTask = { card: 'c', mode: 'scratch', phase: 'build', step: 'author', prompt: 'p', cwd: mkdtempSync(join(tmpdir(), 'scenario-thrown-author-')), tier: 'control' } as const;
+    try {
+      await expect(live.ask(askTask)).rejects.toBe(boom);
+      await expect(live.author(authorTask)).rejects.toBe(boom);
+      const thrown = { name: 'TypeError', message: 'spawn claude ENOENT' };
+      expect([live.recording.turns['c/scratch/run/q/-']!.thrown, live.recording.turns['c/scratch/build/author/-']!.thrown]).toEqual([thrown, thrown]);
+      expect(live.recording.files).toEqual({});
+
+      const again = new RecordingDriver(new RecordedDriver(JSON.parse(JSON.stringify(live.recording)) as Recording));
+      for (const call of [() => again.ask(askTask), () => again.author(authorTask)]) {
+        const e = await call().then(
+          () => undefined,
+          (x: unknown) => x as Error,
+        );
+        expect(e).toBeInstanceOf(Error);
+        expect([e!.name, e!.message, e instanceof ReplayNotFaithfulError]).toEqual(['TypeError', 'spawn claude ENOENT', false]);
+      }
+      expect(readdirSync(authorTask.cwd)).toEqual([]);
+      expect(again.recording.turns).toEqual(live.recording.turns);
+    } finally {
+      rmSync(authorTask.cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('a thrown authoring turn: its replay leaves the build not measured with the live error, not a missing-turn error', async () => {
+    const live = setup({ authorAs: { 'scratch/build': new TypeError('spawn claude ENOENT') } });
+    const recorder = new RecordingDriver(live.driver);
+    const liveRun = await runCard(live.scenario, recorder, live.ops, { modes: ['scratch'], admin: ADMIN });
+    const fresh = setup();
+    const replayRun = await runCard(fresh.scenario, new RecordedDriver(JSON.parse(JSON.stringify(recorder.recording)) as Recording), fresh.ops, { modes: ['scratch'], admin: ADMIN });
+    expect(liveRun.modes[0]!.build).toMatchObject({ error: 'author: spawn claude ENOENT', notMeasured: 'author turn failed: spawn claude ENOENT' });
+    expect(replayRun.modes[0]!.build).toEqual(liveRun.modes[0]!.build);
+  });
+});
