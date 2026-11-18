@@ -111,8 +111,8 @@ Built-in (plugins register more):
 ### `notify`
 
 An undeclared key is a named parse error. **RAW** keys are read as written:
-a `{token}` in one is refused. The node as JSON (in TypeScript the same
-literal, typed `FlowNode` from `@objectstack/spec/automation`):
+a `{token}` in one is refused. The node as JSON (TypeScript: the same
+literal, a `FlowNode`):
 
 ```json
 { "id": "tell_owner", "type": "notify", "label": "Notify Owner", "config": {

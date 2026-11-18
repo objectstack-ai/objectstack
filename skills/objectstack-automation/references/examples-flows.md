@@ -80,8 +80,7 @@ record *happens to change*, so unattended it almost never fires. Use a
 carries a **`timeRelative`** descriptor is swept on a schedule (daily by default)
 and launched **once per record** whose date field falls in the window. The record
 is on the context, so the start `condition` and a `record.*` CEL value envelope work
-exactly as for a record-change flow — and because the window is evaluated every
-day, a threshold is never missed.
+exactly as for a record-change flow.
 
 <!-- os:check -->
 ```typescript
@@ -136,8 +135,8 @@ one-day **window** (`$gte`/`$lt`) — this `filter`, plus the same window at
 ```
 
 Abutting windows tile the timeline, so each record matches exactly one tier —
-fires once, idempotent, no guard field. Each bound is a CEL value envelope
-(`isoDate(daysFromNow(N))`), evaluated before the query; any `{…}` token but a
+fires once, idempotent, no guard field. Each bound is evaluated before the
+query; any `{…}` token but a
 query placeholder such as `{today}` is refused there (`expression-invalid`).
 For "days remaining" in a message, use `daysBetween(today(), record.end_date)`.
 
