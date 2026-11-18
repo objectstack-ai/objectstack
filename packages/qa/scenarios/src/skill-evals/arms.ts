@@ -101,3 +101,16 @@ export function prepareArmWorkdir(arm: Arm, bundle: string, skillsRoot: string):
   }
   return { cwd, mcpConfigPath, root };
 }
+
+/**
+ * Place a case's `files` in a turn's project: each entry, a path under the
+ * bundle's `evals/files/` (the reader has refused any other), is copied to the
+ * same path below `evals/files/` inside `cwd`, a directory whole. Called for
+ * both arms alike, so the arms still differ only in the bundle.
+ */
+export function placeCaseFiles(files: readonly string[] | undefined, bundle: string, skillsRoot: string, cwd: string): void {
+  for (const f of files ?? []) {
+    const below = f.split('/').slice(2).join('/');
+    cpSync(join(skillsRoot, bundle, f), join(cwd, below), { recursive: true, dereference: true });
+  }
+}

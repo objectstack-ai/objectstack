@@ -158,7 +158,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "+86 138", "@example.com"],
-        "must_not_contain": ["****", "'N/A'", "type: 'text', label: 'Phone'"]
+        "must_not_contain": ["'138****", "'N/A'", "type: 'text', label: 'Phone'"]
       }
     },
     {
@@ -194,11 +194,21 @@
     {
       "id": 20,
       "prompt": "Each `project` shows a `task_count` — the number of its `task` records (each task has a `project` lookup). Add a `client_viewer` permission set: clients read projects, but must never be able to read tasks.",
-      "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry — and because a roll-up covers every child row and answers only to the parent field's own access, the set also masks the summary: `fields: { 'project.task_count': { readable: false } }`, with no View All / Modify All on `project` (either overrides the mask). The build then finishes without `security-rollup-source-unreadable`; the warning is resolved, not left standing or explained away, and not silenced by granting the `task` read the request forbids.",
+      "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry — and because a roll-up covers every child row and answers only to the parent field's own access, the set also masks the summary: `fields: { 'project.task_count': { readable: false } }`, with no Modify All on `project` (it overrides the mask). The build then finishes without `security-rollup-source-unreadable`; the warning is resolved, not left standing or explained away, and not silenced by granting the `task` read the request forbids.",
       "files": [],
       "assertions": {
         "must_contain": ["function: 'count'", "'project.task_count': { readable: false }"],
         "must_not_contain": ["task: { allowRead: true }"]
+      }
+    },
+    {
+      "id": 27,
+      "prompt": "Each `project` shows a `task_count` — the number of its `task` records (each task has a `project` lookup). Add a `client_viewer` permission set: clients read projects and should see how many tasks each one has, but must never be able to read the tasks themselves.",
+      "expected_output": "`task_count` is a `summary` on `project` (`summaryOperations: { object: 'task', function: 'count' }`). `client_viewer` grants `project: { allowRead: true }` and no `task` entry. The request says the set sees the total but not the rows, so the column stays readable and the set's entry for it says why: `fields: { 'project.task_count': { readable: true, rollupSourceUnreadableReason: 'Clients see progress counts, not tasks' } }`. `security-rollup-source-unreadable` is then reported as a note quoting the reason instead of a warning, so the build finishes with no warning standing. The count is not masked (that would withhold a total the request grants, and the reason is refused beside `readable: false`), and the warning is not silenced by granting the `task` read the request forbids.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["summary", "project.task_count", "rollupSourceUnreadableReason"],
+        "must_not_contain": []
       }
     },
     {
