@@ -9,7 +9,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Core schemas
 
-- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionRefusalSchema
+- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Action protocol schemas — `ActionSchema`, the `action` metadata type, and the parts it is built from.
 - `node_modules/@objectstack/spec/src/ui/app.zod.ts` — Exports: ObjectNavItemSchema, DashboardNavItemSchema, PageNavItemSchema, UrlNavItemSchema, ReportNavItemSchema
 - `node_modules/@objectstack/spec/src/ui/chart.zod.ts` — Unified Chart Type Taxonomy
 - `node_modules/@objectstack/spec/src/ui/component.zod.ts` — Exports: PageContainerProps, PageHeaderProps, PageTabsProps, PageCardProps, RecordDetailsProps
