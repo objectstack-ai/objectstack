@@ -58,7 +58,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, cleanup, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { render, cleanup, screen, waitFor, within } from '@testing-library/react';
 import { DatasetWidget } from '../DatasetWidget';
 
 afterEach(() => {

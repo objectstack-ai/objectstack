@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, within, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
 import { DashboardWidgetSchema as SpecDashboardWidgetSchema } from '@objectstack/spec/ui';
 
 let lastChartSchema: any = null;
