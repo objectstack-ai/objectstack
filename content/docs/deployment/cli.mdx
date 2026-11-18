@@ -2943,6 +2943,7 @@ os verify --delete-behaviors                   # Also prove each declared delete
 os verify --unique-scopes --multi-tenant       # Also prove each declared unique collides where its scope says
 os verify --parent-write-reach                 # Also prove each controlled_by_parent detail write follows its master
 os verify --dashboard-windows                  # Also prove each dashboard date picker counts the rows its window selects
+os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   # Also run one flow and report its node trace
 ```
 
 1. **Author-time rules.** The rule registry `os validate` runs, over the stack
@@ -3092,6 +3093,31 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    ground truth cannot model (`$or`, a range, a
    relationship path, a condition on the window's own field), are reported
    `excluded`.
+   With `--flow <name>`, another fresh boot runs that one flow once and reports
+   what the engine did: each node's status as the run's log records it, the
+   first failure with its code and the node named, and every write the run
+   made. The run starts the way production starts it. A record-change flow is
+   started by its own trigger: the run writes the record `--flow-record`
+   names (its fields as a JSON object) as the dev admin, inserting it for a
+   create or write leg, seeding it and saving it unchanged for an update leg
+   (so a condition comparing old and new values sees no change), and seeding
+   it and deleting it for a delete leg. A flow its own trigger starts with no
+   caller (a schedule, an API trigger, or a flow declared `runAs: 'system'`)
+   is started the way that trigger starts it, with no caller; any other flow
+   goes through the trigger route as the dev admin. `--flow-input` (a JSON
+   object) is handed to a directly started flow as its params. Before the run
+   starts, every node whose type no installed plugin runs is named, reached or
+   not, and a flow whose trigger never binds is reported with the trigger and
+   the engine's reason, and is not run. A run that fails, a node with no
+   executor, a trigger that never binds, a record-change flow given no record,
+   and a write refused because its object lives outside the ephemeral stack
+   each fail `os verify`; a run the start condition skipped, or one that paused at a
+   screen, wait or approval, is reported and does not. The run writes to the
+   in-memory database this boot creates and nowhere else: a write to an object
+   bound to any other datasource is refused before that datasource's driver is
+   called, and the node that made it fails naming the object and the
+   datasource. Only data writes are confined: a node that calls out (`http`,
+   `connector_action`, `notify`, `script`) runs for real.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.
@@ -3128,8 +3154,10 @@ document carries depends on where the run ended:
   `parentWriteReach` (with `--parent-write-reach`; its `personas` name who
   wrote and who could not be provisioned), `dashboardWindows` (with
   `--dashboard-windows`; its `presets` name what each preset handed the door
-  and how it resolved) and `hardFailures`, the count the exit status is read
-  from.
+  and how it resolved), `flowRun` (with `--flow`: the `verdict`, how the run
+  started, the `trigger` and whether it is bound, the `steps`, the
+  `missingExecutors`, the `firstFailure`, the `writes` and the `confinement`)
+  and `hardFailures`, the count the exit status is read from.
 - **Could not run:** `{ "error": "<sentence>" }`, plus `code` and `httpStatus`
   when the failure carries them.
 
