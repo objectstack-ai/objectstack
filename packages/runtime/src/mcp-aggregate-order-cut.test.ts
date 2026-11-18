@@ -8,7 +8,10 @@
  *
  * Pinned: a top five over more customers than the tool's row cap answers
  * exactly five, in order, with the true number of groups; an order by a group
- * key ascending; an order key naming no column of the aggregated row refused
+ * key ascending; the declared option order `aggregate_records` sends for a
+ * `limit` with no `orderBy` (a rank on a select key), taken by the statement's
+ * CASE before the cut, NULL last, with the true number of groups; an order
+ * key naming no column of the aggregated row refused
  * `INVALID_SORT` with the columns named; `aggregate` with no order answers as
  * before; and the statement the driver ran carries the ORDER BY, the LIMIT and
  * `count(*) over ()` — so a sort in the application cannot pass. The tool's
@@ -33,8 +36,11 @@ const DEF = {
   fields: {
     customer: { name: 'customer', label: 'Customer', type: 'text' },
     amount: { name: 'amount', label: 'Amount', type: 'number' },
+    stage: { name: 'stage', label: 'Stage', type: 'select', options: [{ value: 'open' }, { value: 'won' }, { value: 'lost' }] },
   },
 };
+/** Each customer's stage, in an order that is neither declared nor alphabetical; every fourth has none. */
+const STAGE_OF = (i: number) => ['lost', 'won', null, 'open'][i % 4];
 /** More customers than the tool's row cap (50): `cNN` totals `NN * 10 + 5`. */
 const CUSTOMERS = 70;
 const REVENUE = { groupBy: ['customer'], aggregations: [{ function: 'sum' as const, field: 'amount', alias: 'revenue' }] };
@@ -54,8 +60,8 @@ describe('[aggregate order and cut] the HTTP MCP bridge over a real SQLite datab
     engine.registry.registerObject(DEF as any);
     for (let i = 0; i < CUSTOMERS; i++) {
       const customer = `c${String(i).padStart(2, '0')}`;
-      await driver.create(OBJECT, { id: `${customer}-a`, customer, amount: i * 10 });
-      await driver.create(OBJECT, { id: `${customer}-b`, customer, amount: 5 });
+      await driver.create(OBJECT, { id: `${customer}-a`, customer, amount: i * 10, stage: STAGE_OF(i) });
+      await driver.create(OBJECT, { id: `${customer}-b`, customer, amount: 5, stage: STAGE_OF(i) });
     }
     (driver as unknown as { knex: { on: Function } }).knex.on('query', (q: { sql: string }) => { statements.push(q.sql); });
     const deps = {
@@ -108,6 +114,22 @@ describe('[aggregate order and cut] the HTTP MCP bridge over a real SQLite datab
     expect(answer.totalGroups).toBe(CUSTOMERS);
     const ran = statements.filter((s) => /group by/i.test(s));
     expect(ran[0]).toMatch(/order by case [^ ]+ when \? then 0 when \? then 1 when \? then 2 else 3 end asc/i);
+  });
+
+  it('the declared option order a limit-only aggregate_records call sends: declared groups first, NULL last, the cut after it, the true total', async () => {
+    // The order key `aggregate_records` derives for a `limit` with no
+    // `orderBy` over a select group key (`@objectstack/mcp`, pinned there).
+    const declared = { field: 'stage', order: 'asc' as const, rank: ['open', 'won', 'lost'] };
+    const COUNT = { groupBy: ['stage'], aggregations: [{ function: 'count' as const, alias: 'n' }] };
+    statements.length = 0;
+    const cut = await bridge.aggregateGroups(OBJECT, { ...COUNT, orderBy: [declared], limit: 2 });
+    expect(cut).toEqual({ rows: [{ stage: 'open', n: 34 }, { stage: 'won', n: 36 }], totalGroups: 4 });
+    const ran = statements.filter((s) => /group by/i.test(s));
+    expect(ran, statements.join('\n')).toHaveLength(1);
+    expect(ran[0]).toMatch(/order by case [^ ]+ when \? then 0 when \? then 1 when \? then 2 else 3 end asc/i);
+    expect(ran[0]).toMatch(/limit \?/i);
+    const all = await bridge.aggregateGroups(OBJECT, { ...COUNT, orderBy: [declared], limit: 10 });
+    expect(all.rows.map((r: any) => r.stage)).toEqual(['open', 'won', 'lost', null]);
   });
 
   it('an order key naming no column of the aggregated row is refused INVALID_SORT, naming the columns', async () => {
