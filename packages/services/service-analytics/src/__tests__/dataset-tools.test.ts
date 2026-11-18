@@ -959,11 +959,15 @@ describe('[#34919] list_datasets nextStep on examples/app-crm — the decision e
   });
 
   it('one_measure beside an unknown word and a grouping word: the note keeps the unknown word\'s labelled fallback and names the grouping', async () => {
-    const out = await ask(['商机数', '库存周转', '销售阶段']);
-    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
-    expect(out.nextStep!.note).toContain('"库存周转"');
-    expect(out.nextStep!.note).toContain('query_records');
-    expect(out.nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
+    for (const ctx of [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[]) {
+      const out = await ask(['商机数', '库存周转', '销售阶段'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+      const note = out.nextStep!.note;
+      expect(note, String(ctx.locale)).toContain('库存周转');
+      expect(note, String(ctx.locale)).toContain('query_records');
+      expect(note, String(ctx.locale)).toContain('Stage');
+    }
+    expect((await ask(['商机数', '库存周转', '销售阶段'])).nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
     // The control: alone, the measure word's note sends nobody to the object tools.
     expect((await ask(['商机数'])).nextStep!.note).not.toContain('query_records');
   });
