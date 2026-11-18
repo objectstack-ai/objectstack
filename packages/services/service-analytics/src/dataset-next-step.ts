@@ -65,14 +65,18 @@ import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/s
  *
  * The terms of an unreported case keep their entries in `matches` and
  * `candidates`; `decision` and `terms` name only the case that comes first.
- * When that case is `one_measure`, `note` still names every word it leaves
- * out (seat ruling B on the L1-c N1 finding): a word with candidates
- * together with those candidates, each by its label and its dataset's label,
- * and the instruction to ask before using it; an unknown word with its
- * labelled fallback to the object query tools; a word that equals only a
- * dimension as that grouping. `["营收", "churn"]` computes 营收's measure and
- * asks about churn's candidates in one sentence. (`several_measures` asks
- * before anything is computed, so its note needs no such tail.)
+ * When that case is `one_measure` or `candidates_only`, `note` still names
+ * every word it leaves out (seat ruling B on the L1-c N1 finding, extended to
+ * `candidates_only` by the seat's L2 S3): under `one_measure`, a word with
+ * candidates together with those candidates, each by its label and its
+ * dataset's label, and the instruction to ask before using it; under either,
+ * an unknown word with its labelled fallback to the object query tools and a
+ * word that equals only a dimension as that grouping. `["营收", "churn"]`
+ * computes 营收's measure and asks about churn's candidates in one sentence;
+ * `["库存周转", "金额"]` asks about 金额's candidates and names 库存周转 with
+ * its fallback. (`several_measures` asks before anything is computed, so its
+ * note needs no such tail.) Two words that equal the same measure are one
+ * metric, and the note says so.
  *
  * ## An incomplete catalogue
  *
@@ -126,7 +130,7 @@ interface DatasetToolCopy {
   readonly partialTail: string;
   /** After a `one_measure` note: the left-out words that have candidates are asked about before use. */
   readonly leftCandidateTail: string;
-  /** After a `one_measure` note: the left-out words with no measure and no reading fall back, labelled. */
+  /** After a `one_measure` or `candidates_only` note: the left-out words with no measure and no reading fall back, labelled. */
   readonly leftFallbackTail: string;
   readonly source: (measures: readonly string[], dataset: string, dimensions: readonly string[]) => string;
 }
@@ -322,6 +326,33 @@ function readTerm(
   return { term, decision, measures, dimensions, candidates: offered };
 }
 
+/**
+ * The sentences naming the words the reported case leaves out (seat ruling B,
+ * extended to `candidates_only`): under `one_measure` a word with candidates
+ * with those candidates and the ask-first instruction; under `one_measure` and
+ * `candidates_only` an unknown word with its labelled fallback, and a word that
+ * equals only a dimension as that grouping. A `no_measure` word is never the
+ * reported case here, so every `no_measure` reading is a left-out word.
+ */
+function leftOutSentences(
+  decision: DatasetNextStepDecision,
+  readings: readonly TermReading[],
+  copy: DatasetToolCopy,
+  members: (ms: readonly NamedMember[]) => string,
+): string[] {
+  const sentences: string[] = [];
+  const offered = readings.filter((r) => r.decision === 'candidates_only' && r.decision !== decision);
+  for (const r of offered) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
+  if (offered.length > 0) sentences.push(copy.leftCandidateTail);
+  const unknown = readings.filter((r) => r.decision === 'no_measure' && r.dimensions.length === 0);
+  for (const r of unknown) sentences.push(copy.unknownHit(r.term));
+  if (unknown.length > 0) sentences.push(copy.leftFallbackTail);
+  for (const r of readings) {
+    if (r.decision === 'no_measure' && r.dimensions.length > 0) sentences.push(copy.groupingHit(r.term, members(r.dimensions)));
+  }
+  return sentences;
+}
+
 /** What {@link composeDatasetNextStep} reads: the answer `list_datasets` is about to serve, and the caller's locales. */
 export interface DatasetNextStepSource {
   /** The caller's terms, as sent. */
@@ -355,19 +386,10 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
   switch (decision) {
     case 'one_measure': {
       for (const r of reported) sentences.push(copy.oneHit(r.term, r.measures[0]));
-      sentences.push(copy.oneTail(reported.length));
-      // The words this case leaves out are still named (seat ruling B on
-      // L1-c N1): a word with candidates with those candidates, an unknown
-      // word with its labelled fallback, a grouping word as the grouping.
-      const offered = readings.filter((r) => r.decision === 'candidates_only');
-      for (const r of offered) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
-      if (offered.length > 0) sentences.push(copy.leftCandidateTail);
-      const unknown = readings.filter((r) => r.decision === 'no_measure' && r.dimensions.length === 0);
-      for (const r of unknown) sentences.push(copy.unknownHit(r.term));
-      if (unknown.length > 0) sentences.push(copy.leftFallbackTail);
-      for (const r of readings) {
-        if (r.decision === 'no_measure' && r.dimensions.length > 0) sentences.push(copy.groupingHit(r.term, members(r.dimensions)));
-      }
+      // Two words that equal the same measure are one metric, not two.
+      const metrics = new Set(reported.map((r) => `${r.measures[0].datasetName}.${r.measures[0].name}`));
+      sentences.push(copy.oneTail(metrics.size));
+      sentences.push(...leftOutSentences(decision, readings, copy, members));
       break;
     }
     case 'several_measures':
@@ -377,14 +399,17 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
     case 'candidates_only':
       for (const r of reported) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
       sentences.push(copy.candidateTail);
+      sentences.push(...leftOutSentences(decision, readings, copy, members));
       break;
     case 'no_measure': {
       for (const r of reported) {
         sentences.push(r.dimensions.length > 0 ? copy.groupingHit(r.term, members(r.dimensions)) : copy.unknownHit(r.term));
       }
       // A word for a thing measured that names nothing falls back (D3 rule 4);
-      // a grouping word alone asks which number is meant (rule 5).
-      sentences.push(reported.some((r) => r.dimensions.length === 0) ? copy.fallbackTail : copy.groupingTail);
+      // a grouping word asks which number is meant (rule 5), beside the
+      // fallback too when the words are mixed.
+      if (reported.some((r) => r.dimensions.length === 0)) sentences.push(copy.fallbackTail);
+      if (reported.some((r) => r.dimensions.length > 0)) sentences.push(copy.groupingTail);
       break;
     }
   }
