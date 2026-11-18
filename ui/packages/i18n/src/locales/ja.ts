@@ -1593,6 +1593,9 @@ const ja = {
     },
     total: "合計",
     noDataSourceFor: "データソースが利用できません：",
+    drillTooMany: 'この値に関連するレコードが多すぎるため、ここには一覧表示できません。ダッシュボードのフィルターを絞り込んでから再度お試しください。',
+    drillUnavailable: 'この値に対応するレコードはここでは一覧表示できません。',
+    drillFailed: 'この値に対応するレコードを読み込めませんでした。しばらくしてから再度お試しください。',
     config: {
       breadcrumb: {
         dashboard: "ダッシュボード",

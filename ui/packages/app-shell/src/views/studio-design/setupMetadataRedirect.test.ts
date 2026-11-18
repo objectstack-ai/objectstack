@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   SETUP_KEPT_METADATA_TYPE,
+  packagedActionsStudioPath,
   packagedAutomationStudioPath,
   setupMetadataRest,
   setupMetadataStudioPath,
@@ -115,5 +116,17 @@ describe('packagedAutomationStudioPath (ADR-0146 D11)', () => {
   it('the cross-package landing is already on its leg: the area adds no second hop', () => {
     const target = new URL(packagedAutomationStudioPath('?package=all'), 'http://x');
     expect(areaLocationRedirect('~all', 'flow', target.search)).toBeNull();
+  });
+});
+
+describe('packagedActionsStudioPath (objectstack#34724)', () => {
+  it.each([
+    // [search, hash, expected]
+    ['?package=crm', '', '/studio/crm/data?package=crm'],
+    ['?package=com.acme.app&x=1', '#top', '/studio/com.acme.app/data?package=com.acme.app&x=1#top'],
+    ['', '', '/studio'],
+    ['?package=all', '', '/studio?package=all'],
+  ])('%s%s → %s', (search, hash, expected) => {
+    expect(packagedActionsStudioPath(search, hash)).toBe(expected);
   });
 });

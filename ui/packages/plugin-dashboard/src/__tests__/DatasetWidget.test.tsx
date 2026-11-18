@@ -1344,3 +1344,80 @@ describe('DatasetWidget — the dashboard\'s package as the reader\'s package on
     expect(src.queryDataset.mock.calls[0]).toHaveLength(2);
   });
 });
+
+// objectstack#34907 — a dimension whose `field` is a `relationship.field` path
+// drills through the related ids, and a drill that cannot list shows the
+// viewer a localized sentence in the drawer, never the server's diagnostic.
+describe('DatasetWidget — drilling a relationship-path dimension (objectstack#34907)', () => {
+  const SCHEMAS: Record<string, unknown> = {
+    crm_order: { fields: { crm_account: { type: 'lookup', reference: 'crm_account', label: 'Account' }, status: { type: 'select' } } },
+    crm_account: { fields: { owner_id: { type: 'user' } } },
+  };
+  const dottedSource = (opts: { accounts?: Array<{ id: string }>; orderRead?: () => Promise<unknown>; field?: string } = {}) => ({
+    queryDataset: vi.fn(async () => ({
+      rows: [{ owner: 'Zhang Wei', amount: 300 }],
+      fields: [{ name: 'owner', type: 'string', label: 'Owner' }, { name: 'amount', type: 'number', label: 'Amount' }],
+      object: 'crm_order',
+      dimensionFields: { owner: opts.field ?? 'crm_account.owner_id' },
+      drillScopes: { amount: {} },
+      drillRawRows: [{ owner: 'user_zhang' }],
+    })),
+    find: vi.fn(async (object: string, _params: unknown) => {
+      if (object === 'crm_account') return { data: opts.accounts ?? [{ id: 'acc1' }, { id: 'acc2' }] };
+      return opts.orderRead ? opts.orderRead() : { data: [] };
+    }),
+    getObjectSchema: vi.fn(async (object: string) => SCHEMAS[object]),
+  });
+  const widget = { type: 'pivot', dataset: 'sales', dimensions: ['owner'], values: ['amount'] };
+
+  it('reads the related ids, then lists the base object on the lookup field $in them', async () => {
+    const src = dottedSource();
+    render(<DatasetWidget widget={widget} dataSource={src} />);
+    fireEvent.click(await screen.findByTestId('dataset-drill-row'));
+    await waitFor(() => expect(src.find.mock.calls.some(([o]) => o === 'crm_order')).toBe(true));
+    expect(src.find.mock.calls[0]).toEqual(['crm_account', { $filter: { owner_id: 'user_zhang' }, $select: ['id'], $top: 201 }]);
+    const orderRead = src.find.mock.calls.find(([o]) => o === 'crm_order');
+    expect((orderRead?.[1] as { $filter: unknown }).$filter).toEqual({ crm_account: { $in: ['acc1', 'acc2'] } });
+    // No query ever names the dotted path.
+    expect(JSON.stringify(src.find.mock.calls)).not.toContain('crm_account.owner_id');
+  });
+
+  it('shows a localized notice, and lists nothing, when more related records match than the drill may list', async () => {
+    const src = dottedSource({ accounts: Array.from({ length: 201 }, (_, i) => ({ id: `a${i}` })) });
+    render(<DatasetWidget widget={widget} dataSource={src} />);
+    fireEvent.click(await screen.findByTestId('dataset-drill-row'));
+    const notice = await screen.findByTestId('drill-down-notice');
+    expect(notice).toHaveAttribute('data-notice', 'too-many');
+    expect(notice).toHaveTextContent('Too many records are related to this value to list them here.');
+    expect(src.find.mock.calls.some(([o]) => o === 'crm_order')).toBe(false);
+  });
+
+  it('offers no drill for a path past the hop limit', async () => {
+    const src = dottedSource({ field: 'a.b.c.d.owner_id' });
+    render(<DatasetWidget widget={widget} dataSource={src} />);
+    await screen.findByText('Zhang Wei');
+    expect(screen.queryByTestId('dataset-drill-row')).not.toBeInTheDocument();
+  });
+
+  it('shows the localized failure sentence, not the server diagnostic, when the list read is refused', async () => {
+    const diagnostic = "Query parameter 'filter' filters on 'crm_account.owner_id', which follows the relationship 'crm_account' into another object as a dotted path";
+    const src = dottedSource({ orderRead: async () => { throw new Error(diagnostic); } });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<DatasetWidget widget={widget} dataSource={src} />);
+    fireEvent.click(await screen.findByTestId('dataset-drill-row'));
+    const message = await screen.findByTestId('table-error-message');
+    expect(message).toHaveTextContent('The records behind this value couldn’t be loaded. Try again later.');
+    expect(message).not.toHaveTextContent('dotted path');
+    errors.mockRestore();
+  });
+
+  it('CONTROL: a single-object dimension drills with its own equality filter and reads no related object', async () => {
+    const src = dottedSource({ field: 'status' });
+    render(<DatasetWidget widget={widget} dataSource={src} />);
+    fireEvent.click(await screen.findByTestId('dataset-drill-row'));
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect(src.find.mock.calls.map(([o]) => o)).toEqual(['crm_order']);
+    expect((src.find.mock.calls[0][1] as { $filter: unknown }).$filter).toEqual({ status: 'user_zhang' });
+    expect(screen.queryByTestId('drill-down-notice')).not.toBeInTheDocument();
+  });
+});

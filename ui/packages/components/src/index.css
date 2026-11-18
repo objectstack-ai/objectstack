@@ -122,6 +122,11 @@
   --color-chart-3: hsl(var(--chart-3));
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
+  --color-chart-6: hsl(var(--chart-6));
+  --color-chart-7: hsl(var(--chart-7));
+  --color-chart-8: hsl(var(--chart-8));
+  --color-chart-9: hsl(var(--chart-9));
+  --color-chart-10: hsl(var(--chart-10));
 }
 
 /* CSS custom properties for theme */
@@ -167,6 +172,11 @@
   --chart-3: 197 37% 24%;
   --chart-4: 43 74% 66%;
   --chart-5: 27 87% 67%;
+  --chart-6: 130 55% 40%;   /* green   */
+  --chart-7: 315 65% 38%;   /* magenta */
+  --chart-8: 195 85% 48%;   /* cyan    */
+  --chart-9: 0 70% 38%;     /* red     */
+  --chart-10: 215 14% 55%;  /* slate   */
 
   /* Sidebar colors */
   --sidebar: 0 0% 98%;
@@ -246,6 +256,11 @@
   --chart-3: 30 80% 55%;
   --chart-4: 280 65% 60%;
   --chart-5: 340 75% 55%;
+  --chart-6: 115 55% 48%;
+  --chart-7: 300 55% 72%;
+  --chart-8: 187 65% 48%;
+  --chart-9: 0 70% 46%;
+  --chart-10: 210 12% 60%;
 
   /* Sidebar colors for dark mode */
   --sidebar: 240 5.9% 10%;

@@ -1593,6 +1593,9 @@ const de = {
     },
     total: "Gesamt",
     noDataSourceFor: "Keine Datenquelle verfügbar für",
+    drillTooMany: 'Mit diesem Wert sind zu viele Datensätze verknüpft, um sie hier aufzulisten. Schränken Sie die Dashboard-Filter ein und versuchen Sie es erneut.',
+    drillUnavailable: 'Die Datensätze hinter diesem Wert können hier nicht aufgelistet werden.',
+    drillFailed: 'Die Datensätze hinter diesem Wert konnten nicht geladen werden. Versuchen Sie es später erneut.',
     config: {
       breadcrumb: {
         dashboard: "Dashboard",
