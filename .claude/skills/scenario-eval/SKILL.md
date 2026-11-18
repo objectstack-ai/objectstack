@@ -103,10 +103,11 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
   --model haiku --effort medium --create-version VERSION \
   --out "$OUT" --record "$OUT/run.rec.json" > "$OUT/run.log" 2>&1 &
 
-# 问数日轮:一卡一条;卡名照 §1 从卡文件重读,--template 是该卡入库构建的绝对路径(先查 §1 的开跑条件)
-OUT=/abs/path/eval-runs/DATE-ask/haiku-medium/order_to_cash && mkdir -p "$OUT"
+# 问数日轮:一卡一条;卡名照 §1 从卡文件重读,--template 是该卡入库构建的绝对路径(先查 §1 的开跑条件;
+# order_to_cash 的构建等 #34986,入库前只有 travel_expense 可跑)
+OUT=/abs/path/eval-runs/DATE-ask/haiku-medium/travel_expense && mkdir -p "$OUT"
 nohup pnpm --filter @objectstack/scenarios run-scenarios \
-  --only order_to_cash --modes ask --template "$(git rev-parse --show-toplevel)/docs/qa/scenarios/builds/order_to_cash.json" \
+  --only travel_expense --modes ask --template "$(git rev-parse --show-toplevel)/docs/qa/scenarios/builds/travel_expense.json" \
   --ask-model haiku --ask-effort medium --ask-repeats 1 --create-version VERSION \
   --out "$OUT" --record "$OUT/run.rec.json" > "$OUT/run.log" 2>&1 &
 ```
