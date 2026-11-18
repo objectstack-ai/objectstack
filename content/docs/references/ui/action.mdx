@@ -1,10 +1,25 @@
 ---
 title: Action schema — UI Protocol property reference
 navTitle: Action
-description: "Action schemas of the ObjectStack UI Protocol: Action, ActionAi, ActionLocation and 5 more — each property with its type, default and a TypeScript example."
+description: "Action protocol schemas — ActionSchema, the action metadata type, and the parts it is built from."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Action protocol schemas — `ActionSchema`, the `action` metadata type, and the parts it is built from.
+
+An action is a command a user or an AI agent runs: a button on a record
+header, a list row or a list toolbar, or on a page. Its `type` names the
+dispatch route — a `script` body or handler, a `url`, a `flow`, an `api`
+endpoint, a `modal` or a `form` — and `locations` names the surfaces that
+draw it. Declare one with `defineAction`.
+
+Beside `ActionSchema`: `ActionParamSchema` (one input of the
+param dialog), `ActionLocationSchema` (the surfaces),
+`ActionAiSchema` (how an agent is offered the action),
+`ActionRefusalSchema` (one entry of the `refusals` catalogue a
+`script` body refuses through) and `InlineActionSchema` (an action
+declared inline on a page element instead of registered by name).
 
 <Callout type="info">
 **Source:** `packages/spec/src/ui/action.zod.ts`

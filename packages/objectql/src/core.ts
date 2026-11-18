@@ -68,6 +68,9 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 // Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
 export type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
+// The platform's own system api over a hook's api: the context elevated, with
+// no app-automation provenance. Read by plugin-audit's ledger writer.
+export { platformSystemApi } from './platform-system-api.js';
 
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Embedders that boot the engine themselves can catch

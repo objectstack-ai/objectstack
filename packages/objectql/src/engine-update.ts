@@ -158,9 +158,20 @@ export class UpdateFacet {
      object = this.resolveObjectName(object);
      // [#22782, #34412] An aborting `afterUpdate`, or a refusal after a `beforeUpdate` hook's
      // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
-     if (this.opensAfterAbortUnit('afterUpdate', object, options?.context)) {
-       return this.inAfterAbortUnit(() => this.update(object, data, options));
-     }
+     //
+     // [#35142] The unit opens around the ENGINE BODY (the executor below), not
+     // around the door: the middleware chain runs first, outside it, as it does
+     // for a write that opens no unit. Opened around the door, the unit enclosed
+     // the authorization gate's reads too, and on a single-connection store
+     // (SQLite) a second writer's whole write then waited for the first one's
+     // commit: the loser of a claim race (ADR-0142 D4) read the claimed row in
+     // its gate and was refused there as not found or forbidden, never reaching
+     // the conditional write whose 0-row answer is `ConcurrentUpdateError`.
+     // Everything the unit exists for — the `before*` hooks' `ctx.api` writes,
+     // the row, the `after*` chain — runs inside the executor.
+     const ownUnit = this.opensAfterAbortUnit('afterUpdate', object, options?.context);
+     const inOwnUnit = <T>(body: () => Promise<T>): (() => Promise<T>) =>
+       ownUnit ? () => this.inAfterAbortUnit(body) : body;
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
      // [#8844] See the insert face — an organization row that changes identity
@@ -461,7 +472,7 @@ export class UpdateFacet {
        throw new ReadonlyFieldRejectedError(object, fields, strictDrops);
      };
 
-     await this.executeWithMiddleware(opCtx, async () => {
+     await this.executeWithMiddleware(opCtx, inOwnUnit(async () => {
        // [ADR-0139 D1] A write's predicate never carries a `ReadableIds` leaf.
        // The door refused the caller's; this refuses one the middleware chain
        // wrote — here, at the executor's entry, because the prior-row reads
@@ -2374,7 +2385,7 @@ export class UpdateFacet {
           await this.releaseSecretHandles(object, writtenSecrets, opCtx.context, 'refused');
           throw e;
        }
-     });
+     }));
 
      return opCtx.result;
   }

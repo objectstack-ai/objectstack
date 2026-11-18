@@ -12,7 +12,7 @@
  * which the codemod refuses to move (`foreign-private`), so each writes it
  * through that instance's own host setter.
  * The body of `[DETACHED_HOOK_RUN]` (#33651) was written here, in the same
- * stub-and-facet shape.
+ * stub-and-facet shape, and so was the body of `[PLATFORM_SYSTEM_API]`.
  *
  * A MOVE, not a redesign. {@link ScopedContextFacet} is a stateless facet of
  * `ScopedContext`: each static method of it is the body of the `ScopedContext`
@@ -40,7 +40,7 @@
 import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { IScopedContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { appAutomationElevationOf, markAppAutomationElevation, resolveUserAuthzGrants } from '@objectstack/core';
+import { appAutomationElevationOf, markAppAutomationElevation, resolveUserAuthzGrants, withoutAppAutomationElevation } from '@objectstack/core';
 import type { EngineTransactionInfo, EngineTransactionOptions } from '@objectstack/core';
 import { rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
@@ -119,6 +119,18 @@ export class ScopedContextFacet {
         ? markAppAutomationElevation(elevated, 'hook')
         : elevated,
     );
+  }
+
+  /**
+   * The body of `ScopedContext#[PLATFORM_SYSTEM_API]`; its contract, and
+   * where its guard stops, is `platform-system-api.ts`'s module header.
+   * An app-authored hook's api is never the platform's: there it is that
+   * api's own {@link ScopedContextFacet.sudo}, provenance kept.
+   */
+  static platformSystemApi(this: Pick<ScopedContextHost, 'appAuthored' | 'derive' | 'executionContext'>): ScopedContext {
+    if (this.appAuthored) return ScopedContextFacet.sudo.call(this);
+    const { flowRunId: _run, ...context } = withoutAppAutomationElevation({ ...this.executionContext, isSystem: true });
+    return this.derive(context as ExecutionContext);
   }
 
   /** The body of `ScopedContext#withRunAs`; the method's docblock there is its contract. */

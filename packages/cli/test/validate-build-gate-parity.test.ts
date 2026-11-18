@@ -60,6 +60,9 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // or each `packages[]` body by name — so the row names the stack-level entry
   // both doors call, not the per-list classifier it runs.
   'preflightDeclaredCapabilities',
+  // An `enterprise` token whose package resolves but which no `plugins[]`
+  // entry provides: an advisory at both doors, never a refusal.
+  'preflightProviderWiring',
   // [#3786] The pre-parse undeclared-key diff, both halves.
   'lintUnknownStackKeys',
   'lintUnknownAuthoringKeys',

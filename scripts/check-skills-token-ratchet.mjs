@@ -1391,7 +1391,31 @@ export const CEILINGS = new Map([
   // 「A:先削重复,余额按实测提高」 (record 6513306068). The seven hand-authored
   // objectstack-ui files net -149 bytes across the move (100990 -> 100841).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(12123 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3031],
+  // 3031 -> 3180 (#34824): an action body refuses by code. One paragraph under the `ctx` section (which
+  // action may declare `refusals`; that the catalogue, the throws and the checks are a hook's,
+  // taught in objectstack-data and only pointed at here; the bundle key the sentence is translated
+  // at; that an authored `errorMessage` replaces the sentence in the console's toast), and the
+  // Add Line example declares one entry and throws its code where it threw a sentence. PAID DOWN
+  // FIRST by 124 bytes of true restatement in this file, five cuts: the label line
+  // "**Script-typed action**:" above the Add to Campaign example (26; the block's own
+  // `type: 'script'` says it, under the H2 "Examples"); the label "**Flow-typed action**" and the
+  // parentheses it held the `onSuccess` note in (19 net, the note now says "the flow run"; the
+  // block's own `type: 'flow'` says it); "`openIn: 'new-tab'` opens it in a new tab," (35 net,
+  // `'self'` now spelled `openIn: 'self'`; the H3 "`openIn: 'new-tab'`" under the H2 "Opening in
+  // a New Tab" and the example's `openIn: 'new-tab'` line say it); " on success / failure" on
+  // the `successMessage` / `errorMessage` bullet (21; the two key names, that bullet's
+  // "Action completed" half and the refusals paragraph's "failure toast … `errorMessage`" say
+  // it); "(`{ field: 'email' }`)" beside "field-backed params" (23; the `{ field: … }` params of
+  // the Reassign Lead, Add to Campaign and Add Line examples show the shape). The same ruling's
+  // second half carries the rest. Arithmetic: the text adds 721 bytes, the cuts remove 124, so
+  // the file is 12123 -> 12720 bytes -> 3180 tokens, zero headroom before, ceiling +149, the
+  // measured remainder only, pinned AT the measurement. RE-MEASURED on the merge with main after
+  // the #34770 row above landed first (this entry was written as 2808 -> 2957 over 11231 ->
+  // 11828 bytes; the delta is the same +597 bytes, +149 tokens, and none of the five cuts falls
+  // in the text that row moved in). Same ruling as the lines above (2026-10-27, tap A):
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(12720 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3180],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
