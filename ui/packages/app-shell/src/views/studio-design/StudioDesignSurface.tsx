@@ -1926,6 +1926,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onHeldEditChange={setHeldEdit}
+                onSurfaceLabelChange={setSurfaceLabel}
               />
             ) : tab === 'access' ? (
               // objectstack#28573 — keyed by package like its siblings: "New
@@ -1941,7 +1942,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 readOnly={readOnly}
                 customization={customization}
                 onDirtyChange={setPillarDirty}
-                packageLabel={pkgEntry?.id === packageId ? pkgEntry.name : undefined}
+                onSurfaceLabelChange={setSurfaceLabel}
               />
             ) : (
               // objectui#11203 / objectui#11232 — keyed by package. A package
@@ -7030,6 +7031,19 @@ export function DataPillar({
     baseOwnedFields !== null &&
     baseOwnedFields.has(String(fieldSel.id));
   const addFieldWalledId = React.useId();
+  // objectstack#35018 — the field rail draws ONE header: the aside's names the
+  // field (its label, one close) and the shared field inspector below draws
+  // none of its own (`InspectorShellHostProvider`, the flow inspector's
+  // objectui#12488 seam); its actions sit in this header's slot. The field's
+  // machine name is not in the header: it is the inspector's 开发者信息.
+  const [fieldHeaderSlot, setFieldHeaderSlot] = React.useState<HTMLElement | null>(null);
+  const fieldRailHosted = fieldSel?.kind === 'field' && Boolean(inspector);
+  const fieldRailTitle = React.useMemo(() => {
+    if (fieldSel?.kind !== 'field') return undefined;
+    const entry = readFields(shownDraft.fields).entries.find((e) => e.name === fieldSel.id);
+    const label = entry?.def.label;
+    return typeof label === 'string' && label ? label : String(fieldSel.id);
+  }, [fieldSel, shownDraft.fields]);
 
   // objectui#12725 — the field rail is up exactly when the render below draws
   // it; that is when the pillar holds the slot's properties half. A selection
@@ -7941,11 +7955,21 @@ export function DataPillar({
             className={inSlot ? 'w-full flex-1 border-l-0' : undefined}
             eyebrow={t(fieldSel.kind === 'group' ? 'engine.studio.data.groupProps' : 'engine.studio.data.fieldProps', locale)}
             eyebrowId={fieldRailTitleId}
-            id={fieldSel.id}
+            title={fieldRailHosted ? fieldRailTitle : undefined}
+            id={fieldRailHosted ? undefined : fieldSel.id}
             onClose={() => setFieldSel(null)}
             closeLabel={t('engine.studio.close', locale)}
             // objectui#12725 — the copilot's 草稿 chip on a field it changed.
-            actions={fieldAgentMark ? <DraftChip locale={locale} className="mr-1" /> : undefined}
+            actions={
+              fieldAgentMark || fieldRailHosted ? (
+                <>
+                  {fieldAgentMark && <DraftChip locale={locale} className="mr-1" />}
+                  {fieldRailHosted && (
+                    <span ref={setFieldHeaderSlot} data-testid="data-field-header-actions" className="flex shrink-0 items-center" />
+                  )}
+                </>
+              ) : undefined
+            }
             // objectui#12453 — a read-only package saves no draft: no footer.
             footer={fieldRailReadOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
             bodyClassName="flex min-h-0 flex-1 flex-col"
@@ -7967,6 +7991,7 @@ export function DataPillar({
                   // the pair's extension: its own fields whole, a base field
                   // within the display-property whitelist only.
                   <BaseFieldDisplayPatchContext.Provider value={selectedBaseField}>
+                    <InspectorShellHostProvider value={{ onSelectionChange: setFieldSel, headerActionsTarget: fieldHeaderSlot }}>
                     {React.createElement(inspector, {
                       type: 'object',
                       name: current.name,
@@ -7980,6 +8005,7 @@ export function DataPillar({
                       readOnly: fieldRailReadOnly,
                       locale,
                     })}
+                    </InspectorShellHostProvider>
                   </BaseFieldDisplayPatchContext.Provider>
                 ) : (
                   /* No field inspector registered. ⛔ Not "loading…": the read
@@ -8149,6 +8175,7 @@ export function AutomationsPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onHeldEditChange,
+  onSurfaceLabelChange,
 }: {
   /**
    * The package whose flows the rail lists, or `null` for the package-less
@@ -8171,6 +8198,11 @@ export function AutomationsPillar({
   customization?: StudioBaseCustomization | null;
   /** objectui#11786 — the clause of the edit the autosave holds unsent, for the surface's Publish. */
   onHeldEditChange?: (clause: string | null) => void;
+  /**
+   * objectstack#35018 — the open flow's label for the copilot's chip:
+   * 「正在看：流程 · 新会议提醒」, never the type word and machine name.
+   */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -8325,6 +8357,30 @@ export function AutomationsPillar({
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
   // The package's translations of the flow label and its approval-step labels (flow-label-translations.tsx).
   const flowLabels = useFlowLabelTranslations(current?.name ?? '');
+  // objectstack#35018 — lift the open flow's label to the copilot's chip, the
+  // pillar's word first: 「正在看：流程 · 新会议提醒」 — the label the canvas
+  // header reads. Keyed on primitives, the callback read through a ref.
+  const onSurfaceLabelChangeRef = React.useRef(onSurfaceLabelChange);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
+  });
+  const currentFlowType = current?.type;
+  const currentFlowName = current?.name;
+  const currentFlowLabel = current ? flowLabels?.flowLabel || current.label : undefined;
+  const flowSubject = t('engine.studio.copilot.subject.flow', locale);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current?.(
+      currentFlowType && currentFlowName && currentFlowLabel
+        ? { type: currentFlowType, name: currentFlowName, label: `${flowSubject} · ${currentFlowLabel}` }
+        : null,
+    );
+  }, [currentFlowType, currentFlowName, currentFlowLabel, flowSubject]);
+  React.useEffect(
+    () => () => {
+      onSurfaceLabelChangeRef.current?.(null);
+    },
+    [],
+  );
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState<false | 'draft' | 'publish'>(false);
   const [hasDraft, setHasDraft] = React.useState(false);
@@ -10130,7 +10186,7 @@ export function AccessPillar({
   readOnly: packageReadOnly = false,
   customization = null,
   onDirtyChange,
-  packageLabel,
+  onSurfaceLabelChange,
 }: {
   packageId: string;
   publishNonce?: number;
@@ -10145,8 +10201,13 @@ export function AccessPillar({
    * beforeunload). Reports `false` when the pillar unmounts, same contract as
    * PermissionMatrixEditPage's own onDirtyChange. */
   onDirtyChange?: (dirty: boolean) => void;
-  /** objectstack#34795 — the open app's name: the open set's title reads "app · set". */
-  packageLabel?: string;
+  /**
+   * objectstack#35018 — the open set's label (or the record-visibility
+   * overview's title) for the copilot's chip: 「正在看：权限 · 组织成员」,
+   * never the type word and machine name. Same seam as the Data and
+   * Interfaces pillars' reports.
+   */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -10197,6 +10258,35 @@ export function AccessPillar({
   const initialSurface = useSurfaceDeepLink(currentSurface);
   // objectstack#28572 — see `useDeepLinkFallback`.
   const deepLinkUpgrade = useDeepLinkFallback();
+  // objectstack#35018 — lift the open set's label to the copilot's chip, the
+  // pillar's word first: 「正在看：权限 · 组织成员」. Keyed on primitives, the
+  // callback read through a ref (the Data pillar's report).
+  const onSurfaceLabelChangeRef = React.useRef(onSurfaceLabelChange);
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current = onSurfaceLabelChange;
+  });
+  const accessSubject = t('engine.studio.copilot.subject.access', locale);
+  const currentSetLabel = current ? perms.find((p) => p.name === current)?.label : undefined;
+  const surfaceReportLabel = owdOpen
+    ? `${accessSubject} · ${t('engine.studio.owd.title', locale)}`
+    : current && currentSetLabel
+      ? `${accessSubject} · ${currentSetLabel}`
+      : undefined;
+  const surfaceReportType = currentSurface?.type;
+  const surfaceReportName = currentSurface?.name;
+  React.useEffect(() => {
+    onSurfaceLabelChangeRef.current?.(
+      surfaceReportType && surfaceReportName && surfaceReportLabel
+        ? { type: surfaceReportType, name: surfaceReportName, label: surfaceReportLabel }
+        : null,
+    );
+  }, [surfaceReportType, surfaceReportName, surfaceReportLabel]);
+  React.useEffect(
+    () => () => {
+      onSurfaceLabelChangeRef.current?.(null);
+    },
+    [],
+  );
   const currentRef = React.useRef(current);
   React.useLayoutEffect(() => {
     currentRef.current = current;
@@ -10951,7 +11041,6 @@ export function AccessPillar({
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,
-                appLabel: packageLabel || undefined,
                 onCloneSourceRead,
                 leading: accessRailToggleEl,
                 chips: currentAddedIn ? (

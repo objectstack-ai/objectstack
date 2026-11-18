@@ -82,7 +82,7 @@ import {
 import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
+import { agentSetOf, clockDates, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
@@ -1730,15 +1730,19 @@ export async function runHalf(
         const today = { ...(card.asOf !== undefined ? { asOf: card.asOf } : {}), runDates: clockDates(started, new Date()), agentSet: agentSetOf(op, turn) };
         const rowsByObject: Record<string, Row[]> = { [op.object]: after };
         if (op.outcome.kind === 'applied') {
-          for (const s of op.outcome.state) if (!rowsByObject[s.object]) rowsByObject[s.object] = (await app.listRows(s.object)).rows as Row[];
+          // A post-state's relation path (`claim.trip`) reads the rows of the objects it hops to.
+          for (const o of [...op.outcome.state.map((s) => s.object), ...relationObjects(op, card.expect.lookups)]) {
+            if (!rowsByObject[o]) rowsByObject[o] = (await app.listRows(o)).rows as Row[];
+          }
         }
+        const lookups = card.expect.lookups ?? [];
         let auditActor: string | null | undefined;
         if (op.outcome.kind === 'applied' && op.outcome.auditActor !== undefined) {
-          const id = touchedRowId(op, rowsByObject, today);
+          const id = touchedRowId(op, rowsByObject, today, lookups);
           auditActor = id === undefined ? null : personaOfUser(await app.auditActorUserId(op.object, id), accounts, app.adminUserId());
         }
         const actionGates = op.outcome.kind === 'pending_confirmation' ? actionGatesOf(built, op) : undefined;
-        const observed = { op, turn, before, after, rowsByObject, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(actionGates ? { actionGates } : {}) };
+        const observed = { op, turn, before, after, rowsByObject, lookups, today, ...(auditActor !== undefined ? { auditActor } : {}), ...(actionGates ? { actionGates } : {}) };
         // The runner's probe: it sends the declared write itself, as the same
         // persona through the same MCP door, after the turn. A probed operation
         // (the validation operation, or a permission overstep) is always

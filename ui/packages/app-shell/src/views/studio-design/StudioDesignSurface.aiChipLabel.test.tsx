@@ -130,6 +130,9 @@ window.matchMedia = ((query: string) => ({
     disconnect() {}
   };
 
+const SET = 'b2r4_member_access';
+const FLOW = 'b2r4_new_meeting_alert';
+
 const NAV = [
   { id: 'nav_dash', type: 'dashboard', label: '客户仪表盘', dashboardName: 'b2r4_customer_dashboard' },
   // A leaf the author never labelled.
@@ -157,6 +160,9 @@ beforeEach(() => {
       if (path.startsWith('/api/v1/ai/conversations/')) return json({ id: 'conv_8219', messages: [] });
       if (path === '/api/v1/meta/_drafts') return json([]);
       if (path === '/api/v1/meta/app') return json([{ name: 'acme_app', label: '客户管理' }]);
+      // objectstack#35018 — the Access and Automations rails' items.
+      if (path === '/api/v1/meta/permission') return json([{ name: SET, label: '组织成员', isDefault: true }]);
+      if (path === '/api/v1/meta/flow') return json([{ name: FLOW, label: '新会议提醒', type: 'autolaunched' }]);
       if (path === '/api/v1/meta/app/acme_app/layers') {
         return json({
           code: null,
@@ -177,10 +183,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderStudio() {
+function renderStudio(entry = `/studio/${PACKAGE_ID}/interfaces`) {
   return render(
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
-      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
+      <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
@@ -220,5 +226,31 @@ describe('Studio copilot chip reads the selected item label (objectui#8219 item 
     expect(JSON.stringify(agentSurface())).toBe(
       JSON.stringify({ pillar: 'interfaces', artifact: { type: 'object', name: 'b2r4_customer' } }),
     );
+  });
+});
+
+// objectstack#35018 — the Access and Automations rails report their open
+// item's label too: the chip reads the rail's word and the label, as the Data
+// rail's 「会议 · 记录」 does — never the type word (`permission` / `flow`) or
+// the machine name, which stay on the tooltip and in the agent's data.
+describe('objectstack#35018 — 正在看 on the Access and Automations rails reads a label', () => {
+  it('Access: 「正在看：权限 · 组织成员」, no type word, no machine name', async () => {
+    renderStudio(`/studio/${PACKAGE_ID}/access?surface=permission:${SET}`);
+    await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：权限 · 组织成员'), { timeout: 6000 });
+    expect(String(chip.surfaceContextLabel)).not.toContain('permission');
+    expect(String(chip.surfaceContextLabel)).not.toContain(SET);
+    // CONTROL: the identity stays reachable on the tooltip, and the agent's data is the URL's.
+    expect(chip.surfaceContextTitle).toBe(`permission · ${SET}`);
+    expect(JSON.stringify(agentSurface())).toBe(
+      JSON.stringify({ pillar: 'access', artifact: { type: 'permission', name: SET } }),
+    );
+  });
+
+  it('Automations: 「正在看：流程 · 新会议提醒」, no type word, no machine name', async () => {
+    renderStudio(`/studio/${PACKAGE_ID}/automations?surface=flow:${FLOW}`);
+    await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：流程 · 新会议提醒'), { timeout: 6000 });
+    expect(String(chip.surfaceContextLabel)).not.toContain('flow');
+    expect(String(chip.surfaceContextLabel)).not.toContain(FLOW);
+    expect(chip.surfaceContextTitle).toBe(`flow · ${FLOW}`);
   });
 });

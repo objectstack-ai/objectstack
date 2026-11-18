@@ -15,9 +15,12 @@
  *
  *   - One table per card and mode (`scratch`, `template`, `ask`). Its runs
  *     must share the prompt choice, the package source, the ask repeats, the
- *     driver and the ask client's skills ({@link TABLE_DIMENSIONS}); when they do not, the table is
+ *     driver, the ask client's skills and the card file they graded (its
+ *     sha256, `CardStamp`) ({@link TABLE_DIMENSIONS}); when they do not, the table is
  *     refused with a line naming each difference and the files on each side,
- *     never summed. The other tables still print.
+ *     never summed. The other tables still print. A record from before the
+ *     card stamp reads `card: not recorded`, so it is never summed with a
+ *     stamped one: nothing says it graded the same card.
  *   - Rows: the model the build's authoring turn was SERVED (the record's
  *     `Build · author`), with the model it asked for beside it when that is
  *     another name, and the effort it asked for. A template or ask mode
@@ -45,7 +48,7 @@ import { basename, join, resolve } from 'node:path';
 import { askSkillsText, type AskSkillsInfo } from './ask-skills.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { promptChoiceText, type PromptChoice } from './prompts.js';
-import { askCostText, askTimeText, MODEL_NOT_REPORTED, type AskSpend, type HalfScores, type ModelSpend, type QuestionRepeats, type Tally } from './scorecard.js';
+import { askCostText, askTimeText, cardStampText, MODEL_NOT_REPORTED, type AskSpend, type CardStamp, type HalfScores, type ModelSpend, type QuestionRepeats, type Tally } from './scorecard.js';
 
 // ── The supplied template, as `run` records it ──────────────────────────────
 
@@ -90,6 +93,8 @@ interface LooseRecord {
   app?: string;
   env?: { packages?: PackageSource; driver?: { driver?: string; replayOf?: { driver?: string }; askSkills?: AskSkillsInfo } };
   template?: SuppliedTemplate;
+  /** The card file the run graded (`runRecord`); absent on a record written before the runner stamped it. */
+  card?: CardStamp;
   scorecard: { card?: string; askRepeats?: number; promptChoice?: PromptChoice; modes: LooseModeScorecard[] };
   cardRun?: { modes?: Array<{ mode?: string; template?: { source?: string } }> };
 }
@@ -181,7 +186,7 @@ export function readSummaryRecords(paths: readonly string[]): ReadSummaryResult 
 // ── Grouping: tables, rows, columns ─────────────────────────────────────────
 
 /** The dimensions a table does not show, which every run of one table must share. */
-export const TABLE_DIMENSIONS = ['prompt choice', 'package source', 'ask repeats', 'driver', 'ask skills'] as const;
+export const TABLE_DIMENSIONS = ['prompt choice', 'package source', 'ask repeats', 'driver', 'ask skills', 'card'] as const;
 export type TableDimension = (typeof TABLE_DIMENSIONS)[number];
 
 /** One mode of one record: the unit a cell sums. */
@@ -214,8 +219,16 @@ function dimensionsOf(r: LooseRecord): Record<TableDimension, string> {
     'ask repeats': repeats > 1 ? `each question turn asked ${repeats} times` : 'each question turn asked once',
     driver: `driver: ${driverText(r)}`,
     'ask skills': r.env?.driver?.askSkills ? `ask skills: ${askSkillsText(r.env.driver.askSkills)}` : NO_ASK_SKILLS,
+    card: r.card ? cardStampText(r.card) : NO_CARD_STAMP,
   };
 }
+
+/**
+ * The `card` value of a record written before the runner stamped the card
+ * file's hash: such runs still sum with each other, and their table's
+ * dimensions line prints as before; a stamped run never sums with one.
+ */
+const NO_CARD_STAMP = 'card: not recorded';
 
 /**
  * The `ask skills` value of a record whose question and operation turns were
@@ -461,7 +474,7 @@ export function renderSummaryTable(t: SummaryTable): string {
     lines.push('No run of this mode ran: every one was skipped.');
   } else {
     const dims = t.dims!;
-    lines.push(`${TABLE_DIMENSIONS.filter((d) => !(d === 'ask skills' && dims[d] === NO_ASK_SKILLS)).map((d) => dims[d]).join(' · ')}`, '');
+    lines.push(`${TABLE_DIMENSIONS.filter((d) => !(d === 'ask skills' && dims[d] === NO_ASK_SKILLS) && !(d === 'card' && dims[d] === NO_CARD_STAMP)).map((d) => dims[d]).join(' · ')}`, '');
     lines.push(`| ${t.mode === 'scratch' ? 'Author model' : 'Supplied build'} | Half | ${t.cols.map((c) => esc(c.label)).join(' | ')} |`);
     lines.push(`|:---|:---|${t.cols.map(() => ':---').join('|')}|`);
     const halves = halfRows(t);

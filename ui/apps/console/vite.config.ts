@@ -661,6 +661,7 @@ const workspaceAliases: Record<string, string> = {
   '@object-ui/plugin-map': path.resolve(import.meta.dirname, '../../packages/plugin-map/src'),
   '@object-ui/plugin-markdown': path.resolve(import.meta.dirname, '../../packages/plugin-markdown/src'),
   '@object-ui/plugin-timeline': path.resolve(import.meta.dirname, '../../packages/plugin-timeline/src'),
+  '@object-ui/plugin-timesheet': path.resolve(import.meta.dirname, '../../packages/plugin-timesheet/src'),
   '@object-ui/plugin-tree': path.resolve(import.meta.dirname, '../../packages/plugin-tree/src'),
   '@object-ui/plugin-view/core': path.resolve(import.meta.dirname, '../../packages/plugin-view/src/core.ts'),
   '@object-ui/plugin-view': path.resolve(import.meta.dirname, '../../packages/plugin-view/src'),
@@ -1313,6 +1314,22 @@ export default defineConfig({
             { name: 'i18n-ns-developer-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]ja\.ts$/, priority: 84 },
             { name: 'i18n-ns-developer-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]ko\.ts$/, priority: 84 },
             //
+            // The `timesheet` namespace: `timesheet.*`, the timesheet list view's strings,
+            // never in the packs. Every catalogue is `import()`ed by
+            // `packages/i18n/src/namespaces/timesheet/index.ts` when a timesheet view
+            // mounts, one group per catalogue; the loader rides `plugin-timesheet`'s lazy chunk.
+            { name: 'i18n-ns-timesheet-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]en\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-zh-Hans', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]zh-Hans\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-zh-Hant', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]zh-Hant\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]es\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]ar\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]fr\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-pt-BR', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]pt-BR\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]ru\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]de\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]ja\.ts$/, priority: 84 },
+            { name: 'i18n-ns-timesheet-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]timesheet[\\/]ko\.ts$/, priority: 84 },
+            //
             // ⛔ `i18n-runtime` takes `includeDependenciesRecursively: false`
             // for the reason `data-adapter` below does (objectui#9345, read out
             // there in full): it outranks `framework` (83 over 80), and since
@@ -1522,6 +1539,7 @@ export default defineConfig({
             { name: 'plugin-markdown', test: /[\\/]packages[\\/]plugin-markdown[\\/]/, priority: 70 },
             { name: 'plugin-timeline', test: /[\\/]packages[\\/]plugin-timeline[\\/]/, priority: 70 },
             { name: 'plugin-tree', test: /[\\/]packages[\\/]plugin-tree[\\/]/, priority: 70 },
+            { name: 'plugin-timesheet', test: /[\\/]packages[\\/]plugin-timesheet[\\/]/, priority: 70 },
             { name: 'plugin-calendar', test: /[\\/]packages[\\/]plugin-calendar[\\/]/, priority: 70 },
             { name: 'plugin-kanban', test: /[\\/]packages[\\/]plugin-kanban[\\/]/, priority: 70 },
             //

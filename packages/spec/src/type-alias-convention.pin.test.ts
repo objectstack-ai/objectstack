@@ -304,7 +304,7 @@ import type * as M204 from './ai/dataset-tools.zod.js';
 import type * as M205 from './ai/object-query-source.zod.js';
 
 // ---------------------------------------------------------------------------
-// 861 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 862 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1758,6 +1758,7 @@ export type Iso_ui_view__ListMapConfigSchema = Assert<Eq< z.input< typeof M167.L
 export type Iso_ui_view__NavigationModeSchema = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
 export type Iso_ui_view__RowColorConfigSchema = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.infer< typeof M167.RowColorConfigSchema > >>;
 export type Iso_ui_view__RowHeightSchema = Assert<Eq< z.input< typeof M167.RowHeightSchema >, z.infer< typeof M167.RowHeightSchema > >>;
+export type Iso_ui_view__TimesheetConfigSchema = Assert<Eq< z.input< typeof M167.TimesheetConfigSchema >, z.infer< typeof M167.TimesheetConfigSchema > >>;
 export type Iso_ui_view__TreeConfigSchema = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
 export type Iso_ui_view__UserFilterFieldSchema = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
 export type Iso_ui_view__ViewItemNameSchema = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
@@ -1836,7 +1837,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 861 isomorphic pins', () => {
+  it('still declares all 862 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2932,7 +2933,11 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso_ai_datasetTools__DatasetNextStepSchema). +2 added. `nextStep` on
     // `ListDatasetsOutputSchema` and `sourceLine` on `QueryDatasetOutputSchema`
     // are optional members with no default, so those two pins still hold.
-    expect(pins).toHaveLength(861);
+    // 861 -> 862 is #34382: a timesheet list view's binding,
+    // `TimesheetConfigSchema` (`ui/view.zod.ts`), a closed object of a string
+    // array and two strings with no default or transform
+    // (Iso_ui_view__TimesheetConfigSchema). +1 added.
+    expect(pins).toHaveLength(862);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

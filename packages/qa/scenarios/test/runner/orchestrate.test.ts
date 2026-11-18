@@ -29,11 +29,11 @@ import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { seedDoorAnswer } from './seed-door.js';
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
-import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
+import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
-import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
+import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, CONFIRMATION_WORDS, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -2123,6 +2123,77 @@ describe('runHalf — a replay re-sends the turn\'s recorded writes before the r
     ]);
   });
 
+  // The action door answers what the action body returned under `result`; a filed claim names its row there.
+  const actionAnswer = (action: string, result: Record<string, unknown>) => JSON.stringify({ ok: true, action, objectName: 'claim', result });
+  const refusal = (code: string) => JSON.stringify({ error: { code, message: `${code} (stand-in)` } });
+  /** The build's own action pair, as the travel_expense recording shows it: filing creates a claim; submitting it is refused HOOK_ABORTED, and RECORD_NOT_FOUND for an id the app never gave. */
+  const claimDoor = () => {
+    const sent: Array<[string, Record<string, unknown>]> = [];
+    const live = new Set<string>();
+    let n = 0;
+    const callTool: AskTask['callTool'] = async (tool, args) => {
+      sent.push([tool, args]);
+      if (tool === 'run_action' && args.actionName === 'file_claim') {
+        const id = `cl-live-${n++}`;
+        live.add(id);
+        return { output: actionAnswer('file_claim', { id, name: 'EC-0001' }), isError: false };
+      }
+      if (tool === 'create_record') {
+        const id = `new-${n++}`;
+        live.add(id);
+        return { output: JSON.stringify({ id }), isError: false };
+      }
+      const known = live.has(String(args.recordId));
+      if (tool === 'run_action') return { output: refusal(known ? 'HOOK_ABORTED' : 'RECORD_NOT_FOUND'), isError: true };
+      return known ? { output: JSON.stringify({ id: args.recordId }), isError: false } : { output: refusal('RECORD_NOT_FOUND'), isError: true };
+    };
+    return { sent, callTool };
+  };
+
+  it('a row a recorded run_action created (its answer\'s result.id) is named by the id the replay\'s app gave it, in a later write of the same turn and of a later turn', async () => {
+    const replay = new RecordedDriver({
+      driver: { driver: 'claude-code-cli', apiBilled: false },
+      turns: {
+        'c/scratch/run/a/p': turnOf(
+          call('run_action', { actionName: 'file_claim', params: { trip: 't1' } }, actionAnswer('file_claim', { id: 'cl-rec', name: 'EC-0007' })),
+          call('run_action', { actionName: 'submit_claim', recordId: 'cl-rec' }, refusal('HOOK_ABORTED'), true),
+        ),
+        'c/scratch/run/b/p': turnOf(call('update_record', { objectName: 'claim', recordId: 'cl-rec', data: { note: 'cl-rec' } }, '{"id":"cl-rec"}')),
+      },
+      files: {},
+    });
+    const { sent, callTool } = claimDoor();
+    // Before the action's result.id was read, the submit went out naming `cl-rec` and the app answered RECORD_NOT_FOUND: not faithful.
+    await replay.ask(task('a', callTool));
+    await replay.ask(task('b', callTool));
+    expect(sent).toEqual([
+      ['run_action', { actionName: 'file_claim', params: { trip: 't1' } }],
+      ['run_action', { actionName: 'submit_claim', recordId: 'cl-live-0' }],
+      ['update_record', { objectName: 'claim', recordId: 'cl-live-0', data: { note: 'cl-live-0' } }],
+    ]);
+  });
+
+  it('control: a create_record row is still remapped from its top-level id, in a later update_record and a later run_action', async () => {
+    const replay = new RecordedDriver({
+      driver: { driver: 'claude-code-cli', apiBilled: false },
+      turns: {
+        'c/scratch/run/a/p': turnOf(
+          call('create_record', { objectName: 'claim', data: {} }, '{"id":"rec-1"}'),
+          call('update_record', { objectName: 'claim', recordId: 'rec-1', data: {} }, '{"id":"rec-1"}'),
+          call('run_action', { actionName: 'submit_claim', recordId: 'rec-1' }, refusal('HOOK_ABORTED'), true),
+        ),
+      },
+      files: {},
+    });
+    const { sent, callTool } = claimDoor();
+    await replay.ask(task('a', callTool));
+    expect(sent).toEqual([
+      ['create_record', { objectName: 'claim', data: {} }],
+      ['update_record', { objectName: 'claim', recordId: 'new-0', data: {} }],
+      ['run_action', { actionName: 'submit_claim', recordId: 'new-0' }],
+    ]);
+  });
+
   it('⛔ a recorded write with no recorded answer (a turn cut short): nothing of the turn is re-sent, and the turn is not faithful', async () => {
     const t = turnOf(call('create_record', { objectName: 'o', data: {} }, '{"id":"r1"}'), call('update_record', { objectName: 'o', recordId: 'r1', data: {} }));
     const replay = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/run/a/p': t }, files: {} });
@@ -3876,5 +3947,64 @@ describe('runHalf — a live turn that throws is recorded as a failed turn, and 
     const replayRun = await runCard(fresh.scenario, new RecordedDriver(JSON.parse(JSON.stringify(recorder.recording)) as Recording), fresh.ops, { modes: ['scratch'], admin: ADMIN });
     expect(liveRun.modes[0]!.build).toMatchObject({ error: 'author: spawn claude ENOENT', notMeasured: 'author turn failed: spawn claude ENOENT' });
     expect(replayRun.modes[0]!.build).toEqual(liveRun.modes[0]!.build);
+  });
+});
+
+describe('the card stamp: the record and the scorecard name the card file a run graded (its sha256)', () => {
+  const run = { card: 'travel_expense', counts: { questions: 10, questionTurns: 13, operations: 6, personas: 3 }, modes: [] } as unknown as CardRun;
+  const driverInfo: DriverInfo = { driver: 'recorded', apiBilled: false };
+  const bytes = readFileSync(TRAVEL_FILE);
+
+  it('stamps `card: {id, sha256}` at the record top level and on its scorecard, and the scorecard prints the line', () => {
+    const card = cardStampOf('travel_expense', bytes);
+    expect(card.sha256).toMatch(/^[0-9a-f]{64}$/);
+    const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driverInfo, runner: 'test', evidenceDir: '/tmp', card }, run);
+    expect(record.card).toEqual(card);
+    expect((record.scorecard as { cardStamp?: unknown }).cardStamp).toEqual(card);
+    expect(renderScorecard(cardScorecard(run, PUBLISHED, card)).split('\n')).toContain(`card: travel_expense (sha256 ${card.sha256.slice(0, 12)})`);
+  });
+
+  // The runner stamps from the bytes the loader parsed (`loadedCardStamp`, `LoadedScenario.fileSha256`), never a
+  // second read after the run: a card edited, or deleted, between load and record write keeps its load-time hash,
+  // and its record is still written.
+  const loadCopy = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-card-stamp-'));
+    const file = join(dir, 'travel_expense.json');
+    writeFileSync(file, bytes);
+    const { card: loaded, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    expect(refusals).toEqual([]);
+    return { dir, file, loaded: loaded! };
+  };
+  const writeRecord = (loaded: LoadedScenario, out: string) => {
+    const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driverInfo, runner: 'test', evidenceDir: '/tmp', card: loadedCardStamp(loaded) }, run);
+    writeFileSync(out, JSON.stringify(record));
+    return JSON.parse(readFileSync(out, 'utf8')) as { card: { id: string; sha256: string } };
+  };
+
+  it('a card file edited between load and record write is stamped with the hash of the card that was loaded', () => {
+    const { dir, file, loaded } = loadCopy();
+    const atLoad = cardStampOf('travel_expense', bytes).sha256;
+    expect(loaded.fileSha256).toBe(atLoad);
+    writeFileSync(file, bytes.toString('utf8').replace('"sum": {"amount": 860}', '"sum": {"amount": 861}'));
+    expect(cardStampOf('travel_expense', readFileSync(file)).sha256).not.toBe(atLoad);
+    expect(writeRecord(loaded, join(dir, 'record.json')).card).toEqual({ id: 'travel_expense', sha256: atLoad });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a card file deleted between load and record write still gets its record, stamped with the load-time hash', () => {
+    const { dir, file, loaded } = loadCopy();
+    rmSync(file);
+    expect(existsSync(file)).toBe(false);
+    expect(writeRecord(loaded, join(dir, 'record.json')).card).toEqual({ id: 'travel_expense', sha256: cardStampOf('travel_expense', bytes).sha256 });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a changed card moves the hash, so the scorecard line differs; a record without a stamp keeps its bytes and prints no line', () => {
+    const changed = Buffer.from(bytes.toString('utf8').replace('"sum": {"amount": 860}', '"sum": {"amount": 861}'));
+    expect(changed.equals(bytes)).toBe(false);
+    expect(cardStampOf('travel_expense', changed).sha256).not.toBe(cardStampOf('travel_expense', bytes).sha256);
+    const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driverInfo, runner: 'test', evidenceDir: '/tmp' }, run);
+    expect('card' in record).toBe(false);
+    expect(renderScorecard(cardScorecard(run, PUBLISHED))).not.toContain('card: ');
   });
 });

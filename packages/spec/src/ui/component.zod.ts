@@ -51,6 +51,7 @@ import {
   // `ListViewPageProps`.
   checkListViewCalendarVisualization,
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
   VIEW_METADATA_MEMBERS,
 } from './view.zod';
 // [#22444] The one prescription both tiers refuse a list view's retired
@@ -8552,8 +8553,9 @@ const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', 
  * ## Built from the list view, by reference
  *
  * Every member is {@link ListViewSchema}'s own schema object (its `shape`
- * spread), and both of its object-level checks are attached
- * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding}),
+ * spread), and each of its object-level checks is attached
+ * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding},
+ * {@link checkListViewTimesheetBinding}),
  * so a key or value the authoring door refuses on a list view is refused here
  * with the same issue. So `kanban.groupField` is an unknown key of the kanban
  * block, and the list kind is the bag's own `type` (the node's `type` is the
@@ -8605,7 +8607,7 @@ const ListViewPageProps = lazySchema(() => strictObject({
   ...ListViewSchema.shape,
   columns: ListViewSchema.shape.columns.optional(),
   options: VIEW_METADATA_MEMBERS.listOverlay.shape.options,
-}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding));
+}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding).superRefine(checkListViewTimesheetBinding));
 
 /**
  * ----------------------------------------------------------------------

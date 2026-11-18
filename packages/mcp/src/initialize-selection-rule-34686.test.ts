@@ -11,7 +11,8 @@
  *   bridge that defines no description for one of the pair get no rule — each
  *   pinned beside its `tools/list` control.
  * - The install line names `@objectstack/skills` at this package's own
- *   version (one `fixed` changeset group), for every grant.
+ *   version (one `fixed` changeset group), for every grant, and the CLI
+ *   command that installs it with or without a project (#34773).
  * - Host-injected text and the runtime's configured text are whole answers
  *   their author owns: nothing is appended to either.
  */
@@ -159,9 +160,18 @@ describe('[#34686] initialize instructions — the skills install line', () => {
     for (const o of [{}, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] }, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_WRITE] }] as Opts[]) {
       const text = await instructionsOf(runtime, makeBridge(), o);
       expect(text).toContain(`Published skills: @objectstack/skills ${OWN_VERSION}`);
-      expect(text).toContain(`@objectstack/skills@${OWN_VERSION}`);
       expect(text).not.toContain('0.0.1-operator');
     }
+  });
+
+  // [#34773] The install is the CLI's own command, at that version, which needs
+  // no project: a client that only connected over MCP can follow it in an empty
+  // directory. The npx form is for a machine without the CLI installed.
+  it('names `os skills install --version` at that version, and no project-only install', async () => {
+    const text = await instructionsOf(runtime, makeBridge());
+    expect(text).toContain(`os skills install --version ${OWN_VERSION}`);
+    expect(text).toContain(`npx -p @objectstack/cli@${OWN_VERSION} os skills install --version ${OWN_VERSION}`);
+    expect(text).not.toContain('pnpm add');
   });
 });
 
