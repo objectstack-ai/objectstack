@@ -5,6 +5,8 @@ import { AppPlugin } from './app-plugin';
 import { appDefaultSeedLocale, resolveSeedLocaleForLoad } from './seed-locale';
 import { SeedLoaderService } from './seed-loader';
 import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
+// The source reaches `@objectstack/metadata` lazily (app-plugin.ts); pay its first load during collection.
+import '@objectstack/metadata';
 import type { PluginContext } from '@objectstack/core';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
