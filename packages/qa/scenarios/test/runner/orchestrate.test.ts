@@ -4104,6 +4104,8 @@ class DoorApp extends FakeApp {
   refusesPublishOf: string | undefined;
   /** The draft door refuses every save (a replay against an app that answers otherwise). */
   refusesSaves = false;
+  /** The outcome a publish that refuses no draft answers (default `published`). */
+  publishOutcome = 'published';
   async createPackage(manifest: Record<string, unknown>): Promise<HttpAnswer> {
     this.packages.push(manifest);
     return { ok: true, status: 201, body: {} };
@@ -4137,7 +4139,7 @@ class DoorApp extends FakeApp {
     const src = (this.installed ??= {}) as Record<string, unknown[]>;
     for (const d of mine) (src[`${d.type}s`] ??= []).push(d.item);
     this.drafts = this.drafts.filter((d) => d.package !== packageId);
-    return { ok: true, status: 200, body: { success: true, data: { success: true, outcome: 'published', publishedCount: mine.length, failedCount: 0, published: mine.map(({ type, name }) => ({ type, name })), failed: [] } } };
+    return { ok: true, status: 200, body: { success: true, data: { success: true, outcome: this.publishOutcome, publishedCount: mine.length, failedCount: 0, published: mine.map(({ type, name }) => ({ type, name })), failed: [] } } };
   }
 }
 
@@ -4241,6 +4243,14 @@ describe('runCard — `--modes door` builds through the MCP draft door with no p
     const build = cardScorecard(run).modes[0]!.first.build!;
     expect(build.passed).toBeLessThan(build.total);
     expect(renderScorecard(cardScorecard(run))).toContain('publish: refused, 0 published; refused: object democrm_contact PUBLISH_REFUSED');
+  });
+
+  it('⛔ a publish that lands short of `published` with no draft refused is still a finding, naming the outcome', async () => {
+    const { scenario, ops, driver } = doorSetup({ app: () => Object.assign(new DoorApp(), { publishOutcome: 'published_unregistered' }) });
+    const run = await runCard(scenario, driver, ops, { modes: ['door'], admin: ADMIN });
+    expect(run.modes[0]!.door!.publish).toMatchObject({ ok: true, outcome: 'published_unregistered', publishedCount: 4 });
+    expect(run.modes[0]!.door!.publish!.failed).toBeUndefined();
+    expect(run.modes[0]!.findings).toEqual(['the publish of `com.scenario.democrm` answered published_unregistered']);
   });
 
   it('⛔ no token, no turn: a refused authorization is a finding with the door’s answer, and the client is never asked to author', async () => {
