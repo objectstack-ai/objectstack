@@ -936,6 +936,7 @@ const de = {
     groupingUnstoredNotice: "Diese Liste kann nicht nach {{fields}} gruppiert werden: Der Wert wird bei der Anzeige berechnet und nicht gespeichert. Die Liste wird ohne diese Gruppierung angezeigt.",
     groupingUnstoredRemove: "Aus Gruppierung entfernen",
     draftOnlyQueryDropped: "Nicht nach {{fields}} gefiltert oder sortiert: Das Feld existiert bis zur Veröffentlichung nur im Entwurf.",
+    withheldFieldsLeftOut: "Nicht angezeigt, gefiltert, sortiert oder gruppiert nach {{fields}}: Das Paket, das das Feld hinzufügt, ist deaktiviert. Es kehrt zurück, sobald das Paket aktiviert wird.",
     inlineEditShort: "Inline bearbeiten",
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
   },

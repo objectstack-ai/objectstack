@@ -132,8 +132,16 @@ const VALID: Record<string, unknown> = {
 const blankTyped = (v: string) => Object.fromEntries(TYPED.map((t) => [f(t), v]));
 const STR_BLANK = { c_text: '', c_lookup: '', c_select: '' };
 
+// [#34672] A `summary` column is read-only on create and on update for an
+// ordinary caller: a caller's value for it, a blank included, is dropped
+// before the driver, so no write here sends `f_summary` at all (this fixture's
+// roll-up declares no `summaryOperations`, so the create seed has nothing to
+// fill it with either). Every other typed column still lands null.
+const WRITABLE_TYPED = TYPED.filter((t) => t !== 'summary');
+
 function expectTypedNull(data: Record<string, unknown>) {
-  for (const t of TYPED) expect(data[f(t)], t).toBeNull();
+  for (const t of WRITABLE_TYPED) expect(data[f(t)], t).toBeNull();
+  expect(data).not.toHaveProperty(f('summary'));
 }
 
 describe('engine write doors: a blank on a non-string-typed column reaches the driver as null (#20308)', () => {
@@ -178,28 +186,24 @@ describe('engine write doors: a blank on a non-string-typed column reaches the d
   });
 
   it('update by id and update by predicate', async () => {
-    // [#34672] A `summary` column is read-only on update: a caller's value
-    // for it, a blank included, is dropped before the driver, so the update
-    // sends no `f_summary` at all. Every other typed column still lands null.
-    const updateTyped = TYPED.filter((t) => t !== 'summary');
-    const expectUpdateTypedNull = (data: Record<string, unknown>) => {
-      for (const t of updateTyped) expect(data[f(t)], t).toBeNull();
-      expect(data).not.toHaveProperty(f('summary'));
-    };
     await engine.insert('blank_door', { id: 'u1', ...VALID });
     await engine.update('blank_door', { id: 'u1', ...blankTyped(''), ...STR_BLANK });
     const byId = last('update');
-    expectUpdateTypedNull(byId);
+    expectTypedNull(byId);
     expect([byId.c_text, byId.c_lookup, byId.c_select]).toEqual(['', null, null]);
 
     await engine.update('blank_door', blankTyped(''), { where: { id: { $in: ['u1'] } }, multi: true } as any);
-    expectUpdateTypedNull(last('updateMany'));
+    expectTypedNull(last('updateMany'));
   });
 
-  it('a valid value on every typed column — falsy ones included — is unchanged', async () => {
+  it('a valid value on every typed column — falsy ones included — is unchanged (the roll-up\'s is dropped)', async () => {
     await engine.insert('blank_door', { id: 'v1', ...VALID });
     const sent = last('create');
-    for (const [k, v] of Object.entries(VALID)) expect(sent[k], k).toStrictEqual(v);
+    for (const [k, v] of Object.entries(VALID)) {
+      if (k === f('summary')) continue;
+      expect(sent[k], k).toStrictEqual(v);
+    }
+    expect(sent).not.toHaveProperty(f('summary'));
   });
 
   it('required refuses a blank exactly as it refuses null — insert and update', async () => {

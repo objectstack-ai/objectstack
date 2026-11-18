@@ -164,7 +164,10 @@ describe('REST write doors on SQLite: a cleared typed column stores null (#20308
   let ctx: Awaited<ReturnType<typeof boot>>;
   beforeEach(async () => { ctx = await boot(); });
 
-  const seed = (id: string) => ctx.engine.insert('blank_rest', { id, ...VALID });
+  // [#34672] A `summary` column is read-only on create for an ordinary caller,
+  // so the fixture rows are written as the system principal (a seed load):
+  // that is the writer that may still set the roll-up's `f_summary: 7`.
+  const seed = (id: string) => ctx.engine.insert('blank_rest', { id, ...VALID }, { context: { isSystem: true } } as any);
 
   it('POST create: the typed blanks store null; a text blank stores "", a lookup / select blank null (#29277)', async () => {
     const res = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rest' }, { id: 'c1', ...blankTyped(), ...STR_BLANK });
@@ -209,11 +212,18 @@ describe('REST write doors on SQLite: a cleared typed column stores null (#20308
     expectUpdatedTypedNull(await ctx.stored('blank_rest', 'm2'), 'updateMany');
   });
 
-  it('a valid value on every typed column is stored and read back unchanged', async () => {
+  it('a valid value on every typed column is stored and read back unchanged; the roll-up\'s is dropped (#34672)', async () => {
     const res = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rest' }, { id: 'v1', ...VALID });
     expect(res.status).toBe(201);
+    // [#34672] A person's create no longer sets a `summary` column: the value
+    // is dropped and reported, and this fixture's roll-up (no
+    // `summaryOperations`, so no seed) stays null.
+    expect(res.body.droppedFields).toEqual([{ object: 'blank_rest', fields: ['f_summary'], reason: 'readonly' }]);
     const read = await ctx.engine.findOne('blank_rest', { where: { id: 'v1' } }) as Record<string, unknown>;
-    for (const [k, v] of Object.entries(VALID)) expect(read[k], k).toStrictEqual(v);
+    for (const [k, v] of Object.entries(VALID)) {
+      if (k === 'f_summary') expect(read[k] ?? null, k).toBeNull();
+      else expect(read[k], k).toStrictEqual(v);
+    }
   });
 
   it('a required field refuses a blank: 400 VALIDATION_FAILED / required, nothing stored', async () => {

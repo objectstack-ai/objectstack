@@ -961,6 +961,7 @@ const pt = {
     groupingUnstoredNotice: "Esta lista não pode ser agrupada por {{fields}}: o valor é calculado ao ser exibido e não é armazenado. A lista é exibida sem esse agrupamento.",
     groupingUnstoredRemove: "Remover do agrupamento",
     draftOnlyQueryDropped: "Sem filtrar nem ordenar por {{fields}}: existe apenas no rascunho até você publicar.",
+    withheldFieldsLeftOut: "Sem exibir, filtrar, ordenar nem agrupar por {{fields}}: o pacote que o adiciona está desativado. Ele volta quando o pacote for ativado.",
     inlineEditShort: "Edição em linha",
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
   },
