@@ -1,12 +1,13 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/service-analytics': patch
 ---
 
 feat(service-analytics): `query_dataset` says how many groups existed before the `limit` cut (`totalGroups`), as `aggregate_records` does
 
 Clause-②: yes (widening: QueryDatasetOutputSchema gains totalGroups)
-Metadata-protocol: none
+Metadata-protocol: added
+Skills-docs: follow-up #35203
 
 `QueryDatasetOutputSchema` gains an optional `totalGroups`: how many groups the selection formed before `offset` and `limit` cut them, the same name and meaning as `aggregate_records`' `totalGroups`. A client asked "how many are there" after a top-N cut can now answer it: a grouped `query_dataset` whose `limit` is below the group count answers `truncated: true` and the full count, and an answer that was not cut answers `totalGroups` equal to `rowCount`.
 
