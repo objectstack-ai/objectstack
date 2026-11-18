@@ -1770,7 +1770,21 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6999 / 4)
   // = 1750 (+10), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1750],
+  // 1750 -> 1779, re-measured on the same PR before it landed, after its
+  // contract review (record 6969596617, S1) found the `nextStep` line and the
+  // question-alone paragraph under it giving opposite orders for a note that
+  // answers one measure and leaves a word with candidates out. The note wins:
+  // one sentence says to do both and to use none of that word's candidates
+  // until the user answers, and the paragraph now opens "When you only ask".
+  // Same raise path (ruling record 6513306068, letter B). PAID DOWN FIRST — one
+  // restatement cut from the left cell of step 2's `candidates` row, keeping
+  // its other home: ", one or several" (the same row's right cell: "with one
+  // candidate, ask whether it is the one meant"). Text +133 bytes, cut -17:
+  // 7019 -> 7135 bytes, less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7115 / 4)
+  // = 1779 (+29), the measured remainder only. Pinned AT the measurement, zero
+  // headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1779],
 ]);
 
 /**
