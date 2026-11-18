@@ -1090,7 +1090,22 @@ export const CEILINGS = new Map([
   // now carries it), the related-list example's "write side" comment (the paragraph above
   // says it) and "(no UI config)" (the sentence says "purely from how you model"). 16925 ->
   // 16916 bytes -> ceil(16916 / 4) = 4229; the row follows the measurement down.
-  ['skills/objectstack-data/rules/relationships.md', 4229],
+  // 4229 -> 4221: the roll-up section names the third way out of
+  // `security-rollup-source-unreadable` (the set is meant to see the total but not the
+  // children: keep the column readable and add `rollupSourceUnreadableReason` to the set's
+  // entry; refused blank or beside `readable: false`), with the acknowledged entry in the
+  // `client_viewer` example, and its mask sentence names Modify All alone (a set's own mask
+  // binds beside its own View All). +419 bytes, PAID IN FULL by restatement cut from the
+  // same file (-451), each keeping a home: the `'grid'` / `'form'` bullets (the code
+  // comments beside the three `inlineEdit` values and the smart-default sentence), the
+  // "`inlineEdit` is the write side, the related list is the read side" lead-in (the
+  // heading's "read-side mirror" and the `relatedList` comment), "part of the record's main
+  // content" (the same bullet's "full-width table in the record's detail body") and four
+  // code comments the code or the prose above them states (the junction index's "one
+  // assignment per pair", "On the PARENT object", the second "On the CHILD object's FK
+  // field", the contact example's "independent lifecycle"). 16916 -> 16884 bytes ->
+  // ceil(16884 / 4) = 4221; the row follows the measurement down.
+  ['skills/objectstack-data/rules/relationships.md', 4221],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -1722,7 +1737,25 @@ export const CEILINGS = new Map([
   // read it. 6105 -> 5981 bytes (-124), less the 20-byte stamp line:
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(5961 / 4)
   // = 1491 (-31). Pinned AT the measurement, zero headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1491],
+  // 1491 -> 1740, the ask-skill iteration loop's first kept change set
+  // (Part of #34996), measured on the travel_expense ask round before it was
+  // kept: the description triggers on every question answered from the app's
+  // records ("so far", 「一共」); a term is the user's noun phrase kept whole; an
+  // asked-back reply states no figure of its own, quotes each description as
+  // written and asks only about the user's own words; step 4 declines a record kind no listed object shows instead of
+  // answering from a linked one. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST — two restatements cut from step 2's `candidates` row, each keeping
+  // its other home: ", and never treat a candidate as a match" (step 1's "A
+  // candidate is not a match.") and "Compute nothing yet." (the paragraph under
+  // the table: "no figure, and no tool call until the user answers"). Text
+  // +1057 bytes, cuts -61, the reviewed narrowing of the ask-back sentence +2
+  // (re-measured before it was kept): 5981 -> 6979 bytes, less the 20-byte
+  // stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6959 / 4)
+  // = 1740 (+249), the measured remainder only. Pinned AT the measurement, zero
+  // headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1740],
 ]);
 
 /**

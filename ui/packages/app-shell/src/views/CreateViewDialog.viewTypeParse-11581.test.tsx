@@ -45,6 +45,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, waitFor, screen, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { ListViewSchema, ViewItemSchema } from '@objectstack/spec/ui';
+// Paid during collection: the source under test reaches a dynamic
+// `import('@objectstack/lint')` (celAuthoring.ts), see check:test-source-alias.
+import '@objectstack/lint';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -201,6 +204,11 @@ const PARSE_ROWS: Record<string, ParseRow> = {
     block: { chartType: 'bar', dataset: 'deal_metrics', values: ['total_amount'], dimensions: ['stage'] },
   },
   tree: { picks: [['parentField', 'Parent deal']], block: { parentField: 'parent' } },
+  // objectstack#34382 — one row field, written as the spec's list.
+  timesheet: {
+    picks: [['rowFields', 'Stage'], ['dateField', 'Start'], ['valueField', 'Amount']],
+    block: { rowFields: ['stage'], dateField: 'start_date', valueField: 'amount' },
+  },
 };
 
 /**

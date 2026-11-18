@@ -4,7 +4,9 @@
  * `pnpm --filter @objectstack/scenarios skill-evals` — run the published
  * skills' existing eval cases (`skills/BUNDLE/evals/*.json`) through the local
  * Claude Code login, each case on a with-skill and a no-skill arm, graded by
- * the case's own `must_contain` / `must_not_contain`. A devx instrument run
+ * the case's own `must_contain` / `must_not_contain`; a trigger case
+ * (`should_trigger`) runs on the with-skill arm only, graded on whether the
+ * turn loaded the bundle, and is reported beside them. A devx instrument run
  * from this checkout: not a CI job, not a merge gate, not in the package's
  * published `bin` or `exports`. README section "Running the published skills'
  * eval cases" is the operator's page.
@@ -198,7 +200,11 @@ export function regradedLines(g: NonNullable<RoundRecord['regraded']>): string[]
   ];
 }
 
-/** `round.json`, `summary.md` and `summary.github.md` into `outDir`, and the per-bundle table on stdout. */
+/** `N behaviour case(s) × 2 arms [+ M trigger case(s) × the with-skill arm], × R`. Pure. */
+export const turnsLine = (behaviour: number, trigger: number, repeats: number): string =>
+  `${behaviour} behaviour case(s) × ${ARMS.length} arms${trigger ? ` + ${trigger} trigger case(s) × the with-skill arm` : ''}, × ${repeats}`;
+
+/** `round.json`, `summary.md` and `summary.github.md` into `outDir`, and the per-bundle tables on stdout. */
 export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
   writeFileSync(join(outDir, 'round.json'), JSON.stringify(round, null, 2) + '\n');
   const { driver: d, scope } = round;
@@ -209,7 +215,7 @@ export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
       `runner: ${round.runner.repo} ${round.runner.sha}`,
       `skills: ${round.skills.source}`,
       `driver: ${d.driver} ${d.version}, login \`${d.authMethod}\`, no API key; served ${d.servedModels.join(', ') || 'none'}; effort ${d.requestedEffort ?? 'CLI default'}`,
-      `turns: ${scope.ranTurns} of ${scope.plannedTurns} ran (${scope.cases} cases × 2 arms × ${scope.repeats}), ${d.concurrency} at once, --max-turns ${d.maxTurns}`,
+      `turns: ${scope.ranTurns} of ${scope.plannedTurns} ran (${turnsLine(round.summary.cases.length, round.summary.triggers?.cases.length ?? 0, scope.repeats)}), ${d.concurrency} at once, --max-turns ${d.maxTurns}`,
       `wall time: ${wallMin} min; notional cost the CLI reported: $${round.summary.reportedCostUsd} (subscription login, nothing billed)`,
       ...(round.regraded ? regradedLines(round.regraded) : []),
     ],
@@ -217,7 +223,9 @@ export function writeRoundOutputs(outDir: string, round: RoundRecord): void {
   };
   writeFileSync(join(outDir, 'summary.md'), renderSummaryMarkdown(round.summary, head));
   writeFileSync(join(outDir, 'summary.github.md'), renderSummaryMarkdown(round.summary, head, { forGitHub: true }));
-  console.log(`\n${renderSummaryMarkdown(round.summary, head).split('## Per case')[0]}`);
+  const md = renderSummaryMarkdown(round.summary, head);
+  const triggerTable = md.includes('\n## Trigger cases') ? md.slice(md.indexOf('\n## Trigger cases')).split('\n| trigger case |')[0] : '';
+  console.log(`\n${md.split('## Per case')[0]}${triggerTable}`);
   console.log(`round: ${join(outDir, 'round.json')} · summary: ${join(outDir, 'summary.md')}`);
 }
 
@@ -248,7 +256,8 @@ export function regradeRound(dir: string, catalog: SkillEvalCatalog, sourceLabel
   const recorded = files.map((f) => ({ f, rec: JSON.parse(readFileSync(join(runsDir, f), 'utf8')) as SkillEvalRunRecord }));
   // The cases the round planned: its summary's, plus any an earlier regrade set apart (and so left out of it).
   const before = round.regraded?.setApart;
-  const plannedKeys = [...new Set([...round.summary.cases.map((c) => c.key), ...(before?.changed ?? []), ...(before?.removed ?? [])])];
+  // A round recorded before trigger cases existed has no `triggers`.
+  const plannedKeys = [...new Set([...round.summary.cases.map((c) => c.key), ...(round.summary.triggers?.cases ?? []).map((c) => c.key), ...(before?.changed ?? []), ...(before?.removed ?? [])])];
   const out = regradeRecords(recorded.map((r) => r.rec), plannedKeys, catalogCases, view);
   const byKey = new Map(out.cases.map((c) => [c.key, c]));
   const regraded = new Map(out.records.map((r) => [`${r.key}|${r.arm}|${r.repeat}`, r]));
@@ -307,8 +316,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (args.dryRun) {
       console.log(`skills: ${source.label} (${source.root})`);
       for (const b of bundles) console.log(`  ${b}: ${cases.filter((c) => c.bundle === b).length} case(s)`);
-      console.log(`${cases.length} case(s) × ${ARMS.length} arms × ${args.repeats} repeat(s) = ${jobs.length} turn(s), ${args.concurrency} at once`);
-      console.log(`each turn: a fresh directory; with-skill holds .claude/skills/BUNDLE/ (no evals/), no-skill holds nothing`);
+      const triggers = cases.filter((c) => c.shouldTrigger !== undefined);
+      console.log(`${turnsLine(cases.length - triggers.length, triggers.length, args.repeats)} = ${jobs.length} turn(s), ${args.concurrency} at once`);
+      if (triggers.length) console.log(`trigger cases: ${triggers.filter((c) => c.shouldTrigger).length} should load the bundle, ${triggers.filter((c) => !c.shouldTrigger).length} should not`);
+      console.log(`each turn: a fresh directory holding the case's files; with-skill also holds .claude/skills/BUNDLE/ (no evals/), no-skill no skill`);
       console.log(`argv (prompt on stdin): ${args.bin} ${armArgs('TURN_DIR/mcp.json', turnOpts).join(' ')}`);
       console.log('dry run: no login read, no model called, nothing written');
       return 0;
@@ -322,7 +333,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     const outDir = resolve(args.out ?? join(repo, 'docs', 'qa', 'platform-checklist', 'runs', 'skill-evals', roundId));
     mkdirSync(outDir, { recursive: true });
     if (existsSync(join(outDir, 'round.json'))) throw new Error(`${outDir} already holds a round.json: pass a fresh --out`);
-    console.log(`skill-evals: ${jobs.length} turn(s) (${cases.length} case(s) × ${ARMS.length} arms × ${args.repeats}), ${args.concurrency} at once, ${pf.version}, login ${pf.authMethod}`);
+    const triggerCount = cases.filter((c) => c.shouldTrigger !== undefined).length;
+    console.log(`skill-evals: ${jobs.length} turn(s) (${turnsLine(cases.length - triggerCount, triggerCount, args.repeats)}), ${args.concurrency} at once, ${pf.version}, login ${pf.authMethod}`);
     console.log(`records: ${outDir}`);
 
     const exec = await executeRound(jobs, {

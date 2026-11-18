@@ -182,13 +182,55 @@ export const zhCN: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: '用户' } } },
-    sys_organization_metrics: { measures: { org_count: { label: '组织' } } },
-    sys_session_metrics: { measures: { session_count: { label: '会话' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: '安装' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: '用户',
+          description: '系统中记录的用户账号数，无论是否处于启用状态。',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: '组织',
+          description: '系统中记录的组织数；每个组织拥有各自的成员、数据和设置。',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: '会话',
+          description: '系统中记录的登录会话数，每次从浏览器或设备登录产生一个会话。',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: '安装',
+          description: '系统中记录的包安装数，每安装一个包记一次。',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: '操作' }, user_id: { label: '用户' } },
-      measures: { event_count: { label: '事件' } },
+      dimensions: {
+        action: {
+          label: '操作',
+          description: '审计日志条目所记录的操作类型，例如创建、更新、删除、登录或配置变更。',
+        },
+        user_id: {
+          label: '用户',
+          description: '执行该审计操作的用户；平台自身写入的条目归入“系统”。',
+        },
+      },
+      measures: {
+        event_count: {
+          label: '事件',
+          description: '审计日志条目数；每个条目记录系统中的一次操作，由用户或平台自身执行。',
+        },
+      },
     },
   },
 

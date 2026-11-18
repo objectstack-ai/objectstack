@@ -47,6 +47,11 @@
       "types": "./dist/namespaces/developer/index.d.ts",
       "import": "./dist/namespaces/developer/index.js",
       "default": "./dist/namespaces/developer/index.js"
+    },
+    "./namespaces/timesheet": {
+      "types": "./dist/namespaces/timesheet/index.d.ts",
+      "import": "./dist/namespaces/timesheet/index.js",
+      "default": "./dist/namespaces/timesheet/index.js"
     }
   },
   "scripts": {

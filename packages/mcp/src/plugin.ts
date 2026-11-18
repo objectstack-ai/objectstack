@@ -44,6 +44,7 @@ import {
   GATED_ACTIONS,
   serveStoredMetadataHashes,
   serveStoredMetadataRow,
+  servedLocaleObjectView,
   stdioObjectView,
   type StdioObjectReads,
   type StdioDatasetToolsService,
@@ -901,12 +902,19 @@ export class MCPServerPlugin implements Plugin {
       // object-schema mask (`callerObjectView`), the view the tools read, so
       // a resource never names a field the tools withhold. With no principal
       // (this process starts no stdio transport) the view is the bare one.
+      // [#34995] …in the locale the object tools speak: the served view,
+      // localized through the wrapper the stdio bridge's `list_objects` /
+      // `describe_object` read (`servedLocaleObjectView`), with the same i18n
+      // service, so a resource and a tool answer one object with one label.
       const objectView = stdioObjectView({ metadataService, protocol: protocolReads });
       setRuntimeObjectView(
         this.runtime,
-        schemaPrincipal
-          ? callerObjectView(objectView, { resolvePrincipal: schemaPrincipal, security: securityReads, schemaReadDelegates })
-          : objectView,
+        servedLocaleObjectView(
+          schemaPrincipal
+            ? callerObjectView(objectView, { resolvePrincipal: schemaPrincipal, security: securityReads, schemaReadDelegates })
+            : objectView,
+          { i18n: () => optionalService('i18n'), protocol: protocolReads },
+        ),
       );
       this.runtime.bridgeResources(metadataService, getRecord);
       // Awaited: the prompt bridge reads `skill` metadata to project each

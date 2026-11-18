@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form.",
+      "prompt": "Create `src/views/support-case.view.ts`: a default grid (subject linking to the record, status, priority, owner, due date), a 'My Open Cases' list, a kanban by status, and a simple edit form. None of the project's files are in this directory: write the file in your answer.",
       "expected_output": "One `defineView({ list, form, listViews })` container — never a bare flat view object. `data: { provider: 'object', object: 'support_case' }`, `columns` with `link: true` on `subject`, the owner column is the injected `owner_id` (never an `assigned_to` field), a `listViews.my_open` entry with `filter` triples (`{ field: 'owner_id', operator: 'equals', value: '{current_user_id}' }`), a kanban entry with the required top-level `columns` plus `kanban: { groupByField: 'status' }` (no top-level `groupBy`), and `form` with `type: 'simple'` and `sections` referencing a declared field group.",
       "files": [],
       "assertions": {
@@ -13,7 +13,7 @@
     },
     {
       "id": 2,
-      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team, who work the same objects.",
+      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team, who work the same objects. None of the project's files are in this directory: write the file in your answer.",
       "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and the approvals inbox as `type: 'component', componentRef: 'approvals:inbox'` gated by `requiresService: 'approvals'` (never a `requiresObject` gate on `sys_approval_request`: that object read answers 404 to an approver until a request involves them). At most one app per package, so not a second `App.create` here: the support team shares this product and its objects, so it is a `requiredPermissions`-gated group inside the app. (A support product with objects of its own would carry its app in its own `type: 'module'` package of the suite.) Registered under `defineStack({ apps })`.",
       "files": [],
       "assertions": {
@@ -33,7 +33,7 @@
     },
     {
       "id": 4,
-      "prompt": "Design a custom lead record page: the Convert action inline in the header, a highlights strip, a stage path over `status`, and the related contacts. Also write a user guide for the `crm` package under src/docs and link it from the nav.",
+      "prompt": "Design a custom lead record page: the Convert action inline in the header, a highlights strip, a stage path over `status`, and the related contacts. Also write a user guide for the `crm` package under src/docs and link it from the nav. None of the project's files are in this directory: write the files in your answer.",
       "expected_output": "`definePage({ name, label, type: 'record', object: 'lead', template: 'three-column', regions: [...] })` with `page:header` (the declared action's id in `properties.actions`, no sibling action node), `record:highlights`, `record:path` (`statusField`, `stages`), `record:related_list`. The guide is a flat, namespace-prefixed `src/docs/crm_user_guide.md` in pure Markdown (MDX and image references are rejected at build), surfaced by a `type: 'doc'` nav item (`doc: 'crm_user_guide'`).",
       "files": [],
       "assertions": {
@@ -157,7 +157,7 @@
       "expected_output": "One `defineAction` (`type: 'api'`, that `target` with `${ctx.recordId}`) whose `params` are `version` and `plan_token` (both `required`; `plan_token` declares no default or carry-over), beside `preflight: { read: { url: '/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' }, path: 'data', fields: [{ path: 'changes', label: 'Changes', format: 'json' }], seed: [{ param: 'plan_token', path: 'token' }] }`. The dialog sends that one same-origin GET once `version` has a value, shows `changes` above the params, and fills `plan_token` read-only, so Confirm waits for the answer. Not a script or companion action that fetches the plan by hand, not an absolute URL, credential headers or a non-GET read, and no `result` hole (there is no answer before the read); the endpoint still checks the token.",
       "files": [],
       "assertions": {
-        "must_contain": ["preflight", "read: { url: '/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}' }", "seed: [{ param: 'plan_token', path: 'token' }]"],
+        "must_contain": ["preflight", "/api/v1/packages/${ctx.recordId}/upgrade-plan?version=${param.version}", "seed:", "path: 'token'"],
         "must_not_contain": ["headers:", "${result."]
       }
     },

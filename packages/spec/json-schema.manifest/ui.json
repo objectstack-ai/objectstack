@@ -160,6 +160,7 @@
     "ui/SharingConfig",
     "ui/StyleMap",
     "ui/TimelineConfig",
+    "ui/TimesheetConfig",
     "ui/TreeConfig",
     "ui/UrlNavItem",
     "ui/UserActionsConfig",
