@@ -333,6 +333,15 @@ never opened — one an outside caller obtained elsewhere and passed in as
 `execCtx.transaction`. No `IDataDriver` change is needed for the trio, and the
 driver-contract change above is still the only way to close the rest.
 
+Two bounds on "exactly the 2026-08-06 answers". A handle the current run was
+detached from is no open trio handle for that run: an `async: true` hook's run
+starts outside every unit open at its dispatch while its `ctx.api` still
+carries the handle (`packages/objectql/src/unit-detach.ts`), so the gate reads
+that handle as `buildDriverOptions` does (`isClosedUnitHandle`) and judges the
+run's writes as writes outside any transaction, which land. And the record is
+keyed by the handle object, so a driver whose `beginTransaction` returned a
+primitive handle would leave it unattributed; no in-tree driver does.
+
 ### Consumer impact
 
 Single-datasource deployments — the overwhelming majority — see no change of any
