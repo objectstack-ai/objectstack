@@ -46,6 +46,7 @@ export {
 } from './mcp-http-tools.js';
 export type {
   McpDataBridge,
+  McpFieldVisibility,
   McpObjectSummary,
   RegisterObjectToolsOptions,
   McpActionBridge,

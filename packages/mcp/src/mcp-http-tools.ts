@@ -139,6 +139,23 @@ export interface McpObjectSummary {
 }
 
 /**
+ * [#35137] What {@link McpDataBridge.fieldVisibilityOf} answers for one
+ * object, both halves asked AS the caller:
+ *
+ * - `served` — the field names the caller's own served schema shows: the
+ *   object as `describe_object` serves it to this caller (ADR-0106 D1/D5, the
+ *   `/meta` object door's projection), so a field removed from their schema
+ *   is not in it;
+ * - `readable` — the fields the security service answers this caller may
+ *   READ on the object (`ISecurityService.getReadableFields`), the exact
+ *   complement of what the read path's field mask deletes from a row.
+ */
+export interface McpFieldVisibility {
+  served: readonly string[];
+  readable: readonly string[];
+}
+
+/**
  * Data access seam for the HTTP MCP tools. Implemented by the runtime/dispatcher
  * so execution flows through the existing permission + RLS path bound to the
  * caller's ExecutionContext. Every method runs AS the authenticated principal.
@@ -251,6 +268,21 @@ export interface McpDataBridge {
    * only where one was established.
    */
   diagnoseDelegation?(object: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
+  /**
+   * [#35137] The two framework answers `query_records` and `get_record` name
+   * the fields field-level security withholds from: both asked AS the caller,
+   * neither derived from rows ({@link McpFieldVisibility}). The tool layer
+   * names a field only when the first shows it and the second leaves it out
+   * (`withheldFieldNames`), so a field the caller's schema does not show is
+   * never named.
+   *
+   * OPTIONAL, with the graceful-degradation contract of
+   * {@link McpDataBridge.diagnoseDelegation}: a bridge that omits it, answers
+   * `undefined` (no security service, or no answer from it) or throws gets no
+   * `withheldFields`, and the tools render exactly what they rendered before.
+   * ⛔ The probe never fails the read it annotates.
+   */
+  fieldVisibilityOf?(object: string): Promise<McpFieldVisibility | undefined>;
   get(object: string, id: string): Promise<unknown>;
   create(object: string, data: Record<string, unknown>): Promise<unknown>;
   update(object: string, id: string, data: Record<string, unknown>): Promise<unknown>;
@@ -1819,6 +1851,76 @@ function withDelegationNotice(value: unknown, statement: string): unknown {
   return { result: value, ...notice };
 }
 
+/**
+ * [#35137] The sentence served beside `withheldFields`. It names no field and
+ * no value: the list beside it does the naming.
+ */
+const WITHHELD_FIELDS_NOTE =
+  'The fields in withheldFields exist on this object, but field-level security does not let you read them, '
+  + 'so they are left out of these records. Say they are not visible to you; never say they are empty or blank.';
+
+/**
+ * [#35137] The one line `query_records` and `get_record` describe the member with.
+ */
+const WITHHELD_FIELDS_DESCRIPTION =
+  'A field that field-level security hides from you is left out of the records and named in withheldFields: '
+  + 'it exists but is not visible to you, which is not the same as empty.';
+
+/**
+ * [#35137] Which fields `query_records` / `get_record` name as withheld: of
+ * the fields the call asked for (or, asking none, every field the caller's
+ * served schema shows), those the caller's served schema shows AND the
+ * security service does not answer readable. ⛔ A field the served schema does
+ * not show is never named, whatever the readable answer says: that is the
+ * card's bound, and the `served.has` test below is what holds it.
+ */
+function withheldFieldNames(visibility: McpFieldVisibility, asked: readonly string[] | undefined): string[] {
+  const served = new Set(visibility.served);
+  const readable = new Set(visibility.readable);
+  const candidates = asked !== undefined && asked.length > 0 ? asked : visibility.served;
+  const named: string[] = [];
+  for (const name of candidates) {
+    if (!served.has(name)) continue;
+    if (readable.has(name) || named.includes(name)) continue;
+    named.push(name);
+  }
+  return named;
+}
+
+/**
+ * [#35137] The withheld names for one read, or `[]` when the bridge cannot
+ * say. ⛔ Never fails the read it annotates: no member, `undefined` and a
+ * throw all answer `[]`, which renders exactly what the tool rendered before.
+ */
+async function withheldFieldsFor(
+  bridge: McpDataBridge,
+  objectName: string,
+  asked: readonly string[] | undefined,
+): Promise<string[]> {
+  if (typeof bridge.fieldVisibilityOf !== 'function') return [];
+  try {
+    const visibility = await bridge.fieldVisibilityOf(objectName);
+    return visibility ? withheldFieldNames(visibility, asked) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * [#35137] `value` with the withheld names and {@link WITHHELD_FIELDS_NOTE}
+ * beside it, or `value` itself when nothing is withheld, so an unrestricted
+ * caller's answer is byte-identical to before. A record's own keys cannot
+ * collide: field names are snake_case, these members camelCase.
+ */
+function withWithheldFields(value: unknown, withheld: readonly string[]): unknown {
+  if (withheld.length === 0) return value;
+  const member = { withheldFields: [...withheld], withheldFieldsNote: WITHHELD_FIELDS_NOTE };
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>), ...member };
+  }
+  return { result: value, ...member };
+}
+
 function jsonText(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
@@ -2922,7 +3024,8 @@ export function registerObjectTools(
           // Names repeat (ruling 6867150851), so the text says to tell
           // namesakes apart by email.
           'To fill a person field, find the colleague\'s id: objectName "sys_user", where {"email":"..."} for exactly ' +
-          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email.',
+          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email. ' +
+          WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
@@ -2989,8 +3092,11 @@ export function registerObjectTools(
           const diagnosed = typeof bridge.diagnoseDelegation === 'function'
             ? await bridge.diagnoseDelegation(objectName).catch(() => undefined)
             : undefined;
-          if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
-          return textResult(withDelegationNotice(result, diagnosed.statement));
+          // [#35137] …and the fields field-level security withheld from these
+          // rows named beside them, so a left-out field is not read as blank.
+          const answer = withWithheldFields(result, await withheldFieldsFor(bridge, objectName, fields));
+          if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(answer);
+          return textResult(withDelegationNotice(answer, diagnosed.statement));
         } catch (err) {
           return dataDoorErrorResult(err, 'query_records', objectName);
         }
@@ -3096,7 +3202,7 @@ export function registerObjectTools(
     server.registerTool(
       note('get_record'),
       {
-        description: 'Fetch a single record by id.',
+        description: `Fetch a single record by id. ${WITHHELD_FIELDS_DESCRIPTION}`,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
@@ -3119,7 +3225,8 @@ export function registerObjectTools(
           // `RECORD_NOT_FOUND` / 404. A missing id and an id the caller may not
           // read reach here as the same empty read, so they answer alike.
           if (record == null) throw recordNotFoundError(objectName, recordId);
-          return textResult(record);
+          // [#35137] …with the fields field-level security withheld from it named.
+          return textResult(withWithheldFields(record, await withheldFieldsFor(bridge, objectName, undefined)));
         } catch (err) {
           return dataDoorErrorResult(err, 'get_record', objectName);
         }

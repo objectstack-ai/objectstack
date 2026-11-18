@@ -146,7 +146,7 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
-import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
+import type { McpDataBridge, McpFieldVisibility, McpObjectSummary } from './mcp-http-tools.js';
 import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
 import {
   authoredDescription,
@@ -1376,6 +1376,25 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         }).map((row) => serveStoredMetadataHashes(object, row, digest)),
       );
       return { object, records, total: records.length };
+    },
+
+    /**
+     * [#35137] The two answers `query_records` and `get_record` name withheld
+     * fields from ({@link McpFieldVisibility}), both asked as the principal:
+     * the object as `describe_object` serves it to them ({@link servedView},
+     * the object-schema mask) and the security service's readable answer.
+     * No security service, an object not served, or no readable answer:
+     * `undefined`, and nothing is named.
+     */
+    async fieldVisibilityOf(object: string): Promise<McpFieldVisibility | undefined> {
+      const surface = security?.();
+      if (typeof surface?.getReadableFields !== 'function') return undefined;
+      const context = await resolvePrincipal();
+      const def = (await servedView.getObject(object)) as ObjectDef | undefined;
+      if (!def) return undefined;
+      const readable = await surface.getReadableFields(object, context);
+      if (!Array.isArray(readable)) return undefined;
+      return { served: Object.keys(def.fields ?? {}), readable };
     },
 
     async get(object, id) {

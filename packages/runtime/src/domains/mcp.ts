@@ -1219,6 +1219,29 @@ export function buildMcpBridge(
                 return { narrowed: false };
             }
         },
+        /**
+         * [#35137] The two answers `query_records` and `get_record` name
+         * withheld fields from (`McpFieldVisibility`, `@objectstack/mcp`), both
+         * asked as THIS request's caller: the object as `describe_object`
+         * serves it to them ({@link readObjectForCaller}, the `/meta` object
+         * door's projection) and this request's security service's readable
+         * answer (`getReadableFields`). No security service, an object not
+         * served, or no readable answer: `undefined`, and nothing is named.
+         * A throw reaches the tool layer, which names nothing either.
+         */
+        fieldVisibilityOf: async (object: string) => {
+            const security = await deps.resolveService(context, 'security', envId) as
+                Partial<ISecurityService> | undefined;
+            if (typeof security?.getReadableFields !== 'function') return undefined;
+            const def: any = await readObjectForCaller(object);
+            if (!def) return undefined;
+            const readable = await security.getReadableFields(object, ec);
+            if (!Array.isArray(readable)) return undefined;
+            const served: string[] = Array.isArray(def.fields)
+                ? def.fields.map((f: any) => String(f?.name ?? '')).filter(Boolean)
+                : Object.keys(def.fields ?? {});
+            return { served, readable };
+        },
         get: async (object: string, id: string) => {
             const res: any = await callData('get', { object, id }, driver, envId, ec);
             return res?.record ?? res ?? null;
