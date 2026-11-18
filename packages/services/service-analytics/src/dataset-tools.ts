@@ -107,15 +107,17 @@ const LIST_DATASETS_DESCRIPTION =
   + '`provenance` as its source; two such words are two metrics, so compute both. One word matching several '
   + 'measures (in one dataset or two): ask the user which one is meant, listing each candidate\'s label, dataset '
   + 'label and description; never pick one. A word that matched nothing may have `candidates`, members offered as '
-  + 'possible readings: ask the same way, listing each one\'s label, dataset label and description; never pick one, '
-  + 'and never treat a candidate as a match. No match and no candidates: fall back to the object query tools and '
+  + 'possible readings. A word with a measure among its candidates: ask the same way, listing each one\'s label, '
+  + 'dataset label and description; never pick one, and never treat a candidate as a match. A word whose candidates '
+  + 'are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure. '
+  + 'No match and no candidates: fall back to the object query tools and '
   + 'say in the answer that no governed metric was used (非指标口径); when the object you fall back to is a listed '
   + 'dataset\'s `object`, add one line naming that dataset and its measures. A dimension match alone picks a '
   + 'grouping, not a number: a measure must still match. `membersWithheld` means some members exist that this '
   + 'caller may not see. When `terms` were sent the answer carries `nextStep`: the case of this rule your words are '
   + 'in (`decision`), the words it is about (`terms`) and what to do, already written (`note`); follow `note`, which '
-  + 'with one_measure also names the words left out and their candidates, and with candidates_only names the '
-  + 'unknown and grouping-only words left out. When '
+  + 'with one_measure also names the words left out with their candidates or possible groupings, and with '
+  + 'candidates_only names the unknown and grouping-only words left out. When '
   + `the words are in different cases it reports the first of ${DATASET_NEXT_STEP_PRECEDENCE.join(', ')}, so a word `
   + 'matching only a dimension never outranks a measure match.';
 

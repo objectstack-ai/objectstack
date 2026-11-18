@@ -46,6 +46,18 @@ import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/s
  *
  * A term sent twice is one term, and a member it equals is counted once.
  *
+ * ## Which candidates ask
+ *
+ * The decision counts candidates of either kind, as the spec declares
+ * `candidates_only` ("it matched no member and has entries in `candidates`").
+ * The SENTENCE asks back only for a term with a measure among its candidates:
+ * that is the word being measured, and a possible reading of it is a question
+ * worth asking. A term whose candidates are all dimensions (「按行业」 near
+ * 行业, "this quarter" near `quarter`) is at most a possible grouping: the
+ * sentence offers it as one, never asks about it, and never lets it stop a
+ * matched measure. What counts as a match does not change (ADR-0149 D3,
+ * ruling #34691 F1 = B): such a candidate is offered, never selected.
+ *
  * ## Precedence among the terms' cases
  *
  * One answer carries one `nextStep`, reporting one case, and `terms` names
@@ -67,14 +79,19 @@ import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/s
  * `candidates`; `decision` and `terms` name only the case that comes first.
  * When that case is `one_measure` or `candidates_only`, `note` still names
  * every word it leaves out (seat ruling B on the L1-c N1 finding, extended to
- * `candidates_only` by the seat's L2 S3): under `one_measure`, a word with
- * candidates together with those candidates, each by its label and its
- * dataset's label, and the instruction to ask before using it; under either,
- * an unknown word with its labelled fallback to the object query tools and a
- * word that equals only a dimension as that grouping. `["营收", "churn"]`
- * computes 营收's measure and asks about churn's candidates in one sentence;
+ * `candidates_only` by the seat's L2 S3): under `one_measure`, a word with a
+ * measure among its candidates together with those candidates, each by its
+ * label and its dataset's label, and the instruction to ask before using it,
+ * and a word whose candidates are all dimensions as a possible grouping, asked
+ * about by nobody; under either, an unknown word with its labelled fallback to
+ * the object query tools and a word that equals only a dimension as that
+ * grouping. `["营收", "churn"]` computes 营收's measure and asks about churn's
+ * measure candidates in one sentence; `["按行业", "销售额"]` computes 销售额's
+ * measure and offers 行业 as a possible grouping, with no question;
  * `["库存周转", "金额"]` asks about 金额's candidates and names 库存周转 with
- * its fallback. (`several_measures` asks before anything is computed, so its
+ * its fallback. A reported `candidates_only` word whose candidates are all
+ * dimensions is offered the same way, and with no measure word beside it the
+ * note asks which number is meant, as a grouping word does (D3 rule 5). (`several_measures` asks before anything is computed, so its
  * note needs no such tail.) Two words that equal the same measure are one
  * metric, and the note says so.
  *
@@ -123,12 +140,16 @@ interface DatasetToolCopy {
   readonly severalTail: string;
   readonly candidateHit: (term: string, members: string) => string;
   readonly candidateTail: string;
+  /** A word with no match whose candidates are all dimensions: offered as a possible grouping. */
+  readonly groupingCandidateHit: (term: string, members: string) => string;
+  /** After the possible groupings: not a question, and no stop for a matched measure. */
+  readonly groupingCandidateTail: string;
   readonly groupingHit: (term: string, members: string) => string;
   readonly unknownHit: (term: string) => string;
   readonly fallbackTail: string;
   readonly groupingTail: string;
   readonly partialTail: string;
-  /** After a `one_measure` note: the left-out words that have candidates are asked about before use. */
+  /** After a `one_measure` note: the left-out words with a measure among their candidates are asked about before use. */
   readonly leftCandidateTail: string;
   /** After a `one_measure` or `candidates_only` note: the left-out words with no measure and no reading fall back, labelled. */
   readonly leftFallbackTail: string;
@@ -148,6 +169,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalTail: 'Ask the user which one they mean, listing each one\'s label, dataset label and description; do not pick one, and compute nothing until they answer.',
     candidateHit: (t, ms) => `"${t}" matches no member exactly; possible readings: ${ms}.`,
     candidateTail: 'Ask the user which one they mean, listing each one\'s label, dataset label and description (with a single reading, ask whether it is the one meant); do not pick one, never treat a reading as a match, and compute nothing until they answer.',
+    groupingCandidateHit: (t, ms) => `"${t}" matches no member exactly; it may name a grouping: ${ms}.`,
+    groupingCandidateTail: 'A possible grouping is not a question: do not ask the user about it, and it does not stop a matched measure; group the answer only as the question asks.',
     groupingHit: (t, ms) => `"${t}" equals a grouping, not a number: ${ms}.`,
     unknownHit: (t) => `"${t}" equals no measure and has no possible reading.`,
     fallbackTail: 'Answer with the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used.',
@@ -169,6 +192,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalTail: '先问用户指的是哪一个，列出每一个的名称、所属数据集名称和说明；不要替用户选，用户回答前不要计算。',
     candidateHit: (t, ms) => `「${t}」没有精确匹配任何成员，可能指的是：${ms}。`,
     candidateTail: '先问用户指的是哪一个，列出每一个的名称、所属数据集名称和说明（只有一个时，问是不是它）；不要替用户选，也不要把它当作匹配，用户回答前不要计算。',
+    groupingCandidateHit: (t, ms) => `「${t}」没有精确匹配任何成员，可能指分组维度：${ms}。`,
+    groupingCandidateTail: '可能的分组维度不需要追问：不要就它问用户，它也不妨碍计算已匹配的指标；只按问题本身的要求分组。',
     groupingHit: (t, ms) => `「${t}」是分组维度，不是数字：${ms}。`,
     unknownHit: (t) => `「${t}」没有匹配任何指标，也没有可能的候选。`,
     fallbackTail: '改用对象查询工具（query_records、aggregate_records）回答，并在回答中注明未使用治理指标（非指标口径）。',
@@ -190,6 +215,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalTail: '先問使用者指的是哪一個，列出每一個的名稱、所屬資料集名稱和說明；不要替使用者選，使用者回答前不要計算。',
     candidateHit: (t, ms) => `「${t}」沒有精確符合任何成員，可能指的是：${ms}。`,
     candidateTail: '先問使用者指的是哪一個，列出每一個的名稱、所屬資料集名稱和說明（只有一個時，問是不是它）；不要替使用者選，也不要把它當作符合，使用者回答前不要計算。',
+    groupingCandidateHit: (t, ms) => `「${t}」沒有精確符合任何成員，可能指分組維度：${ms}。`,
+    groupingCandidateTail: '可能的分組維度不需要追問：不要就它問使用者，它也不妨礙計算已符合的指標；只按問題本身的要求分組。',
     groupingHit: (t, ms) => `「${t}」是分組維度，不是數字：${ms}。`,
     unknownHit: (t) => `「${t}」沒有符合任何指標，也沒有可能的候選。`,
     fallbackTail: '改用物件查詢工具（query_records、aggregate_records）回答，並在回答中註明未使用治理指標（非指標口徑）。',
@@ -211,6 +238,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     severalTail: 'どれを指しているかユーザーに確認し、それぞれの名前、データセット名、説明を示してください。代わりに選ばず、回答があるまで計算しないでください。',
     candidateHit: (t, ms) => `「${t}」はどのメンバーにも完全には一致しません。候補：${ms}。`,
     candidateTail: 'どれを指しているかユーザーに確認し、それぞれの名前、データセット名、説明を示してください（候補が一つなら、それで合っているか確認してください）。代わりに選ばず、候補を一致として扱わず、回答があるまで計算しないでください。',
+    groupingCandidateHit: (t, ms) => `「${t}」はどのメンバーにも完全には一致しません。グループ分けの候補：${ms}。`,
+    groupingCandidateTail: 'グループ分けの候補は確認の対象ではありません。ユーザーに確認せず、一致した指標の計算も止めないでください。グループ分けは質問が求めるとおりにしてください。',
     groupingHit: (t, ms) => `「${t}」は数値ではなくグループ分けです：${ms}。`,
     unknownHit: (t) => `「${t}」はどの指標にも一致せず、候補もありません。`,
     fallbackTail: 'オブジェクトのクエリツール（query_records、aggregate_records）で回答し、管理された指標を使っていないことを回答に明記してください。',
@@ -271,6 +300,12 @@ interface TermReading {
   readonly measures: readonly NamedMember[];
   readonly dimensions: readonly NamedMember[];
   readonly candidates: readonly NamedMember[];
+  /**
+   * A `candidates_only` reading whose candidates are all dimensions: a
+   * possible grouping, offered and never asked about. `false` for any other
+   * decision, and for a term with a measure among its candidates.
+   */
+  readonly groupingOnly: boolean;
 }
 
 /** The member a `kind.name` pointer names in `entry`, as the entry lists it, or `undefined`. */
@@ -303,7 +338,7 @@ function readTerm(
       else if (member?.kind === 'dimensions') dimensions.push(member);
     }
   });
-  const offered: NamedMember[] = [];
+  const offered: (NamedMember & { kind: string })[] = [];
   for (const candidate of candidates) {
     if (candidate.term !== term) continue;
     // A candidate points at a member the same answer lists (the shape's invariant).
@@ -323,16 +358,34 @@ function readTerm(
       : offered.length > 0
         ? 'candidates_only'
         : 'no_measure';
-  return { term, decision, measures, dimensions, candidates: offered };
+  const groupingOnly = decision === 'candidates_only' && offered.every((m) => m.kind === 'dimensions');
+  return { term, decision, measures, dimensions, candidates: offered, groupingOnly };
+}
+
+/**
+ * The words among `readings` whose candidates are all dimensions, each offered
+ * as a possible grouping, then the one sentence saying that is no question and
+ * no stop for a matched measure; nothing when there is none.
+ */
+function groupingCandidateSentences(
+  readings: readonly TermReading[],
+  copy: DatasetToolCopy,
+  members: (ms: readonly NamedMember[]) => string,
+): string[] {
+  const groupings = readings.filter((r) => r.groupingOnly);
+  if (groupings.length === 0) return [];
+  return [...groupings.map((r) => copy.groupingCandidateHit(r.term, members(r.candidates))), copy.groupingCandidateTail];
 }
 
 /**
  * The sentences naming the words the reported case leaves out (seat ruling B,
- * extended to `candidates_only`): under `one_measure` a word with candidates
- * with those candidates and the ask-first instruction; under `one_measure` and
- * `candidates_only` an unknown word with its labelled fallback, and a word that
- * equals only a dimension as that grouping. A `no_measure` word is never the
- * reported case here, so every `no_measure` reading is a left-out word.
+ * extended to `candidates_only`): under `one_measure` a word with a measure
+ * among its candidates with those candidates and the ask-first instruction,
+ * and a word whose candidates are all dimensions as a possible grouping, never
+ * asked about; under `one_measure` and `candidates_only` an unknown word with
+ * its labelled fallback, and a word that equals only a dimension as that
+ * grouping. A `no_measure` word is never the reported case here, so every
+ * `no_measure` reading is a left-out word.
  */
 function leftOutSentences(
   decision: DatasetNextStepDecision,
@@ -341,9 +394,11 @@ function leftOutSentences(
   members: (ms: readonly NamedMember[]) => string,
 ): string[] {
   const sentences: string[] = [];
-  const offered = readings.filter((r) => r.decision === 'candidates_only' && r.decision !== decision);
-  for (const r of offered) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
-  if (offered.length > 0) sentences.push(copy.leftCandidateTail);
+  const leftOut = readings.filter((r) => r.decision === 'candidates_only' && r.decision !== decision);
+  const asked = leftOut.filter((r) => !r.groupingOnly);
+  for (const r of asked) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
+  if (asked.length > 0) sentences.push(copy.leftCandidateTail);
+  sentences.push(...groupingCandidateSentences(leftOut, copy, members));
   const unknown = readings.filter((r) => r.decision === 'no_measure' && r.dimensions.length === 0);
   for (const r of unknown) sentences.push(copy.unknownHit(r.term));
   if (unknown.length > 0) sentences.push(copy.leftFallbackTail);
@@ -396,11 +451,19 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
       for (const r of reported) sentences.push(copy.severalHit(r.term, members(r.measures)));
       sentences.push(copy.severalTail);
       break;
-    case 'candidates_only':
-      for (const r of reported) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
-      sentences.push(copy.candidateTail);
+    case 'candidates_only': {
+      // A word with a measure among its candidates is asked about; a word
+      // whose candidates are all dimensions is offered as a grouping, and
+      // with no such measure word beside it the note asks which number is
+      // meant, as a grouping word does (D3 rule 5).
+      const asked = reported.filter((r) => !r.groupingOnly);
+      for (const r of asked) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
+      if (asked.length > 0) sentences.push(copy.candidateTail);
+      sentences.push(...groupingCandidateSentences(reported, copy, members));
+      if (asked.length === 0) sentences.push(copy.groupingTail);
       sentences.push(...leftOutSentences(decision, readings, copy, members));
       break;
+    }
     case 'no_measure': {
       for (const r of reported) {
         sentences.push(r.dimensions.length > 0 ? copy.groupingHit(r.term, members(r.dimensions)) : copy.unknownHit(r.term));
