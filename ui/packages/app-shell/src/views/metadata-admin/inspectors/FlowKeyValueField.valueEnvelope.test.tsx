@@ -7,6 +7,8 @@
  * field path read against the spec's expression ledger.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import {
@@ -20,7 +22,7 @@ import { t } from '../i18n';
 
 afterEach(cleanup);
 
-const TOGGLE = 'Write as a CEL expression';
+const TOGGLE = 'Write as a formula';
 
 const ASSIGNMENTS: FlowConfigField = {
   id: 'assignments',

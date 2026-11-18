@@ -1458,6 +1458,27 @@ const ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
+  rule: 'action-body-does-not-compile',
+  covers: 'the wrapper an action body is compiled in',
+  paragraphs: [
+    'An action body is not a script of its own. The runtime pastes `body.source` into the body of ' +
+      '`(async (input, ctx) => { … })` and calls it with the action\'s params and its context, so the ' +
+      'statements share a scope with two parameters the author never wrote. A source that is valid on its ' +
+      'own can fail to compile there, and then every run of the action fails, on every door, before any ' +
+      'statement runs.',
+    'The common case is declaring a parameter again: `const input = ctx.input || {}` or `let ctx = …` is a ' +
+      'redeclaration, a SyntaxError. Read the params as `input` (they are also `ctx.input`), or give the ' +
+      'local another name. `var input = …` is not a redeclaration and compiles.',
+    'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
+      'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
+      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ on regular ' +
+      'expressions, so a regular-expression literal the host refuses is reported as a warning rather than ' +
+      'refused. Syntax the host accepts and QuickJS does not is not caught here; at run time such an ' +
+      'action answers a 500 that names the action and the compile error.',
+  ],
+};
+
 const ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION: RuleExplanation = {
   rule: 'action-body-write-unprovisioned-anchor',
   covers: 'why a write to an unprovisioned anchor never lands',
@@ -6300,6 +6321,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [ACTION_RECORD_WRITE_DISCARDED_EXPLANATION.rule]: ACTION_RECORD_WRITE_DISCARDED_EXPLANATION,
   [ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
+  [ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
   [FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,

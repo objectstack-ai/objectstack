@@ -28,6 +28,8 @@
  *    opens as itself.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -273,7 +275,7 @@ function rowTexts(group: HTMLElement): string[] {
 }
 
 /** The view item name the object page's panel shows beneath its title. */
-const shownView = () => screen.queryByTestId('list-view-name')?.textContent ?? null;
+const shownView = () => screen.queryByTestId('studio-list-view-inspector')?.getAttribute('data-view-id') ?? null;
 
 /** Every view row's read settled: the drafts headers and the draft-overlaid list. */
 async function viewsRead() {

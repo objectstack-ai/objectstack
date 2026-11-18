@@ -124,8 +124,11 @@ use `where` to shrink the scan, `having` to threshold the aggregates. `avg` /
 > total and a conditional count share ONE call. A driver that declares
 > `supports.aggregationFilter` (`driver-sql`; `driver-turso` outside remote
 > mode) runs it in the database whenever the aggregate itself is pushed down
-> (a date bucket under a non-UTC `timezone`, or one the driver does not bucket
-> natively, keeps the whole call in memory), compiled as that datasource's
+> (a date bucket the driver does not bucket natively keeps the whole call in
+> memory; so does one under a non-UTC `timezone`, unless the driver declares
+> `supports.zonedDateBucketing` — PostgreSQL via `driver-sql` — and the zone
+> resolves to an area/location: `Asia/Taipei` buckets in the database,
+> `+08:00` or `EST5EDT` never), compiled as that datasource's
 > `where` is: it answers what the same condition answers there (text by the
 > database collation) and is refused where it is — a `{ $field }` comparison on
 > a column the object does not declare, `INVALID_FILTER` / 400. On any other driver the

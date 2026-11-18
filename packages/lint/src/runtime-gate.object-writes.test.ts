@@ -191,6 +191,12 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateRlsPredicateEnforceability',
       'validateMembershipKeyDeclarations',
       'validateRuleCompilability',
+      // Joins with its card's acceptance ("refused at validate, build or
+      // publish"): an object write carries its inline `actions[]`, the second
+      // place an action body is published, so a body that does not compile
+      // in the runtime's wrapper is refused here as at the `action` door. Its
+      // door cases are in `validate-action-body-compiles.test.ts`.
+      'validateActionBodyCompiles',
       'validateRuleSchemaFormats',
     ]);
   });
@@ -566,6 +572,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateRlsPredicateEnforceability', // [#25234] — see the roster pin above
       'validateMembershipKeyDeclarations', // [#25234]
       'validateRuleCompilability',
+      'validateActionBodyCompiles', // see the roster pin above
       'validateRuleSchemaFormats',
     ]);
   });

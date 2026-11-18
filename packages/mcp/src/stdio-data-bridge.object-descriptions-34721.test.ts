@@ -20,6 +20,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { securityDoubleFor } from '@objectstack/metadata-core/testing';
 import { OBJECT_SCHEMA_MASK_DISABLE_ENV } from '@objectstack/metadata-core';
+import { AUDIT_FIELD_DEFS } from '@objectstack/spec/data';
 import { createStdioDataBridge } from './stdio-data-bridge.js';
 import { registerObjectTools } from './mcp-http-tools.js';
 
@@ -40,6 +41,8 @@ const deal = () => ({
     amount: { name: 'amount', type: 'currency', label: 'Amount', description: AMOUNT_TEXT },
     blank_note: { name: 'blank_note', type: 'text', label: 'Note', description: '   ' },
     [DENIED]: { name: DENIED, type: 'currency', label: 'Margin', description: DENIED_TEXT },
+    // [#34877] A platform-injected column, as the registry serves it beside the declared fields.
+    created_at: { name: 'created_at', ...AUDIT_FIELD_DEFS.created_at },
   },
 });
 const plain = () => ({ name: PLAIN, label: 'Plain', fields: { id: { name: 'id', type: 'text' }, title: { name: 'title', type: 'text' } } });
@@ -76,7 +79,7 @@ async function connect(readable?: readonly string[]) {
     const text = res.content[0]!.text;
     return { text, json: JSON.parse(text), isError: res.isError === true };
   };
-  return { call, close: () => client.close() };
+  return { call, listTools: () => client.listTools(), close: () => client.close() };
 }
 
 const prevMask = process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
@@ -87,7 +90,7 @@ afterEach(() => {
 });
 
 /** Every field but the denied one (the double answers one readable set for every object). */
-const MEMBER_READS = ['id', 'subject', 'amount', 'blank_note', 'title'] as const;
+const MEMBER_READS = ['id', 'subject', 'amount', 'blank_note', 'created_at', 'title'] as const;
 
 const field = (described: any, name: string) => described.fields.find((f: any) => f.name === name);
 
@@ -133,8 +136,25 @@ describe('[#34721] stdio list_objects and describe_object serve the authored des
     try {
       const listed = (await session.call('list_objects', {})).json;
       const found = (name: string) => listed.objects.find((o: any) => o.name === name);
-      expect(found(OBJ)).toEqual({ name: OBJ, label: 'Deal', description: OBJECT_TEXT, fieldCount: 4 });
+      expect(found(OBJ)).toEqual({ name: OBJ, label: 'Deal', description: OBJECT_TEXT, fieldCount: 5 });
       expect(found(PLAIN)).toEqual({ name: PLAIN, label: 'Plain', fieldCount: 2 });
+    } finally {
+      await session.close();
+    }
+  });
+});
+
+describe('[#34877] the describe_object tool description says whose words a field description carries', () => {
+  it('names the author\'s and the platform\'s text, and an injected column\'s description is answered with system: true', async () => {
+    const session = await connect(MEMBER_READS);
+    try {
+      const { tools } = await session.listTools();
+      const description = tools.find((t) => t.name === 'describe_object')!.description!;
+      expect(description).toContain('description (where set: the author\'s, or the platform\'s on a column it injects)');
+      expect(description).not.toContain('description (where written)');
+      const described = (await session.call('describe_object', { objectName: OBJ })).json;
+      expect(field(described, 'created_at')).toMatchObject({ description: AUDIT_FIELD_DEFS.created_at.description, system: true });
+      expect(field(described, 'amount')).toMatchObject({ description: AMOUNT_TEXT, system: false });
     } finally {
       await session.close();
     }
