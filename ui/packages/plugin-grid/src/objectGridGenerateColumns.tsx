@@ -14,7 +14,7 @@ import { resolveGridCellRendering, gridCellRendererForFixedKey, linkCellRenderer
 import { isWithheldGridColumn } from './maskedColumn';
 import { humanizeLabel, MaskedCellRenderer } from '@object-ui/fields';
 import { Button, EmptyValue } from '@object-ui/components';
-import { isDeadlineSettled, leadWithNameField, columnIdentity } from '@object-ui/core';
+import { isDeadlineSettled, leadWithNameField, columnIdentity, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { Type, Hash, Calendar, CheckSquare, User, Tag, Clock } from 'lucide-react';
 import { applyRelationalMeta } from './relationalMetaKeys';
@@ -226,6 +226,13 @@ export function useObjectGridGenerateColumns({
         if (!Object.prototype.hasOwnProperty.call(objectFields ?? {}, fieldName)) return true;
         return perms.checkField(schema.objectName, fieldName, 'read');
       };
+      // objectstack#34901 — an authored column on a field a disabled package
+      // withholds from the served object (`_withheldFields`) is not drawn: the
+      // row load never asks for it, so it could only draw empty. Derived from
+      // the definition on every call, so it is drawn again once the package is
+      // enabled; nothing is written.
+      const packageWithheld = readWithheldFieldNames(objectSchema);
+      const notWithheld = (entry: unknown): boolean => !refersToWithheldField(columnIdentity(entry), packageWithheld);
       // ObjectStack's DECLARED column spelling is the only one read
       // (objectui#5068). `ObjectGridSchema.columns` is `string[] | ListColumn[]`,
       // and `ListColumnSchema` in `@objectstack/spec/ui` is a STRICT object:
@@ -259,6 +266,7 @@ export function useObjectGridGenerateColumns({
         return (cols as ListColumn[])
           .filter((col) => resolvesToDataColumn(col))
           .filter((col) => passesFieldGate(col))
+          .filter((col) => notWithheld(col))
           .map((col, colIndex, shown) => {
             // The column's own `label` is the spec's "Display label override"
             // (`ListColumnSchema`), so when the author wrote one it IS the
@@ -584,6 +592,7 @@ export function useObjectGridGenerateColumns({
       return (cols as string[])
         .filter((fieldName) => typeof fieldName === 'string' && fieldName.trim().length > 0)
         .filter((fieldName) => passesFieldGate(fieldName))
+        .filter((fieldName) => notWithheld(fieldName))
         .map((fieldName, colIndex) => {
           const fieldDef = objectFields?.[fieldName];
           // objectui#10657 — a bare field name carries no type of its own, so

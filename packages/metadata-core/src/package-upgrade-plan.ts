@@ -269,10 +269,10 @@ const DEFAULT_SEED_EXTERNAL_ID: string | string[] = SeedSchema.shape.externalId.
 /**
  * Does a replay of a dataset in this mode write its columns over a row it
  * MATCHED by `externalId`? `upsert` and `update` do (a column declaring
- * `applyOn: 'create'` excepted); `insert` and `ignore` never touch a matched
- * row, and `replace` deletes every row before it inserts, so it matches none.
- * The rows a customer edited that an upgrade's replay would overwrite are
- * counted for these modes only.
+ * `applyOn: 'create'` excepted); `ignore` never touches a matched row. The
+ * retired `insert` and `replace` (#34613) matched no row, and a replay now
+ * refuses a dataset that still declares one. The rows a customer edited that
+ * an upgrade's replay would overwrite are counted for these modes only.
  */
 export function seedModeOverwritesMatchedRows(mode: string): boolean {
   return mode === 'upsert' || mode === 'update';

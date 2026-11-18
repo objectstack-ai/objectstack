@@ -360,12 +360,6 @@ export {
 export type { AssignmentRuleFinding, AssignmentRuleSeverity } from './validate-assignment-rules.js';
 
 export {
-  validateSeedReplaySafety,
-  SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
-} from './validate-seed-replay-safety.js';
-export type { SeedReplaySafetyFinding, SeedReplaySafetySeverity } from './validate-seed-replay-safety.js';
-
-export {
   validateSeedStateMachine,
   SEED_VALUE_OUTSIDE_STATE_MACHINE,
 } from './validate-seed-state-machine.js';

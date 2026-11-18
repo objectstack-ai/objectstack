@@ -238,13 +238,35 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // Map a settled-VM state to the right budget error, or null if the body is
     // simply still progressing. Callers add the just-run slice to `cpuMs` first,
     // so `cpuMs` here is inclusive.
+    //
+    // An ACTION's timeout carries a caller sentence naming the action and its
+    // limit ({@link actionTimeoutSentence}); a hook's or a job's does not, and
+    // keeps the bare fault every door answers with the sanitised 500. Each
+    // construction keeps its message a literal template, which is what the core
+    // sandbox-fault census renders. The action's is marked as the runner's own
+    // fault ({@link isRunnerOwnFault}), so an action's refusal catalogue passes
+    // it through rather than reading its sentence as the body's code-less throw.
     const budgetError = (pumps: number): SandboxError | null => {
       if (cpuMs > cpuBudget) {
+        if (args.origin.kind === 'action') {
+          return markRunnerOwnFault(new SandboxError(
+            `action '${args.origin.name}' exceeded CPU budget of ${cpuBudget}ms (after ${pumps} pump iterations)`,
+            actionTimeoutSentence(args.origin.name, cpuBudget, false),
+            { status: 500 },
+          ));
+        }
         return new SandboxError(
           `${args.origin.kind} '${args.origin.name}' exceeded CPU budget of ${cpuBudget}ms (after ${pumps} pump iterations)`,
         );
       }
       if (Date.now() > wallDeadline) {
+        if (args.origin.kind === 'action') {
+          return markRunnerOwnFault(new SandboxError(
+            `action '${args.origin.name}' exceeded wall-clock ceiling of ${wallCeiling}ms while awaiting host calls (after ${pumps} pump iterations)`,
+            actionTimeoutSentence(args.origin.name, wallCeiling, true),
+            { status: 500 },
+          ));
+        }
         return new SandboxError(
           `${args.origin.kind} '${args.origin.name}' exceeded wall-clock ceiling of ${wallCeiling}ms while awaiting host calls (after ${pumps} pump iterations)`,
         );
@@ -1045,7 +1067,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // ── [#34374] `ctx.text(key, params?)` — a declared text, in the
     // organization's language ────────────────────────────────────────────────
     //
-    // Installed when the host built the seam (hook bodies, `hook-text.ts`). The
+    // Installed when the host built the seam (hook bodies and, #34374 PR2,
+    // action bodies — `hook-text.ts`). The
     // same deferred-promise pump as `title`, never `newAsyncifiedFunction`, for
     // the same reason: a body awaits it beside `ctx.api` calls. No capability:
     // it reads no record, and the language it reads is the platform's.
@@ -2404,12 +2427,37 @@ function isCompileFailure(err: unknown): boolean {
  */
 function actionBodyCompileFailure(actionName: string, compilerError: string): SandboxError {
   const reason = compilerError.split('\n')[0].slice(0, 240);
-  return new SandboxError(
+  return markRunnerOwnFault(new SandboxError(
     `action '${actionName}' does not compile: ${compilerError}`,
     `Action '${actionName}' cannot run: its body does not compile (${reason}). ` +
       'The action\'s author must fix its body.source and publish it again.',
     { status: 500 },
-  );
+  ));
+}
+
+/**
+ * The caller sentence an action that ran out of time answers with: the action's
+ * name and the limit it hit, in milliseconds, and nothing the body was doing.
+ *
+ * A timeout is neither a refusal nor a crash. It stays a server fault, so the
+ * declared status is `500` and no code is declared: the doors answer the
+ * status's own `INTERNAL_ERROR` and relay this sentence, as they do for an
+ * action body that does not compile ({@link actionBodyCompileFailure}). What
+ * the sentence adds is the one fact a caller cannot get any other way: this
+ * action was slow, the platform did not break. A crash keeps the sanitised
+ * `Internal server error`, because its native text may carry the data the body
+ * was reading; a limit and a name carry none.
+ *
+ * Actions only. A hook's or a job's timeout keeps no `innerMessage`, so the
+ * `/data` door and the import rows answer it as the sandbox's own fault, as
+ * before. The declared `500` is also what keeps this sentence off the `/data`
+ * door should an action's timeout ever reach it: that door relays an
+ * `innerMessage` only below the server band.
+ */
+function actionTimeoutSentence(actionName: string, limitMs: number, waitingOnHostCalls: boolean): string {
+  return waitingOnHostCalls
+    ? `Action '${actionName}' timed out: it exceeded its ${limitMs} ms time limit while waiting on platform calls, and was stopped.`
+    : `Action '${actionName}' timed out: it exceeded its ${limitMs} ms time limit and was stopped.`;
 }
 
 function formatErr(err: unknown): string {
@@ -2427,8 +2475,12 @@ export class SandboxError extends Error {
    * message without the `<kind> '<name>' threw:` debug wrapper that lives in
    * `.message`. Safe to surface to end users (e.g. an action's error toast);
    * the wrapped `.message` stays for server logs. Undefined for the sandbox's
-   * own internal errors (timeouts, marshalling failures), which have no
-   * user-meaningful inner message.
+   * own internal errors (a hook's or a job's timeout, marshalling failures),
+   * which have no user-meaningful inner message.
+   *
+   * An ACTION's timeout is not one of those either: it carries the sentence
+   * naming the action and the limit it hit, at a declared `500`
+   * (`actionTimeoutSentence`).
    *
    * [#26903/#26965] A capability denial is not one of those: it is a refusal
    * naming the body and the capability, so it carries this field and its
@@ -2542,6 +2594,32 @@ const hostRelayedErrors = new WeakSet<object>();
  */
 export function isHostRelayedSandboxError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && hostRelayedErrors.has(err);
+}
+
+/**
+ * The faults this runner made itself that still carry a caller sentence: an
+ * action's timeout ({@link actionTimeoutSentence}) and an action body that does
+ * not compile ({@link actionBodyCompileFailure}). Both are `innerMessage` + a
+ * declared `500` + no `code`, which is also what a body's own code-less throw
+ * of `{ status: 500 }` looks like, so no field tells them apart: identity does,
+ * for the reason {@link relayedRefusals} gives. The runner's other faults carry
+ * no `innerMessage` and need no mark.
+ */
+const runnerOwnFaults = new WeakSet<object>();
+
+function markRunnerOwnFault(err: SandboxError): SandboxError {
+  runnerOwnFaults.add(err);
+  return err;
+}
+
+/**
+ * Was this error made by the runner itself (an action's timeout, an action
+ * body that does not compile) rather than thrown by the body? A refusal
+ * catalogue passes it through unchanged: it is the platform speaking, never a
+ * refusal the body chose (`resolveActionRefusal`).
+ */
+export function isRunnerOwnFault(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && runnerOwnFaults.has(err);
 }
 
 /**

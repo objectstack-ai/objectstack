@@ -2934,6 +2934,23 @@ export class SchemaRegistry {
     return ObjectRegistrationFacet.resolveStorageObject.call(objectRegistrationHost.of(this), fqn);
   }
 
+  /**
+   * [#34901] The fields a disabled package's `extend` contribution adds to
+   * `name` and the served fold therefore withholds, each with the package
+   * that adds it: `{ crm_project: { packageId: 'com.acme.projects' } }`.
+   * Empty when nothing is withheld (no disabled extender, or every field it
+   * adds is also declared by the owner or a served extension).
+   *
+   * The served object read stamps this as its `_withheldFields` read
+   * decoration, so a console can tell a name a switched-off package withholds
+   * from a name nothing declares, and leave it out of every query while the
+   * data door keeps refusing both. Accepts a short name or an FQN, as
+   * {@link getObject} does.
+   */
+  getWithheldExtensionFields(name: string): Record<string, { packageId: string }> {
+    return ObjectRegistrationFacet.getWithheldExtensionFields.call(objectRegistrationHost.of(this), name);
+  }
+
   private withholdDisabledExtensions(contributors: readonly ObjectContributor[], asEnabled?: string): WithheldExtensions | undefined {
     // [#33949 codemod] The body moved to `registry-object-registration.ts`, its docblock with it (see `ObjectRegistrationHost`).
     return ObjectRegistrationFacet.withholdDisabledExtensions.call(objectRegistrationHost.of(this), contributors, asEnabled);

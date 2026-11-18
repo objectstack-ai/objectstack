@@ -242,7 +242,15 @@ describe('[ADR-0149 D2] stdio dataset tools when the i18n service resolves but i
   it.each(CASES)('$read throwing: list_datasets lists nothing, says partial and names the i18n error', async ({ read, message }) => {
     const bridge = await bridgeOverRealExecutor(() => i18nWhoseReadThrows(read, message));
     const answer = await bridge.listDatasets!({ terms: TERMS });
-    expect(answer).toEqual({ datasets: [], partial: true, warning: expect.stringContaining(message) });
+    // [#34919] Terms were sent, so the degraded answer also carries `nextStep`:
+    // nothing listed reads `no_measure` for every word, and the note says the
+    // catalogue was incomplete and to repeat the warning.
+    expect(answer).toEqual({
+      datasets: [],
+      partial: true,
+      warning: expect.stringContaining(message),
+      nextStep: { decision: 'no_measure', terms: TERMS, note: expect.stringContaining('warning') },
+    });
     expect(answer.warning).toMatch(/^The dataset catalogue could not be read: /);
   });
 

@@ -952,6 +952,7 @@
     "data/Seed:dependsOn",
     "data/Seed:env",
     "data/Seed:externalId",
+    "data/Seed:fallback",
     "data/Seed:files",
     "data/Seed:locale",
     "data/Seed:mode",

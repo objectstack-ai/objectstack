@@ -1,6 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 
 /**
  * #3453 — the multi-tenant seed-replay seam.
@@ -42,6 +44,12 @@ let seedResult: any = loaderResult({ totalInserted: 0, totalUpdated: 0, totalSki
 
 vi.mock('./seed-loader.js', () => ({
     SeedLoaderService: class {
+        // [#34613] The real `loadStored` parses the stored request and hands it to `load`;
+        // the stand-in keeps that funnel, so the request `load` records is the parsed one.
+        async loadStored(raw: any) {
+            const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
+            return this.load(SeedLoaderRequestSchema.parse(raw));
+        }
         constructor(..._args: any[]) { /* ql / metadata / logger ignored — mocked */ }
         async load(request: any) { loadCalls.push(request); return seedResult; }
     },

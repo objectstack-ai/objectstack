@@ -963,6 +963,7 @@ const zhHant = {
     groupingUnstoredNotice: '無法按 {{fields}} 分組：它的值在顯示時計算，並未儲存。列表已暫不按它分組顯示。',
     groupingUnstoredRemove: '從分組中移除',
     draftOnlyQueryDropped: '未按 {{fields}} 篩選或排序：它僅存在於草稿中，釋出後才生效。',
+    withheldFieldsLeftOut: '未顯示 {{fields}}，也未按其篩選、排序或分組：新增該欄位的軟體包已停用，啟用後即恢復。',
     inlineEditShort: '行內編輯',
     inlineEditLabel: '行內編輯記錄(點選單元格進行編輯)',
   },

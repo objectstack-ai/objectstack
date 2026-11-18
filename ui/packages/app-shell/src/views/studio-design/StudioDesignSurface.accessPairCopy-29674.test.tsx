@@ -303,7 +303,7 @@ describe('the header’s provenance chip follows the rail’s mark (objectstack#
     await copyOpen();
     await waitFor(() => expect(railMarkOf('My contributor')).toBe('added'), { timeout: 8000 });
     expect(chip()).toHaveTextContent(t('perm.badge.custom', 'en'));
-    expect(chip()).not.toHaveTextContent(t('perm.badge.package', 'en'));
+    expect(chip()).not.toHaveTextContent(t('engine.studio.access.origin.app', 'en'));
   });
 
   it('a set created in the pair: Custom in the header, Added in the rail', async () => {
@@ -320,6 +320,6 @@ describe('the header’s provenance chip follows the rail’s mark (objectstack#
     // The read has answered: the copy's row is marked, the base set's is not.
     await waitFor(() => expect(railMarkOf('My contributor')).toBe('added'), { timeout: 8000 });
     expect(railMarkOf('Contributor')).toBeNull();
-    expect(chip()).toHaveTextContent(t('perm.badge.package', 'en'));
+    expect(chip()).toHaveTextContent(t('engine.studio.access.origin.app', 'en'));
   });
 });

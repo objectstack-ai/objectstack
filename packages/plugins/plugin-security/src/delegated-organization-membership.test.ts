@@ -855,7 +855,7 @@ describe('[#25107] every reader in this package that resolves a delegator asks t
   const MEMO_FILE = 'security-plugin.ts';
   const memoAsks = (text: string) => (text.match(/\bthis\.resolveDelegatorForContext\(context\b/g) ?? []).length;
 
-  it('per source file, the asks equal the resolutions — and the seven files that resolve one are all counted', () => {
+  it('per source file, the asks equal the resolutions — and the eight files that resolve one are all counted', () => {
     const counted: Record<string, [number, number]> = {};
     for (const file of readdirSync(SRC, { recursive: true }) as string[]) {
       if (!file.endsWith('.ts') || file.endsWith('.test.ts') || file.includes('.testkit.')) continue;
@@ -876,6 +876,7 @@ describe('[#25107] every reader in this package that resolves a delegator asks t
       'security-plugin-operation-principals.ts',
       'security-plugin-read-filter.ts',
       'security-plugin-security-service.ts',
+      'security-plugin-withheld-field-readers.ts',
     ]);
     for (const [file, [resolutions, asks]] of Object.entries(counted)) expect(asks, file).toBe(resolutions);
   });

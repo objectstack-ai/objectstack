@@ -1955,26 +1955,36 @@ export function stripReadonlyWhenFieldsMulti(
  * clauses a naive membership rule would use — persisted AND runtime-issued —
  * and is STILL excluded. Persistence and runtime ownership do not decide it.
  *
- * What decides it is the third clause: a runtime-owned type must have NO
- * legitimate caller-supplied value. `autonumber` qualifies — a client-chosen
- * record number bypasses the sequence and forges a business identifier nothing
- * later corrects. `summary` does not qualify: the value is a derived cache of
- * the child aggregate, self-healing on the next child write, and supplying an
- * initial value is a SUPPORTED authoring path — `initializeSummaryFields`
- * deliberately keeps a caller-supplied one ("author supplied a value"), so
- * historical imports and seed data may carry pre-computed totals.
+ * What decides it is HOW a caller's value is taken, not WHETHER it is.
+ * [#34672] A person's or an import's value for a roll-up IS taken, on create
+ * and on update: the spec lists `summary` among the computed types that are
+ * "never client-written" (`COMPUTED_VALUE_TYPES`), and a typed total stood,
+ * and was read downstream, until the next child write recomputed it. It is
+ * taken by the static-`readonly` strip, which reads every roll-up as
+ * `readonly: true` (`summaryFieldsLockedOnWrite` in `engine-top-level.ts`,
+ * read by both of that strip's schema views), and NOT by this set's strip,
+ * for two reasons:
  *
- * DO NOT "fix the code to match this comment" by adding `summary` here. The
- * insert-side strip ({@link stripRuntimeOwnedFields}) judges against the RAW
- * caller payload (its keys AND their values, #6339) and runs in
- * `engine.insert` AFTER the seed pass, so a plain
- * (non-`isSystem`, non-`preserveAudit`) import of a parent carrying
- * `task_count: 42` would lose the 42 to the strip and get no 0 from the seed
- * either — the seed already skipped that field precisely BECAUSE the caller
- * supplied it. The column lands `null`, the exact state #6013 was written to
- * eliminate, and the write still reports success. Only `isSystem: true` (whole
- * pass skipped) or `preserveAudit: true` (kept by {@link isPreservableUnderAudit},
- * since a summary field is not `system: true`) would survive it.
+ *  - The exemption. {@link stripRuntimeOwnedFields} keeps a value under
+ *    `preserveAudit` as well as `isSystem`. The create-side static strip
+ *    honours `isSystem` alone (the `preserveAudit` ruling below), and that is
+ *    the boundary a roll-up needs: seed loads, package installs and
+ *    historical imports (`treatAsHistorical` is system-only) write as the
+ *    system principal and keep a pre-computed total; an in-process caller
+ *    that merely sets `preserveAudit` does not.
+ *  - The seed. The runtime-owned strip judges the RAW caller payload (#6339)
+ *    and runs AFTER the seed pass, which skipped the field BECAUSE the caller
+ *    supplied it, so taking `task_count: 42` there would land the column
+ *    `null`: the #5749 state #6013 was written to eliminate, behind a write
+ *    that still reports success. The static strip's create pass re-seeds
+ *    every roll-up it takes (`staticReadonlyCreateStrip` in
+ *    `engine-insert.ts`), so the column starts at `0` for `count` / `sum`,
+ *    exactly as a create that never named it.
+ *
+ * So DO NOT add `summary` here: that would trade the seed and the boundary
+ * above for the `null` this note was first written to prevent (#6014). An
+ * initial value from an ordinary caller is no longer an authoring path; one
+ * from the system principal still is.
  *
  * Keep this set to types whose value is (a) persisted, (b) issued by the
  * runtime, and (c) never legitimately supplied by a caller.

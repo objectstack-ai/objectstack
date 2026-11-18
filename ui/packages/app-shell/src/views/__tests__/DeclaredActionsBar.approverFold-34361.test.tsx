@@ -372,3 +372,17 @@ describe('ApprovalDecisionPanel — the request page draws the same band (object
     ]);
   });
 });
+
+// objectstack#35016 — the band's menu entry is named, never a bare `⋯`: the
+// record header keeps the page's one `⋯`, so the two are told apart by look.
+describe('DeclaredActionsBar — the approver band names its menu entry (objectstack#35016)', () => {
+  it('draws the entry as its label and a chevron, with no ⋯ glyph, at every width', async () => {
+    renderBar(APPROVER);
+    const trigger = await screen.findByTestId('declared-actions-decision-menu');
+    expect(trigger.textContent).toBe('More approval actions');
+    // No `hidden sm:inline` on the label: it is the name on a phone too.
+    expect(trigger.querySelector('span')?.className ?? '').not.toContain('hidden');
+    expect(trigger.querySelector('svg.lucide-ellipsis, svg.lucide-more-horizontal')).toBeNull();
+    expect(trigger.querySelector('svg.lucide-chevron-down')).toBeTruthy();
+  });
+});
