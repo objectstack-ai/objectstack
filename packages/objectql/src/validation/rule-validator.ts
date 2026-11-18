@@ -3099,13 +3099,17 @@ function toExpression(cond: string | Expression): Expression {
  * `buildScope` mounts the SAME `EvalUser` object under `user`, `ctx.user` and
  * `os.user` as aliases, and mounts none of them when the evaluation carries no
  * user. `ctx` and `os` are listed at bare-root granularity because that is what
- * {@link collectCelRootIdentifiers} reports — and that is exact at THIS call
- * site rather than merely conservative: {@link evaluateOptionVisibility}
- * evaluates with `{ record, previous, user, permissions }` and nothing else, so
- * `buildScope` has no `org`/`env` to mount `os` from and no other source for
- * `ctx` (`permissions` mounts no root at all — it reaches `can` through the
- * environment, #18783). Both roots are therefore bound here if and only if a
- * user is.
+ * {@link collectCelRootIdentifiers} reports — and that is exact at the
+ * option-visibility call site rather than merely conservative:
+ * {@link evaluateOptionVisibility} evaluates with
+ * `{ record, previous, user, permissions }` and nothing else, so `buildScope`
+ * has no `org`/`env` to mount `os` from and no other source for `ctx`
+ * (`permissions` mounts no root at all — it reaches `can` through the
+ * environment, #18783). Both roots are therefore bound there if and only if a
+ * user is. At the formula plan's call site (`formulaValuesFor`, through
+ * `readsUserRoot`) it is only conservative: `applyFormulaPlan` mounts `os.org`
+ * from the tenant with no user, so a formula reading only `os.org` is marked
+ * too — the strict direction, the unconditional `required`.
  */
 const USER_SCOPE_ROOTS: readonly string[] = ['current_user', 'user', 'ctx', 'os'];
 

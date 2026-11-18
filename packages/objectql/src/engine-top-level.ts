@@ -3223,7 +3223,7 @@ function unservableReason(
   // bare-root granularity, so a formula reading only `os.org` counts too: the
   // strict direction, the unconditional `required`.
   if (!actingUser && readsUserRoot(entry.expression)) {
-    return { reason: 'reads the acting user, and this write has none (a system write)', noActingUser: true };
+    return { reason: 'reads the acting user or a bare ctx/os root, and this write has no acting user (a system write)', noActingUser: true };
   }
   if (known.size === 0) return undefined;
   const reads = storedExpressionReads(entry);

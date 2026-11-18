@@ -160,7 +160,11 @@ makes "blank" a declared **third** state rather than a spelling of "no rule".
 > know (it reads through a reference, calls `label()`, calls `can` on a write
 > that resolved no permission map, reads the acting user on a write that has
 > none, or reads such a formula) is such a fault; the acting-user case is
-> logged as `no-acting-user`, as the direct `current_user` spelling is. A
+> logged as `no-acting-user`, as the direct `current_user` spelling is. That
+> mark covers any read of a bare user-scope root (`current_user`, its ADR-0068
+> aliases, or a bare `ctx` / `os` read such as `os.org`), because the engine
+> cannot separate the user-dependent part of such a read; the field then keeps
+> the unconditional `required` it carried before this amendment. A
 > formula calling `can` is computed on a write that picks a permission-gated
 > option, which resolves the map. A formula that faults for a reason a read shares (an
 > empty operand) is not: the predicate is judged on the `null` a read serves. A

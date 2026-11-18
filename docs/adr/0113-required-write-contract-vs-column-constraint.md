@@ -327,8 +327,10 @@ that does not compute is answered by the reason, in two arms:
   write), calls `current_user.can()` and the write resolved no permission
   map (it resolves one only when it picks a permission-gated option, so such a
   formula is computed on that write and not on another), or reads the acting
-  user (`current_user` and its ADR-0068 aliases) on a write that has none, a
-  system write, where a read would compute it for its reader; or it reads such
+  user (`current_user` and its ADR-0068 aliases, or any bare `ctx` / `os` read
+  such as `os.org`, since the engine cannot separate the user-dependent part of
+  such a read; the result is the unconditional `required`) on a write that has
+  none, a system write, where a read would compute it for its reader; or it reads such
   a formula, at any depth of the formulas it reads. A
   formula over one can compute cleanly over the `null` it reads on the write
   path and still not be the value a read serves, so the whole read closure
