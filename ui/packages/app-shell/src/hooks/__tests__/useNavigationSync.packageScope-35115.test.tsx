@@ -83,7 +83,7 @@ async function addPage(served: Record<string, unknown>) {
 
 /** Press the success toast's Undo, and wait for its save. */
 async function undo(saveItem: ReturnType<typeof vi.fn>) {
-  const options = vi.mocked(toast.success).mock.calls[0]?.[1] as { action: { onClick: () => Promise<void> } };
+  const options = vi.mocked(toast.success).mock.calls[0]?.[1] as unknown as { action: { onClick: () => Promise<void> } };
   await options.action.onClick();
   await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(2));
 }
