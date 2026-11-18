@@ -40,7 +40,8 @@
  * address (`actionTextMessageKey` — `objects.<object>._actions.<action>.texts.<key>.message`,
  * or `globalActions.<action>.…` for an object-less action, the object read by
  * the one owner-key ladder the action's refusals read), the organization the
- * action context's `session.organizationId`, and an undeclared key refused as
+ * body's door caller's (`executionContext.tenantId`, else `session.organizationId`),
+ * and an undeclared key refused as
  * a fault naming the action (`undeclaredActionTextAtRun`). Only a `script`
  * action's sandboxed `js` body runs code of its own (`actionBodyRunnerFactory`),
  * so that is the one path it is installed on. Both are one function,
@@ -127,14 +128,14 @@ function pickTranslatedText(
 
 /**
  * Build `ctx.text(key, params?)` for one invocation of a declaration that
- * holds `texts`. The organization is the context's `session.organizationId`;
- * a call with none asks the settings service with no scope (its own reach),
- * as the flow record write does.
+ * holds `texts`, in `organizationId`'s language — each face resolves its own
+ * organization; a call with none asks the settings service with no scope (its
+ * own reach), as the flow record write does.
  */
 function buildDeclaredTextSurface(
   owner: TextOwner,
   declaration: { texts?: unknown },
-  engineCtx: { session?: { organizationId?: unknown } } | undefined,
+  organizationId: string | undefined,
   opts: HookTextOptions,
 ): HookTextSurface {
   return async (key: string, params?: Record<string, unknown>): Promise<string> => {
@@ -143,11 +144,7 @@ function buildDeclaredTextSurface(
     if (!entry || typeof entry.message !== 'string') {
       throw new SandboxError(owner.undeclaredAtRun(String(key), Object.keys(texts ?? {})));
     }
-    const organizationId = engineCtx?.session?.organizationId;
-    const locale = await readOrganizationTextLocale(
-      opts.getService,
-      typeof organizationId === 'string' && organizationId.length > 0 ? organizationId : undefined,
-    );
+    const locale = await readOrganizationTextLocale(opts.getService, organizationId);
     const translated = locale ? pickTranslatedText(owner, key, locale, opts.i18n, opts.logger) : undefined;
     const declared = Array.isArray(entry.params) ? entry.params : [];
     if (declared.length === 0) return translated ?? entry.message;
@@ -189,7 +186,13 @@ export function buildHookTextSurface(
     messageKey: (key) => hookTextMessageKey(hookName, key),
     undeclaredAtRun: (key, declared) => undeclaredHookTextAtRun(hookName, key, declared),
   };
-  return buildDeclaredTextSurface(owner, hook, engineCtx, opts);
+  const organizationId = engineCtx?.session?.organizationId;
+  return buildDeclaredTextSurface(
+    owner,
+    hook,
+    typeof organizationId === 'string' && organizationId.length > 0 ? organizationId : undefined,
+    opts,
+  );
 }
 
 /** [#34374 PR2] An action as its declared texts read it: its name, its OWN object (absent: object-less), its texts. */
@@ -204,15 +207,18 @@ export interface ActionTextDeclaration {
 
 /**
  * [#34374 PR2] Build `ctx.text(key, params?)` for one invocation of an
- * action's sandboxed body. The organization is the action context's
- * `session.organizationId` (`buildActionSession`, both action doors); the
+ * action's sandboxed body, in `organizationId`'s language. The caller passes
+ * the body's own door caller's organization (`actionDoorCaller` in
+ * `body-runner.ts`: `executionContext.tenantId`, else `session.organizationId`)
+ * — the one reading every action door answers, `ObjectRepository.execute`
+ * included, which hands the handler a `tenantId` and no `session`. The
  * translation is read at the action's own address, never the object a caller
  * routed it under, so a bound action never reads `globalActions` and an
  * object-less one never reads an object's group.
  */
 export function buildActionTextSurface(
   action: ActionTextDeclaration,
-  actionCtx: { session?: { organizationId?: unknown } } | undefined,
+  organizationId: string | undefined,
   opts: HookTextOptions = {},
 ): HookTextSurface {
   const actionName = String(action.name);
@@ -222,5 +228,5 @@ export function buildActionTextSurface(
     messageKey: (key) => actionTextMessageKey(object, actionName, key),
     undeclaredAtRun: (key, declared) => undeclaredActionTextAtRun(actionName, key, declared),
   };
-  return buildDeclaredTextSurface(owner, action, actionCtx, opts);
+  return buildDeclaredTextSurface(owner, action, organizationId, opts);
 }

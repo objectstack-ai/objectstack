@@ -68,6 +68,8 @@ interface StackOptions {
   bundles?: Record<string, Record<string, unknown>>;
   /** What the settings service answers; absent ⇒ the host has no settings service. */
   settings?: SettingsAnswer;
+  /** Per-organization Localization answers, as a real settings store scopes them: an unscoped or other-organization read gets the `source: 'default'` placeholder. */
+  orgSettings?: Record<string, { value: unknown; source: string }>;
   /** The action is object-less (`globalActions`) rather than bound to the contact object. */
   objectLess?: boolean;
   /** The action's declared texts; absent ⇒ {@link TEXTS}, `null` ⇒ none declared. */
@@ -118,9 +120,13 @@ describe('#34374 PR2 — a script action writes its declared text in the organiz
     if (options.defaultLocale) i18n.setDefaultLocale(options.defaultLocale);
     for (const [locale, data] of Object.entries(options.bundles ?? {})) i18n.loadTranslations(locale, data);
     const asked: Array<{ tenantId?: string } | undefined> = [];
-    const settings = options.settings === undefined ? undefined : {
+    const settings = options.settings === undefined && options.orgSettings === undefined ? undefined : {
       async get(_ns: string, _key: string, ctx?: { tenantId?: string }) {
         asked.push(ctx);
+        if (options.orgSettings) {
+          const scoped = ctx?.tenantId ? options.orgSettings[ctx.tenantId] : undefined;
+          return scoped ?? { value: 'en-US', source: 'default' };
+        }
         const answer = options.settings!;
         if (typeof answer === 'function') answer();
         return answer as { value?: unknown; source?: string };
@@ -155,9 +161,10 @@ describe('#34374 PR2 — a script action writes its declared text in the organiz
 
   /**
    * Run the action as a caller whose own language is en-US, in organization
-   * `org_a` — the context both action doors hand a handler
+   * `org_a` — the context the REST and MCP action doors hand a handler
    * (`buildActionSession`: `session.organizationId` from the caller's
-   * `tenantId`) — and answer the stored activity subjects.
+   * `tenantId`) — and answer the stored activity subjects. The
+   * `ObjectRepository.execute` door, which passes no `session`, has its own case.
    */
   async function sendEmail(
     stack: { engine: ObjectQL; objectKey: string },
@@ -199,6 +206,24 @@ describe('#34374 PR2 — a script action writes its declared text in the organiz
 
     const placeholder = await makeStack({ defaultLocale: 'zh-CN', bundles, settings: { value: 'en-US', source: 'default' } });
     expect(await sendEmail(placeholder, { subject: 'Q3 renewal' })).toEqual(['邮件：Q3 renewal']);
+  }, 30000);
+
+  it('through repo.execute (tenantId, no session) writes the language SET in Localization for the caller\'s organization', async () => {
+    // `ObjectRepository.execute` hands the handler the caller's `tenantId` and
+    // an elevated `executionContext`, but no `session`: the organization is read
+    // off the body's own door caller (`executionContext.tenantId` first).
+    const stack = await makeStack({
+      defaultLocale: 'zh-CN',
+      bundles: { 'zh-CN': bundle(ZH), 'ja-JP': bundle(JA) },
+      orgSettings: { org_a: { value: 'ja-JP', source: 'organization' } },
+    });
+    await stack.engine
+      .createContext({ userId: 'u_probe', tenantId: 'org_a' })
+      .object(CONTACT.name)
+      .execute(ACTION_NAME, { params: { subject: 'Q3 renewal', recordId: 'c1' } });
+    const rows: any[] = await stack.engine.find(ACTIVITY.name, SYSTEM_READ);
+    expect(rows.map((r) => r.subject)).toEqual(['メール：Q3 renewal']);
+    expect(stack.asked).toContainEqual({ tenantId: 'org_a' });
   }, 30000);
 
   it('writes the declared sentence, holes filled, when the organization\'s language has no translation — and the action goes on', async () => {

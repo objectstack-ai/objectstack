@@ -678,19 +678,23 @@ export function actionBodyRunnerFactory(
       // the body runs and before its sandbox context is built.
       const subjectRefusal = actionSubjectRecordRefusal(actionCtx, action);
       if (subjectRefusal) throw subjectRefusal;
+      const doorCaller = actionDoorCaller(actionCtx);
       const sandboxCtx = buildActionSandboxContext(
         actionCtx,
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'action', name: action.name }),
         // [#34374 PR2] The action's declared texts, in the organization's
-        // language — the hook body's `ctx.text`, built by the same core.
-        buildActionTextSurface(action, actionCtx, { i18n: opts.i18n, getService: opts.getService, logger: opts.logger }),
+        // language — the hook body's `ctx.text`, built by the same core — for
+        // the door caller's organization, so every action door answers alike.
+        buildActionTextSurface(action, doorCaller.organizationId, {
+          i18n: opts.i18n, getService: opts.getService, logger: opts.logger,
+        }),
       );
       installBodyDoors(
         sandboxCtx,
         opts,
         { kind: 'action', name: action.name },
-        actionDoorCaller(actionCtx),
+        doorCaller,
         actionCtx?.executionContext?.transaction,
       );
       try {
