@@ -280,6 +280,39 @@ service is installed:
 | `list_datasets` | List the governed datasets (business metrics) you may query: their measures and dimensions with business labels, descriptions and synonyms, and which of the question's words each one matches exactly |
 | `query_dataset` | Compute a governed metric by the names `list_datasets` gives; the answer carries its provenance (the dataset and measures used) |
 
+### Each X with its latest Y: `latestPer`
+
+"Each account with its latest deal" is one `query_records` call. `latestPer`
+names the groups and the order that picks each group's row:
+
+```json
+{
+  "objectName": "crm_opportunity",
+  "where": { "stage": { "$ne": "closed_won" } },
+  "latestPer": { "by": ["account"], "orderBy": [{ "field": "close_date", "order": "desc" }] }
+}
+```
+
+- `by` takes 1 to 3 fields; `orderBy` takes 1 to 3 keys, each `asc` or `desc`.
+  The answer is one row per group: the group's first row in that order. A tie
+  goes to the record id, in the direction of the last key; an empty order value
+  ranks last.
+- The row is chosen among the rows the caller may read and the `where` admits:
+  a group whose newest row is hidden from the caller answers its newest row the
+  caller can read. Your own `orderBy`, `fields` and `offset` apply to the
+  answered rows.
+- `limit` counts groups (capped at 50, like any list). The answer is
+  `{ object, records, hasMore }` with no `total`; when more groups exist than
+  came back it also carries `truncated: true`.
+- A partition or order field the caller may not read is refused, as it is in
+  `orderBy`. A computed, JSON or multi-value field, or a dotted path, is refused
+  as a partition or order field.
+- The SQL drivers serve it (Postgres, MySQL, SQLite, and Turso on a local or
+  embedded-replica database). Elsewhere (the in-memory driver, Turso's remote
+  connection, MongoDB) the call is refused with `INVALID_QUERY` before anything
+  is read, as it is for an object with an `afterFind` hook or object-scoped read
+  middleware.
+
 ### Governed metrics and the `initialize` instructions
 
 `list_datasets` and `query_dataset` are registered with the `data:read` scope,
