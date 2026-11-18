@@ -373,12 +373,13 @@
           "translations",
           "acme_billing",
           "zh-CN",
+          "objects",
           "crm_account",
           "industry",
           "customer"
         ],
         "must_not_contain": [
-          "overrides"
+          "overrides:"
         ]
       }
     }
