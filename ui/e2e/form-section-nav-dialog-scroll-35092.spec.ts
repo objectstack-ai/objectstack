@@ -60,7 +60,10 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *     does.
  *   - The OLD jump (an element `scrollIntoView` on the heading, a frame after
  *     unfolding) is reproduced by the harness for the defect leg; it is the
- *     call this card removed, not code still in the tree.
+ *     call this card removed, not code still in the tree. The harness flushes
+ *     the unfold (`flushSync`), as a click on the real navigation does by
+ *     unfolding inside a React event, and each leg that runs it asserts its
+ *     frame found the last section's hidden inputs mounted.
  */
 
 const REPO_ROOT = uiRoot();
@@ -131,6 +134,7 @@ export const cn = (...parts) => parts.flat(Infinity).filter((p) => typeof p === 
 `,
     [ENTRY]: `
 import * as React from 'react';
+import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { FormSectionNav } from ${at(FORM_SECTION_NAV)};
 
@@ -199,11 +203,21 @@ function Harness() {
 }
 
 window.__harness = {
-  /** The jump this card removed: an element scrollIntoView, a frame after unfolding. */
+  /**
+   * The jump this card removed: an element scrollIntoView, a frame after
+   * unfolding. The unfold is flushed here: called from outside a React event
+   * the update is not flushed before the next frame, so the frame could run
+   * before the section's fields (and their hidden inputs) mounted. A click on
+   * the real navigation unfolds inside a React event, which flushes first.
+   * \`jumpSaw\` records what the frame found, so a leg can assert the jump ran
+   * against the unfolded section.
+   */
   oldJump(key) {
-    window.__harness.expand(key);
-    requestAnimationFrame(() =>
-      document.getElementById(anchorOf(key))?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    flushSync(() => window.__harness.expand(key));
+    requestAnimationFrame(() => {
+      window.__harness.jumpSaw = { hiddenInputs: document.querySelectorAll('input[aria-hidden="true"]').length };
+      document.getElementById(anchorOf(key))?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
   },
 };
 createRoot(document.getElementById('root')).render(h(Harness));
@@ -349,6 +363,16 @@ const read = (page: Page): Promise<Reading> =>
     };
   });
 
+type OldJumpHarness = { __harness: { oldJump(k: string): void; jumpSaw?: { hiddenInputs: number } } };
+
+/** Run the old jump to the last section, and assert its frame found that section's two hidden inputs mounted. */
+async function oldJumpToPrivacy(page: Page) {
+  await page.evaluate(() => (window as unknown as OldJumpHarness).__harness.oldJump('privacy'));
+  await page.waitForFunction(() => (window as unknown as OldJumpHarness).__harness.jumpSaw !== undefined);
+  const saw = await page.evaluate(() => (window as unknown as OldJumpHarness).__harness.jumpSaw);
+  expect(saw, 'the old jump ran before the last section unfolded').toEqual({ hiddenInputs: 2 });
+}
+
 /** Wait for every smooth scroll in the dialog to come to rest, and the click hold to end. */
 async function settle(page: Page) {
   await page.waitForTimeout(900);
@@ -376,7 +400,7 @@ test.describe('grouped record dialog: a section jump scrolls only the form (obje
     const before = await read(page);
     expect(before.dialogScrollTop).toBe(0);
 
-    await page.evaluate(() => (window as unknown as { __harness: { oldJump(k: string): void } }).__harness.oldJump('privacy'));
+    await oldJumpToPrivacy(page);
     await settle(page);
     const after = await read(page);
 
@@ -435,7 +459,7 @@ test.describe('grouped record dialog: a section jump scrolls only the form (obje
   test('either half alone is enough: the positioned scroller leaves the old jump nothing to scroll in the dialog box', async ({ page }) => {
     await openDialog(page, { scroller: CLS.scroller, viewport: DESKTOP });
     const before = await read(page);
-    await page.evaluate(() => (window as unknown as { __harness: { oldJump(k: string): void } }).__harness.oldJump('privacy'));
+    await oldJumpToPrivacy(page);
     await settle(page);
     const r = await read(page);
     expect(r.dialogScrollHeight).toBe(r.dialogClientHeight);
