@@ -88,3 +88,23 @@ describe('useActionModal: an object create form is titled by its object (#30126 
     expect(screen.queryByRole('heading', { name: 'Create Repair Ticket' })).toBeNull();
   });
 });
+
+/**
+ * A create descriptor's `initialValues` reach the form it opens
+ * (objectstack#35050): the lookup's "+ New" seeds the new record with the
+ * `dependsOn` value its picker filters by. Control: a descriptor without
+ * them opens an empty form.
+ */
+describe('useActionModal: a create descriptor opens its form with the seeded values (objectstack#35050)', () => {
+  const subject = () => screen.findByRole('textbox', { name: /subject/i }) as Promise<HTMLInputElement>;
+
+  it('a create descriptor with initialValues opens the form holding them', async () => {
+    await open({ objectName: 'repair_ticket', mode: 'create', initialValues: { subject: 'Seeded parent' } });
+    expect((await subject()).value).toBe('Seeded parent');
+  });
+
+  it('CONTROL: a create descriptor without them opens empty', async () => {
+    await open({ objectName: 'repair_ticket', mode: 'create' });
+    expect((await subject()).value).toBe('');
+  });
+});

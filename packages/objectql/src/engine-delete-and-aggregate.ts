@@ -161,7 +161,7 @@ export class DeleteAndAggregateFacet {
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
     // hook, default or validation runs, so a refusal costs nothing.
-    this.enforceTransactionOrigin(object, driver, 'delete');
+    this.enforceTransactionOrigin(object, driver, 'delete', options?.context?.transaction);
 
     // Fold the `filter` alias into `where` first — same reasoning as update()
     // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no

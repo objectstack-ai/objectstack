@@ -293,13 +293,44 @@ export function useNavigationSync(): UseNavigationSyncReturn {
     [apps],
   );
 
+  /**
+   * objectstack#35054 (route D) — the app as its author STORED it, the body a
+   * navigation write starts from (and its Undo puts back).
+   *
+   * The served list (`apps`) is translated for the console's locale: an app's
+   * label and every navigation label. A navigation write sends the whole app
+   * back, and the door stores a body verbatim, so writing the served copy
+   * stored the translations as source text, into every app a new page joined.
+   * The served list only finds the app here; its body comes from the
+   * untranslated layers (`getAuthoredItem`), read at the address `saveApp`
+   * writes (no package). An app with nothing stored to read is not written,
+   * and the failure is said once.
+   */
+  const storedApp = useCallback(
+    async (appName: string): Promise<AppComponentSchema | undefined> => {
+      const served = findApp(appName);
+      if (!served) return undefined;
+      const name = typeof served.name === 'string' && served.name ? served.name : appName;
+      try {
+        const read = adapterRef.current?.getAuthoredItem;
+        const stored = read ? await read.call(adapterRef.current, 'app', name) : null;
+        if (stored) return stored as unknown as AppComponentSchema;
+      } catch {
+        // Said below, as an absent body is.
+      }
+      toast.error(t('navigationSync.updateFailed'));
+      return undefined;
+    },
+    [findApp, t],
+  );
+
   // ------------------------------------------------------------------
   // Created
   // ------------------------------------------------------------------
 
   const syncPageCreated = useCallback(
     async (appName: string, pageName: string, label?: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -329,12 +360,12 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   const syncDashboardCreated = useCallback(
     async (appName: string, dashboardName: string, label?: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -362,7 +393,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   // ------------------------------------------------------------------
@@ -371,7 +402,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
 
   const syncPageDeleted = useCallback(
     async (appName: string, pageName: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -399,12 +430,12 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   const syncDashboardDeleted = useCallback(
     async (appName: string, dashboardName: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -432,7 +463,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   // ------------------------------------------------------------------
@@ -441,7 +472,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
 
   const syncPageRenamed = useCallback(
     async (appName: string, oldName: string, newName: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -469,12 +500,12 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   const syncDashboardRenamed = useCallback(
     async (appName: string, oldName: string, newName: string) => {
-      const app = findApp(appName);
+      const app = await storedApp(appName);
       if (!app) return;
 
       const prev = app.navigation ?? [];
@@ -502,7 +533,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
         toast.error(t('navigationSync.updateFailed'));
       }
     },
-    [findApp, saveApp, t],
+    [storedApp, saveApp, t],
   );
 
   // ------------------------------------------------------------------

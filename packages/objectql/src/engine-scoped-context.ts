@@ -44,6 +44,7 @@ import { appAutomationElevationOf, markAppAutomationElevation, resolveUserAuthzG
 import type { EngineTransactionInfo, EngineTransactionOptions } from '@objectstack/core';
 import { rolledBackRefusal } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
+import { forgetTrioTransactionScope, recordTrioTransactionScope } from './engine-execute-transactions.js';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import { UnscopedHookApi } from './hook-run-as.js';
 import { newUnitCommitQueue, openTrioCommitQueue, runOutsideOpenUnits, runOutsideOpenUnitsOnCommit, settleTrioCommitQueue, settleUnitCommitQueue, type UNIT_ROLLED_BACK } from './unit-detach.js';
@@ -334,6 +335,17 @@ export class ScopedContextFacet {
     // [#33760] The `async` after-hooks dispatched in this unit wait for the
     // trio's own commit, or are dropped by its rollback (`unit-detach.ts`).
     openTrioCommitQueue(trx);
+    // [#35028] The trio never publishes into `txStore`, so record here which
+    // driver owns the handle — the same scope `runOpenedUnit` publishes — for
+    // the same-origin gate to read when the handle comes back explicitly. A
+    // ledger row routed to another datasource then runs outside this
+    // transaction on its own connection, and a business write routed there is
+    // refused, exactly as inside `transaction(cb)`. Reached the same `as any`
+    // way as `runOpenedUnit`.
+    const engine = this.engine as any;
+    if (typeof engine?.newTransactionScope === 'function') {
+      recordTrioTransactionScope(trx, engine.newTransactionScope(driver));
+    }
     const ctx = this.derive({ ...this.executionContext, transaction: trx });
     return { ctx, handle: trx, owned: true };
   }
@@ -341,10 +353,15 @@ export class ScopedContextFacet {
   /** The body of `ScopedContext#commitTransaction`; the method's docblock there is its contract. */
   static async commitTransaction(this: Pick<ScopedContextHost, 'releaseJoinedHandle' | 'txDriver'>, handle: unknown): Promise<void> {
     if (this.releaseJoinedHandle(handle)) return;
-    const driver = this.txDriver();
-    if (!driver) return;
-    if (driver.commit) await driver.commit(handle);
-    else if (driver.commitTransaction) await driver.commitTransaction(handle);
+    // [#35028] Closed either way: a handle whose commit threw is no open unit.
+    try {
+      const driver = this.txDriver();
+      if (!driver) return;
+      if (driver.commit) await driver.commit(handle);
+      else if (driver.commitTransaction) await driver.commitTransaction(handle);
+    } finally {
+      forgetTrioTransactionScope(handle);
+    }
     settleTrioCommitQueue(handle, true);
   }
 
@@ -352,10 +369,15 @@ export class ScopedContextFacet {
   static async rollbackTransaction(this: Pick<ScopedContextHost, 'releaseJoinedHandle' | 'txDriver'>, handle: unknown): Promise<void> {
     if (this.releaseJoinedHandle(handle)) return;
     settleTrioCommitQueue(handle, false);
-    const driver = this.txDriver();
-    if (!driver) return;
-    if (driver.rollback) await driver.rollback(handle);
-    else if (driver.rollbackTransaction) await driver.rollbackTransaction(handle);
+    // [#35028] Closed either way, as on the commit face.
+    try {
+      const driver = this.txDriver();
+      if (!driver) return;
+      if (driver.rollback) await driver.rollback(handle);
+      else if (driver.rollbackTransaction) await driver.rollbackTransaction(handle);
+    } finally {
+      forgetTrioTransactionScope(handle);
+    }
   }
 
   /** The body of `ScopedContext#serveFormulaField`; the method's docblock there is its contract. */

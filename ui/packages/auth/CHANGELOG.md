@@ -1,5 +1,139 @@
 # @object-ui/auth
 
+## 18.6.0
+
+### Patch Changes
+
+- e53e02e: feat(console): a Mobile App page in the account app shows the code that connects the ObjectOS mobile app to this server
+  
+  Clause-②: yes (widening) — a new account-app navigation entry and component (`account:mobile_app`), a new `mobileApp` namespace in the `@object-ui/i18n` packs, and a new optional `features.publicBaseUrl` served on `GET /api/v1/auth/config` (declared in `AuthFeaturesConfigSchema`, registered in `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS`, typed on `AuthPublicConfig`); nothing that worked before is refused
+  Metadata-protocol: added
+  
+  The account app (avatar menu → Profile) gains a **Mobile App** entry after Profile. Its page shows a QR code that encodes `objectos://connect?server=<this server's public base URL, URL-encoded>`, the same link as copyable text, and one line saying the code holds only the server's address, never the account.
+  
+  `GET /api/v1/auth/config` now serves `features.publicBaseUrl`: the base URL the auth layer builds every link from (`OS_AUTH_URL`, then `BETTER_AUTH_URL`, then `OS_BASE_URL`), with any sub-path mount, as an address only (scheme, host and path; a credential, query or fragment in the setting is never served). The page encodes that URL. The page normalises it the same way again before use, so the code carries the server's address and nothing else. The browser's own address is never used, because it can be an internal or proxied host. When that URL names `localhost` or a private address, or a public host on plain `http:` (the mobile app signs in through it, so it must be HTTPS), the page shows no code and says how to fix it: set `OS_AUTH_URL` on the server to its public `https://` address and restart it. A server that does not publish the field gets a page saying it does not offer this yet.
+  
+  No app-store links are shown: no setting carries them today.
+- 3372da0: fix(plugin-auth)!: under the local sign-in path `off`, the auth settings save keeps a way to sign in, and a client the IP allow-list refuses at the direct sign-in door lands on the sign-in page
+  
+  Clause-②: yes (narrowing) — narrowed: with direct sign-in on and its local sign-in path `off` (`directSignIn.localSignIn: 'off'`, or `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=off`), an auth settings save (`PUT /api/settings/auth`) that turns Google off, or clears a Google client credential no environment variable backs, while Google is the last way in the sign-in page offers answers `400 SETTINGS_VALIDATION` with the new copy `googleLocalOff` and saves nothing, where it saved, even with email and password (or phone sign-in) switched on; and a `GET /api/v1/auth/sign-in/direct` from a client the IP allow-list refuses answers `302` to the Console's `/login?error=IP_NOT_ALLOWED` (keeping a same-origin `?redirect=`), where it answered the `403 IP_NOT_ALLOWED` JSON body. Widened: under `off` with nothing else in force (no Google, no identity provider row, no social or OIDC provider with credentials, no host sign-in handoff), a save of `email_password_enabled: false` answers `200` and saves, where it answered `400 SETTINGS_VALIDATION`, because the sign-in page offers no email and password there either way; module exports (not on the package entry) `DIRECT_SIGN_IN_NETWORK_REFUSED`, `isDirectSignInDoorNavigation` and `directSignInNetworkRefusal`; a `googleLocalOff` key on the sign-in floor copy, in all 11 locales; the `@object-ui/i18n` key `auth.login.errors.networkNotAllowed`, in all 11 shipped locales (no key renamed or removed); the Console sign-in page explains `?error=IP_NOT_ALLOWED`; `markSignOutRoundTrip` in `@object-ui/auth` takes the sign-in page path it records.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches direct sign-in, the auth settings save, the IP allow-list or the sign-out note; `content/docs/permissions/sso.mdx` gains the rules in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answers are a runtime refusal of one settings save under a deployment switch and the status of one refused auth navigation, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment running direct sign-in with the local sign-in path `off`: saving the auth settings with Google off (or with an unbacked Google client credential cleared) while Google is the last way in the sign-in page offers is refused `400 SETTINGS_VALIDATION` and nothing is saved, unless another way in the page offers remains (another identity provider row, a social or OIDC provider with a client ID and secret, or a host sign-in handoff). Email and password and phone sign-in do not count there, because the page does not offer them; turning email and password on in the same save does not help. Before, the save went through and the sign-in page then showed "No sign-in method is available". Also **BREAKING** for anything that reads the status of `GET /api/v1/auth/sign-in/direct` from a client outside the IP allow-list: it is now `302` to `/login?error=IP_NOT_ALLOWED` with no cookie set, instead of the `403` JSON body.
+  
+  Unchanged: the local sign-in path `hidden` (the default) and direct sign-in off, where email and password and phone sign-in count as before; the IP allow-list itself, which does not exempt the door: nothing is started and no provider is read for a refused client, every other auth request from it (including a `POST` to the door and the door path with a trailing slash) is still refused `403 IP_NOT_ALLOWED`, and the refusal is still audited and logged.
+  
+  What to do: nothing, unless you turn Google off as the last way in under `off`, or switch email and password off there. Register another identity provider first, or set `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden` (with email and password sign-in on) and restart. If email and password sign-in was switched off under `off` (that save is no longer refused), setting the local path back to `hidden` is not enough: set `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` as well, then restart. A client that checked the door's `403` status should check for the `302` to `/login?error=IP_NOT_ALLOWED` instead.
+  
+  Also fixed: the `503` sentence for a provider delete whose provider list could not be read now says the sign-in page offers no email and password, which is true under both reasons the check runs; and the note a provider-logout sign-out leaves in the tab now records the sign-in page the provider returns to, and only a load of that page reads it, so a provider that never sends the browser back no longer makes the next deep link opened in that tab drop its `?redirect=`.
+- 842637a: feat(auth): an invitation is accepted in one step with the proof its mail carries
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The invitation mail carries a mailbox proof.** The accept link in the mail carries a single-use proof bound to the invitation, its address and its expiry; a resend retires it. The proof is never at rest in clear, the stored mail row never holds the proof, and the console's copy-link action answers the link without it. The invitation mail is sent inline, never through the durable mail queue, because the queue delivers from the stored row.
+  - **One door redeems it.** `POST /api/v1/auth/organization/accept-invitation-one-step` takes the invitation id, the proof, a name and a password. In one request it creates the account (or sets the password of an account whose address is not verified, ending every session that account had with the reason a password reset records, in an order that matches the vendor's order), verifies the address, accepts the invitation and signs in. The password-age stamp and the forced-change clear that every password change writes are written too. On an account whose password it replaces, the password history is consulted before the proof is spent and extended after, as the reset door does. The proof is spent only by a request that passed every gate; one server process serializes concurrent redemptions of a proof, and across server processes single use is as strong as the store's consume. A bad proof gets one `INVALID_TOKEN` refusal that does not say which check failed, and the real proof stays usable. The door is rate-limited per client network address and per invitation, and runs the sign-up gates before anything is written: email sign-up switched off, SSO-only mode, password length, complexity and breach checks, a name for a new account, and who may sign up. A refused request leaves the proof usable.
+  - **An address with an account signs in as today.** The door sets a password on an existing account only when it reads all of these: the address is not verified; the account's only sign-in account is its email and password one, or it has none; it has no second factor, enabled or enrolled; its user row holds no phone number, verified or not; it holds no standing grant (an API key, an OAuth client consent, an OAuth access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM credential or a link to an identity provider's directory, revoked or expired ones included); its identity source is local; and the server allows a local password here (not SSO-only, email and password on). Every other account answers `sign_in`, including one in a state no rule names and one whose reading fails, and the proof stays unspent. Every reading is taken again once the account's sessions are revoked and before the password is written; an account that no longer passes then answers `sign_in` with its sessions revoked, and the proof stays unspent. Every store this plugin mounts that is keyed by a user, and every column of the vendor's user model with every plugin this plugin can mount, is classified as a claim the judge reads or as no claim, and a test holds each classification to what is mounted. The classification covers what this plugin mounts and nothing another package mounts.
+  - **`sys_device_code` gains an index on `user_id`** (`@objectstack/platform-objects`), so the door reads a user's device authorizations by an indexed lookup, as it reads every other standing grant.
+  - **A cloud-managed environment refuses it.** With `OS_CLOUD_MANAGED=1` the door sets no local password: a request carrying a proof answers `409 RESOURCE_CONFLICT`, the cloud-managed refusal, before the proof is read. `CLOUD_MANAGED_REFUSAL_MESSAGES` gains the door's message. A process without the variable is unaffected.
+  - **Without the proof, a session must hold the verified invited address.** Called with a session and no proof, the door accepts only when the session's address is the invited one and verified, and otherwise answers `verify_email`. A copied link still owes the verification mail.
+  - **`SendTemplateInput.deliverOnlyData`** (`@objectstack/spec`): render values delivered with the message and never written to the stored mail row, which gives no sign they were overlaid. Required template variables are checked against `data` alone. A send carrying them is delivered inline, never through the durable queue, so its sender gives up queued delivery where a queue is mounted. Only the server-side template send declares the key; `POST /email/send` and a script's `ctx.email.send` take a `SendEmailInput`, which has none.
+  - **The accept page offers one form.** A signed-out visitor whose link carries the proof sees a name and password form, or a provider sign-in, in place of the sign-in redirect. The accept page does not keep the proof in its address. A provider sign-in returns to the page, which redeems the invitation for the new session. A link without the proof keeps today's path. The `@object-ui/auth` client gains `acceptInvitationOneStep`, with the types `AuthInvitationOneStepInput` and `AuthInvitationOneStepOutcome`.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

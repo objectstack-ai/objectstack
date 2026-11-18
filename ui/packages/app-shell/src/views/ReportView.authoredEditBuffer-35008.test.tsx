@@ -149,6 +149,8 @@ function makeClient({ draft }: { draft: typeof SOURCE | null }) {
   return {
     // The served draft read (`RuntimeDraftBar`): translated, like every served read.
     get: vi.fn(async () => (draft ? served(draft) : null)),
+    // The served draft read the editor hands `authoredBuffer` (objectstack#35054): the envelope, translated.
+    getDraft: vi.fn(async () => (draft ? { type: 'report', name: draft.name, item: served(draft) } : null)),
     layered: vi.fn(async () => ({ code: null, overlay: null, overlayScope: null, effective: SOURCE, draft })),
     save: vi.fn(async () => ({})),
     publish: vi.fn(async () => ({})),
@@ -210,6 +212,35 @@ describe('the report quick edit edits the authored report (objectstack#35008, Re
     expect(body.description).toBe('Edited description');
     // The draft bar still reads the draft, for its indicator and Publish.
     expect(client.value.get).toHaveBeenCalledWith('report', 'task_overview', { state: 'draft' });
+  });
+
+  it('a pending draft whose stored copy the layers do not serve opens no editor (objectstack#35054)', async () => {
+    const pending = { ...SOURCE, description: 'Draft description' };
+    client.value = {
+      ...makeClient({ draft: pending }),
+      // The served draft read answers a pending draft; the layered read serves no `draft` layer.
+      layered: vi.fn(async () => ({ code: null, overlay: null, overlayScope: null, effective: SOURCE })),
+    };
+    mountReport();
+    fireEvent.click(await screen.findByTestId('report-edit-button'));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    // Read at the address the layers were read at.
+    expect(client.value.getDraft).toHaveBeenCalledWith('report', 'task_overview', { packageId: PKG });
+    expect(screen.queryByTestId('report-config-panel')).toBeNull();
+    expect(client.value.save).not.toHaveBeenCalled();
+  });
+
+  it('control: the same layers with no draft pending open the published report', async () => {
+    client.value = {
+      ...makeClient({ draft: null }),
+      layered: vi.fn(async () => ({ code: null, overlay: null, overlayScope: null, effective: SOURCE })),
+    };
+    mountReport();
+    fireEvent.click(await screen.findByTestId('report-edit-button'));
+
+    await screen.findByTestId('report-config-panel');
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it('with nothing authored to read the editor does not open, and nothing is saved from the served copy', async () => {

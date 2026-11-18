@@ -492,6 +492,21 @@ recomputes after each row, so each row's rules, and the parent's own rules
 judging each recompute, read it as one-by-one updates would, for every summary
 function, `avg` included. A `parent.` predicate that reads a field that is not a
 summary, and is not calculated from one, does not count.
+**A predicate update equals one-by-one updates too:** an update that selects
+its rows by a filter (`update(object, patch, { where, multi: true })`, a flow
+`update_record` step with `multi: true`) judges every matched row before its
+one write. A validation rule reading a parent summary one hop through a
+reference, a detail object's `requiredWhen` reading it on `parent`, and a rule
+reading a formula or stored computed field of the parent calculated from it,
+read it as the matched rows judged before leave it, for every summary function,
+`avg` included, and a row that moves to another parent leaves the old one and
+joins the new one. If any row is refused, none is written. Three cases keep
+reading the stored value for every parent the update reads that summary for: a
+summary whose `filter` reads through another reference, as a dotted path or in
+the nested form `{ account: { status: 'x' } }` (or one the in-memory filter
+cannot evaluate), a summary meeting a value that is not a number, and a `min` / `max`
+when one parent holds more than 5,000 matched rows. A rule of the parent
+itself judges the summary once, after the write.
 **Hooks and flow steps read the value from before the batch:** inside one bulk
 create or bulk update, a hook or flow step that reads a parent's summary reads
 it as stored before the batch, on create and update alike.

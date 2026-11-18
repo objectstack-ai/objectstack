@@ -103,19 +103,19 @@ const silentLogger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debu
 function seeds(organizationId?: string) {
   return {
     seeds: [
-      { object: 'sys_business_unit', externalId: 'code', mode: 'insert', env: ['prod', 'dev', 'test'],
+      { object: 'sys_business_unit', externalId: 'code', mode: 'ignore', env: ['prod', 'dev', 'test'],
         records: [{ name: 'Head Office', code: 'HQ' }] },
-      { object: 'my_app_widget', externalId: 'sku', mode: 'insert', env: ['prod', 'dev', 'test'],
+      { object: 'my_app_widget', externalId: 'sku', mode: 'ignore', env: ['prod', 'dev', 'test'],
         records: [
           { name: 'Gizmo', sku: 'G-1' },
           // Carries its own organization: that IS an explicit owner.
           { name: 'Pinned', sku: 'P-1', organization_id: 'org_named_by_author' },
         ] },
-      { object: 'billing_license', externalId: 'sku', mode: 'insert', env: ['prod', 'dev', 'test'],
+      { object: 'billing_license', externalId: 'sku', mode: 'ignore', env: ['prod', 'dev', 'test'],
         records: [{ name: 'Site licence', sku: 'L-1' }] },
     ],
     config: {
-      dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'insert', batchSize: 1000,
+      dryRun: false, haltOnError: false, multiPass: true, defaultMode: 'ignore', batchSize: 1000,
       transaction: false, ...(organizationId ? { organizationId } : {}),
     },
   } as never;

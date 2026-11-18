@@ -53,6 +53,35 @@ function scrollParentOf(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
+/**
+ * Bring a section heading to the top of its own scroller — the nearest
+ * ancestor that scrolls, or the window — and move nothing else.
+ *
+ * Not an element `scrollIntoView`: that scrolls every scrollable ancestor,
+ * an `overflow: hidden` box included. In the record dialog the dialog box
+ * itself is one: absolutely positioned hidden inputs in the form (a Radix
+ * checkbox's or select's native stand-in) can overflow it, and a short last
+ * section that the form's scroller cannot bring to the top hands the rest of
+ * the distance to the dialog box, which scrolls its title, this navigation
+ * and the footer out of view with no way back (objectstack#35092).
+ *
+ * The heading's `scroll-margin-top` and the scroller's `scroll-padding-top`
+ * are kept, as `scrollIntoView` keeps them.
+ */
+function scrollToHeading(heading: HTMLElement) {
+  const scroller = scrollParentOf(heading);
+  const margin = parseFloat(getComputedStyle(heading).scrollMarginTop) || 0;
+  const headingTop = heading.getBoundingClientRect().top;
+  if (scroller) {
+    const padding = parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+    const viewTop = scroller.getBoundingClientRect().top + scroller.clientTop;
+    scroller.scrollTo({ top: scroller.scrollTop + headingTop - viewTop - margin - padding, behavior: 'smooth' });
+  } else {
+    const padding = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
+    window.scrollTo({ top: window.scrollY + headingTop - margin - padding, behavior: 'smooth' });
+  }
+}
+
 export interface FormSectionNavProps {
   /** The sections the form reported — `useFormSectionNav().items`. */
   items: FormSectionNavItem[] | null;
@@ -163,8 +192,10 @@ export function FormSectionNav({ items, className }: FormSectionNavProps) {
     }, CLICK_HOLD_MS);
     jumpedTo.current = item.anchorId;
     setCurrent(item.key);
-    const reveal = () =>
-      document.getElementById(item.anchorId)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    const reveal = () => {
+      const heading = document.getElementById(item.anchorId);
+      if (heading) scrollToHeading(heading);
+    };
     if (item.collapsed) {
       item.expand();
       // The unfolded fields mount on the next render; scroll once they have.
