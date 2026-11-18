@@ -88,6 +88,10 @@ vi.mock('./useMetadata', async (importOriginal) => {
   };
 });
 
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay
+// its load at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { MetadataResourceEditPage } from './ResourceEditPage';
 import { registerMetadataPreview, getMetadataPreview } from './preview-registry';
 
