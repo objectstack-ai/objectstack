@@ -16,8 +16,17 @@
  *   its access         POST /api/v1/data/sys_user_permission_set { user_id,
  *                      permission_set, organization_id } — a user with no app permission
  *                      set reads `PERMISSION_DENIED` on every app object
- *   a seed row         POST /api/v1/data/:object with the card's own `id` (accepted
- *                      verbatim, so a lookup value in the seed names the real row)
+ *   the seed rows      the managed install door below, with a data-only package whose
+ *                      `data[]` holds them (`loadSeedRows` in `orchestrate.ts`): the
+ *                      platform's seed loader writes them under its seed posture, which
+ *                      skips the `state_machine` rule a user write meets. Measured on a
+ *                      blank 18.5.0 host with the travel_expense build installed: every
+ *                      row keeps the card's own `id`, a lookup value names the row
+ *                      seeded under it, a user id in `owner_id` or a `user` field lands
+ *                      as sent, and the answer's `data.seeded.errorList` names each row
+ *                      refused (`sourceObject`, `recordIndex`, `message`; no code). A
+ *                      second package claiming a namespace another holds is refused
+ *                      (`PLUGIN_REGISTER_FAILED`), so each load takes its own
  *   a waiting lookup   PATCH /api/v1/data/:object/:id with the bare field patch (the
  *                      seed's second pass, `seedApp` in `orchestrate.ts`; read from the
  *                      route's source, `packages/rest/src/crud-routes.ts`, not yet
@@ -149,8 +158,10 @@ export interface AppHarness {
    * The same build installed managed (`installMode: 'managed'`): what ask mode
    * falls back to when the unmanaged door refuses the build
    * `UNMANAGED_INSTALL_UNCOPYABLE` (`withInstalledBuild` in `orchestrate.ts`).
+   * It is also the door the seed loads through: a data-only package whose
+   * `data[]` holds the rows (`loadSeedRows` in `orchestrate.ts`).
    * Optional, so a harness written before the fallback keeps compiling; without
-   * it that refusal stays the mode's finding.
+   * it that refusal stays the mode's finding, and every seed row is refused.
    */
   installManaged?(manifest: Record<string, unknown>): Promise<HttpAnswer>;
   /** The environment's metadata of every collection the template carries, as an artifact. */

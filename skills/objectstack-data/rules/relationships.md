@@ -19,7 +19,6 @@
 ### One-to-Many: lookup
 
 ```typescript
-// Child: Contact (independent lifecycle) of an account
 export default ObjectSchema.create({
   name: 'contact',
   sharingModel: 'public_read_write',
@@ -138,7 +137,6 @@ export default ObjectSchema.create({
     hours_allocated: { type: 'number' },
   },
   indexes: [
-    // One assignment per (project, employee) pair.
     { fields: ['project_id', 'employee_id'], unique: 'organization' },
   ],
 });
@@ -186,7 +184,6 @@ A parent `summary` field aggregates a child collection. The engine recomputes it
 transaction as the write, so it's consistent).
 
 ```typescript
-// On the PARENT object:
 {
   type: 'summary',
   summaryOperations: {
@@ -228,16 +225,21 @@ where you can; declared late, run the migration before you call the number ready
 **Never finish with `security-rollup-source-unreadable` standing.** The total
 covers every child row and answers only to the parent field's own access, so
 `os build` warns for each permission set that reads the summary but not the
-child object, the aggregated field, or a field `filter` tests. Decide per set:
-it should see the children → grant the read; it should not → mask the summary
-on that set, after removing any View All / Modify All it holds on the parent
-(either overrides the mask).
+child object, the aggregated field, or a field `filter` tests. Decide per set
+from the request: it sees the children → grant the read; the total but not the
+children → keep the column readable and add `rollupSourceUnreadableReason` to
+the set's entry for it (the warning becomes a note quoting the reason; refused
+blank or beside `readable: false`); neither → mask the summary on that set,
+after removing any Modify All it holds on the parent (it overrides the mask).
+Never add the reason to silence a total the request withholds: mask it.
 
 ```typescript
 definePermissionSet({
   name: 'client_viewer',
   objects: { project: { allowRead: true } },  // no `task` read: warned
   fields: { 'project.task_count': { readable: false } },  // the mask: resolved
+  // or, clients are meant to see the count: acknowledged, a note
+  // fields: { 'project.task_count': { readable: true, rollupSourceUnreadableReason: 'Clients see progress counts, not tasks' } },
 })
 ```
 
@@ -288,13 +290,9 @@ inlineEdit: 'grid'     // editable line-item grid (fast bulk entry; thin childre
 inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL form
 ```
 
-- **`'grid'`** — best for *thin* line items
-  (invoice/order lines): few columns, high volume, keyboard-fast.
-- **`'form'`** — best for *fat* children (long text, attachments, many fields)
-  that don't fit a narrow grid cell.
-- **`true`** / omitted — **smart default**: picks `form` when the child has
-  rich/form-only fields (textarea, file, image, json, location…) or more than ~8
-  editable fields, else `grid`. Set the string to override.
+**`true`** / omitted — **smart default**: picks `form` when the child has
+rich/form-only fields (textarea, file, image, json, location…) or more than ~8
+editable fields, else `grid`. Set the string to override.
 
 **Modeling a `'grid'` line item for the full editor.** The grid lights up extra
 behaviors purely from how you model the child + parent:
@@ -344,14 +342,12 @@ InvoiceLine = {
 
 ### Detail-page related lists (the read-side mirror)
 
-Where `inlineEdit` is the **write** side, the **related list** on the parent's record detail page is the **read**
-side. You usually don't declare it: every child relationship
+You usually don't declare the **related list** on the parent's record detail page: every child relationship
 (`master_detail` and `lookup`) is shown **by default** — owned (`master_detail`)
 children first. The relationship
 flags exist to *refine* that:
 
 ```typescript
-// On the CHILD object's FK field:
 project: {
   type: 'master_detail',
   reference: 'project',
@@ -367,8 +363,7 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 
 `relatedList` is tri-state — placement:
 
-- `'primary'` — part of the record's main content: a full-width table in the
-  record's detail body. Default for a `master_detail` FK with `inlineEdit`.
+- `'primary'` — a full-width table in the record's detail body. Default for a `master_detail` FK with `inlineEdit`.
 - `false` — the child object is not shown on the parent record page.
 - `true`, or omitted (except inline-edited `master_detail`) — an auxiliary
   panel on the record page.

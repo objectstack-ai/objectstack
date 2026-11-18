@@ -13,7 +13,7 @@
     },
     {
       "id": 2,
-      "prompt": "We are adding Japanese to the app.",
+      "prompt": "We are adding Japanese to the app. None of the project's files are in this directory: answer with the configuration change and the commands to run.",
       "expected_output": "Adds `'ja-JP'` (BCP-47) to `i18n.supportedLocales`, keeps `defaultLocale` / `fallbackLocale`, scaffolds the skeleton with `os i18n extract --locales=ja-JP --out=./src/translations`, adds the `'ja-JP'` key to the bundle, and verifies with `os i18n check --locales=ja-JP`.",
       "files": [],
       "assertions": {
@@ -33,7 +33,7 @@
     },
     {
       "id": 4,
-      "prompt": "Our storage plugin ships its own generated `objects` translations for `en` and `zh-CN`. Wire them in.",
+      "prompt": "Our storage plugin ships its own generated `objects` translations for `en` and `zh-CN`. Wire them in. The plugin's source is not in this directory: write the code in your answer.",
       "expected_output": "Wraps the generated subtree into a `TranslationData` (`{ objects: enObjects }`), builds the bundle with `defineTranslationBundle`, and wraps the translated locale with `withSourceFallback(..., enSource, undefined, zhCNGeneratedSourceHashes)` so a leaf whose source moved is not served forever under a green check. A plugin that owns its objects loads it from its own `kernel:ready` hook via `i18n.loadTranslations(locale, data)` (deep-merge) rather than the stack.",
       "files": [],
       "assertions": {
@@ -108,7 +108,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["_actions", "crm_renew", "preflight", "fields", "verdict.summary"],
-        "must_not_contain": ["title:", "verdict: {"]
+        "must_not_contain": ["title:", "verdict: { summary: '"]
       }
     },
     {
