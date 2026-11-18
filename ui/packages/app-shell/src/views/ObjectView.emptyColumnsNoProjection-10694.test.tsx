@@ -175,6 +175,8 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
   };
 });
 
+// Paid at collection, not in a case's clock: the view inspector's CEL authoring loads it on demand.
+import '@objectstack/lint';
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { localListStateKey } from '../context/ListPreferencesProvider';
