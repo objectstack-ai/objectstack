@@ -1800,26 +1800,6 @@ function wireCodeOf(err: unknown, thrownCode: string): string {
 }
 
 /**
- * [ADR-0090 D10 — ruling 2026-09-08, consequence 2] Attach the D10 narrowing
- * notice to a query result WITHOUT reshaping it.
- *
- * The bridge's `query` is typed `Promise<unknown>`, and the shape that ships is
- * the protocol's `{ object, records, total }` — so the object case adds two
- * keys beside the existing ones, mirroring `list_objects`' `partial` / `warning`
- * pair so a client branches on the same vocabulary on both tools. Anything that
- * is NOT a plain object (a bare array from some future bridge) keeps its own
- * shape and carries the notice alongside: inventing a `records` wrapper there
- * would break a caller to deliver a warning about breaking callers.
- */
-function withDelegationNotice(value: unknown, statement: string): unknown {
-  const notice = { delegationNarrowed: true as const, warning: statement };
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    return { ...(value as Record<string, unknown>), ...notice };
-  }
-  return { result: value, ...notice };
-}
-
-/**
  * [#35138] May `query_records` read one row past its page, to learn whether
  * the page was capped?
  *
@@ -1865,6 +1845,26 @@ function servedQueryPage(result: unknown, page: number, probed: boolean): unknow
     ...(probed && typeof answer.hasMore === 'boolean' ? { hasMore: truncated } : {}),
     ...(truncated ? { truncated: true as const } : {}),
   };
+}
+
+/**
+ * [ADR-0090 D10 — ruling 2026-09-08, consequence 2] Attach the D10 narrowing
+ * notice to a query result WITHOUT reshaping it.
+ *
+ * The bridge's `query` is typed `Promise<unknown>`, and the shape that ships is
+ * the protocol's `{ object, records, total }` — so the object case adds two
+ * keys beside the existing ones, mirroring `list_objects`' `partial` / `warning`
+ * pair so a client branches on the same vocabulary on both tools. Anything that
+ * is NOT a plain object (a bare array from some future bridge) keeps its own
+ * shape and carries the notice alongside: inventing a `records` wrapper there
+ * would break a caller to deliver a warning about breaking callers.
+ */
+function withDelegationNotice(value: unknown, statement: string): unknown {
+  const notice = { delegationNarrowed: true as const, warning: statement };
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...(value as Record<string, unknown>), ...notice };
+  }
+  return { result: value, ...notice };
 }
 
 function jsonText(value: unknown): string {
