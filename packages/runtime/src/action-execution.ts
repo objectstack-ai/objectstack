@@ -979,7 +979,9 @@ export async function callData(deps: ActionExecutionDeps,
                     ...(params.timezone ? { timezone: params.timezone } : {}),
                     ...(executionContext ? { context: executionContext } : {}),
                 },
-                ...(orderCut !== undefined ? [{ [AGGREGATE_ORDER_CUT]: orderCut }] as const : [] as const),
+                ...(orderCut !== undefined
+                    ? [{ [AGGREGATE_ORDER_CUT]: orderCut } as Parameters<typeof engine.aggregate>[2]] as const
+                    : [] as const),
             );
             if (orderCut === undefined) return { object: params.object, rows: rows ?? [] };
             if (orderCut.outcome?.kind !== 'served') {
