@@ -252,19 +252,6 @@ export interface McpDataBridge {
    * only where one was established.
    */
   diagnoseDelegation?(object: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
-  /**
-   * [#35138] The caller's locale ladder for a sentence the tools compose into
-   * a result (`ifNotRecorded`): the codes in order, the shared picker
-   * (`pickSentenceLocale`, `@objectstack/core`) choosing the first language
-   * the sentence is written in, `en` below all. The HTTP bridge answers
-   * `userTextLocalesOf` over the request's `ExecutionContext`, the ladder the
-   * dataset tools' `nextStep` reads on that door; the stdio bridge answers the
-   * principal's ladder, then the i18n service's default.
-   *
-   * OPTIONAL: a bridge that omits it, or whose answer throws, is written to in
-   * `en`.
-   */
-  userTextLocales?(): Promise<readonly string[]>;
   get(object: string, id: string): Promise<unknown>;
   create(object: string, data: Record<string, unknown>): Promise<unknown>;
   update(object: string, id: string, data: Record<string, unknown>): Promise<unknown>;
@@ -293,6 +280,19 @@ export interface McpDataBridge {
       timezone?: string;
     },
   ): Promise<unknown[]>;
+  /**
+   * [#35138] The caller's locale ladder for a sentence the tools compose into
+   * a result (`ifNotRecorded`): the codes in order, the shared picker
+   * (`pickSentenceLocale`, `@objectstack/core`) choosing the first language
+   * the sentence is written in, `en` below all. The HTTP bridge answers
+   * `userTextLocalesOf` over the request's `ExecutionContext`, the ladder the
+   * dataset tools' `nextStep` reads on that door; the stdio bridge answers the
+   * principal's ladder, then the i18n service's default.
+   *
+   * OPTIONAL: a bridge that omits it, or whose answer throws, is written to in
+   * `en`.
+   */
+  userTextLocales?(): Promise<readonly string[]>;
   /**
    * [ADR-0149 D2] `list_datasets`: the governed datasets this caller may
    * query, each with its dimensions and measures, their business vocabulary,

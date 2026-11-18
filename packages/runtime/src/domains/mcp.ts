@@ -1219,10 +1219,6 @@ export function buildMcpBridge(
                 return { narrowed: false };
             }
         },
-        // [#35138] The caller's locale ladder for a sentence the record tools
-        // compose (`ifNotRecorded`): this request's, as the dataset tools'
-        // `nextStep` reads it on this door (`userTextLocalesOf`).
-        userTextLocales: async (): Promise<readonly string[]> => userTextLocalesOf(ec),
         get: async (object: string, id: string) => {
             const res: any = await callData('get', { object, id }, driver, envId, ec);
             return res?.record ?? res ?? null;
@@ -1247,6 +1243,10 @@ export function buildMcpBridge(
             );
             return res?.rows ?? [];
         },
+        // [#35138] The caller's locale ladder for a sentence the record tools
+        // compose (`ifNotRecorded`): this request's, as the dataset tools'
+        // `nextStep` reads it on this door (`userTextLocalesOf`).
+        userTextLocales: async (): Promise<readonly string[]> => userTextLocalesOf(ec),
 
         // ── Skill metadata → MCP prompts (#3905) ──────────────────
         // ADR-0063 §2 names skills the only third-party extension primitive,
