@@ -9,7 +9,7 @@
  */
 
 import * as React from 'react';
-import { clampDockWidth, DOCK_DEFAULT_WIDTH, DOCK_KEYBOARD_STEP } from '../../layout/chatDockState.js';
+import { DOCK_CONTENT_MIN_WIDTH, DOCK_DEFAULT_WIDTH, DOCK_KEYBOARD_STEP } from '../../layout/chatDockState.js';
 
 export type StudioSlotMode = 'props' | 'copilot';
 
@@ -17,10 +17,30 @@ export type StudioSlotMode = 'props' | 'copilot';
  * objectstack#34725 — the slot's width: the console drawer's default (420 px,
  * `DOCK_DEFAULT_WIDTH`), resizable from its left edge and remembered per
  * browser under its own key, so a width dragged here never moves the console
- * drawer's. The drag keeps the canvas at least `DOCK_CONTENT_MIN_WIDTH` wide
- * (`clampDockWidth`); the widened copilot is the one other width (`wideWidth`).
+ * drawer's. objectstack#35061 — the drag stays within the slot's own range
+ * (`clampStudioSlotWidth`), and still keeps the canvas at least
+ * `DOCK_CONTENT_MIN_WIDTH` wide; the widened copilot is the one other width
+ * (`wideWidth`), outside that range.
  */
 export const STUDIO_SLOT_WIDTH_STORAGE_KEY = 'studio-right-slot-width';
+
+/** objectstack#35061 — the slot is never narrower than this. */
+export const STUDIO_SLOT_MIN_WIDTH = 320;
+/** objectstack#35061 — the slot is never wider than this (the in-place widen aside). */
+export const STUDIO_SLOT_MAX_WIDTH = 560;
+
+/**
+ * Clamp a desired slot width into {@link STUDIO_SLOT_MIN_WIDTH}–{@link STUDIO_SLOT_MAX_WIDTH},
+ * and never so wide that the canvas drops under `DOCK_CONTENT_MIN_WIDTH`; the lower
+ * bound wins when the two meet. `viewportWidth <= 0` (unmeasured) skips the canvas
+ * bound. Pure + exported for tests.
+ */
+export function clampStudioSlotWidth(desired: number, viewportWidth: number): number {
+  const canvasBound =
+    viewportWidth > 0 ? viewportWidth - DOCK_CONTENT_MIN_WIDTH : Number.POSITIVE_INFINITY;
+  const upper = Math.max(STUDIO_SLOT_MIN_WIDTH, Math.min(STUDIO_SLOT_MAX_WIDTH, canvasBound));
+  return Math.min(Math.max(desired, STUDIO_SLOT_MIN_WIDTH), upper);
+}
 
 function readStoredSlotWidth(): number {
   try {
@@ -58,8 +78,8 @@ export function useStudioSlotWidth(): StudioSlotWidth {
     (e: React.PointerEvent) => {
       e.preventDefault();
       const startX = e.clientX;
-      const startWidth = clampDockWidth(stored, window.innerWidth);
-      const widthAt = (x: number) => clampDockWidth(startWidth + (startX - x), window.innerWidth);
+      const startWidth = clampStudioSlotWidth(stored, window.innerWidth);
+      const widthAt = (x: number) => clampStudioSlotWidth(startWidth + (startX - x), window.innerWidth);
       setDragging(true);
       const onMove = (ev: PointerEvent) => setStored(widthAt(ev.clientX));
       const onUp = (ev: PointerEvent) => {
@@ -80,13 +100,13 @@ export function useStudioSlotWidth(): StudioSlotWidth {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       e.preventDefault();
       const step = e.key === 'ArrowLeft' ? DOCK_KEYBOARD_STEP : -DOCK_KEYBOARD_STEP;
-      const next = clampDockWidth(clampDockWidth(stored, window.innerWidth) + step, window.innerWidth);
+      const next = clampStudioSlotWidth(clampStudioSlotWidth(stored, window.innerWidth) + step, window.innerWidth);
       setStored(next);
       writeStoredSlotWidth(next);
     },
     [stored],
   );
-  const width = typeof window === 'undefined' ? stored : clampDockWidth(stored, window.innerWidth);
+  const width = typeof window === 'undefined' ? stored : clampStudioSlotWidth(stored, window.innerWidth);
   return { width, dragging, onResizePointerDown, onResizeKeyDown };
 }
 

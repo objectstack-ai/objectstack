@@ -99,10 +99,10 @@ describe('StudioRightSlot', () => {
     renderSlot();
     expect(screen.getByTestId('studio-right-slot')).toHaveStyle({ width: `${420 + DOCK_KEYBOARD_STEP + 100}px` });
     cleanup();
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1163 });
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
     window.localStorage.setItem(STUDIO_SLOT_WIDTH_STORAGE_KEY, '2000');
     renderSlot();
-    expect(screen.getByTestId('studio-right-slot')).toHaveStyle({ width: `${1163 - 520}px` });
+    expect(screen.getByTestId('studio-right-slot')).toHaveStyle({ width: `${1000 - 520}px` });
   });
 
   it('switches with its segmented header when both halves exist', () => {
