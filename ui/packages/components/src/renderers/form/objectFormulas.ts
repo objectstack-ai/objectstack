@@ -17,19 +17,22 @@
  * renderer reads the object's formula definitions here, once per object,
  * through the data source it already has (the read `usePatchingUpdateActions`
  * makes, served from the adapter's schema cache), and computes them over its
- * rule record with `@object-ui/core`'s `planObjectFormulas`.
+ * rule record with `@object-ui/core`'s `planObjectFormulas`, for the acting
+ * user its predicate scope holds (`current_user`, bound as the server binds
+ * it: `id` and `positions`).
  *
  * A `visibleWhen` that reads a formula the form cannot compute (unservable:
- * a hop, `label()`, an unbound root, an expression not served, or a formula
- * reading one) is dropped from that field row, with one warning: the field is
- * SHOWN and keeps its static `required`, and the form does not refuse the
- * submit for it. That is the server's answer for the same predicate (it counts
- * as shown, so the field stays required), and the client must not be stricter
- * than the server (ADR-0124).
+ * a hop, `label()`, `current_user.can()`, the acting user when the scope
+ * holds none, another root but `record`, an expression not served, or a
+ * formula reading one) is dropped from that field row, with one warning: the
+ * field is SHOWN and keeps its static `required`, and the form does not refuse
+ * the submit for it (no ADR-0137 D2 fault), so the server, which judges the
+ * write, decides.
  */
 
 import * as React from "react"
 import { planObjectFormulas, type ObjectFormulaPlan } from "@object-ui/core"
+import { usePredicateScope } from "@object-ui/react"
 import type { DataSource } from "@object-ui/types"
 
 const RULE_KEYS = ["visibleWhen", "requiredWhen", "readonlyWhen", "visibleOn"] as const
@@ -43,9 +46,10 @@ export function declaresFieldRule(fields: readonly unknown[]): boolean {
 }
 
 /**
- * The object's formula plan, read once per object while `enabled`. A data
- * source without `getObjectSchema`, a failed read, or an object declaring no
- * formula yields `undefined`, and the form computes nothing.
+ * The object's formula plan, read once per object while `enabled`, for the
+ * acting user of the predicate scope. A data source without
+ * `getObjectSchema`, a failed read, or an object declaring no formula yields
+ * `undefined`, and the form computes nothing.
  */
 export function useObjectFormulaPlan(
   dataSource: DataSource | null | undefined,
@@ -57,8 +61,8 @@ export function useObjectFormulaPlan(
   const [answer, setAnswer] = React.useState<{
     dataSource: DataSource | null | undefined
     objectName: string | undefined
-    plan: ObjectFormulaPlan | undefined
-  }>({ dataSource: undefined, objectName: undefined, plan: undefined })
+    fields: unknown
+  }>({ dataSource: undefined, objectName: undefined, fields: undefined })
   const canAsk = enabled && !!objectName && typeof dataSource?.getObjectSchema === "function"
 
   React.useEffect(() => {
@@ -67,18 +71,27 @@ export function useObjectFormulaPlan(
     Promise.resolve()
       .then(() => dataSource.getObjectSchema(objectName))
       .then(
-        (schema) => planObjectFormulas((schema as { fields?: unknown } | null | undefined)?.fields),
+        (schema) => (schema as { fields?: unknown } | null | undefined)?.fields,
         () => undefined,
       )
-      .then((plan) => {
-        if (!cancelled) setAnswer({ dataSource, objectName, plan })
+      .then((fields) => {
+        if (!cancelled) setAnswer({ dataSource, objectName, fields })
       })
     return () => {
       cancelled = true
     }
   }, [canAsk, dataSource, objectName])
 
-  return canAsk && answer.dataSource === dataSource && answer.objectName === objectName ? answer.plan : undefined
+  // The acting user as a key: re-planned when its id or positions change, not
+  // on every new scope object.
+  const user = usePredicateScope()?.current_user as { id?: unknown; positions?: unknown } | null | undefined
+  const userKey = JSON.stringify([user?.id ?? null, user?.positions ?? null])
+  const current = canAsk && answer.dataSource === dataSource && answer.objectName === objectName
+  return React.useMemo(() => {
+    if (!current) return undefined
+    const [id, positions] = JSON.parse(userKey) as [unknown, unknown]
+    return planObjectFormulas(answer.fields, { current_user: { id, positions } })
+  }, [current, answer.fields, userKey])
 }
 
 const warned = new Set<string>()
@@ -106,7 +119,7 @@ export function withoutUnservableVisibleWhen<T>(fields: readonly T[], plan: Obje
       warned.add(key)
       console.warn(
         `[object-ui] The visibleWhen of field '${String(row.name)}' reads a formula the form cannot compute ` +
-          `(${why}), so the field is shown and keeps its required flag, as the server judges it.`,
+          `(${why}), so the field is shown and keeps its required flag; the server decides on save.`,
       )
     }
   })

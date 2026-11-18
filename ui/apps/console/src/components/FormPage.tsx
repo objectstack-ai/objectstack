@@ -2432,10 +2432,10 @@ const warnedUnservableRules = new Set<string>();
  * `sections` with the OBJECT-level `visibleWhen` (`rules.visibleWhen`) of every
  * row that reads a formula this page cannot compute dropped, each drop warned
  * once (objectstack#35033). The field is then shown and keeps its `required`,
- * which is the server's answer for that predicate (it counts as shown), and
- * its rule is no fault, so the submit is not refused for it (ADR-0124: the
- * client is never stricter than the server). The view-level predicate is a
- * layout gate and is left alone. Returns `sections` itself when nothing drops.
+ * and its rule is no fault, so the submit is not refused for it (no ADR-0137
+ * D2 refusal) and the server, which judges the write, decides. The view-level
+ * predicate is a layout gate and is left alone. Returns `sections` itself when
+ * nothing drops.
  */
 export function withoutUnservableRuleVisibleWhen(
   sections: RenderableSection[],
@@ -2459,7 +2459,7 @@ export function withoutUnservableRuleVisibleWhen(
         warnedUnservableRules.add(key);
         console.warn(
           `[object-ui] The visibleWhen of field '${f.name}' reads a formula the form cannot compute ` +
-            `(${why}), so the field is shown and keeps its required flag, as the server judges it.`,
+            `(${why}), so the field is shown and keeps its required flag; the server decides on save.`,
         );
       }
     });
@@ -2802,8 +2802,13 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
    * object-level `visibleWhen` reads a formula this page cannot compute loses
    * that rule — shown and still required, never a submit refusal — in
    * {@link withoutUnservableRuleVisibleWhen}. The payload stays `values`.
+   * The formulas are computed for the acting user of `predicateScope`
+   * (`current_user`), bound as the server binds it.
    */
-  const formulaPlan = useMemo(() => planObjectFormulas(loaded?.objectSchema?.fields), [loaded]);
+  const formulaPlan = useMemo(
+    () => planObjectFormulas(loaded?.objectSchema?.fields, predicateScope),
+    [loaded, predicateScope],
+  );
   const ruleValues = useMemo(
     () => (formulaPlan ? formulaPlan.compute(values) : values),
     [formulaPlan, values],

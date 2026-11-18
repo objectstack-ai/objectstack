@@ -25,7 +25,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
-import { SchemaRendererContext } from '@object-ui/react';
+import { SchemaRendererContext, PredicateScopeProvider } from '@object-ui/react';
 // Module scope, not `beforeAll` — see object-ui/no-dynamic-import-in-test-hook.
 import '../../../renderers';
 // `react-page.tsx` (reached through `../../../renderers`) loads this dynamically: pay the load at collection.
@@ -109,6 +109,51 @@ const save = async () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 };
+/** An object whose formulas read the acting user, and an update action whose patch moves a formula input. */
+const TASK_OBJECT = {
+  name: 'task',
+  fields: {
+    owner: { type: 'text' },
+    status: { type: 'text' },
+    is_mine: { type: 'formula', expression: 'record.owner == current_user.id' },
+    may_edit: { type: 'formula', expression: "current_user.can('task', 'edit')" },
+    is_done: { type: 'formula', expression: "record.status == 'done'" },
+  },
+  actions: [
+    { name: 'complete', label: 'Complete', operation: 'update', patch: { status: 'done' }, locations: ['record_header'] },
+  ],
+};
+const MINE_NOTE = { name: 'mine_note', label: 'Mine note', type: 'input', required: true, visibleWhen: 'record.is_mine == true' };
+const EDIT_NOTE = { name: 'edit_note', label: 'Edit note', type: 'input', required: true, visibleWhen: 'record.may_edit == true' };
+const OWNER = { name: 'owner', label: 'Owner', type: 'input' };
+const ACTING_USER = { current_user: { id: 'u1', name: 'Ada', positions: [] } };
+
+function renderTaskForm(opts: { fields: unknown[]; record?: Record<string, unknown>; onSubmit?: (data: any) => unknown }) {
+  const getObjectSchema = vi.fn(async () => TASK_OBJECT);
+  const Form = ComponentRegistry.get('form')!;
+  const view = render(
+    <PredicateScopeProvider scope={ACTING_USER}>
+      <SchemaRendererContext.Provider value={{ dataSource: { getObjectSchema } } as any}>
+        <Form
+          schema={{
+            type: 'form',
+            objectName: 'task',
+            showSubmit: true,
+            showCancel: false,
+            submitLabel: 'Save',
+            defaultValues: opts.record ?? {},
+            ...(opts.record ? { previousValues: opts.record } : {}),
+            fields: opts.fields,
+            onSubmit: opts.onSubmit ?? (() => undefined),
+          }}
+        />
+      </SchemaRendererContext.Provider>
+    </PredicateScopeProvider>,
+  );
+  return { ...view, getObjectSchema };
+}
+const taskRow = (name: string) => document.querySelector(`[data-testid="field:task.${name}"]`);
+
 const faultBanner = () => /Can't submit: the visibleWhen rule/.test(document.body.textContent ?? '');
 
 describe('form renderer — formula fields recomputed from the live inputs (objectstack#35033)', () => {
@@ -186,5 +231,46 @@ describe('form renderer — formula fields recomputed from the live inputs (obje
     await save();
     expect(faultBanner()).toBe(false);
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a formula reading current_user.id is computed for the acting user of the predicate scope, and the field is judged on it', async () => {
+    const onSubmit = vi.fn();
+    const { getObjectSchema } = renderTaskForm({ fields: [OWNER, MINE_NOTE], onSubmit });
+    await waitFor(() => expect(getObjectSchema).toHaveBeenCalledWith('task'));
+    await type('Owner', 'u2');
+    // Cleanly not TRUE: hidden, and no fault refuses the submit.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(taskRow('mine_note')).toBeNull();
+    await save();
+    expect(faultBanner()).toBe(false);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+
+    await type('Owner', 'u1');
+    await waitFor(() => expect(taskRow('mine_note')).not.toBeNull());
+    expect(screen.getByLabelText(/Mine note/).getAttribute('aria-required')).toBe('true');
+  });
+
+  it('a formula calling current_user.can() stays unservable with a user bound: the field is shown and required', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { getObjectSchema } = renderTaskForm({ fields: [OWNER, EDIT_NOTE] });
+    await waitFor(() => expect(getObjectSchema).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(warn.mock.calls.some(([m]) => /visibleWhen of field 'edit_note' reads a formula the form cannot compute/.test(String(m)))).toBe(true),
+    );
+    expect(taskRow('edit_note')).not.toBeNull();
+    expect(screen.getByLabelText(/Edit note/).getAttribute('aria-required')).toBe('true');
+  });
+
+  it('an update action whose patch moves a formula input is judged on the formula recomputed over the patched record', async () => {
+    const ISSUED_ON = { name: 'issued_on', label: 'Issued on', type: 'input', requiredWhen: 'record.is_done == true' };
+    const served = { id: 't1', owner: 'u1', status: 'open', is_done: false, issued_on: null };
+    renderTaskForm({ fields: [OWNER, ISSUED_ON], record: served });
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="field:task.issued_on"] [data-required-for-action="true"]')?.textContent).toBe(
+        'Required to run “Complete”.',
+      ),
+    );
   });
 });

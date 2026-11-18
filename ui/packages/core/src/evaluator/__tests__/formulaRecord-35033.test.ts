@@ -92,7 +92,7 @@ describe('planObjectFormulas — computing formulas over the live record (object
     expect(plan.unservableReadsOf('record.big_order == true')).toEqual([]);
   });
 
-  it('label(), a scope root other than record, and an expression not served are unservable', () => {
+  it('label(), current_user.can(), the acting user with none held, and an expression not served are unservable', () => {
     const plan = planObjectFormulas({
       status: ORDER_FIELDS.status,
       status_label: { type: 'formula', expression: 'label(record.status)' },
@@ -101,9 +101,43 @@ describe('planObjectFormulas — computing formulas over the live record (object
       masked: { type: 'formula' },
     })!;
     expect(plan.unservable.get('status_label')).toMatch(/label\(\)/);
-    expect(plan.unservable.get('mine')).toMatch(/'current_user'/);
-    expect(plan.unservable.get('may_edit')).toMatch(/'current_user'/);
+    expect(plan.unservable.get('mine')).toMatch(/acting user \('current_user'\)/);
+    expect(plan.unservable.get('may_edit')).toMatch(/current_user\.can\(\)/);
     expect(plan.unservable.get('masked')).toMatch(/no expression/);
+  });
+
+  it('binds the acting user as the server does (id and positions): current_user, user and ctx compute; can(), os and other roots stay unservable', () => {
+    const fields = {
+      owner: { type: 'text' },
+      mine: { type: 'formula', expression: 'record.owner == current_user.id' },
+      mine_alias: { type: 'formula', expression: 'record.owner == user.id && ctx.user.id == user.id' },
+      is_admin: { type: 'formula', expression: "'admin' in current_user.positions" },
+      platform: { type: 'formula', expression: 'current_user.isPlatformAdmin' },
+      // A member the server does not bind faults to null there, and here.
+      email: { type: 'formula', expression: 'current_user.email' },
+      may_edit: { type: 'formula', expression: "current_user.can('order', 'edit')" },
+      org: { type: 'formula', expression: 'os.org.id' },
+      prior: { type: 'formula', expression: 'previous.owner' },
+    };
+    const scope = { current_user: { id: 'u1', name: 'Ada', email: 'ada@example.com', positions: ['admin'], isPlatformAdmin: true } };
+    const plan = planObjectFormulas(fields, scope)!;
+    expect([...plan.unservable.keys()].sort()).toEqual(['may_edit', 'org', 'prior']);
+    expect(plan.unservable.get('may_edit')).toMatch(/current_user\.can\(\)/);
+    expect(plan.unservable.get('org')).toMatch(/'os'/);
+    expect(plan.unservable.get('prior')).toMatch(/'previous'/);
+
+    expect(plan.compute({ owner: 'u1' })).toMatchObject({ mine: true, mine_alias: true, is_admin: true, platform: false, email: null });
+    expect(plan.compute({ owner: 'u2' })).toMatchObject({ mine: false, mine_alias: false });
+    // `isPlatformAdmin` is derived from positions, as the server derives it.
+    const admin = planObjectFormulas(fields, { current_user: { id: 'u1', positions: ['platform_admin'] } })!;
+    expect(admin.compute({ owner: 'u1' })).toMatchObject({ platform: true });
+
+    // No acting user held (no scope, or the signed-out visitor's null id): unservable.
+    for (const none of [undefined, { current_user: { id: null, positions: [] } }]) {
+      const p = planObjectFormulas(fields, none)!;
+      expect(p.unservable.get('mine')).toMatch(/acting user/);
+      expect(p.unservable.get('mine_alias')).toMatch(/acting user/);
+    }
   });
 
   it('a predicate whose reads cannot be named counts as reading every unservable formula', () => {

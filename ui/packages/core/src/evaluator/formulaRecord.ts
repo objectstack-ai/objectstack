@@ -29,18 +29,32 @@
  *   `null`, and a predicate over it is judged on that `null`.
  * - **Unservable** — the form cannot know the value a read would serve: the
  *   formula reads through a reference (no related record is read here), calls
- *   `label()` (no option label is read here), or reads a scope root other than
- *   `record` (the form binds no user, organization or `previous` for a
- *   formula, so `current_user.can()` lands here too); its expression is not
- *   served to this reader at all (a field-level-security mask deletes an
- *   expression naming a field the reader cannot see); or it reads such a
- *   formula at any depth. {@link ObjectFormulaPlan.unservableReadsOf} names
- *   them, and the form treats a `visibleWhen` reading one as SHOWN — the
- *   server counts the same predicate as shown.
+ *   `label()` (no option label is read here), or calls `current_user.can()`
+ *   (no permission map is bound for a formula); it reads the acting user
+ *   (`current_user`, `user`, `ctx`) and the form holds none; it reads `os`
+ *   (the server binds `os.org` from the tenant, which the form does not
+ *   hold) or any other scope root but `record`; its expression is not served
+ *   to this reader at all (a field-level-security mask deletes an expression
+ *   naming a field the reader cannot see); or it reads such a formula at any
+ *   depth. {@link ObjectFormulaPlan.unservableReadsOf} names them, and the
+ *   form treats a `visibleWhen` reading one as SHOWN, as the server counts a
+ *   predicate reading one of its own unservable formulas.
  *
- * The client set of unservable formulas is the server's plus the roots it
- * cannot bind: a formula the server can compute and this form cannot is shown,
- * never hidden, so the form is never stricter than the server (ADR-0124).
+ * The acting user is bound as the server binds it (objectql
+ * `applyFormulaPlan`): the caller's `id` and `positions` only, through the
+ * engine's own `EvalUser` factory, so `current_user.id`,
+ * `'x' in current_user.positions` and `current_user.isPlatformAdmin` compute
+ * as they do on the server, and a member the server does not bind
+ * (`current_user.name`, `current_user.email`) faults to `null` on both sides.
+ * The form takes it from its predicate scope (`current_user` there).
+ *
+ * Every formula the form computes, it computes as the server does. Where the
+ * form cannot, the field is shown and keeps its `required` flag. That is
+ * stricter than the server in two places: a formula the server computes and
+ * the form does not (one reading `os`, or calling `current_user.can()` on a
+ * write that resolved a permission map), and a formula reading a root
+ * neither side binds (`previous`, `vars`, …), which the server reads as
+ * `null`. The server stays the authority on the write.
  */
 import {
   ExpressionEngine,
@@ -50,6 +64,7 @@ import {
   findTraversalConflicts,
   formulaReadOrder,
   isUnparseableDate,
+  parseCelToAst,
 } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { referenceTargetOf } from '@objectstack/spec/data';
@@ -116,10 +131,50 @@ function roundValue(value: unknown, scale: number | undefined): unknown {
 /** objectql's `planCallsOptionLabel` test, on one source. */
 const LABEL_CALL = /\blabel\s*\(/;
 
-/** Scope roots a formula may name that the form does not bind for it. */
-const UNBOUND_ROOTS: ReadonlySet<string> = new Set(
+/**
+ * The roots that name the acting user and that the form binds when it holds
+ * one: objectql's `USER_SCOPE_ROOTS` minus `os`, whose `os.org` the form
+ * cannot bind.
+ */
+const USER_ROOTS: ReadonlySet<string> = new Set(['current_user', 'user', 'ctx']);
+
+/** Every scope root but `record`: the form binds none of them unless {@link USER_ROOTS} says so. */
+const NON_RECORD_ROOTS: ReadonlySet<string> = new Set(
   [...SCOPE_ROOTS, 'current_user'].filter((root) => root !== 'record'),
 );
+
+/** The acting user as the server's formula pass binds it (objectql `applyFormulaPlan`). */
+interface FormulaUser {
+  id: string;
+  positions: string[];
+}
+
+/**
+ * The acting user out of a predicate scope's `current_user`, or `undefined`
+ * when it holds none: no `current_user`, or one without an id (the signed-out
+ * visitor's `id: null`). Only `id` and `positions` are kept, the two the
+ * server binds.
+ */
+function formulaUserOf(scope: Readonly<Record<string, unknown>> | null | undefined): FormulaUser | undefined {
+  const user = scope?.current_user as { id?: unknown; positions?: unknown } | null | undefined;
+  if (!user || typeof user !== 'object') return undefined;
+  const id = typeof user.id === 'number' ? String(user.id) : user.id;
+  if (typeof id !== 'string' || !id) return undefined;
+  const positions = Array.isArray(user.positions)
+    ? user.positions.filter((p): p is string => typeof p === 'string')
+    : [];
+  return { id, positions };
+}
+
+/** objectql's `readsPermissionPredicate`: a receiver call named `can` anywhere in the AST. */
+function callsReceiverMethod(node: unknown, method: string): boolean {
+  if (Array.isArray(node)) return node.some((child) => callsReceiverMethod(child, method));
+  if (typeof node !== 'object' || node === null) return false;
+  const { op, args } = node as { op?: unknown; args?: unknown };
+  if (typeof op !== 'string') return false;
+  if (op === 'rcall' && Array.isArray(args) && args[0] === method) return true;
+  return callsReceiverMethod(args, method);
+}
 
 function toExpression(value: unknown): Expression | undefined {
   if (typeof value === 'string') return value.trim() ? { dialect: 'cel', source: value } : undefined;
@@ -163,12 +218,19 @@ function isReferenceField(def: ServedFieldDef | undefined): boolean {
  * Plan the object's formula fields for {@link ObjectFormulaPlan.compute}, or
  * `undefined` when the served object declares none. `fields` is the served
  * object's `fields` (a map, or a list of definitions carrying `name`).
+ * `scope` is the form's predicate scope: its `current_user` is the acting
+ * user the formulas are computed for. Without one, a formula reading the
+ * acting user is unservable.
  */
-export function planObjectFormulas(fields: unknown): ObjectFormulaPlan | undefined {
+export function planObjectFormulas(
+  fields: unknown,
+  scope?: Readonly<Record<string, unknown>> | null,
+): ObjectFormulaPlan | undefined {
   const defs = fieldMap(fields);
   if (!defs) return undefined;
   const formulaNames = Object.keys(defs).filter((name) => defs[name]?.type === 'formula');
   if (formulaNames.length === 0) return undefined;
+  const user = formulaUserOf(scope);
 
   const unservable = new Map<string, string>();
   const entries = new Map<string, PlanEntry>();
@@ -201,10 +263,22 @@ export function planObjectFormulas(fields: unknown): ObjectFormulaPlan | undefin
       unservable.set(name, 'calls label(), which the form does not answer');
       continue;
     }
+    if (callsReceiverMethod(parseCelToAst(source), 'can')) {
+      unservable.set(name, 'calls current_user.can(), which the form does not answer for a formula');
+      continue;
+    }
     const roots = collectCelRootIdentifiers(source);
-    const unbound = roots.ok ? roots.roots.filter((root) => UNBOUND_ROOTS.has(root)) : [];
+    const unbound = roots.ok
+      ? roots.roots.filter((root) => NON_RECORD_ROOTS.has(root) && !(user && USER_ROOTS.has(root)))
+      : [];
     if (unbound.length > 0) {
-      unservable.set(name, `reads ${unbound.map((r) => `'${r}'`).join(', ')}, which the form does not bind for a formula`);
+      const names = unbound.map((r) => `'${r}'`).join(', ');
+      unservable.set(
+        name,
+        unbound.every((root) => USER_ROOTS.has(root))
+          ? `reads the acting user (${names}), and the form holds none`
+          : `reads ${names}, which the form does not bind for a formula`,
+      );
     }
   }
 
@@ -248,7 +322,7 @@ export function planObjectFormulas(fields: unknown): ObjectFormulaPlan | undefin
         }
         let value: unknown = null;
         try {
-          const res = ExpressionEngine.evaluate(entry.expression, { now, record: copy });
+          const res = ExpressionEngine.evaluate(entry.expression, user ? { now, user, record: copy } : { now, record: copy });
           if (res.ok && !isUnparseableDate(res.value)) value = roundValue(res.value, entry.scale);
         } catch {
           value = null;

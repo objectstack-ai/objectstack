@@ -40,6 +40,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { PredicateScopeProvider } from '@object-ui/react';
 import { buildSections, FormPage, isSectionVisible, resolveRowState } from './FormPage';
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -124,6 +125,8 @@ interface RenderOpts {
   objectSchema?: unknown;
   query?: string;
   extraRoutes?: Parameters<typeof stubFetch>[0];
+  /** The ambient predicate scope (`current_user`, …) the host would publish. */
+  scope?: Record<string, unknown>;
 }
 
 /** Render the INTERNAL route (`/forms/:name`) over a given section list. */
@@ -136,7 +139,7 @@ function renderInternal(sections: unknown[], opts: RenderOpts = {}) {
       ...(opts.extraRoutes ?? []),
     ]),
   );
-  return render(
+  const page = (
     <MemoryRouter initialEntries={[`/forms/showcase_task.edit${opts.query ?? ''}`]}>
       <Routes>
         <Route path="/forms/:name" element={<FormPage mode="internal" recordPath={recordPath} />} />
@@ -145,8 +148,9 @@ function renderInternal(sections: unknown[], opts: RenderOpts = {}) {
           element={<div data-testid="record-page">record page</div>}
         />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  return render(opts.scope ? <PredicateScopeProvider scope={opts.scope}>{page}</PredicateScopeProvider> : page);
 }
 
 /** Render the PUBLIC route (`/f/:slug`) over a given section list. */
@@ -861,6 +865,32 @@ describe('objectstack#35033 — FormPage judges a visibleWhen that reads a formu
     await user.type(screen.getByLabelText(/^Notes/), 'gold desk');
     await user.click(screen.getByRole('button', { name: /submit/i }));
     await waitFor(() => expect(writes()).toHaveLength(1));
+  });
+
+  it('a formula reading current_user.id is computed for the acting user of the predicate scope, and the field is judged on it', async () => {
+    const user = userEvent.setup();
+    const schema = {
+      ...ESCALATION,
+      fields: {
+        ...ESCALATION.fields,
+        owner: { type: 'text', label: 'Owner' },
+        mine: { type: 'formula', label: 'Mine', expression: 'record.owner == current_user.id' },
+        notes: { ...ESCALATION.fields.notes, visibleWhen: 'record.mine == true' },
+      },
+    };
+    const { container } = renderInternal([{ label: 'Basics', fields: ['priority', 'owner', 'notes'] }], {
+      objectSchema: schema,
+      extraRoutes: createRoutes,
+      scope: { current_user: { id: 'u1', name: 'Ada', positions: [] } },
+    });
+    await awaitForm();
+    await user.type(screen.getByLabelText('Owner'), 'u2');
+    // Cleanly not TRUE: hidden.
+    expect(screen.queryByLabelText(/^Notes/)).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Owner'));
+    await user.type(screen.getByLabelText('Owner'), 'u1');
+    await waitFor(() => expect(controlFor(container, 'notes')).toBeRequired());
   });
 
   it('an empty operand reads null, the predicate is judged on it, and the submit is not refused', async () => {
