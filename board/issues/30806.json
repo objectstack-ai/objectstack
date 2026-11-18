@@ -12,6 +12,7 @@
   },
   "labels": [
     "area:devpath",
+    "area:package",
     "domain:server",
     "pm:blocked",
     "priority:p2"
@@ -20,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-06T04:11:20Z",
-  "updated_at": "2026-11-13T03:09:49Z",
+  "updated_at": "2026-11-18T16:33:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

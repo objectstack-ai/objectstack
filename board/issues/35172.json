@@ -11,20 +11,21 @@
     "type": "Bot"
   },
   "labels": [
+    "area:data",
     "domain:server",
     "finding",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T09:44:09Z",
-  "updated_at": "2026-11-18T09:51:55Z",
+  "updated_at": "2026-11-18T16:43:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35172",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling category: out-of-scope follow-up from objectstack#34726 (draft PR #35168, Acceptance notes; premise 6972083658), filed by the seat. ⛔ Not a claim.\n\n## What is wrong\n\nWhen `hierarchy-security` is required but no provider is installed, the runtime falls back to owner-only scope (`plugin-sharing` `resolveOwnerScopeIds`) and logs nothing. #35168 adds a line at `os serve` start, but a host that boots the runtime without the CLI (for example a hosted runtime) still gets no line, so an operator cannot tell why every user sees only their own records.\n\n## Done when\n\nThe runtime logs one warning per boot (not per request) naming the missing provider and the owner-only consequence, wherever the fallback is taken; pinned."

@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ai",
     "domain:server",
     "pm:blocked",
     "priority:p2"
@@ -19,7 +20,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:33:22Z",
-  "updated_at": "2026-11-16T09:04:15Z",
+  "updated_at": "2026-11-18T16:03:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

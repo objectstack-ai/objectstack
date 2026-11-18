@@ -2,8 +2,8 @@
   "number": 35194,
   "kind": "issue",
   "title": "query_dataset: say how many groups existed before the limit cut (totalGroups), as aggregate_records does",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "domain:server",
     "lease:o1-A",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T12:05:47Z",
-  "updated_at": "2026-11-18T13:54:36Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T15:28:16Z",
+  "closed_at": "2026-11-18T15:27:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35194",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling category: scope split from #35144 (sub-epic #35159, 问数底座), filed by the seat. #35144's Scope line \"The same on `query_dataset` if it lacks it\" moves here, so draft PR #35193 can close #35144 on the `aggregate_records` half. ⛔ Not a claim.\n\n## Why\n\n`query_dataset` already takes `order`, `orderBy` and `limit`, and answers `rowCount` and `truncated` (`QueryDatasetOutputSchema`, `packages/spec/src/ai/dataset-tools.zod.ts`). So a cut list is never read as complete. But a client asked \"how many X are there\" after a top-N cut can't answer: nothing says how many groups existed before the cut. `aggregate_records` answers that with `totalGroups` (on main, and on the hosted tools as \"the groups before the cut\", cloud `aggregate-cut.ts`). `query_dataset` has no such member.\n\n## Scope\n\n- `QueryDatasetOutputSchema` gains `totalGroups`: the groups before `limit` cut the result, under the same name and meaning as `aggregate_records`. It's additive, so `Clause-②: yes` and a contract review at `CONTRACT_REVIEW_TIER`.\n- It's computed in the database where the dataset executor's driver can. A driver that can't leaves the member out and doesn't build a slower path for parity, the same rule as #35144.\n- HTTP and stdio alike. The ask skill's served text gains one line, only if it already teaches `truncated`.\n\n## Done when\n\n- A grouped `query_dataset` with `limit` below the group count answers `truncated: true` and the right `totalGroups`. A call that isn't cut answers `totalGroups` equal to `rowCount`.\n- A driver that can't compute it leaves `totalGroups` out, and a pin covers that.\n- The pins sit beside the existing `truncated` pins."

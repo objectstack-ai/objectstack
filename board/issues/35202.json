@@ -2,7 +2,7 @@
   "number": 35202,
   "kind": "pull_request",
   "title": "feat(mcp): aggregate_records names a lookup group's record beside its id, read as the caller",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T13:32:25Z",
-  "updated_at": "2026-11-18T14:01:30Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-18T14:22:39Z",
+  "closed_at": "2026-11-18T14:22:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T14:22:36Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35202",

@@ -1,0 +1,37 @@
+{
+  "number": 35224,
+  "kind": "pull_request",
+  "title": "feat(auth): directSignIn.afterSignOut returns hosted sign-out through the identity provider",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T17:01:20Z",
+  "updated_at": "2026-11-18T19:04:50Z",
+  "closed_at": "2026-11-18T19:04:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T19:04:48Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35224",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgFLS4Fre2j1wzU3P5dVPqmJ)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CYxMsbSfVbHgmGptah\n\nFixes #35106\n\nClause-②: yes (widening)\nMetadata-protocol: added\nSkills-docs: none — the added key is `AuthFeaturesConfigSchema.afterSignOut`, a field `GET /auth/config` serves, which no metadata author writes; `git grep -n -e directSignIn -e localSignIn -e afterSignOut -- skills` answers 0 hits, so no skill teaches this surface\n\n## 维护者速读\n\n- 改了什么:直连登录(direct sign-in)新增 `afterSignOut: 'hold' | 'identity-provider'` 选项(环境变量 `OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT` 优先),`/auth/config` 在直连登录开启时下发 `features.afterSignOut`;Console 登出在 `identity-provider` 且 `directSignIn: true` 时把身份提供方的登出回跳地址设为直连门 `/api/v1/auth/sign-in/direct`,否则仍是 `/login`。\n- 为什么改:cloud#4465 裁决 8、10:托管环境登出后应落在云端登录页,不保留环境自己的登录页;cloud#4471 等这一项发版后设 `identity-provider`。\n- 风险与回滚:默认 `hold`,未设新值的部署行为完全不变;非法取值启动即报错(与 `localSignIn` 同规则)。回滚 = 撤本 PR 或部署把值设回 `hold`。\n- 先看:`ui/packages/auth/src/createAuthClient.ts`(`signOutReturn` 与 `signOut`)、`packages/plugins/plugin-auth/src/direct-sign-in.ts`(选项、环境变量、解析)、`packages/spec/src/api/auth-endpoints.zod.ts`(新字段)。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/auth/src/__tests__/signOutProviderLogout-26618.test.tsx`,预期全绿,其中 `identity-provider` 一例的登出请求体是 `{ callbackURL: '/api/v1/auth/sign-in/direct' }`。\n- 需要你做的:无,席位落地(契约面 L2 审核由席位安排)。\n\n## What changes\n\n- `@objectstack/plugin-auth`: `DirectSignInOptions.afterSignOut` (`'hold'` default, `'identity-provider'`), env `OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT` winning field by field like the other direct sign-in settings, an off-vocabulary value throws at resolve time naming the variable and both values. `getPublicConfig()` serves `features.afterSignOut` while the direct sign-in setting is on, on the same terms as `localSignIn`. Type `DirectSignInAfterSignOut` on the package entry.\n- `@objectstack/spec`: optional `AuthFeaturesConfigSchema.afterSignOut` enum; `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` gains `'afterSignOut'`; regenerated `authorable-surface/api.json` and the `auth-endpoints` reference page.\n- `@object-ui/auth`: `signOut()` resolves its `callbackURL` through `signOutReturn`: the start door `{basePath}/sign-in/direct` when the config reads `directSignIn: true` and `afterSignOut: 'identity-provider'`, else the sign-in page. It reads the config the tab holds; with none, one attempt bounded at 3 s; an unreadable config keeps the sign-in page. The sign-out round-trip note (the hold) is written only when the return is the sign-in page.\n- Docs: `content/docs/permissions/sso.mdx` (settings table, a \"Sign-out through the identity provider\" paragraph) and `content/docs/deployment/environment-variables.mdx`.\n\n## Tests\n\n- `direct-sign-in.test.ts`: resolve defaults to `hold`, option and env both ways, off-vocabulary throws (option and env); `/auth/config` serves `hold` by default and `identity-provider` when set, env overriding the option; with the setting off `afterSignOut` is absent and every other key is unchanged; the bare door hit (what the provider returns to after logout, no cookie, no query) answers 302 off this origin to the identity provider's authorize endpoint, never the door again and never `/login` (the A4 no-loop pin).\n- `sso-oidc-refusal-cause.test.ts`: a real OIDC sign-in then sign-out with `callbackURL: '/api/v1/auth/sign-in/direct'` hands the provider `post_logout_redirect_uri` = the absolute door on this origin, and the session ends.\n- `signOutProviderLogout-26618.test.tsx`: `hold` sends `/_console/login` and writes the round-trip note; `identity-provider` sends the door and writes no note; a held config is reused (one config read); CONTROL rows return to `/login` when `directSignIn` is false, when no `afterSignOut` is served, and when the config cannot be read.\n- `createAuthClient.test.ts`: the plain sign-out test now counts the sign-out POST among the calls (with no config held, sign-out reads `/config` once first).\n- `auth-endpoints.test.ts` (spec): the served-features fixture carries `afterSignOut`, so the parse covers it.\n\n## Acceptance notes\n\n- With no provider logout to follow (a provider without `end_session_endpoint`, or a password sign-in), the `callbackURL` is never used and the Console ends on the held sign-in page under either value, as the card scopes it (\"the Console's sign-out `callbackURL`\").\n- The door's query set stays closed to `callbackURL`. The Console sends no `state` on sign-out, so a conforming provider appends nothing to the return address.\n- The direct door is used only while `features.directSignIn` reads `true`; otherwise it is not mounted (404) or cannot start, so the Console keeps `/login`.\n- `Metadata-protocol: added` (patch round): the new optional enum on `AuthFeaturesConfigSchema` moves `packages/spec/authorable-surface/api.json`, so the kind is `added` and `@objectstack/spec` is graded `minor`; `@objectstack/plugin-auth` and `@object-ui/auth` stay `patch`. The key addition is intended (the card's spec field).\n- Cloud side (cloud#4471): set `identity-provider` and register the absolute door address as a post-logout redirect URI once a release carrying this ships.\n\n## Verification\n\nReadings A1–A4 (at `ec227fc7`, before the change): A1 `afterSignOut` appears only in `sso-oidc-refusal-cause.test.ts` constants; A2 Console sign-out hard-coded the sign-in page as `callbackURL`; A3 `localSignIn` is served from `getPublicConfig()` and declared in `auth-endpoints.zod.ts` and `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS`; A4 the door never reads the request's cookie or session and always starts a fresh provider sign-in, pinned above.\n\nLocal gate and test readings are added in the report comment on #35106.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CYxMsbSfVbHgmGptah)_\n\n<!-- signed: repo:objectstack#5 · os-bill · session_01Utp6CYxMsbSfVbHgmGptah -->\n"
+}

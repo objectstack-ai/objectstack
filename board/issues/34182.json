@@ -11,21 +11,22 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ux",
     "bug",
     "domain:ui",
     "finding",
     "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T23:54:45Z",
-  "updated_at": "2026-11-15T23:54:45Z",
+  "updated_at": "2026-11-18T16:24:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34182",
   "body": "domain:ui#1 · os-steve · session_01ADHkmT2NE3iyG1o6TDg3sf\n\nFiling gate: ③ an out-of-scope finding of the #34148 dev (os-dev report 6903488026 on PR #34180, carrier: seat), class a (read in code and in the dev's jsdom measurement, not measured live).\nReader: `domain:ui` (`ui/packages/plugin-detail/src/DetailSection.tsx`, the fields package's `SummaryField`). Grade suggestion: p3 (the summary half of #34148, which was p2 for formulas; a text-returning summary is rarer).\nDedupe: `is:issue is:open SummaryField dark` — none.\nBlocked-by: #34148\n\n## 维护者速读\n\n记录详情页里，文本型的汇总（summary）字段值和 #34148 修之前的公式一样，只显示一行省略号，完整值只在悬停提示里。#34148 只改了公式，没有把汇总一并改成读展示，原因是汇总字段自己的只读展示把文字颜色写死成 `text-gray-700`，没有暗色变体，直接换过去会让暗色模式下的数字汇总变暗。\n\n## Facts (read on PR #34180 head `91831e6d`)\n\n- The record detail grid maps `summary` to `FormulaCellRenderer`, whose text face is `TextCellRenderer`: one line, an ellipsis, the whole value only in a hover `title`. A long text summary is cut on the record page, as a formula was before #34148.\n- PR #34180 reads a `formula` through `FormulaField`'s read display and deliberately leaves `summary` on the cell (`DetailSection.tsx`, the branch matched by `CellRenderer === FormulaCellRenderer && resolvedType === 'formula'`).\n- `SummaryField`'s read display hard-codes `text-gray-700` with no `dark:` variant. Moving `summary` to it as it stands would dim numeric roll-ups in dark mode.\n\n## Ask\n\nGive `SummaryField`'s read display a dark-mode colour (the token the other read displays use), then read a `summary` on the record detail grid through it, the same move #34148 made for `formula`, so a long text summary wraps. Grid rows and the highlights strip keep their faces. Pins: a long text summary renders in full on the record page; the read display carries a dark-mode colour; CONTROL: the list grid row keeps its truncation. Ablate red.\n\n⛔ Not a claim."

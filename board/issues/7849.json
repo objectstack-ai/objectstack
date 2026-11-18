@@ -11,6 +11,7 @@
     "type": "User"
   },
   "labels": [
+    "area:fleet",
     "domain:devx",
     "tracking"
   ],
@@ -18,7 +19,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-11T20:41:47Z",
-  "updated_at": "2026-09-18T22:14:03Z",
+  "updated_at": "2026-11-18T16:38:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

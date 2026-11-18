@@ -11,21 +11,22 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ux",
     "bug",
     "domain:server",
     "finding",
     "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T08:58:47Z",
-  "updated_at": "2026-11-18T09:26:56Z",
+  "updated_at": "2026-11-18T16:25:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35164",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbYRqkDAGuse5Wqbohi\n\nFiling gate ① (product defect, named producer). Out-of-scope finding from the os-dev report 6973807530 on #34651 (PR #35162). Dedupe: `is:issue \"told again\" deactivated` → 1 hit (#34651, the source); `is:issue \"Already pending, told again\"` → same; `is:issue import_sso_users alreadyPending label` → 3 hits (#34651, #33187, #33186 closed), none on this label.\n\n## Defect\n\n`sys_user.import_sso_users`'s result labels its `alreadyPending` table column and `summary.alreadyPending` field \"Already pending, told again\" (`packages/platform-objects/src/identity/sys-user.object.ts`). But `addOnePendingPerson` in `packages/plugins/plugin-auth/src/pending-sso-users.ts` answers `alreadyPending: true` with `host: { notified: false, reason: 'deactivated' }` for a pending person who is deactivated (pinned in `pending-sso-users.test.ts`, describe `[#33228]`, \"re-adding a deactivated pending person does not invite them\"). On that row the Import Users result draws \"Already pending, told again: true\" beside \"Why not told: deactivated\": the label says the person was told, the next column says they were not.\n\nreach: named real producer (the door and the object's result labels above, read from code and the existing pin).\n\n## Fix direction\n\nLabel the column for what `alreadyPending` means (\"Already pending\"), as PR #35162 did for the Add User field, leaving \"told\" to the host columns; translations in the platform-objects bundles.\n\n## Why it matters\n\nAn admin importing people on a managed environment reads a contradiction for a deactivated pending person and cannot tell whether an invitation went out.\n\n## Reader\n\nThe lane holding `packages/platform-objects/src/identity/` (`domain:server`), when p3 work resumes; or the next PR touching `sys_user.import_sso_users`'s result labels.\n\nGrading: p3 · who: an admin importing a CSV that re-adds a deactivated pending person · door: Import Users result dialog · frequency: rare configuration (a deactivated pending person) · read from code. User-visible wrong text (p2) lowered one tier for the rare configuration."

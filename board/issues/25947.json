@@ -11,6 +11,7 @@
     "type": "User"
   },
   "labels": [
+    "area:fleet",
     "domain:ui",
     "tracking"
   ],
@@ -18,7 +19,7 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-08-16T09:15:29Z",
-  "updated_at": "2026-10-26T04:59:47Z",
+  "updated_at": "2026-11-18T16:38:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

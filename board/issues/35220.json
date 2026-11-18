@@ -1,0 +1,32 @@
+{
+  "number": 35220,
+  "kind": "issue",
+  "title": "Setup → Users on a managed environment: an admin can remove a pending person from the list, and the removal cancels their invitation",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T16:44:20Z",
+  "updated_at": "2026-11-18T16:44:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35220",
+  "body": "repo:objectstack#5 · os-bill · session_01Utp6CbUb7TcZK1XUAddUmQ\n\nFiling gate: ③ a task the maintainer asked for. Split out of #33187 on his word in seat repo:objectstack#5's project session, 2026-11-18T16:40Z, verbatim: 「同意」. That answered the seat's proposal to close #33187, whose add, import and per-row result have shipped, and to file the remaining \"remove a pending person\" button as a small card of its own.\n\n## Why\n\nOn a managed environment, an admin adds people by email before they first sign in (pending rows, #33181 / PR #33227). When an admin mistypes an address or adds the wrong person, they need to take that pending row back out, and the invitation must die with it. Otherwise a stranger keeps a live invitation to the organization. The server door exists: `remove-sso-user` (`packages/plugins/plugin-auth/src/pending-sso-users.ts`, about line 779, PR #34162), and the host is told through `userDeleted` (#34183). The seat's premise read at origin/main ec227fc7 found no Setup → Users action that reaches it: `packages/platform-objects/src/identity/sys-user.object.ts` carries `add_sso_user` and `import_sso_users`, and nothing calls `remove-sso-user`.\n\n## First step: measure reach\n\nOn a managed environment, as a platform admin, open Setup → Users and look at a pending row. Does any control (a row action or the standard delete) remove it so that the invitation is cancelled? If one already does, close this card with that reading.\n\n## Scope, if the gap holds\n\n- A row action on `sys_user`, visible only on a pending row on a managed environment to the same admins who see Add/Import, calling `/api/v1/auth/admin/remove-sso-user`, with a confirm dialog.\n- Its labels through the regenerated translation packs. A test beside the existing managed-visibility test. A changeset.\n- Generic blocks only: the existing action/confirm-dialog machinery, no new named widget.\n\n## Done when\n\n- Removing a pending person from Setup → Users deletes the row and cancels the invitation. A test pins the visibility: pending + managed + admin only.\n\n## Relations\n\n- Split from #33187 (closed with this card). Server: #33181, PR #34162, #34183. Related: #34404 (remove-sso-user writes no audit row), #35164.\n- Reader: the repo:objectstack lane seat that claims it. Dedupe: `remove-sso-user` and `pending person delete invitation cancel` in issues: no open card asks for this control (#34183 is the server seam, closed)."
+}

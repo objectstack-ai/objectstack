@@ -1,0 +1,31 @@
+{
+  "number": 35251,
+  "kind": "issue",
+  "title": "lint: state-machine-no-initial-states should not judge update-only machines, where initialStates is inert",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T19:16:20Z",
+  "updated_at": "2026-11-18T19:49:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35251",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nPR #35244 (card #34776) adds the publish-time rule `state-machine-no-initial-states`. It refuses a `state_machine` validation with no `initialStates`. The engine applies `initialStates` only when the machine runs on insert. A machine declared with `events: ['update']` never runs on create, so the fix the finding asks for produces metadata the runtime ignores. That is the very trap class #34776 closes.\n\nThe #34776 dev measured this on PR #35244 (report on #34776, round 2). Three showcase machines are update-only: `showcase_account` `account_lifecycle`, `showcase_project` `project_health_progression` and `showcase_task` `task_status_flow`. To pass the rule, they now carry `initialStates` that state the entry state without enforcing it.\n\n## Scope\n\n- The rule judges only machines that run on insert, meaning their `events` include `insert` or default to it. Its hint stays as written.\n- Remove the three declaration-only `initialStates` lists from the showcase, unless the showcase owner wants them as documentation.\n- Add a negative pin for an update-only machine with no `initialStates`.\n- Read whether `events` defaults to include insert in `packages/spec/src/data/validation.zod.ts` before writing the predicate.\n\nBlocked until #35244 merges.\n\n## Origin\n\nSeat answer B on PR #35244: the rule ships as written, and this card carries the narrowing. #34776 claim amendment 6987471285, with the seat note that follows it.\n\nRe-check: `git grep -n \"state-machine-no-initial-states\" origin/main -- packages/lint/src`"
+}

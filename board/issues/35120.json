@@ -11,19 +11,20 @@
     "type": "Bot"
   },
   "labels": [
+    "area:build",
     "domain:spec",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T05:17:34Z",
-  "updated_at": "2026-11-18T07:03:53Z",
+  "updated_at": "2026-11-18T16:42:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35120",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbWDsbbJizuYnDwBxT8\n\nFiling gate: ① a product defect with a measured public reach (below). Filed by area o1-C on seat 1's routing (2026-11-18 05:16Z), from a finding of the contract review of PR #35059; no grade or state label, for triage.\n\n## Rule\n\nA `/meta` type segment (and an MCP `type` argument) that is the name of an inherited object property is an unknown metadata type, and is refused `400 INVALID_REQUEST` exactly as `fieldz` is. Today the spelling table is consulted in a way that treats such names as recognised spellings, so the refusal is skipped and the request fails later with the wrong status.\n\n## Reach (measured, origin/main 0e46840fca, real kernel on SqlDriver)\n\n- `PUT /api/v1/meta/<inherited-name>/<name>` as a user holding `manage_metadata`: `503`, where an unknown type answers `400 INVALID_REQUEST`. Nothing is written.\n- `GET /api/v1/meta/<inherited-name>` and `/<inherited-name>/<name>`: `503` / `500` (REST) or `404` (dispatcher) instead of `400`.\n- No item, name or body is returned on any of these paths, and nothing is written or deleted; the defect is the refusal's status and error code only.\n- Control: `fieldz` answers `400 INVALID_REQUEST` on the same doors.\n\n## Where\n\n`packages/spec/src/meta-spelling/metadata-url-spelling.ts` (`canonicalMetaUrlType`, `unrecognisedMetaTypeRefusal`): own-key lookup is the expected fix; `pluralToSingular` in the same package already guards this way.\n\n## Why\n\nAI clients probe types by name; a wrong `503`/`500` reads as an outage and invites retries, where `400` tells the caller to fix its argument. Every door that folds a type shares the helper, so one fix covers REST, the dispatcher and the MCP door.\n\n## Reader\n\nThe spec lane (`packages/spec` meta-spelling), one small PR with a pin per door kind.\n\nDedup: `canonicalMetaUrlType` (22 hits), `unrecognisedMetaTypeRefusal` (9 hits), `inherited meta type`, `constructor meta type`: none covers this (closest closed: #27514, #9744, other unknown-type answers)."

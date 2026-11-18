@@ -12,6 +12,7 @@
   },
   "labels": [
     "area:ai",
+    "area:cloud",
     "domain:server",
     "pm:blocked",
     "pm:blocking",
@@ -21,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T08:56:59Z",
-  "updated_at": "2026-11-12T09:04:05Z",
+  "updated_at": "2026-11-18T16:40:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

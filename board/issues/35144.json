@@ -11,7 +11,7 @@
     "type": "Bot"
   },
   "labels": [
-    "area:ai",
+    "area:cloud",
     "domain:server",
     "lease:o1-C",
     "pm:dispatched",
@@ -23,11 +23,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T07:19:49Z",
-  "updated_at": "2026-11-18T13:43:06Z",
+  "updated_at": "2026-11-18T18:23:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 9,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35144",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「你要评估，云端哪些要迁移到开源项目，相关卡片要么关闭要么等待」, after 「开源项目能做的尽量在开源项目做，云端等开源项目完全优化好再开工」. Source of the inventory: a reading of the hosted tree at cloud main `0aabf9aa` against this repository's main `b1eb500d`, 2026-11-18. The open repository's agents cannot read the hosted tree, so what each item does is written here.\n\n## Why\n\n\"The top five customers by revenue\" over a thousand customers: the open tool returns every group or a capped page of them, in no stated order, and the client ranks what it happened to get. The answer looks exact and can be wrong.\n\nWho acts: the server lane (`packages/mcp`, `packages/services/service-analytics`, the engine's aggregate). Reader: every MCP client asking a ranking question.\n\n## Evidence\n\n- Open `aggregate_records` takes `groupBy`, `aggregations` and `where`, and no order or limit over the groups (`packages/mcp/src/mcp-http-tools.ts:3002-3090`).\n- The hosted ask tools add both, and the count of groups before the cut, after measuring a top-5 over 1,000 groups that put every group in the model's window.\n\n## Scope\n\n- `orderBy` over an aggregation alias or a group key, `limit`, and `groupCount` in the result: how many groups existed before the cut. Computed in the database where the driver can; a driver that cannot refuses with a stable code, never a slower path built for parity.\n- The same on `query_dataset` if it lacks it.\n\n## Done when\n\n- A top-N question over more groups than the row cap returns exactly N groups, in order, with the total number of groups, and a pin shows it.\n\n## Relations\n\n- Parent: #34659. Related: #35138 (`capped`), #35113 (`top_n` is one of the ten question kinds)."

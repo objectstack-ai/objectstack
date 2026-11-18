@@ -11,19 +11,20 @@
     "type": "Bot"
   },
   "labels": [
+    "area:fleet",
     "domain:devx",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T20:28:34Z",
-  "updated_at": "2026-11-18T07:51:06Z",
+  "updated_at": "2026-11-18T17:25:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34975",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzfr1xZSFZzCR8HnqXX\n\nThis is the follow-up the seat asked for at the landing of PR #34791 (#34613, which retires the seed modes `insert` and `replace` at the schema). It collects nits N14 and N18 of the seat's delta contract review 6960023348, and nit N16, which the same review raised. None blocks the PR, which lands first under the maintainer's small-flaw rule. N14 has a consequence on `main`, so this card exists before the merge.\n\nBlocked-by: #34791\nSuggested-grade: p2 · domain:qa · size S\nOwner after merge: seat 3 area o3-J takes it as soon as #34791 merges (seat note 2026-11-17 20:27Z).\n\n## 1. Two platform-checklist items still exercise the retired modes (N14)\n\n- `docs/qa/platform-checklist/areas/platform-core.json` › `platform-core.seed-mode-matrix`: its steps drive `INSERT` and `REPLACE`, and its `enumSource` pins `SeedMode` at 5 members. `check-platform-checklist.mjs` `extractEnumMembers` takes the first bracketed list after `const SeedMode =`. Since #34791, `SeedMode` is an `enumWithRetiredValues(SEED_MODE_VALUES, …)` call with no list of its own, so the extractor lands on a later `[value]`, counts 0 against the pinned 5, and reports VARIANTS STALE. That gate is off on per-PR CI by standing decision; the daily `platform-checklist-watchdog` runs it on `main`, so expect it to go red there once #34791 lands. Fix it the way #34791 fixed `check-skill-identifier-liveness.mjs`: pin `SEED_MODE_VALUES` at 3, drop the INSERT/REPLACE steps (or turn them into \"refused at parse / refused alone at load\" steps), and bump the item's revision.\n- `docs/qa/platform-checklist/areas/access-security.json` › `access-security.agent-ceiling-set-assignment-refusal`: one step seeds with `mode: 'insert'`. Rekey it (`externalId` plus the default mode) and bump the revision.\n\n## 2. FOLLOW-UPS.md K6 still reads open\n\n`docs/qa/platform-checklist/FOLLOW-UPS.md` K6 (\"Seed mode `replace` is declared≠implemented\") is answered by #34791: `replace` is retired, a parse refuses it, and a stored dataset carrying it is refused alone. Mark K6 resolved and point it at #34613 / #34791.\n\n## 3. Three comments still describe the retired modes as live (N18, text only)\n\nNone is a `.describe()`, so no generated reference carries them.\n- `packages/spec/src/api/protocol.zod.ts`, the `SeedAppliedLandedSchema` jsdoc: \"Per mode: `insert` / `replace` put every row they write in `inserted`\". This is the sibling of the line #34791 corrected in `seed-loader.zod.ts`.\n- `packages/spec/src/stack.zod.ts`, the `data` jsdoc: \"`insert`, `update`, `replace`\".\n- `packages/metadata-protocol/src/protocol.ts`, the `seedExternalIdSaveRefusal` docblock: \"`insert` and `replace` never match, so they are not judged\". Now the parse refuses both before the key judgment runs (pinned by the edited dogfood control in #34791). Mind the facade line ceiling on `protocol.ts` (11705, ruling 6897467376): change the line in place, add none.\n\n## 4. Inert `mode: 'insert'` keys in two objectql suites (N16)\n\n`packages/objectql/src/seed-loader-org-fallback.test.ts` and `seed-loader-org-stamp.test.ts` call `SeedLoaderConfigSchema.parse({ mode: 'insert', ...over })`. That schema has no `mode` key (the key is `defaultMode`), so the key is stripped and both suites load in the default `ignore`. The key reads as an insert-mode load and is none: drop it."

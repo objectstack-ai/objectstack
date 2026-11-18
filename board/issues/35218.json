@@ -1,0 +1,33 @@
+{
+  "number": 35218,
+  "kind": "issue",
+  "title": "skills: a published project-process skill for metadata apps — areas and grades, first touch, which document at which stage, testing and acceptance",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T16:11:54Z",
+  "updated_at": "2026-11-18T18:37:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35218",
+  "body": "repo:hotcrm#3 · os-warren · session_01JQwxbXSZrwmusBcL7dnLQf\n\nPart of objectstack-ai/hotcrm#2661 (child 5 of the hotcrm priorities rollout objectstack-ai/hotcrm#2656), item 7.\n\n## Why\n\nMaintainer rulings, verbatim (2026-11-18, hotcrm priorities thread):\n- 16:09Z 「这个项目中的很多做法应该是元数据项目的最佳实践，是不是应该写到平台的skills中，跟着技能安装到元数据项目中国呢」\n- 16:10Z 「ok」\n- 16:14Z 「这个skills是整个元数据项目的核心指引，用 fable 综合评估一下需要些什么」\n\nThe 12 published skills teach how to write metadata. None teaches how to run a metadata-app project. Today the scaffold and the skills disagree on how an app tests itself: `skills/objectstack-platform/references/operations.md` teaches `LiteKernel`, while the scaffold's sample test uses `@objectstack/verify` `bootStack` (`packages/create-objectstack/src/templates/blank/note.test.ts`). No skill mentions `@objectstack/verify`.\n\nScope below follows an independent review. The review is in the project files; its verdicts are restated here.\n\n## v1 — `skills/objectstack-project` (process domain, `SKILL.md` under ~200 lines)\n\n1. **Two opening questions.** Does this belong in the app or in the platform? Is the app for own use, or a product shipped to customers? The heavier parts apply only to a product; the light path is the default.\n2. **Stage × document table.** This is the skeleton: requirement, design, card, build, test and acceptance, user docs, release, upgrade.\n3. **Test boundary.** The app pins business facts with `@objectstack/verify`. It does not hand-write checks the platform derives. The skill lists what this version's `os validate`, `os lint` and verify actually check, so an agent never skips a check nobody runs. Plugin tests stay in objectstack-platform; one home per rule (#31112).\n4. **Platform gaps.** Never worked around in the app. File the card upstream; the app card waits until the fix is released into the app's pin.\n5. **Changes written for customers.** Release notes come from changesets. A breaking change says from what to what, which platform version it needs, and the customer's steps.\n6. **Bumping the pin and data migration.** Bump `@objectstack/*` together, re-sync the skills, sweep the waiting cards. Backfill scripts run before the upgrade, only through REST, and report by default (hotcrm's 8 `scripts/backfill-*.ts`). Retiring app tests once a platform check takes over follows hotcrm's `RETIRED` markers.\n7. **Pointers** to the 12 domain skills.\n- `description` names tasks, not file names (#34769): starting a feature or fix, filing or grading a card, opening a PR, cutting a release, bumping the platform.\n- Evals include scenarios: a platform defect found; asked to hand-write a reference-integrity test; a business-fact test; dropping a field; a pin bump; and a counter-example, a one-person app changing a label, which must not demand a requirement record.\n\n## Scaffold, same epic\n\n- `ci.yml` runs `pnpm test`. Today it does not, although the README tells users to.\n- The template AGENTS.md gets five lines pointing at the skill. Its hand-written skill table goes; it lists 9 of 12 skills. Copilot and Cursor read only AGENTS.md.\n- A three-line PR template: what a user can do now, how it was checked, whether the docs changed.\n- No empty `docs/PRIORITIES.md` or `docs/requirements/`. The skill carries the templates and creates them the first time they are needed, for new and old apps alike.\n\n## Later\n\n- `references/triage.md`: areas, first touch and grades as a fill-in.\n- `references/growth.md`: growing from one package to an app plus modules.\n- A docs-site guide whose stage table is generated from the skill.\n- A tag-time changeset check as a platform command.\n- A reusable workflow.\n\n## Not published\n\n- Seats, `pm:*` states, Tier and review levels, `reach:` lines: fleet machinery.\n- A/B/C/D dispositions as a general requirement.\n- hotcrm's own standards (three-locale docs, one e2e per chain) and any hotcrm area content.\n\n## Open\n\n- Grade and when it runs: for the maintainer.\n- Unverified: whether `experimental_sync` brings a newly added skill into an installed app. Check this on a real app first.\n- `skills/**` is governed: Tier H, os-zhuang approves.\n\n## Done when\n\n- `@objectstack/skills` ships the skill with its evals.\n- A freshly scaffolded app runs its tests in CI and its AGENTS.md points at the skill.\n- hotcrm's `docs/PRIORITIES.md` keeps only hotcrm's own content.\n"
+}

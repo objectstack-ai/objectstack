@@ -2,8 +2,8 @@
   "number": 34577,
   "kind": "issue",
   "title": "review follow-ups of PR #34568",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p3",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T02:03:43Z",
-  "updated_at": "2026-11-17T02:05:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T16:15:52Z",
+  "closed_at": "2026-11-18T16:15:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34577",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate: L1/L2 follow-ups, one card per PR. The source is PR #34568 (card #34527, which aligned the pm-dispatch text to #33941's merge-tree rule), passed on by area `o2-S`. It follows up work that has already landed, so it is not a new pm rule. Dedupe: `notify:serial when`, `review follow-ups of PR #34568`.\n\nSuggested-grade: p3 · `domain:skills` · `pm:queue`\n\n## 维护者速读\n\n- 现象:#34527 已把 pm-dispatch 文本对齐到「认领时和推送前各做一次 merge-tree」。但 `scripts/pm/record-recognisers.mjs` 里 `notify:serial` 的英文触发说明还写着旧说法「claimed file surfaces overlap」。另外，生成物接力的规则写在 landing-operations 的 D 节，不在车道章程里，按严格读法进不了串行队(L2 N4)。\n- 需要你做的：无。\n\n## Items\n\n- [ ] `scripts/pm/record-recognisers.mjs`: the `notify:serial` `when` text names the merge-tree trigger and drops \"claimed file surfaces overlap\".\n- [ ] L2 N4 on PR #34568: the generated-file relay reaches the serial queue by a pointer from the lane charter to `landing-operations.md` §D. Add the pointer only; do not restate the rule.\n\n## Done when\n\n`git grep -n \"claimed file surfaces overlap\" scripts/pm/ .claude/skills/pm-dispatch/` is empty, and the charter's serial-queue line points to §D.\n"

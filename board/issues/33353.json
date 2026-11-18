@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:fleet",
     "documentation",
     "domain:devx",
     "pm:on-hold",
@@ -22,7 +23,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-14T17:17:24Z",
-  "updated_at": "2026-11-16T14:11:54Z",
+  "updated_at": "2026-11-18T16:38:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

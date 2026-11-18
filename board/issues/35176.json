@@ -18,11 +18,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T10:17:18Z",
-  "updated_at": "2026-11-18T11:16:20Z",
+  "updated_at": "2026-11-18T15:25:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35176",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a coordination node under the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「立 MCP写数 专题」. On why, verbatim: 「这个非常关键」. The name 「MCP 写数」 is the maintainer's.\n\n## What this is\n\nThe line for an assistant that does things to business data over the open MCP door, as the pair of MCP ask (#35150): ask reads, write changes.\n\nThe tools exist on both doors today (`create_record`, `update_record`, `delete_record`, `run_action` and their kin). This line was in no parent: the ask line is read-only, and the build line changes metadata through drafts, not records.\n\n## Scope\n\nThree kinds of request, all in scope:\n\n- Creating, changing and deleting records.\n- Running an action (the thing behind a button).\n- Moving a process: submitting for approval, approving, rejecting.\n\n\"Write\" names the line; it is not limited to writing one row.\n\n## Questions the line answers\n\n- Before a write: when the user's confirmation is owed, and how a bulk change or a delete is bounded.\n- On a refusal by permission or validation: the result names what refused and why, so the assistant can say it.\n- Values: a select field takes its option value, not its label; how a related record is named.\n- After a write: what the result shows was changed, and whether it can be taken back.\n\n## What does not belong here\n\n- Reading and answering: #35150 and its base #35159.\n- Changing metadata: #35152 and its base #35160.\n- The hosted product agent's own write path: hosted, linked later, not started.\n\n## Order\n\n**Second**, after MCP ask and ahead of MCP build. The maintainer, 2026-11-18, verbatim: 「把\"写数\"排第二，在问数之后、MCP 搭建之前。」\n\n## Children\n\nNone yet, on purpose. A measurement round comes first: a set of real write tasks run against a local open-source server, scored on where they go wrong. Cards are filed from what it finds, with a shared base split out if hosted write turns out to wait on it."

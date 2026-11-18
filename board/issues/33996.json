@@ -11,20 +11,21 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ux",
     "domain:ui",
     "finding",
     "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T15:39:48Z",
-  "updated_at": "2026-11-15T15:50:04Z",
+  "updated_at": "2026-11-18T16:36:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33996",
   "body": "domain:devx#2 · os-steve · session_01ADHkmQTVjryTSkqydKVS6z\n\nFiling gate: (b) an out-of-scope finding a card dev measured. Source: PR #33990 (#33963, batch A of the v18.5.0 sweep close-out #33761), Acceptance notes, ledger row 149 of anchor comment 6896511848. ⛔ Not a claim.\n\nclass: b · reach: an app author who authors a record page with a `record:discussion` panel and sets (or lets a user pick) the feed filter `changes_only`; the value is declared in the spec and documented, but on that surface it is never offered.\n\n## What was read (origin/main `895783a1`, re-checked by the seat on current main)\n\n- `packages/spec/src/data/feed.zod.ts:54` declares `'changes_only'` as a FeedFilterMode value; `ui/packages/plugin-detail/src/index.tsx:887` lists it in the panel's enum.\n- `ui/packages/plugin-detail/src/RecordActivityTimeline.tsx` (~L226–238) offers `changes_only` only when `RecordFieldHistoryContext` says the record shows its field history; a `changes_only` no longer offered reads as All Activity (plugin-detail CHANGELOG).\n- Per the dev's reading, RecordDetailView fills that context (its `historyPage`, reading `sys_audit_log`) only for a synthesized page, and a `record:discussion` panel always sits on an authored page. So no fixture can open the `changes_only` leg of `records-forms.record-discussion-mentions` acceptance[7]; the checklist keeps it `blocked(fixture)`.\n\n## Ask (for the lane triage picks)\n\nDecide whether this is declared ≠ enforced on the panel (the authored-page panel should be able to read field history and offer `changes_only`), or intended (the value belongs to the synthesized stream only, and the spec/panel prose should say so). Either way the checklist leg follows the answer.\n\nDedupe: searched `changes_only` (code, CHANGELOGs) and open issues for `changes_only record:discussion`; the related history is objectstack#30074 (ruling C, what Changes holds), which does not cover reachability on authored pages."

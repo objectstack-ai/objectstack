@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ai",
     "domain:skills",
     "pm:queue",
     "priority:p2"
@@ -19,7 +20,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T10:47:42Z",
-  "updated_at": "2026-11-18T10:47:42Z",
+  "updated_at": "2026-11-18T16:03:47Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

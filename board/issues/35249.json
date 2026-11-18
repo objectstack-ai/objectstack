@@ -1,0 +1,30 @@
+{
+  "number": 35249,
+  "kind": "issue",
+  "title": "console: the default record form (no authored sections) never draws a field whose object-level visibleWhen holds; the same predicate on an authored section renders",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T19:07:02Z",
+  "updated_at": "2026-11-18T19:47:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35249",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a user-visible defect, reproduced once in the console.\n\n**Business reason.** The platform's direction is to draw a record's form from the object's `fieldGroups`, so that apps stop authoring form views. A field that only applies in some states, such as a deal's Loss Reason (only when lost), a lead's disqualification reason or a case's resolution, carries its condition on the field (`Field.visibleWhen`). On the default form that field never appears. A rep closing a deal as lost has no place to record why. Every app that reverts an authored form to the default loses its conditional fields, so the revert cannot happen. hotcrm's audit of its forms found this blocks 3 of its 10 \"move into metadata\" rows (objectstack-ai/hotcrm#2665, assessment comment 6988592923).\n\n**Reach (measured once).** hotcrm `main` `a2b7cc0b`, `@objectstack/*` 18.6.0, `objectstack dev` on fresh SQLite with demo staff, Playwright (Chromium):\n1. The form view for `crm_opportunity` has its `sections` deleted, so the console builds the form from `fieldGroups`. On the record 'Stark Expansion (Lost)' (stage `closed_lost`), the Edit dialog DOM contains **no** `loss_reason`. On 'Wayne Operations Module Rollout' (won), there is no `win_reason`.\n2. Control on the same records with the authored form (the section carries the same predicate): Loss Reason and Win Reason both render.\n3. Both fields' object-level `visibleWhen` evaluates true for those records. The detail page's own field rendering was not part of this measurement.\n\nExpected: the default form draws a field whenever its `visibleWhen` holds, exactly as an authored section with the same predicate does.\n\n**Seam.** `spec:Field.visibleWhen` → `renderer:plugin-form`, on the auto-derived `fieldGroups` path.\n\n**Reader.** objectstack triage grades it and routes it to the forms lane. Not a claim; awaits triage.\n\n**Dedupe** (`search/issues`, `repo:objectstack-ai/objectstack is:issue`, open and closed):\n- `visibleWhen auto-derived form`: 7 hits, none on point.\n- `fieldGroups form visibleWhen not rendered`: 11, all QA runs.\n- `ObjectForm visibleWhen derived`: 21. The nearest is #30184 (closed: `requiredWhen` treated as plain required), which is a different key."
+}

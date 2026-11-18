@@ -11,19 +11,20 @@
     "type": "Bot"
   },
   "labels": [
+    "area:workflow",
     "domain:devx",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T01:23:20Z",
-  "updated_at": "2026-11-18T01:48:08Z",
+  "updated_at": "2026-11-18T17:24:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35067",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFiling gate: the maintainer's word in the verification seat's session on 2026-11-18. Asked about three product questions from round 2, analysed against the code and prior rulings, the maintainer answered, verbatim: 「三个问题 同意」. This card is the execution of the first answer. No new ruling: ruling 6377731715 on #25496 (letter B for #25446, \"default off\") stands.\n\n## Why\n- **What the runner saw:** a probe beside `approvals.account-app-entry` (QA run #34803, private note) found that a submitter can approve their own invoice sign-off request on the stock showcase.\n- **Why that is not a platform gap:** the per-step key `excludeSubmitter` exists and is enforced. It is declared at `packages/spec/src/automation/approval.zod.ts` (docblock around lines 1073–1117, \"off by default, and ABSENT when off\") and enforced at open, decide, reassign and escalate in `packages/plugins/plugin-approvals/src/approval-service.ts`. `showcase_invoice_signoff` (`examples/app-showcase/src/automation/flows/index.ts`) does not declare it, so the platform did what the metadata said.\n- **The actual gap is documentation:** `grep -rn excludeSubmitter examples/` finds nothing. The capability is demonstrated nowhere, and no checklist item asserts it.\n\n## Scope\n1. **Showcase:** declare `excludeSubmitter: true` on one approval flow that fits segregation of duties (an invoice or payment sign-off).\n   - The seeded dev admin holds every approver position (`seed-approval-demo.ts`), so with the submitter excluded that path goes to `admin_rescue` or the node's `onEmptyApprovers`.\n   - Make the demo data still show a working path, and say which in the flow's comment.\n   - Note: `excludeSubmitter` beside `onEmptyApprovers: 'auto_approve'` is refused at parse (#25635, ruling 6386627950).\n2. **Checklist:** add or extend an item in `docs/qa/platform-checklist/areas/approvals.json`. When the step declares the key, the submitter's own decision is refused (403) and the route never silently passes. When it does not declare it, self-approval is allowed by design (the default-off ruling).\n\n## Not in scope\n- Changing the default.\n- The same person listed twice in `pending_approvers` when they hold two position specs. That is per-spec by design (#28684). A display-level dedupe would be its own small UI card if wanted.\n\nQA-source: #34803 · approvals.account-app-entry · observed beside the clauses"

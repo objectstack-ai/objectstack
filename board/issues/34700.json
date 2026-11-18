@@ -11,6 +11,7 @@
     "type": "User"
   },
   "labels": [
+    "area:data",
     "domain:server",
     "pm:dispatched",
     "priority:p2",
@@ -22,7 +23,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T07:13:52Z",
-  "updated_at": "2026-11-18T05:16:09Z",
+  "updated_at": "2026-11-18T16:07:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

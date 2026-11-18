@@ -2,8 +2,8 @@
   "number": 35137,
   "kind": "issue",
   "title": "mcp: query_records and get_record say which fields field-level security withheld, so an answer says \"not visible to you\", not \"blank\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "lease:o1-C",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T07:03:54Z",
-  "updated_at": "2026-11-18T13:04:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T15:47:37Z",
+  "closed_at": "2026-11-18T15:27:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35137",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「开源项目能做的尽量在开源项目做，云端等开源项目完全优化好再开工」, given in answer to this session's analysis of the hosted card on this defect.\n\n## Why\n\nA member asks for a value they are not allowed to read, their own cost rate for example. The answer says the field is blank. Nothing leaks, and the person is misled: they conclude the data is missing and go and fill it in, or report a bug. The hosted product fixed this for its own agent; a client on the open MCP door still gets the misleading answer.\n\nWho acts: the server lane (`packages/mcp`, `packages/runtime/src/domains/mcp.ts`, a read of `packages/plugins/plugin-security`). Reader: every MCP client asking on behalf of a user with a restricted field.\n\n## Evidence\n\n- The framework strips an unreadable field from every row it serves and leaves no marker: `FieldMasker.maskRecord` deletes the key (`packages/plugins/plugin-security/src/field-masker.ts:448`), and selecting a hidden field in `fields` is not refused. A row therefore cannot tell withheld from empty.\n- Objectstack main (read 2026-11-18): no `withheldFields` anywhere in `packages/mcp/src/mcp-http-tools.ts`, `packages/mcp/src/stdio-data-bridge.ts` or `packages/runtime/src/domains/mcp.ts`.\n- The hosted product measured the misleading answer on its ask set (a member's own cost rate read as blank) and fixed it in its own tools: its record tools return `withheldFields` and a note. That fix does not reach the open door.\n- On the open door the misleading answer is inferred from the code above; it was not reproduced there.\n\n## Scope\n\n- `query_records` and `get_record` results carry `withheldFields`: the fields the call asked for, or the object declares, that field-level security withheld from this caller's rows.\n- **The bound, which is the security line of this card:** only a field the caller's own served schema shows is ever named. A field removed from the caller's schema is never named, in this list or anywhere in the result. The framework's own answers decide both, asked as the caller; nothing is derived by comparing rows.\n- The same member on `aggregate_records` when a withheld field was asked for as a measure or a group, if the door does not already refuse it.\n- A short note in the result: these fields exist and are not visible to you; say so, never say they are empty.\n- HTTP and stdio alike. The ask-data skill and the served text gain one line.\n- Pins: a withheld field named; a field hidden from the schema not named; an empty readable field in neither list.\n\n## Done when\n\n- On an example app with a field restricted for a member persona, a question about that field over MCP is answered \"not visible to you\", and the scenario ask round carries that question (#35113).\n\n## Out of scope\n\n- Any change to what field-level security withholds. Write paths.\n\n## Relations\n\n- Parent: #34659. Same pattern as #34919 (a result member the hosted product computed in a wrapper, moved into the framework for both doors).\n- Security-touching: yes. It changes what a tool result says about a field a caller may not read. The bound above is the one the hosted fix adopted; widening or narrowing it is the maintainer's to say.\n- Dedup, open and closed: the search this card was filed with found no card."

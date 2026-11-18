@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ux",
     "domain:ui",
     "pm:epic",
     "priority:p2"
@@ -19,7 +20,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T01:31:07Z",
-  "updated_at": "2026-11-18T09:41:19Z",
+  "updated_at": "2026-11-18T16:25:38Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

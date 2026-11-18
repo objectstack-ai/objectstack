@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:package",
     "domain:server",
     "pm:queue",
     "priority:p3"
@@ -19,7 +20,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T23:25:24Z",
-  "updated_at": "2026-11-13T18:45:57Z",
+  "updated_at": "2026-11-18T16:35:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ai",
     "domain:devx",
     "pm:queue",
     "priority:p2"
@@ -19,7 +20,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T23:02:57Z",
-  "updated_at": "2026-11-17T20:04:49Z",
+  "updated_at": "2026-11-18T16:05:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

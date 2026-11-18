@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:data",
     "documentation",
     "domain:skills",
     "finding",
@@ -21,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T11:39:43Z",
-  "updated_at": "2026-11-18T05:50:28Z",
+  "updated_at": "2026-11-18T16:12:37Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

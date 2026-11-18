@@ -1,0 +1,36 @@
+{
+  "number": 35233,
+  "kind": "pull_request",
+  "title": "fix(plugin-detail): the record page's empty-sections line follows the remembered show-empty-fields choice",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T17:28:01Z",
+  "updated_at": "2026-11-18T18:12:31Z",
+  "closed_at": "2026-11-18T18:12:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T18:12:29Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35233",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgEdwjBmjmPjaieDs6mot1QR)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CaTDynWQQPWZNZBKq6\n\nFixes #35166\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:记录页底部那条「地址 · 转化 · N 个空分区 · 展开」空分区行,改为读写读者已记住的「显示空字段」选择(与各分区自己的「显示 N 个空字段」行同一个 `showEmptyFields`,按用户 + 对象存)。默认页与编排页都生效;顺手改正 `RecordDetailView.tsx` 一处过时注释。\n- 为什么改:读者选过「显示空字段」,空分区行仍每次折叠;展开后关页即忘,每次进记录都得再点一次。\n- 风险与回滚:只动 `plugin-detail` 一个组件 + 一处传参;无宿主偏好存储(未登录、无 bridge)时行为与原来一致(组件自身状态)。注意:展开/收起这条行就是同一个选择,所以会一并展开/收起各分区内的空字段。回滚即 revert 本 PR。\n- 先看:`ui/packages/plugin-detail/src/EmptySectionsFold.tsx` 的 `EmptySectionsLine`(`remembered` 一段)→ `DetailView.tsx` 传 `objectName` 一行 → 测试文件末尾新 describe。\n- 两分钟验证:登录 console,打开任一有空分区的记录,点空分区行「展开」,刷新页面,预期该行仍是展开(「收起」)状态,换同对象另一条记录也一样。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `EmptySectionsLine` (`ui/packages/plugin-detail/src/EmptySectionsFold.tsx`) takes the page's `objectName` and, under a host record-page preference store (`useRecordPagePreferences`), reads its expanded state from that object's `showEmptyFields` entry and writes an expand or collapse back to it — the same entry and the same local-state fallback `DetailSection` uses (objectstack#25883). With no store or no object name it keeps its own state, as before.\n- `DetailView` passes `schema.objectName` to the line. Both page kinds reach the line through this one call site: the synthesized default page (`DefaultRecordPageContext`) and every `record:details` body (`EmptySectionsLineContext`, which hands `ctx.objectName` down as `schema.objectName`).\n- `ui/packages/app-shell/src/views/RecordDetailView.tsx`: the comment that listed the empty-sections line as a default-page-only face now says every `record:details` body draws it.\n- Changeset: `@object-ui/plugin-detail` patch.\n\nOne choice, not two: expanding the line sets `showEmptyFields: true`, which also opens each section's own empty fields (sections read the same entry). The card asks for \"the same remembered 「显示空字段」 choice\"; no new preference key was added.\n\n## Tests\n\nNew top-level `describe` in `ui/packages/plugin-detail/src/__tests__/EmptySectionsLine.authoredPage-35019.test.tsx` (the line's existing harness), run for both page kinds (authored page; default page via `DefaultRecordPageContext`):\n\n- a remembered `showEmptyFields: true` opens the line and every empty field shows;\n- CONTROL: another object's remembered choice leaves the line folded;\n- expanding writes `['crm_opportunity', { showEmptyFields: true }]`, survives a remount; collapsing writes `false`, also survives;\n- CONTROL: with no host store the line's state is forgotten on unmount.\n\nAblation (one-shot, not kept): `EmptySectionsFold.tsx` replaced by its `ec227fc7` bytes (`grep -c useRecordPagePreferences` → 0) ⇒ `Tests 4 failed | 13 passed (17)` — exactly the two remembered-true and the two remount cases, both page kinds; the three controls stay green. Restored with `git checkout HEAD --`, `git diff HEAD` empty, marker count back to 2.\n\n## Acceptance notes\n\n- Follow-up (out of scope per dispatch): `EmptySectionsFold` (the whole-body fold a standalone `detail-view` draws) keeps `revealed` in `useState(false)` and does not read the remembered choice either.\n\n## Verification\n\nAll at head `2b539819`:\n\n<details><summary>Local subset</summary>\n\n- `pnpm --filter @object-ui/plugin-detail run type-check` + `pnpm --filter @object-ui/plugin-detail test` under the verify lock: `VERDICT command-exit 0`, `Test Files 386 passed | 1 skipped (387)`, `Tests 3477 passed | 18 skipped (3495)` (run at `aa63bf8b`; the later commit adds only the changeset).\n- eslint on the four changed files: exit 0, 0 errors (warnings pre-existing).\n- `dispatch-gates --commands`: 39 derived families, all run, all exit 0; `dispatch-gates --ran`: `39 run, 0 NOT-MEASURED`.\n\n</details>\n\nEvery family CI runs: read from this PR's check-runs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CaTDynWQQPWZNZBKq6\n"
+}

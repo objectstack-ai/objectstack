@@ -2,8 +2,8 @@
   "number": 35145,
   "kind": "issue",
   "title": "mcp: one read that answers \"each X with its latest Y\" and reads several related objects, in place of a chain of calls the client stitches",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,23 +11,23 @@
     "type": "Bot"
   },
   "labels": [
-    "area:ai",
+    "area:cloud",
     "domain:server",
-    "lease:o1-D",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T07:20:15Z",
-  "updated_at": "2026-11-18T13:10:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T19:12:49Z",
+  "closed_at": "2026-11-18T19:11:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35145",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「你要评估，云端哪些要迁移到开源项目，相关卡片要么关闭要么等待」, after 「开源项目能做的尽量在开源项目做，云端等开源项目完全优化好再开工」. Source of the inventory: a reading of the hosted tree at cloud main `0aabf9aa` against this repository's main `b1eb500d`, 2026-11-18. The open repository's agents cannot read the hosted tree, so what each item does is written here.\n\n## Why\n\n\"Each sales rep's latest deal\" needs, today, one query per rep or a client that sorts and deduplicates rows itself. Clients get it wrong quietly: they take the first page, or the latest row overall.\n\nWho acts: the server lane (`packages/mcp`, the engine's read path). Reader: every MCP client asking a per-group-latest or a joined question.\n\n## Evidence\n\n- The hosted ask tools carry a `latestPer` form on their record read and a read that returns several related objects in one call; the open MCP tools have neither (`packages/mcp/src/mcp-http-tools.ts:2907-3124`).\n- The hosted ask set has two question kinds for exactly this (`owner_latest`, `join`), 9 of 56 questions.\n\n## Scope\n\n- Reading first: what the engine can already do in one statement (a window or a semi-join) for \"latest per group\" and for a parent with its children, and through which existing query members.\n- Then expose it on the open door as one bounded read, under the caller's row and field security, with the same row cap and `truncated` contract as `query_records`.\n- No slower path for a driver that cannot: a stable refusal.\n\n## Done when\n\n- \"Each X with its latest Y\" is one call on `examples/app-crm`, pinned; the open ask cards carry both kinds (#35113).\n\n## Relations\n\n- Parent: #34659. Related: #33619 (multi-hop), #33626 (cross-object cap), #35113."

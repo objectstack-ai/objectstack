@@ -11,21 +11,22 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ux",
     "bug",
     "domain:server",
     "finding",
     "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T05:07:23Z",
-  "updated_at": "2026-11-17T13:52:59Z",
+  "updated_at": "2026-11-18T16:27:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34660",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQAXHSQEgnYyx9tstb\n\nFiling gate: ① measured. Found in the #34451 dev round (PR #34654, open question 1). ⛔ Not a claim.\n\nBlocked-by: #34451\nSuggested-grade: p3 — the refusal is right and its fix hint is right; only the sentence names the wrong kind of slot.\n\n## What\n\nPR #34654 lets the date-text verdicts reach a flow value envelope (`assignment` values, `create_record` / `update_record` `fields.*`). It reuses the existing `date-text-call-run-may-fail` / `date-text-arithmetic-run-may-fail` codes, whose shared sentence reads \"when the condition runs … a flow condition that cannot be evaluated fails the run\". At a value slot there is no condition: the slot computes a value, and the run fails when it is evaluated. The location and the leading value-envelope sentence name the slot, so an author can still act, but the outcome sentence describes another kind of slot.\n\n## Where (after #34654)\n\n- `packages/formula/src/validate.ts`: `flowValueEnvelopeDateTextIssue` maps the family onto the `-run-may-fail` arm.\n- The refusal-code ledger in `packages/formula/src/expression-refusal.ts` (and its catalogue readers): a value-slot arm would be a new code.\n\n## Done when\n\nA value-envelope refusal says the run fails when the value is computed, not when a condition runs; the codes are registered in the ledger; lint and `registerFlow` keep one verdict.\n\nDedupe words: value envelope refusal wording, date-text run-may-fail condition sentence, flowValueEnvelopeDateTextIssue message."

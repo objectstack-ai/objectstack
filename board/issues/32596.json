@@ -11,6 +11,7 @@
     "type": "Bot"
   },
   "labels": [
+    "area:cloud",
     "domain:cloud",
     "pm:dispatched",
     "priority:p1",
@@ -22,7 +23,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T07:14:44Z",
-  "updated_at": "2026-11-17T14:53:58Z",
+  "updated_at": "2026-11-18T16:42:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,

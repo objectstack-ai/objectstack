@@ -1,0 +1,30 @@
+{
+  "number": 35248,
+  "kind": "issue",
+  "title": "ci card writers: nightly-tiers-card and scheduled-full-run set the native issue type instead of the bug label (follow-up of #35223)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T18:43:18Z",
+  "updated_at": "2026-11-18T18:43:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35248",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nSource: topic #35205\n\nFiling gate: owed follow-up named in the acceptance notes of PR #35223 (L1 6988050932, item C1); child of epic #35205. ⛔ Not a claim.\n\nGrade: p3 · area:fleet · Task · blocks no running work\n\nBlocked-by: #35223\n\n## What to do\n\n`scripts/ci/nightly-tiers-card.mjs`, `scheduled-full-run-card.mjs` and `scheduled-full-run.mjs` open cards with the `bug` label and no native issue type. Give them the native type (and area:fleet, and no `domain:*`), so the old type labels can retire.\n\n## Done when\n\nThe three writers set the native type, the `bug` label is no longer written by them, and their tests cover it."
+}

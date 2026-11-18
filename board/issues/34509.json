@@ -11,20 +11,21 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ux",
     "bug",
     "domain:spec",
     "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T23:20:50Z",
-  "updated_at": "2026-11-16T23:47:21Z",
+  "updated_at": "2026-11-18T17:16:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34509",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRfW5u1LRmhWwaYHRp\n\nFiling gate: ① product defect, named producer (code reading, mechanism stated; not run)\n\n## Defect\n\n`renderValidationMessage` (`packages/spec/src/system/validation-message.ts`, published from `@objectstack/spec/system`) asks a deployment's `validation.field.<messageKey>` override with `opts.translate(key, locale, params)` and then interpolates the answer again with `interpolateValidationMessage(override, params)`. `II18nService.t` (`FileI18nAdapter.t`, the core memory fallback) already fills `{{name}}` from the params it is handed, so on the override path the message is filled twice. A parameter VALUE that itself holds a placeholder is expanded on the second pass.\n\nThis is the same shape PR #34496 fixed in `renderOperationMessage` (ask the template by key and locale, interpolate once). Its function docblock already states the single-pass call: `translate('validation.field.<messageKey>', locale)`.\n\n## Reach\n\nNamed producer: `packages/objectql/src/validation/record-validator.ts:1866-1873` (origin/main bdd51769ee). A write of a `select` value that is not an option fails with `invalid_option_value` / `invalid_option_value_picklist` and passes the written value as `value` (`buildFieldError` → `renderValidationMessage`, `params.value`). The built-in templates that echo `{{value}}` include `invalid_option_value`, `invalid_option_value_picklist`, `option_unavailable`, `reference_not_found`, the `value_domain*` keys, `invalid_initial_state` and the `import_*` keys.\n\nSo on a deployment that overrides one of those keys with a sentence containing `{{value}}`, a user who writes `{{label}}` (or any `{{word}}`) into such a field reads the field's label, or another parameter, where their own value should be. Display text only: the error code, the status, the shipped `value` field and the store are unchanged.\n\n## Ask\n\n- In `renderValidationMessage`, ask the override as `opts.translate(key, locale)` and interpolate once, as `renderOperationMessage` does after PR #34496.\n- Pin it: with an interpolating translator, an override for a key that echoes `{{value}}` and a value containing a placeholder renders the value as written; CONTROL on the built-in path.\n- Optional fold-in (accepted nit N2 of contract record 6932332429 on PR #34496): `RenderOperationMessageOptions.translate` (and the twin `RenderValidationMessageOptions.translate`) could say the lookup is asked for the template with no params.\n\n## Filing answers\n\n- Category: ① (product defect with a named producer).\n- Business reason: a deployment that localises its validation refusals (the documented `translation` override) shows a user a sentence that misquotes what they typed. Small, but it is the sentence the user reads to fix their input, and it is wrong exactly when the value looks unusual.\n- Reader: the area that owns PR #34496's follow-ups (repo:objectstack#2, area o2-G), in a card thread because the fix is on a `packages/spec/src/**` non-test path and owes the L2 contract record, like PR #34496.\n- Dedupe: issue search `repo:objectstack-ai/objectstack is:issue renderValidationMessage` → 8 hits (open and closed), `\"PR #34496\"` → 1 hit, `validation-message.ts interpolate` → 4 hits; none is this defect (#34454 is the operation-message twin, now in PR #34496).\n- Source: escalated by the L2 contract record on PR #34496 (comment 6932332429, section ③).\n"

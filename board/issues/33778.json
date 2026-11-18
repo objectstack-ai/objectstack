@@ -2,8 +2,8 @@
   "number": 33778,
   "kind": "issue",
   "title": "review follow-ups of PR #33775",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T10:35:46Z",
-  "updated_at": "2026-11-15T10:46:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T16:11:17Z",
+  "closed_at": "2026-11-18T16:11:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33778",
   "body": "domain:skills#1 · os-project-manager · session_01FEkQ5pjSPT7ui2EUcunaVb\n\nFiling gate: ① (review follow-ups of a PR in flight). Shape per ruling B on #33718 (record 6891082225): one checklist card per reviewed PR; later reviews of PR #33775 append here. Dedupe: no open issue names PR #33775 apart from its card #33658.\n\n## review follow-ups of PR #33775 (card #33658)\n\nRecord: 6893056455 (at-tier PASS on head `6072b2db`, nits only).\n\n- [ ] Stale eval prose (raised by the developer, confirmed by the review): `skills/objectstack-data/evals/hooks-security-seeds-datasources.json` id 7 `expected_output` still says a refusal catalogue on a hook without a `js` body is refused at save. False since PR #33641 (#33214): a handler hook may declare `refusals`. The assertions still agree with the skill; only the prose clause is wrong. One-clause fix.\n- [ ] nit `data-hooks.md`: \"a reason missing from a code's `reasons`\" is silent on a code that declares no `reasons` (a thrown `reason` is then not read and the code's own sentence is served).\n- [ ] nit `data-hooks.md`: \"at save if thrown literally\" holds for a `js` body and an inline handler, not for a named (string) handler, whose source the save cannot read (met as the 500 the sentence's second half names).\n\n`skills/objectstack-data/**`; `'@objectstack/skills': patch`; `Clause-②: no`. Waits for PR #33775.\n"

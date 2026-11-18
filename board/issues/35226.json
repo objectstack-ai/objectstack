@@ -1,0 +1,37 @@
+{
+  "number": 35226,
+  "kind": "pull_request",
+  "title": "fix(plugin-auth): an invitation mail sent outside a better-auth endpoint still carries the mailbox proof",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T17:05:29Z",
+  "updated_at": "2026-11-18T17:52:51Z",
+  "closed_at": "2026-11-18T17:52:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T17:52:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35226",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgB7Sa3pQkTCAA7hPp3Bc29g)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CZNxUcd9g6ABZNVZKs\n\nFixes #35107\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：宿主自己代码里直接调用组织插件的 `sendInvitationEmail`（不在任何 better-auth 端点内）时，邀请邮件现在也带上邮箱证明，受邀人可以一步接受邀请。\n- **为什么改**：云端环境代成员发出的邀请走的就是这条路，此前只带普通链接，cloud#4470 卡在这里。\n- **风险与回滚**：只在「没有端点上下文」时多读一次管理器自己的 auth 上下文；端点内的发送路径不变。回滚即 revert 本 PR，退回只带普通链接。\n- **先看**：`auth-manager-organization-plugin.ts` 的 `mintProofForSend`；`invitation-one-step-acceptance-34257.test.ts` 末尾的 #35107 三条用例；`auth-manager-plugin-list.ts` / `auth-manager.ts` 各一行接线。\n- **两分钟验证**：`pnpm --filter @objectstack/plugin-auth exec vitest run src/invitation-one-step-acceptance-34257.test.ts -t 35107`，预期 3 条全绿。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- `mintProofForSend` reads the endpoint context with the non-throwing `tryGetCurrentAuthEndpointContext`. With no endpoint context it mints through the auth manager's own context (`getAuthContext().internalAdapter`), the card's ask; inside an endpoint it mints through the endpoint's store as before.\n- The manager's `getAuthContext` is handed to the organization plugin's factory through the two existing host objects (`PluginListHost`, `OrganizationPluginHost`); it is read at send time only, never while the plugin is built.\n- The proof is still deliver-only and never stored in clear; the door and its closing rule are untouched.\n- One changeset, `@objectstack/plugin-auth` patch.\n\n## Tests\n\nThree cases appended to `invitation-one-step-acceptance-34257.test.ts` (it owns the engine double and the door helpers; no new double):\n\n1. A host-style send (plugin `sendInvitationEmail` called directly, `tryGetCurrentAuthEndpointContext()` asserted `undefined` at the call) delivers a mail whose link carries a proof; the template data and every stored row hold no proof; the one-step door redeems it (`accepted`, address verified, invitation accepted).\n2. CONTROL: the console invite inside the endpoint mints a proof and never reads the manager context; the out-of-endpoint send reads it exactly once.\n3. Construction-order pin: building the auth instance reads the manager context zero times, so the send cannot wait on its own build.\n\n<details><summary>Ablation (head 6269ad7e)</summary>\n\n`node scripts/ablation-replace.mjs` replaced the fallback (`: (await managerContext())?.internalAdapter;` to `: undefined;`, anchor 1 to 0, blob 5761479e to a1805a14): cases 1 and 2 red (`the mail's link carries no proof`, `expected getAuthContext to be called 1 times, but got 0`), case 3 green (it pins the build order, not the fix). Restored: blob == HEAD, `git diff HEAD` empty. The suite imports `src/` directly, so no dist leg.\n</details>\n\n## Acceptance notes\n\n- Premise reading A1: before this change the out-of-endpoint send did not reach the `!store` return. `getCurrentAuthEndpointContext` in `@better-auth/core` 1.7.12 throws outside `runWithEndpointContext`; the throw landed in the catch, which warned and sent the plain link. Same outcome as the card says, different line.\n- `auth.api.*` calls already run inside `runWithEndpointContext` (vendor `api/dispatch.mjs`), so a host using `auth.api.createInvitation` was never affected; this covers a direct call of the plugin option.\n\n## Verification\n\n<details><summary>Local gates (head 6269ad7e)</summary>\n\n- `pnpm --filter @objectstack/plugin-auth build && pnpm --filter @objectstack/plugin-auth typecheck`: lock VERDICT command-exit 0 (typecheck includes `check:test-typecheck`).\n- `pnpm --filter @objectstack/plugin-auth test`: lock VERDICT command-exit 0, Test Files 285 passed (285), Tests 6000 passed, 10 skipped (6010).\n- `node scripts/pm/dispatch-gates.mjs --commands`: 75 derived commands, run locally; the reconciliation goes in the seat report.\n- CI families: read from this PR's check-runs.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CZNxUcd9g6ABZNVZKs)_\n"
+}

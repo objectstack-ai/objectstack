@@ -18,11 +18,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T08:35:30Z",
-  "updated_at": "2026-11-18T08:35:30Z",
+  "updated_at": "2026-11-18T15:54:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35159",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a coordination node under the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18. On the structure, verbatim: 「现在就改结构」; on what this parent restores, verbatim: 「你之前的公共底座不用优化吗」. This session had proposed a shared base and then left it out when it split the epic into lines; this card puts it back.\n\n## What this is\n\nThe part of ask-data that belongs to no door. The open MCP door and the hosted product's own agent call the same framework tools; what those tools match, compute, return and say is decided once, here, for both.\n\n**Order: first**, with line 1 (#35150): a card here is wanted by the MCP ask line now.\n\n## What belongs here\n\n- What a result carries: candidates, the next step, the citation line, fields withheld by field security, the query a figure came from, \"not recorded\", a capped page.\n- When an ask-back is owed.\n- What the tools can read in one call: groups ordered and cut, the latest row per group, related objects.\n\n## What does not\n\n- The ask-data skill, the text the open server sends, the size of its tool list: those are the open door's, on #35150.\n- The product agent's prompt, planner and model: hosted.\n\n## Why it is its own parent\n\nHosted ask does not wait for the open door's skill or instructions. It waits for exactly this: when the open children here have landed and the pin carries them, the hosted wrapper that computes the same things can be deleted (objectstack-ai/cloud#3825, objectstack-ai/cloud#4829). This card's state is that gate.\n\nLanded work of this kind from before the split stays where it was hung, under #35150: `candidates` (#34761, #34763), the `nextStep` shape (#34918), labels in the caller's language (#34787, #34872, #34995)."

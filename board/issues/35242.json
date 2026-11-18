@@ -1,0 +1,36 @@
+{
+  "number": 35242,
+  "kind": "pull_request",
+  "title": "fix(plugin-dashboard): remove the dashboard table widget's CSV export button",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T17:46:38Z",
+  "updated_at": "2026-11-18T18:41:22Z",
+  "closed_at": "2026-11-18T18:41:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T18:41:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35242",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg6LBHtbsqCbRPM9MzTWbFBv)_\n\nrepo:objectstack#5 · os-bill · session_01Utp6CaQvpYhavZuHEZEF3C\n\nFixes #34906\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：删掉仪表盘表格组件（平铺表和交叉表）右上角的「导出 CSV」按钮，连同只为它存在的 CSV 生成函数和 11 个语言包里的 `dashboard.exportCsv` 文案。\n- 为什么改：按钮在浏览器里直接生成 CSV 下载，不过导出授权、不留导出审计。维护者裁定「直接删掉导出按钮」（ruling 6985168401）。\n- 风险与回滚：只删界面控件，不动服务器、不动元数据协议；报表自己的导出不变。回滚即 revert 本 PR。\n- 先看：`ui/packages/plugin-dashboard/src/DatasetWidget.tsx`（删掉的 `downloadCsv` / `toCsv` 与按钮）→ `DatasetWidget.test.tsx` 新钉子 `renders no export control on the …`。\n- 两分钟验证：打开任一带表格组件的仪表盘，表格右上角不再有下载图标。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `DatasetWidget.tsx`: the table and cross-tab no longer render the `dataset-export` button. `downloadCsv`, `toCsv`, `csvCell`, the `exportCsv` / `exportColumns` closure and the `Download` icon import go with it; nothing else read them (`toCsv` was exported from the module but not from the package index).\n- `@object-ui/i18n`: `dashboard.exportCsv` removed from all 11 locale packs. No other reader of the key.\n- Tests: five tests that pinned the CSV's contents (compare columns, dotted and local select labels, sort order, totals row) and the `toCsv` unit test are deleted with the feature. The phone touch-target test drops its export-button assertions. A new pin in `DatasetWidget.test.tsx` covers both table shapes: no `dataset-export` node, no button named export/CSV/download, and clicking every button builds no file.\n- Changeset: patch for `@object-ui/plugin-dashboard` and `@object-ui/i18n`.\n\n## Acceptance notes\n\n- The ruling's \"Done when\" says no dashboard widget offers a download. The other dashboard-package block that can, `object-data-table`, passes an authored `exportable` prop through to `data-table`, which then shows its own Export CSV button. It defaults to off, it is the shared table's prop rather than a dashboard widget option, and it is not in this PR's scope. Reported to the seat; not changed here.\n- No docs describe the dashboard control: `content/docs/**` and the package README carry no mention of it, so there is nothing to correct.\n\n## Verification\n\n<details><summary>Tests and type-check (head 24291320)</summary>\n\n- `pnpm --filter @object-ui/plugin-dashboard test`: Test Files 206 passed (206), Tests 2010 passed, 6 skipped.\n- `pnpm --filter @object-ui/plugin-dashboard type-check`: exit 0.\n- `pnpm --filter @object-ui/i18n test`: Test Files 104 passed (104), Tests 1956 passed, 13 skipped.\n- `pnpm --filter @object-ui/i18n type-check`: exit 0.\n- Reverse check: with `DatasetWidget.tsx` taken from `origin/main`, the new pin fails on both shapes (2 failed); restored from `HEAD`, `git diff HEAD` empty.\n\n</details>\n\n<details><summary>Derived gate families</summary>\n\nLocal, at head 24291320: `node scripts/pm/dispatch-gates.mjs --commands` derived 40 families; all 40 ran and exited 0. `--ran` reconciliation: ✓ dispatch-gates --ran: 40 derived famil(ies) accounted for — 40 run, 0 NOT-MEASURED (a DERIVED zero — all 40 recorded an exit code and none of them is 3).\n\n- `node scripts/check-adr-0087-registration.mjs --base origin/main` :: exit 0\n- `node scripts/check-adr-0087-registration.mjs --self-test` :: exit 0\n- `node scripts/check-changeset-no-major.mjs --base origin/main` :: exit 0\n- `node scripts/check-closing-keyword-parity.mjs` :: exit 0\n- `node scripts/check-closing-keyword-parity.mjs --self-test` :: exit 0\n- `node scripts/check-comment-mask-corpus.mjs` :: exit 0\n- `node scripts/check-empty-changeset.mjs --base origin/main` :: exit 0\n- `node scripts/check-empty-changeset.mjs --self-test` :: exit 0\n- `node scripts/check-sdui-manifest.mjs` :: exit 0\n- `node scripts/check-sdui-manifest.mjs --self-test` :: exit 0\n- `node scripts/ci/snapshot-next.mjs --self-test` :: exit 0\n- `node scripts/pm/check-governed-queue-guard.mjs --self-test` :: exit 0\n- `node scripts/pm/release-rehearsal-clone.mjs --self-test` :: exit 0\n- `node scripts/release-pending-publish.mjs --self-test` :: exit 0\n- `pnpm --dir ui exec vitest run scripts/` :: exit 0\n- `pnpm --filter @objectstack/spec run check:duration-unit-keys` :: exit 0\n- `pnpm check:adr-anchors` :: exit 0\n- `pnpm check:changeset-gate-self-tests` :: exit 0\n- `pnpm check:closed-ceremony-text` :: exit 0\n- `pnpm check:cross-package-test-inputs` :: exit 0\n- `pnpm check:dispatcher-error-vocabulary` :: exit 0\n- `pnpm check:driver-memory-census` :: exit 0\n- `pnpm check:engine-double-contract` :: exit 0\n- `pnpm check:gitlink-declared` :: exit 0\n- `pnpm check:merge-driver` :: exit 0\n- `pnpm check:nul-bytes` :: exit 0\n- `pnpm check:published-files` :: exit 0\n- `pnpm check:query-options-erasure` :: exit 0\n- `pnpm check:refd-timer-probe` :: exit 0\n- `pnpm check:registry-log-declared` :: exit 0\n- `pnpm check:rest-log-spy-declared` :: exit 0\n- `pnpm check:role-word` :: exit 0\n- `pnpm check:skill-identifier-liveness` :: exit 0\n- `pnpm check:test-source-alias` :: exit 0\n- `pnpm check:tier-file-adoption` :: exit 0\n- `pnpm check:type-check-coverage` :: exit 0\n- `pnpm check:type-check-debt` :: exit 0\n- `pnpm check:undeclared-dep-imports` :: exit 0\n- `pnpm check:watch-hint-literal` :: exit 0\n- `pnpm check:where-matcher` :: exit 0\n\nEvery other family is CI's; its check-runs on this PR are the reading.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CaQvpYhavZuHEZEF3C)_\n"
+}

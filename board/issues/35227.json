@@ -1,0 +1,36 @@
+{
+  "number": 35227,
+  "kind": "pull_request",
+  "title": "docs(releases): 18.6.0 release page, its upgrading row and the v18 index status",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T17:12:00Z",
+  "updated_at": "2026-11-18T17:56:54Z",
+  "closed_at": "2026-11-18T17:56:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T17:56:52Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35227",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgKCVJNUr6cPb1s2hrZX9Ty5)_\n\nFixes #35182\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:补上 18.6.0 的发布页 `releases/v18/18-6.mdx`(含升级清单),`upgrading.mdx` 加 v18.6.0 行,v18 索引页与 18.5 页的发布状态改成实情。\n- 为什么改:18.6.0 已上 npm(`latest`),带 68 条破坏性变更,却没有发布页,升级的开发者无处可查。\n- 风险与回滚:纯文档,不发布任何包;回滚即 revert 本 PR。\n- 先看:`content/docs/releases/v18/18-6.mdx` 的「需手动处理」与「Upgrade checklist」两节;`content/docs/releases/v18/index.mdx` 的状态段。\n- 两分钟验证:`pnpm check:release-page-status && pnpm check:doc-anchors`,预期两者都绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **New `content/docs/releases/v18/18-6.mdx`** (about 890 lines), modelled on `18-5.mdx`:\n  - release status, highlights, and a \"Release facts, as measured\" table (packages, npm `latest`, tags, the GitHub Release, the image);\n  - the five CHANGELOG sections as `classifyReleaseBullet` sorts them: 需手动处理 (53 entries in 9 groups, each with its action), 自动迁移 (15), 新增能力 (112), 语义变化 (4), 其他修复 (235, summarised by area);\n  - \"One change with no CHANGELOG line\": the #35094 Studio landing changeset (`35018-studio-landing-c.md`) that merged after the cut and is still pending in `.changeset/`;\n  - the #35114 N2 doors (public form submit and clone `overrides`) on the `cc5472e` line, and the N1 gap (the stdio data bridge does not report dropped fields) named as open;\n  - an upgrade checklist: move the pins, build, before the first boot (`os migrate plan` with `create_index` / `normalize_boolean_storage`, `--sealer-stopped`), after the boot.\n- **`content/docs/upgrading.mdx`**: a v18.6.0 row above v18.5.0 and a short \"Upgrading from 18.5.0 or earlier\" note.\n- **`content/docs/releases/v18/index.mdx`**: status now says 18.6.0 is released (2026-11-18); table gains the 18.6.0 row and dates 18.5.0 (2026-11-15); per-release bullet for 18.6.0.\n- **`content/docs/releases/v18/meta.json`**: `18-6` in the nav.\n- **`scripts/docs-audit/handwritten-docs.json`**: one line listing the new page, as `check:docs-audit-scope` demands (fence widened by the seat for this one file; the 18.5 and 18.4 release PRs made the same edit).\n- **`content/docs/releases/v18/18-5.mdx`** (bounded in-place fix, same defect class as the card): its callout still said \"18.4.0 is released, and 18.5.0 is not yet\". It now says 18.5.0 is released and links 18.6.0. Same file surface (`releases/v18/**`), same gate families, mechanical.\n\n## Tests\n\nDocs only; no code or package changes, so no unit tests. The gates derived by `node scripts/pm/dispatch-gates.mjs --commands` were run locally (see Verification).\n\n## Acceptance notes\n\n- **Breaking-change count.** The triage first touch says 64. Measured: 64 commits with a `!` subject in `b914e724..958ee035` (547 commits, all first-parent squash merges); 68 changesets declared breaking (53 manual + 15 migrated). The difference: `c4c0794`'s changeset defers its notice to `8b7c5d5`; `18194fb` produced three breaking changesets; `5c7e448`, `6091b64` and `6c1f9b3` are breaking without a `!`. The page uses the changeset count.\n- **Out of scope, left untouched (outside this card's file fence):**\n  - O-D4: the cli CHANGELOG entry for `35c9a30` calls audit side copies new in 18.6.0; they shipped in 18.5.0 (`4e1d327`, #33607). The page says so; amending the CHANGELOG needs its own docs-only PR.\n  - O-D5: `content/docs/deployment/cli.mdx` (\"Run them with the server stopped\") does not mention `--sealer-stopped`. The 18.6 checklist covers it.\n  - O-F1: npm's `next` dist-tag still reads 18.5.0 on spec, cli and create-objectstack. The v18 index \"Two npm channels\" paragraph was left as is.\n  - The next Version Packages PR #35129 will list the #35094 changeset as new; that PR is out of scope here.\n- Every `sha` / #PR pair on the page (107) was checked against `git log` subjects at `958ee035`.\n\n## Verification\n\n<details><summary>Gates (dispatch-gates --commands, 52 commands)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --ran` at `b100e4f49`: **62 derived families accounted for, 62 run, 0 NOT-MEASURED, all exit 0.**\n\n- First pass, 52 commands at `87aa35479`: 45 green on the first run.\n- Two were real findings, both fixed in `b100e4f49`:\n  - `check:role-word` flagged a reserved word in the new page; it is reworded to \"tier\".\n  - `check:docs-audit-scope` needed the new page in `scripts/docs-audit/handwritten-docs.json`; the entry was written by `check-audit-scope.mjs --write`.\n- Five exited 3 (prerequisite not met), then went green after building `@objectstack/lint...`, formula, client and client-react and running `spec gen:schema`:\n  - `lint check:doc-formula-expressions`\n  - `lint check:doc-security-posture`\n  - `spec check:docs`\n  - `spec check:skill-examples`\n  - `check:docs-transcript-drift`\n- The ten families the json path added were run at `b100e4f49`. All exited 0.\n- The other 45 were not re-run after `b100e4f49`. That commit only rewords one sentence on the page and adds the one json line.\n\n</details>\n\n<details><summary>Release facts</summary>\n\n- 419 changesets consumed (54 minor, 365 patch); 111 packages published at 18.6.0, each answering `npm view NAME@18.6.0`.\n- `@objectstack/spec@18.6.0` published 2026-11-18T05:50:28Z; `latest` = 18.6.0; tags point at `958ee035`; GitHub Release `@objectstack/spec@18.6.0` published 05:52:51Z; image `:18.6.0` answers 200.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CYbfRsYCpSxXuYuS58\n"
+}

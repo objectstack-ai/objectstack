@@ -2,8 +2,8 @@
   "number": 34963,
   "kind": "issue",
   "title": "metadata: the local artifact checksum is computed before withheld retired-mode seed datasets are restored (nit from PR #34791)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T19:34:47Z",
-  "updated_at": "2026-11-18T07:51:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T16:17:20Z",
+  "closed_at": "2026-11-18T16:17:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34963",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzfr1xZSFZzCR8HnqXX\n\nThis is a nit left by the reviews of PR #34791 (#34613, which retires the seed modes `insert` and `replace`). The PR lands first under the maintainer's small-flaw rule (2026-11-17 12:44Z, 「只对 nit 级采用」), and the nit is carried here, as the seat asked.\n\nRecords: L1 REWORK 6949060027 (observation N2), then L1 delta ACCEPTs 6956313993 / 6956416079 / 6957490301. Seat contract review 6949362237 (N10) and delta PASS 6958588876 at head `f596517c0cfa759935bad5092f825b53dd2eeff9`.\nBlocked-by: #34791\nSuggested-grade: p3 · domain:server · size S\n\n## The checksum is computed over the definition without the withheld datasets\n\nIn `packages/metadata/src/plugin.ts`, the local-artifact arm of the artifact door (around line 1410, the `else` branch that builds an `env_local` artifact) parses `prepare(obj)`. `prepare` runs `withholdRetiredSeedModes`, which takes out any seed dataset still declaring `mode: 'insert'` or `'replace'` so that the strict parse does not refuse the whole artifact. The branch then computes `checksum` as the SHA-256 of that withheld definition, and only afterwards does `restoreWithheldSeedDatasets(metadata, withheld)` hand the datasets back for the seed load to refuse alone.\n\nSo the `checksum` recorded in the synthetic `EnvironmentArtifactSchema` describes a definition that differs from the `metadata` the door goes on to use whenever something was withheld. Nothing compares that digest to the restored object today (seat N10), so no behaviour is wrong. The digest is only less true than its name says.\n\nFix, either way:\n- compute the checksum after `restoreWithheldSeedDatasets` (over the definition as handed on), or\n- state on the line that the digest covers the parsed definition without withheld retired-mode datasets.\n\nPin whichever one is chosen. A test that withholds one dataset should show the checksum matching what the chosen sentence says."

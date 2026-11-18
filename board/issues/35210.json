@@ -1,0 +1,30 @@
+{
+  "number": 35210,
+  "kind": "issue",
+  "title": "regrade: open objectstack cards per the v2 regrade list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T14:50:22Z",
+  "updated_at": "2026-11-18T17:32:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35210",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1 on the maintainer's 「立一张专题卡，开始执行」 (2026-11-18 14:43Z). Source order: /mnt/project-files/pm-orders/objectstack/seat1/priorities-rollout-2026-11-18.md. ⛔ Not a claim.\n\nRuns after child 3.\n\n- Regrade per /mnt/project-files/pm-orders/objectstack/regrade-2026-11-18.md (v2, agreed 14:42Z).\n- Each regraded card gets one line: `area · type · severity · reach · evidence · former grade`. A security-related card gets only its grade and former grade.\n- In-flight cards are not touched.\n- Measure #34862 and #35084 before grading them.\n- Re-read the body before closing any card. Groups of ten."
+}

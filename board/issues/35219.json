@@ -1,0 +1,31 @@
+{
+  "number": 35219,
+  "kind": "issue",
+  "title": "fleet-write: add an op that sets an issue's type (Bug / Feature / Task), for the area rollouts in objectstack and cloud",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T16:16:23Z",
+  "updated_at": "2026-11-18T17:32:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35219",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: the maintainer's choice of option A on 「卡片类型怎么设到卡上」 (2026-11-18 16:15Z, in the cloud priorities discussion): add a relay op that sets the issue type. Filed here because the relay lives in this repo (`scripts/pm/fleet-write/`); both area rollouts need it: cloud#4869 (child cloud#4871) and objectstack#35205 (child #35208, which met the same gap). ⛔ Not a claim.\n\n## What changes\n\n- A new op in `scripts/pm/fleet-write/ops.mjs`, e.g. `issue_type_set` `{issue, type}`, `type` one of `Bug`, `Feature`, `Task` (the organization's issue type names; reject anything else before any request).\n- Request: `PATCH /repos/{owner}/{repo}/issues/{n}` with `{\"type\": \"<name>\"}` (the issue-update endpoint's `type` field). Permission `issues`.\n- Read-back: the issue's `type.name` equals the requested name; otherwise the action fails with what was read.\n- Works on both `objectstack-ai/objectstack` and `objectstack-ai/cloud`.\n- Self-test row in the existing fleet-write self-tests, and the op listed wherever the op roster is documented (pm-dispatch references).\n\n## Open point to check first\n\nWhether the relay's app installation can set issue types at all (organization issue types must be enabled and named Bug / Feature / Task; the org issue-types read answers 403 to session tokens). If the app cannot, say so on this card and to the maintainer before building anything.\n\n## Done when\n\n- The op lands; one trial on a cloud card and one on an objectstack card read back the type.\n- Scope: new cards only. The maintainer, 2026-11-18 16:16Z: 「历史卡先回填，这个字段可以空着」. Existing cards keep an empty type field; there is no type backfill.\n"
+}

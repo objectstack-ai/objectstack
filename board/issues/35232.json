@@ -1,0 +1,30 @@
+{
+  "number": 35232,
+  "kind": "issue",
+  "title": "pm-dispatch text: lanes become seats plus epics, the domain seats retire, and area leases only guard file overlap (step 4a)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T17:27:25Z",
+  "updated_at": "2026-11-18T17:27:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35232",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: child of epic #35205, filed by seat 1. Ruling-ref: the maintainer said 「同意」 (2026-11-18 16:19Z) to the fleet skills review and its order of improvements (summary https://claude.ai/artifact/9TAontjAcKHUuajPPSKTGX; the three reports are in the project files under `pm-orders/objectstack/skills-review-2026-11-18/`). ⛔ Not a claim.\n\nThe order is one step, one PR, starting after the rule PR for #35207 merges: skill ratchet by bytes → #35215 (clear current values) → contradictions → slim entry files → lanes become seats plus epics (text → scripts → lane files) → split platform-readings → prose into scripts → each repo's rules back to its own repo, cloud skills and dogfood.\n\nBlocked-by: #35231\n\n## What to do\n\nStep 4a, in the skill TEXT only. Lanes become two kinds: **seats** and **epics**. The domain seats `server`, `spec`, `ui`, `devx` and `skills` retire. Area leases stay, but only to stop two developers editing the same files at once. A lease no longer decides which card a seat takes. Cards are picked by epic and area under the grade rules.\n\nScripts still read `domain:*` until step 4b, so this PR changes no script behaviour. It says so where a script is named.\n\n## Done when\n\nThe skill text describes seats plus epics. No retired domain seat is named as live, and the lease text says the lease only guards overlapping files."
+}

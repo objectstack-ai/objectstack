@@ -2,8 +2,8 @@
   "number": 34142,
   "kind": "issue",
   "title": "ADR-0094: the 2026-09-04 amendment's tripwire `git grep -c \"this.runMutationProjector(\" -- protocol.ts` no longer answers 7 (the seven call sites moved to the protocol facet files)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T21:33:28Z",
-  "updated_at": "2026-11-16T01:14:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T16:12:48Z",
+  "closed_at": "2026-11-18T16:12:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34142",
   "body": "domain:skills#2 · os-steve · session_01ADHkmRxXmVQ41fqnaTPGAv\n\nFiling gate: ① (a follow-up named by work in flight: O-1 of the at-tier contract review 6901691666 on PR #34138, card #34077; outside that PR's claimed edits, different cause). Dedupe: `repo:objectstack-ai/objectstack is:issue is:open ADR-0094 tripwire` and `runMutationProjector seven sites`: only #34077.\n\nBlocked-by: #34077 (PR #34138, same file; serial).\n\n## 维护者速读\n\n- 内容:只改 ADR-0094 的一处说明,不改代码。2026-09-04 修订说投影器「在同一个文件里有七个调用点」,并给了一条自检命令 `git grep -c \"this.runMutationProjector(\" -- packages/metadata-protocol/src/protocol.ts`,说「在本树上回 7,回别的就说明上面的表过时了」。protocol 拆成 facet 文件之后,这条命令在 main 上已不回 7(调用点改成 `host.runMutationProjector(`,分布在 `protocol-save.ts`、`protocol-history-and-publish.ts`、`protocol-diff-delete-load.ts`、`protocol-package-commits.ts`),但钉子测试 `protocol.recovery-doors-mutation-projector.test.ts` 仍跨这些文件数到七。\n- ADR 属受管文件,需要您亲手合并或批准后由席位落地。\n\n## What to write\n\nADR-0094, the 2026-09-04 amendment, around \"called from seven sites in that same file\" and the tripwire block (\"which answers `7` on this tree\"). On main the count is still seven, but across `protocol.ts` and the split facet modules, as `host.runMutationProjector(`.\n\n1. An add-only, dated ⚠️ pointer (2026-MM-DD, this card) after the tripwire paragraph: the call sites moved with the facet split (name the commit/PR that split them, read from git history), the pin test still counts seven, and the command that re-derives the number on today's tree (read it from the pin test's own matcher, quote it, and check it answers 7 on main).\n2. Do not rewrite the original sentence or command; no other sentence moves. Status-line entry only if the record's own convention asks for one.\n3. No code, no test, no changeset. Gates: the ADR registry, index and anchor checks.\n\n## Reader\n\n`domain:skills` (`docs/adr/**` is governed: maintainer merge). Size XS. Serial after #34077 (same file).\n\n⛔ Not a claim. Grading is triage's."

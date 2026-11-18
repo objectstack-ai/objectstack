@@ -11,20 +11,21 @@
     "type": "Bot"
   },
   "labels": [
+    "area:package",
     "bug",
     "domain:server",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T15:38:50Z",
-  "updated_at": "2026-11-17T19:05:33Z",
+  "updated_at": "2026-11-18T17:21:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34417",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5obaLbqgzRUR9xXfft\n\nFiling gate: ① reproducible defect (class a), measured. Found by area o1-D's dev on PR #34347 (out-of-scope finding in dev report 6920924279 on #34247). Reader who acts: the server lane, after #34347 lands (it touches the same reads).\n\n## Symptom\n\nAn environment saves a package-less doc `N` while no package ships it; later packages A and B, which both ship `N`, are installed. After a restart (boot hydration), or after `loadMetaFromDb` runs once the artifacts are registered, `GET /meta/doc/N?package=A` (A registered first) answers 200 with the environment row's content, not A's own doc. The bare doors answer 409 naming both holders. A reader who asks for A's doc gets the environment's text under A's name.\n\n## Location\n\n`packages/metadata-protocol/src/protocol-package-bindings.ts#mergeArtifactProtection` grafts the first registered holder's envelope onto the environment row's body (`_packageId` = the first holder, `_provenance: 'package'`), so the registry's entry at A's address is the environment row.\n\n## How it was found\n\nMeasured on the composed artifact rig, dispatcher and RestServer, both registration orders, at `origin/main` `c9346317` and at #34347's earlier head `72dc8ca2`; unchanged by #34347 (which pins this state as a CONTROL).\n\nreach: `GET /api/v1/meta/doc/:name?package=:firstHolder` on a deployment with a hydrated package-less row of a name two packages ship. Measured.\n\n## Acceptance\n\n1. In that state, `?package=A` serves A's own doc and `?package=B` serves B's, in both registration orders, on the plain read, `/layers` and `/published`; the environment row stays reachable at its own (package-less / `_env`) address.\n2. The bare doors' answers are unchanged (409 naming both, per ruling 6893582352 and #34347).\n3. CONTROLs: hydration before the artifacts (the case #34347 pins), one holder only, no environment row.\n4. Declaration: the exact address moves from the environment row's content to the holder's own doc. `Clause-②:` as the measured FROM→TO reads (expected `no (narrowing)` with an ADR-0087 entry if any door that answered 200 now answers differently).\n\n## Related\n\n#34247, #34248 and PR #34347; #33127 (stored rows after a restart, different shape); #32568 (closed: package-less item at both exact addresses, draft and preview doors); ADR-0150 D3/D5.\n\nDedupe: `is:issue mergeArtifactProtection package-less row exact address` → 4 hits (#34247, #28409 closed, #31699 closed, #6015), none on this shape; `is:issue hydrate graft envelope first holder doc` → 18 hits, top 5 read (#34247, #33127, #31527, #32568 closed, #33385 closed), none on this shape."

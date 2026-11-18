@@ -11,20 +11,21 @@
     "type": "Bot"
   },
   "labels": [
+    "area:data",
     "bug",
     "domain:server",
     "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T03:49:25Z",
-  "updated_at": "2026-11-16T03:49:25Z",
+  "updated_at": "2026-11-18T16:14:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34283",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jUg7BKfRBcTPyMxbLh\n\nFiling gate ③: area-directed (area S2 of seat domain:server#5). This is open question 1 of os-dev report 6906716209 on #34096 (PR #34282), ruled A there with this card as the follow-up.\n\n## Today (with PR #34282)\n\nA summary roll-up that an install door adds in a running process is materialised for the rows already stored (`materialiseAddedSummaries` at the end of `syncSchemas`). A roll-up that arrives with a restart is not:\n- a code-defined app's new version, which boots with the new field;\n- a marketplace install whose hot register failed and loaded at the next restart;\n- a ledger entry rehydrated at `kernel:ready`.\n\n`ObjectQLPlugin` seals the roll-ups served at `kernel:bootstrapped` as already computed, so those rows keep reading `null` until a child row is written, and nothing tells the operator. `os migrate summary-nulls` is the documented backfill for that path.\n\n## Ask\n\nAt `kernel:bootstrapped`, announce NULL `count` / `sum` roll-up holes with a bounded sample read per object, the way `announceStoredExpressionHoles` does for stored expressions. Write nothing. Name the `os migrate summary-nulls` line that fills them. Measure the sample's boot cost on a showcase boot, and pin both cases: a hole is announced once, and a computed column announces nothing.\n\nNot asked: persisting the computed set to walk it at boot (option B in the report). That adds a stored contract and a boot-time write, so it needs its own ruling.\n\nPrior rulings read: area ruling on #34096 open question 1 (A, with this card as the follow-up).\n\nReader: domain:server (objectql summaries). Size S."
