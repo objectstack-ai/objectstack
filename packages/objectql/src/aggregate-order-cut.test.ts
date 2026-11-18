@@ -136,13 +136,16 @@ describe('[aggregate order and cut] engine.aggregate — served as the driver\'s
     expect(rec.calls).toEqual([]);
   });
 
-  it('a rank orders a key by its listed values\' positions: handed to the driver as named', async () => {
+  it('a rank orders a key by its listed values\' positions: handed to the driver as named, the ranked column kept among the trailing keys', async () => {
     rec.answer([]);
     const request: AggregateOrderCutRequest = { orderBy: [{ field: 'area', order: 'asc', rank: ['west', 'east'] }], limit: 3 };
     await engine.aggregate(ORDER, { ...BY_CUSTOMER }, withCut(request));
+    // Every value the rank does not list shares one rank, so the column's own
+    // ascending order stays among the trailing keys to tell those groups apart.
     expect(rec.calls[0].ast[AGGREGATE_ORDER_CUT_DIRECTIVE].orderBy).toEqual([
       { column: 'area', order: 'asc', rank: ['west', 'east'] },
       { column: 'customer', order: 'asc' },
+      { column: 'area', order: 'asc' },
     ]);
     expect(request.outcome).toEqual({ kind: 'served', totalGroups: 0 });
   });

@@ -303,15 +303,6 @@ interface ObjectDef {
 }
 
 /**
- * Unwrap what the engine's read path resolves to.
- *
- * Same shape-tolerance as the ADR-0101 record reader next door: an engine may
- * answer a bare array or an envelope carrying `value`. Tolerating BOTH here is
- * not the consumer-side aliasing Prime Directive #12 forbids — it is the one
- * spelling the existing stdio reader already accepts, kept identical so the two
- * readers on this transport cannot disagree about what a row list is.
- */
-/**
  * The engine's order-cut-count read option for `aggregate`
  * (`@objectstack/objectql`, `aggregate-order-cut.ts`), spelled `Symbol.for`
  * because this package does not depend on the engine at runtime. A symbol, so
@@ -325,6 +316,15 @@ const STDIO_AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectq
  */
 const STDIO_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
 
+/**
+ * Unwrap what the engine's read path resolves to.
+ *
+ * Same shape-tolerance as the ADR-0101 record reader next door: an engine may
+ * answer a bare array or an envelope carrying `value`. Tolerating BOTH here is
+ * not the consumer-side aliasing Prime Directive #12 forbids — it is the one
+ * spelling the existing stdio reader already accepts, kept identical so the two
+ * readers on this transport cannot disagree about what a row list is.
+ */
 function unwrapRows(res: unknown): Array<Record<string, unknown>> {
   const rows =
     res && typeof res === 'object' && 'value' in (res as Record<string, unknown>)

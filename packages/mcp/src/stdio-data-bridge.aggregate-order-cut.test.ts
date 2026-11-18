@@ -37,6 +37,8 @@ const DEF = {
   },
 };
 const DIRECTIVE = Symbol.for('objectstack.driver.aggregate.orderCut');
+/** The engine's order-cut read option, spelled as the stdio bridge spells it. */
+const AGGREGATE_ORDER_CUT = Symbol.for('objectstack.objectql.aggregateOrderCut');
 const COUNT_COLUMN = '__os_total_groups';
 const PRINCIPAL = { userId: 'u1', isSystem: true } as unknown as ExecutionContext;
 
@@ -64,15 +66,15 @@ function makeDriver(name: string, answerCount = true) {
   return { driver, asts };
 }
 
-async function makeStdio(driverName = 'com.objectstack.driver.sql', answerCount = true) {
+async function makeStdio(driverName = 'com.objectstack.driver.sql', answerCount = true, def: typeof DEF | Record<string, any> = DEF) {
   const { driver, asts } = makeDriver(driverName, answerCount);
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
-  engine.registry.registerObject(DEF as any, 'test');
+  engine.registry.registerObject(def as any, 'test');
   const bridge = createStdioDataBridge({
     engine: engine as unknown as IDataEngine,
-    metadataService: { getObject: async (n: string) => (n === OBJECT ? DEF : undefined) } as unknown as IMetadataService,
+    metadataService: { getObject: async (n: string) => (n === OBJECT ? def : undefined) } as unknown as IMetadataService,
     resolvePrincipal: async () => PRINCIPAL,
   });
   const server = new McpServer({ name: 'pin', version: '0' });
@@ -88,7 +90,7 @@ async function makeStdio(driverName = 'com.objectstack.driver.sql', answerCount 
     })) as { isError?: boolean; content: Array<{ text: string }> };
     return { isError: res.isError === true, body: JSON.parse(res.content[0]!.text) };
   };
-  return { bridge, asts, call, close: () => client.close() };
+  return { engine, bridge, asts, call, close: () => client.close() };
 }
 
 describe('[aggregate order and cut] stdio — aggregate_records over the engine', () => {
@@ -158,12 +160,54 @@ describe('[aggregate order and cut] stdio — aggregate_records over the engine'
       expect(body).not.toHaveProperty('groupCount');
       expect(h.asts).toHaveLength(1);
       expect(h.asts[0][DIRECTIVE]).toEqual({
-        orderBy: [{ column: 'stage', order: 'asc', rank: ['open', 'won', 'lost'] }, { column: 'customer', order: 'asc' }],
+        orderBy: [
+          { column: 'stage', order: 'asc', rank: ['open', 'won', 'lost'] },
+          // The ranked column stays among the trailing keys: its unlisted values keep their own order.
+          { column: 'stage', order: 'asc' },
+          { column: 'customer', order: 'asc' },
+        ],
         limit: 6,
         totalGroupsColumn: COUNT_COLUMN,
       });
     } finally {
       await h.close();
+    }
+  });
+
+  it('the tool\'s longest declared order is the engine\'s longest rank: sent and served at the limit, neither past it', async () => {
+    // The tool mirrors the engine's rank maximum (it has no runtime dependency
+    // on the engine); this measures both at the boundary, so either moving
+    // alone goes red.
+    const wide = (n: number) => ({
+      ...DEF,
+      fields: { ...DEF.fields, wide: { name: 'wide', type: 'select', options: Array.from({ length: n }, (_, i) => ({ value: `w${i}` })) } },
+    });
+    const AT = 500;
+    const at = await makeStdio('com.objectstack.driver.sql', true, wide(AT));
+    try {
+      const { isError, body } = await at.call({ groupBy: ['wide'], limit: 5 });
+      // The tool sent the whole declared list as the rank, and the engine served it.
+      expect(isError, JSON.stringify(body)).toBe(false);
+      expect(at.asts[0][DIRECTIVE].orderBy[0].rank).toHaveLength(AT);
+    } finally {
+      await at.close();
+    }
+    const past = await makeStdio('com.objectstack.driver.sql', true, wide(AT + 1));
+    try {
+      const { isError, body } = await past.call({ groupBy: ['wide'], limit: 5 });
+      // One past it, the tool sends no rank…
+      expect(isError, JSON.stringify(body)).toBe(false);
+      expect(past.asts[0][DIRECTIVE].orderBy).toEqual([{ column: 'wide', order: 'asc' }]);
+      // …and the engine refuses that rank, the driver never asked.
+      const rank = Array.from({ length: AT + 1 }, (_, i) => `w${i}`);
+      const err: any = await past.engine
+        .aggregate(OBJECT, { groupBy: ['wide'], aggregations: [{ function: 'count', alias: 'n' }] } as any,
+          { [AGGREGATE_ORDER_CUT]: { orderBy: [{ field: 'wide', order: 'asc', rank }], limit: 5 } } as any)
+        .then(() => undefined, (e: unknown) => e);
+      expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_QUERY', status: 400 });
+      expect(past.asts).toHaveLength(1);
+    } finally {
+      await past.close();
     }
   });
 

@@ -28,11 +28,14 @@
  * group key's projected name (`alias ?? field`), the namespace `having` filters
  * ({@link aggregatedRowColumns}). Any other name is refused `INVALID_SORT` /
  * 400, naming the columns this query projects. The group keys the order does
- * not name follow it, ascending, so two runs of one request answer the same
- * groups in the same order. A NULL ranks last in either direction, except
- * where the column answers an identity over nothing (`sum`, the counts:
- * `emptyGroupValueFor`), which ranks as that identity — the value the row is
- * served with.
+ * not name, and every group key a `rank` names, follow it, ascending, so two
+ * runs of one request answer the same groups in the same order. A NULL ranks
+ * last in either direction, except where the column answers an identity over
+ * nothing (`sum`, the counts: `emptyGroupValueFor`), which ranks as that
+ * identity — the value the row is served with. Under a `rank` key the values
+ * it does not list (a NULL among them) share one rank past the listed ones,
+ * so they come after them ascending and before them descending; among
+ * themselves they follow the trailing ascending keys, NULL last.
  *
  * ## The count is the statement's
  *
@@ -93,12 +96,15 @@ export interface AggregateOrderKey {
   readonly order: 'asc' | 'desc';
   /**
    * Order the column by these values' positions instead of by the values
-   * themselves: a value at position `i` ranks `i`, any value the list does not
-   * hold (a NULL among them) ranks after every listed one, and `order` runs
-   * over the ranks. For a group key whose values are declared options, so a
-   * cut keeps the groups first in the declared order — the order the caller
-   * reads off the schema it is served, handed down so the statement applies it
-   * before the cut. Groups the rank does not tell apart fall to the next key.
+   * themselves: a value at position `i` ranks `i`, every value the list does
+   * not hold (a NULL among them) ranks `rank.length`, and `order` runs over the
+   * ranks, so the unlisted values come after the listed ones ascending and
+   * before them descending. For a group key whose values are declared options,
+   * so a cut keeps the groups first in the declared order — the order the
+   * caller reads off the schema it is served, handed down so the statement
+   * applies it before the cut. Groups the rank does not tell apart fall to the
+   * next key, and the ranked column itself stays among the trailing ascending
+   * keys (NULL last), so the unlisted values keep an order of their own.
    */
   readonly rank?: ReadonlyArray<string | number>;
 }
@@ -125,7 +131,7 @@ export interface AggregateOrderCutRequest {
 
 /** What the driver is handed, on the AST under {@link AGGREGATE_ORDER_CUT_DIRECTIVE}. */
 export interface DriverAggregateOrderCut {
-  /** The full order: the request's keys, then every group key it does not name, ascending. */
+  /** The full order: the request's keys, then every group key it does not name or names only by a `rank`, ascending. */
   readonly orderBy: ReadonlyArray<{
     readonly column: string;
     readonly order: 'asc' | 'desc';
@@ -309,13 +315,16 @@ export function aggregateOrderCutRefusal(
 /**
  * The full order the driver applies: the request's keys, then every group key
  * column the request does not name, ascending — so the answer is the same
- * groups in the same order on every run.
+ * groups in the same order on every run. A column the request names only by a
+ * `rank` stays among those trailing keys: the rank leaves every value it does
+ * not list on one rank, and its own ascending order (NULL last) then tells
+ * those groups apart.
  */
 export function aggregateOrderCutDirective(
   request: AggregateOrderCutRequest,
   groupColumns: readonly string[],
 ): DriverAggregateOrderCut {
-  const named = new Set(request.orderBy.map((k) => k.field));
+  const named = new Set(request.orderBy.filter((k) => k.rank === undefined).map((k) => k.field));
   return {
     orderBy: [
       ...request.orderBy.map((k) => ({ column: k.field, order: k.order, ...(k.rank !== undefined ? { rank: [...k.rank] } : {}) })),

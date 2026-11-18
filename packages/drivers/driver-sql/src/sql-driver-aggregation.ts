@@ -562,8 +562,10 @@ export class AggregationFacet {
         const ref = `${groups}.${this.aliasIdentifierSql(key.column)}`;
         const identity = foldedOutput.get(key.column);
         if (key.rank !== undefined) {
-          // A declared order: each listed value ranks by its position, any
-          // other value (a NULL among them) after every listed one.
+          // A declared order: each listed value ranks by its position, every
+          // other value (a NULL among them) on one rank past the listed ones;
+          // `order` runs over the ranks. The engine's trailing keys order the
+          // values that share that rank.
           const arms = key.rank.map((_, i) => `when ? then ${i}`).join(' ');
           outer.orderByRaw(`case ${ref} ${arms} else ${key.rank.length} end ${key.order}`, [...key.rank]);
         } else if (identity !== undefined && Number.isFinite(identity)) {
@@ -631,8 +633,9 @@ export const AGGREGATE_ORDER_CUT_DIRECTIVE: unique symbol = Symbol.for('objectst
 export interface AggregateOrderCutDirective {
   /**
    * The full order, every key a column the grouped statement projects. A key
-   * with a `rank` orders by each value's position in it, any value it does
-   * not list after every listed one.
+   * with a `rank` orders by each value's position in it, every value it does
+   * not list (a NULL among them) on one rank past the listed ones, and `order`
+   * runs over the ranks.
    */
   readonly orderBy: ReadonlyArray<{
     readonly column: string;

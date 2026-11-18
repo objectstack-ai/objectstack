@@ -334,6 +334,8 @@ describe('aggregate_records — ordered, cut and counted groups', () => {
     expect(Object.keys(tool.inputSchema.properties)).toEqual(expect.arrayContaining(['orderBy', 'limit']));
     expect(tool.inputSchema.properties.limit.maximum).toBe(CAP);
     expect(tool.description).toMatch(/totalGroups says how many groups existed before the cut/);
+    // A per-record-currency amount is ranked by its bare numbers: the text keeps the ranking to one currency.
+    expect(tool.description).toMatch(/Ranking an amount whose records each carry their own currency compares bare numbers across currencies: rank it inside one currency by filtering where on its currency code field\./);
     expect(tool.description).not.toMatch(/groupCount/);
   });
 });

@@ -3812,6 +3812,11 @@ export function registerObjectTools(
             // cut, and the number of groups before the cut stated.
             'For a ranking (top or bottom N), set orderBy to an aggregation alias or a group key and limit to N: ' +
             'the database orders and cuts the groups, and totalGroups says how many groups existed before the cut. ' +
+            // The database ranks a per-record-currency amount by its bare
+            // numbers, whatever each group's currency; the caller keeps the
+            // ranking to one currency.
+            'Ranking an amount whose records each carry their own currency compares bare numbers across currencies: ' +
+            'rank it inside one currency by filtering where on its currency code field. ' +
             `At most ${maxLimit} groups come back; truncated: true says more existed. ` +
             'Runs under the caller\'s permissions, row-level security and field-level security.',
           inputSchema: strictToolInput(
