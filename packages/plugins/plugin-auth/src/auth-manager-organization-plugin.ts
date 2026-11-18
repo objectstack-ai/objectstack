@@ -105,6 +105,7 @@ export interface OrganizationPluginHost {
   readonly config: AuthManager['config'];
   emailLocaleArg: AuthManager['emailLocaleArg'];
   getAppName: AuthManager['getAppName'];
+  getAuthContext: AuthManager['getAuthContext'];
   getAudience: AuthManager['getAudience'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
@@ -676,9 +677,14 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
       // [#34257] The mail's link carries the invitation's mailbox proof; the
       // copied link and the stored mail row never do. Minted only for a send
       // that goes out; one that cannot be minted goes out as today's link.
+      // [#35107] A send from the host's own code, outside any endpoint, mints
+      // through the manager's own auth context, read at send time only.
       const proof = expiry.expiresAt === undefined
         ? undefined
-        : await mintProofForSend({ id: String(invitation.id), email: recipientEmail, expiresAt: invitation.expiresAt });
+        : await mintProofForSend(
+            { id: String(invitation.id), email: recipientEmail, expiresAt: invitation.expiresAt },
+            () => this.getAuthContext(),
+          );
       try {
         await emailService.sendTemplate({
           template: 'auth.invitation',
@@ -766,14 +772,27 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
 /**
  * Mint the invitation's mailbox proof through the verification store of the
  * request that sends the mail (better-auth calls `sendInvitationEmail` inside
- * invite-member, a resend included). No endpoint context, or a store that
- * refuses the write: no proof, and the mail carries today's link.
+ * invite-member, a resend included).
+ *
+ * [#35107] A send with no endpoint context at all is a host calling the
+ * plugin's `sendInvitationEmail` from its own code; it mints through the
+ * auth manager's own context (`managerContext`), the same internal adapter and
+ * so the same verification store. That getter is read here, at send time,
+ * never while the plugin is built: the callback is reachable only from a built
+ * auth instance, so the read never waits on the build that is calling it.
+ * An endpoint context without a store, or a store that refuses the write: no
+ * proof, and the mail carries today's link.
  */
-async function mintProofForSend(invitation: { id: string; email: string; expiresAt: unknown }): Promise<string | undefined> {
+async function mintProofForSend(
+  invitation: { id: string; email: string; expiresAt: unknown },
+  managerContext: () => Promise<any>,
+): Promise<string | undefined> {
   try {
-    const { getCurrentAuthEndpointContext } = await import('@better-auth/core/context');
-    const ctx: any = getCurrentAuthEndpointContext();
-    const store = ctx?.context?.internalAdapter;
+    // `try…` answers `undefined` outside an endpoint; the `get…` form throws
+    // there, which is what sent today's link (with a warn) before #35107.
+    const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
+    const ctx: any = tryGetCurrentAuthEndpointContext();
+    const store = ctx ? ctx.context?.internalAdapter : (await managerContext())?.internalAdapter;
     if (!store) return undefined;
     return await mintInvitationProof(store, invitation);
   } catch (err: any) {

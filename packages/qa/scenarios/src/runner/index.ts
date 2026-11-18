@@ -9,6 +9,7 @@
  */
 
 export * from './app.js';
+export * from './door.js';
 export * from './driver.js';
 export * from './drivers/codex.js';
 export * from './drivers/external.js';

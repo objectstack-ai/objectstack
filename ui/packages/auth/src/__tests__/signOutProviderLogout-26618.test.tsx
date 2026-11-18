@@ -152,6 +152,82 @@ describe('createAuthClient.signOut follows the provider-logout redirect (#26618)
   });
 });
 
+/**
+ * A fetch double that answers `/config` with `features` and `/sign-out` with a
+ * provider-logout URL, recording each sign-out body and counting config reads.
+ */
+function afterSignOutFetch(features: Record<string, unknown> | null) {
+  const bodies: Array<Record<string, unknown> | null> = [];
+  let configReads = 0;
+  const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+    if (url.endsWith('/config')) {
+      configReads += 1;
+      return features === null
+        ? json({ message: 'boom' }, 503)
+        : json({ success: true, data: { emailPassword: { enabled: true }, socialProviders: [], features } });
+    }
+    if (url.includes('/sign-out')) {
+      bodies.push(typeof init?.body === 'string' ? JSON.parse(init.body) : null);
+      return json({ success: true, url: END_SESSION_URL, redirect: true });
+    }
+    return json({ message: 'Not found' }, 404);
+  });
+  return { fetchFn, bodies, configReads: () => configReads };
+}
+
+describe('createAuthClient.signOut returns where the deployment\'s afterSignOut says', () => {
+  it('hold (default): the provider returns to the sign-in page, and the tab notes the round trip so the page holds', async () => {
+    setBaseHref('/_console/');
+    const { fetchFn, bodies } = afterSignOutFetch({ directSignIn: true, localSignIn: 'hidden', afterSignOut: 'hold' });
+    const client = createAuthClient({ baseURL: '/api/v1/auth', fetchFn });
+
+    await client.signOut();
+
+    expect(bodies).toEqual([{ callbackURL: '/_console/login' }]);
+    expect(assignSpy).toHaveBeenCalledWith(END_SESSION_URL);
+    expect(JSON.parse(sessionStorage.getItem('objectui:auth:signed-out-via-provider')!).path).toBe('/_console/login');
+  });
+
+  it('identity-provider: the provider returns through the direct sign-in door, and no hold is noted', async () => {
+    setBaseHref('/_console/');
+    const { fetchFn, bodies } = afterSignOutFetch({ directSignIn: true, localSignIn: 'off', afterSignOut: 'identity-provider' });
+    const client = createAuthClient({ baseURL: '/api/v1/auth', fetchFn });
+
+    await client.signOut();
+
+    expect(bodies).toEqual([{ callbackURL: '/api/v1/auth/sign-in/direct' }]);
+    expect(assignSpy).toHaveBeenCalledWith(END_SESSION_URL);
+    expect(sessionStorage.getItem('objectui:auth:signed-out-via-provider')).toBeNull();
+  });
+
+  it('identity-provider reads the config this tab already holds, without a second request', async () => {
+    const { fetchFn, bodies, configReads } = afterSignOutFetch({ directSignIn: true, afterSignOut: 'identity-provider' });
+    const client = createAuthClient({ baseURL: '/api/v1/auth', fetchFn });
+    await client.getConfig();
+
+    await client.signOut();
+
+    expect(configReads()).toBe(1);
+    expect(bodies).toEqual([{ callbackURL: '/api/v1/auth/sign-in/direct' }]);
+  });
+
+  it.each([
+    ['the door cannot start (directSignIn false)', { directSignIn: false, afterSignOut: 'identity-provider' }],
+    ['direct sign-in is off (no afterSignOut served)', { directSignIn: false }],
+    ['the config cannot be read', null],
+  ])('CONTROL: returns to the sign-in page when %s', async (_label, features) => {
+    const { fetchFn, bodies } = afterSignOutFetch(features);
+    const client = createAuthClient({ baseURL: '/api/v1/auth', fetchFn });
+
+    await client.signOut();
+
+    expect(bodies).toEqual([{ callbackURL: '/login' }]);
+  });
+});
+
 const authRef: { current: AuthContextValue | null } = { current: null };
 
 function Probe() {

@@ -1983,7 +1983,6 @@ const en = {
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
     allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
     details: 'Details',
-    exportCsv: 'Export CSV',
     openInList: 'Open in list',
     config: {
       breadcrumb: {

@@ -59,7 +59,9 @@
  *
  * `callData` prefers the `protocol` service (metadata-protocol) and falls back
  * to the engine; this bridge is engine-only. So the HTTP tools additionally get
- * that layer's existence probes, its spec-shaped receipts and `expand`/`select`.
+ * that layer's existence probes, its spec-shaped receipts and `select`
+ * (`expand` is served here since #35145, built as that layer builds it:
+ * {@link stdioExpandMap}).
  * (That layer's create-side `readonly` strip used to head this list; since the
  * maintainer ruling of 2026-09-03 — option C, #14147 — the static `readonly`
  * strip runs inside `engine.insert` for every non-system caller and the
@@ -132,6 +134,10 @@ import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts'
 import { resolveObjectSortability } from '@objectstack/spec/api';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
+// [#35145] What a reference field points at, and whether that object serves
+// the read an expansion is (`get`): the spec's one arbiter of each, the pair
+// the data door's expand gate asks.
+import { REFERENCE_VALUE_TYPES, canServeApiOperation, referenceTargetOf } from '@objectstack/spec/data';
 // [commit 4810dd628] The repo's ONE single-record 404 (#4435/#5138/#7867). Imported from
 // `@objectstack/core` rather than re-minted here or reached via
 // `@objectstack/metadata-protocol`'s re-export: this package already declares
@@ -315,6 +321,60 @@ const STDIO_AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectq
  * on the engine at runtime. A symbol, so no tool argument can carry it.
  */
 const STDIO_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
+
+/**
+ * [#35145] `query_records`' `expand` on this transport, as the data door
+ * builds it (`assertExpandTargetsExist`, then `servedExpand`): each name is a
+ * reference field of the object as the caller is served it (`served`), else
+ * the door's `400 INVALID_FIELD`; a target whose declaration does not serve
+ * `get` is withheld, and its field answers as the stored id. The map is the
+ * engine's own `expand`, which reads each target in one batched `id IN (...)`
+ * read under the target's permissions, row and field security.
+ */
+async function stdioExpandMap(
+  reads: StdioObjectReads,
+  object: string,
+  served: ObjectDef | undefined,
+  names: readonly string[],
+): Promise<Record<string, { object: string }> | undefined> {
+  const out: Record<string, { object: string }> = {};
+  for (const name of names) {
+    const def = served?.fields && Object.prototype.hasOwnProperty.call(served.fields, name)
+      ? served.fields[name]
+      : undefined;
+    let target: string | undefined;
+    try {
+      target = def && typeof def.type === 'string' && REFERENCE_VALUE_TYPES.has(def.type) ? referenceTargetOf(def) : undefined;
+    } catch {
+      target = undefined;
+    }
+    if (!target) {
+      const err = new Error(
+        def === undefined
+          ? `Unknown field '${name}' on object '${object}'. 'expand' resolves a reference field into the related record.`
+          : `Field '${name}' on object '${object}' is not a relationship: only lookup / master_detail / user / tree `
+            + 'fields can be expanded.',
+      ) as Error & { code: string; status: number; field: string; object: string; param: string };
+      err.code = 'INVALID_FIELD';
+      err.status = 400;
+      err.field = name;
+      err.object = object;
+      err.param = 'expand';
+      throw err;
+    }
+    let declared: ObjectDef | undefined;
+    try {
+      declared = await readObjectDeclaration(reads, target);
+    } catch (err) {
+      // A target whose package is disabled serves nothing: withheld.
+      if (isObjectPackageDisabledRefusal(err)) continue;
+      throw err;
+    }
+    if (!canServeApiOperation(declared?.enable as EnableLike | undefined, 'get')) continue;
+    out[name] = { object: target };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 /**
  * Unwrap what the engine's read path resolves to.
@@ -1415,6 +1475,11 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       if (opts?.orderBy) query.orderBy = opts.orderBy;
       if (typeof opts?.limit === 'number') query.limit = opts.limit;
       if (typeof opts?.offset === 'number') query.offset = opts.offset;
+      // [#35145] `expand`, built as the data door builds it (`stdioExpandMap`).
+      if (Array.isArray(opts?.expand) && opts.expand.length > 0) {
+        const expand = await stdioExpandMap(reads, object, (await servedView.getObject(object)) as ObjectDef | undefined, opts.expand);
+        if (expand) query.expand = expand;
+      }
       // [#21207] The content-hash columns are served keyed, or not at all.
       const digest = keyedDigest?.();
       if (opts?.latestPer) {

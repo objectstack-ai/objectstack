@@ -1563,7 +1563,6 @@ const de = {
     widgetForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Widgets anzuzeigen.",
     allWidgetsForbiddenMessage: "Sie haben keine Berechtigung, die Daten dieses Dashboards anzuzeigen.",
     details: "Details",
-    exportCsv: "CSV exportieren",
     openInList: "In Liste öffnen",
     filters: {
       label: "Dashboard-Filter",

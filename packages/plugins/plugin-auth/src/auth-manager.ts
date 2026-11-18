@@ -2439,6 +2439,7 @@ export class AuthManager {
       enforceSessionControls: (...a) => this.enforceSessionControls(...a),
       getAppName: (...a) => this.getAppName(...a),
       getAudience: (...a) => this.getAudience(...a),
+      getAuthContext: (...a) => this.getAuthContext(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
@@ -6013,6 +6014,10 @@ export class AuthManager {
       // value served only while direct sign-in is on (registered in
       // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
       ...(directSignIn.enabled ? { localSignIn: directSignIn.localSignIn } : {}),
+      // Where the console's explicit sign-out returns (`hold` | `identity-provider`),
+      // served on the same terms as `localSignIn` (registered in
+      // PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS).
+      ...(directSignIn.enabled ? { afterSignOut: directSignIn.afterSignOut } : {}),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
       // The public base URL every emailed / OAuth link is built on

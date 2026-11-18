@@ -13,9 +13,10 @@
  *
  * What a table shows, so a cell always means one thing:
  *
- *   - One table per card and mode (`scratch`, `template`, `ask`). Its runs
+ *   - One table per card and mode (`scratch`, `template`, `ask`, `door`). Its runs
  *     must share the prompt choice, the package source, the ask repeats, the
- *     driver, the ask client's skills and the card file they graded (its
+ *     driver, the ask client's skills, the door arm (`door.ts`: one arm per
+ *     table, so an arm's runs are summed and two arms never are) and the card file they graded (its
  *     sha256, `CardStamp`) ({@link TABLE_DIMENSIONS}); when they do not, the table is
  *     refused with a line naming each difference and the files on each side,
  *     never summed. The other tables still print. A record from before the
@@ -23,7 +24,8 @@
  *     stamped one: nothing says it graded the same card.
  *   - Rows: the model the build's authoring turn was SERVED (the record's
  *     `Build · author`), with the model it asked for beside it when that is
- *     another name, and the effort it asked for. A template or ask mode
+ *     another name, and the effort it asked for (a door mode's too: it
+ *     authors its build). A template or ask mode
  *     authored no first build: its row is the build it was supplied — the
  *     template file the record names (`template`, {@link SuppliedTemplate}),
  *     or, for `this run’s from-scratch build`, that run's scratch author. A
@@ -46,6 +48,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 
 import { askSkillsText, type AskSkillsInfo } from './ask-skills.js';
+import { doorArmText, type DoorArm } from './door.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { promptChoiceText, type PromptChoice } from './prompts.js';
 import { askCostText, askTimeText, cardStampText, MODEL_NOT_REPORTED, type AskSpend, type CardStamp, type HalfScores, type ModelSpend, type QuestionRepeats, type Tally } from './scorecard.js';
@@ -82,7 +85,7 @@ export interface SummaryRecord {
 }
 
 interface LooseModeScorecard {
-  mode: 'scratch' | 'template' | 'ask';
+  mode: 'scratch' | 'template' | 'ask' | 'door';
   skipped?: string;
   first?: HalfScores;
   iterate?: HalfScores;
@@ -91,7 +94,7 @@ interface LooseModeScorecard {
 
 interface LooseRecord {
   app?: string;
-  env?: { packages?: PackageSource; driver?: { driver?: string; replayOf?: { driver?: string }; askSkills?: AskSkillsInfo } };
+  env?: { packages?: PackageSource; driver?: { driver?: string; replayOf?: { driver?: string }; askSkills?: AskSkillsInfo; door?: DoorArm } };
   template?: SuppliedTemplate;
   /** The card file the run graded (`runRecord`); absent on a record written before the runner stamped it. */
   card?: CardStamp;
@@ -107,7 +110,7 @@ export interface ReadSummaryResult {
   errors: string[];
 }
 
-const MODES = ['scratch', 'template', 'ask'] as const;
+const MODES = ['scratch', 'template', 'ask', 'door'] as const;
 
 /** Why `raw` is not a run record the summary can read, or `undefined` when it is one. */
 function notARecord(raw: unknown): string | undefined {
@@ -117,7 +120,7 @@ function notARecord(raw: unknown): string | undefined {
   const sc = r.scorecard as { modes?: unknown } | undefined;
   if (typeof sc !== 'object' || sc === null || !Array.isArray(sc.modes)) return 'a scenario-runner record without a `scorecard.modes` list';
   for (const m of sc.modes as unknown[]) {
-    if (typeof m !== 'object' || m === null || !(MODES as readonly unknown[]).includes((m as { mode?: unknown }).mode)) return 'a scorecard mode that is not scratch, template or ask';
+    if (typeof m !== 'object' || m === null || !(MODES as readonly unknown[]).includes((m as { mode?: unknown }).mode)) return 'a scorecard mode that is not scratch, template, ask or door';
   }
   return undefined;
 }
@@ -186,7 +189,7 @@ export function readSummaryRecords(paths: readonly string[]): ReadSummaryResult 
 // ── Grouping: tables, rows, columns ─────────────────────────────────────────
 
 /** The dimensions a table does not show, which every run of one table must share. */
-export const TABLE_DIMENSIONS = ['prompt choice', 'package source', 'ask repeats', 'driver', 'ask skills', 'card'] as const;
+export const TABLE_DIMENSIONS = ['prompt choice', 'package source', 'ask repeats', 'driver', 'ask skills', 'door arm', 'card'] as const;
 export type TableDimension = (typeof TABLE_DIMENSIONS)[number];
 
 /** One mode of one record: the unit a cell sums. */
@@ -219,6 +222,7 @@ function dimensionsOf(r: LooseRecord): Record<TableDimension, string> {
     'ask repeats': repeats > 1 ? `each question turn asked ${repeats} times` : 'each question turn asked once',
     driver: `driver: ${driverText(r)}`,
     'ask skills': r.env?.driver?.askSkills ? `ask skills: ${askSkillsText(r.env.driver.askSkills)}` : NO_ASK_SKILLS,
+    'door arm': r.env?.driver?.door ? `door arm: ${doorArmText(r.env.driver.door)}` : NO_DOOR_ARM,
     card: r.card ? cardStampText(r.card) : NO_CARD_STAMP,
   };
 }
@@ -236,6 +240,14 @@ const NO_CARD_STAMP = 'card: not recorded';
  * a table of such runs prints its dimensions line as before.
  */
 const NO_ASK_SKILLS = 'ask skills: none';
+
+/**
+ * The `door arm` value of a record whose driver was given no door skill and no
+ * door rule (every record made before door mode, and a door run in the bare
+ * arm): a table of such runs prints its dimensions line without it. Two arms
+ * never sum into one cell.
+ */
+const NO_DOOR_ARM = `door arm: ${doorArmText(undefined)}`;
 
 /** `· effort high`; `· effort low / high`; nothing when none was asked for. */
 const effortSuffix = (efforts: readonly string[]): string => (efforts.length ? ` · effort ${[...efforts].sort().join(' / ')}` : '');
@@ -301,7 +313,7 @@ function entriesOf(r: SummaryRecord): ModeEntry[] {
     mode: sc.mode,
     sc,
     dims,
-    row: sc.mode === 'scratch' ? authorAxis(sc.first?.build) : suppliedAxis(r, sc.mode, sc),
+    row: sc.mode === 'scratch' || sc.mode === 'door' ? authorAxis(sc.first?.build) : suppliedAxis(r, sc.mode, sc),
     col: askAxis(sc),
   }));
 }
@@ -446,7 +458,7 @@ const esc = (s: string): string => s.replace(/\|/g, '\\|');
 
 /** The halves a table's cells show, in the scorecard's order; the Iterate rows only when a run of the table iterated. */
 function halfRows(t: SummaryTable): Array<[string, (es: readonly ModeEntry[]) => string]> {
-  const supplied = t.mode !== 'scratch';
+  const supplied = t.mode === 'template' || t.mode === 'ask';
   const rows: Array<[string, (es: readonly ModeEntry[]) => string]> = [
     ['Runs', (es) => String(es.length)],
     ['Build', (es) => (supplied ? 'supplied' : buildCell(es.map((e) => e.sc.first?.build)))],
@@ -474,8 +486,8 @@ export function renderSummaryTable(t: SummaryTable): string {
     lines.push('No run of this mode ran: every one was skipped.');
   } else {
     const dims = t.dims!;
-    lines.push(`${TABLE_DIMENSIONS.filter((d) => !(d === 'ask skills' && dims[d] === NO_ASK_SKILLS) && !(d === 'card' && dims[d] === NO_CARD_STAMP)).map((d) => dims[d]).join(' · ')}`, '');
-    lines.push(`| ${t.mode === 'scratch' ? 'Author model' : 'Supplied build'} | Half | ${t.cols.map((c) => esc(c.label)).join(' | ')} |`);
+    lines.push(`${TABLE_DIMENSIONS.filter((d) => !(d === 'ask skills' && dims[d] === NO_ASK_SKILLS) && !(d === 'door arm' && dims[d] === NO_DOOR_ARM) && !(d === 'card' && dims[d] === NO_CARD_STAMP)).map((d) => dims[d]).join(' · ')}`, '');
+    lines.push(`| ${t.mode === 'scratch' || t.mode === 'door' ? 'Author model' : 'Supplied build'} | Half | ${t.cols.map((c) => esc(c.label)).join(' | ')} |`);
     lines.push(`|:---|:---|${t.cols.map(() => ':---').join('|')}|`);
     const halves = halfRows(t);
     for (const row of t.rows) {

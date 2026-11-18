@@ -1563,7 +1563,6 @@ const ja = {
     widgetForbiddenMessage: "このウィジェットのデータを表示する権限がありません。",
     allWidgetsForbiddenMessage: "このダッシュボードのデータを表示する権限がありません。",
     details: "詳細",
-    exportCsv: "CSV で書き出す",
     openInList: "リストで開く",
     filters: {
       label: "ダッシュボードのフィルター",
