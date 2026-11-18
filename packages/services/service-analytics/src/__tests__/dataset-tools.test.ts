@@ -18,7 +18,8 @@
  * - `query_dataset`: one NOT_FOUND for missing and hidden; `provenance`
  *   composed from what ran, which the model's input cannot set; the row cap
  *   and `truncated`; `totalGroups`, counted by the statement that grouped the
- *   answer and absent where none did; the delegation statement; no `sql`.
+ *   answer or as the length of a whole grid windowed in memory, and absent
+ *   where neither holds; the delegation statement; no `sql`.
  * - [#34919] `nextStep` and `sourceLine` (ADR-0149 M1 note): the decision for
  *   each term, the precedence among mixed cases, the partial-answer rule, the
  *   sentence's language, and that neither sentence names a member the caller
@@ -35,6 +36,8 @@ import { AnalyticsService } from '../analytics-service.js';
 import { createDatasetTools, getDatasetToolDefinitions } from '../dataset-tools.js';
 import { DATASET_NEXT_STEP_PRECEDENCE, composeDatasetSourceLine, datasetToolSentenceLocale } from '../dataset-next-step.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+import { NativeSQLStrategy } from '../strategies/native-sql-strategy.js';
+import type { AnalyticsStrategy } from '../strategies/types.js';
 
 const ME = { userId: 'u_me', tenantId: 'org_a', locale: 'zh-CN' } as ExecutionContext;
 const ADMIN = { userId: 'u_admin', tenantId: 'org_a' } as ExecutionContext;
@@ -588,26 +591,38 @@ describe('query_dataset', () => {
 
 // [query_dataset totalGroups] Beside `truncated`: how many groups the selection
 // formed before `offset` and `limit` cut them, the same name and meaning as
-// `aggregate_records`' `totalGroups` — counted by the database, by a window in
-// the ONE statement that grouped and cut the answer (`dataset-group-count.ts`),
-// never by reading the groups. Over a real engine, so the count is the
-// database's: the SQLite cell always runs, the PostgreSQL cell where
-// `OS_TEST_POSTGRES_URL` is set (a named skip otherwise; node-postgres answers
-// the count as text). Every read of the object is counted, so "one statement,
-// no second read" is measured, not assumed. Where no statement counted the
-// groups the member is ABSENT — never a number made up from the rows.
+// `aggregate_records`' `totalGroups` (`dataset-group-count.ts`). Two sources,
+// never a read made to count: a window in the ONE statement that grouped and
+// cut the answer in the database, or the length of a grid the executor or the
+// ObjectQL face windowed in memory, counted only when every read that built it
+// is vouched whole. Over a real engine: the SQLite cell always runs, the
+// PostgreSQL cell where `OS_TEST_POSTGRES_URL` is set (a named skip otherwise;
+// node-postgres answers the count as text). Every read of the object is
+// counted, so "no second read" is measured, not assumed. Where neither source
+// holds the member is ABSENT — never a number made up from a cut grid.
 const TG_OBJECT = 'os_tg_deal';
 const TG_ROWS = [
-  { id: 'd1', stage: 'lead', region: 'emea', amount: 10, closed_on: '2026-01-05' },
-  { id: 'd2', stage: 'lead', region: 'apac', amount: 20, closed_on: '2026-01-20' },
-  { id: 'd3', stage: 'qualified', region: 'emea', amount: 30, closed_on: '2026-02-03' },
-  { id: 'd4', stage: 'proposal', region: 'emea', amount: 40, closed_on: '2026-02-14' },
-  { id: 'd5', stage: 'proposal', region: 'amer', amount: 50, closed_on: '2026-03-01' },
-  { id: 'd6', stage: 'won', region: 'apac', amount: 60, closed_on: '2026-03-09' },
-  { id: 'd7', stage: 'lost', region: 'amer', amount: 70, closed_on: '2026-03-30' },
+  { id: 'd1', stage: 'lead', region: 'emea', phase: 'p1', amount: 10, closed_on: '2026-01-05' },
+  { id: 'd2', stage: 'lead', region: 'apac', phase: 'p1', amount: 20, closed_on: '2026-01-20' },
+  { id: 'd3', stage: 'qualified', region: 'emea', phase: 'p2', amount: 30, closed_on: '2026-02-03' },
+  { id: 'd4', stage: 'proposal', region: 'emea', phase: 'p2', amount: 40, closed_on: '2026-02-14' },
+  { id: 'd5', stage: 'proposal', region: 'amer', phase: 'p3', amount: 50, closed_on: '2026-03-01' },
+  { id: 'd6', stage: 'won', region: 'apac', phase: 'p3', amount: 60, closed_on: '2026-03-09' },
+  { id: 'd7', stage: 'lost', region: 'amer', phase: 'p3', amount: 70, closed_on: '2026-03-30' },
 ] as const;
 const TG_STAGES = new Set(TG_ROWS.map((r) => r.stage)).size; // 5
 const TG_PAIRS = new Set(TG_ROWS.map((r) => `${r.stage}|${r.region}`)).size; // 7
+const TG_MONTHS = new Set(TG_ROWS.map((r) => r.closed_on.slice(0, 7))).size; // 3
+// A select field with options: the plugin's label resolver makes its dimension
+// label-bearing, so the tool's default order (every dimension, ascending, which
+// `limit: cap + 1` brings in) sorts it by the label in memory and the window is
+// applied there, not in SQL. The labels sort in another order than the values.
+const TG_PHASE_OPTIONS = [
+  { value: 'p1', label: 'Discovery' },
+  { value: 'p2', label: 'Negotiation' },
+  { value: 'p3', label: 'Closing' },
+];
+const TG_PHASES = new Set(TG_ROWS.map((r) => r.phase)).size; // 3
 const TG_DATASET = {
   name: 'tg_pipeline',
   label: 'Deal pipeline',
@@ -615,6 +630,7 @@ const TG_DATASET = {
   dimensions: [
     { name: 'stage', label: 'Stage', field: 'stage', type: 'string' },
     { name: 'region', label: 'Region', field: 'region', type: 'string' },
+    { name: 'phase', label: 'Phase', field: 'phase', type: 'string' },
     { name: 'closed', label: 'Closed', field: 'closed_on', type: 'date' },
   ],
   measures: [
@@ -635,8 +651,8 @@ const TG_CALLER = { userId: 'u_tg' } as ExecutionContext;
 const tgSecurity = {
   getReadFilter: async () => undefined,
   canReadObject: () => true,
-  getReadableFields: async () => ['id', 'stage', 'region', 'amount', 'closed_on'],
-  getQueryableFields: async () => ['id', 'stage', 'region', 'amount', 'closed_on'],
+  getReadableFields: async () => ['id', 'stage', 'region', 'phase', 'amount', 'closed_on'],
+  getQueryableFields: async () => ['id', 'stage', 'region', 'phase', 'amount', 'closed_on'],
 };
 const tgQuiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return tgQuiet; } };
 const TG_WINDOW = 'COUNT(*) OVER ()';
@@ -649,11 +665,11 @@ for (const cell of TG_CELLS) {
       let driver: SqlDriver;
       let engine: ObjectQL;
       const reads = { statements: [] as string[], aggregate: 0 };
-      const services: Partial<Record<'native' | 'objectql', AnalyticsService>> = {};
+      const services: Partial<Record<'native' | 'objectql' | 'guarded', AnalyticsService>> = {};
       const loadTg = async () => [{ ...TG_DATASET }];
 
       const run = async (
-        face: 'native' | 'objectql',
+        face: 'native' | 'objectql' | 'guarded',
         selection: Record<string, unknown>,
         opts: { maxQueryLimit?: number } = {},
       ) => {
@@ -681,6 +697,7 @@ for (const cell of TG_CELLS) {
           fields: {
             stage: { name: 'stage', type: 'text' },
             region: { name: 'region', type: 'text' },
+            phase: { name: 'phase', type: 'select', options: TG_PHASE_OPTIONS },
             amount: { name: 'amount', type: 'number' },
             closed_on: { name: 'closed_on', type: 'date' },
           },
@@ -703,6 +720,7 @@ for (const cell of TG_CELLS) {
         for (const [face, caps] of [
           ['native', undefined],
           ['objectql', () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false })],
+          ['guarded', undefined],
         ] as const) {
           const registered: Record<string, unknown> = {};
           await new AnalyticsServicePlugin({ ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
@@ -714,6 +732,22 @@ for (const cell of TG_CELLS) {
           } as never);
           services[face] = registered.analytics as AnalyticsService;
         }
+        // A host strategy ahead of the built-ins with a row guard of its own:
+        // it serves each query through the native strategy and keeps the first
+        // two rows. No built-in path cuts an unwindowed read; this is the shape
+        // a cap anywhere under the executor takes, so the arm is pinned on it.
+        const native = new NativeSQLStrategy();
+        const rowGuard: AnalyticsStrategy = {
+          name: 'HostRowGuard',
+          priority: 5,
+          canHandle: (query, ctx) => native.canHandle(query, ctx),
+          execute: async (query, ctx) => {
+            const answer = await native.execute(query, ctx);
+            return { ...answer, rows: answer.rows.slice(0, 2) };
+          },
+          generateSql: (query, ctx) => native.generateSql(query, ctx),
+        };
+        (services.guarded as unknown as { strategies: AnalyticsStrategy[] }).strategies.unshift(rowGuard);
       });
 
       afterAll(async () => {
@@ -761,27 +795,57 @@ for (const cell of TG_CELLS) {
         expect(out.rows[0]).toEqual({ revenue: 280, deals: 7 });
       });
 
-      it('absent where the grid is assembled from several queries, and nothing extra is read to count it', async () => {
-        for (const measures of [['revenue', 'emea_revenue'], ['avg_deal']]) {
-          const { out, statements } = await run('native', { measures, dimensions: ['stage'], limit: 2 });
-          expect(out, measures.join(',')).toMatchObject({ rowCount: 2, truncated: true });
-          expect(out, measures.join(',')).not.toHaveProperty('totalGroups');
+      it('a label-bearing dimension in the tool\'s default order, not cut: the grid windowed in memory is counted, totalGroups equals rowCount', async () => {
+        const { out, statements, aggregate } = await run('native', { measures: ['deals'], dimensions: ['phase'] });
+        expect(out).toMatchObject({ rowCount: TG_PHASES, truncated: false, totalGroups: TG_PHASES });
+        expect(out.totalGroups).toBe(out.rowCount);
+        expect(statements, 'the one grouped read, no second read to count').toHaveLength(1);
+        expect(statements[0], 'no window in SQL: the order is by label, so the window ran in memory').not.toContain(TG_WINDOW);
+        expect(statements[0]).not.toMatch(/\bLIMIT\b/i);
+        expect(aggregate).toBe(0);
+        expect(QueryDatasetOutputSchema.safeParse(out).success).toBe(true);
+      });
+
+      it('a label-bearing dimension in the tool\'s default order, cut: truncated, and totalGroups counts the whole grid', async () => {
+        const capped = await run('native', { measures: ['deals'], dimensions: ['phase'] }, { maxQueryLimit: 2 });
+        expect(capped.out).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_PHASES });
+        expect(capped.statements).toHaveLength(1);
+        const deals = capped.out.rows.map((r) => r.deals);
+        expect(deals, 'ordered by label: Closing (p3), Discovery (p1)').toEqual([3, 2]);
+        // The in-memory window knows the whole grid, so a page past it still counts.
+        const past = await run('native', { measures: ['deals'], dimensions: ['phase'], limit: 2, offset: 10 });
+        expect(past.out).toMatchObject({ rowCount: 0, truncated: false, totalGroups: TG_PHASES });
+      });
+
+      it('an assembled grid (a measure with its own filter, a derived measure) is counted, with nothing extra read to count it', async () => {
+        for (const [measures, reads] of [[['revenue', 'emea_revenue'], 2], [['avg_deal'], 1]] as const) {
+          const { out, statements } = await run('native', { measures: [...measures], dimensions: ['stage'], limit: 2 });
+          expect(out, measures.join(',')).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_STAGES });
+          expect(statements, `${measures.join(',')}: the pass's own reads only`).toHaveLength(reads);
           for (const sql of statements) expect(sql).not.toContain(TG_WINDOW);
         }
       });
 
-      it('absent where the engine\'s aggregate serves the query: a date bucket, and the ObjectQL face', async () => {
+      it('the engine\'s aggregate answers every group and the ObjectQL face windows them in memory: a date bucket, and the face itself', async () => {
         const bucketed = await run('native', {
           measures: ['revenue'], dimensions: ['closed'], timeDimensions: [{ dimension: 'closed', granularity: 'month' }], limit: 1,
         });
-        expect(bucketed.out).toMatchObject({ rowCount: 1, truncated: true });
-        expect(bucketed.out).not.toHaveProperty('totalGroups');
-        expect(bucketed.aggregate, 'the ObjectQL face answered').toBe(1);
+        expect(bucketed.out).toMatchObject({ rowCount: 1, truncated: true, totalGroups: TG_MONTHS });
+        expect(bucketed.aggregate, 'the ObjectQL face answered, once').toBe(1);
         const face = await run('objectql', { measures: ['revenue'], dimensions: ['stage'], limit: 2 });
-        expect(face.out).toMatchObject({ rowCount: 2, truncated: true });
-        expect(face.out).not.toHaveProperty('totalGroups');
+        expect(face.out).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_STAGES });
         expect(face.aggregate).toBe(1);
         expect(face.statements).toHaveLength(0);
+        const labelled = await run('objectql', { measures: ['deals'], dimensions: ['phase'] }, { maxQueryLimit: 1 });
+        expect(labelled.out).toMatchObject({ rowCount: 1, truncated: true, totalGroups: TG_PHASES });
+        expect(labelled.aggregate).toBe(1);
+      });
+
+      it('absent where a cap cut the grid before the in-memory window: a host row guard', async () => {
+        const { out, statements } = await run('guarded', { measures: ['deals'], dimensions: ['phase'] });
+        expect(out, 'the guard kept two of the three groups').toMatchObject({ rowCount: 2, truncated: false });
+        expect(out).not.toHaveProperty('totalGroups');
+        expect(statements).toHaveLength(1);
       });
     },
   );
