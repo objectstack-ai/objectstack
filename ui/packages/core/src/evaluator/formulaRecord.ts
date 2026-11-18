@@ -25,15 +25,17 @@
  * them:
  *
  * - **A fault a read shares** — an operator over an empty operand, an
- *   undeclared key, a cycle, a traversal no read can serve: the formula reads
- *   `null`, and a predicate over it is judged on that `null`.
+ *   undeclared key, a cycle, a traversal no read can serve, a scope root
+ *   neither the server nor the form binds for a formula (`previous`, `vars`,
+ *   `features`, …): the formula reads `null`, and a predicate over it is
+ *   judged on that `null`, as objectql's `formulaValuesFor` judges it.
  * - **Unservable** — the form cannot know the value a read would serve: the
  *   formula reads through a reference (no related record is read here), calls
  *   `label()` (no option label is read here), or calls `current_user.can()`
  *   (no permission map is bound for a formula); it reads the acting user
  *   (`current_user`, `user`, `ctx`) and the form holds none; it reads `os`
  *   (the server binds `os.org` from the tenant, which the form does not
- *   hold) or any other scope root but `record`; its expression is not served
+ *   hold); its expression is not served
  *   to this reader at all (a field-level-security mask deletes an expression
  *   naming a field the reader cannot see); or it reads such a formula at any
  *   depth. {@link ObjectFormulaPlan.unservableReadsOf} names them, and the
@@ -48,17 +50,16 @@
  * (`current_user.name`, `current_user.email`) faults to `null` on both sides.
  * The form takes it from its predicate scope (`current_user` there).
  *
- * Every formula the form computes, it computes as the server does. Where the
- * form cannot, the field is shown and keeps its `required` flag. That is
- * stricter than the server in two places: a formula the server computes and
- * the form does not (one reading `os`, or calling `current_user.can()` on a
- * write that resolved a permission map), and a formula reading a root
- * neither side binds (`previous`, `vars`, …), which the server reads as
- * `null`. The server stays the authority on the write.
+ * The unservable set is the server's (objectql `unservableReason`) plus the
+ * two things the server binds and the form cannot hold: `os` (for `os.org`)
+ * and `current_user.can()` (a permission map, which a write may resolve).
+ * Every other formula the form computes as the server does. A field whose
+ * `visibleWhen` reads an unservable one is shown and keeps its `required`
+ * flag; for those two the form can be stricter than the server, which stays
+ * the authority on the write.
  */
 import {
   ExpressionEngine,
-  SCOPE_ROOTS,
   analyzeRelationshipTraversals,
   collectCelRootIdentifiers,
   findTraversalConflicts,
@@ -138,10 +139,14 @@ const LABEL_CALL = /\blabel\s*\(/;
  */
 const USER_ROOTS: ReadonlySet<string> = new Set(['current_user', 'user', 'ctx']);
 
-/** Every scope root but `record`: the form binds none of them unless {@link USER_ROOTS} says so. */
-const NON_RECORD_ROOTS: ReadonlySet<string> = new Set(
-  [...SCOPE_ROOTS, 'current_user'].filter((root) => root !== 'record'),
-);
+/**
+ * The roots the server binds for a formula and the form cannot: {@link USER_ROOTS}
+ * while the form holds no acting user, and `os` always. Every other root but
+ * `record` is bound on neither side, faults, and reads `null` on both.
+ */
+function unbindableRoots(user: unknown): ReadonlySet<string> {
+  return user ? new Set(['os']) : new Set(['os', ...USER_ROOTS]);
+}
 
 /** The acting user as the server's formula pass binds it (objectql `applyFormulaPlan`). */
 type FormulaUser = {
@@ -231,6 +236,7 @@ export function planObjectFormulas(
   const formulaNames = Object.keys(defs).filter((name) => defs[name]?.type === 'formula');
   if (formulaNames.length === 0) return undefined;
   const user = formulaUserOf(scope);
+  const unbindable = unbindableRoots(user);
 
   const unservable = new Map<string, string>();
   const entries = new Map<string, PlanEntry>();
@@ -268,16 +274,14 @@ export function planObjectFormulas(
       continue;
     }
     const roots = collectCelRootIdentifiers(source);
-    const unbound = roots.ok
-      ? roots.roots.filter((root) => NON_RECORD_ROOTS.has(root) && !(user && USER_ROOTS.has(root)))
-      : [];
+    const unbound = roots.ok ? roots.roots.filter((root) => unbindable.has(root)) : [];
     if (unbound.length > 0) {
       const names = unbound.map((r) => `'${r}'`).join(', ');
       unservable.set(
         name,
         unbound.every((root) => USER_ROOTS.has(root))
           ? `reads the acting user (${names}), and the form holds none`
-          : `reads ${names}, which the form does not bind for a formula`,
+          : `reads ${names}, which the server binds for a formula and the form does not`,
       );
     }
   }

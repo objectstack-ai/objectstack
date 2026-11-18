@@ -106,7 +106,7 @@ describe('planObjectFormulas — computing formulas over the live record (object
     expect(plan.unservable.get('masked')).toMatch(/no expression/);
   });
 
-  it('binds the acting user as the server does (id and positions): current_user, user and ctx compute; can(), os and other roots stay unservable', () => {
+  it('binds the acting user as the server does (id and positions): current_user, user and ctx compute; can() and os stay unservable', () => {
     const fields = {
       owner: { type: 'text' },
       mine: { type: 'formula', expression: 'record.owner == current_user.id' },
@@ -121,10 +121,9 @@ describe('planObjectFormulas — computing formulas over the live record (object
     };
     const scope = { current_user: { id: 'u1', name: 'Ada', email: 'ada@example.com', positions: ['admin'], isPlatformAdmin: true } };
     const plan = planObjectFormulas(fields, scope)!;
-    expect([...plan.unservable.keys()].sort()).toEqual(['may_edit', 'org', 'prior']);
+    expect([...plan.unservable.keys()].sort()).toEqual(['may_edit', 'org']);
     expect(plan.unservable.get('may_edit')).toMatch(/current_user\.can\(\)/);
     expect(plan.unservable.get('org')).toMatch(/'os'/);
-    expect(plan.unservable.get('prior')).toMatch(/'previous'/);
 
     expect(plan.compute({ owner: 'u1' })).toMatchObject({ mine: true, mine_alias: true, is_admin: true, platform: false, email: null });
     expect(plan.compute({ owner: 'u2' })).toMatchObject({ mine: false, mine_alias: false });
@@ -133,10 +132,31 @@ describe('planObjectFormulas — computing formulas over the live record (object
     expect(admin.compute({ owner: 'u1' })).toMatchObject({ platform: true });
 
     // No acting user held (no scope, or the signed-out visitor's null id): unservable.
+    // `os` is unservable either way: the server binds `os.org`, the form cannot.
     for (const none of [undefined, { current_user: { id: null, positions: [] } }]) {
       const p = planObjectFormulas(fields, none)!;
       expect(p.unservable.get('mine')).toMatch(/acting user/);
       expect(p.unservable.get('mine_alias')).toMatch(/acting user/);
+      expect(p.unservable.get('org')).toMatch(/'os'/);
+    }
+  });
+
+  it('a root neither side binds (previous, vars, features) is a fault a read shares: it reads null and the rule is judged on that null', () => {
+    const fields = {
+      prior: { type: 'formula', expression: "previous.owner == 'u1'" },
+      flagged: { type: 'formula', expression: 'vars.flag == true || features.beta == true' },
+      note: { type: 'text', required: true, visibleWhen: 'record.prior == null && record.flagged == null' },
+      gated: { type: 'text', required: true, visibleWhen: 'record.flagged == true' },
+    };
+    for (const scope of [undefined, { current_user: { id: 'u1', positions: [] } }]) {
+      const plan = planObjectFormulas(fields, scope)!;
+      expect(plan.unservable.size).toBe(0);
+      const record = plan.compute({ prior: true, flagged: true });
+      expect(record).toMatchObject({ prior: null, flagged: null });
+      // Judged on the null, as objectql's formulaValuesFor judges it: not counted as shown.
+      expect(plan.unservableReadsOf(fields.gated.visibleWhen)).toEqual([]);
+      expect(resolveFieldRuleState({ visibleWhen: fields.gated.visibleWhen }, record, { required: true }).visible).toBe(false);
+      expect(resolveFieldRuleState({ visibleWhen: fields.note.visibleWhen }, record, { required: true }).visible).toBe(true);
     }
   });
 

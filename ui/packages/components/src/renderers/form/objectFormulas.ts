@@ -23,11 +23,13 @@
  *
  * A `visibleWhen` that reads a formula the form cannot compute (unservable:
  * a hop, `label()`, `current_user.can()`, the acting user when the scope
- * holds none, another root but `record`, an expression not served, or a
- * formula reading one) is dropped from that field row, with one warning: the
- * field is SHOWN and keeps its static `required`, and the form does not refuse
- * the submit for it (no ADR-0137 D2 fault), so the server, which judges the
- * write, decides.
+ * holds none, `os` (whose `os.org` the server binds and the form cannot), an
+ * expression not served, or a formula reading one) is dropped from that field
+ * row, with one warning: the field is SHOWN and keeps its static `required`,
+ * and the form does not refuse the submit for it (no ADR-0137 D2 fault), so
+ * the server, which judges the write, decides. A formula reading a root
+ * neither side binds (`previous`, `vars`, …) is not unservable: it reads
+ * `null` on both, and the rule is judged on that `null`.
  */
 
 import * as React from "react"
