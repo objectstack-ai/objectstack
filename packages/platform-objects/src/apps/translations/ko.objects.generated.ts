@@ -240,6 +240,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "완료",
           fields: {
             email: "이메일",
+            pendingAgain: "이미 대기 중",
             notApplied: "이미 대기 중이어서 적용되지 않음(레코드에서 설정하세요)",
             managerError: "관리자",
             "host.reason": "초대가 전송되지 않음"

@@ -240,6 +240,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Concluído",
           fields: {
             email: "E-mail",
+            pendingAgain: "Já pendente",
             notApplied: "Já pendente, então não aplicado (defina no registro)",
             managerError: "Gestor",
             "host.reason": "Convite não enviado"
