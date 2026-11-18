@@ -15,6 +15,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not inside a clocked case: the protocol's diagnostics load it lazily.
+import '@objectstack/lint';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const LATEST_PER = Symbol.for('objectstack.objectql.latestPer');

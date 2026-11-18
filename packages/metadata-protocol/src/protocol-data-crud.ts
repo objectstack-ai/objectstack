@@ -26,7 +26,7 @@ import { recordNotFoundError } from '@objectstack/core';
 import { staleSummaryRefusalOrThrow, withEarnedAnswer } from '@objectstack/types';
 import type { SummaryRecomputeRefusal } from '@objectstack/types';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
-import type { DroppedFieldsEvent, EngineQueryOptions, ValidationAdvisoryEvent } from '@objectstack/spec/data';
+import type { BaseEngineOptions, DroppedFieldsEvent, EngineQueryOptions, ValidationAdvisoryEvent } from '@objectstack/spec/data';
 import {
     redactStoredMetadataRow,
     redactStoredMetadataRows,
@@ -910,7 +910,10 @@ export class ProtocolDataCrudFacet {
         if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 0) {
             throw latestPerQueryRefusal(object, 'it needs a limit: the number of groups to return.');
         }
-        const found = await host.engine.find(object, { ...findQuery, limit: limit + 1 }, { [FIND_DATA_LATEST_PER]: latestPer } as any);
+        // The request rides on a symbol member of the engine's read options, never a declared key.
+        const readOptions: BaseEngineOptions = {};
+        (readOptions as Record<symbol, unknown>)[FIND_DATA_LATEST_PER] = latestPer;
+        const found = await host.engine.find(object, { ...findQuery, limit: limit + 1 }, readOptions);
         if (latestPer.outcome?.kind !== 'served') {
             const err: any = new Error(
                 `findData('${object}') with latestPer: the read came back without being served as one row per group, `
