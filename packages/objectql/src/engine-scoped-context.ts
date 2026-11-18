@@ -122,8 +122,8 @@ export class ScopedContextFacet {
   }
 
   /**
-   * The body of `ScopedContext#[PLATFORM_SYSTEM_API]`; the method's docblock
-   * there is its contract, and `platform-system-api.ts` draws its line.
+   * The body of `ScopedContext#[PLATFORM_SYSTEM_API]`; its contract, and
+   * where its guard stops, is `platform-system-api.ts`'s module header.
    * An app-authored hook's api is never the platform's: there it is that
    * api's own {@link ScopedContextFacet.sudo}, provenance kept.
    */

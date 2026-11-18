@@ -6488,14 +6488,11 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   /**
    * Create an elevated (system) context.
    *
-   * [#25653] Platform code's `sudo()` adds no app-automation mark, so its
-   * writes to the four identity-assignment objects land — unless the context
-   * it is taken on already carries one (a platform hook fired by an action
-   * body's write): the spread keeps it, and the writes are judged as that
-   * automation's. The platform's own record of such a write is made through
-   * {@link PLATFORM_SYSTEM_API} instead. An app-authored hook's in-process
-   * `ctx.api.sudo()` is the hook's elevation: it carries the `'hook'` mark
-   * (unless the context already carries one).
+   * [#25653] Platform code's `sudo()` adds no app-automation mark but keeps
+   * one its context carries (a platform hook fired by an action body's write);
+   * the platform's own record of such a write uses {@link PLATFORM_SYSTEM_API}.
+   * An app-authored hook's in-process `ctx.api.sudo()` is the hook's
+   * elevation: it carries the `'hook'` mark unless the context carries one.
    */
   sudo(): ScopedContext {
     // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
@@ -6503,16 +6500,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   }
 
   /**
-   * The platform's own system api: this api's context elevated as
-   * {@link sudo} elevates it, without the app-automation elevation mark and
-   * without `flowRunId` — for the rows a platform service writes to an object
-   * it owns because the write this api serves happened (the audit writer's
-   * ledger and activity rows). ⛔ Never for a write the automation itself
-   * asked for: on an app-authored api it is {@link sudo}. See `platform-system-api.ts`.
-   *
-   * Keyed on {@link PLATFORM_SYSTEM_API}, a symbol the package entry does not
-   * export, so it is no nameable member of this class's published face: it is
-   * reached through `platformSystemApi`.
+   * The platform's own system api; its contract, and where its guard stops, is
+   * `platform-system-api.ts`. Keyed on an unexported symbol: reached only
+   * through `platformSystemApi`.
    */
   [PLATFORM_SYSTEM_API](): ScopedContext {
     return ScopedContextFacet.platformSystemApi.call(scopedContextHost.of(this));
