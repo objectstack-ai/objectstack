@@ -88,6 +88,14 @@ export interface ModalDescriptor {
   recordId?: string;
   fields?: any;
   /**
+   * The values an object CREATE form opens with — a DESCRIPTOR-only key, like
+   * `objectName`, with the same one producer: the lookup field's "+ New",
+   * which seeds the new record with the `dependsOn` values its picker filters
+   * by (objectstack#35050), so the record made is one the picker lists. Read
+   * on a create alone; an edit opens the stored record.
+   */
+  initialValues?: Record<string, unknown>;
+  /**
    * An UNRESOLVED string target, straight off a `type: 'modal'` action. It
    * names a PAGE; whether that page exists is only knowable by asking the
    * metadata service, so `normalizeModalSchema` (pure) records the name here
@@ -294,6 +302,7 @@ export function useActionModal(dataSource?: any) {
             objectName: d.objectName,
             mode: formMode,
             recordId: d.recordId,
+            ...(formMode === 'create' && d.initialValues ? { initialValues: d.initialValues } : {}),
             title,
             description: d.description,
             fields: d.fields,

@@ -341,11 +341,14 @@ describe('[#28952] controls — an `externalId` the object has is not refused', 
         expect(stored(rows, 'seed', 'r_ok')).toEqual([`active|${PKG}|${JSON.stringify(externalId ?? null)}`]);
     });
 
-    it.each([['insert'], ['replace']])('mode `%s` never matches by `externalId`, so it is not judged', async (mode) => {
+    // [#34613] The unkeyed `insert` and `replace` modes, which this suite once
+    // held out as "never matches, so not judged", are retired: the save door
+    // refuses them with `SeedMode`'s prescription, whatever the key names.
+    it.each([['insert'], ['replace']])('the retired mode `%s` is refused with its prescription', async (mode) => {
         const { protocol, rows } = makeSession({ objects: OBJECTS });
-        const res = await protocol.saveMetaItem({ type: 'seed', name: 'r_ins', item: seed('seedkey_other', 'no_such_field', mode), mode: 'draft' });
-        expect(res.success).toBe(true);
-        expect(stored(rows, 'seed', 'r_ins')).toEqual(['draft|-|"no_such_field"']);
+        const attempt = protocol.saveMetaItem({ type: 'seed', name: 'r_ins', item: seed('seedkey_other', 'sku', mode), mode: 'draft' });
+        await expect(attempt).rejects.toThrow(new RegExp(`seed\\.mode: '${mode}'\` was removed in @objectstack/spec 18\\.7\\.0`));
+        expect(stored(rows, 'seed', 'r_ins')).toEqual([]);
     });
 
     it('an object drafted in the same batch that declares the field publishes with the seed', async () => {
@@ -368,10 +371,6 @@ describe('[#28952] controls — an `externalId` the object has is not refused', 
 
     it('a `migrate-stored` re-save of a stored seed is not judged', async () => {
         const { protocol, rows } = makeSession({ objects: OBJECTS });
-        const res = await protocol.saveMetaItem({
-            type: 'seed', name: 'r_old', item: seed('seedkey_other', 'no_such_field', 'insert'), mode: 'draft',
-        });
-        expect(res.success).toBe(true);
         const migrated = await protocol.saveMetaItem({
             type: 'seed', name: 'r_old', item: seed('seedkey_other', 'no_such_field'), mode: 'draft', source: 'migrate-stored',
         });

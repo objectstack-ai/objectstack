@@ -230,6 +230,7 @@ interface Action {
   patch?: Record<string, unknown>; // Static field values for operation: 'update', merged under params
   body?: HookBody;              // Inline logic for type: 'script'
   refusals?: Record<string, ActionRefusal>; // Codes the js body may throw, answered with a declared sentence in the caller's locale
+  texts?: Record<string, ActionText>; // Sentences the js body writes into records (ctx.text), in the organization's language
   params?: ActionParam[];       // Inputs collected before execution
   submitText?: I18nLabel;       // The param dialog's submit button verb (default "Confirm")
   cancelText?: I18nLabel;       // The confirm or param dialog's dismiss button label (default "Cancel")
