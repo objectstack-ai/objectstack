@@ -644,6 +644,85 @@ export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps
   return served;
 }
 
+/** What {@link servedLocaleObjectView} localizes with: the host's `i18n` service and `protocol`. */
+export interface ServedLocaleSources {
+  /** The `i18n` service, resolved at each use ({@link StdioDataBridgeDeps.i18n}); a resolver that throws is none. */
+  i18n?: () => unknown;
+  /** The `protocol` service: an object's packaged base and a declared override's pair translations. */
+  protocol?: () => StdioProtocolObjectReads | undefined;
+}
+
+/**
+ * [ADR-0149 D2 · #34872] What the HTTP door's `/meta` translation reads, on a
+ * transport that carries no request: the i18n service (a resolver that throws
+ * is none) and, for the locale, `metaRequestLocale` with no request — the i18n
+ * service's default, the workspace default the stdio principal speaks.
+ * `resolveProtocol` answers the protocol the read was served from (an object's
+ * packaged base, a declared override's pair translations), or none.
+ */
+function defaultLocaleSources(i18n: (() => unknown) | undefined, resolveProtocol: () => Promise<unknown>) {
+  return {
+    resolveI18nService: async () => {
+      try {
+        return i18n?.();
+      } catch {
+        return undefined;
+      }
+    },
+    resolveProtocol,
+    requestLocale: (service?: unknown) => metaRequestLocale(undefined, service),
+  };
+}
+
+/**
+ * [#34872] Served objects in the locale this transport speaks: the HTTP door's
+ * `/meta` object translation (`translateMetaList`), ⛔ never a second routine,
+ * over the objects AS THE PRINCIPAL IS SERVED THEM ({@link callerObjectView}):
+ * the translator rewrites the text of the fields it is given and adds none, so
+ * a masked field stays absent, its translated text with it (ADR-0106 D3/D5).
+ * No locale, or a key the bundle does not carry, leaves the authored text;
+ * names never change.
+ */
+async function inServedLocale(sources: ServedLocaleSources, served: readonly ObjectDef[]): Promise<ObjectDef[]> {
+  if (served.length === 0) return [...served];
+  const translated = await translateMetaList(
+    defaultLocaleSources(sources.i18n, async () => sources.protocol?.()),
+    'object',
+    [...served],
+  );
+  return Array.isArray(translated) ? (translated as ObjectDef[]) : [...served];
+}
+
+/**
+ * [#34872 · #34995] `view` in the locale this transport speaks
+ * ({@link inServedLocale}): what the object tools (`list_objects`,
+ * `describe_object`) and the `objectstack://objects` resources read, so a
+ * resource and a tool describe one object with one set of labels. Wrap the
+ * view the principal is served ({@link callerObjectView}): the served object
+ * is what is translated, never the declaration, so a masked field stays absent
+ * (ADR-0106 D3/D5). The declaration that object was projected from is handed
+ * on untranslated ({@link readObjectWithDeclaration}): only `readonly` is read
+ * off it.
+ */
+export function servedLocaleObjectView(view: McpObjectView, sources: ServedLocaleSources): McpObjectView {
+  const readWithDeclaration = async (name: string) => {
+    const { served, declared } = await readObjectWithDeclaration(view, name);
+    if (!served) return { served, declared };
+    const [def] = await inServedLocale(sources, [served as ObjectDef]);
+    return { served: def, declared };
+  };
+  const localized: McpObjectView = {
+    async listObjects() {
+      return inServedLocale(sources, ((await view.listObjects()) ?? []) as ObjectDef[]);
+    },
+    async getObject(name) {
+      return (await readWithDeclaration(name)).served;
+    },
+  };
+  setDeclaredObjectRead(localized, readWithDeclaration);
+  return localized;
+}
+
 /**
  * The ADR-0049 object exposure gate, applied before a data verb dispatches
  * (#8083). Throws {@link McpExposureError} when the object's own declaration
@@ -1172,41 +1251,11 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   // the view discovery answers from. The gates below read `objectView` whole.
   const servedView = callerObjectView(objectView, { resolvePrincipal, security, schemaReadDelegates });
 
-  /**
-   * [ADR-0149 D2 · #34872] What the HTTP door's `/meta` translation reads, on
-   * a transport that carries no request: the i18n service ({@link
-   * StdioDataBridgeDeps.i18n}; a resolver that throws is none) and, for the
-   * locale, `metaRequestLocale` with no request — the i18n service's default,
-   * the workspace default the stdio principal speaks. `resolveProtocol`
-   * answers the protocol the read was served from (an object's packaged base,
-   * a declared override's pair translations), or none.
-   */
-  const defaultLocaleSources = (resolveProtocol: () => Promise<unknown>) => ({
-    resolveI18nService: async () => {
-      try {
-        return deps.i18n?.();
-      } catch {
-        return undefined;
-      }
-    },
-    resolveProtocol,
-    requestLocale: (i18n?: unknown) => metaRequestLocale(undefined, i18n),
-  });
-
-  /**
-   * [#34872] Served objects in the locale this transport speaks: the HTTP
-   * door's `/meta` object translation (`translateMetaList`), ⛔ never a second
-   * routine, over the objects AS THE PRINCIPAL IS SERVED THEM ({@link
-   * callerObjectView}): the translator rewrites the text of the fields it is
-   * given and adds none, so a masked field stays absent, its translated text
-   * with it (ADR-0106 D3/D5). No locale, or a key the bundle does not carry,
-   * leaves the authored text; names never change.
-   */
-  const inServedLocale = async (served: readonly ObjectDef[]): Promise<ObjectDef[]> => {
-    if (served.length === 0) return [...served];
-    const translated = await translateMetaList(defaultLocaleSources(async () => protocol?.()), 'object', [...served]);
-    return Array.isArray(translated) ? (translated as ObjectDef[]) : [...served];
-  };
+  // [#34872 · #34995] …and in the locale this transport speaks
+  // ({@link servedLocaleObjectView}): the view the object tools describe
+  // from, through the wrapper `plugin.ts` puts on the view the
+  // `objectstack://objects` resources read, so the two answer alike.
+  const localizedView = servedLocaleObjectView(servedView, { i18n: deps.i18n, protocol });
 
   const bridge: McpDataBridge = {
     async listObjects(): Promise<McpObjectSummary[]> {
@@ -1214,8 +1263,8 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // [ADR-0106] as the principal is served it, so `fieldCount` counts the
       // fields that exist for them ({@link callerObjectView}).
       // [#34721] …and the object's authored `description`, as the HTTP twin serves it.
-      // [#34872] …in the locale this transport speaks ({@link inServedLocale}).
-      return (await inServedLocale((await servedView.listObjects()) as ObjectDef[])).map((o) => ({
+      // [#34872] …in the locale this transport speaks ({@link servedLocaleObjectView}).
+      return ((await localizedView.listObjects()) as ObjectDef[]).map((o) => ({
         name: o.name,
         label: o.label ?? o.name,
         ...authoredDescription(o),
@@ -1257,17 +1306,16 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // twin judges it ({@link readObjectWithDeclaration}): only that boolean
     // is read off the declaration.
     async describeObject(name: string): Promise<unknown | null> {
-      const { served, declared } = await readObjectWithDeclaration(servedView, name);
-      if (!served) return null;
-      // [#34872] …in the locale this transport speaks ({@link inServedLocale});
+      // [#34872] …in the locale this transport speaks ({@link servedLocaleObjectView});
       // `declared` is read for the `readonly` verdict alone.
-      const [def] = await inServedLocale([served as ObjectDef]);
+      const { served: def, declared } = await readObjectWithDeclaration(localizedView, name);
+      if (!def) return null;
       // The field list is an ARRAY here, not the stored map: `validate_expression`
       // reads `Array.isArray(def.fields)` off this very value, and the HTTP
       // bridge projects the same shape. A map would type-check and silently
       // leave that tool with zero fields in scope.
       // [#32435] …each field and rule carrying what a write needs.
-      return describeServedObject(def, declared as ServedObjectDef);
+      return describeServedObject(def as ServedObjectDef, declared as ServedObjectDef);
     },
 
     // [#28715] From the object `describeObject` reads: the protocol's served
@@ -1480,7 +1528,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       } else {
         items = (await metadataService.list('dataset')) ?? [];
       }
-      const translated = await translateMetaList(defaultLocaleSources(async () => merged), 'dataset', items);
+      const translated = await translateMetaList(defaultLocaleSources(deps.i18n, async () => merged), 'dataset', items);
       return Array.isArray(translated) ? translated : items;
     };
     const executor = (maxQueryLimit?: number) =>
