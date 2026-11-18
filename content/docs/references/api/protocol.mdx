@@ -474,10 +474,10 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **layer** | `'runtime'` | ✅ | The ADR-0038 verification plane that found it. Always `runtime` on this report: these are the post-publish probes. |
-| **severity** | `Enum<'error' \| 'warning'>` | ✅ | `error`: the published artifact is broken at runtime, or the check that judges it could not run (`object_field_ref_rule_failed`). `warning`: a dashboard widget was not probed, so nothing is known about it. Neither fails the publish. |
+| **severity** | `Enum<'error' \| 'warning'>` | ✅ | `error`: the published artifact is broken at runtime, or the check that judges it could not run (`object_field_ref_rule_failed`). `warning`: a dashboard widget was not probed, so nothing is known about it (`widget_not_probed`, `probes_unavailable`), or what landed reads in a way the person will notice although it may be the truth (`widget_empty_result`, `rollup_never_computed`, `seed_reference_unresolved`, `flow_connector_action_unresolved`). Neither fails the publish. |
 | **artifact** | `{ type: string; name: string }` | ✅ | The published artifact whose runtime behaviour the finding is about. |
-| **ref** | `{ type: string; name: string; member?: string }` | optional | What the probe exercised, when that is not the artifact itself: the object a seed loads into or a view reads, the dataset a widget is bound to. Absent when the finding is about the artifact as a whole. |
-| **code** | `string` | ✅ | Stable machine id of the finding class, lowercase snake: a diagnostics code carried in a 200, not an ADR-0112 error code. The probes emit `seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, `object_field_ref_rule_failed`, `empty_query`, `widget_query_failed`, `widget_not_probed` and `probes_unavailable`. The list is the producer's and may grow: a consumer treats an id it does not know as any other finding. |
+| **ref** | `{ type: string; name: string; member?: string }` | optional | What the probe exercised, when that is not the artifact itself: the object a seed loads into or a view reads, the dataset a widget is bound to, the connector a flow step dispatches. Absent when the finding is about the artifact as a whole. |
+| **code** | `string` | ✅ | Stable machine id of the finding class, lowercase snake: a diagnostics code carried in a 200, not an ADR-0112 error code. The probes emit `seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, `object_field_ref_rule_failed`, `empty_query`, `widget_query_failed`, `widget_not_probed`, `probes_unavailable`, `widget_empty_result`, `rollup_never_computed`, `seed_reference_unresolved` and `flow_connector_action_unresolved`. The list is the producer's and may grow: a consumer treats an id it does not know as any other finding. |
 | **message** | `string` | ✅ | What is wrong, written for the AGENT that built the app (ADR-0038): English, naming the exact artifact and member by machine name. Not the sentence for the person who published; that is `userMessage`. |
 | **fix** | `string` | optional | How to repair it, written for the same agent. Absent when the probe has no remedy to name. |
 | **userMessage** | `string` | optional | The finding's sentence for the PERSON who published, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `RuntimeAuthoringIssueSchema.userMessage` and `ApiErrorSchema.userMessage`. It names an artifact by its label where the probe can read one, else by its machine name; an object the publishing caller was refused, or whose read access could not be decided, by the machine name the refusal carries, its label unread. Present when the producer authors a user sentence for this `code`, which the probes do for every code they emit; absent, a consumer shows its own generic sentence. Consumers render it as received and keep no per-code translation table; `code` stays the stable id and `message` / `fix` stay the agent-facing text. |
@@ -2970,10 +2970,10 @@ Answer to a device registration: the device id the client keeps
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **layer** | `'runtime'` | ✅ | The ADR-0038 verification plane that found it. Always `runtime` on this report: these are the post-publish probes. |
-| **severity** | `Enum<'error' \| 'warning'>` | ✅ | `error`: the published artifact is broken at runtime, or the check that judges it could not run (`object_field_ref_rule_failed`). `warning`: a dashboard widget was not probed, so nothing is known about it. Neither fails the publish. |
+| **severity** | `Enum<'error' \| 'warning'>` | ✅ | `error`: the published artifact is broken at runtime, or the check that judges it could not run (`object_field_ref_rule_failed`). `warning`: a dashboard widget was not probed, so nothing is known about it (`widget_not_probed`, `probes_unavailable`), or what landed reads in a way the person will notice although it may be the truth (`widget_empty_result`, `rollup_never_computed`, `seed_reference_unresolved`, `flow_connector_action_unresolved`). Neither fails the publish. |
 | **artifact** | `{ type: string; name: string }` | ✅ | The published artifact whose runtime behaviour the finding is about. |
-| **ref** | `{ type: string; name: string; member?: string }` | optional | What the probe exercised, when that is not the artifact itself: the object a seed loads into or a view reads, the dataset a widget is bound to. Absent when the finding is about the artifact as a whole. |
-| **code** | `string` | ✅ | Stable machine id of the finding class, lowercase snake: a diagnostics code carried in a 200, not an ADR-0112 error code. The probes emit `seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, `object_field_ref_rule_failed`, `empty_query`, `widget_query_failed`, `widget_not_probed` and `probes_unavailable`. The list is the producer's and may grow: a consumer treats an id it does not know as any other finding. |
+| **ref** | `{ type: string; name: string; member?: string }` | optional | What the probe exercised, when that is not the artifact itself: the object a seed loads into or a view reads, the dataset a widget is bound to, the connector a flow step dispatches. Absent when the finding is about the artifact as a whole. |
+| **code** | `string` | ✅ | Stable machine id of the finding class, lowercase snake: a diagnostics code carried in a 200, not an ADR-0112 error code. The probes emit `seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, `object_field_ref_rule_failed`, `empty_query`, `widget_query_failed`, `widget_not_probed`, `probes_unavailable`, `widget_empty_result`, `rollup_never_computed`, `seed_reference_unresolved` and `flow_connector_action_unresolved`. The list is the producer's and may grow: a consumer treats an id it does not know as any other finding. |
 | **message** | `string` | ✅ | What is wrong, written for the AGENT that built the app (ADR-0038): English, naming the exact artifact and member by machine name. Not the sentence for the person who published; that is `userMessage`. |
 | **fix** | `string` | optional | How to repair it, written for the same agent. Absent when the probe has no remedy to name. |
 | **userMessage** | `string` | optional | The finding's sentence for the PERSON who published, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `RuntimeAuthoringIssueSchema.userMessage` and `ApiErrorSchema.userMessage`. It names an artifact by its label where the probe can read one, else by its machine name; an object the publishing caller was refused, or whose read access could not be decided, by the machine name the refusal carries, its label unread. Present when the producer authors a user sentence for this `code`, which the probes do for every code they emit; absent, a consumer shows its own generic sentence. Consumers render it as received and keep no per-code translation table; `code` stays the stable id and `message` / `fix` stay the agent-facing text. |
@@ -2982,16 +2982,16 @@ Answer to a device registration: the device id the client keeps
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ | Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`). |
+| **type** | `string` | ✅ | Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`, `flow`). |
 | **name** | `string` | ✅ | Item name of the artifact. On `probes_unavailable` it is the name of every dashboard whose widgets went unprobed, joined by `, `. |
 
 ### Nested Shape: `RuntimeBuildIssue.ref`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `string` | ✅ | Metadata type of what was exercised (`object`, `dataset`). |
+| **type** | `string` | ✅ | Metadata type of what was exercised (`object`, `dataset`, `connector`). |
 | **name** | `string` | ✅ | Its item name. |
-| **member** | `string` | optional | The dashboard widget the finding is about, when the finding is about one widget: its `id`, else its `title` as a string, else `?`. |
+| **member** | `string` | optional | The part of it the finding is about: the dashboard widget, when the finding is about one widget (its `id`, else its `title` as a string, else `?`); the field of an object (a roll-up, a reference column); the action of a connector. |
 
 
 ---
