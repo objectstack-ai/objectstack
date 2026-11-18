@@ -142,16 +142,16 @@ Area boundaries, one `area:*` per card:
    - **Impeded**: there is a workaround (same role, same entry point, named by the error or the documentation); a feature that is not core cannot be done; an error that cannot be understood.
    - **Cosmetic**: looks wrong, wording, consistency, small experience.
 
-   Severity is crossed with how often the broken thing is hit (reach); a UX problem takes the UX rule below instead:
+   Severity is crossed with how often the broken thing is hit (reach). A UX problem is graded by the UX rule below, and the Cosmetic row is that rule written out, so no UX problem is p3:
 
    | Severity | End users, daily | Builders, often (on the build, install and upgrade path) | Administrators, often | Rare configuration or developers only |
    |:--|:--|:--|:--|:--|
    | Severe · data wrong | p1 | p1 | p1 | p2 (still p1 when unrecoverable or cross-tenant) |
    | Broken | p1 | p1 | p2 | p2 |
    | Impeded | p2 | p2 | p2 | p3 |
-   | Cosmetic | p2 | p3 | p3 | p3 |
+   | Cosmetic (a UX problem: the UX rule) | p2 (p1 on a core feature every user hits every time) | p2 | p2 | p2 |
 
-   A security problem is not graded by reach but by who can trigger it, who gains and what they get: an attacker walks the path few people walk on purpose, so a rare path lowers no risk. When an administrator acts normally but a third party gains (a user re-enabled and a departed person gets back in with an old key), look up the party that gains. The security hole itself goes to the private security channel, and this table is used there too:
+   A security problem is not graded by reach but by who can trigger it, who gains and what they get: an attacker walks the path few people walk on purpose, so a rare path lowers no risk. When an administrator acts normally but a third party gains (an administrator's routine change lets someone reach data their role does not grant), look up the party that gains. The security hole itself goes to the private security channel, and this table is used there too:
 
    | Who can trigger it | Gets other people's data, escalates privilege, crosses tenants | Leaks only metadata, or affects only themselves |
    |:--|:--|:--|
