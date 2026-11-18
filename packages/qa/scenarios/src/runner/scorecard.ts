@@ -103,6 +103,8 @@
  *     half with nothing measured is `not-run` in the record, never `fail`.
  */
 
+import { createHash } from 'node:crypto';
+
 import { askedFirst, confirmedByAgent, DATASET_GRADERS, type CheckResult, type DatasetGrader } from '../score/index.js';
 import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, RollupSourceCharge, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
@@ -279,8 +281,33 @@ export interface ModeScorecard {
   findings: string[];
 }
 
+/**
+ * The card a run graded, as the record stamps it at its top level (`card`)
+ * and the scorecard prints it: the card's id and the sha256 of the card file's
+ * bytes as the runner loaded them (the bytes the loader parsed,
+ * `LoadedScenario.fileSha256`, never a later read of the file), before the run moved its dates or prefixed
+ * its names. A change to a card's questions, outcomes or seed moves the hash,
+ * so a round graded before the change is told from one graded after it, on
+ * the scorecard and in `summary` (which never sums two hashes into one cell).
+ * A replay grades on the card as it is now, and stamps that card.
+ */
+export interface CardStamp {
+  id: string;
+  sha256: string;
+}
+
+/** {@link CardStamp} of a card file's bytes. */
+export function cardStampOf(id: string, bytes: Buffer | string): CardStamp {
+  return { id, sha256: createHash('sha256').update(bytes).digest('hex') };
+}
+
+/** `card: travel_expense (sha256 3f2a9c01b7de)`: the scorecard's line, and `summary`'s card dimension. */
+export const cardStampText = (c: CardStamp): string => `card: ${c.id} (sha256 ${c.sha256.slice(0, 12)})`;
+
 export interface CardScorecard {
   card: string;
+  /** The card file the run graded ({@link CardStamp}); absent on a record written before the runner stamped it. */
+  cardStamp?: CardStamp;
   /** Where the run's `@objectstack/*` packages came from (`--packages`); the table's first line states it. */
   packages?: PackageSource;
   counts: CardRun['counts'];
@@ -702,7 +729,7 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   return out;
 }
 
-export function cardScorecard(run: CardRun, packages?: PackageSource): CardScorecard {
+export function cardScorecard(run: CardRun, packages?: PackageSource, cardStamp?: CardStamp): CardScorecard {
   const modes = run.modes.map((m) => modeScorecard(m));
   const halves = modes.flatMap((m) => [m.first.confirmation, m.iterate?.confirmation]);
   const asked = halves.reduce((n, c) => n + (c?.askedFirst ?? 0), 0);
@@ -713,6 +740,7 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
     : undefined;
   return {
     card: run.card,
+    ...(cardStamp ? { cardStamp } : {}),
     ...(packages ? { packages } : {}),
     counts: run.counts,
     authorCost: authorCost(run.modes.flatMap(authorTurnsOf)),
@@ -842,6 +870,7 @@ export function renderScorecard(sc: CardScorecard): string {
     `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns${sc.askRepeats !== undefined && sc.askRepeats > 1 ? `, each asked ${sc.askRepeats} times` : ''}), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
+    ...(sc.cardStamp ? [cardStampText(sc.cardStamp), ''] : []),
     ...(sc.promptChoice ? [`prompts: ${promptChoiceText(sc.promptChoice)}`, ''] : []),
     `author cost: ${noAuthoring ? NO_AUTHORING_TURNS : authorCostText(sc.authorCost)}`,
     `author time: ${noAuthoring ? NO_AUTHORING_TURNS : authorTimeText(sc.authorTime)}`,
@@ -905,10 +934,12 @@ export interface RunRecordMeta {
   driver: DriverInfo;
   runner: string;
   evidenceDir: string;
+  /** The card file the run graded: stamped at the record's top level (`card`) and on its scorecard. */
+  card?: CardStamp;
 }
 
 export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string, unknown> {
-  const sc = cardScorecard(cardRun, meta.packages);
+  const sc = cardScorecard(cardRun, meta.packages, meta.card);
   const results: Array<Record<string, unknown>> = [];
   for (const m of cardRun.modes) {
     const s = sc.modes.find((x) => x.mode === m.mode)!;
@@ -944,6 +975,7 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     date: meta.date,
     scope: `scenario card ${cardRun.card}`,
     app: cardRun.card,
+    ...(meta.card ? { card: meta.card } : {}),
     env: { framework: meta.framework ?? 'unknown', packages: meta.packages, packagesLine: packagesLine(meta.packages), driver: meta.driver },
     runner: meta.runner,
     evidenceDir: meta.evidenceDir,

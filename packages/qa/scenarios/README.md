@@ -78,7 +78,12 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   write goes through it is the run's to observe (ruling A on #31999 item 9, carried to the Build
   side). An `applied` write stays measured against the grant, whatever actions the build adds.
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
-  `pending_confirmation`; a fact the observation does not carry fails. The operation the
+  `pending_confirmation`; a fact the observation does not carry fails. An `applied` state
+  entry may be an aggregate over every row its `where` matches: `sum` (`state:LABEL.sum(amount)`,
+  the rows' total; a row reading no number fails it) and `each` (`state:LABEL.each(field)`, every
+  row holds the value); no row matched fails `->rows`, never a vacuous pass. A `where` key may
+  be a relation path through `expect.lookups` (`claim.trip`): the runner reads the objects it
+  hops to after the turn (`relationObjects` in `runner/observe.ts`). The operation the
   card's `write_validation` guardrail names is graded in two halves: the agent half (its write
   was refused with the declared code, or it wrote nothing and its reply declines the write or
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of
@@ -257,9 +262,18 @@ files only: no model, no network, and no score of its own — every figure is th
   record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
   `this run’s from-scratch build` takes that run's scratch author.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
-  driver (a replay is its own driver), and the ask skills (`--ask-skills`: names and sha256; a record without them
-  reads `none`). When they do not, that table is refused with a line naming each difference and
+  driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
+  reads `none`), and the card file they graded (`card`, below; a record without it reads `card: not recorded`).
+  When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
+- **The card stamp**: every record names the card file it graded at its top level, `card: { id, sha256 }` (the sha256
+  of the card file's bytes as the runner loaded them: the bytes the loader parsed, `LoadedScenario.fileSha256`, never
+  a later read, so a card edited, moved or deleted during the run neither changes the stamp nor costs the record;
+  taken before the run moved the dates or prefixed the names), and the
+  scorecard prints it under the packages line: `card: travel_expense (sha256 3f2a9c01b7de)`. A change to a card's
+  questions, outcomes or seed moves the hash, so a round graded before it is told from one graded after it; a
+  replay grades on the card as it is now, and stamps that card. Two hashes in one table refuse it as above, the line
+  naming each hash and the records holding it.
 - **Older records**: a field a record predates (served models, ask cost and time, the package source) reads
   `not recorded`, never a zero. An effort set only through `CLAUDE_CODE_EFFORT_LEVEL` was never recorded, so runs that
   differ only in it share a row.
