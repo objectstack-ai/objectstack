@@ -322,7 +322,10 @@ describe('the override never approves its actor\'s own request', () => {
     // A store whose collation folds letter case (MySQL's default) resolves a
     // differently-cased email to the submitter's account, and the decision door
     // admits a named email in any case: the comparison must not be narrower.
-    const find = engine.find.bind(engine);
+    // The double is rebuilt before every case; the original `find` is put back
+    // here as well, so the case does not lean on that to stay contained.
+    const original = engine.find;
+    const find = original.bind(engine);
     engine.find = async (object: string, options?: any) => {
       const email = options?.where?.email;
       if (object === 'sys_user' && typeof email === 'string') {
@@ -330,14 +333,18 @@ describe('the override never approves its actor\'s own request', () => {
       }
       return find(object, options);
     };
-    const own = await open(ADMIN);
-    await expect(svc.reassign(own.id, { actorId: 'root', to: 'ROOT@Example.COM' }, ADMIN))
-      .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'ROOT@Example.COM' — it names the request's submitter/);
-    const members = await open(SUBMITTER);
-    await expect(svc.reassign(members.id, { actorId: 'root2', to: 'U1@EXAMPLE.com' }, OTHER_ADMIN))
-      .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'U1@EXAMPLE.com' — it names the request's submitter/);
-    expect((await svc.getRequest(own.id, SYS))!.pending_approvers).toEqual(['u9']);
-    expect((await svc.getRequest(members.id, SYS))!.pending_approvers).toEqual(['u9']);
+    try {
+      const own = await open(ADMIN);
+      await expect(svc.reassign(own.id, { actorId: 'root', to: 'ROOT@Example.COM' }, ADMIN))
+        .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'ROOT@Example.COM' — it names the request's submitter/);
+      const members = await open(SUBMITTER);
+      await expect(svc.reassign(members.id, { actorId: 'root2', to: 'U1@EXAMPLE.com' }, OTHER_ADMIN))
+        .rejects.toThrow(/^VALIDATION_FAILED: cannot reassign to 'U1@EXAMPLE.com' — it names the request's submitter/);
+      expect((await svc.getRequest(own.id, SYS))!.pending_approvers).toEqual(['u9']);
+      expect((await svc.getRequest(members.id, SYS))!.pending_approvers).toEqual(['u9']);
+    } finally {
+      engine.find = original;
+    }
   });
 
   it('CONTROL: an administrator who did not submit the request still approves it through the override, audited', async () => {

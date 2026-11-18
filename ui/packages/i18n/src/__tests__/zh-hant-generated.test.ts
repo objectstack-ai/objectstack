@@ -59,6 +59,7 @@ describe('every zh-Hant catalogue is generated, and current', () => {
       'src/locales/zh-Hant.ts',
       'src/namespaces/marketplace/zh-Hant.ts',
       'src/namespaces/developer/zh-Hant.ts',
+      'src/namespaces/timesheet/zh-Hant.ts',
     ]);
   });
 

@@ -535,11 +535,6 @@ export interface PermissionStudioChrome {
   /** Before History in the header's actions (the pillar's Explain access). */
   actions?: React.ReactNode;
   /**
-   * objectstack#34795 — the open app's name. The header's title reads
-   * "app · set label"; without it, the set's label alone.
-   */
-  appLabel?: string;
-  /**
    * objectstack#32774 — told, for the set `name` this editor shows, the
    * package the clone door must name to copy it (`holdingPackage` of the
    * holding this editor read): `undefined` where the name alone addresses it
@@ -2314,11 +2309,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     const chipButton =
       'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground';
     const facetTab = chrome.tab === 'rls' || chrome.tab === 'tabs' || chrome.tab === 'admin' ? chrome.tab : null;
-    // objectstack#34795 — the title is "app · set label", in the title row
-    // alone, so it is not cut: the set's machine name is the title's tooltip,
-    // and the provenance, default and lock labels are the line under it.
-    const setLabel = headerLabel || name;
-    const studioTitle = chrome.appLabel ? `${chrome.appLabel} · ${setLabel}` : setLabel;
+    // objectstack#35018 — the title is the set's label alone: the app's name
+    // is the top bar's, so it is not repeated here (objectstack#34795 put it
+    // in front). The title row holds nothing else, so it is not cut; the
+    // set's machine name is the title's tooltip, and the provenance, default
+    // and lock labels are the line under it.
+    const studioTitle = headerLabel || name;
     return (
       <div className="flex h-full flex-col">
         <StudioItemHeader
@@ -2330,8 +2326,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           note={
             <span className="inline-flex items-center gap-1.5" data-testid="perm-studio-title-note">
               {/* Same test id and the same answer as the page's badge. */}
+              {/* objectstack#35018 — in the builder's words: a set the app
+                  brings reads 「随应用提供」, not the package term 「包内置」. */}
               <span data-testid="perm-provenance-badge">
-                {shippedByPackage ? t('perm.badge.package') : t('perm.badge.custom')}
+                {shippedByPackage ? t('engine.studio.access.origin.app') : t('perm.badge.custom')}
               </span>
               {!!draft.isDefault && (
                 <>

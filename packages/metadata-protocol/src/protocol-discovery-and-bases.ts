@@ -15,7 +15,9 @@
  * dataset, app and book packaged bases (`getPackagedPageBase`,
  * `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`), the
  * served-override reading of a served document (`servedOverrideBaseOf`) and the
- * pair's own translations (`getPairTranslationBundle`). [#30504] The app base
+ * pair's own translations (`getPairTranslationBundle`). The import-mapping base
+ * (`getPackagedMappingBase`) joins them, the label `translateMapping` judges an
+ * override against. [#30504] The app base
  * carries the code layer's navigation contributions, folded once.
  *
  * A MOVE, not a redesign. `ProtocolDiscoveryAndBasesFacet` is a stateless facet over the host
@@ -83,7 +85,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
  * answers: the artifact item IS the packaged declaration for each (none has an
  * extension fold, unlike the object).
  */
-export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book';
+export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book' | 'mapping';
 
 export class ProtocolDiscoveryAndBasesFacet {
     /** The body of `ObjectStackProtocolImplementation#getProjectId`; the method's docblock there is its contract. */
@@ -920,6 +922,11 @@ export class ProtocolDiscoveryAndBasesFacet {
         return host.packagedArtifactBase('book', name);
     }
 
+    /** The body of `ObjectStackProtocolImplementation#getPackagedMappingBase`; the method's docblock there is its contract. */
+    static getPackagedMappingBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
+        return host.packagedArtifactBase('mapping', name);
+    }
+
     /** The body of `ObjectStackProtocolImplementation#servedOverrideBaseOf`; the method's docblock there is its contract. */
     static servedOverrideBaseOf(type: string, document: unknown): string | undefined {
         return servedOverrideBaseOf(type, document);
@@ -1056,7 +1063,8 @@ export class ProtocolDiscoveryAndBasesFacet {
      * The one body behind {@link getPackagedDashboardBase},
      * {@link getPackagedViewBase}, {@link getPackagedReportBase} and
      * [#30062] {@link getPackagedPageBase}, {@link getPackagedDatasetBase},
-     * {@link getPackagedAppBase} and {@link getPackagedBookBase}:
+     * {@link getPackagedAppBase}, {@link getPackagedBookBase} and
+     * {@link getPackagedMappingBase}:
      * {@link lookupArtifactItem}, and nothing wider, so only an item whose
      * `_packageId` marks a genuine code package answers, and an overlay
      * hydrated under the plain registry key never does.

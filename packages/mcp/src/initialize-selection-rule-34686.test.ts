@@ -11,7 +11,8 @@
  *   bridge that defines no description for one of the pair get no rule — each
  *   pinned beside its `tools/list` control.
  * - The install line names `@objectstack/skills` at this package's own
- *   version (one `fixed` changeset group), for every grant.
+ *   version (one `fixed` changeset group), for every grant, and the CLI
+ *   command that installs it with or without a project (#34773).
  * - Host-injected text and the runtime's configured text are whole answers
  *   their author owns: nothing is appended to either.
  */
@@ -25,6 +26,7 @@ import {
   MCP_OAUTH_SCOPE_METADATA_WRITE,
   QUERY_DATASET_TOOL_NAME,
 } from '@objectstack/spec/ai';
+import { DATASET_NEXT_STEP_PRECEDENCE } from '@objectstack/service-analytics';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import type { McpAuthoringInjection } from './types.js';
@@ -159,9 +161,18 @@ describe('[#34686] initialize instructions — the skills install line', () => {
     for (const o of [{}, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] }, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_WRITE] }] as Opts[]) {
       const text = await instructionsOf(runtime, makeBridge(), o);
       expect(text).toContain(`Published skills: @objectstack/skills ${OWN_VERSION}`);
-      expect(text).toContain(`@objectstack/skills@${OWN_VERSION}`);
       expect(text).not.toContain('0.0.1-operator');
     }
+  });
+
+  // [#34773] The install is the CLI's own command, at that version, which needs
+  // no project: a client that only connected over MCP can follow it in an empty
+  // directory. The npx form is for a machine without the CLI installed.
+  it('names `os skills install --version` at that version, and no project-only install', async () => {
+    const text = await instructionsOf(runtime, makeBridge());
+    expect(text).toContain(`os skills install --version ${OWN_VERSION}`);
+    expect(text).toContain(`npx -p @objectstack/cli@${OWN_VERSION} os skills install --version ${OWN_VERSION}`);
+    expect(text).not.toContain('pnpm add');
   });
 });
 
@@ -217,5 +228,21 @@ describe('[#34766] initialize instructions — the drafts line follows the autho
       {},
     ];
     for (const o of cases) expect(await instructionsOf(runtime, makeBridge(), o), JSON.stringify(o)).not.toContain(DRAFTS);
+  });
+});
+
+/**
+ * [#34919] The rule tells the client to follow `list_datasets`' `nextStep`
+ * and cite `query_dataset`'s `sourceLine`, and names the precedence among
+ * mixed cases in the order the service-analytics executor applies it (its
+ * exported constant, so a reorder there reds here).
+ */
+describe('[#34919] initialize instructions — follow nextStep, cite sourceLine', () => {
+  it('names both members and the executor\'s precedence, in its order', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge());
+    expect(text).toContain('nextStep');
+    expect(text).toContain('sourceLine');
+    expect(text).toContain(DATASET_NEXT_STEP_PRECEDENCE.join(', '));
   });
 });

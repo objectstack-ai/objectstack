@@ -103,6 +103,8 @@
  *     half with nothing measured is `not-run` in the record, never `fail`.
  */
 
+import { createHash } from 'node:crypto';
+
 import { askedFirst, confirmedByAgent, DATASET_GRADERS, type CheckResult, type DatasetGrader } from '../score/index.js';
 import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, QuestionResult, RollupSourceCharge, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
@@ -141,9 +143,11 @@ export interface HalfScores {
    * The half's dataset questions (`run.datasetQuestions`): every ask counts,
    * passing when its route grade passes, and per grader beside the total
    * (`metric-selected`, `asked-back`, `fallback-labelled`); a not-measured ask
-   * is in neither passed nor total. Absent when the card declares none.
+   * is in neither passed nor total. A grader's `revision` is the highest its
+   * grades carry (`DatasetGrade.revision`), absent ⇒ revision 1, so a round
+   * graded under an older rule reads apart. Absent when the card declares none.
    */
-  datasets?: Tally & { notMeasured: number; byGrader: Partial<Record<DatasetGrader, Tally>> };
+  datasets?: Tally & { notMeasured: number; byGrader: Partial<Record<DatasetGrader, Tally & { revision?: number }>> };
   /** How the half's passing `pending_confirmation` operations were met ({@link confirmationTally}); absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
   /** The half's confirmation turns, the write after the person confirmed ({@link confirmedWriteTally}); absent ⇒ none ran. */
@@ -277,8 +281,33 @@ export interface ModeScorecard {
   findings: string[];
 }
 
+/**
+ * The card a run graded, as the record stamps it at its top level (`card`)
+ * and the scorecard prints it: the card's id and the sha256 of the card file's
+ * bytes as the runner loaded them (the bytes the loader parsed,
+ * `LoadedScenario.fileSha256`, never a later read of the file), before the run moved its dates or prefixed
+ * its names. A change to a card's questions, outcomes or seed moves the hash,
+ * so a round graded before the change is told from one graded after it, on
+ * the scorecard and in `summary` (which never sums two hashes into one cell).
+ * A replay grades on the card as it is now, and stamps that card.
+ */
+export interface CardStamp {
+  id: string;
+  sha256: string;
+}
+
+/** {@link CardStamp} of a card file's bytes. */
+export function cardStampOf(id: string, bytes: Buffer | string): CardStamp {
+  return { id, sha256: createHash('sha256').update(bytes).digest('hex') };
+}
+
+/** `card: travel_expense (sha256 3f2a9c01b7de)`: the scorecard's line, and `summary`'s card dimension. */
+export const cardStampText = (c: CardStamp): string => `card: ${c.id} (sha256 ${c.sha256.slice(0, 12)})`;
+
 export interface CardScorecard {
   card: string;
+  /** The card file the run graded ({@link CardStamp}); absent on a record written before the runner stamped it. */
+  cardStamp?: CardStamp;
   /** Where the run's `@objectstack/*` packages came from (`--packages`); the table's first line states it. */
   packages?: PackageSource;
   counts: CardRun['counts'];
@@ -345,12 +374,13 @@ export function askTally(r: RunHalf | undefined): HalfScores['ask'] | undefined 
 export function datasetTally(r: RunHalf | undefined): HalfScores['datasets'] | undefined {
   if (!r?.datasetQuestions) return undefined;
   const measured = r.datasetQuestions.filter((q) => !q.notMeasured);
-  const byGrader: Partial<Record<DatasetGrader, Tally>> = {};
+  const byGrader: Partial<Record<DatasetGrader, Tally & { revision?: number }>> = {};
   for (const q of measured) {
     if (!q.grade) continue;
     const t = (byGrader[q.grade.grader] ??= { passed: 0, total: 0 });
     t.total++;
     if (q.grade.pass) t.passed++;
+    if (q.grade.revision !== undefined && q.grade.revision > (t.revision ?? 1)) t.revision = q.grade.revision;
   }
   return { passed: measured.filter((q) => q.grade?.pass === true).length, total: measured.length, notMeasured: r.datasetQuestions.length - measured.length, byGrader };
 }
@@ -699,7 +729,7 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   return out;
 }
 
-export function cardScorecard(run: CardRun, packages?: PackageSource): CardScorecard {
+export function cardScorecard(run: CardRun, packages?: PackageSource, cardStamp?: CardStamp): CardScorecard {
   const modes = run.modes.map((m) => modeScorecard(m));
   const halves = modes.flatMap((m) => [m.first.confirmation, m.iterate?.confirmation]);
   const asked = halves.reduce((n, c) => n + (c?.askedFirst ?? 0), 0);
@@ -710,6 +740,7 @@ export function cardScorecard(run: CardRun, packages?: PackageSource): CardScore
     : undefined;
   return {
     card: run.card,
+    ...(cardStamp ? { cardStamp } : {}),
     ...(packages ? { packages } : {}),
     counts: run.counts,
     authorCost: authorCost(run.modes.flatMap(authorTurnsOf)),
@@ -823,10 +854,13 @@ const NO_AUTHORING_TURNS = 'no authoring turns';
 /** Did every mode that ran run on a supplied build ({@link ModeScorecard.supplied}): then the card authored nothing either. */
 const suppliedOnly = (sc: CardScorecard): boolean => sc.modes.some((m) => m.supplied !== undefined) && sc.modes.every((m) => m.supplied !== undefined || m.skipped !== undefined);
 
-/** `2/4 (metric-selected 1/2 · asked-back 1/1 · fallback-labelled 0/1)`: a half's dataset questions, then each grader's. */
+/**
+ * `2/4 (metric-selected 1/2 · asked-back rev 2 1/1 · fallback-labelled 0/1)`: a half's dataset questions, then each
+ * grader's, naming its rule revision past the first (`HalfScores.datasets`).
+ */
 const datasetCell = (t: HalfScores['datasets']): string =>
   t
-    ? `${cell(t)}${Object.keys(t.byGrader).length ? ` (${(Object.values(DATASET_GRADERS) as DatasetGrader[]).flatMap((g) => (t.byGrader[g] ? [`${g} ${t.byGrader[g]!.passed}/${t.byGrader[g]!.total}`] : [])).join(' · ')})` : ''}`
+    ? `${cell(t)}${Object.keys(t.byGrader).length ? ` (${(Object.values(DATASET_GRADERS) as DatasetGrader[]).flatMap((g) => { const b = t.byGrader[g]; return b ? [`${g}${b.revision !== undefined ? ` rev ${b.revision}` : ''} ${b.passed}/${b.total}`] : []; }).join(' · ')})` : ''}`
     : '—';
 
 /** The scorecard as a markdown table: the modes side by side, one row per half. */
@@ -836,6 +870,7 @@ export function renderScorecard(sc: CardScorecard): string {
     `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns${sc.askRepeats !== undefined && sc.askRepeats > 1 ? `, each asked ${sc.askRepeats} times` : ''}), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
+    ...(sc.cardStamp ? [cardStampText(sc.cardStamp), ''] : []),
     ...(sc.promptChoice ? [`prompts: ${promptChoiceText(sc.promptChoice)}`, ''] : []),
     `author cost: ${noAuthoring ? NO_AUTHORING_TURNS : authorCostText(sc.authorCost)}`,
     `author time: ${noAuthoring ? NO_AUTHORING_TURNS : authorTimeText(sc.authorTime)}`,
@@ -899,10 +934,12 @@ export interface RunRecordMeta {
   driver: DriverInfo;
   runner: string;
   evidenceDir: string;
+  /** The card file the run graded: stamped at the record's top level (`card`) and on its scorecard. */
+  card?: CardStamp;
 }
 
 export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string, unknown> {
-  const sc = cardScorecard(cardRun, meta.packages);
+  const sc = cardScorecard(cardRun, meta.packages, meta.card);
   const results: Array<Record<string, unknown>> = [];
   for (const m of cardRun.modes) {
     const s = sc.modes.find((x) => x.mode === m.mode)!;
@@ -938,6 +975,7 @@ export function runRecord(meta: RunRecordMeta, cardRun: CardRun): Record<string,
     date: meta.date,
     scope: `scenario card ${cardRun.card}`,
     app: cardRun.card,
+    ...(meta.card ? { card: meta.card } : {}),
     env: { framework: meta.framework ?? 'unknown', packages: meta.packages, packagesLine: packagesLine(meta.packages), driver: meta.driver },
     runner: meta.runner,
     evidenceDir: meta.evidenceDir,

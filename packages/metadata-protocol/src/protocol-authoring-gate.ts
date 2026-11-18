@@ -54,6 +54,7 @@ import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
 import { memberOption } from './protocol-bundle-members.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+import { withDisabledExtensionsFolded } from './metadata-diagnostics.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
@@ -629,7 +630,10 @@ export async function judgeRuntimeAuthoringRules(
         name: evt.name,
         state: evt.state,
         body: evt.body,
-        objects,
+        // [#34901] A `view` write judges its field names against the STORAGE
+        // fold ({@link withDisabledExtensionsFolded}); every other type keeps
+        // the served objects.
+        objects: singular === 'view' ? withDisabledExtensionsFolded(this.engine?.registry, objects) : objects,
         permissions,
         books,
         datasets,

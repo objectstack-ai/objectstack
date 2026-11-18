@@ -361,8 +361,9 @@ export interface PendingSchemaWork {
    * How much data the step touches, when that is knowable up front and worth
    * knowing — absent for the additive kinds, which touch none.
    *
-   * For `normalize_datetime_storage` it is the number of row-writes (summed
-   * across `columns`, since each is its own `UPDATE`). For
+   * For `normalize_datetime_storage` and `normalize_boolean_storage` it is the
+   * number of row-writes (summed across `columns`, since each is its own
+   * `UPDATE`). For
    * `widen_datetime_columns` it is the table's row count, because MySQL's
    * `ALTER … MODIFY` is a full rebuild holding a metadata lock — which is the
    * number that decides "now" versus "in a maintenance window".
@@ -398,6 +399,11 @@ export interface PendingSchemaWork {
  * section tells the operator the work is never data-losing, and that claim must
  * not silently come to cover a row rewrite.
  *
+ * [#34973] `normalize_boolean_storage` rewrites rows in place too: the SQLite
+ * boolean backfill, which turns legacy text `'true'` / `'false'` cells into
+ * `1` / `0`. It is in place by the rule below, and `os migrate plan` renders
+ * it as a row-update count beside the temporal ones.
+ *
  * [#30636] Two more describe the one existing-table shape the additive path
  * cannot adopt — keyed by `_id`, with no `id` column (`existing-table-refusal.ts`):
  * `rebuild_table` drops and recreates it while it is EMPTY (in place: it is
@@ -418,6 +424,7 @@ export type PendingSchemaWorkKind =
   | 'add_columns'
   | 'normalize_datetime_storage'
   | 'normalize_time_storage'
+  | 'normalize_boolean_storage'
   | 'widen_datetime_columns'
   | 'widen_time_columns'
   | 'rebuild_table'

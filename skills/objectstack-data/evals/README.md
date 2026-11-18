@@ -10,3 +10,6 @@ JSON fixtures in the objectui shape (`skill_name`, `evals[]`: `prompt`,
 - `hooks-security-seeds-datasources.json` — search mirrors via hooks,
   permission-set scopes, external datasources, seeds (`externalId`,
   CEL dynamic values).
+- `triggers.json` — trigger cases (`should_trigger` in place of
+  `assertions`): requests that should load this skill and near misses that
+  should not, graded on whether the skill was loaded.
