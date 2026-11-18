@@ -68,13 +68,18 @@ import {
 export function railAbbreviation(name: string | undefined, locale: string): string {
   const text = name?.trim() ?? '';
   if (!text) return '';
-  let first: string | undefined;
-  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
-    const segments = new Intl.Segmenter(locale, { granularity: 'grapheme' }).segment(text);
-    first = segments[Symbol.iterator]().next().value?.segment;
-  }
+  // Typed here as `romanizeHan.ts` types it: the package's `lib` predates `Intl.Segmenter`.
+  const Segmenter = (Intl as unknown as { Segmenter?: GraphemeSegmenterCtor }).Segmenter;
+  const first = Segmenter
+    ? new Segmenter(locale, { granularity: 'grapheme' }).segment(text)[Symbol.iterator]().next().value?.segment
+    : undefined;
   return (first ?? Array.from(text)[0] ?? '').toLocaleUpperCase(locale);
 }
+
+type GraphemeSegmenterCtor = new (
+  locale: string,
+  options: { granularity: 'grapheme' },
+) => { segment: (input: string) => Iterable<{ segment: string }> };
 
 /** The marker the narrow form keeps in the list: rows and groups carry it, anything else is left out. */
 const RAIL_ITEM = { 'data-studio-rail-item': '' } as const;
