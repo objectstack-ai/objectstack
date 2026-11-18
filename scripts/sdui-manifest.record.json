@@ -13,11 +13,11 @@
   ],
   "source": "built-tree",
   "generator": "scripts/gen-sdui-manifest-node.mjs",
-  "generatedAt": "2026-11-17",
-  "sha256": "240fb9507b04431628938e1ace914645d6502d5489af6311c638539ea3c335ea",
+  "generatedAt": "2026-11-18",
+  "sha256": "d6baeb81803dba3e0e4cdf4f1fa1f3a6340c9ab2e3df5a063ef2dbe453ffd754",
   "components": 106,
   "inTree": {
     "modulesRoot": "ui/apps/console",
-    "objectuiWorkspaceVersion": "18.5.0"
+    "objectuiWorkspaceVersion": "18.6.0"
   }
 }

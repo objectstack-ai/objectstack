@@ -148,16 +148,19 @@ export interface EmptySectionsLineProps {
 }
 
 /**
- * The record page v3 fold of empty sections (objectstack#27055, Target 2):
+ * The record page fold of empty sections (objectstack#27055, Target 2):
  * every section that is ENTIRELY empty leaves its place and the body ends in
  * ONE quiet line naming them — 「地址 · 转化 · 附加信息 · 3 个空分区 · 展开」.
  * Sections with a value draw in their order as before. Expanding the line
  * draws every section in its own place and turns the line into a 「收起」.
  *
- * Drawn on the synthesized default page only (`DetailView` asks
- * `useDefaultRecordPage`); elsewhere the whole-body fold
- * ({@link EmptySectionsFold}) keeps its own rule. Edit mode and a print page
- * draw every section, for the reasons that fold gives.
+ * Drawn by a record page's details body: every `record:details` body
+ * (`EmptySectionsLineContext`, objectstack#35019) and anything the
+ * synthesized default page draws (`useDefaultRecordPage`). Elsewhere the
+ * whole-body fold ({@link EmptySectionsFold}) keeps its own rule. Where every
+ * section is empty the line names them all, so it takes that fold's place on
+ * those bodies. Edit mode and a print page draw every section, for the
+ * reasons that fold gives.
  */
 export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
   sections,
