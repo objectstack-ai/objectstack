@@ -1,5 +1,31 @@
 # App Navigation & Run Modes
 
+Build an App with `App.create({...})` from
+`@objectstack/spec/ui` and register under `defineStack({ apps: [...] })`.
+
+⛔ **At most one App per package** (ADR-0019 (app-as-consumer-unit) D3 as
+amended): `defineStack` refuses a second app in a `type: 'app'` and a
+`type: 'module'` package alike. A suite (an app package plus its modules) may
+surface more apps: each further app goes in a module of its own with the
+objects it shows (gone when it is disabled), and the suite composes with
+`composeStacks(stacks, { manifest: 'preserve' })`, which serves each app under
+its own package id; a flat composition puts them under one and is refused.
+Audiences sharing one product and its objects stay
+`requiredPermissions`-gated groups **inside** one app.
+
+Keys by item type ([the ten types](../SKILL.md#navigation-item-types); each
+takes `label`, `icon`): `group` `expanded`, `children[]`; `object`
+`objectName`, `viewName?`, `recordId?`, `filters?`; `dashboard`
+`dashboardName`; `report` `reportName?`; `page` `pageName`; `url` `url`;
+`action` `actionDef` (`{ actionName, params? }`); `component` `componentRef`,
+`params?`; `doc` `book?` / `doc?` (one required).
+
+> **`requiresObject` / `requiresService`** hide an item whose optional
+> system object or kernel service is missing — never hard-code conditional UI.
+> `AppContextSelector` ids (e.g. `{active_package}`) resolve in navigation
+> `recordId` / `params` only: filters are not evaluated with the sidebar's
+> selector state.
+
 <!-- os:check -->
 ```typescript
 import { App } from '@objectstack/spec/ui';

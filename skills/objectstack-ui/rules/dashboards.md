@@ -10,7 +10,8 @@
 
 Dashboards are a grid of widgets (`columns` × `rowHeight`) sharing a
 `dateRange` scrubber and `globalFilters`. Each widget binds a `dataset`
-(below), picks a chart `type`, and sets a `layout: {x,y,w,h}`.
+(below), picks a chart `type`, and sets a `layout: {x,y,w,h}` (omitted, the
+widget auto-flows; `position` is not a widget key).
 
 ### Widget Types
 

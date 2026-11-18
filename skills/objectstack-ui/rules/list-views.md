@@ -8,6 +8,12 @@
 
 ## Configuring a List View
 
+A list view's `type`: `grid` (the default table), `kanban` (a board by status),
+`gallery` (cards over an image, avatar or file field), `calendar`, `timeline`
+(a chronological stream), `gantt` (start/end bars with dependencies), `map`
+(`location` fields), `chart` (an aggregate over the object), `tree` (a
+self-referencing hierarchy).
+
 ### The `defineView` container (`*.view.ts` file shape)
 
 Views ship **inside a `defineView` container** — one per object, aggregating
@@ -80,6 +86,9 @@ columns: [
 | `resizable` | Allow resizing |
 | `link` | Make this the primary navigation link |
 | `summary` | Footer aggregation: `count`, `sum`, `avg`, `min`, `max`, etc. |
+
+6–8 visible columns is plenty (`hidden` the rest); the name/subject column
+carries `link: true`.
 
 **Inline editing is on by default**, under the permission gate: a user who may
 `update` the object edits a cell in place. A list whose records are read-only

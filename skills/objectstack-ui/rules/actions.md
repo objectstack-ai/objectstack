@@ -1,5 +1,19 @@
 # Actions
 
+Actions are user-triggered operations attached to an object or a view.
+Register them under `defineStack({ actions: [...] })`; the six `type` values:
+[Action Types](../SKILL.md#action-types).
+
+**A record button needs a placement and a body that writes.** `objectName`
+folds the action into that object's record surfaces; with neither `locations`
+nor a view naming it in `rowActions` / `bulkActions` it renders nowhere
+(`action-no-placement`). A body that only returns the new values or assigns to
+`ctx.record` changes nothing and still reports success
+(`action-record-write-discarded`): it calls `ctx.api.object(...).update(...)`
+in `language: 'js'`, because an `expression` body is a pure formula with no
+I/O, with `capabilities: ['api.write']`, because the sandbox throws on
+`ctx.api…update` / `insert` / `delete` without it.
+
 ## Where Actions Appear (`locations`)
 
 | Value            | Surface |
