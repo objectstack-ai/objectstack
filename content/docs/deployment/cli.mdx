@@ -1196,9 +1196,10 @@ duration. On SQLite it also lists `normalize_boolean_storage`: rows of a
 them. Any other text in such a column is left as stored and reported in the
 log.
 
-Both are safe to apply — the convergence preserves every stored instant, the
-boolean step rewrites only the two canonical spellings, and both are idempotent —
-but only the second takes time proportional to your data.
+All three are safe to apply — the datetime convergence preserves every stored
+instant, the boolean step rewrites only the two canonical spellings, and each is
+idempotent — but only the MySQL widen is a table rebuild whose duration grows with
+your data.
 
 #### Runtime-owned indexes apply builds
 
