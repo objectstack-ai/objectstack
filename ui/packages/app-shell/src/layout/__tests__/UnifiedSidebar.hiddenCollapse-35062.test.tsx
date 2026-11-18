@@ -15,7 +15,9 @@
  * - The app bar's trigger and ⌘B float the menu and move focus into it, on a
  *   sidebar the reader collapsed as on the fold; Esc folds it and gives focus
  *   back to the trigger. "Keep sidebar open", at the foot of the floated menu,
- *   puts the sidebar back beside the content, and a reload keeps it there.
+ *   puts the sidebar back beside the content, and a reload keeps it there;
+ *   chosen from the keyboard, focus stays in the menu, and turning it off on
+ *   the fold gives focus to the trigger.
  * - Choosing an entry navigates, folds the menu and leaves the sidebar
  *   collapsed.
  * - "Keep sidebar open" still turns the fold off; the edge is drawn only while
