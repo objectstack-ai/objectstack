@@ -26,6 +26,7 @@ import {
   MCP_OAUTH_SCOPE_METADATA_WRITE,
   QUERY_DATASET_TOOL_NAME,
 } from '@objectstack/spec/ai';
+import { DATASET_NEXT_STEP_PRECEDENCE } from '@objectstack/service-analytics';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import type { McpAuthoringInjection } from './types.js';
@@ -200,5 +201,21 @@ describe('[#34686] initialize instructions — host and configured texts are lef
     const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0', instructions: CONFIGURED });
     expect(await datasetToolsListed(runtime, makeBridge())).toHaveLength(2);
     expect(await instructionsOf(runtime, makeBridge())).toBe(CONFIGURED);
+  });
+});
+
+/**
+ * [#34919] The rule tells the client to follow `list_datasets`' `nextStep`
+ * and cite `query_dataset`'s `sourceLine`, and names the precedence among
+ * mixed cases in the order the service-analytics executor applies it (its
+ * exported constant, so a reorder there reds here).
+ */
+describe('[#34919] initialize instructions — follow nextStep, cite sourceLine', () => {
+  it('names both members and the executor\'s precedence, in its order', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge());
+    expect(text).toContain('nextStep');
+    expect(text).toContain('sourceLine');
+    expect(text).toContain(DATASET_NEXT_STEP_PRECEDENCE.join(', '));
   });
 });
