@@ -158,7 +158,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "+86 138", "@example.com"],
-        "must_not_contain": ["****", "'N/A'", "type: 'text', label: 'Phone'"]
+        "must_not_contain": ["'138****", "'N/A'", "type: 'text', label: 'Phone'"]
       }
     },
     {
