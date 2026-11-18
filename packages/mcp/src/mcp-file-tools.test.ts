@@ -19,9 +19,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE } from '@objectstack/spec/ai';
+import { MCP_FILE_TOOL_NAMES } from '@objectstack/spec/system';
+import { validateAiToolReferences } from '@objectstack/lint';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import type { McpDataBridge } from './mcp-http-tools.js';
+import { registerFileTools, type McpDataBridge } from './mcp-http-tools.js';
 import {
   READ_FILE_CPU_BUDGET_MS_DEFAULT,
   READ_FILE_CPU_BUDGET_MS_ENV,
@@ -285,6 +288,25 @@ describe('the file tools register where the bridge carries them, for the scope o
     const write = await toolNames(runtime, fullBridge(), [MCP_OAUTH_SCOPE_DATA_WRITE]);
     expect(write).toContain('create_upload_link');
     expect(write).not.toContain('read_file');
+  });
+});
+
+/**
+ * [#34948] The door's file tools and the names a skill may bind. A skill bound
+ * to `read_file` or `create_upload_link` is offered over MCP, and `os lint`
+ * resolves those names from `MCP_FILE_TOOL_NAMES` in `@objectstack/spec`. Held
+ * equal here, where the tools are registered, so a file tool added or renamed
+ * at the door fails this case until the list follows it — and with it the
+ * lint rule, which would otherwise report a served tool as fictional.
+ */
+describe('the file tools the door registers are the ones a skill may bind', () => {
+  it('registerFileTools registers exactly MCP_FILE_TOOL_NAMES, and the lint rule resolves each', () => {
+    const registered = registerFileTools(new McpServer({ name: 'file-tools', version: '0.0.0' }), fullBridge());
+    expect([...registered].sort()).toEqual([...MCP_FILE_TOOL_NAMES].sort());
+    expect(validateAiToolReferences({ skills: [{ name: 'receipts', tools: registered }] })).toEqual([]);
+    // The control: on a bridge with no file member the door registers nothing,
+    // so the equality above is read from the registration sites, not assumed.
+    expect(registerFileTools(new McpServer({ name: 'file-tools', version: '0.0.0' }), makeBridge(null))).toEqual([]);
   });
 });
 

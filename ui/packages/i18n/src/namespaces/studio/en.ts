@@ -730,15 +730,15 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.kv.empty': 'No entries yet.',
   // objectui#7588 — the per-value text / expression toggle on a `value`-role
   // map (the assignment node's `assignments`); see `flow-value-envelope.ts`.
-  'engine.inspector.flowNode.kv.asExpression': 'Write as a CEL expression',
-  'engine.inspector.flowNode.kv.expressionPlaceholder': 'CEL expression, e.g. joinNonEmpty(…)',
-  'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs an expression. Write one, or switch the value back to text.',
+  'engine.inspector.flowNode.kv.asExpression': 'Write as a formula',
+  'engine.inspector.flowNode.kv.expressionPlaceholder': 'Formula, e.g. joinNonEmpty(…)',
+  'engine.inspector.flowNode.kv.expressionNeeded': 'This value needs a formula. Write one, or switch the value back to text.',
   // objectstack#33838 — a connector Input key the action does not declare: the run refuses it.
   'engine.inspector.flowNode.kv.undeclaredKey': 'The action does not declare this input, so the run refuses it. Remove it, or pick an action that declares it.',
   // objectstack#27834 — the Update Records filter's "Triggering record" target.
   'engine.inspector.flowNode.triggeringRecord.use': 'Update the triggering record',
-  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the {object} record that started this flow.',
-  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the {object} record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.hint': 'Targets the “{object}” record that started this flow.',
+  'engine.inspector.flowNode.triggeringRecord.active': 'Updates the “{object}” record that started this flow.',
   'engine.inspector.flowNode.list.add': 'Add item',
   'engine.inspector.flowNode.list.item': 'Value',
   'engine.inspector.flowNode.list.remove': 'Remove item',
@@ -750,6 +750,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.flowNode.help.learnMore': 'Learn more',
   'engine.inspector.flowNode.help.showLess': 'Show less',
   'engine.inspector.flowNode.remove': 'Remove node',
+  // objectstack#34796 — the node panel's header menu and its collapsed section for the node id.
+  'engine.inspector.flowNode.moreActions': 'More actions',
+  'engine.inspector.flowNode.developerInfo': 'Developer info',
   // App nav inspector
   'engine.inspector.appNav.kind': 'Nav Item',
   'engine.inspector.appNav.close': 'Close nav item',
@@ -1506,6 +1509,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
   'engine.inspector.view.type.tree': 'Tree',
+  'engine.inspector.view.type.timesheet': 'Timesheet',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',
@@ -1591,7 +1595,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.reference.managerPlaceholder': 'Resolved automatically',
   'engine.inspector.reference.managerHint': "Resolved at runtime from the submitter's manager — no value needed.",
   'engine.inspector.reference.queueHint': "The queue's machine name. Its members when the step opens are the approvers; an empty queue adds nobody.",
-  'engine.inspector.reference.fieldsOf': 'Fields of {object}.',
+  'engine.inspector.reference.fieldsOf': 'Fields of “{object}”.',
   'engine.inspector.reference.setTriggerObject': 'Set the flow’s trigger object (on the Start node) to list fields.',
   'engine.inspector.reference.actionsOf': 'Actions of {connector}.',
   'engine.inspector.reference.chooseConnector': 'Choose a Connector above to list its actions.',
@@ -1608,7 +1612,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.recipients.placeholder.user': 'Pick a user',
   'engine.inspector.recipients.placeholder.team': 'Pick a team',
   'engine.inspector.recipients.placeholder.email': 'name@example.com',
-  'engine.inspector.recipients.placeholder.expression': 'CEL, e.g. ownerId',
+  'engine.inspector.recipients.placeholder.expression': 'Formula, e.g. ownerId',
   'engine.inspector.recipients.placeholder.custom': 'Saved as typed, e.g. role:admin',
   'engine.inspector.recipients.add': 'Add recipient',
   'engine.inspector.recipients.remove': 'Remove recipient',
@@ -2201,7 +2205,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.tab.advanced': 'Advanced',
   'engine.studio.data.nameLabel': 'Object name',
   'engine.studio.data.idLabel': 'Identifier',
-  'engine.studio.auto.nameLabel': 'Flow name',
+  'engine.studio.auto.nameLabel': 'Automation name',
   'engine.studio.auto.idLabel': 'Identifier',
   'engine.studio.access.nameLabel': 'Name',
   'engine.studio.access.idLabel': 'Identifier',
@@ -2694,15 +2698,20 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.title': 'Permission matrix',
   'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
-    'This matrix lists only the objects this package declares, and “Save” merges just that slice — grants contributed by other packages are preserved. Edits are saved as package drafts and go live when you Publish the package (top bar), exactly like Data and Interfaces.',
-  'engine.studio.access.banner': 'This package’s objects · saved as draft',
+    'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish the app (top bar), as in Data and Interfaces.',
+  'engine.studio.access.banner': 'This app’s objects · live on publish',
   // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
-  'engine.studio.access.bannerPair': 'This package’s and {package}’s objects · saved as draft',
+  'engine.studio.access.bannerPair': 'This app’s and {package}’s objects · live on publish',
+  // objectstack#35018 — the open set's origin in the builder's words (the Studio title note).
+  'engine.studio.access.origin.app': 'Included with the app',
+  // objectstack#35018 — the word before the open item's label on the copilot's "Viewing" line.
+  'engine.studio.copilot.subject.access': 'Access',
+  'engine.studio.copilot.subject.flow': 'Flow',
   'engine.studio.access.bannerTitlePair':
-    'This permission set is in the customization package for {package}, so the matrix lists {package}’s objects as well as the ones this package declares, and “Save” merges just that slice — grants contributed by other packages are preserved. Edits are saved as package drafts and go live when you Publish the package (top bar).',
+    'This permission set is part of the customization of {package}, so {package}’s objects are listed as well as this app’s, and saving changes only these grants — grants from other apps stay as they are. Changes are saved as a draft and go live when you Publish (top bar).',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
-    'This matrix lists only the objects this package declares. The package is read-only: its permission sets can be viewed here, but not changed.',
+    'Only this app’s objects are listed here. This app is read-only: you can view its permission sets but not change them.',
   // ADR-0090 D5/D9 — pending suggested audience bindings (isDefault sets
   // awaiting the admin's confirm; the server never auto-binds).
   'engine.studio.access.suggestPromptEveryone': 'Suggested: every member gets “{set}” by default, and new members get it automatically.',
@@ -4524,8 +4533,7 @@ const STUDIO_EN: Record<string, string> = {
   // qualified name (`{view}` below is the panel's title, the same string).
   // objectstack#30046 — the header's title names the object before it.
   'engine.studio.inspector.listView.defaultView': 'Default view',
-  'engine.studio.inspector.listView.notCreated':
-    'There is no list view “{view}” yet. Your first change here creates it in this package\'s draft.',
+  'engine.studio.inspector.listView.notCreated': 'Changes save as a draft first.',
   'engine.studio.inspector.listView.readOnly': 'This package is read-only: the list view is shown here, not edited.',
   'engine.studio.inspector.listView.notList': '“{view}” is not a list view, so it is not edited here.',
   'engine.studio.inspector.listView.filter': 'Filter',
@@ -4625,6 +4633,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.category.positions': 'Positions',
   'engine.translationPreview.category.permissions': 'Permission Sets',
   'engine.translationPreview.category.books': 'Doc Books',
+  'engine.translationPreview.category.mappings': 'Import Mappings',
   'engine.translationPreview.category.metadataForms': 'Metadata Forms',
   'engine.translationPreview.category.settingsCommon': 'Settings UI',
   'engine.translationPreview.coverage': 'Category coverage:',

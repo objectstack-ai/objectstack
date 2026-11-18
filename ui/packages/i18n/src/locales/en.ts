@@ -1225,6 +1225,7 @@ const en = {
     groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
     groupingUnstoredRemove: 'Remove from grouping',
     draftOnlyQueryDropped: 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
+    withheldFieldsLeftOut: 'Not shown, filtered, sorted or grouped by {{fields}}: the package that adds it is disabled. It comes back when the package is enabled.',
     inlineEditShort: 'Edit inline',
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
   },
@@ -1956,6 +1957,9 @@ const en = {
   dashboard: {
     total: 'Total',
     noDataSourceFor: 'No data source available for',
+    drillTooMany: 'Too many records are related to this value to list them here. Narrow the dashboard filters and try again.',
+    drillUnavailable: 'The records behind this value can’t be listed from here.',
+    drillFailed: 'The records behind this value couldn’t be loaded. Try again later.',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
@@ -3197,8 +3201,16 @@ const en = {
       viewTypeChartDesc: 'Aggregated bar / line / pie visualisations.',
       viewTypeTree: 'Tree',
       viewTypeTreeDesc: 'Nest self-referencing records into a hierarchy by a parent field.',
+      viewTypeTimesheet: 'Timesheet',
+      viewTypeTimesheetDesc: 'Enter a number per row and weekday; each filled cell is one record.',
       parentField: 'Parent field',
       parentFieldHelp: 'The field pointing to the parent record (same object) that defines the hierarchy. Only self-referencing fields qualify.',
+      timesheetRowField: 'Row field',
+      timesheetRowFieldHelp: 'Each row of the grid is one value of this field, such as a project.',
+      timesheetDateField: 'Date field',
+      timesheetDateFieldHelp: 'Records are placed on the weekday matching this date.',
+      timesheetValueField: 'Value field',
+      timesheetValueFieldHelp: 'The number each cell shows and edits, such as hours.',
       newView: 'New View',
       viewName: 'Name',
       viewNameHelp: 'Machine key (snake_case). Auto-filled from the title — edit if you like.',

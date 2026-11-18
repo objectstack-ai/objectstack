@@ -31,7 +31,8 @@
  *     what the recorded run wrote.
  *
  * {@link RecordingDriver} wraps a live driver and writes every turn it sees to
- * a recording the replay driver reads back.
+ * a recording the replay driver reads back. A turn that threw is recorded as
+ * one ({@link RecordedTurn.thrown}), and its replay throws it again.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -514,10 +515,28 @@ export class ClaudeCodeDriver implements AgentDriver {
 
 // ── Replay ──────────────────────────────────────────────────────────────────
 
+/**
+ * A live turn that threw instead of answering ({@link RecordingDriver}): the
+ * error's `name` and `message`, as the run counted it. Its turn is empty.
+ */
+export interface ThrownTurn {
+  name: string;
+  message: string;
+}
+
+/**
+ * A recorded turn: what the driver answered, or, with {@link thrown}, an empty
+ * turn standing for an ask or authoring turn that threw. Absent ⇒ the turn
+ * answered, as every turn of a recording made before throws were recorded.
+ */
+export interface RecordedTurn extends ParsedTurn {
+  thrown?: ThrownTurn;
+}
+
 /** A recording: every turn of a run, keyed by {@link stepKey}. */
 export interface Recording {
   driver: DriverInfo;
-  turns: Record<string, ParsedTurn>;
+  turns: Record<string, RecordedTurn>;
   /** Authoring turns' resulting project sources, keyed like `turns`. */
   files: Record<string, Record<string, string>>;
   /**
@@ -543,6 +562,33 @@ export class MissingRecordingError extends Error {
     super(`no recorded turn for \`${key}\``);
     this.name = 'MissingRecordingError';
   }
+}
+
+/**
+ * A replayed turn that threw in the recorded run ({@link RecordedTurn.thrown}),
+ * thrown again with the recorded `name` and `message`: the runner counts it
+ * exactly as it counted the live throw (an error, never a missing turn, which a
+ * dataset question or a confirmation turn reads as not measured).
+ */
+export class RecordedThrowError extends Error {
+  constructor(
+    readonly key: string,
+    thrown: ThrownTurn,
+  ) {
+    super(thrown.message);
+    this.name = thrown.name;
+  }
+}
+
+/**
+ * The turn recorded for a live call that threw `e`, or `undefined` for a throw
+ * that is itself a replay's verdict on a missing or unfaithful turn: those are
+ * left unrecorded, as before, so a replay of the recording meets the same gap.
+ */
+function thrownTurn(e: unknown): RecordedTurn | undefined {
+  if (e instanceof MissingRecordingError || e instanceof ReplayNotFaithfulError) return undefined;
+  const thrown: ThrownTurn = e instanceof Error ? { name: e.name, message: e.message } : { name: 'Error', message: String(e) };
+  return { replyText: '', toolCalls: [], meta: {}, thrown };
 }
 
 /**
@@ -575,16 +621,29 @@ function answerOutcome(output: unknown, isError: boolean): string {
   return isError ? 'refused without a code' : 'applied';
 }
 
-/** The id an applied create answered (`{ id }`), when its output carries one. */
-function createdIdOf(output: unknown): string | undefined {
+/** The write doors whose applied answer can name a row the write created, so a replay maps its recorded id to the live one. */
+const CREATING_TOOLS: readonly string[] = ['create_record', 'run_action'];
+
+/**
+ * The id of the row an applied write created, when its output names one:
+ * `create_record` answers it at the top level (`{ id }`), and `run_action`
+ * answers what the action body returned under `result`
+ * (`{ ok, action, objectName, result: { id } }`), so an action that creates a
+ * row (a claim filed from text) names it there.
+ */
+function createdIdOf(tool: string, output: unknown): string | undefined {
   if (typeof output !== 'string') return undefined;
+  let v: unknown;
   try {
-    const v: unknown = JSON.parse(output);
-    const id = typeof v === 'object' && v !== null ? (v as Record<string, unknown>).id : undefined;
-    return typeof id === 'string' && id !== '' ? id : undefined;
+    v = JSON.parse(output);
   } catch {
     return undefined;
   }
+  if (typeof v !== 'object' || v === null) return undefined;
+  const answer = v as Record<string, unknown>;
+  const holder = tool === 'run_action' ? answer.result : answer;
+  const id = typeof holder === 'object' && holder !== null ? (holder as Record<string, unknown>).id : undefined;
+  return typeof id === 'string' && id !== '' ? id : undefined;
 }
 
 /** `value` with every string equal to a recorded id replaced by the id the replay's app gave that row. */
@@ -596,7 +655,8 @@ function remapIds(value: unknown, ids: ReadonlyMap<string, string>): unknown {
 }
 
 /**
- * Replays a {@link Recording}. A step it has no turn for is a loud error, never an empty turn.
+ * Replays a {@link Recording}. A step it has no turn for is a loud error, never an empty turn;
+ * a step whose live turn threw throws again ({@link RecordedThrowError}), with nothing re-sent.
  * Each ask of a repeated question turn is read by its own key ({@link stepKey});
  * how many asks are read is the run's `--ask-repeats`, checked against what the
  * recording holds before any card runs ({@link RecordedDriver.assertAskRepeats}).
@@ -607,9 +667,10 @@ function remapIds(value: unknown, ids: ReadonlyMap<string, string>): unknown {
  * persona ({@link AskTask.callTool}), before the turn is handed back: the
  * runner's read-back then finds what the recorded run wrote. Reads are never
  * re-sent. A refused write is re-sent too, and must be refused again with the
- * same code. A row the recorded run created is known to the replay's app
- * under a new id, so a later write naming the recorded id is sent with the
- * new one. The replay is not faithful, and the turn's grade measures nothing
+ * same code. A row the recorded run created (by `create_record`, or by a
+ * `run_action` whose action answered the row's id, {@link createdIdOf}) is
+ * known to the replay's app under a new id, so a later write naming the
+ * recorded id is sent with the new one. The replay is not faithful, and the turn's grade measures nothing
  * ({@link ReplayNotFaithfulError}), when a recorded write has no recorded
  * answer (nothing is re-sent for that turn: whether it ran is unknown), or
  * when the app answers a re-sent write otherwise than it answered the run.
@@ -702,6 +763,7 @@ export class RecordedDriver implements AgentDriver {
     const key = stepKey(task);
     const turn = this.recording.turns[key];
     if (!turn) throw new MissingRecordingError(key);
+    if (turn.thrown) throw new RecordedThrowError(key, turn.thrown);
     const files = this.recording.files[key] ?? {};
     const root = resolve(task.cwd);
     for (const [rel, content] of Object.entries(files)) {
@@ -717,6 +779,7 @@ export class RecordedDriver implements AgentDriver {
     const key = stepKey(task);
     const turn = this.recording.turns[key];
     if (!turn) throw new MissingRecordingError(key);
+    if (turn.thrown) throw new RecordedThrowError(key, turn.thrown);
     const writes = recordedWrites(turn);
     if (writes.length === 0 || task.callTool === undefined) return turn;
     const unanswered = writes.filter((c) => c.output === undefined);
@@ -741,9 +804,9 @@ export class RecordedDriver implements AgentDriver {
         broken.push(`\`${c.name}\`${target} was ${recorded} in the recorded run and ${replayed} on replay`);
         continue;
       }
-      if (c.name === 'create_record' && recorded === 'applied') {
-        const was = createdIdOf(c.output);
-        const now = createdIdOf(answer?.output);
+      if (CREATING_TOOLS.includes(c.name) && recorded === 'applied') {
+        const was = createdIdOf(c.name, c.output);
+        const now = createdIdOf(c.name, answer?.output);
         if (was !== undefined && now !== undefined && was !== now) this.ids.set(was, now);
       }
     }
@@ -775,16 +838,34 @@ export class RecordingDriver implements AgentDriver {
   }
 
   async author(task: AuthorTask): Promise<AuthorResult> {
-    const r = await this.inner.author(task);
+    let r: AuthorResult;
+    try {
+      r = await this.inner.author(task);
+    } catch (e) {
+      this.recordThrow(task, e);
+      throw e;
+    }
     this.recording.turns[stepKey(task)] = r.turn;
     if (r.files) this.recording.files[stepKey(task)] = r.files;
     return r;
   }
 
   async ask(task: AskTask): Promise<ParsedTurn> {
-    const t = await this.inner.ask(task);
+    let t: ParsedTurn;
+    try {
+      t = await this.inner.ask(task);
+    } catch (e) {
+      this.recordThrow(task, e);
+      throw e;
+    }
     this.recording.turns[stepKey(task)] = t;
     return t;
+  }
+
+  /** A turn that threw is recorded as one ({@link RecordedTurn.thrown}), so its replay throws it again and counts as the run did. */
+  private recordThrow(task: StepRef, e: unknown): void {
+    const turn = thrownTurn(e);
+    if (turn) this.recording.turns[stepKey(task)] = turn;
   }
 
   save(path: string): void {

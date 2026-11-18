@@ -12,7 +12,7 @@ import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, DependsOnInput, ViewData } from '@object-ui/types';
 import { useDataInvalidation } from '@object-ui/react';
 import { recordCurrencyReadField } from '@object-ui/i18n';
-import { resolveDependsOnFields, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, type QuerySortEntry } from '@object-ui/core';
+import { resolveDependsOnFields, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, type QuerySortEntry } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
 import { findParamsSignature } from './objectGridQuery';
 import { normalizeColumns } from './objectGridColumns';
@@ -181,6 +181,10 @@ export function useObjectGridRowLoad({
           throw new Error('DataSource required');
         }
 
+        // objectstack#34901 — read before the definition is handed on, so the
+        // grouping decisions find the names beside its field map on the
+        // render it causes (`withheldFieldNamesOfFieldMap`).
+        const withheld = readWithheldFieldNames(resolvedSchema);
         if (!cancelled) {
           setObjectSchema(resolvedSchema);
         }
@@ -206,9 +210,14 @@ export function useObjectGridRowLoad({
           // objectstack#34898 — the names the definition marks draft-only (see
           // `draftOnlyFieldNames`); empty outside the draft preview.
           const draftOnly = draftOnlyFieldNames(resolvedSchema);
-          const withoutDraftOnly = (list: any[]): any[] => (draftOnly.size === 0
+          // objectstack#34901 — `withheld` (read above) are the names a disabled
+          // package withholds from the served object: the door refuses each on
+          // every axis, so no `$select`, `$orderby` or `$searchFields` below
+          // names one.
+          const withoutDraftOnly = (list: any[]): any[] => (draftOnly.size === 0 && withheld.size === 0
             ? list
-            : list.filter((f: any) => !refersToDraftOnly(columnIdentity(f), draftOnly)));
+            : list.filter((f: any) => !refersToDraftOnly(columnIdentity(f), draftOnly)
+              && !refersToWithheldField(columnIdentity(f), withheld)));
           const getSelectFields = () => {
             // Always include 'id' so row click / navigation handlers can resolve
             // the record key — without it `record.id` is undefined and the
@@ -608,7 +617,12 @@ export function useObjectGridRowLoad({
               // interpolated unconditionally, so `[{ field: 'name' }]` went out
               // as `'name undefined'` and `[]` as `''`. The join, and only the
               // join, stays this block's (see {@link toOrderByClause}).
-              const orderBy = toOrderByClause(schemaSort as unknown as QuerySortEntry[]);
+              // A header click can only name a drawn column, and a withheld
+              // one is not drawn (`useObjectGridGenerateColumns`); a declared
+              // entry on one is left out here.
+              const orderBy = toOrderByClause((withheld.size > 0
+                ? schemaSort.filter((s) => !refersToWithheldField((s as { field?: unknown } | null)?.field, withheld))
+                : schemaSort) as unknown as QuerySortEntry[]);
               if (orderBy !== undefined) {
                 params.$orderby = orderBy;
               }
@@ -631,8 +645,11 @@ export function useObjectGridRowLoad({
           const trimmedSearch = querySearchTerm.trim();
           if (trimmedSearch) {
             params.$search = trimmedSearch;
-            if (schema.searchableFields && schema.searchableFields.length > 0) {
-              params.$searchFields = schema.searchableFields;
+            const searchFields = withheld.size > 0 && schema.searchableFields
+              ? schema.searchableFields.filter((f) => !refersToWithheldField(f, withheld))
+              : schema.searchableFields;
+            if (searchFields && searchFields.length > 0) {
+              params.$searchFields = searchFields;
             }
           }
 

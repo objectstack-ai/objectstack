@@ -41,6 +41,7 @@ import {
 import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import { isUnlandedWriteRefusal } from '@objectstack/objectql';
+import { actionBodyFunctionExpression } from '@objectstack/lint/runtime';
 import type {
   ScriptContext,
   ScriptOrigin,
@@ -392,6 +393,11 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // hand in as a first parameter, and `JobSchema.body` documents `ctx` as
       // the whole surface. Only an action body is `(input, ctx)`.
       //
+      // The action wrapper is `actionBodyFunctionExpression` from
+      // `@objectstack/lint/runtime`, the expression the author-time rule
+      // `action-body-does-not-compile` compiles a body inside, so the two
+      // cannot disagree about it. ⛔ Never spell it inline here again.
+      //
       // [#23702] `SETTLE` attaches the same two handlers the bare `.then(…)`
       // did and hands back the BODY's own promise as the script's completion
       // value, so the host holds that promise ({@link relayedEngineRefusal}
@@ -406,7 +412,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
               ${REJECT_HANDLER}
             );`
         : `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined; globalThis.__errorFromHost = undefined;
-            ${SETTLE}((async (input, ctx) => { ${args.source} })(globalThis.__input, globalThis.__ctx),
+            ${SETTLE}(${actionBodyFunctionExpression(args.source)}(globalThis.__input, globalThis.__ctx),
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
             );`;
@@ -422,6 +428,9 @@ export class QuickJSScriptRunner implements ScriptRunner {
         }
         const err = vm.dump(evalRes.error);
         evalRes.error.dispose();
+        if (args.origin.kind === 'action' && isCompileFailure(err)) {
+          throw actionBodyCompileFailure(args.origin.name, formatErr(err));
+        }
         throw new SandboxError(
           `${args.origin.kind} '${args.origin.name}' threw: ${formatErr(err)}`,
           userFacingMessage(formatErr(err)),
@@ -2360,6 +2369,47 @@ function cryptoRandomUUID(): string {
   // RFC 4122 v4 fallback
   const r = () => Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, '0');
   return `${r()}-${r().slice(0, 4)}-4${r().slice(0, 3)}-${r().slice(0, 4)}-${r()}${r().slice(0, 4)}`;
+}
+
+/**
+ * Did evaluating the wrapper fail because the body does not COMPILE?
+ *
+ * Evaluating the wrapper compiles it and runs one statement, which calls the
+ * async arrow. An async function never throws synchronously: everything the
+ * body does, a `throw new SyntaxError(…)` or a `JSON.parse` of bad text
+ * included, rejects its promise and crosses `__error`, never `evalCode`'s
+ * error. So a `SyntaxError` here is the compiler's: the body did not start.
+ */
+function isCompileFailure(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { name?: unknown }).name === 'SyntaxError';
+}
+
+/**
+ * The error an action whose body does not compile answers with, on every run.
+ *
+ * Not a crash, and not a refusal. A crash (`TypeError` in `innerMessage`) is
+ * answered with the sanitised `500 Internal server error`, because its text may
+ * carry the data the body was reading; a compile error carries none, and the
+ * opaque answer was all an MCP caller of `run_action` ever saw for a body that
+ * can never run. So the sentence names the action and the compiler's reason,
+ * and the declared status is `500`: the caller sent nothing wrong, the
+ * deployed metadata is broken, and no retry of the same call can succeed. No
+ * code is declared, so the doors answer the status's own `INTERNAL_ERROR` and
+ * relay the sentence (a declared 5xx code would withhold it). The operator line
+ * keeps the runner's `KIND 'NAME' …` shape.
+ *
+ * The author-time rule `action-body-does-not-compile` refuses such a body at
+ * `os validate` / `os build` / publish; this is the answer for one that got
+ * past it (deployed before the rule, or syntax the author's host accepted).
+ */
+function actionBodyCompileFailure(actionName: string, compilerError: string): SandboxError {
+  const reason = compilerError.split('\n')[0].slice(0, 240);
+  return new SandboxError(
+    `action '${actionName}' does not compile: ${compilerError}`,
+    `Action '${actionName}' cannot run: its body does not compile (${reason}). ` +
+      'The action\'s author must fix its body.source and publish it again.',
+    { status: 500 },
+  );
 }
 
 function formatErr(err: unknown): string {

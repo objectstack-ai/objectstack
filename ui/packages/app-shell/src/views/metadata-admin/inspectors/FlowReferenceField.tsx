@@ -59,7 +59,7 @@ import { useMetadataClient } from '../useMetadata.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
 import { t, tFormat, useMetadataLocale, type SupportedLocale } from '../i18n.js';
 import { flagUnknownValue, RequiredMarker } from './_shared.js';
-import { ObjectPicker } from './ObjectPicker.js';
+import { ObjectPicker, useObjectDisplayName } from './ObjectPicker.js';
 import {
   APPROVER_REGISTRY_TYPES,
   APPROVER_TWO_SOURCE_BINDINGS,
@@ -991,6 +991,16 @@ export interface ReferenceComboboxProps {
  * Hooks are called unconditionally (kind-gated args) so the
  * component is safe to use in a repeater where the kind changes per row.
  */
+/** "Fields of …", naming the object by its label (mounted only while the hint shows). */
+function ObjectFieldsOfHint({ objectName, locale }: { objectName: string; locale?: SupportedLocale }) {
+  const objectLabel = useObjectDisplayName(objectName);
+  return (
+    <p className="text-[11px] leading-snug text-muted-foreground">
+      {tFormat('engine.inspector.reference.fieldsOf', locale, { object: objectLabel })}
+    </p>
+  );
+}
+
 export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect, disabled, placeholder, context, showHint = true, ariaLabel }: ReferenceComboboxProps) {
   const listId = React.useId();
   // No `locale` prop here: the out-of-enum tier flag reads the designer's
@@ -1212,6 +1222,8 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
         disabled={disabled}
         placeholder={placeholder}
         locale={locale}
+        // The flow node panel shows an object by its label; the machine name is on hover.
+        nameOnHover
       />
     );
   }
@@ -1237,7 +1249,7 @@ export function ReferenceCombobox({ resolved, value, onCommit, onBlur, onSelect,
         </datalist>
       )}
       {showHint && kind === 'object-field' && objectName && (
-        <p className="text-[11px] leading-snug text-muted-foreground">{tFormat('engine.inspector.reference.fieldsOf', locale, { object: objectName })}</p>
+        <ObjectFieldsOfHint objectName={objectName} locale={locale} />
       )}
       {showHint && unresolvedObject && (
         <p className="text-[11px] leading-snug text-muted-foreground">

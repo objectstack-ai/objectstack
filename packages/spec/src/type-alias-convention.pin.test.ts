@@ -304,7 +304,7 @@ import type * as M204 from './ai/dataset-tools.zod.js';
 import type * as M205 from './ai/object-query-source.zod.js';
 
 // ---------------------------------------------------------------------------
-// 859 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 862 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -382,6 +382,8 @@ export type Iso_ai_conversation__TextContentSchema = Assert<Eq< z.input< typeof 
 export type Iso_ai_conversation__TokenBudgetStrategySchema = Assert<Eq< z.input< typeof M1.TokenBudgetStrategySchema >, z.infer< typeof M1.TokenBudgetStrategySchema > >>;
 
 // ai/dataset-tools.zod.ts -- [ADR-0149 D2] plain objects, enums and literals, no default and no transform
+export type Iso_ai_datasetTools__DatasetNextStepDecision = Assert<Eq< z.input< typeof M204.DatasetNextStepDecision >, z.infer< typeof M204.DatasetNextStepDecision > >>;
+export type Iso_ai_datasetTools__DatasetNextStepSchema = Assert<Eq< z.input< typeof M204.DatasetNextStepSchema >, z.infer< typeof M204.DatasetNextStepSchema > >>;
 export type Iso_ai_datasetTools__DatasetProvenanceSchema = Assert<Eq< z.input< typeof M204.DatasetProvenanceSchema >, z.infer< typeof M204.DatasetProvenanceSchema > >>;
 export type Iso_ai_datasetTools__DatasetTermCandidateSchema = Assert<Eq< z.input< typeof M204.DatasetTermCandidateSchema >, z.infer< typeof M204.DatasetTermCandidateSchema > >>;
 export type Iso_ai_datasetTools__DatasetTermMatchSchema = Assert<Eq< z.input< typeof M204.DatasetTermMatchSchema >, z.infer< typeof M204.DatasetTermMatchSchema > >>;
@@ -1756,6 +1758,7 @@ export type Iso_ui_view__ListMapConfigSchema = Assert<Eq< z.input< typeof M167.L
 export type Iso_ui_view__NavigationModeSchema = Assert<Eq< z.input< typeof M167.NavigationModeSchema >, z.infer< typeof M167.NavigationModeSchema > >>;
 export type Iso_ui_view__RowColorConfigSchema = Assert<Eq< z.input< typeof M167.RowColorConfigSchema >, z.infer< typeof M167.RowColorConfigSchema > >>;
 export type Iso_ui_view__RowHeightSchema = Assert<Eq< z.input< typeof M167.RowHeightSchema >, z.infer< typeof M167.RowHeightSchema > >>;
+export type Iso_ui_view__TimesheetConfigSchema = Assert<Eq< z.input< typeof M167.TimesheetConfigSchema >, z.infer< typeof M167.TimesheetConfigSchema > >>;
 export type Iso_ui_view__TreeConfigSchema = Assert<Eq< z.input< typeof M167.TreeConfigSchema >, z.infer< typeof M167.TreeConfigSchema > >>;
 export type Iso_ui_view__UserFilterFieldSchema = Assert<Eq< z.input< typeof M167.UserFilterFieldSchema >, z.infer< typeof M167.UserFilterFieldSchema > >>;
 export type Iso_ui_view__ViewItemNameSchema = Assert<Eq< z.input< typeof M167.ViewItemNameSchema >, z.infer< typeof M167.ViewItemNameSchema > >>;
@@ -1834,7 +1837,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 859 isomorphic pins', () => {
+  it('still declares all 862 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2922,7 +2925,19 @@ describe('ADR-0122 type-alias convention', () => {
     // declared-entry factory as `HookRefusalSchema` and closed at the same
     // four keys with no default or transform, pinned here
     // (Iso_ui_action__ActionRefusalSchema). +1 added.
-    expect(pins).toHaveLength(859);
+    // 859 -> 861 is the ADR-0149 M1 amendment note's `nextStep`
+    // (`ai/dataset-tools.zod.ts`): `DatasetNextStepDecision`, a closed enum of
+    // four values, and `DatasetNextStepSchema`, a plain object of that enum, a
+    // non-empty array of strings and a non-empty string, no default and no
+    // transform in either (Iso_ai_datasetTools__DatasetNextStepDecision,
+    // Iso_ai_datasetTools__DatasetNextStepSchema). +2 added. `nextStep` on
+    // `ListDatasetsOutputSchema` and `sourceLine` on `QueryDatasetOutputSchema`
+    // are optional members with no default, so those two pins still hold.
+    // 861 -> 862 is #34382: a timesheet list view's binding,
+    // `TimesheetConfigSchema` (`ui/view.zod.ts`), a closed object of a string
+    // array and two strings with no default or transform
+    // (Iso_ui_view__TimesheetConfigSchema). +1 added.
+    expect(pins).toHaveLength(862);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
