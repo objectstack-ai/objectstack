@@ -200,7 +200,8 @@
  *       unparseable timestamp reports as a finding, never as fresh (#4690:
  *       "could not read the input" must not look like "input is clean").
  *   H11 the important-parked inventory — a card carrying an importance signal
- *       (native type `Bug`, or a `bug` / `security` / `priority:*` label)
+ *       (native type `Bug`, or a `security` / `priority:*` label; the old `bug`
+ *       type label is read only on a card with no native type, until it retires)
  *       sitting in `pm:blocked` or `pm:on-hold` and open past the threshold.
  *       Maintainer concern, 2026-08-16, verbatim: 「我担心的优先的，重要的问
  *       题，比如bug 被放进 blocked 或者 on-hold 没人理会」. Distinct from H10
@@ -3653,11 +3654,16 @@ export const PARKED_STATE_LABELS = ['pm:blocked', 'pm:on-hold', AWAITING_MAINTAI
 /**
  * H11 — null when clean, else the finding sentence.
  *
- * Importance is read from BOTH the native issue type (`Bug`, object or string
- * shape — REST serializes it as an object) and the label vocabulary
- * (`bug` / `security` / any `priority:*`), because the triage protocol only
- * types new cards and deliberately does not backfill the stock — a label-only
- * reading would hide exactly the older cards most at risk of being forgotten.
+ * Importance is read from the native issue type FIRST (`Bug`, object or string
+ * shape — REST serializes it as an object): triage sets a type on every public
+ * card at first touch, and the stock is typed under the backfill the maintainer
+ * authorised, so the type is the primary signal. The `bug` LABEL is one of the
+ * old type labels and is read only as a TRANSITIONAL fallback, on a card that
+ * carries no native type at all — kept until those labels retire, so an older
+ * card the backfill has not reached is not hidden meanwhile. Once a card is
+ * typed the type is the answer: a `bug` label left on a `Feature` or `Task`
+ * card is not an importance signal. `security` and any `priority:*` label are
+ * not type labels and are read unconditionally.
  * Age is `created_at` ("open longer than", per the card); an unreadable
  * timestamp flags rather than reading as fresh (#4690 direction, same as H10).
  */
@@ -3669,7 +3675,8 @@ export function h11ImportantParked(issue, nowMs = Date.now()) {
   const signals = [];
   if (typeName === 'Bug') signals.push('type:Bug');
   for (const l of labels) {
-    if (l === 'bug' || l === 'security' || l.startsWith('priority:')) signals.push(l);
+    // TRANSITIONAL: the `bug` label speaks only for a card with no native type.
+    if (l === 'bug' ? !typeName : l === 'security' || l.startsWith('priority:')) signals.push(l);
   }
   if (signals.length === 0) return null;
   const created = Date.parse(issue.created_at ?? '');
@@ -27473,6 +27480,14 @@ async function selfTest() {
   t('H11: type Bug + on-hold past threshold -> finding', typeof h11ImportantParked(parkedCard(['pm:on-hold'], { type: { name: 'Bug' } }), NOW), 'string');
   t('H11: type as plain string is read too', typeof h11ImportantParked(parkedCard(['pm:on-hold'], { type: 'Bug' }), NOW), 'string');
   t('H11: bug label + blocked -> finding', typeof h11ImportantParked(parkedCard(['bug', 'pm:blocked']), NOW), 'string');
+  // The native type is the primary signal; the `bug` label is a transitional
+  // fallback that speaks only for a card with no native type at all.
+  t('H11: ⛔ a `bug` label left on a typed Task card is not a signal — the native type decides', h11ImportantParked(parkedCard(['bug', 'pm:on-hold'], { type: { name: 'Task' } }), NOW), null);
+  t('H11: …nor on a typed Feature card, the plain-string shape included', h11ImportantParked(parkedCard(['bug', 'pm:blocked'], { type: 'Feature' }), NOW), null);
+  t('H11: a typed Bug card that still carries the `bug` label names the type…', h11row(parkedCard(['bug', 'pm:on-hold'], { type: { name: 'Bug' } }), NOW).includes('type:Bug sitting'), true);
+  t('H11: …once — the label is not listed beside it', h11row(parkedCard(['bug', 'pm:on-hold'], { type: { name: 'Bug' } }), NOW).includes('+ bug'), false);
+  t('H11: a typed Task card is still read for its `security` label', typeof h11ImportantParked(parkedCard(['bug', 'security', 'pm:on-hold'], { type: 'Task' }), NOW), 'string');
+  t('H11: …and for its `priority:*` label, which is the only signal the row names', h11row(parkedCard(['bug', 'priority:p2', 'pm:blocked'], { type: 'Task' }), NOW).includes('important card parked: priority:p2 sitting'), true);
   t('H11: security label + on-hold -> finding', typeof h11ImportantParked(parkedCard(['security', 'pm:on-hold']), NOW), 'string');
   t('H11: priority:p1 + blocked -> finding', typeof h11ImportantParked(parkedCard(['priority:p1', 'pm:blocked']), NOW), 'string');
   t('H11: …and the finding names the parked state', h11row(parkedCard(['bug', 'pm:blocked']), NOW).includes('pm:blocked'), true);
