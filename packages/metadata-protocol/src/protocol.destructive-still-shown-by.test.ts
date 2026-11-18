@@ -91,10 +91,11 @@ function makeKernel(seed: Row[]) {
         });
     const finds: string[] = [];
     const engine: any = {
-        async find(table: string, o?: { where?: Record<string, unknown> }) {
+        async find(table: string, o?: { where?: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
             finds.push(String(o?.where?.type));
-            return Array.from(rows.values()).filter((r) => match(r, o?.where ?? {}));
+            const matched = Array.from(rows.values()).filter((r) => match(r, o?.where ?? {}));
+            return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
         },
         async findOne(table: string, o: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, o);

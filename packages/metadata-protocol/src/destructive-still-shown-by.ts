@@ -89,8 +89,8 @@ export async function withStillShownBy(
     issues: readonly DestructiveFinding[],
     listServed: ServedItemsLister,
 ): Promise<DestructiveFinding[]> {
-    const removed = issues.filter((i) => i.code === 'field_removed' && i.field).map((i) => i.field as string);
-    const retyped = issues.filter((i) => i.code === 'field_type_change' && i.field).map((i) => i.field as string);
+    const removed = issues.filter((i) => i.code === 'field_removed' && i.field).map((i) => i.field as string); // adr0112-ok: D6 a field-addressed finding code of the refusal's issues[], not an error.code
+    const retyped = issues.filter((i) => i.code === 'field_type_change' && i.field).map((i) => i.field as string); // adr0112-ok: D6 a field-addressed finding code of the refusal's issues[], not an error.code
     if (removed.length === 0 && retyped.length === 0) return [...issues];
 
     // A type change needs the views alone; a removal needs every collection.
@@ -114,7 +114,7 @@ export async function withStillShownBy(
     const nextFields = isRecord(next) && isRecord(next.fields) ? next.fields : {};
     return issues.map((issue) => {
         if (!issue.field) return { ...issue };
-        if (issue.code === 'field_removed') {
+        if (issue.code === 'field_removed') { // adr0112-ok: D6 a field-addressed finding code of the refusal's issues[], not an error.code
             const shown = shownByRemoval?.get(issue.field);
             if (!shown) return { ...issue };
             return withProse({ ...issue, stillShownBy: shown }, 'Still shown by');

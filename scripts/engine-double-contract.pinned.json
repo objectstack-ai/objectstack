@@ -912,6 +912,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.destructive-still-shown-by.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.diagnostics-store-outage.test.ts",
       "verb": "findOne",
       "pinned": 5

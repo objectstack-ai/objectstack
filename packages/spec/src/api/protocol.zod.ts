@@ -4825,8 +4825,12 @@ export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredRespon
 export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
-export type FieldStillShownBy = z.infer<typeof FieldStillShownBySchema>;
-export type DestructiveChangeIssue = z.infer<typeof DestructiveChangeIssueSchema>;
+export type FieldStillShownBy = z.input<typeof FieldStillShownBySchema>;
+export type DestructiveChangeIssue = z.input<typeof DestructiveChangeIssueSchema>;
+/** Post-parse shape of {@link FieldStillShownBy} (ADR-0122). */
+export type FieldStillShownByParsed = z.infer<typeof FieldStillShownBySchema>;
+/** Post-parse shape of {@link DestructiveChangeIssue} (ADR-0122). */
+export type DestructiveChangeIssueParsed = z.infer<typeof DestructiveChangeIssueSchema>;
 /** The 409 `METADATA_CONFLICT` body of the `/meta/:type/:name` write doors (#22114). */
 export type MetadataConflictError = z.input<typeof MetadataConflictErrorSchema>;
 /** Post-parse shape of {@link MetadataConflictError} — defaults applied, transforms run (ADR-0122). */
