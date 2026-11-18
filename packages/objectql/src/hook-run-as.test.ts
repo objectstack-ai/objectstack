@@ -740,6 +740,26 @@ describe("the platform's own system api carries no app-automation provenance", (
     expect((await insertThrough(RUN, (a) => a.sudo())).flowRunId).toBe('run_1');
   });
 
+  it("on an app-authored hook's api it is that api's sudo(): the mark, and the run, stay", async () => {
+    /** The context of an insert made through `pick(c.api)` inside an app-authored hook handed `execCtx`. */
+    async function appAuthoredInsertThrough(execCtx: ExecutionContext, pick: (api: any) => any) {
+      const engine = recordingEngine();
+      await wrapDeclarativeHook(hookOf(undefined), async (c) => {
+        await pick(c.api).object('sys_activity').insert({ id: 'a1' });
+      }, { logger: silentLogger, appAuthored: true })(makeCtx(execCtx, engine));
+      return engine.seen.find((e: { method: string }) => e.method === 'insert')!.context;
+    }
+    for (const [execCtx, mark, run] of [[OPERATOR, 'hook', undefined], [ACTION, 'action', undefined], [RUN, 'hook', 'run_1']] as const) {
+      const context = await appAuthoredInsertThrough(execCtx, (a) => platformSystemApi(a));
+      const control = await appAuthoredInsertThrough(execCtx, (a) => a.sudo());
+      expect(context.isSystem).toBe(true);
+      expect(appAutomationElevationOf(context)).toBe(mark);
+      expect(context.flowRunId).toBe(run);
+      expect(appAutomationElevationOf(control)).toBe(mark);
+      expect(control.flowRunId).toBe(run);
+    }
+  });
+
   it('answers nothing for an api this engine did not build', () => {
     expect(platformSystemApi({ sudo: () => ({}) })).toBeUndefined();
     expect(platformSystemApi(undefined)).toBeUndefined();
