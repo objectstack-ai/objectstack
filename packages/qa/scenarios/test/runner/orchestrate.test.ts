@@ -1943,6 +1943,77 @@ describe('runHalf — a replay re-sends the turn\'s recorded writes before the r
     ]);
   });
 
+  // The action door answers what the action body returned under `result`; a filed claim names its row there.
+  const actionAnswer = (action: string, result: Record<string, unknown>) => JSON.stringify({ ok: true, action, objectName: 'claim', result });
+  const refusal = (code: string) => JSON.stringify({ error: { code, message: `${code} (stand-in)` } });
+  /** The build's own action pair, as the travel_expense recording shows it: filing creates a claim; submitting it is refused HOOK_ABORTED, and RECORD_NOT_FOUND for an id the app never gave. */
+  const claimDoor = () => {
+    const sent: Array<[string, Record<string, unknown>]> = [];
+    const live = new Set<string>();
+    let n = 0;
+    const callTool: AskTask['callTool'] = async (tool, args) => {
+      sent.push([tool, args]);
+      if (tool === 'run_action' && args.actionName === 'file_claim') {
+        const id = `cl-live-${n++}`;
+        live.add(id);
+        return { output: actionAnswer('file_claim', { id, name: 'EC-0001' }), isError: false };
+      }
+      if (tool === 'create_record') {
+        const id = `new-${n++}`;
+        live.add(id);
+        return { output: JSON.stringify({ id }), isError: false };
+      }
+      const known = live.has(String(args.recordId));
+      if (tool === 'run_action') return { output: refusal(known ? 'HOOK_ABORTED' : 'RECORD_NOT_FOUND'), isError: true };
+      return known ? { output: JSON.stringify({ id: args.recordId }), isError: false } : { output: refusal('RECORD_NOT_FOUND'), isError: true };
+    };
+    return { sent, callTool };
+  };
+
+  it('a row a recorded run_action created (its answer\'s result.id) is named by the id the replay\'s app gave it, in a later write of the same turn and of a later turn', async () => {
+    const replay = new RecordedDriver({
+      driver: { driver: 'claude-code-cli', apiBilled: false },
+      turns: {
+        'c/scratch/run/a/p': turnOf(
+          call('run_action', { actionName: 'file_claim', params: { trip: 't1' } }, actionAnswer('file_claim', { id: 'cl-rec', name: 'EC-0007' })),
+          call('run_action', { actionName: 'submit_claim', recordId: 'cl-rec' }, refusal('HOOK_ABORTED'), true),
+        ),
+        'c/scratch/run/b/p': turnOf(call('update_record', { objectName: 'claim', recordId: 'cl-rec', data: { note: 'cl-rec' } }, '{"id":"cl-rec"}')),
+      },
+      files: {},
+    });
+    const { sent, callTool } = claimDoor();
+    // Before the action's result.id was read, the submit went out naming `cl-rec` and the app answered RECORD_NOT_FOUND: not faithful.
+    await replay.ask(task('a', callTool));
+    await replay.ask(task('b', callTool));
+    expect(sent).toEqual([
+      ['run_action', { actionName: 'file_claim', params: { trip: 't1' } }],
+      ['run_action', { actionName: 'submit_claim', recordId: 'cl-live-0' }],
+      ['update_record', { objectName: 'claim', recordId: 'cl-live-0', data: { note: 'cl-live-0' } }],
+    ]);
+  });
+
+  it('control: a create_record row is still remapped from its top-level id, in a later update_record and a later run_action', async () => {
+    const replay = new RecordedDriver({
+      driver: { driver: 'claude-code-cli', apiBilled: false },
+      turns: {
+        'c/scratch/run/a/p': turnOf(
+          call('create_record', { objectName: 'claim', data: {} }, '{"id":"rec-1"}'),
+          call('update_record', { objectName: 'claim', recordId: 'rec-1', data: {} }, '{"id":"rec-1"}'),
+          call('run_action', { actionName: 'submit_claim', recordId: 'rec-1' }, refusal('HOOK_ABORTED'), true),
+        ),
+      },
+      files: {},
+    });
+    const { sent, callTool } = claimDoor();
+    await replay.ask(task('a', callTool));
+    expect(sent).toEqual([
+      ['create_record', { objectName: 'claim', data: {} }],
+      ['update_record', { objectName: 'claim', recordId: 'new-0', data: {} }],
+      ['run_action', { actionName: 'submit_claim', recordId: 'new-0' }],
+    ]);
+  });
+
   it('⛔ a recorded write with no recorded answer (a turn cut short): nothing of the turn is re-sent, and the turn is not faithful', async () => {
     const t = turnOf(call('create_record', { objectName: 'o', data: {} }, '{"id":"r1"}'), call('update_record', { objectName: 'o', recordId: 'r1', data: {} }));
     const replay = new RecordedDriver({ driver: { driver: 'x', apiBilled: false }, turns: { 'c/scratch/run/a/p': t }, files: {} });
