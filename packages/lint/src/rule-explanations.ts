@@ -5556,13 +5556,16 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
   rule: 'ai-skill-tool-unresolved',
   covers: 'how a skill tool name resolves, and why it only warns',
   paragraphs: [
-    // The three sources and the wildcard are held to the rule by its test, each one silencing it.
+    // The four sources and the wildcard are held to the rule by its test, each one silencing it.
     'A `skill.tools` entry resolves, in order, against the stack\'s own `stack.tools` names; ' +
       '`PLATFORM_PROVIDED_TOOL_NAMES` (`@objectstack/spec/system`), the tools the cloud AI runtime ' +
-      'registers at boot; and the materialised action tools, one `action_<name>` per declarative ' +
-      'action in `stack.actions` or any object\'s `actions` (ADR-0109: the default path declares no ' +
-      'tool record at all). A trailing-wildcard entry (`action_*`, `crm_*`) resolves when any member ' +
-      'of that universe starts with its prefix.',
+      'registers at boot; `MCP_FILE_TOOL_NAMES` (same module), the file tools the MCP door registers ' +
+      '(`read_file`, `create_upload_link`), only for a skill offered over MCP: no cloud package ' +
+      'registers either, so an in-product turn runs without them, and a skill kept out of MCP ' +
+      '(`mcpPrompt: false`) is still reported for naming them; and the materialised action tools, ' +
+      'one `action_<name>` per declarative action in `stack.actions` or any object\'s `actions` ' +
+      '(ADR-0109: the default path declares no tool record at all). A trailing-wildcard entry ' +
+      '(`action_*`, `crm_*`) resolves when any member of that universe starts with its prefix.',
     // The headless paths are held to the rule by its test, each one materialising.
     'An action materialises as a tool only when it opts in, `ai.exposed: true` with an ' +
       '`ai.description` (ADR-0011) of at least 40 characters, which the model reads, and has a headless ' +
@@ -5696,7 +5699,7 @@ const PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION: RuleExplanation = {
   ],
 };
 
-// ── Seed datasets (`validate-seed-replay-safety.ts`, `validate-seed-state-machine.ts`) ──
+// ── Seed datasets (`validate-seed-state-machine.ts`) ──
 
 // ── Assignment rules (`validate-assignment-rules.ts`) ──
 
@@ -5731,26 +5734,6 @@ const ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION: RuleExplanation = {
       'intended; a target this stack does not declare is an organization\'s own queue and is not judged.',
     'Advisory (`info`): the shape mirrors `approval-approvers-may-resolve-empty`, and the engine never ' +
       'refuses an insert on a rule\'s account.',
-  ],
-};
-
-const SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION: RuleExplanation = {
-  rule: 'seed-insert-mode-duplicates-on-replay',
-  covers: 'why a seed dataset must be safe to replay',
-  paragraphs: [
-    'Seeds are replayed, not applied once: every `data` dataset is loaded again on each dev-server ' +
-      'boot and each package re-publish, so a dataset\'s mode must be idempotent. `mode: \'insert\'` ' +
-      'is the one that is not: the loader\'s insert path writes every record unconditionally, with no ' +
-      'existing-row check, so the table grows by the dataset\'s size on every restart (three rows, ' +
-      'then six, then nine).',
-    // The modes are held to the rule by its test, each one silent.
-    'The fix line names the idempotent modes, `ignore` (skip rows that already exist) and `upsert` ' +
-      '(create or update), each matching on the dataset\'s `externalId`: a single natural-key field ' +
-      '(`externalId: \'code\'`), ' +
-      'or a composite list of fields for a join or junction table with no single natural key ' +
-      '(`[\'team\', \'project\']`).',
-    'A warning, not a refusal: an insert seed loads and works on a fresh database, and the defect ' +
-      'shows only from the second boot on.',
   ],
 };
 
@@ -6481,7 +6464,6 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION.rule]: PERMISSION_RETIRED_LIFECYCLE_RESIDUE_EXPLANATION,
   [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
   [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
-  [SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION.rule]: SEED_INSERT_MODE_DUPLICATES_ON_REPLAY_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,
   [SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEMANTIC_ROLE_FIELD_UNPROVISIONED_EXPLANATION,
   [ACTION_NO_PLACEMENT_EXPLANATION.rule]: ACTION_NO_PLACEMENT_EXPLANATION,

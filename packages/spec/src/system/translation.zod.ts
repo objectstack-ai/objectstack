@@ -389,6 +389,28 @@ const refusalTranslationsSchema = (noun: 'hook' | 'action') => z.record(z.string
 })).optional().describe(`Refusal translations keyed by the code the ${noun}'s \`refusals\` declares`);
 
 /**
+ * The translations of a declared text catalogue, keyed by text key — one shape
+ * for `hooks.<hook>.texts` (#34374) and an action's `….texts` (#34374 PR2,
+ * under `objects.<object>._actions.<action>` or `globalActions.<action>`),
+ * built by one factory so the two cannot drift. Every sentence it produces for
+ * `hook` is the one the hook group carried before.
+ */
+const textTranslationsSchema = (noun: 'hook' | 'action') => z.record(z.string(), strictObject({
+  surface: `this ${noun} text translation`,
+  history: TRANSLATION_HISTORY,
+  // The spellings the text entry schema renames onto its own `message`.
+  aliases: { text: 'message', template: 'message', value: 'message', description: 'message' },
+}, {
+  // The declared message's own form — plain text, or a template over the
+  // entry's declared `params`; an empty string is the untranslated
+  // skeleton slot `os i18n extract` writes (the declared message is served).
+  message: z.string().optional().describe(
+    `Translated sentence of ${noun === 'action' ? 'an action' : 'a hook'}'s declared text — written into the record in the organization's language in `
+    + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
+  ),
+})).optional().describe(`Text translations keyed by the key the ${noun}'s \`texts\` declares`);
+
+/**
  * Action translations — one shape, used at two addresses: an object's
  * `_actions.<name>` and the top-level `globalActions.<name>` (the same split
  * `resolveActionLabel` walks). Built by a factory rather than transcribed
@@ -412,6 +434,7 @@ const actionTranslationSchema = (surface: string) => strictObject({
     parameters: 'params', args: 'params', inputs: 'params',
     result: 'resultDialog', dialog: 'resultDialog',
     refusal: 'refusals',
+    text: 'texts',
   },
 }, {
   label: z.string().optional().describe('Translated action label'),
@@ -472,6 +495,12 @@ const actionTranslationSchema = (surface: string) => strictObject({
   // declared sentence on a miss. Server-rendered like a hook refusal, so no
   // client overlay reads it.
   refusals: refusalTranslationsSchema('action'),
+  // [#34374 PR2] `ActionSchema.texts` — one translated sentence per declared
+  // text key, picked by the action body runner in the ORGANIZATION's language
+  // through `actionTextMessageKey` (`system/i18n-resolver.ts`) when the body
+  // asks for it (`ctx.text`), the declared sentence on a miss. Written into a
+  // record server-side like a hook text, so no client overlay reads it.
+  texts: textTranslationsSchema('action'),
 });
 
 /**
@@ -751,6 +780,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.preflight.columns.<path>.<column_path>
    *   objects.<object>._actions.<action_name>.refusals.<CODE>.message                  (#34273, `ActionSchema.refusals`)
    *   objects.<object>._actions.<action_name>.refusals.<CODE>.reasons.<REASON>.message
+   *   objects.<object>._actions.<action_name>.texts.<key>.message                      (#34374 PR2, `ActionSchema.texts`)
    */
   _actions: z.record(z.string(), actionTranslationSchema('this object action translation'))
     .optional().describe('Action translations keyed by action name'),
@@ -1283,6 +1313,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.preflight.columns.<path>.<column_path>
    *   globalActions.<action_name>.refusals.<CODE>.message                  (#34273, `ActionSchema.refusals`)
    *   globalActions.<action_name>.refusals.<CODE>.reasons.<REASON>.message
+   *   globalActions.<action_name>.texts.<key>.message                      (#34374 PR2, `ActionSchema.texts`)
    */
   globalActions: z.record(z.string(), actionTranslationSchema('this global action translation'))
     .optional().describe('Global action translations keyed by action name'),
@@ -2226,20 +2257,7 @@ const appTranslationDataShape = () => ({
   }, {
     refusals: refusalTranslationsSchema('hook'),
     // [#34374] A declared text's sentence, picked in the organization's language.
-    texts: z.record(z.string(), strictObject({
-      surface: 'this hook text translation',
-      history: TRANSLATION_HISTORY,
-      // The spellings `HookTextSchema` renames onto its own `message`.
-      aliases: { text: 'message', template: 'message', value: 'message', description: 'message' },
-    }, {
-      // The declared message's own form — plain text, or a template over the
-      // entry's declared `params`; an empty string is the untranslated
-      // skeleton slot `os i18n extract` writes (the declared message is served).
-      message: z.string().optional().describe(
-        "Translated sentence of a hook's declared text — written into the record in the organization's language in "
-        + 'place of the declared message, its {{ }} holes (over the entry\'s declared params) filled after',
-      ),
-    })).optional().describe("Text translations keyed by the key the hook's `texts` declares"),
+    texts: textTranslationsSchema('hook'),
   })).optional().describe('Hook translations keyed by hook name'),
 
   /**

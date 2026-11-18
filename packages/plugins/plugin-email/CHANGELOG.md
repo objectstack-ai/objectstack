@@ -1,5 +1,185 @@
 # @objectstack/plugin-email
 
+## 18.6.0
+
+### Minor Changes
+
+- 2068e03: feat(i18n): the serving layer reads `i18n.sourceLocale` as the authored label's language
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  
+  `II18nService` (`@objectstack/spec/contracts`) gains an optional `getSourceLocale()` / `setSourceLocale(locale)` pair, shaped like the fallback pair; `FileI18nAdapter` and the kernel's in-memory fallback implement both.
+  
+  An app authored in one language that defaults its users to another now serves its inline labels to a request in the authored language. Take `defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, English inline labels, a `zh-CN` bundle and no `fallbackLocale`:
+  
+  - Before: an `en` request was not treated as the authored language, walked the fallback chain (`zh-CN`) ahead of the inline text and was served the Chinese bundle row, unless the stack also declared `fallbackLocale: 'en'`.
+  - Now: an `en` request answers the English inline label; a `zh-CN` request answers the `zh-CN` row; any other locale walks the declared fallback chain exactly as before.
+  
+  `AppPlugin` threads the declared `i18n.sourceLocale` into the i18n service, and every metadata-document translation (the REST metadata reads, a formula's `label()`, an email template's `option` hole, analytics select-option labels and the upload-link page) passes `getSourceLocale()`, else `getDefaultLocale()`, as `ResolveOptions.defaultLocale`. A stack that declares no `sourceLocale` is served exactly as before. A `fallbackLocale: 'en'` added only to work around this can stay; it is no longer needed for the `en` request.
+  
+  Writing your own i18n provider: implement `setSourceLocale` to receive the declaration and `getSourceLocale` to report it, answering `undefined` when nothing was declared — never `defaultLocale`; the serving layer does that collapse itself.
+
+### Patch Changes
+
+- 64c4285: fix(plugin-email): a host's own mail transport now reads as in use on `GET /api/settings/mail` (`live.provider` is `{ value: null, source: 'environment' }`)
+  
+  Clause-②: yes (widening) — the served `live` entry of `GET /api/settings/:namespace` now also admits `{ value: null, source: 'environment' }`; every entry served before is served unchanged
+  Metadata-protocol: none
+  
+  A transport the host application hands to `@objectstack/plugin-email` that no `provider` option names (a plain `IEmailTransport`, such as a hosted platform's mail channel) used to leave `live.provider` unstated, so the first-run checklist read mail as not set up while mail was being delivered. The plugin now states it as `{ value: null, source: 'environment' }`: in use, supplied by the environment or host, named by no option.
+  
+  - `@objectstack/spec`: `SettingsNamespacePayloadSchema.live` documents the reading. A non-null `value` is still always one of the key's options. `value` is `null` when `source` is `'none'` (nothing in use) or `'environment'` (in use, named by no option). Read whether something is in use from `source`, never from `value === null`. `'settings'` always names an option. The schema's shape is unchanged.
+  - `@objectstack/service-settings`: the live-value judge serves `environment` with a `null` value. `settings` with a `null` value is still dropped, and so is any entry on a key with no option table.
+  - `@objectstack/plugin-email`: the stock transports (`smtp`, `resend`, `postmark`) read as before. A transport swapped in through `EmailService.setTransport` is still not stated.
+  
+  A reader that took `value === null` to mean "nothing is in use" should read `source` instead: `source: 'none'` is the only "nothing is in use".
+- 842637a: feat(auth): an invitation is accepted in one step with the proof its mail carries
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The invitation mail carries a mailbox proof.** The accept link in the mail carries a single-use proof bound to the invitation, its address and its expiry; a resend retires it. The proof is never at rest in clear, the stored mail row never holds the proof, and the console's copy-link action answers the link without it. The invitation mail is sent inline, never through the durable mail queue, because the queue delivers from the stored row.
+  - **One door redeems it.** `POST /api/v1/auth/organization/accept-invitation-one-step` takes the invitation id, the proof, a name and a password. In one request it creates the account (or sets the password of an account whose address is not verified, ending every session that account had with the reason a password reset records, in an order that matches the vendor's order), verifies the address, accepts the invitation and signs in. The password-age stamp and the forced-change clear that every password change writes are written too. On an account whose password it replaces, the password history is consulted before the proof is spent and extended after, as the reset door does. The proof is spent only by a request that passed every gate; one server process serializes concurrent redemptions of a proof, and across server processes single use is as strong as the store's consume. A bad proof gets one `INVALID_TOKEN` refusal that does not say which check failed, and the real proof stays usable. The door is rate-limited per client network address and per invitation, and runs the sign-up gates before anything is written: email sign-up switched off, SSO-only mode, password length, complexity and breach checks, a name for a new account, and who may sign up. A refused request leaves the proof usable.
+  - **An address with an account signs in as today.** The door sets a password on an existing account only when it reads all of these: the address is not verified; the account's only sign-in account is its email and password one, or it has none; it has no second factor, enabled or enrolled; its user row holds no phone number, verified or not; it holds no standing grant (an API key, an OAuth client consent, an OAuth access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM credential or a link to an identity provider's directory, revoked or expired ones included); its identity source is local; and the server allows a local password here (not SSO-only, email and password on). Every other account answers `sign_in`, including one in a state no rule names and one whose reading fails, and the proof stays unspent. Every reading is taken again once the account's sessions are revoked and before the password is written; an account that no longer passes then answers `sign_in` with its sessions revoked, and the proof stays unspent. Every store this plugin mounts that is keyed by a user, and every column of the vendor's user model with every plugin this plugin can mount, is classified as a claim the judge reads or as no claim, and a test holds each classification to what is mounted. The classification covers what this plugin mounts and nothing another package mounts.
+  - **`sys_device_code` gains an index on `user_id`** (`@objectstack/platform-objects`), so the door reads a user's device authorizations by an indexed lookup, as it reads every other standing grant.
+  - **A cloud-managed environment refuses it.** With `OS_CLOUD_MANAGED=1` the door sets no local password: a request carrying a proof answers `409 RESOURCE_CONFLICT`, the cloud-managed refusal, before the proof is read. `CLOUD_MANAGED_REFUSAL_MESSAGES` gains the door's message. A process without the variable is unaffected.
+  - **Without the proof, a session must hold the verified invited address.** Called with a session and no proof, the door accepts only when the session's address is the invited one and verified, and otherwise answers `verify_email`. A copied link still owes the verification mail.
+  - **`SendTemplateInput.deliverOnlyData`** (`@objectstack/spec`): render values delivered with the message and never written to the stored mail row, which gives no sign they were overlaid. Required template variables are checked against `data` alone. A send carrying them is delivered inline, never through the durable queue, so its sender gives up queued delivery where a queue is mounted. Only the server-side template send declares the key; `POST /email/send` and a script's `ctx.email.send` take a `SendEmailInput`, which has none.
+  - **The accept page offers one form.** A signed-out visitor whose link carries the proof sees a name and password form, or a provider sign-in, in place of the sign-in redirect. The accept page does not keep the proof in its address. A provider sign-in returns to the page, which redeems the invitation for the new session. A link without the proof keeps today's path. The `@object-ui/auth` client gains `acceptInvitationOneStep`, with the types `AuthInvitationOneStepInput` and `AuthInvitationOneStepOutcome`.
+- Updated dependencies [e53e02e]
+- Updated dependencies [35c9a30]
+- Updated dependencies [1f923d7]
+- Updated dependencies [a00b422]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [5af956f]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [b109659]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [9a7f8c1]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [8f052e9]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [54f8e16]
+- Updated dependencies [bb3c163]
+- Updated dependencies [3c2fb32]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [4176c95]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [568d416]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [6844e6b]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [6080387]
+- Updated dependencies [8fd5004]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [803f909]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [a8e09bb]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [b91cefa]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [cc5472e]
+- Updated dependencies [a825152]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [0465f4a]
+- Updated dependencies [2487242]
+- Updated dependencies [3a78b89]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [6880b04]
+- Updated dependencies [d18d54b]
+- Updated dependencies [1354d2a]
+- Updated dependencies [0593356]
+- Updated dependencies [a2bb7d5]
+- Updated dependencies [6aeb665]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/objectql@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/formula@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

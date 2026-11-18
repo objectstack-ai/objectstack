@@ -144,7 +144,8 @@ describe('os diff — what the upgrade plan adds', () => {
       { type: 'removed', category: 'data', name: 'acme_old', breaking: false, detail: 'seed dataset removed, mode insert' },
       {
         type: 'added', category: 'data', name: 'acme_tier', breaking: false,
-        detail: 'seed dataset added: 1 record(s); mode replace; a replay deletes nothing and inserts these again, so rows already in the table stay',
+        detail: 'seed dataset added: 1 record(s); mode replace; `replace` is a retired seed mode: a replay refuses this '
+          + "dataset and writes none of it. Declare `mode: 'ignore'` (or 'upsert') with an `externalId` that names a row",
       },
       {
         type: 'modified', category: 'data', name: 'acme_stage', breaking: false,
@@ -154,7 +155,10 @@ describe('os diff — what the upgrade plan adds', () => {
     ]);
   });
 
-  it('an insert dataset, added or changed, says a replay inserts its records again; ignore stays silent', () => {
+  // [#34613] A stored artifact built before the retirement can still carry
+  // `insert`: the diff names the mode as retired and the fix, rather than
+  // describing a replay that no longer writes the dataset.
+  it('a retired insert dataset, added or changed, says a replay refuses it; ignore stays silent', () => {
     const before = lead({}, [
       { object: 'acme_source', mode: 'insert', records: [{ name: 'web' }] },
       { object: 'acme_region', mode: 'ignore', records: [{ name: 'emea' }] },
@@ -164,7 +168,8 @@ describe('os diff — what the upgrade plan adds', () => {
       { object: 'acme_region', mode: 'ignore', records: [{ name: 'apac' }] },
       { object: 'acme_channel', mode: 'insert', records: [{ name: 'email' }] },
     ]);
-    const insertNote = "a replay inserts these again, and a row the database refuses is that row's error";
+    const insertNote = '`insert` is a retired seed mode: a replay refuses this dataset and writes none of it. '
+      + "Declare `mode: 'ignore'` (or 'upsert') with an `externalId` that names a row";
     expect(diffStacks(before, after)).toEqual([
       {
         type: 'added', category: 'data', name: 'acme_channel', breaking: false,

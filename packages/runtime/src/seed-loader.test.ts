@@ -1117,7 +1117,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', author: cel('os.user.id') }],
           },
@@ -1150,7 +1150,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', author: cel('os.user.id') }],
           },
@@ -1185,7 +1185,7 @@ describe('SeedLoaderService', () => {
           {
             object: 'note',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'N1', org_label: cel('os.org.id') }],
           },
@@ -1194,7 +1194,7 @@ describe('SeedLoaderService', () => {
       });
 
       expect(result.success).toBe(true);
-      // One record, mode 'insert' ⇒ exactly ONE engine write. Seed application is
+      // One record ⇒ exactly ONE engine write. Seed application is
       // the very path where a doubled collect writes twice and stays green under
       // `toHaveBeenCalledWith` (#15607).
       expect(engine.insert).toHaveBeenCalledTimes(1);
@@ -1220,12 +1220,12 @@ describe('SeedLoaderService', () => {
           {
             object: 'account',
             externalId: 'name',
-            mode: 'insert',
+            mode: 'ignore',
             env: ['prod', 'dev', 'test'],
             records: [{ name: 'Acme' }],
           },
         ],
-        config: baseConfig({ defaultMode: 'insert' }),
+        config: baseConfig({ defaultMode: 'ignore' }),
       });
 
       expect(result.success).toBe(false);

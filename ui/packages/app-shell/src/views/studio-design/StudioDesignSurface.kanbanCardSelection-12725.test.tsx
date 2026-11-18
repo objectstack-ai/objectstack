@@ -27,6 +27,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches it through dynamic imports: its first load is paid at collection.
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -363,8 +365,9 @@ describe("a card on a kanban leaf's canvas selects the board's card (objectui#12
     );
     expect(openRecord).not.toHaveBeenCalled();
     expect(press).not.toHaveBeenCalled();
-    // The copilot stays, folded to the strip at the slot's foot.
-    expect(slot().lastElementChild).toBe(screen.getByTestId('studio-slot-copilot-strip'));
+    // The copilot stays, behind the header's switch (objectstack#35018: no strip at the foot).
+    expect(within(slot()).getByTestId('studio-slot-tab-copilot')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
 
     // Another card moves the outline; still nothing opens.
     fireEvent.click(await card('Cyd'));

@@ -396,22 +396,20 @@ are inserted, updated, or deleted. `relationshipField` is optional when the chil
 has only one `lookup`/`master_detail` field pointing back to the parent; set it
 when multiple relationships target the same parent object.
 
-On update a summary field is read-only whether or not it declares `readonly: true`.
-A value that a `PATCH`, an import with `writeMode: 'update'` or a bulk update
-sends for it is dropped, the rest of the write is stored, and the response's
-`droppedFields` names the field with reason `readonly`. Under
-`strictReadonlyWrites` the whole update is refused. Server code that runs with
-`isSystem: true` can still write the column, as it can any read-only column.
-On create, a value you send is kept as the field's starting value (seed data or
-a historical import may carry a pre-computed total); the next child write
-replaces it with the computed one.
-An import with `writeMode: 'upsert'` therefore drops the value on the rows it
-updates and keeps it on the rows it creates. A historical import
-(`treatAsHistorical: true`, which writes with `preserveAudit`) keeps a summary
-value on update as well, as it keeps any other read-only value it sends. Undoing
-an ordinary import restores the rows through an ordinary update, so a summary
-value that an import committed before this rule overwrote is not put back by
-the undo; it stays until the next child write recomputes it.
+A summary field is read-only on create and on update whether or not it declares
+`readonly: true`. A value that a `POST`, an import (any `writeMode`), an MCP
+create, a `PATCH` or a bulk update sends for it is dropped, the rest of the write
+is stored, and the response's `droppedFields` names the field with reason
+`readonly`. A record created that way starts as if no value had been sent: `0`
+for `count` and `sum`, empty for `min`, `max` and `avg`, and the next child write
+replaces it with the computed value. Under `strictReadonlyWrites` the whole write
+is refused. Server code that runs with `isSystem: true` can still write the
+column, as it can any read-only column: seed data, package installs and a
+historical import (`treatAsHistorical: true`, which only the system principal may
+send) keep a pre-computed total, on create and on update. Undoing an ordinary
+import restores the rows through an ordinary update, so a summary value that an
+import committed before this rule overwrote is not put back by the undo; it stays
+until the next child write recomputes it.
 
 Because the roll-up is engine-derived state rather than a user write, the
 recompute runs under a system context: a user who may create a child does not
@@ -494,6 +492,21 @@ recomputes after each row, so each row's rules, and the parent's own rules
 judging each recompute, read it as one-by-one updates would, for every summary
 function, `avg` included. A `parent.` predicate that reads a field that is not a
 summary, and is not calculated from one, does not count.
+**A predicate update equals one-by-one updates too:** an update that selects
+its rows by a filter (`update(object, patch, { where, multi: true })`, a flow
+`update_record` step with `multi: true`) judges every matched row before its
+one write. A validation rule reading a parent summary one hop through a
+reference, a detail object's `requiredWhen` reading it on `parent`, and a rule
+reading a formula or stored computed field of the parent calculated from it,
+read it as the matched rows judged before leave it, for every summary function,
+`avg` included, and a row that moves to another parent leaves the old one and
+joins the new one. If any row is refused, none is written. Three cases keep
+reading the stored value for every parent the update reads that summary for: a
+summary whose `filter` reads through another reference, as a dotted path or in
+the nested form `{ account: { status: 'x' } }` (or one the in-memory filter
+cannot evaluate), a summary meeting a value that is not a number, and a `min` / `max`
+when one parent holds more than 5,000 matched rows. A rule of the parent
+itself judges the summary once, after the write.
 **Hooks and flow steps read the value from before the batch:** inside one bulk
 create or bulk update, a hook or flow step that reads a parent's summary reads
 it as stored before the batch, on create and update alike.

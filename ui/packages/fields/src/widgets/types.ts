@@ -256,8 +256,24 @@ export type FieldWidgetComponentProps<T = any> = {
    * **Consumer**: `LookupField`, on a single-value pick whose host owns no
    * `onSelectRecord` (a host that owns the pick, the line-item grid, applies
    * the pairs itself). A lookup reached without it fills nothing.
+   *
+   * `options.opening` marks the fill a create form's opening value made (see
+   * {@link openingValue}): the filled values join what the form opened with,
+   * so the writer records them as opening values, not as the user's edits.
    */
-  onAutofill?: (patch: Record<string, unknown>) => void;
+  onAutofill?: (patch: Record<string, unknown>, options?: { opening?: boolean }) => void;
+  /**
+   * The value this field held when a CREATE form opened: a related list's New
+   * pre-linking its parent, a URL prefill, a form view default.
+   *
+   * **Producer**: the form renderer, on a create form only (an edit form's
+   * value is the stored record's, and fills nothing).
+   * **Consumer**: `LookupField`, which fills its declared `lookupAutofill`
+   * targets from that record once, as a pick does, while the field still holds
+   * it, and only where a target is empty: a value the form opened with is an
+   * explicit one, so `overwrite: true` does not replace it.
+   */
+  openingValue?: unknown;
   /**
    * Offer a "create new" affordance in a record picker, carrying whatever the
    * user had typed. Also declarable on the field metadata.

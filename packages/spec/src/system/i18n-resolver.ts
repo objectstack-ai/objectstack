@@ -4677,12 +4677,35 @@ export function actionRefusalMessageKey(
   code: string,
   reason?: string,
 ): string {
-  const node = typeof objectName === 'string' && objectName.length > 0
-    ? `objects.${objectName}._actions.${actionName}`
-    : `globalActions.${actionName}`;
+  const node = actionTranslationNodeKey(objectName, actionName);
   return reason === undefined
     ? `${node}.refusals.${code}.message`
     : `${node}.refusals.${code}.reasons.${reason}.message`;
+}
+
+/**
+ * Dot-notation i18n key for an action's declared text (#34374 PR2, ruling
+ * 6913660232 parameter 7, `ActionSchema.texts`) — the action twin of
+ * {@link hookTextMessageKey}, at the address every action translation is read
+ * at, beside the action's refusals:
+ *
+ *  - a bound action: `objects.<object>._actions.<action>.texts.<key>.message`;
+ *  - an object-less action: `globalActions.<action>.texts.<key>.message`.
+ *
+ * Used by the action body runner, which answers `ctx.text(key, params)` with
+ * this translation in the ORGANIZATION's language (never the caller's), the
+ * declared sentence on a miss, and fills its holes after. `objectName` is the
+ * action's OWN object, as for {@link actionRefusalMessageKey}.
+ */
+export function actionTextMessageKey(objectName: string | undefined, actionName: string, key: string): string {
+  return `${actionTranslationNodeKey(objectName, actionName)}.texts.${key}.message`;
+}
+
+/** The translation node of an action: `objects.<object>._actions.<action>`, or `globalActions.<action>` with no object. */
+function actionTranslationNodeKey(objectName: string | undefined, actionName: string): string {
+  return typeof objectName === 'string' && objectName.length > 0
+    ? `objects.${objectName}._actions.${actionName}`
+    : `globalActions.${actionName}`;
 }
 
 /**

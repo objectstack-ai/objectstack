@@ -1,5 +1,153 @@
 # @object-ui/types
 
+## 18.6.0
+
+### Minor Changes
+
+- 4240719: feat(ui): timesheet list view, an editable row × weekday entry grid
+  
+  Clause-②: yes (widening — new list view type `timesheet`, its `timesheet` block and the `VisualizationType` member; new locale keys)
+  Metadata-protocol: added
+  
+  A list view can now be `type: 'timesheet'`. It pivots detail records into rows × the seven days of one week, and every cell is editable:
+  
+  ```ts
+  type: 'timesheet',
+  timesheet: {
+    rowFields: ['project', 'task'], // 1–3 fields; one row per distinct combination
+    dateField: 'work_date',         // date or datetime
+    valueField: 'hours',            // number, currency or percent
+  }
+  ```
+  
+  - Typing into an empty cell creates a record carrying the row's field values, the day and the number. Changing a cell updates that record, and clearing it deletes the record. Each cell is one call on the record API, so hooks, validation rules and permissions judge it; a refusal stays on that cell with the server's message.
+  - A cell holding several records shows their sum and is read-only.
+  - The grid offers each write only to a caller who may make it (the affordance-to-grant map's `gridAddRow`, `listInlineEdit` with the value field's write permission, and `rowDelete`). A cell no granted write can change is read-only, and **Add row** needs the create grant. An interface page's list block relays the view's `timesheet` block.
+  - The week starts on the viewer's locale first day, with previous / this / next navigation. Row, day and week totals are always shown.
+  - **Add row** asks for the row field values first; typing a day then creates the record. The view's `filter` applies to the week's query.
+  - A `timesheet` view with an incomplete block shows "Timesheet configuration required", and `os validate` warns with `view/layout-without-binding`. `view/list-view-field-refs` checks the three field names.
+  
+  The renderer is the new lazy package `@object-ui/plugin-timesheet` (`object-timesheet`), with its own lazy locale namespace `timesheet.*`. The view switcher, the create-view dialog and the Studio list-view type section offer the new type.
+
+### Patch Changes
+
+- b019048: feat(console): surfaces that never draw a record count decline the list total
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The list door (`GET /data/:object`) runs a `count(*)` over the full predicate beside every paged read, unless the request sends `count=false`. On PostgreSQL that count is now the largest part of a paged list's database time. The ObjectStack adapter never forwarded `$count`, so no Console surface could decline the total.
+  
+  - `ObjectStackAdapter.find()` now honours `$count: false`. Such a read takes the adapter's raw GET, which sends `count=false`, and the result carries no `total`. The page length is not used in its place. An absent `$count`, or `$count: true`, still gets the total, as before.
+  - The timeline rail (`object-timeline` and the timeline view), the `element:record_picker` block and the `element:repeater` block draw rows and never a record count, so they now send `$count: false`. Surfaces that print a total keep it: the grid and list footers, related lists, the lookup picker's "showing N of M", kanban lane counts, and the calendar, map, tree and gantt row-ceiling note.
+- 31eb2ae: fix(plugin-grid): a rejected aggregate bulk action reports one outcome for the selection and refreshes the list
+  
+  Clause-②: yes (widening) — optional member userMessage on ActionResult (@object-ui/types) and ActionResponseOutcome (@object-ui/core); nothing removed or renamed
+  Metadata-protocol: none
+  
+  An aggregate bulk action (`bulkActionDefs` entry with `execution: 'aggregate'`) is one call for the whole selection. When that call rejected, the result dialog printed the rejection's platform `message` against every selected record, read "Succeeded 0 / N" even when the handler had already changed some of them, and the list kept showing the old values until a manual reload.
+  
+  A rejected aggregate run is now one outcome for the selection. The dialog says the action did not complete for the selected records and shows the rejection's message once: its `userMessage` when the handler threw one (the text it wrote for the user, already in the request's locale), else its `message`. It shows no per-record count and no per-record failure list, because one call cannot say which records it changed before it stopped, nor whether it kept those changes; it says only that some records may already have been changed. When the dialog is closed at the result step, the list re-reads its rows, whether the action resolved or rejected, and the selection stays after a rejection for a re-run. The per-record dispatch (`bulkActions: ['NAME']`) reports exactly as before.
+  
+  To carry the text, a failed script/server action dispatch now relays the refusal's `error.userMessage` on `ActionResult.userMessage` (`@object-ui/types`), read by `createServerActionHandler` (`@object-ui/core`); `error` stays the whole text. The new dialog sentence is translated in every locale pack.
+- 2e29287: fix(components): an editable list's lookup column is wide enough for its record picker
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With inline editing on, a lookup column in a list was sized from the short names its cells draw, often 80 to 121px. Its cell editor is the record picker, so the picker's trigger got a few dozen pixels and the option list it opened cut every name ("C..", "W."). In an editable table, a foreign-key column (a lookup, master-detail, tree or user field) whose cells edit is now never narrower than 168px, the width the inline line-item grid already gives its lookup columns. A wider name still widens the column as before. A width the view pins, or the user's own resize, is drawn exactly as written, and read-only tables and columns that do not edit are unchanged.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

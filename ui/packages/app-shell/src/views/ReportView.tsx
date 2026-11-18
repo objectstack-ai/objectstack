@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { useParams } from 'react-router-dom';
 const ReportRenderer = lazy(() =>
   import('@object-ui/plugin-report').then((m) => ({ default: m.ReportRenderer })),
@@ -16,7 +16,8 @@ import { preferLocal } from '../utils/preferLocal.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { persistRuntimeMetadata } from './runtime-metadata-persistence.js';
-import { formatMetadataError } from '@object-ui/data-objectstack';
+import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
+import { t as tStudio, tFormat, useMetadataLocale } from './metadata-admin/i18n.js';
 import { servedPackageId } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
@@ -135,7 +136,9 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
 
         // Fallback (older server with no drill metadata): resolve the dataset's
         // object and reverse-map dimension labels → stored values ourselves.
-        const callerPackage = servedPackageId(editSchema || reportData);
+        // The served report names the package; the authored edit buffer carries no
+        // read decoration (objectstack#35008).
+        const callerPackage = servedPackageId(reportData);
         const def = await metadataClient.get<Record<string, any>>(
           'dataset',
           dataset,
@@ -218,14 +221,75 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   );
 
   // ---- Open / close config panel ------------------------------------------
-  const handleOpenConfigPanel = useCallback(() => {
-    setEditSchema(reportData);
+  // objectstack#35008 — the editor edits the report as its author wrote it,
+  // never the report as it is served. `reportData` comes from the served
+  // `/meta/report` list, which the server translates for the console's
+  // Accept-Language: in a zh-CN session its `label`, `description` and block
+  // labels are the catalog's translations, and the save door stores a report
+  // body verbatim (its translated-echo restore covers objects only). Seeded
+  // from that copy, a quick edit of any field stored the translations as the
+  // source text, and every other locale was served them after publish.
+  //
+  // The buffer is the layered read's authored document instead, through the
+  // one reading the Studio editors share (`authoredBuffer`, objectstack#29793):
+  // the stored draft when one is pending, else the published item, both
+  // untranslated. Read at the package the served report came from (ADR-0048).
+  // The served report stays the display copy; with nothing authored to read,
+  // the editor does not open — ⛔ never fall back to the served copy, which is
+  // the translated document this exists to keep out of the save.
+  //
+  // objectstack#35054 — the served draft read, at the same package, is handed
+  // to `authoredBuffer` as the Studio editors hand theirs: it says whether a
+  // draft is pending, so a pending draft whose stored copy the layers do not
+  // serve is `unserved` and opens no editor, instead of an editor seeded with
+  // the published report that a Save would stage over the pending draft.
+  const metadataLocale = useMetadataLocale();
+  // A landed save keeps the edited schema as the preview until the metadata
+  // refresh it triggers replaces it (`handleCloseConfigPanel`). A close with no landed save puts
+  // the served report back: the buffer is the untranslated source, which is
+  // no display copy for this locale.
+  const savedSinceOpenRef = useRef(false);
+  const [openingEditor, setOpeningEditor] = useState(false);
+  const handleOpenConfigPanel = useCallback(async () => {
+    if (!metadataClient || !reportName) return;
+    const packageId = servedPackageId(reportData);
+    setOpeningEditor(true);
+    let body: Record<string, unknown> | null = null;
+    let failure: string | null = null;
+    try {
+      const at = packageId ? { packageId } : {};
+      const [layers, servedDraft] = await Promise.all([
+        metadataClient.layered<Record<string, unknown>>('report', reportName, at),
+        metadataClient.getDraft('report', reportName, at),
+      ]);
+      const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
+      if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
+      else if (Object.keys(authored.body).length > 0) body = authored.body;
+      else failure = tStudio('engine.form.notFound', metadataLocale);
+    } catch (err) {
+      failure = formatMetadataError(err);
+    } finally {
+      setOpeningEditor(false);
+    }
+    if (!body) {
+      toast.error(
+        tFormat('engine.edit.loadFailed', metadataLocale, {
+          type: 'report',
+          name: reportName,
+          message: failure ?? tStudio('engine.form.notFound', metadataLocale),
+        }),
+      );
+      return;
+    }
+    savedSinceOpenRef.current = false;
+    setEditSchema(body);
     setConfigPanelOpen(true);
     setConfigVersion((v) => v + 1);
-  }, [reportData]);
+  }, [metadataClient, reportName, reportData, metadataLocale]);
 
   const handleCloseConfigPanel = useCallback(() => {
     setConfigPanelOpen(false);
+    if (!savedSinceOpenRef.current) setEditSchema(null);
   }, []);
 
   // ---- Report config panel handlers --------------------------------------
@@ -243,6 +307,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     async (config: Record<string, any>): Promise<boolean> => {
       setEditSchema(config);
       const saved = await saveSchema(config);
+      if (saved) savedSinceOpenRef.current = true;
       // Re-seat the panel's config only on a save that landed: a refused one
       // keeps the open panel's draft, edit included, for a retry
       // (objectui#11583).
@@ -434,7 +499,8 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
            {isAdmin && (
            <button
              type="button"
-             onClick={handleOpenConfigPanel}
+             onClick={() => { void handleOpenConfigPanel(); }}
+             disabled={openingEditor}
              className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground"
              data-testid="report-edit-button"
            >

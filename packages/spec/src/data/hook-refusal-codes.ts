@@ -457,18 +457,33 @@ export function undeclaredHookTextKeyAtSave(
   declared: readonly string[],
   at: 'body.source' | 'handler' = 'body.source',
 ): string {
+  return undeclaredTextKeyAtSave('hook', key, declared, at);
+}
+
+// [#34374 PR2] One subject-parameterised core per text sentence, as the
+// refusal sentences above are: the hook exports keep their bytes, and the
+// action twins below name the action.
+function undeclaredTextKeyAtSave(subject: RefusalSubject, key: string, declared: readonly string[], at: string): string {
   return (
-    `\`${at}\` asks for text '${key}' (\`ctx.text('${key}')\`), and this hook's \`texts\` declares no such key `
+    `\`${at}\` asks for text '${key}' (\`ctx.text('${key}')\`), and this ${subject}'s \`texts\` declares no such key `
     + `(declared: ${declaredList(declared)}). Declare it under \`texts.${key}\` with the sentence the record keeps, `
     + 'or ask for one of the declared keys.'
   );
 }
 
 /** The save-time refusal for a `{{ … }}` hole in a text `message` whose entry declares no `params`. */
-export const HOOK_TEXT_MESSAGE_HOLE_REFUSED =
-  'A hook text `message` whose entry declares no `params` is plain text, and nothing fills a `{{ }}` hole: the '
-  + 'record would keep the braces as written. Declare the name under the entry\'s `params` (`params: [\'lead\']`) '
-  + 'and pass it to `ctx.text` (`ctx.text(\'KEY\', { lead })`), or write the sentence without the hole.';
+export const HOOK_TEXT_MESSAGE_HOLE_REFUSED = textMessageHoleRefused('hook', 'lead');
+
+/** [#34374 PR2] The action twin of {@link HOOK_TEXT_MESSAGE_HOLE_REFUSED}. */
+export const ACTION_TEXT_MESSAGE_HOLE_REFUSED = textMessageHoleRefused('action', 'subject');
+
+function textMessageHoleRefused(subject: RefusalSubject, param: string): string {
+  return (
+    `${capArticle(subject)} text \`message\` whose entry declares no \`params\` is plain text, and nothing fills a \`{{ }}\` hole: the `
+    + `record would keep the braces as written. Declare the name under the entry's \`params\` (\`params: ['${param}']\`) `
+    + `and pass it to \`ctx.text\` (\`ctx.text('KEY', { ${param} })\`), or write the sentence without the hole.`
+  );
+}
 
 /**
  * The save-time refusal for `texts` on a hook whose code cannot ask for one:
@@ -489,8 +504,12 @@ export function hookTextsWithoutRunnableCode(language: string | undefined): stri
  * and the key and says how to fix it.
  */
 export function undeclaredHookTextAtRun(hookName: string, key: string, declared: readonly string[]): string {
+  return undeclaredTextAtRun('hook', hookName, key, declared);
+}
+
+function undeclaredTextAtRun(subject: RefusalSubject, name: string, key: string, declared: readonly string[]): string {
   return (
-    `hook '${hookName}' asked for text '${key}' (ctx.text), and its \`texts\` declares no such key `
+    `${subject} '${name}' asked for text '${key}' (ctx.text), and its \`texts\` declares no such key `
     + `(declared: ${declaredList(declared)}). Only a declared text is written in the organization's language: `
     + 'declare it under `texts` with the sentence the record keeps, or ask for one of the declared keys.'
   );
@@ -548,15 +567,62 @@ export function undeclaredActionRefusalReasonAtRun(
  * serve them.
  */
 export function actionRefusalsWithoutSandboxedBody(type: string, language: string | undefined): string {
-  const has = type !== 'script'
-    ? `\`type: '${type}'\`, which runs no code of the action's own`
-    : language !== undefined
-      ? `a \`${language}\` body`
-      : 'no `body` (an inline `target` function `os build` could not lower leaves none)';
+  const has = actionCodeCarrier(type, language);
   return (
     "`refusals` is answered for a `type: 'script'` action's sandboxed `body` (`language: 'js'`) and for its inline "
     + `\`target\` function (which \`os build\` lowers to a \`js\` body), and this action has ${has}: nothing it runs `
     + 'can throw a declared code, while `os i18n` still demanded its translations. Give the action a `js` body that '
     + 'throws the declared codes, or drop `refusals`.'
+  );
+}
+
+/** How an action that runs no `js` body of its own names what it has, for the two sentences that refuse it. */
+function actionCodeCarrier(type: string, language: string | undefined): string {
+  return type !== 'script'
+    ? `\`type: '${type}'\`, which runs no code of the action's own`
+    : language !== undefined
+      ? `a \`${language}\` body`
+      : 'no `body` (an inline `target` function `os build` could not lower leaves none)';
+}
+
+/*
+ * ── An action's declared texts (#34374 PR2, ruling 6913660232 parameter 7) ──
+ *
+ * `ActionSchema.texts` is the hook texts' twin on an action: a sentence a
+ * `script` action's `js` body writes into a record for people to read — the
+ * subject of the email activity it logs — declared under `texts: { <key>: {
+ * message, params? } }` and asked for by key, `await ctx.text('email_subject',
+ * { subject })`. The runtime answers it in the ORGANIZATION's language through
+ * the action's own translation address (`actionTextMessageKey`:
+ * `objects.<object>._actions.<action>.texts.<key>.message`, or
+ * `globalActions.<action>.texts.<key>.message` for an object-less action).
+ * The same two halves as a hook text: a key the body asks for literally and
+ * `texts` does not declare is refused at save (the key reading is
+ * {@link hookTextKeysAskedIn}, one reading for both); any other key is refused
+ * when the action runs. The sentences are the hook ones with the action named.
+ */
+
+/** The save-time refusal for a key an action's body asks for literally that its `texts` does not declare. */
+export function undeclaredActionTextKeyAtSave(key: string, declared: readonly string[]): string {
+  return undeclaredTextKeyAtSave('action', key, declared, 'body.source');
+}
+
+/** The run-time fault for `ctx.text(key)` with a key the action's `texts` does not declare (or none at all). */
+export function undeclaredActionTextAtRun(actionName: string, key: string, declared: readonly string[]): string {
+  return undeclaredTextAtRun('action', actionName, key, declared);
+}
+
+/**
+ * The save-time refusal for `texts` on an action whose code cannot ask for
+ * one: a type other than `script`, an `expression` body, or a `script` action
+ * with no body. `os i18n` would demand its translations and nothing would
+ * serve them.
+ */
+export function actionTextsWithoutRunnableCode(type: string, language: string | undefined): string {
+  return (
+    "`texts` is served to a `type: 'script'` action's sandboxed `body` (`language: 'js'`) and to its inline "
+    + `\`target\` function (which \`os build\` lowers to a \`js\` body) through \`ctx.text\`, and this action has `
+    + `${actionCodeCarrier(type, language)}: nothing it runs can ask for a declared text, while \`os i18n\` still `
+    + 'demanded its translations. Give the action a `js` body that writes the texts, or drop `texts`.'
   );
 }

@@ -1,5 +1,240 @@
 # @object-ui/fields
 
+## 18.6.0
+
+### Patch Changes
+
+- 2c296cf: feat(fields): the lookup picker reads `{ $record }` lookupFilters values from the record being edited and sends `orEmpty`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `lookupFilters` entry may compare a candidate column with a value of the record being edited, written `{ $record: 'quote_date' }` or, one lookup hop away, `{ $record: 'account.cb_market' }`, and may add `orEmpty: true` so a candidate whose column is null also matches. The schema has accepted both since the previous release; the lookup picker now honours them.
+  
+  - **The value.** Before the candidate query leaves the browser, the picker puts the value the reference names in its place: the quick-select popover, the table picker and the search-first people picker all send it. A one-hop path reads the lookup's target row once per id, its hop fields alone, unless the record already holds that row expanded. The query waits for that read and goes out once, with the value in it.
+  - **An empty value.** While the referenced value is empty (null, unset, an empty string, or an unset hop lookup) or cannot be read (the hop's row or field does not come back, no object is named for the hop, or the host has no single-row reader), the entry is left out, the rule an unset `dependsOn` parent follows. A reference that was never resolved is never sent.
+  - **Re-query.** Changing a referenced field re-queries the open picker once, with the new value. Changing any other field of the record does not.
+  - **orEmpty.** An entry with `orEmpty: true` is sent as an `$or` of its comparison and a null match on the same column. Several such entries each keep their own alternative.
+  - **Record forms opt in.** `ObjectForm` and authored form sections stamp such a lookup as drawn for a single record being edited, naming the object each hop's lookup points at (`withRecordBeingEdited`, exported from `@object-ui/fields`), through the spec's `referenceTargetOf`, so a hop through a `user` field, whose target the type fixes, resolves too. The picker resolves `{ $record }` only on that stamp. Any other host, such as a bulk action dialog that hands the widget its sibling parameters, leaves every `{ $record }` entry out. A bulk action parameter cannot claim the stamp by writing it: the bulk dialog never carries `recordBeingEdited` from a parameter onto its widget.
+  - **Spec.** The `value`, `orEmpty` and `lookupFilters` describes on `FieldSchema` lose their `[PLANNED — not enforced]` markers and say what the picker does. The no-record example now names a bulk action over selected rows in place of a filter panel, which reads no `lookupFilters`.
+  
+  Literal entries and `dependsOn` query exactly as before.
+- 6a7403b: fix(console): a record page printed in a zh-CN organization shows dates in Chinese order, fits its line-items table to the sheet, and prints on white with plain values
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A print page (a record page that declares `print`), printed by `@objectstack/service-print` or by the console's Print button, now reads as a document:
+  
+  - **Dates in the locale's own order.** A `date` field authored `format: 'short'` drew `11月 15, '26` in `zh-CN`: only the month was translated into the English compact layout `Nov 15, '26`. That compact layout is now kept only for a locale that writes a date month first, then day, then year (`en`, `en-US`). Every other locale gets its own date with the year: `2026年11月15日` in `zh-CN` and `ja`, `15. Nov. 2026` in `de`, `15 Nov 2026` in `en-GB`. This is the face `formatDate` already drew for the default style with the year shown. It applies on screen as well as on paper, and to every reader of `formatDate(value, 'short', { locale })`.
+  - **Tables fit the printable width.** On a print page, a data table's cells drop their on-screen minimum width and single line on paper, so the columns shrink and wrap to the box. Before, a five-column `record:line_items` table on A4 portrait with 15 mm margins was 647 px wide in a 630 px box. Its last column ran past the box's border, and that border was drawn through the column. The running header and footer table is not affected.
+  - **White page, plain values.** On paper the page and everything around it are white instead of the app's background. A link, such as a lookup's referenced record, prints in the surrounding text colour with no underline. A select value drawn as a coloured badge prints as its label with no pill. The select badge carries a new inert attribute, `data-select-badge`, for this rule. Every rule sits inside `@media print` and is scoped to the print page, so the screen is unchanged.
+  
+  `avoidBreakInside` is unchanged: it still keeps each block whole on one sheet when the block fits.
+- dc54c60: fix(plugin-form): a record form's inline members resolve `{ $record }` lookupFilters, and only a record form can opt a lookup in
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A lookup field's `lookupFilters` entry `{ $record: 'quote_date' }` (or one hop away, `{ $record: 'account.cb_market' }`) resolves in a record form, whatever its layout. Until now that held only for fields generated from the object schema.
+  
+  - **Inline members.** A `customFields` member and a self-describing inline section entry are fields of the record being edited too. A record form now stamps every field it draws in the one step every layout draws through (`gateFormFields`), after the members are merged and the sections expanded. Their `{ $record }` entries resolve like a generated field's. Before, they were left out of the candidate query.
+  - **Only the form says so.** The picker honours only a stamp `withRecordBeingEdited` issued. A `recordBeingEdited` key written as data opts nothing in: on a standalone form's field, an action's parameter, or anywhere else, it is ignored and the `{ $record }` entry is left out. A record form also drops an authored `recordBeingEdited` from the fields it draws before it writes its own.
+  
+  Fields generated from the object schema, literal entries and `dependsOn` query exactly as before.
+- bdd5176: fix(fields): the lookup picker's list fits the room it is given, marks a cut row as "scroll for more", and lets an option's secondary fields wrap
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The lookup quick-picker's option list had a fixed 16rem height. With a one-line preview under each option, that height ends part-way through the fifth row, so the last visible option showed its name and lost its preview, with nothing saying the list scrolls. On a short window the popover was also taller than the room on either side of the field and ran off the screen. Radix already flips the popover to the side with more room, inside a dialog too; the list simply ignored how much room that side had.
+  
+  - The popover is now no taller than the room Radix reports on the side it opens to. The search row keeps its height and the list takes what is left, up to the same 16rem.
+  - When options continue past the top or the bottom edge of the list, that edge fades out, so a row cut there reads as "scroll for more". The keyboard scrolls the active option clear of the fade.
+  - An option's preview wraps onto a second row when its columns do not fit side by side, so two text columns (an email and an account name, say) are no longer both cut to fit one row. A column that does not fit on two rows leaves whole, as before; a badge is never cut and a text value is never cut below its label. A text value that is still cut short shows its whole text on hover.
+- 518baca: fix(fields): a lookupFilters `{ $record }` path through or to a multi-valued field is left out of the candidate query, with a development warning
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `{ $record }` path through or to a multi-valued field has no single value to compare: a hop through a `multiple: true` lookup (`accounts.cb_market`), a plain path to a multi-valued field (`tags`), or a hop that ends at one (`account.markets`). The spec already states that such a path is not resolved and that lint refuses it. The lookup picker now does the same in all three shapes. It leaves the entry out of the candidate query and, in a development build, warns once per path. The warning names the path and the field that holds a list, and says the path is multi-valued.
+  
+  Before, a hop through a multi-valued lookup was left out with no warning. A plain path to a multi-valued field was sent with the whole list as the comparand of a scalar operator.
+  
+  Single-valued paths, literal entries and `dependsOn` query exactly as before.
+- 8bc0808: fix(fields): a lookup's picker is wide enough to read an option name, and never wider than the screen
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The lookup picker opened exactly as wide as its trigger. In a narrow line-item grid cell that left the options a few letters wide, so a product read as "Data Migr…" and could not be told from the next one. The picker keeps its trigger's width when the trigger is wider, is never narrower than 18rem, and is capped at the width the viewport leaves on the side it opens to, floor included, so on a narrow phone screen it fits inside the viewport instead of running past its edge. A picker opened from a cell at the right edge moves left to stay on screen. Nothing changes in what a lookup searches, filters or stores.
+- 3c535ee: fix(fields): a line-items grid reads a boolean column as a boolean in its `requiredWhen` / `readonlyWhen` rules
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A master-detail grid draws a `boolean` / `toggle` child field as a select whose two options store the strings `'true'` / `'false'`. Its per-cell rules evaluated `record.won == true` against that string, so the required marker and the readonly lock showed the opposite of what the server enforces: since the engine stores and judges these writes as booleans, a line the grid showed as complete was refused on save.
+  
+  The grid now evaluates each column's `requiredWhen` and `readonlyWhen` over the row with every boolean column's cell read as the boolean it stands for. The readings are the ones the engine's write normalisation accepts (`'true'` / `'1'` / `1` and `'false'` / `'0'` / `0`). Only the predicate's view changes: what the cell shows and what the row saves are unchanged. A select column over any other field keeps its string value.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [0e2ead3]
+- Updated dependencies [b1efa37]
+- Updated dependencies [ffa6db1]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [b019048]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [a78781a]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [1078c73]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [39fa82b]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [b4eea88]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [8436f67]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [5a75579]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [6a7403b]
+- Updated dependencies [04e7b90]
+- Updated dependencies [3b1307e]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [a8e794f]
+- Updated dependencies [d57d6ee]
+- Updated dependencies [22bf910]
+- Updated dependencies [2b267b7]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [6c7d730]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [b86331d]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e2d3514]
+- Updated dependencies [e95210d]
+- Updated dependencies [26cab15]
+- Updated dependencies [e9f65a3]
+- Updated dependencies [13c62a6]
+- Updated dependencies [77b42a1]
+- Updated dependencies [4db3750]
+- Updated dependencies [2e29287]
+- Updated dependencies [e61af97]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [a931063]
+- Updated dependencies [14619f5]
+- Updated dependencies [e47c1cb]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [81ea504]
+- Updated dependencies [c81f498]
+- Updated dependencies [4bdbdac]
+- Updated dependencies [3bbda33]
+- Updated dependencies [d656d62]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [90f2b1c]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [0584eb5]
+- Updated dependencies [94c9491]
+- Updated dependencies [fff0ad0]
+- Updated dependencies [65ec3c5]
+- Updated dependencies [4aeeca5]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [421f180]
+- Updated dependencies [2fcc9cf]
+- Updated dependencies [7b7272f]
+- Updated dependencies [cb7d514]
+- Updated dependencies [743308b]
+- Updated dependencies [97cd541]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [343c49c]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [92a5cac]
+- Updated dependencies [db1a05c]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [59defa0]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @object-ui/i18n@18.6.0
+  - @objectstack/spec@18.6.0
+  - @object-ui/core@18.6.0
+  - @object-ui/types@18.6.0
+  - @object-ui/components@18.6.0
+  - @objectstack/formula@18.6.0
+  - @object-ui/permissions@18.6.0
+  - @object-ui/react@18.6.0
+  - @object-ui/mobile@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

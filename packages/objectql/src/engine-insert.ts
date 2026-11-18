@@ -179,13 +179,23 @@ export class InsertFacet {
    * need it. Scoped to the TAKEN keys: those are the only defaults this pass
    * keeps, so no other field's default can make it ask, or fail.
    *
+   * [#34672] A taken roll-up `summary` is then re-SEEDED, after its default:
+   * `initializeSummaryFields` over the stripped row, copied back for the
+   * taken keys only, so the column starts at the empty-child-list value (`0`
+   * for `count` / `sum`) exactly as a create that never named it does. The
+   * re-default alone never asked the seed, so a value taken from a
+   * `readonly: true` roll-up left the column `null` (the #5749 state, which
+   * the seed exists to rule out) while the write still succeeded. The seed
+   * yields nothing for `min` / `max` / `avg`, which stay empty as on any
+   * create.
+   *
    * @returns the row as the strip leaves it (the SAME reference when nothing
    *   was taken) and the keys taken, in the row's key order. When the
    *   re-default's permission resolution fails, `error` carries it and `row`
    *   is the row as it arrived: the caller decides whether that fails the
    *   write or culls the row, and the taken keys are still reported.
    */
-  static async staticReadonlyCreateStrip(this: Pick<InsertHost, 'applyFieldDefaults' | 'resolveDefaultPermissions'>, object: string, readonlySubject: NonNullable<ReturnType<typeof staticReadonlyInsertSubject>>, row: Record<string, unknown>, supplied: Readonly<Record<string, unknown>>, context: ExecutionContext | undefined, pass: {
+  static async staticReadonlyCreateStrip(this: Pick<InsertHost, 'applyFieldDefaults' | 'initializeSummaryFields' | 'resolveDefaultPermissions'>, object: string, readonlySubject: NonNullable<ReturnType<typeof staticReadonlyInsertSubject>>, row: Record<string, unknown>, supplied: Readonly<Record<string, unknown>>, context: ExecutionContext | undefined, pass: {
       logger: Parameters<typeof stripReadonlyFields>[3];
       strictReadonlyWrites: boolean;
       hookWrittenKeys: ReadonlySet<string> | undefined;
@@ -214,6 +224,10 @@ export class InsertFacet {
       const redefaulted = this.applyFieldDefaults(object, stripped, context, pass.nowSnap, redefaultPermissions);
       for (const k of taken) {
         if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+      }
+      const reseeded = this.initializeSummaryFields(object, stripped) as Record<string, unknown>;
+      for (const k of taken) {
+        if (stripped[k] == null && reseeded[k] !== undefined) stripped[k] = reseeded[k];
       }
     }
     return { row: stripped, taken };
