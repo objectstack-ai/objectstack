@@ -162,7 +162,11 @@ export interface FlowRunReport {
   firstFailure?: FlowRunFailure;
   /** What the run wrote: every write the engine received while it was open, the triggering write excluded. */
   writes: FlowRunWrite[];
-  /** The confinement: the one datasource the run may write, and how many writes it refused. */
+  /**
+   * The confinement: the one datasource the run may write, and how many writes
+   * it refused. `datasource` is empty when the report ends before the
+   * confinement is set (nothing was started, so nothing could write).
+   */
   confinement: { datasource: string; refused: number };
   /** Notes the reader needs (a skipped start, an ignored record, a paused node). */
   notes: string[];
@@ -352,7 +356,7 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
     steps: [],
     missingExecutors: [],
     writes: [],
-    confinement: { datasource: 'default', refused: 0 },
+    confinement: { datasource: '', refused: 0 },
     notes: [],
     summary: { steps: 0, failedSteps: 0, writes: 0, hardFailures: 0 },
   };
@@ -620,7 +624,9 @@ export function formatFlowRunReport(report: FlowRunReport): string {
   if (report.record) {
     lines.push(`  record: ${report.record.operation} ${report.record.object}${report.record.id ? ` ${report.record.id}` : ''}`);
   }
-  lines.push(`  confined to datasource '${report.confinement.datasource}' (the in-memory database this run booted)`);
+  if (report.confinement.datasource) {
+    lines.push(`  confined to datasource '${report.confinement.datasource}' (the in-memory database this run booted)`);
+  }
   for (const s of report.steps) {
     const mark = s.status === 'success' ? '✓' : s.status === 'failure' ? '✗' : '–';
     const where = s.region ? ` [${s.region}]` : '';
