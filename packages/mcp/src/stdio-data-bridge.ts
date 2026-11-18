@@ -309,6 +309,20 @@ interface ObjectDef {
 }
 
 /**
+ * The engine's order-cut-count read option for `aggregate`
+ * (`@objectstack/objectql`, `aggregate-order-cut.ts`), spelled `Symbol.for`
+ * because this package does not depend on the engine at runtime. A symbol, so
+ * no tool argument can carry it.
+ */
+const STDIO_AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectql.aggregateOrderCut');
+/**
+ * The engine's one-row-per-group read option (`@objectstack/objectql`,
+ * `latest-per.ts`), spelled `Symbol.for` because this package does not depend
+ * on the engine at runtime. A symbol, so no tool argument can carry it.
+ */
+const STDIO_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
+
+/**
  * [#35145] `query_records`' `expand` on this transport, as the data door
  * builds it (`assertExpandTargetsExist`, then `servedExpand`): each name is a
  * reference field of the object as the caller is served it (`served`), else
@@ -371,13 +385,6 @@ async function stdioExpandMap(
  * spelling the existing stdio reader already accepts, kept identical so the two
  * readers on this transport cannot disagree about what a row list is.
  */
-/**
- * The engine's one-row-per-group read option (`@objectstack/objectql`,
- * `latest-per.ts`), spelled `Symbol.for` because this package does not depend
- * on the engine at runtime. A symbol, so no tool argument can carry it.
- */
-const STDIO_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
-
 function unwrapRows(res: unknown): Array<Record<string, unknown>> {
   const rows =
     res && typeof res === 'object' && 'value' in (res as Record<string, unknown>)
@@ -1722,7 +1729,14 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
   }
 
   if (typeof engine.aggregate === 'function') {
-    bridge.aggregate = async (object, opts) => {
+    // [aggregate order and cut] `orderCut`, when set, is the engine's
+    // order-cut-count request, handed on its read option after every gate
+    // below; the caller reads the engine's outcome off it.
+    const runAggregate = async (
+      object: string,
+      opts: Parameters<NonNullable<McpDataBridge['aggregate']>>[1],
+      orderCut?: object,
+    ): Promise<unknown[]> => {
       const context = await resolvePrincipal();
       // `aggregate` is a list-class read: an object whose whitelist excludes
       // `list` must not leak row statistics through GROUP BY either. The
@@ -1753,14 +1767,45 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // compiles — the two `as unknown as` casts this line used to carry
       // existed only because the engine option declared `groupBy: string[]`
       // while reading structured buckets.
-      const rows = await engine.aggregate(object, {
-        ...(opts?.where ? { where: opts.where } : {}),
-        ...(opts?.groupBy ? { groupBy: opts.groupBy } : {}),
-        aggregations: opts.aggregations,
-        ...(opts?.timezone ? { timezone: opts.timezone } : {}),
-        context,
-      });
+      const rows = await engine.aggregate(
+        object,
+        {
+          ...(opts?.where ? { where: opts.where } : {}),
+          ...(opts?.groupBy ? { groupBy: opts.groupBy } : {}),
+          aggregations: opts.aggregations,
+          ...(opts?.timezone ? { timezone: opts.timezone } : {}),
+          context,
+        },
+        ...(orderCut !== undefined
+          ? [{ [STDIO_AGGREGATE_ORDER_CUT]: orderCut } as Parameters<IDataEngine['aggregate']>[2]] as const
+          : [] as const),
+      );
       return rows ?? [];
+    };
+    bridge.aggregate = (object, opts) => runAggregate(object, opts);
+    // [aggregate order and cut] The same read, through the same gates, ordered,
+    // cut and counted by the driver's own statement; the engine's outcome slot
+    // is read back — a read that comes back without it was not served by the
+    // driver's statement, and its rows are no answer.
+    bridge.aggregateGroups = async (object, opts) => {
+      const orderCut: {
+        orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
+        limit?: number;
+        outcome?: { kind?: unknown; totalGroups?: unknown };
+      } = {
+        orderBy: opts.orderBy,
+        ...(typeof opts.limit === 'number' ? { limit: opts.limit } : {}),
+      };
+      const { orderBy: _orderBy, limit: _limit, ...read } = opts;
+      const rows = await runAggregate(object, read, orderCut);
+      const totalGroups = orderCut.outcome?.totalGroups;
+      if (orderCut.outcome?.kind !== 'served' || typeof totalGroups !== 'number') {
+        throw new Error(
+          `aggregate_records on '${object}': the ordered and cut aggregate came back without being served by the `
+          + 'driver\'s own statement, so its rows are not the answer and none is returned.',
+        );
+      }
+      return { rows, totalGroups };
     };
   }
 
