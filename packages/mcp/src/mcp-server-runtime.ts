@@ -1838,6 +1838,29 @@ const DATASET_SELECTION_RULE =
   + 'query_dataset\'s sourceLine as the answer\'s source.';
 
 /**
+ * [#34766] What a request that registers host-injected authoring tools is told
+ * about them, in one sentence true of every such registry: authoring lands as
+ * drafts that a person reviews and publishes (the authoring section of the
+ * served skill says the same, `skill-md.ts`). What each tool answers — the
+ * open draft door's save answers with the publish verdict — is the tool's own
+ * description. Sent only where the authoring family registers tools
+ * ({@link authoringToolsServed}).
+ */
+const AUTHORING_DRAFTS_LINE =
+  'This connection also lists authoring tools, which change the app\'s metadata. They save drafts only: nothing '
+  + 'they write is published until a person reviews and publishes it in Studio. Read each tool\'s reply before '
+  + 'the next step; a refused authoring call means you may not author that here.';
+
+/**
+ * [#34766] Does this request register host-injected authoring tools? The gate
+ * `registerAuthoringTools` reads (`grantsAuthoringTools`) and a registry that
+ * lists at least one tool for this caller.
+ */
+function authoringToolsServed(authoring: McpAuthoringInjection | undefined, grantedScopes: readonly string[] | undefined): boolean {
+  return authoring !== undefined && grantsAuthoringTools(grantedScopes) && authoring.registry.getAll().length > 0;
+}
+
+/**
  * [#34686] The published skills package an open server points a client to
  * (#34659 ruling D5 = A), at the version to install: this package's own
  * version, which `@objectstack/skills` shares (both are in one `fixed` group
@@ -1862,13 +1885,19 @@ function skillsInstallLine(version: string | undefined): string | undefined {
 /**
  * [#34686] The open server's own `initialize` text for one HTTP request: the
  * default sentence, the selection rule when this request's grant registers
- * both dataset tools, and the skills install line. Read only when neither the
+ * both dataset tools, [#34766] the drafts line when it registers authoring
+ * tools, and the skills install line. Read only when neither the
  * host (`hostInstructions`) nor the runtime's configured `instructions`
  * answers: both are whole texts their author owns, and the configured one is
  * the same string for every grant, so nothing is appended to either.
  */
-function openServerInstructions(datasetRule: boolean): string {
-  return [DEFAULT_HTTP_INSTRUCTIONS, datasetRule ? DATASET_SELECTION_RULE : undefined, skillsInstallLine(PACKAGE_VERSION)]
+function openServerInstructions(datasetRule: boolean, authoringServed = false): string {
+  return [
+    DEFAULT_HTTP_INSTRUCTIONS,
+    datasetRule ? DATASET_SELECTION_RULE : undefined,
+    authoringServed ? AUTHORING_DRAFTS_LINE : undefined,
+    skillsInstallLine(PACKAGE_VERSION),
+  ]
     .filter((part): part is string => part !== undefined)
     .join('\n\n');
 }
@@ -2821,7 +2850,10 @@ export class MCPServerRuntime {
         instructions:
           hostInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
           this.config.instructions ??
-          openServerInstructions(datasetToolsServed(opts.bridge, opts.toolOptions)),
+          openServerInstructions(
+            datasetToolsServed(opts.bridge, opts.toolOptions),
+            authoringToolsServed(opts.authoring, opts.toolOptions?.grantedScopes),
+          ),
       },
     );
 

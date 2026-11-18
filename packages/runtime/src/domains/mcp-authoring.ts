@@ -5,9 +5,10 @@
  * `handleHttpRequest` as `authoring` (design `docs/design/mcp-local-first-door.md`,
  * Design A; rulings D2 A, D3 A and E3 of the local-first door's epic).
  *
- * This first half carries the registry, its admission and the three read
- * tools. The draft save and discard tools, and the publish verdict a save
- * answers with, join it later; until then nothing here writes.
+ * Five tools: three reads (`list_metadata_items`, `get_metadata_item`,
+ * `list_drafts`) and two draft writes (`save_metadata_draft`,
+ * `delete_metadata_draft`). No tool publishes and none takes a `force` (D2 A):
+ * a person reviews and publishes the drafts in Studio.
  *
  * ## Who is admitted (seat ruling D1 A)
  *
@@ -84,18 +85,46 @@
  *  - A gate that cannot evaluate (a books or doc read that throws, a security
  *    service that cannot resolve holdings) refuses: the read answers that
  *    fault, never the item (ADR-0049).
- *  - `list_drafts` runs no item gate, as `/meta/_drafts` runs none for this
- *    same caller: a draft row carries the item's identity and its own `label`,
- *    no body for a gate to judge.
+ *  - `list_drafts` runs no item gate on its rows, as `/meta/_drafts` runs none
+ *    for this same caller: a draft row carries the item's identity and its own
+ *    `label`, no body for a gate to judge (each row's verdict is gated, below).
  *
- * The walled refusal (`walledCatalogWriteVerdict`, ADR-0131 D3/D12) gates
- * metadata WRITES and no `/meta` read; it joins this door with the save tool.
+ * ## What the writes do (E3: the save answers with the publish verdict)
+ *
+ *  - `save_metadata_draft` saves through `saveMetaItem` with `mode: 'draft'`,
+ *    `surface: 'mcp'` and the token's OAuth client as `client`, attributed to
+ *    the human (`actor`). A draft save runs the type's schema parse and no
+ *    authoring rule, so the reply carries what a publish would answer: the
+ *    protocol's public `draftPublishJudgement` on the stored draft, every
+ *    finding whole (rule id, path, message, hint, severity), and the Studio
+ *    routes a person reviews it on. `package` is required (seat ruling D4):
+ *    Studio's Changes review is per package, and a save naming none is
+ *    refused with the writable packages named. A judgement that fails after
+ *    the save landed is said beside the saved identity, never as a refused
+ *    save.
+ *  - `delete_metadata_draft` discards a pending draft through `deleteMetaItem`
+ *    with `state: 'draft'`, never an active item.
+ *  - Both ask the `/meta` type-level write admission (`metaTypeWriteRefusal`,
+ *    the save as `PUT`, the discard as `DELETE`) with the human as the caller,
+ *    then the walled refusal (`walledCatalogWriteVerdict`, ADR-0131 D3/D12),
+ *    before anything is written, as every `/meta` write door does, on the
+ *    posture this transport reads (`readEffectiveTenancyPosture`). The
+ *    authoring admission (D1) alone does not cover a type whose own write
+ *    door requires more.
+ *  - A verdict is a read of the stored draft's body, so the save's verdict
+ *    and each listed draft's verdict are told only where the type-level read
+ *    admission admits the human; elsewhere the reply says it was withheld.
+ *  - `list_drafts` stays ungated as a list (as `/meta/_drafts`), and each
+ *    entry now carries its publish verdict. The verdict is read off the
+ *    draft's body, so it is told only where the `/meta` item gate admits the
+ *    strict draft read for this human; elsewhere the entry says it was
+ *    withheld and why.
  *
  * ## The names (seat ruling D3 A)
  *
  * The design table's `list_metadata` is already a hosted platform tool
  * (`PLATFORM_TOOLS_BY_PACKAGE` in `@objectstack/spec/system`), so the two item
- * reads are `list_metadata_items` and `get_metadata_item`. None of the three
+ * reads are `list_metadata_items` and `get_metadata_item`. None of the five
  * names is an MCP native tool: the SDK refuses a duplicate registration by
  * throwing, and the request would fail with it.
  *
@@ -107,12 +136,13 @@
  * and their names never meet.
  */
 
-import { resolveUserAuthzGrants } from '@objectstack/core';
-import { metaWriteCapabilityVerdict } from '@objectstack/metadata-core';
+import { resolveUserAuthzGrants, userTextLocalesOf } from '@objectstack/core';
+import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import {
     createMetaItemReadGate,
     createMetaListReadGate,
     metaTypeReadRefusal,
+    metaTypeWriteRefusal,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
     type MetaItemReadGateSources,
@@ -120,13 +150,17 @@ import {
 } from '@objectstack/rest';
 import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
-import type { ErrorCode, ListDraftsResponse, MetadataProtocol } from '@objectstack/spec/api';
+import type { ErrorCode, ListDraftsResponse, MetadataProtocol, RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
+import { readEffectiveTenancyPosture } from './activation-gate.js';
 
 /** The read tools' names, in the order the registry lists them. */
 export const OPEN_AUTHORING_READ_TOOL_NAMES = ['list_metadata_items', 'get_metadata_item', 'list_drafts'] as const;
+
+/** The draft write tools' names, listed after the reads. */
+export const OPEN_AUTHORING_WRITE_TOOL_NAMES = ['save_metadata_draft', 'delete_metadata_draft'] as const;
 
 const PERMISSION_DENIED: ErrorCode = 'PERMISSION_DENIED';
 /** A malformed argument this door judges itself; a protocol refusal keeps its own code. */
@@ -201,8 +235,9 @@ const READ_TOOLS: readonly AIToolDefinition[] = Object.freeze([
         name: 'list_drafts',
         description:
             'List the pending metadata drafts in this environment: what was saved as a draft and is not '
-            + 'published yet. A person reviews and publishes drafts in Studio. Pass `package` to list one '
-            + 'package\'s drafts.',
+            + 'published yet. A person reviews and publishes drafts in Studio. Each draft carries its publish '
+            + 'verdict: `verdict.refusals` lists what a publish would refuse it on (rule id, path, hint), empty '
+            + 'when it would publish. Pass `package` to list one package\'s drafts.',
         parameters: {
             type: 'object',
             properties: {
@@ -213,10 +248,92 @@ const READ_TOOLS: readonly AIToolDefinition[] = Object.freeze([
     },
 ]);
 
-/** The protocol reads this door makes, named structurally (a host may fill the slot partially). */
-export type OpenAuthoringProtocol = Partial<Pick<MetadataProtocol, 'getMetaTypes' | 'getMetaItems' | 'getMetaItem'>> & {
+/**
+ * The two draft write tools. `package` is required (seat ruling D4) and is
+ * judged by the registry rather than by the input schema's `required`, so a
+ * save naming none is answered with the packages it may name instead of the
+ * schema validator's bare refusal.
+ */
+const WRITE_TOOLS: readonly AIToolDefinition[] = Object.freeze([
+    {
+        name: 'save_metadata_draft',
+        description:
+            'Save one metadata item as a DRAFT in a package. Nothing is published: a person reviews and '
+            + 'publishes drafts in Studio, and this server has no publish tool. The reply answers what a publish '
+            + 'would say about the saved draft: `verdict.refusals` lists every rule the publish would refuse it '
+            + 'on, each with its rule id, the path in the item and a `hint` (the next step); fix the item and '
+            + 'save again until it is empty. `verdict.advisories` are findings a publish still returns. `review` '
+            + 'names the Studio routes where the draft is reviewed. Saving again replaces the pending draft.',
+        parameters: {
+            type: 'object',
+            properties: {
+                type: TYPE_PARAMETER,
+                name: { type: 'string', minLength: 1, description: 'The item\'s machine name.' },
+                item: { type: 'object', description: 'The item\'s full definition, as `get_metadata_item` reads it.' },
+                package: {
+                    type: 'string',
+                    minLength: 1,
+                    description: 'Required: the id of the package the draft is saved into. Studio reviews drafts per package; a save without one is refused with the writable packages named.',
+                },
+                ifMatch: {
+                    type: 'string',
+                    minLength: 1,
+                    description: 'Optional: the `version` a read or a save answered. The save is refused if the draft changed since.',
+                },
+            },
+            required: ['type', 'name', 'item'],
+            additionalProperties: false,
+        },
+    },
+    {
+        name: 'delete_metadata_draft',
+        description:
+            'Discard one pending metadata draft. The published version, if any, is not touched. Pass '
+            + '`package` to discard that package\'s draft of the item.',
+        parameters: {
+            type: 'object',
+            properties: {
+                type: TYPE_PARAMETER,
+                name: { type: 'string', minLength: 1, description: 'The item\'s machine name.' },
+                package: { type: 'string', minLength: 1, description: 'The id of the package whose draft to discard.' },
+            },
+            required: ['type', 'name'],
+            additionalProperties: false,
+        },
+    },
+]);
+
+/** The publish judgement of a stored draft (`ObjectStackProtocolImplementation#draftPublishJudgement`). */
+export interface OpenAuthoringDraftJudgement {
+    refusals: RuntimeAuthoringIssue[];
+    advisories: RuntimeAuthoringIssue[];
+}
+
+/** The protocol calls this door makes, named structurally (a host may fill the slot partially). */
+export type OpenAuthoringProtocol = Partial<Pick<MetadataProtocol, 'getMetaTypes' | 'getMetaItems' | 'getMetaItem' | 'saveMetaItem' | 'deleteMetaItem'>> & {
     listDrafts?(request: { packageId?: string; type?: string }): Promise<ListDraftsResponse>;
+    /** The metadata protocol's public draft verdict; with no `body`, it judges the stored draft at the address. */
+    draftPublishJudgement?(draft: {
+        type: string; name: string; packageId: string | null; member?: string;
+        userTextLocales?: readonly (string | undefined)[];
+        /** One map per pass: each package's publish closure is collected once, on its first draft. */
+        packageClosures?: Map<string, Promise<unknown>>;
+    }): Promise<OpenAuthoringDraftJudgement>;
 };
+
+/**
+ * What the write tools need beyond the protocol, built per request by
+ * {@link resolveOpenAuthoringInjection}; a registry handed none refuses every
+ * write (fail closed).
+ */
+export interface OpenAuthoringWriter {
+    /** The OAuth client the token was issued to, stated on the save as its `client`. */
+    clientId?: string;
+    /** The languages the verdict's user sentences are composed in (`userTextLocalesOf`). */
+    userTextLocales: string[];
+    /** The walled refusal for a write of `type` (`walledCatalogWriteVerdict`). */
+    writeVerdict(type: string): Promise<{ allowed: true } | { allowed: false; code: ErrorCode; message: string; status: number }>;
+}
 
 /**
  * The `/meta` read gates' ports for one protocol, with the admitted human as
@@ -291,7 +408,7 @@ export async function resolveOpenAuthoringInjection(
             admitted: reader !== undefined,
             userId,
             getProtocol: async () => (await deps.resolveService(context, 'protocol', context.environmentId)) as OpenAuthoringProtocol | undefined,
-            ...(reader ? { readGate: openReadGateSources(deps, context, reader) } : {}),
+            ...(reader ? { readGate: openReadGateSources(deps, context, reader), writer: openWriter(deps, context, clientId) } : {}),
             logger: deps.logger,
         }),
         principal: {
@@ -353,6 +470,36 @@ async function resolveHumanReader(
     }
 }
 
+/**
+ * The write tools' per-request inputs. The walled refusal is the one every
+ * `/meta` write door asks (`walledCatalogWriteVerdict`), on the posture this
+ * transport reads; a posture that cannot be read refuses the write `503`,
+ * never a permit. The caller's posture rung is the request envelope's, as the
+ * `/meta` doors and the MCP `import_object` tool read it.
+ */
+function openWriter(deps: DomainHandlerDeps, context: HttpProtocolContext, clientId: string | undefined): OpenAuthoringWriter {
+    const ec: any = context.executionContext;
+    return {
+        ...(clientId ? { clientId } : {}),
+        userTextLocales: userTextLocalesOf(ec),
+        async writeVerdict(type) {
+            let tenancyPosture: Awaited<ReturnType<typeof readEffectiveTenancyPosture>>;
+            try {
+                tenancyPosture = await readEffectiveTenancyPosture(deps, context);
+            } catch {
+                return {
+                    allowed: false,
+                    code: SERVICE_UNAVAILABLE,
+                    message: 'This environment\'s tenancy posture could not be read, so no metadata is written. Nothing was saved or discarded; try again.',
+                    status: 503,
+                };
+            }
+            const walled = walledCatalogWriteVerdict({ type, tenancyPosture, isSystem: ec?.isSystem === true, callerPosture: ec?.posture });
+            return walled.allowed ? { allowed: true } : { allowed: false, code: PERMISSION_DENIED, message: walled.message, status: 403 };
+        },
+    };
+}
+
 /** Where the app gate's nav-servability prune log records what it has already said, for this door. */
 const NAV_PRUNE_LOGGED = new Set<string>();
 
@@ -404,11 +551,13 @@ export function createOpenAuthoringRegistry(opts: {
     getProtocol: () => Promise<OpenAuthoringProtocol | undefined>;
     /** The `/meta` read gates' ports; without them every read is refused. */
     readGate?: OpenAuthoringReadGateSources;
+    /** The write tools' inputs; without them every write is refused. */
+    writer?: OpenAuthoringWriter;
     logger?: { warn?: (...args: unknown[]) => void };
 }): OpenAuthoringRegistry {
-    const { admitted, userId, getProtocol, readGate } = opts;
+    const { admitted, userId, getProtocol, readGate, writer } = opts;
     return {
-        getAll: () => (admitted ? [...READ_TOOLS] : []),
+        getAll: () => (admitted ? [...READ_TOOLS, ...WRITE_TOOLS] : []),
         async execute(toolCall, context) {
             const answer = (body: unknown): OpenAuthoringToolResult => ({
                 type: 'tool-result',
@@ -416,8 +565,8 @@ export function createOpenAuthoringRegistry(opts: {
                 toolName: toolCall.toolName,
                 output: { type: 'text', value: JSON.stringify(body, null, 2) },
             });
-            const refuse = (code: ErrorCode, message: string, status: number): OpenAuthoringToolResult => ({
-                ...answer({ error: { code, message, status } }),
+            const refuse = (code: ErrorCode, message: string, status: number, issues?: unknown[]): OpenAuthoringToolResult => ({
+                ...answer({ error: { code, message, status, ...(issues ? { issues } : {}) } }),
                 isError: true,
             });
 
@@ -442,6 +591,9 @@ export function createOpenAuthoringRegistry(opts: {
             if (typeof readGate !== 'function') {
                 return refuse(PERMISSION_DENIED, 'The authoring tools cannot judge what your account may read on this request.', 403);
             }
+            /** The `/meta` item gate, as the doors that serve a stored version for authoring run it. */
+            const itemGate = (type: string, name: string, stored: unknown) =>
+                createMetaItemReadGate(readGate(protocol ?? {}), type, name, [stored], STORED_VERSION_DOOR_POLICY)(stored);
             try {
                 switch (toolCall.toolName) {
                     case 'list_metadata_items': {
@@ -489,7 +641,7 @@ export function createOpenAuthoringRegistry(opts: {
                         // The `/meta` item gate, as the doors that serve a stored version
                         // for authoring run it. `absent` is the not-found answer itself
                         // (an unpublished app stays unobservable, ADR-0045 §3).
-                        const verdict = await createMetaItemReadGate(readGate(protocol), type, name, [stored], STORED_VERSION_DOOR_POLICY)(stored);
+                        const verdict = await itemGate(type, name, stored);
                         if (verdict.kind === 'refuse') {
                             const { refusal } = verdict;
                             if (refusal.reason === 'absent') return notFound();
@@ -511,9 +663,109 @@ export function createOpenAuthoringRegistry(opts: {
                         if (input.package !== undefined && !pkg) return refuse(VALIDATION_ERROR, '`package` is a package id.', 400);
                         // ADR-0131 D6: no organization, as the `/meta` drafts list; every
                         // draft is saved environment-wide.
+                        if (typeof protocol.draftPublishJudgement !== 'function' || typeof protocol.getMetaItem !== 'function') {
+                            return unavailable();
+                        }
                         const listed = await protocol.listDrafts(pkg ? { packageId: pkg } : {});
                         const drafts = Array.isArray(listed?.drafts) ? listed.drafts : [];
-                        return answer({ count: drafts.length, drafts });
+                        // The list itself runs no item gate, as `/meta/_drafts` runs
+                        // none: a row is the item's identity and its own label. Each
+                        // verdict is read off the draft's BODY, so it is told only where
+                        // the item gate admits the strict draft read for this human.
+                        // Cost per draft: that strict read, which the item gate needs
+                        // (it judges the served body, and the read folds its own verdict
+                        // into `_diagnostics` as every `/meta` draft read does), and the
+                        // judgement, which reads the row as stored (the bytes the publish
+                        // judges; the served copy is not) and answers each finding whole.
+                        // The closure a draft is judged against is its package's alone,
+                        // so one map collects it once per package for the judgements.
+                        const packageClosures = new Map<string, Promise<unknown>>();
+                        const judged = [];
+                        for (const draft of drafts) judged.push({ ...draft, ...(await gatedDraftVerdict(protocol, draft, packageClosures)) });
+                        return answer({ count: judged.length, drafts: judged });
+                    }
+                    case 'save_metadata_draft': {
+                        if (typeof protocol?.saveMetaItem !== 'function' || typeof protocol.draftPublishJudgement !== 'function') {
+                            return unavailable();
+                        }
+                        if (!writer) return refuse(PERMISSION_DENIED, 'The authoring tools cannot write on this request.', 403);
+                        // Folded once to the canonical singular, as the protocol folds a
+                        // plural spelling, so the walled verdict, the save, the verdict and
+                        // the review route all name the type the protocol writes.
+                        const type = canonicalTypeOf(input.type);
+                        const name = requiredString(input.name);
+                        if (!type || !name) return refuse(VALIDATION_ERROR, 'Name the item as `type` and `name`.', 400);
+                        const item = input.item;
+                        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+                            return refuse(VALIDATION_ERROR, 'Send the item\'s full definition as `item`, an object.', 400);
+                        }
+                        const pkg = requiredString(input.package);
+                        // Seat ruling D4: Studio's Changes review is per package.
+                        if (!pkg) return refuse(VALIDATION_ERROR, await packageRequiredMessage(protocol), 400);
+                        const ifMatch = input.ifMatch === undefined ? undefined : requiredString(input.ifMatch);
+                        if (input.ifMatch !== undefined && !ifMatch) {
+                            return refuse(VALIDATION_ERROR, '`ifMatch` is the `version` a read or a save answered.', 400);
+                        }
+                        // The `/meta` type-level write admission, before anything is written.
+                        const typeWriteRefused = await typeAdmission('PUT', type);
+                        if (typeWriteRefused) return refuse(typeWriteRefused.code, typeWriteRefused.message, typeWriteRefused.status);
+                        const walled = await writer.writeVerdict(type);
+                        if (!walled.allowed) return refuse(walled.code, walled.message, walled.status);
+                        // Built field by field: `item` is data, never a channel, so no
+                        // `force`, `mode` or `writeFace` rides in through it.
+                        const saved = await protocol.saveMetaItem({
+                            type,
+                            name,
+                            item,
+                            packageId: pkg,
+                            mode: 'draft',
+                            surface: 'mcp',
+                            ...(writer.clientId ? { client: { id: writer.clientId } } : {}),
+                            // The face of a door with no `force` and a structured issues channel.
+                            writeFace: 'meta-dispatch',
+                            ...(ifMatch ? { parentVersion: ifMatch } : {}),
+                            actor: userId,
+                            userTextLocales: writer.userTextLocales,
+                        });
+                        const identity = {
+                            type,
+                            name,
+                            package: pkg,
+                            state: (saved as { state?: unknown } | undefined)?.state ?? 'draft',
+                            ...((saved as { version?: unknown } | undefined)?.version !== undefined ? { version: (saved as { version?: unknown }).version } : {}),
+                        };
+                        const review = reviewRoutes(pkg, type, name);
+                        // The verdict is a read of the stored draft: told only where the
+                        // `/meta` type-level read admission admits this human.
+                        const typeReadRefused = await typeAdmission('read', type);
+                        if (typeReadRefused) {
+                            return answer({ saved: identity, verdict: null, verdictWithheld: typeReadRefused, review });
+                        }
+                        let judgement: OpenAuthoringDraftJudgement;
+                        try {
+                            judgement = await protocol.draftPublishJudgement({ type, name, packageId: pkg, userTextLocales: writer.userTextLocales });
+                        } catch (error) {
+                            // The draft is saved; only its verdict is missing, and the
+                            // reply says so rather than reading as a refused save.
+                            return answer({ saved: identity, verdict: null, verdictError: verdictErrorOf(error), review });
+                        }
+                        return answer({ saved: identity, verdict: verdictOf(judgement), review });
+                    }
+                    case 'delete_metadata_draft': {
+                        if (typeof protocol?.deleteMetaItem !== 'function') return unavailable();
+                        if (!writer) return refuse(PERMISSION_DENIED, 'The authoring tools cannot write on this request.', 403);
+                        const type = canonicalTypeOf(input.type);
+                        const name = requiredString(input.name);
+                        if (!type || !name) return refuse(VALIDATION_ERROR, 'Name the draft as `type` and `name`.', 400);
+                        const pkg = input.package === undefined ? undefined : requiredString(input.package);
+                        if (input.package !== undefined && !pkg) return refuse(VALIDATION_ERROR, '`package` is a package id.', 400);
+                        const typeWriteRefused = await typeAdmission('DELETE', type);
+                        if (typeWriteRefused) return refuse(typeWriteRefused.code, typeWriteRefused.message, typeWriteRefused.status);
+                        const walled = await writer.writeVerdict(type);
+                        if (!walled.allowed) return refuse(walled.code, walled.message, walled.status);
+                        // `state: 'draft'`: the pending draft only, never an active item.
+                        await protocol.deleteMetaItem({ type, name, state: 'draft', ...(pkg ? { packageId: pkg } : {}), actor: userId });
+                        return answer({ discarded: { type, name, package: pkg ?? null } });
                     }
                     default:
                         return refuse(VALIDATION_ERROR, `'${toolCall.toolName}' is not one of this registry's tools.`, 400);
@@ -530,12 +782,89 @@ export function createOpenAuthoringRegistry(opts: {
              * refuses it, whether or not the named item exists.
              */
             async function typeReadRefusal(type: string): Promise<OpenAuthoringToolResult | undefined> {
-                const refusal = metaTypeReadRefusal('GET', type, await readGate!(protocol ?? {}).resolveCaller());
+                const refusal = await typeAdmission('read', type);
                 return refusal ? refuse(refusal.code, refusal.message, refusal.status) : undefined;
             }
 
+            /**
+             * The `/meta` type-level admissions, read or write, with the human as
+             * the caller: `metaTypeReadRefusal` for a read of a typed item (a draft's
+             * body, the verdict read off it), `metaTypeWriteRefusal` for a draft save
+             * (`PUT`) or discard (`DELETE`), as the `/meta` entry asks them of the
+             * same verbs. `undefined` admits.
+             */
+            async function typeAdmission(
+                kind: 'read' | 'PUT' | 'DELETE',
+                type: string,
+            ): Promise<{ code: ErrorCode; message: string; status: number } | undefined> {
+                const caller = await readGate!(protocol ?? {}).resolveCaller();
+                return kind === 'read' ? metaTypeReadRefusal('GET', type, caller) : metaTypeWriteRefusal(kind, type, caller);
+            }
+
             function unavailable(): OpenAuthoringToolResult {
-                return refuse(SERVICE_UNAVAILABLE, 'This environment serves no metadata protocol to read from.', 503);
+                return refuse(SERVICE_UNAVAILABLE, 'This environment serves no metadata protocol this tool can use.', 503);
+            }
+
+            /** One draft's verdict, told where the item gate admits this human's strict draft read. */
+            async function gatedDraftVerdict(
+                p: OpenAuthoringProtocol,
+                listed: { type: string; name: string; packageId?: string | null; member?: string },
+                packageClosures: Map<string, Promise<unknown>>,
+            ): Promise<{ verdict: ReturnType<typeof verdictOf> | null; verdictWithheld?: unknown; verdictError?: unknown }> {
+                // The gate and the judgement read the canonical singular, folded by
+                // the door's one helper; a row with no type keeps the row's own.
+                const draft = { ...listed, type: canonicalTypeOf(listed.type) ?? listed.type };
+                try {
+                    // A type this human may not read: neither its body nor a verdict read off it.
+                    const typeRefused = await typeAdmission('read', draft.type);
+                    if (typeRefused) return { verdict: null, verdictWithheld: typeRefused };
+                    // A package-unbound draft is read without a package: the strict
+                    // draft read's own address resolution then names it.
+                    const read = await p.getMetaItem!({
+                        type: draft.type,
+                        name: draft.name,
+                        state: 'draft',
+                        ...(draft.packageId ? { packageId: draft.packageId } : {}),
+                        ...(draft.member !== undefined ? { member: draft.member } : {}),
+                    } as Parameters<NonNullable<OpenAuthoringProtocol['getMetaItem']>>[0]);
+                    if (read?.item === undefined || read.item === null) {
+                        return { verdict: null, verdictWithheld: { code: RESOURCE_NOT_FOUND, message: `No '${draft.type}' draft named '${draft.name}' is readable here.`, status: 404 } };
+                    }
+                    const gate = await itemGate(draft.type, draft.name, read.item);
+                    if (gate.kind === 'refuse') {
+                        const { refusal } = gate;
+                        return {
+                            verdict: null,
+                            verdictWithheld: refusal.reason === 'absent'
+                                ? { code: RESOURCE_NOT_FOUND, message: `No '${draft.type}' draft named '${draft.name}' is readable here.`, status: 404 }
+                                : { code: refusal.code, message: refusal.message, status: refusal.status },
+                        };
+                    }
+                    const judgement = await p.draftPublishJudgement!({
+                        type: draft.type,
+                        name: draft.name,
+                        packageId: draft.packageId ?? null,
+                        ...(draft.member !== undefined ? { member: draft.member } : {}),
+                        ...(writer ? { userTextLocales: writer.userTextLocales } : {}),
+                        packageClosures,
+                    });
+                    return { verdict: verdictOf(judgement) };
+                } catch (error) {
+                    return { verdict: null, verdictError: verdictErrorOf(error) };
+                }
+            }
+
+            /** A verdict that could not be reached: a coded refusal keeps its code; a fault is named without its text. */
+            function verdictErrorOf(error: unknown): { code: string; message: string; status: number } {
+                const code = (error as { code?: unknown } | null)?.code;
+                const status = (error as { status?: unknown } | null)?.status;
+                if (typeof code === 'string' && code.length > 0 && typeof status === 'number' && status < 500) {
+                    return { code, message: error instanceof Error ? error.message : String(error), status };
+                }
+                (opts.logger ?? console).warn?.(`[MCP] ${toolCall.toolName}: the publish verdict could not be read`, {
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                return { code: INTERNAL_ERROR, message: 'The publish verdict could not be read.', status: 500 };
             }
 
             /**
@@ -547,15 +876,79 @@ export function createOpenAuthoringRegistry(opts: {
                 const code = (error as { code?: unknown } | null)?.code;
                 const status = (error as { status?: unknown } | null)?.status;
                 if (typeof code === 'string' && code.length > 0 && typeof status === 'number' && status < 500) {
-                    return refuse(code as ErrorCode, error instanceof Error ? error.message : String(error), status);
+                    // The structured findings travel beside the message: the save
+                    // states the `meta-dispatch` face, whose spec-validation refusal
+                    // trims its message to a headline because the face carries
+                    // `issues[]` (`specValidationFindings`), so they are relayed here.
+                    const issues = (error as { issues?: unknown } | null)?.issues;
+                    return refuse(code as ErrorCode, error instanceof Error ? error.message : String(error), status, Array.isArray(issues) ? issues : undefined);
                 }
                 (opts.logger ?? console).warn?.(`[MCP] ${toolCall.toolName} failed`, {
                     error: error instanceof Error ? error.message : String(error),
                 });
-                return refuse(INTERNAL_ERROR, 'Reading the metadata failed.', 500);
+                return refuse(
+                    INTERNAL_ERROR,
+                    toolCall.toolName === 'save_metadata_draft' ? 'Saving the draft failed.'
+                        : toolCall.toolName === 'delete_metadata_draft' ? 'Discarding the draft failed.'
+                            : 'Reading the metadata failed.',
+                    500,
+                );
             }
         },
     };
+}
+
+/** A judgement as the replies carry it: `publishable` is "no refusal". */
+function verdictOf(judgement: OpenAuthoringDraftJudgement): {
+    publishable: boolean;
+    refusals: RuntimeAuthoringIssue[];
+    advisories: RuntimeAuthoringIssue[];
+} {
+    const refusals = Array.isArray(judgement?.refusals) ? judgement.refusals : [];
+    const advisories = Array.isArray(judgement?.advisories) ? judgement.advisories : [];
+    return { publishable: refusals.length === 0, refusals, advisories };
+}
+
+/**
+ * Where a person reviews the draft, as Console routes: the package's Changes
+ * drawer (`?changes=review` on its Interfaces pillar, `studioChangesLink.ts`)
+ * and the item's draft review on Studio's metadata area (`?review=1`).
+ */
+function reviewRoutes(packageId: string, type: string, name: string): { changes: string; item: string; note: string } {
+    const pkg = encodeURIComponent(packageId);
+    return {
+        changes: `/studio/${pkg}/interfaces?changes=review`,
+        item: `/studio/${pkg}/metadata/${encodeURIComponent(type)}/${encodeURIComponent(name)}?review=1`,
+        note: 'Console routes. A person reviews and publishes the draft there; this server cannot publish.',
+    };
+}
+
+/** How many writable package ids the missing-package refusal names. */
+const NAMED_PACKAGES_CAP = 20;
+
+/**
+ * The refusal of a save naming no package (seat ruling D4), naming the
+ * packages it may name: the protocol's own writability verdict on each
+ * installed package (`getMetaItems({ type: 'package' })`'s `writable`).
+ */
+async function packageRequiredMessage(protocol: OpenAuthoringProtocol): Promise<string> {
+    const head = 'Name the package to save the draft into as `package`: Studio reviews and publishes drafts per package. Nothing was saved.';
+    let writable: string[] | undefined;
+    try {
+        const listed = typeof protocol.getMetaItems === 'function' ? await protocol.getMetaItems({ type: 'package' }) : undefined;
+        if (listed && Array.isArray(listed.items)) {
+            writable = listed.items
+                .filter((p: any) => p?.writable === true)
+                .map((p: any) => p?.manifest?.id ?? p?.id)
+                .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
+        }
+    } catch {
+        writable = undefined;
+    }
+    if (writable === undefined) return `${head} The packages could not be listed on this request; list them with list_metadata_items, type "package".`;
+    if (writable.length === 0) return `${head} No package in this environment is writable: create one in Studio first.`;
+    const named = writable.slice(0, NAMED_PACKAGES_CAP).join(', ');
+    return `${head} Writable packages here: ${named}${writable.length > NAMED_PACKAGES_CAP ? `, and ${writable.length - NAMED_PACKAGES_CAP} more` : ''}.`;
 }
 
 /**
