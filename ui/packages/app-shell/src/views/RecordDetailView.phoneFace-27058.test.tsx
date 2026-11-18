@@ -567,17 +567,20 @@ describe('one ⋯ per screen on a record pending approval (objectstack#35016)', 
  */
 const LOCKS_NEW = "record.status == 'new'";
 
-function leadWithDisabledEdit(when: string) {
+/** The fixtures' object list, widened by one key the page reads; `mountPage` only passes it through. */
+type PageObjects = Parameters<typeof mountPage>[1];
+
+function leadWithDisabledEdit(when: string): PageObjects {
   const [lead, ...rest] = objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')]);
-  return [{ ...lead, userActions: { edit: { disabledWhen: when } } }, ...rest];
+  return [{ ...lead, userActions: { edit: { disabledWhen: when } } }, ...rest] as never;
 }
 
-function leadLockedByState() {
+function leadLockedByState(): PageObjects {
   const [lead, ...rest] = objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')]);
   const fields = Object.fromEntries(
     Object.entries(lead.fields).map(([name, def]) => [name, name === 'id' ? def : { ...def, readonlyWhen: LOCKS_NEW }]),
   );
-  return [{ ...lead, fields }, ...rest];
+  return [{ ...lead, fields }, ...rest] as never;
 }
 
 /** The desktop header row's Edit, read before any menu opens. */
