@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-17T20:18:34.507Z",
+  "generated_at": "2026-11-18T02:23:11.775Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-17T20:03:15.062Z",
-      "since": "2026-11-17T14:05:08.910Z",
+      "cursor": "2026-11-18T02:07:31.147Z",
+      "since": "2026-11-17T20:03:15.062Z",
       "slice": 300
     },
     "history": {
@@ -20,28 +20,28 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-17T14:05:08.910Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-17T14:05:08.910Z)",
-  "next_since": "2026-11-17T20:03:15.062Z",
+  "since": "2026-11-17T20:03:15.062Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-17T20:03:15.062Z)",
+  "next_since": "2026-11-18T02:07:31.147Z",
   "resume": null,
   "counts": {
-    "issues_open": 449,
-    "issues_closed": 15385,
+    "issues_open": 461,
+    "issues_closed": 15437,
     "issues_transferred": 10,
     "pulls_open": 61,
-    "pulls_closed": 16953,
-    "records": 32858
+    "pulls_closed": 17007,
+    "records": 32976
   },
   "board": {
-    "open_issues_count": 443,
+    "open_issues_count": 455,
     "open_pull_requests": 56,
-    "read_at": "2026-11-17T20:18:26.481Z"
+    "read_at": "2026-11-18T02:23:05.129Z"
   },
   "count_check": {
     "verdict": "ok",
     "reason": null,
-    "expected": 387,
-    "archived": 449,
+    "expected": 399,
+    "archived": 461,
     "shortfall": 0,
     "surplus": 0,
     "gone_ledger": 62,
@@ -52,10 +52,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 410,
+  "requests": 447,
   "run": {
-    "numbers_read": 218,
-    "files_written": 410,
+    "numbers_read": 248,
+    "files_written": 451,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -65,12 +65,12 @@
     "reconcile": {
       "first": {
         "verdict": "ok",
-        "expected": 387,
-        "archived": 449,
+        "expected": 399,
+        "archived": 461,
         "shortfall": 0,
         "surplus": 0
       },
-      "listed": 443,
+      "listed": 455,
       "candidates": 5,
       "left": 0,
       "reread": [],

@@ -1,0 +1,31 @@
+{
+  "number": 34990,
+  "kind": "issue",
+  "title": "filter grammar: a client node for the nested-relation form, so a dataset drill-through pushes one nested condition down instead of the bounded two-step id resolution (exit for #34907's PD5 exception)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:17:07Z",
+  "updated_at": "2026-11-17T22:17:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34990",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (6961260513). A follow-up of #34907 (PR #34968).\n\nThe seat ruled a **bounded Prime Directive 5 exception** on #34907. PR #34968's dataset drill-through resolves a filter that reads through a relation on the client, in two steps:\n- at most 200 ids per hop and at most 3 hops;\n- never truncated, with a localized notice otherwise.\n\n**Exit:** a client filter-grammar node for the nested-relation form. The drill filter is then sent as one nested condition and pushed down to SQL, instead of materialising id sets in the app.\n\nDone when the node lands, `resolveDatasetDrillFilter`'s two-step is removed, and the PD5 exception docblock in #34968 is retired.\n\nGrade: **p2 · domain:ui** (theme: performance; it removes a client-side id materialisation that is bounded today). No user break: today's path is bounded and announces when it stops."
+}

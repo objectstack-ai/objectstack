@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T15:27:39Z",
-  "updated_at": "2026-11-17T19:18:48Z",
+  "updated_at": "2026-11-18T02:08:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34901",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nFound by the hotcrm lane's probe for hotcrm#2618 (report: hotcrm#2618 comment 6952320824, screenshot `issue-2618/expenses-psa-off.png` in the project files) on @objectstack 18.5.0. **Live on hotcrm main today.** Read in code on objectstack `main` fc5913e117.\n\n## What happens\n\nhotcrm's Project Delivery package contributes `crm_project` to `crm_expense` (an object extension; the expense package does not depend on it). The Expenses package's own list views name `crm_project` as a column. Disable Project Delivery: the extension field leaves `crm_expense`'s meta (correct), but the views keep the column, the console asks `select=…crm_project…`, and the server answers **400 `INVALID_FIELD` \"Unknown field 'crm_project' on object 'crm_expense'\"**. The grid shows \"This view's query was rejected\". Every Expenses list that shows the project column is unusable while Project Delivery is off. Same reading for a Project column added to Order to Cash's plan-step grid.\n\n## Why, in code\n\n`packages/metadata-protocol/src/protocol-query-validation.ts` ~339–375: `resolveQueryFields` builds the known set from the object's current fields, and `assertQueryParamsAreFields` refuses any unknown name. Nothing between the view and the query drops a column whose field was contributed by a now-disabled package. Related but different cause: #34807 (draft-only field).\n\n## Asked\n\nA view column (and sort, filter, group) naming a field that a disabled package contributed is dropped where the view is served or where the console builds the query, not sent. Optionally lint can warn that a view names a field from a package its own package does not depend on.\n\n## Done when\n\nWith the contributing package disabled, the list opens and shows its other columns; re-enabled, the column returns."

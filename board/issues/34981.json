@@ -1,0 +1,37 @@
+{
+  "number": 34981,
+  "kind": "pull_request",
+  "title": "fix(scenarios): travel_expense pins the dataset its report reads, so no build names one after the ambiguous word",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T21:13:41Z",
+  "updated_at": "2026-11-17T22:25:54Z",
+  "closed_at": "2026-11-17T22:25:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T22:25:51Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34981",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBLW6dHPW6sSheA32XPKZzPV)_\n\nPart of #34896\n\nClause-②: no\nMetadata-protocol: none\n\nThis PR leaves the card open. The card's Done-when says two builds of the card give the ambiguous question the same set of matches. Only fresh builds of this card after the merge can show that, and the area runs them. This PR changes the card. It does not prove the Done-when.\n\n## 维护者速读\n\n- 改了什么:travel_expense 场景卡新增第三个固定数据集 `claim_lines`(基于 `claim_line`,度量 `line_amount` = `amount` 求和,维度 `expense_type`);构建提示里报表那句(中英两版)改为点名这个数据集,不再出现 \"travel spend\" 这个词。\n- 为什么改:卡上的问数题故意问一个有歧义的词 \"travel spend / 差旅花费\",正确答法是反问。原提示要一个 \"travel spend\" 报表却没固定数据集,构建就会自建名为 \"Travel spend\" 的数据集,问答 agent 直接拿它作答而不反问,两次构建测的不再是同一道题。\n- 风险与回滚:只动场景卡 JSON、一处测试钉子和一个 patch changeset,不碰运行时代码;回滚即 revert 本 PR。卡随 `@objectstack/scenarios` 包发布(`dist/library`),所以带 patch changeset。\n- 先看:`docs/qa/scenarios/travel_expense.json` 的 `expect.datasets` 第三项与 `prompt.detailed` 报表句;`packages/qa/scenarios/test/dataset-cards.test.ts` 的 Build 检查清单。\n- 两分钟验证:`pnpm --filter @objectstack/scenarios build && pnpm --filter @objectstack/scenarios test`,预期 39 个测试文件、1086 个测试全绿。\n- 需要你做的:无,区域 o3-F 自审后落地(≤50 行、Clause-② no),卡片在两次新构建比对后关闭。\n\n## What changes\n\n- `docs/qa/scenarios/travel_expense.json`:\n  - `expect.datasets` gains a third dataset, `claim_lines` on `claim_line`, label \"Claim lines\". It has one measure, `line_amount` (the sum of `amount`, synonyms \"line total\" and 「明细金额」, with a description), and one dimension, `expense_type` (synonym 「费用类型」, with a description). The build prompt states it word for word through the existing `datasetLines`.\n  - The report sentence of `prompt.detailed` now names that dataset in both languages. en: \"Add a report of claim line amounts by department and expense type, built on the claim_lines dataset.\" zh: 「需要一个按部门和费用类型统计明细金额的报表,数据取自 claim_lines 数据集。」 The build is no longer handed \"travel spend\" as a natural name for the report. The old zh sentence said 差旅支出, which is not the ambiguous word, but it was rewritten too so that both languages name the dataset.\n  - Unchanged: `dq_travel_spend` (its words, `asked_back` / `ambiguous`, and the two candidates), the dashboard name `travel_spend_by_department`, and every other question.\n- No department dimension. A card dimension's `field` is a `MachineNameSchema` field of the base object, and `claim_line` has no department field: department is reached through `claim` and then `claimant`. Grouping by department is therefore left to the build. A dimension the build adds to `claim_lines` does not collide with the word.\n- `packages/qa/scenarios/test/dataset-cards.test.ts`: the faithful build in the Build-half pin now carries the third dataset, and the expected check list gains `dataset:claim_lines`, `dataset-measure:claim_lines.line_amount` and `dataset-dimension:claim_lines.expense_type`. The missing-dataset assertion pops the last dataset, so it now names the three `claim_lines` checks.\n- `.changeset/34896-travel-expense-report-dataset.md`: `@objectstack/scenarios` patch. The card is package data: `dist/library/docs/qa/scenarios/travel_expense.json` carries `claim_lines` after a build.\n\n## Tests\n\nHead `4914d02f`.\n\n- `pnpm --filter @objectstack/scenarios build && pnpm --filter @objectstack/scenarios test` under the verify lock: `VERDICT command-exit 0`, Test Files 39 passed (39), Tests 1086 passed (1086).\n- `pnpm --filter @objectstack/scenarios typecheck`: `VERDICT command-exit 0`.\n- I read the word hits with the loader's own `datasetMembers` / `hitsOf` / `isNearMiss` from `src/datasets.ts`, on the card at base `0465f4aa` and at head. Every question word gives the same hits and near-misses in both: \"travel spend\" and 「差旅花费」 hit exactly `trip_plan.estimated_spend` and `reimbursement.claimed_amount`; \"claimed\" and 「报销」 hit nothing and stay near only the `reimbursement` measures; \"employees\" and 「员工」 hit nothing. No member of `claim_lines` adds a hit or a near-miss to any question word.\n\n## Acceptance notes\n\n- What I did not measure: whether a fresh build now declares `claim_lines` and no dataset named after \"travel spend\". Only builds made after the merge can answer that (the card's Done-when).\n- `test:repo` (vitest `repo` project) was not run locally. This diff touches none of its tests. CI `Test Core` carries it.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands, 62)</summary>\n\n- 60 exited 0, among them `check:nul-bytes`, `check:doc-authoring`, `check:cross-package-test-inputs`, `check:published-files`, `check:empty-changeset --base origin/main`, `check:adr-0087-registration --base origin/main` and `check:changeset-no-major`.\n- 2 NOT MEASURED, both PREREQUISITE NOT MET (exit 3):\n  - `check-plugin-teardown-shape.mjs --self-test`: shallow clone, pinned positive control unreachable. Checker health only.\n  - `check:dual-build-cjs-loads`: needs whole-workspace `dist/`, and only the scenarios closure was built.\n- `dispatch-gates --ran`: 62 derived, 62 run, 0 UNRUN.\n- `overlap-check`: `VERDICT clean exit 0`. The branch merges cleanly onto origin/main.\n\n</details>\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufziH9rnXEpD9ne7yFhD -->"
+}

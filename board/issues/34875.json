@@ -2,8 +2,8 @@
   "number": 34875,
   "kind": "issue",
   "title": "reading first: are the platform's own system datasets out of the vocabulary advisory's reach by design",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "lease:o3-F",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:27:58Z",
-  "updated_at": "2026-11-17T18:20:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T21:45:59Z",
+  "closed_at": "2026-11-17T21:17:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

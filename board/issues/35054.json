@@ -1,0 +1,33 @@
+{
+  "number": 35054,
+  "kind": "issue",
+  "title": "[Decision] Should the metadata save door restore translated echoes for every translatable type (not only object), so a GET-as-zh-CN then PUT from an SDK, script or agent cannot store translations as source?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "lease:o3-I",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T00:25:20Z",
+  "updated_at": "2026-11-18T02:08:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35054",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6965042388, item 2), from area o3-I's reading on #35008 (6965012558).\n\n## 维护者速读\n- 现象：保存元数据的接口本身没有防护。用中文界面读出（拿到的是翻译后的文字）再原样存回，翻译就会被当成原文存进去，而且没有任何提示。报告、仪表盘、页面、应用、数据集、导入映射等 6–7 类元数据都这样，只有\"对象\"有防护。\n- 谁会碰到：控制台里的问题由 #35008 修（p1）。剩下的是通过 SDK、脚本和 AI 助手（MCP）直接调接口的客户端。\n- 需要你定：\n  - **A**（读码的开发建议）：把\"对象\"已有的还原逻辑推广到所有可翻译类型，数组里的项按 key 对应（区块按名字、组件按 id、导航按 id、度量、分组）。\n  - **B**：不改接口，只在文档和技能里写明\"编辑请读原文接口\"。\n  - **C**：读到翻译版时不允许直接存回，提示调用方改读原文。\n- 为什么要你定：A 会改变 7 类元数据的保存行为，属于接口约定的变化。\n\n## Context\n- `packages/metadata-protocol/src/protocol-translated-echo.ts` restores translated echoes for `object` bodies only.\n- Measured: GET as zh-CN, then PUT, stores the translations verbatim, with no advisory, for book, page, dashboard, report, app and dataset, and `mapping` after #34976.\n\nRelated: #35008 (the UI half, p1), #34976.\nGrade: **p2 · domain:spec**. Theme: zh-CN and MCP (agents edit metadata through the door). It changes a served contract, so it waits for the maintainer."
+}

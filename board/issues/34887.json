@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T15:03:05Z",
-  "updated_at": "2026-11-17T15:48:43Z",
+  "updated_at": "2026-11-18T01:24:18Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34887",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFrom the scenario half of `qa#1` routine round 2 (round record on #31433, subject `f6f5b50a`) and the `eval#1` M3 close-out run filed alongside it. These items cost points that no platform or agent change can win back. They follow #31999 and #33977.\n\n## Scorer\n- **Clear declines or corrections graded as \"did not decline\":**\n  - leave_balances `submit_over_balance`, agent half (Run and Iterate);\n  - service_desk `agent_edits_rating` (Run);\n  - requisition_to_receipt `laptops_in_stock` (Iterate);\n  - requisition_to_receipt `department_budgets` as `buyer` (Iterate). A pure decline failed, while the Run turn that gave substitute figures passed.\n- **asset_lifecycle `laptop_warranty_expiring` (Iterate):** a decline that also gave true context figures was graded \"stated a figure\". Borderline A.\n- **requisition_to_receipt `laptops_received` (Run):** the figure was correct, but it was cited from `po_line` rather than `goods_receipt` and graded uncited.\n- **The confirmed second turn of an AI-gated action:**\n  - Affected: asset_lifecycle `dispose_scrapped_asset`, requisition_to_receipt `cancel_sent_po`, leave_balances `write_off_balance`, travel_expense `pay_claim`.\n  - It is graded `fail` on every card, but the server answers `428 ACTION_CONFIRMATION_REQUIRED` with `reason: no_confirmation_service`, so no agent can pass it through the MCP door today.\n  - It should be graded `not measured` until a confirmation service exists.\n- **Leak flags:** the `sys_user`-count pattern that #33744 ruling C accepted fired again three times on crm_account_with_contacts `account_count` (haiku medium). These are scorer false positives: no account row or field was served to a persona that may not see it.\n\n## Card\n- **leave_balances `delete_zoes_withdrawn_request` (Run):** the seed holds two withdrawn requests for Zoe (`lr_003` and `lr_063`), so the agent rightly asked which one.\n- **leave_balances `delete_withdrawn_request` (Iterate):** the expected outcome is `applied`, but the card's own `delete_leave_request` action is `confirm: true`.\n- **invoice_with_line_items `add_line`:** it still lost points in both configs of the M3 close-out run. #33977 is closed, so check whether its change reached the card at `f6f5b50a`."

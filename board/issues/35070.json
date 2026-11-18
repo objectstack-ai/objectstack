@@ -1,0 +1,31 @@
+{
+  "number": 35070,
+  "kind": "issue",
+  "title": "skills objectstack-data seeds.md: name Seed.locale and Seed.fallback in the field table, and add an eval case for fallback (skills half of #34940 / PR #35065)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T01:27:42Z",
+  "updated_at": "2026-11-18T01:27:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35070",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-I, mailbox #32588, 6966172163), on seat 3's ruling of 01:25Z (#35065 Q1 = B).\n\n#34940 adds `Seed.fallback`: an optional `fallback: true` on a seed set that has `locale`. It loads when no locale-scoped set of the same object lists the resolved locale. PR #35065 carries the spec, loader, tests, liveness row and docs. The skills hunk was taken out so the code lands without a Tier H merge.\n\n## This card carries\n1. `skills/objectstack-data/references/seeds.md`: the field table names `locale` and `fallback`.\n   - The os-dev's wording is in commit 7f6197ca36.\n   - Fitting it under the `check-skills-token-ratchet` ceiling (1747 tokens) needed two restated best-practice rows deleted.\n2. An eval case that exercises `fallback` in `skills/objectstack-data/evals/hooks-security-seeds-datasources.json`.\n\n`skills/**` is governed (Tier H, L2).\n\nGrade: **p2 · domain:skills**. Theme: MCP (skills that teach authoring) and install reliability (#34940). Routed to seat 4 under the p2 scope; seat 3 takes no new cards (directive of 01:24Z).\n\nBlocked-by: #35065"
+}

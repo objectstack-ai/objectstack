@@ -2,8 +2,8 @@
   "number": 34655,
   "kind": "issue",
   "title": "automation: a packaged flow cannot ship switched off for an administrator to turn on — `status: 'obsolete'` disarms it for good, yet `POST /automation/:name/toggle` answers 200 {enabled:true}",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "lease:o3-J",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:58:21Z",
-  "updated_at": "2026-11-17T17:21:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T23:49:57Z",
+  "closed_at": "2026-11-17T22:25:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 21,
   "locked": false,

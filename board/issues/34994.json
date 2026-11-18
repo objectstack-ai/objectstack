@@ -1,0 +1,37 @@
+{
+  "number": 34994,
+  "kind": "issue",
+  "title": "ci: git fetch / actions/checkout stall to the step timeout (14-25 min) before any test runs — dozens of merge-queue ejections a day; #34561's stall-bound retry does not cover actions/checkout",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "lease:o3-B",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:19:29Z",
+  "updated_at": "2026-11-18T00:44:05Z",
+  "closed_at": "2026-11-18T00:41:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34994",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage on a seat-holder report to the maintainer (2026-11-17, in Chinese: CI keeps stalling at the fetch step, 14–25 min timeouts before tests start, 31+ merge-queue failures in 24 h, 30–60 extra minutes per card).\n\n## Measured (Actions API, 2026-11-16 21:50Z → 11-17 21:50Z)\n- 60 merge_group workflow runs concluded `failure`.\n- In 16 of them the failing step itself is `Checkout repository` (`actions/checkout@v7`, `fetch-depth: 0`, 25 min budget in `lint.yml`) or `Fetch this commit's history and the base branch` (`scripts/ci/fetch-history.sh`, 8–20 min budgets in `ci.yml`).\n- More are masked behind aggregate jobs (`Test UI`, `Test Core`, `Lint & Repo Gates`) whose shard died in that step.\n- Examples today, all 0 tests run:\n  - 19:14Z Type Check · debt ledger: checkout 25 min;\n  - 20:04Z Lint · ESLint: checkout 25 min;\n  - 20:50Z Test UI 6/16: fetch 14 min;\n  - 18:08Z main Test UI 3/16: fetch 14 min.\n- The p0 fix #34949 alone was ejected twice by it and landed on its third entry.\n- Runners are GitHub-hosted `ubuntu-latest`.\n\n## What exists\n- #29980 (closed 11-06, not planned) measured an earlier tail as GitHub-side throughput loss, where a bounded checkout with one retry did not lower the failure rate.\n- #34561 then made `fetch-history.sh` retry an attempt that stalls silent, using `FETCH_HISTORY_STALL_SECONDS`, default 60. Today's `Fetch this commit's history` timeouts show it still runs to the budget in some cases.\n- `actions/checkout` with `fetch-depth: 0` has **no** stall bound at all.\n\n## Wanted (pick by measurement, not guess)\n1. **Read why #34561's stall retry did not fire** on today's `fetch-history` timeouts, for example an attempt that trickles bytes and never goes silent. Fix the bound.\n2. **Bound `actions/checkout` the same way.** For lanes that need history (the slot-lookup ratchet needs the merge base), use a shallow checkout plus a bounded `git fetch --deepen` or `fetch-history.sh`. For lanes that do not, use `fetch-depth: 1`.\n3. **Cut step budgets to fail fast** (a stalled transfer is dead after ~2 min), so an ejection costs minutes, not 25.\n4. **If it is still GitHub-side after 1–3**, the maintainer opens a GitHub Support ticket or moves to larger or self-hosted runners. That is an account-level decision.\n\n`.github/workflows/**` is a governed surface, so the PR needs L2 and the maintainer's (os-zhuang) approval.\n\nGrade: **p1 · domain:devx**. Addendum 7: this fleet-efficiency card removes the current largest throughput bottleneck. It is not p0, because main keeps advancing between stalls; it becomes p0 on a >90 min stall."
+}

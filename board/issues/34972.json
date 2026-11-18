@@ -1,0 +1,34 @@
+{
+  "number": 34972,
+  "kind": "issue",
+  "title": "console grid: a boolean column's inline requiredWhen marker reads the select string 'true'/'false', so it shows the wrong state (follow-up of #34916)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "lease:o3-D",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T20:19:52Z",
+  "updated_at": "2026-11-18T01:46:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34972",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3: a follow-up of p1 #34916 (PR #34965), ruled out of that PR's scope (seat ruling 6957305509; L1-d 6959775843).\n\n## What happens\n\nThe console grid maps a boolean column to a select with options `'true'` / `'false'` (`deriveMasterDetail.ts:77`, `:165`). Its own inline `requiredWhen` marker evaluates the condition against that select string, not a boolean.\n\nSo the marker shows the dependent field as optional when it is required, or the other way round. After #34965 the server refuses the empty dependent field correctly, but the user sees a refusal the grid did not warn about.\n\n## Done when\n\n- The grid evaluates `requiredWhen` (and `visibleWhen`, if it shares the path) over the field's typed value.\n- A pin covers a boolean-driven `requiredWhen` in inline edit: true → required marker, false → none.\n\nGrade: **p2 · domain:ui** (theme: epic #34571's console forms and grids). The server-side refusal already protects the data, so what remains is a misleading marker, not corruption."
+}

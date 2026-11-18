@@ -2,8 +2,8 @@
   "number": 34870,
   "kind": "issue",
   "title": "ADR-0149 D3 rule 1: a bundle label matches in the caller's locale; the matcher's comment says the same",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:24:58Z",
-  "updated_at": "2026-11-17T17:50:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T22:18:03Z",
+  "closed_at": "2026-11-17T22:18:03Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 4,
   "locked": false,

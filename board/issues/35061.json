@@ -1,0 +1,31 @@
+{
+  "number": 35061,
+  "kind": "issue",
+  "title": "Studio：右栏打开时主区域自适应——左侧列表收成窄栏，权限矩阵留 4 列，记录表横向滚动，右栏可拖宽",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T00:58:48Z",
+  "updated_at": "2026-11-18T01:46:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35061",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-17 原话：「Studio 右栏打开时主区域被挤到不能用。 这个你应该先出设计稿。」；看过图 23、24 和「挤压但让主区域自适应、不用浮层」的方向后：「同意」。优先级按同日「其他问题按照你的建议立卡 p2」。\n\n![图 23 右栏打开时 · 权限页](https://github.com/objectstack-ai/objectstack/blob/96817b73c70d0910c64397c324cf6dd0db865a2e/23-studio-slot-access.png?raw=true)\n\n![图 24 右栏打开时 · 数据栏](https://github.com/objectstack-ai/objectstack/blob/96817b73c70d0910c64397c324cf6dd0db865a2e/24-studio-slot-data.png?raw=true)\n\n## 现状（界面实测：控制台是 objectstack `origin/main` 4443014630 的构建，zh-CN，2026-11-17；本地 cloud 环境，自建应用「会议纪要」，视口 1280×800）\n\n- 右栏（AI 助手 420 宽，或属性面板）打开后，中间区域约 620 宽。\n- 权限页：矩阵有「创建 / 读取 / 编辑 / 删除 / 导出 / 转移 / 查看全部 / 修改全部 / 读取范围 / 写入范围」10 列，夹在左边冻结的「对象」「谁能看到哪些记录」和右边冻结的批量按钮之间，只露出 1 列勾选框。\n- 数据栏记录表：只看得到「会议名称 / 会议日期 / 会议地点」3 列，其余列被右栏盖住，没有可见的横向滚动条，看不出右边还有列。\n- 右栏宽度不能调。\n\n## 要做的\n\n方向：右栏仍然挤压主区域（不改成浮层，搭建时要一边看 AI 的改动一边看表），由主区域自己适应。沿用数据栏页签已有的「按内容宽度切换」做法（`dataTabsFold.ts`，objectui#12450）。\n\n1. **左侧列表收窄**：右栏打开且中间内容区不足 900 宽时，左侧对象 / 权限集 / 流程列表自动收成约 52 宽的窄栏（每项一个字的缩写 + 悬停显示全名，顶部「»」临时展开为浮层）；右栏关闭或变宽后自动恢复。四个栏一致。\n2. **权限矩阵**：内容区不足 1000 宽时只平铺「新建 / 查看 / 编辑 / 删除」4 列；其余 6 项收进每行的「更多权限」（显示「已开 N 项」），点开在该行下方展开。「全选 · 只读 · 清空 · 增删改查」收成每行一个「批量」菜单。够宽时保持现在的全部平铺。\n3. **记录表**：不压缩列宽；名称列冻结，其余列横向滚动，底部滚动条一直可见；长文本列设最大宽度；通过点列头选中的列自动滚进可见区。「添加字段」留在工具栏（#34794 已做）。\n4. **右栏可拖宽**：左边缘可拖，范围 320–560，按「属性」「AI 助手」分别记住；默认属性 360、AI 助手 420。\n\n## 不做的\n\n- 不改「选中内容时右栏自动展开」（objectstack#26737）。\n- 不把右栏改成浮层。\n- 不改手机端（手机上右栏本来就是整屏）。\n- 图里的字段属性面板标题、「正在看」用名称这两处归 objectstack-ai/objectstack#35018，不在本卡。\n\n## 验收\n\n- 1280×800、AI 助手打开时：权限页一屏内能看到并勾选两个对象的新建 / 查看 / 编辑 / 删除，其余权限点开可改；记录表能横向滚到最后一列，滚动条可见。\n- 关闭右栏后左侧列表恢复原宽，矩阵恢复 10 列平铺。\n- 右栏拖宽后刷新页面，宽度保持；属性与 AI 助手各自记住。\n- 1440 及以上视口、右栏打开时内容区够宽的，不触发收窄。\n\nReader: `domain:ui` 车道，`ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`（右栏状态在 :1462 一带）、`views/metadata-admin/PermissionMatrixEditor.tsx`、`dataTabsFold.ts`。\n\nDedupe: `repo:objectstack-ai/objectstack is:open Studio 右栏 挤压 权限矩阵` → 0。"
+}

@@ -2,8 +2,8 @@
   "number": 34959,
   "kind": "issue",
   "title": "service-automation: a node whose type has no executor (e.g. `approval` without plugin-approvals) throws outside the executor try, so its `fault` edge never routes — the run just fails and the record waits forever",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T19:18:50Z",
-  "updated_at": "2026-11-17T19:46:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T23:49:49Z",
+  "closed_at": "2026-11-17T23:48:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34959",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n**Found by** hotcrm#2570, measured on 18.5.0 in a scratch boot without `@objectstack/plugin-approvals` (no `sys_approval_request`); re-read on objectstack main b8408d8226.\n\n## What happens\n\nA package flow with an `approval` node runs on a deployment that has no approvals plugin. The record save succeeds; the flow run then fails at the approval node with `NO_EXECUTOR` (\"No executor registered for node type 'approval'\"). Nobody is asked, nothing is notified, and the record stays in its submitted status. Four hotcrm flows did this in the measurement (`timesheet_approval`, `expense_report_project_approval`, `project_initiation_approval`, `project_budget_approval`).\n\nAn author who wants a graceful path (route to a fallback, notify, or set the record back) cannot express it: a `fault` edge on the node is never taken.\n\n## Why (code)\n\n`packages/services/service-automation/src/dag-traversal.ts` ~264–278: when `this.nodeExecutors.get(node.type)` is missing (and the node is not `start`), the traversal pushes a `NO_EXECUTOR` failure step and **throws** immediately. The `try { executor.execute(...) } catch` block below it, which grades the error and routes `fault` edges, is in the `else` branch, so a missing executor never reaches the routing.\n\nAt boot the only signal is a warning: `plugin.ts` ~3030 logs \"N flow(s) reference node types no installed plugin provides … install/enable the plugin that contributes them\".\n\n## Expected (one of these; the platform decides)\n\n1. A missing executor is graded like any other node failure, so a declared `fault` edge routes it (and `$error.code` reads `NO_EXECUTOR`); or\n2. A package whose flows need a node type no installed plugin provides is refused at install/enable (or the flow is refused at registration), so the failure is visible to the admin instead of to the person whose submission hangs.\n\n## hotcrm side\n\nhotcrm#2570 is deciding what a person can do by hand on such a deployment; it does not work around this."

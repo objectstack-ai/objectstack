@@ -1,0 +1,36 @@
+{
+  "number": 35026,
+  "kind": "pull_request",
+  "title": "docs(os-dev): name the signed PR-body trailer as the second HTML-comment exemption",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T23:19:55Z",
+  "updated_at": "2026-11-18T00:06:49Z",
+  "closed_at": "2026-11-18T00:06:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T00:06:46Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35026",
+  "body": "Fixes #34702\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:开发代理说明书(`.claude/agents/os-dev.md`〈干净收尾〉)里「PR 正文不许写 HTML 注释」的例外从一条改成两条,把派发指令要求的末行签名注释正式列为第二条例外。\n- 为什么改:说明书禁止开发自己写 HTML 注释,中继脚本却要求 PR 正文最后一行是签名注释,两条规定互相打架,开发每次都要犹豫,审核也可能照说明书挑错。\n- 风险与回滚:只改三行说明文字,不动任何代码与门禁;文件行数不变(405 行,正好等于上限)。回滚即 revert 本 PR。\n- 先看:`.claude/agents/os-dev.md` 第 320–321 行(新例外句);第 323 行(为了不超行数上限,把两条「写完要读回」合并成了一条)。\n- 两分钟验证:运行 `pnpm check:pm-skill-ratchet`,预期看到 `.claude/agents/os-dev.md is 405 lines (ceiling 405; headroom 0)` 且退出码为 0。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nOne file, `.claude/agents/os-dev.md`, section 〈干净收尾〉. +3 / −3 lines, 405 → 405 (the ratchet ceiling is 405).\n\nThe two texts that conflicted on `origin/main` 4443014630 (in the quotations below, `Fixes #N` stands for the file's angle-bracketed placeholder, spelled out so this body survives the sanitizer):\n\n- `.claude/agents/os-dev.md:319-320`: \"全文 ⛔ 不出现 HTML 注释:sanitizer 落库后吃短尖括号片段,连反引号里的也吃。\" and \"例外:harness 自写的 PR 正文首行归属注释原样留、只报;`Fixes #N` 紧随其后;dev 自写仍禁。\"\n- `scripts/pm/fleet-write/dispatch.mjs:871`: \"export const PR_BODY_TRAILER_SHAPE = '`<!-- signed: LANE#N · ACCOUNT · SESSION -->`';\" and its refusal text at `:957`: \"as the LAST non-empty line, alone\".\n\nThe new exemption sentence (lines 320–321), replacing the old one:\n\n- \"例外二:harness 自写 PR 正文首行归属注释原样留、只报,`Fixes #N` 紧随;派发令要求才独占末个非空行写 `<!-- signed: LANE#N · ACCOUNT · SESSION -->`(`PR_BODY_TRAILER_SHAPE`);其余 dev 自写仍禁。\"\n\nIt names the trailer's exact shape and the constant that owns it, its place (the last non-empty line, alone), and that it is written only when the dispatch order asks for it. Every other dev-written HTML comment stays banned. `dispatch.mjs` is read, not edited.\n\nPaying the line: the new sentence needs two lines under the 120-byte line rule, and the file stood at its ceiling with headroom 0. The line is paid inside the same section by deleting content, not by re-wrapping: the two read-back bullets\n\n- \"写完读回那条评论到尾部:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。\"\n- \"PR 正文同欠一次全文回读,评审读的正是它。\"\n\nbecome one: \"评论、PR 正文都读回到尾:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。\" The obligation (read both the comment and the PR body back to the end) is kept; the clause \"评审读的正是它\" is dropped. Three words also left the exemption sentence (\"的\", \"其后\", and \";\" became \",\").\n\n## Tests\n\nNo behaviour changes; nothing is ablated (documentation only). No package is touched, so there is no build closure and no package test owed.\n\n## Acceptance notes\n\n- Scope addition (a `Requested-by` line before the closing-keyword line): measured, and NOT added. On 4443014630, `git grep -n -i \"Requested-by\"` over the whole tree answers 0 hits (control: `git grep -n \"PR_BODY_TRAILER_SHAPE\"` answers 7 lines in `scripts/pm/fleet-write/dispatch.mjs`). The spelling `_Requested by **NAME**_` appears in exactly two places, both self-test fixtures (`scripts/pm/check-governed-queue-guard.mjs:5571`, `scripts/pm/check-owed-reviews.mjs:746`), as line 2 of the attribution block the harness writes in a project thread. Nothing reads or requires it: `.github/workflows/pr-body-guards.yml` and its four scripts, `.claude/hooks/`, and the relay's `pr_create` (whose header at `dispatch.mjs:477` leaves a pull request body outside the first-line rule) carry no requester rule. The line is harness-written, so the existing first exemption (leave it, report it) already covers it; no gate or ruling in the tree orders a dev to write one.\n- The line ratchet prices lines, and this file has no headroom. A later addition to this file needs its own deletion.\n\n## Verification\n\nHead a5865e4174. Derived by `node scripts/pm/dispatch-gates.mjs --commands` (23 families); each exit code captured before any pipe.\n\n<details><summary>Derived gates: 23 run, 23 exit 0</summary>\n\n- `node scripts/check-closing-keyword-parity.mjs` :: exit 0\n- `node scripts/check-closing-keyword-parity.mjs --self-test` :: exit 0\n- `node scripts/check-comment-mask-corpus.mjs` :: exit 0\n- `node scripts/pm/check-governed-queue-guard.mjs --self-test` :: exit 0\n- `node scripts/pm/check-harness-current.mjs --self-test` :: exit 0\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` :: exit 0 (first run exit 3, PREREQUISITE NOT MET: `@objectstack/formula` not built; re-run after building formula and lint under the verify lock, `VERDICT command-exit 0`)\n- `pnpm check:adr-anchors`, `check:agent-model-declared`, `check:agent-test-spelling`, `check:commit-card-trailers`, `check:cross-package-test-inputs`, `check:doc-authoring`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes`, `check:pm-governed-merges`, `check:pm-label-write`, `check:pm-settings-deny-roster`, `check:pm-skill-id-lint`, `check:pm-skill-ratchet`, `check:refd-timer-probe`, `check:skill-frame-sync`, `check:watch-hint-literal` :: each exit 0\n- `--ran`: \"23 derived famil(ies) accounted for — 23 run, 0 NOT-MEASURED (a DERIVED zero — all 23 recorded an exit code and none of them is 3)\"\n- ratchet: \"check-skill-line-ratchet: .claude/agents/os-dev.md is 405 lines (ceiling 405; headroom 0)\"\n- `node scripts/pm/overlap-check.mjs`: \"VERDICT clean exit 0\" (against origin/main 4443014630 and 0 PR heads)\n\n</details>\n\n`skip-changeset`: the diff is `.claude/**` only; nothing publishes.\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzgwLiKcfujYUug7sPs -->\n"
+}

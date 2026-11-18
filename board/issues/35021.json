@@ -1,0 +1,31 @@
+{
+  "number": 35021,
+  "kind": "issue",
+  "title": "审批用词：运行界面的按钮写「拒绝」，流程设计器里写「驳回」，统一成一个",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T23:15:00Z",
+  "updated_at": "2026-11-17T23:50:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35021",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-17 原话：「更新最新的代码，验收，并对这些关键核心界面重新进行一轮测试，提出优化改进意见和我沟通。」；看过意见后：「记录页有两个「更多」菜单 p1 …… 其他问题按照你的建议立卡 p2」。\n\n## 现状（界面实测：控制台是 objectstack `origin/main` 4443014630 的构建，zh-CN，2026-11-17）\n\n- 审批收件箱行内按钮、记录页审批条：「通过」「拒绝」（`ui/packages/i18n/src/locales/zh-Hans.ts:4751` `actReject`、`:4769` `reject`）。\n- 流程设计器：连线分支叫「驳回」（`ui/packages/i18n/src/namespaces/studio/zh.ts:1249` `engine.inspector.flowEdge.branchReject`），「问题」页签的提示也写「审批「审批」没有「驳回」出边…并把审批分支设为「驳回」」。\n- 搭建者在设计器里配的是「驳回」，审批人在界面上点的是「拒绝」，是同一件事的两个说法。\n\n## 要做的\n\n1. zh-Hans / zh-Hant 里审批这个动作只用一个词。建议统一为「驳回」（中文审批场景的习惯说法，和权限里的「拒绝访问」区分开）；如果维护者更倾向「拒绝」，就把设计器一侧改过来。实现者在 PR 里列出改了哪些词条。\n2. 只动审批语境的词条；权限判定（`perm.cel.test.deny`、`access.explain.verdict.denies`）、邀请的「拒绝」不动。\n\n## 不做的\n\n- 不改 en 及其他语言。\n- 不改动作的内部名（`reject`）。\n\n## 验收\n\n- zh-CN 下审批收件箱、记录页审批条、审批请求页、流程设计器的分支与提示，用的是同一个词。\n\nReader: `domain:ui` 车道，`ui/packages/i18n/`；已有测试 `approvalOverride-zh-wording-13402.test.ts` 里写死了「拒绝」，一并更新。\n\nDedupe: `repo:objectstack-ai/objectstack is:open 审批 拒绝 驳回 用词` → 0。"
+}

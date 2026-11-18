@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T06:46:05Z",
-  "updated_at": "2026-11-16T09:49:42Z",
+  "updated_at": "2026-11-18T01:25:10Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34325",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jTEivi2wogPpeo3xd5\n\nFollow-up allowed by maintainer ruling 6909391261 on #33712 (\"a door-aware no-service message (spec step 3) is a small follow-up the area may file\").\n\n**Today:** `run_action` / `resume_run` on a confirmation-gated action, with no pending-confirmation service, answer `428 ACTION_CONFIRMATION_REQUIRED` with `reason: no_confirmation_service`. Step 3 of `AI_ACTION_CONFIRMATION_CAPABILITY` names a sentence for that answer: use a client that supports confirmation. #34202 left it out, because no door elicited, and so did #34318, because it would be false on the Streamable HTTP door.\n\n**Once #34318 lands:** the stdio door elicits for a client that advertises `elicitation`. For a stdio caller without that capability, the sentence is true and useful. For an HTTP caller it stays false until #34321.\n\n**Ask:** make the no-service message door-aware. On the stdio door, add the step-3 sentence. On the HTTP door, keep today's message. Pin both doors. No new code or reason value.\n\nBlocked-by: #34318\n\nFiles: `packages/mcp/src/mcp-http-tools.ts` and the runtime refusal message site that #34318 touches; the existing `*-33690` pin files."

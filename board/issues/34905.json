@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T15:46:28Z",
-  "updated_at": "2026-11-17T18:26:42Z",
+  "updated_at": "2026-11-18T01:20:55Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34905",
   "body": "## What (18.5.0, console + Studio, measured in a browser)\n\nA platform administrator adds a field to `crm_account` in Studio: Data → 客户 → 表单 → 添加字段 → Publish. The field is **required** and also has a **visibleWhen** so that it shows only for one customer tier.\n\nAfter publishing, saving **any** customer that does not meet the condition is refused, even an edit of an unrelated field such as the owner:\n\n> 验证用-备注字段是必填项,不能清空\n\nThe field is hidden on that record, so the user cannot see it, cannot fill it in, and cannot save anything. A single admin configuration therefore locks every record outside the condition, organization-wide. Deleting the field and republishing restores saving.\n\n## Expected\n\nA field hidden by its `visibleWhen` is not required at that moment. Required should be judged together with visibility, on the server as well as in the form, so that the rule reads as \"required when visible\". Failing that, Studio should refuse to publish `required` together with `visibleWhen`, and explain why.\n\n## Severity\n\nHigh. It needs no code: an administrator doing ordinary self-service configuration can stop the whole sales team from saving customers."

@@ -1,0 +1,31 @@
+{
+  "number": 34989,
+  "kind": "issue",
+  "title": "views: kanban, calendar, gallery, timeline, gantt and map bindings to a withheld (disabled-package) field — calendar fails 400, kanban cards land in Uncategorized (follow-up of #34901)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:16:20Z",
+  "updated_at": "2026-11-17T22:16:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34989",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (6961006099). A follow-up of p1 #34901 (PR #34979), which fixes the grid and list case only. The area's reading follows verbatim. It was read in code at d639b903f34; nothing was run.\n\n> Non-grid views that bind a withheld (disabled-package) field\n> \n> Follow-up to #34901 (PR #34979, grid/list only). All READ in code at d639b903f34; nothing run.\n> \n> Field binding keys (packages/spec/src/ui/view.zod.ts):\n> - kanban: groupByField, summarizeField, titleField, columns\n> - calendar: startDateField, endDateField, titleField, colorField, allDayField\n> - gallery: coverField, titleField, visibleFields\n> - timeline: startDateField, endDateField, titleField, groupByField, colorField\n> - gantt: 16 *Field keys (start/end date, title, groupBy, parent, color...)\n> - map: latitudeField, longitudeField, locationField, titleField, descriptionField\n> \n> In ListView:\n> - $select is safe: bindings pass addSpeculative, gated on served names (ListView.tsx:3931-3975, 4006-4040).\n> - Calendar REACHES THE DOOR. calendarWindowFilter(window, start, end) (calendarWindow.ts:126-135) is merged into $filter at ListView.tsx:4296-4299, after the withheld drop. The fetch at ListView.tsx:4347 then gets 400 INVALID_FIELD.\n> - Kanban does NOT reach the door:\n>   - Lane paging needs the lane field's served options (ListView.tsx:3651-3661, ObjectKanban.tsx:741-756).\n>   - ObjectKanban's query sends no $select or groupBy (ObjectKanban.tsx:964-975).\n>   - Every card lands in Uncategorized.\n> - withheldViewRefs (ListView.tsx:2858-2880) ignores view-type keys: no notice.\n> \n> Standalone page blocks:\n> - $orderby is built from schema.sort at ObjectKanban.tsx:970, ObjectCalendar.tsx:961, ObjectGantt.tsx:1072, ObjectTimeline.tsx:495 and ObjectMap.tsx:1100. A withheld sort gets 400 INVALID_SORT.\n> - The calendar record anchor (ObjectCalendar.tsx:1041, initialDate.ts:73-76) also puts startDateField in its query. Its 400 ends up as a console.warn.\n> \n> Repro (read). P extends crm_expense with crm_project; Q's view sets kanban.groupByField: crm_project; disable P, open it.\n> - Expected: GET crm_expense with no crm_project returns 200, every card is in Uncategorized, and there is no notice. No 400.\n> - Variant with calendar.startDateField: crm_project_start: the window $filter names it and the response is 400 INVALID_FIELD, so the list fails.\n> \n> Fix shape:\n> - Read the withheld set via @object-ui/core readWithheldFieldNames, as ListView does now.\n> - Skip the calendar window node and the anchor when the start field is withheld.\n> - Feed the view-type keys into withheldViewRefs.\n> - Drop withheld names from schema.sort in the standalone renderers.\n> \n> Dedupe: withheld field, disabled package, kanban groupByField, calendar startDateField, _withheldFields\n\nGrade: **p2 · domain:ui**, as the seat suggests. Theme: HotCRM usable (the #34901 family). The effect is user-visible: a calendar list fails with 400, and kanban silently uncategorizes. It was found from code reads, and no HotCRM view is named as hitting it, so it is not p1. Raise it to p1 if HotCRM names a view that does."
+}

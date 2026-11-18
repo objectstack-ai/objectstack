@@ -2,8 +2,8 @@
   "number": 34939,
   "kind": "issue",
   "title": "Import mappings: the mapping label and field mapping are not localizable, and the import wizard shows target API names and a blank preview for a named mapping",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T17:09:14Z",
-  "updated_at": "2026-11-17T19:26:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T00:42:47Z",
+  "closed_at": "2026-11-18T00:41:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34939",
   "body": "## What (18.5.0, zh-CN, measured in a browser)\n\nAn app ships a named import mapping (e.g. weekly supply CSV import). In a zh-CN organization:\n\n1. The mapping's name shows in English (「Weekly Supply Import (CSV)」). The mapping `label` is a plain string, and translation bundles have no `mappings` category, so the app cannot translate it.\n2. The mapping step lists the **target field API names** (e.g. `supply_week`, `domestic_reserved_qty`) instead of the fields' translated labels.\n3. The preview table's cells are **empty** for a named mapping, although the import itself runs correctly.\n\n## Ask\n\n- A translation key for import mappings (label and description) in the bundle, e.g. `mappings.<name>.label`.\n- The wizard shows target fields by their translated labels.\n- The preview renders the mapped values."

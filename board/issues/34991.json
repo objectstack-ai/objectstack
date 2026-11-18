@@ -1,0 +1,39 @@
+{
+  "number": 34991,
+  "kind": "issue",
+  "title": "Queue-flake anchor: packages/fields FilterConditionField.betweenBlankBound-9914.test.tsx:174 — toHaveValue(5) receives \"5\" (render race before the schema types the field)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "lease:o3-D",
+    "pm:dispatched",
+    "priority:p1",
+    "queue-flake-anchor"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:17:53Z",
+  "updated_at": "2026-11-18T02:12:44Z",
+  "closed_at": "2026-11-18T02:12:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34991",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (6961296270). This is a queue-flake anchor.\n\n- **Ejected:** PR #34955 (#34818 slice 3) from merge-queue build 44173515593. The PR does not touch `packages/fields`.\n- **Where:** Test UI shard 11/16, `FilterConditionField.betweenBlankBound-9914.test.tsx:174`: `toHaveValue(5)` received the string `\"5\"`.\n- **Reading** (PR comment 6961223962, #34818 comment 6961242308): the `To` box is queried before the async object schema has typed `age` as a number, which is a render race. The same queue commit 471a3da09 passes the file 3 of 3 times locally.\n- **Fix shape:** wait for the schema-typed render (`findBy`, or wait for the number input) before the assertion.\n\nGrade: **p2 · domain:ui**, under the queue-flake rule (#34152): one independent root, one head, so p2 and no jump. It is raised to p0 if a second head is ejected by it."
+}

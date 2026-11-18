@@ -12,17 +12,19 @@
   },
   "labels": [
     "area:ai",
-    "pm:on-hold"
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:09:12Z",
-  "updated_at": "2026-11-17T10:32:35Z",
+  "updated_at": "2026-11-17T23:03:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34769",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nA person builds an app through MCP, with no project files at all. None of the metadata skills fires, because each one's description says it applies to `*.object.ts` or `*.flow.ts`.\n\nWho acts: the skills lane (`skills/objectstack-{data,ui,automation,formula,i18n,query}/SKILL.md` frontmatter and evals). Governed surface.\n\n## Evidence\n\n- Every metadata skill's `description` triggers on TypeScript file globs; only `objectstack-i18n` also names the metadata API.\n- 13 vendor skill sets read at source (Supabase, Convex, NocoBase, Stripe, Vercel, Anthropic, Directus, Clerk, Cloudflare, Neon, dbt, Prisma, Salesforce): none triggers on file globs; all trigger on tasks or intents.\n- Directus records the effect of a fixed description opener on a small model: 22 of 37 trigger cases before, 33–34 after.\n- Claude Code truncates a skill description at 1,536 characters.\n\n## Scope\n\n- Each description leads with the task (\"designing or changing objects and fields, in a project or through MCP\"), keeps file globs as a secondary cue, and ends with a \"Not for\" clause naming the neighbouring skill. Target 300–450 characters.\n- No body change in this card.\n\n## Done when\n\n- The trigger cases of the runner card pass at a higher rate after than before, on the weakest model the eval seat tracks, with no new false trigger on the negative cases.\n\n## Relations\n\n- Parent: #34659. Decision record: #34691 S3 = A. Blocked on measurement by the runner card, not on authoring.\n- Dedup, open and closed: none found for `skill description trigger`."

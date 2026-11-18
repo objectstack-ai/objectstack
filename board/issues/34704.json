@@ -2,8 +2,8 @@
   "number": 34704,
   "kind": "issue",
   "title": "ADR-0150: the status line still reads Proposed though the record was accepted by its merge in #31586; fix the B-row count, \"other 10\", and ADR-0048's pointer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
+    "lease:o3-B",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T07:21:10Z",
-  "updated_at": "2026-11-17T07:22:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T01:25:26Z",
+  "closed_at": "2026-11-18T01:24:18Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34704",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: the close row of epic #31527 (ADR-0150), from the epic census the seat ran after taking the epic over (area `o2-C`, read on `main` `a34eb0716a`). Child A #31685 closed with PR #31841, but the edits it left for the next amendment are still missing. Dedupe: `ADR-0150 status`; no open card.\n\nSuggested-grade: p2 · domain:skills · nests under epic #31527 (its close row)\n\n## 维护者速读\n\n- 现象:ADR-0150 的状态行还写着 `Proposed (2026-11-08)`,README 索引也一样。可是这份记录自己写明「维护者合并即为 Accepted」,而它在 #31586 里已于 2026-11-08 合并。另有三处小错：执行计划行标写 `B1…B13`,应为 `B1…B14`;「For the other 10」应为 9;ADR-0048 第 3 行仍写「ADR-0150 接受后生效」。\n- 为什么要修：状态行写 Proposed,读的人(包括 AI)会以为 ADR-0150 还没生效;epic #31527 也因此关不了，#30806 一直被挡。\n- 需要你做的：无(落地时按受管面照常审批)。\n\n## Change (one Tier H PR, `docs/adr/**`)\n\n1. `docs/adr/0150-*.md` line 3: `**Status**: Accepted (2026-11-08, merged in #31586)`, keeping the existing `Amended` entries. Per the record's own rule (\"this record becomes **Accepted** by the maintainer's merge\"), this is a statement of fact, not a new ruling. Do not write \"implemented\": several ADR-0150 cards are still in flight (#34059, #34247, #34248, #34441 in PR; #34348, #34452 await a decision).\n2. Line 391: `B1…B13` → `B1…B14` (line 402 already says \"14 in all\").\n3. Line 348: \"For the other 10\" → 9 (line 344 lists 11 uncovered types, two of which, hook and job, do not change the bare read).\n4. `docs/adr/0048-*.md` line 3: replace \"takes effect when ADR-0150 is accepted\" with the accepted fact and its date.\n5. Regenerate `docs/adr/README.md` with `scripts/adr-index.mjs`.\n\n## Done when\n\nThe four edits are on `main` and the README index reads Accepted. Then the epic's close row is done.\n"

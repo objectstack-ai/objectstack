@@ -2,8 +2,8 @@
   "number": 34629,
   "kind": "issue",
   "title": "console AI change card: a published object or field whose label was changed in a draft still shows its published label",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T03:59:55Z",
-  "updated_at": "2026-11-17T04:10:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T00:48:47Z",
+  "closed_at": "2026-11-18T00:47:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34629",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRH4UCX1tvddXMS7cq\n\nFiling gate ①: class a, a user-visible wrong label. This is the remainder of #32984 item 5 (\"The confirmation card names objects and fields by their labels\"), recorded on that card by area o1-E in comment 6930132262 and not filed until now. #32984 closes once both Q1 PRs have merged (#34513, #34539), so this remainder moves to its own card. Dedupe: `useChangeCardLabels`, `change card label draft overlay published`; no open card.\n\nreach: `ui/packages/app-shell/src/console/ai/changeCardLabels.ts` (`useChangeCardLabels`, from PR #34472). It is reached whenever an AI build conversation proposes a change to an object or field that is already published and whose label the same draft changes.\n\nSuggested-grade: p2 · `domain:ui`\n\n## 维护者速读\n\n- 现象：AI 搭建对话里的确认卡，对「已发布、但草稿里改了标签」的对象或字段，仍显示发布版的旧标签。\n- 原因：确认卡先查已发布的元数据，查到就不再看草稿。\n- 需要你做的：无。\n\n## What happens\n\nPR #34472 names objects and fields on the change card by label. It reads the published registry by name first and the draft overlay only for a name the registry does not know. When a PUBLISHED object or field has a label that a draft changed, the registry answers first, so the card shows the published label rather than the one the change will publish.\n\n## Change\n\nWhen a name is in the published registry, also read the draft overlay for it, and show the draft label when the overlay has one. Keep the cost bounded the way #34472 bounds the overlay read now: at most one overlay read per object per conversation revision, none while one is in flight, never per render. #34472 left this out because it costs one more request per object. Measure that cost and say what it is.\n\nPin: a published object whose draft renames it, and a published field whose draft relabels it, each show the draft label on the card. A published name with no draft change still shows its published label (control).\n\n## Done when\n\nThe change card shows a draft-changed label for published objects and fields, and the pins pass."

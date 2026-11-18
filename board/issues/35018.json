@@ -1,0 +1,34 @@
+{
+  "number": 35018,
+  "kind": "issue",
+  "title": "Studio：权限页标题重复应用名、AI 面板上下文和字段面板第一行还是内部名；着陆页应用卡片显示包 ID 和「可写」",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "lease:o3-H",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T23:13:32Z",
+  "updated_at": "2026-11-18T01:59:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35018",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-17 原话：「更新最新的代码，验收，并对这些关键核心界面重新进行一轮测试，提出优化改进意见和我沟通。」；看过意见后：「记录页有两个「更多」菜单 p1 …… 其他问题按照你的建议立卡 p2」。\n\n## 现状（界面实测：控制台是 objectstack `origin/main` 4443014630 的构建，zh-CN，2026-11-17；本地 cloud 环境，自建应用「会议纪要」，1280×800）\n\nobjectstack-ai/objectstack#34794、#34795、#34725 合并后剩下的几处：\n\n- 权限页标题：「会议纪要 · 会议纪要·组织成员」，应用名出现两次。副标题「包内置 · 新用户默认」、页签右侧「仅本包对象 · 保存为草稿」仍是内部说法。\n- 权限页打开 AI 面板，输入框上方写「正在看：permission · app_ti8v_member_access」。数据栏已经是「正在看：会议 · 记录」。\n- 字段属性面板：第一行是「字段属性」加内部名 `meeting_name` 和一个关闭按钮；第二行才是「字段 会议名称」，右边又有一个关闭按钮。面板底部还有一条「AI 助手 / 回到对话 →」，和顶部的「属性 | AI 助手」切换重复。\n- Studio 着陆页「自己的应用」：每张卡片在应用名下面显示 `app.nb57` / `app.ti8v`，并带「可写」徽标（自己的应用全都可写，没有信息量）；下面的「最近访问」只有一条，和上面的卡片是同一个应用。\n\n## 要做的\n\n1. 权限页标题只写权限集的名字；应用名已在顶栏。「包内置」「仅本包对象」换成业务说法或移除。\n2. AI 面板的「正在看」在权限、自动化、界面三栏也用名称（例如「权限 · 组织成员」「流程 · 新会议提醒」），与数据栏一致。\n3. 字段属性面板合并成一行标题、一个关闭按钮；内部名只在「开发者信息」里。底部「回到对话」条去掉或与顶部切换二选一。\n4. 着陆页应用卡片不显示包 ID 和「可写」；需要包 ID 时放进卡片的更多菜单或悬停提示。「最近访问」在内容与上方卡片完全重复时不显示。\n\n## 不做的\n\n- 不改这些页面的布局与功能。\n- 属性面板在自动化栏、界面栏的同类问题归 objectstack-ai/objectstack#34796，不在本卡。\n\n## 验收\n\n- 权限页标题里应用名只出现一次（顶栏）。\n- 四个栏的 AI 面板「正在看」都不出现 `object` / `permission` / `flow` 这类类型词和内部名。\n- 字段属性面板只有一个关闭按钮，默认不显示内部名。\n- 着陆页自己的应用卡片上没有 `app.xxxx` 和「可写」。\n\nReader: `domain:ui` 车道，`ui/packages/app-shell/src/views/studio-design/`（`StudioDesignSurface.tsx`、`StudioAiCopilot.tsx`）、`views/metadata-admin/inspectors/ObjectFieldInspector.tsx`、`PermissionMatrixEditor.tsx`，着陆页在 `ui/apps/console`。\n\nDedupe: `repo:objectstack-ai/objectstack is:open Studio 内部名 权限页 标题 正在看` → 0（#34796 只覆盖自动化栏与界面栏的属性面板）。"
+}

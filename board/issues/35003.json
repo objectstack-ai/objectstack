@@ -1,0 +1,32 @@
+{
+  "number": 35003,
+  "kind": "issue",
+  "title": "mcp: the DATASET_SELECTION_RULE docblock stops saying the skill still carries its loose-form rows",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:41:13Z",
+  "updated_at": "2026-11-17T22:49:47Z",
+  "closed_at": "2026-11-17T22:49:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35003",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-17, verbatim: 「立卡」, answering this session's list of four gaps nobody had carded. The gap was reported by the dispatching seat `repo:objectstack#3` on #34659 (comment 6960624063, item 1); the filer did not re-read the code behind it.\n\n## Why\n\nA comment that states something false about where a rule lives sends the next reader to the wrong file. It becomes false the moment PR #34977 lands, so it is not left as a nit.\n\n## Evidence\n\n- Per the report: the `DATASET_SELECTION_RULE` docblock in `packages/mcp/src/mcp-server-runtime.ts` ends \"The skill's own loose-form rows predate candidates and are amended in its lane\"; PR #34977 (#34868) deletes those rows.\n\n## Scope\n\n- One sentence: the docblock says what the skill carries after #34977. Land it right after that PR; it was kept out of it so that PR stays skills-only.\n\n## Done when\n\n- The docblock is true against the merged skill.\n\n## Relations\n\n- Parent: #34659. Related: #34868 (PR #34977)."
+}

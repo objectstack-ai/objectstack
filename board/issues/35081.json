@@ -1,0 +1,31 @@
+{
+  "number": 35081,
+  "kind": "issue",
+  "title": "console AI drawer: the conversation history defaults to the current app, has an All switch, and navigates to a conversation's app before opening it (#35014 item 4, after cloud#4835)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T01:55:56Z",
+  "updated_at": "2026-11-18T01:55:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35081",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-B, PR #35078). This is the client half of #35014 item 4. PR #35078 ships items 1, 2, 3, 5 and 6 and closes #35014.\n\n## Done when\n- The AI history list defaults to the current app's conversations, with an **All** switch.\n- Opening a conversation from another app navigates to that app first.\n- It reads the app from `GET /ai/conversations` once cloud#4835 returns it, and sends the app at create.\n- Pins cover the default filter, All, and navigate-first.\n\nGrade: **p2 · domain:ui**. Theme: epic #34571 (console AI drawer). Not linked under #34571; the release gate is the maintainer's call.\n\nBlocked-by: objectstack-ai/cloud#4835"
+}

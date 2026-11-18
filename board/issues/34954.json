@@ -2,7 +2,7 @@
   "number": 34954,
   "kind": "pull_request",
   "title": "fix(app-shell): permission matrix keeps a roll-up acknowledgement only while Read is on",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T18:47:40Z",
-  "updated_at": "2026-11-17T19:58:55Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 3,
+  "updated_at": "2026-11-17T21:45:07Z",
+  "closed_at": "2026-11-17T21:45:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-17T21:45:05Z",
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34954",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBLW6dHPW6sSheA32XPKZzPV)_\nFixes #34786\nClause-②: no\nMetadata-protocol: none\n\nrepo:objectstack#3 · os-support-ai · session_01WGufziunkXbDT7wUWqfmWz\n\n## 维护者速读\n\n- 改了什么:控制台权限矩阵里,字段行关掉 Read 时,同一次编辑会删掉 `rollupSourceUnreadableReason`;批量快捷键(只读全部/可写全部)改写字段行时保留这条说明。\n- 为什么改:spec 拒收 `readable: false` 旁边的说明,原来关 Read 会留下被拒的形状且无法清除;批量快捷键则会悄悄丢掉管理员写下的说明。\n- 风险与回滚:仅限私有包 `@object-ui/app-shell` 的两个函数,无 spec 或接口变化;回滚即 revert 本 PR。\n- 先看:`permission-slice.ts`(`withFieldBits` 的 `readable &&` 条件)、`PermissionMatrixEditor.tsx`(`updateFieldPerm` 的 Read off 级联)、`permission-slice.fieldRule-26597.test.ts`。\n- 两分钟验证:`cd ui && pnpm exec vitest run packages/app-shell/src/views/metadata-admin/permission-slice.fieldRule-26597.test.ts`,预期全绿,含 3 条 `withFieldBits` 新用例。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `FieldPerm` (`permission-slice.ts`) declares the optional `rollupSourceUnreadableReason` key, documented against `FieldPermissionSchema`.\n- `updateFieldPerm` (`PermissionMatrixEditor.tsx`): Read off now deletes the reason beside `when` (the objectstack#25866 cascade), so the editor never authors the shape `FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN` refuses.\n- `withFieldBits` keeps the reason while `readable` stays true and drops it only when `readable` goes false. Its one caller, `applyFieldBulk`, always passes `readable: true`, so the bulk shortcuts now keep the reason instead of dropping it silently.\n- Changeset: `@object-ui/app-shell` patch.\n\n## Tests\n\n- `permission-slice.fieldRule-26597.test.ts`: a new top-level `describe` for `withFieldBits`. It keeps the reason on a readable rewrite and drops it on `readable: false`, and `applyFieldBulk` Read-only all keeps it. Each resulting entry is parsed with the real `FieldPermissionSchema` from `@objectstack/spec/security`, and a control parse proves the refused shape really is refused (the issue path is `rollupSourceUnreadableReason`).\n- `PermissionMatrixEditor.fieldWhen-25866.test.tsx`: a new top-level `describe` in the existing field-cascade harness. Read off on a stored acknowledged entry saves `{ readable: false, editable: false }`, Write all saves the entry with the reason kept, and both saved entries parse with `FieldPermissionSchema`.\n\n## Acceptance notes\n\n- `withFieldBits(cur, false, …)` still keeps `when`. The refused `when` beside `readable: false` shape is reachable only if a caller passes `readable: false`, and no caller does (`applyFieldBulk` passes `true`). I left it alone because it is outside this card.\n\n## Verification\n\n<details><summary>Pinned tests, head 5d561afbe6</summary>\n\n`os-verify-lock` running `vitest run --maxWorkers=2` on the two files: `Test Files 2 passed (2)`, `Tests 27 passed (27)`, `VERDICT command-exit 0`.\n</details>\n\n<details><summary>Ablations (scripts/ablation-replace.mjs, each restored to blob == HEAD)</summary>\n\n- A, delete `delete next.rollupSourceUnreadableReason;` in `updateFieldPerm`: `Read off removes the reason, so the saved entry is one the spec accepts` fails (1 failed). Restored to blob 27768b90fc7b, which equals HEAD.\n- B, `readable && ` guard removed in `withFieldBits`: `drops the reason when the entry goes readable:false` fails (1 failed). Restored to blob 5206a2968c7c, which equals HEAD.\n- C, keep branch disabled in `withFieldBits` (the pre-fix behaviour): 3 failed, namely the slice keep case, bulk Read-only all, and editor Write all. Restored to blob 5206a2968c7c, which equals HEAD.\n- After the script: `git diff HEAD` empty.\n</details>\n\n<details><summary>Type check and gates</summary>\n\n- `pnpm --filter @object-ui/app-shell run type-check` (both `tsc` programs): `VERDICT command-exit 0`.\n- `dispatch-gates --commands`: 38 derived commands. 36 exited 0. Two were NOT MEASURED on the first pass: `pnpm --dir ui exec vitest run scripts/` (the files failed with `Cannot find package '@objectstack/spec/ui'` because the run started before the spec dist existed, an environment fault) and `pnpm check:type-check-debt` (exit 3, its closure build never got a lock turn). The seat report records the re-run result. `dispatch-gates --ran`: 38 derived, 38 run.\n- `overlap-check` against origin/main c81f498b5f and open PR #34914: `VERDICT clean exit 0`.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufziunkXbDT7wUWqfmWz)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufziunkXbDT7wUWqfmWz -->\n"

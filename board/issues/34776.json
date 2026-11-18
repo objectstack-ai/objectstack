@@ -12,17 +12,19 @@
   },
   "labels": [
     "area:ai",
-    "pm:on-hold"
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:13:28Z",
-  "updated_at": "2026-11-17T10:33:47Z",
+  "updated_at": "2026-11-17T23:03:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34776",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nThese are the mistakes an AI author makes most quietly: the item saves, publishes and never works. Today the hosted product warns its model about them in prose and catches some in a private check; the open platform catches none of the six. The maintainer ruled that such a rule becomes a check first and prose second (E1).\n\nWho acts: the spec lane (`packages/lint`, `packages/spec`). Reader: every author, human or AI, at publish time.\n\n## Evidence\n\n- Flow node `type` is an open string; only three reserved names are refused (`packages/spec/src/automation/flow.zod.ts:683-692`). A node with no executor fails every run with `NO_EXECUTOR`; the engine only logs a warning once the vocabulary is sealed.\n- Approval decisions continue down out-edges labelled `approve` / `reject` (`packages/spec/src/automation/approval.zod.ts:493-511`); the lint checks `revise` edges only (`packages/lint/src/lint-flow-patterns.ts:224-232`).\n- A boolean field marked `required`: no rule in spec or lint. The create form then refuses an unchecked switch.\n- A `state_machine` validation without `initialStates`: the key is optional (`packages/spec/src/data/validation.zod.ts:197`); the lint checks seed rows only.\n- An `http` flow node without `timeoutMs`: optional in the spec (`flow.zod.ts:776`).\n- An action bound to no object: `validateActionLocations` runs on the CLI only (`packages/lint/src/authoring-rules.ts:1804`).\n- The hosted product's own graph check already reports each of these six under a private code, which shows they occur.\n\n## Scope\n\n- Six rules in the authoring registry, runtime publish gate and CLI. The first four and the last are errors; the missing timeout is a warning unless the lane reads it otherwise from the engine.\n- The node-type rule judges against the sealed executor vocabulary, never against a registry still filling at boot.\n- Each finding names the fix. Each rule has a positive and a negative pin.\n- When a rule lands, the matching trap leaves the skills and the hosted rule text (#34690).\n\n## Done when\n\n- Publishing each of six fixture items raises its finding; `examples/app-crm` and the showcase raise none.\n\n## Relations\n\n- Parent: #34659. Ruling: E1 = A, enforce first. These are product rules an author sees at publish, ruled by name, not repository gates.\n- Dedup, open and closed: `NO_EXECUTOR lint flow node type` none; `approval edge label approve reject lint` none."

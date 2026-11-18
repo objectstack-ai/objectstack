@@ -24,11 +24,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:26:49Z",
-  "updated_at": "2026-11-17T19:51:43Z",
+  "updated_at": "2026-11-17T22:45:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34637",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: the `Skills-docs: follow-up` card owed by PR #34619 (Fixes #34579, `Clause-②: yes (widening)`), passed on by area `o2-H` (L1-c D2 on ACCEPT 6938291867). Dedupe: `RESUME_FAILED innerRefusal skill`; no open card.\n\nSuggested-grade: p2 · domain:skills · Blocked-by #34579 (teach the shape only after it lands)\n\n## 维护者速读\n\n- 现象:#34579 让审批通过后下一步被记录钩子拒绝时,`RESUME_FAILED` 错误体带上拒绝码与原文(`innerRefusal`)和钩子声明的那句话(`userMessage`);流程作者在这一步画 fault 边，拒绝就走 fault 分支，流程不卡。教 AI 写审批流程的技能还没讲这两点。\n- 为什么要修：技能不教,AI 写审批后的「改记录」步骤时不会画 fault 边，被钩子拒绝时流程照样卡住，审批人只看到 500。\n- 需要你做的：无(落地时按受管面照常审批)。\n\n## Change\n\nAfter PR #34619 merges, teach in `skills/objectstack-automation/references/state-machines-and-approvals.md`:\n\n1. Draw a `fault` edge on the step after an approval when that step writes a record a hook may refuse; the refusal then takes the fault branch and the decision returns normally.\n2. Without that edge the decision door answers `RESUME_FAILED` (status 500 per the standing ruling), and its body carries `innerRefusal` (code and text) and `userMessage` (the hook's declared end-user sentence) so the approver sees why.\n\nTake the wording from the merged code and approvals docs; do not restate it in a third place. Add one eval that writes an approval flow whose next step updates a record guarded by a refusing hook, and checks the flow draws the `fault` edge.\n\n## Done when\n\nThe reference teaches both points and the eval passes.\n\nBlocked-by: #34579\n"

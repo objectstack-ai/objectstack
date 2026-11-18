@@ -12,17 +12,22 @@
   },
   "labels": [
     "area:ai",
-    "pm:on-hold"
+    "domain:skills",
+    "lease:o3-C",
+    "pm:dispatched",
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:10:07Z",
-  "updated_at": "2026-11-17T10:32:41Z",
+  "updated_at": "2026-11-18T02:06:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34770",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nThe platform is defined by its metadata protocol; a skill that copies option lists and key tables from it drifts from it, and costs the reader's context on every load. A long skill also hides its few critical traps among reference text the model skips.\n\nWho acts: the skills lane (`skills/objectstack-{data,ui,automation}/**` first). Governed surface.\n\n## Evidence\n\n- Each `SKILL.md` is 15–27 KB; the data skill is 174 KB with its rules and references, the UI skill 123 KB; the catalog is about 1.0 MB.\n- Across the vendor sets read, the median `SKILL.md` is 6.6–8.7 KB; Clerk enforces 500 lines / 5,000 tokens in a script; Directus keeps the router near 100 lines with at most about 8 traps inline.\n- In this seat's eval run a case failed because the model invoked the skill and never opened the reference file that held the answer (`objectstack-ui/analytics-inline-vs-dataset#5`).\n- Supabase and Directus skills tell the agent to read the live schema before proposing anything, and say not to re-document tool parameters.\n\n## Scope\n\n- Per skill: `SKILL.md` holds first checks (version, read what exists, read the type's contract), at most about 8 traps that pass the schema and fail at run time, and a routing list to the references. Budget 6–9 KB, hard cap 500 lines.\n- Restated option lists and key tables move behind a pointer to the generated reference index or to the contract a door serves.\n- Start with data, UI and automation; the others follow the same shape in later PRs.\n- No trap is removed until a publish-time check covers it or it stays inline.\n\n## Done when\n\n- The three skills meet the budget; their eval cases pass at least as often as before on the runner card's round.\n- The catalog total falls toward 0.5 MB.\n\n## Relations\n\n- Parent: #34659. Decision record: #34691 S3 = A. Related: the six-checks card (traps that become checks leave the skill).\n- Dedup, open and closed: none found for `SKILL.md size budget`."

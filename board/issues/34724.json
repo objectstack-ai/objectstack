@@ -2,8 +2,8 @@
   "number": 34724,
   "kind": "issue",
   "title": "已安装应用的动作启停：开关搬到 Studio 对应应用的动作条目上，设置里的「打包动作」页退休",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T08:30:48Z",
-  "updated_at": "2026-11-17T13:52:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T22:25:53Z",
+  "closed_at": "2026-11-17T22:25:53Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 11,
   "locked": false,

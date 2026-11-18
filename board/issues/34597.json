@@ -2,8 +2,8 @@
   "number": 34597,
   "kind": "issue",
   "title": "skills/objectstack-query aggregation.md: a zoned date bucket no longer always stays in memory once PostgreSQL buckets it in the database (#33697)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "documentation",
     "domain:skills",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T02:53:58Z",
-  "updated_at": "2026-11-17T05:49:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T00:07:54Z",
+  "closed_at": "2026-11-18T00:06:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34597",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: class a, the `Skills-docs:` debt S2 from the contract-review delta PASS 6936523534 on PR #34530 (card #33697), passed on by area `o2-F`. Dedupe: `aggregation.md timezone`, `zonedDateBucketing`; no open card besides #33697 itself.\n\nreach (read from the file on `main`): `skills/objectstack-query/rules/aggregation.md`, section \"Filtered Aggregation (FILTER WHERE)\", about lines 122–126, says that a date bucket under a non-UTC `timezone` keeps the whole call in memory. Once PR #34530 merges, a driver declaring `supports.zonedDateBucketing` (PostgreSQL through `driver-sql`) pushes a zoned date bucket down to the database, so the sentence becomes false on PostgreSQL. An author or agent reading the skill would expect an in-memory call and the `aggregationFilter` behaviour that goes with it.\n\nSuggested-grade: p2 · `domain:skills` · `pm:blocked`, Blocked-by #33697\n\n## 维护者速读\n\n- 现象：技能文档写「非 UTC 时区的日期分桶整次调用在内存里算」,#33697 合并后 PostgreSQL 会直接在库里分桶，这句话就不对了。\n- 为什么要修：技能是 AI 写应用时读的，写错会让它对性能和过滤行为做出错误判断。\n- 需要你做的：无。\n\n## Change\n\nRewrite that note: a driver declaring `supports.zonedDateBucketing` (today PostgreSQL via `driver-sql`) buckets a zoned date in the database; on every other driver a zoned date bucket still keeps the whole call in memory. Keep the eval case, or add one, that exercises the sentence.\n\n## Done when\n\nThe section matches the driver capability the code reads, and the skill eval for it passes.\n\nBlocked-by: #33697\n"

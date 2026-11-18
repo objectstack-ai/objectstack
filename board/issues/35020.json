@@ -1,0 +1,31 @@
+{
+  "number": 35020,
+  "kind": "issue",
+  "title": "手机端底部菜单栏：当前页面不在底部四项里时没有任何一项高亮，也看不出自己在哪个菜单",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T23:14:32Z",
+  "updated_at": "2026-11-17T23:50:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35020",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-17 原话：「更新最新的代码，验收，并对这些关键核心界面重新进行一轮测试，提出优化改进意见和我沟通。」；看过意见后：「记录页有两个「更多」菜单 p1 …… 其他问题按照你的建议立卡 p2」。\n\n## 现状（界面实测：控制台是 objectstack `origin/main` 4443014630 的构建，zh-CN，2026-11-17；本地 HotCRM 销售应用，375×812，用户没有固定任何菜单项）\n\n- 底部菜单栏是「首页 / 销售主页 / 线索 / 客户 / 更多」（没有固定项时取导航的前 4 项，objectstack-ai/objectstack#34594）。\n- 打开「商机」列表：底部五项都不高亮。顶栏写着「商机」，但底部看不出当前位置属于哪里。\n\n## 要做的\n\n1. 当前页面不在底部四项里时，高亮「更多」。\n2. 「更多」打开的全部菜单里，当前项有选中态。\n\n## 不做的\n\n- 不改底部四项的取法（固定项优先，否则前 4 项）。\n- 不做「按最近使用自动替换底部项」。\n\n## 验收\n\n- 在「商机」列表页，底部「更多」是高亮的；点开后「商机」有选中态。\n- 在「线索」列表页，高亮的是「线索」，「更多」不高亮。\n\nReader: `domain:ui` 车道，底部菜单栏在 `ui/packages/layout/src/AppSchemaRenderer.tsx` 一侧（#34594 的实现）。\n\nDedupe: `repo:objectstack-ai/objectstack is:open 手机 底部 菜单栏 高亮 更多` → 0。"
+}

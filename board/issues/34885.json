@@ -2,8 +2,8 @@
   "number": 34885,
   "kind": "issue",
   "title": "A record an action body inserts (`ctx.api.object(X).insert`) is stored with owner_id null, so on a private object the caller cannot read or update what its own action just created",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "lease:o3-G",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T15:02:00Z",
-  "updated_at": "2026-11-17T19:50:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T21:46:11Z",
+  "closed_at": "2026-11-17T21:45:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34885",
   "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\n## What happens\nOn an object with `sharingModel: 'private'`, a script action run by a non-admin inserts a record through `ctx.api.object(X).insert({...})`. The record is stored with `owner_id = null` and `created_by` set to the caller. The caller then cannot see it: queries come back empty and `get_record` or `update_record` on the returned id answers `404 RECORD_NOT_FOUND`. A raw `create_record` by the same user does stamp `owner_id`.\n\n## Reproduction\n1. Use a private object and a script action whose body inserts into it.\n2. As a non-admin user, `run_action` returns `ok` with an id.\n3. `get_record(id)` → 404.\n4. An admin read shows `owner_id: null` and `created_by` set to that user.\n\n## Seen in (qa#1 routine round 2, scenario half, subject `f6f5b50a`, workspace packages)\n- **travel_expense `file_and_submit_from_text` (Run and Iterate):** the agent re-ran the action, then fell back to raw creates. That left 3 claims (Run) and 2 (Iterate) where the card expects one.\n- **service_desk `log_ticket_from_call` (Run and Iterate):** ticket TK-0121 was stored with `owner_id` null, so the agent's assign call got 404.\n\n## Expected\nA record inserted on the caller's behalf is owner-stamped the same way as a direct create.\n\nFound by: `qa#1` routine round 2, scenario half (round record on #31433)."

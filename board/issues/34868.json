@@ -2,8 +2,8 @@
   "number": 34868,
   "kind": "issue",
   "title": "skills: the ask-data skill's zero-match row reads the `candidates` list once list_datasets fills it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "lease:o3-E",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T14:23:13Z",
-  "updated_at": "2026-11-17T20:07:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T22:18:40Z",
+  "closed_at": "2026-11-17T22:17:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34868",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic). The maintainer set who files this epic's cards, in this session's chat, 2026-11-17, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported to this session by the dispatching seat `repo:objectstack#3` on #34659 (comment 6947907343, repeated in 6948819963); the filer did not re-read the code behind it. It is the `Skills-docs` follow-up PR #34828 names.\n\n## Why\n\nThe published ask-data skill tells a client, on a zero-match, to read the whole catalogue and judge near readings itself. Once the server returns `candidates`, that wording teaches the slower and less reliable path.\n\n## Evidence\n\n- #34685 / PR #34792 wrote the zero-match row before the F1 ruling's server change existed.\n- #34761 adds `candidates` to the output shape; #34763 fills it.\n\n## Scope\n\n- In `skills/objectstack-ask/SKILL.md`: on a zero-match, read `candidates`; when any is listed, ask which is meant, name each candidate's label, dataset and description, and compute nothing; never treat a candidate as a match. With none listed, fall back and say so.\n- The served `/mcp/skill` text says the same (single source, #34686).\n- Its eval cases cover: candidates listed, none listed.\n\n## Done when\n\n- The skill, the served text and the tool description of #34763 state one rule in the same words.\n\n## Relations\n\n- Parent: #34659. Ruling: #34691 F1 = B.\n- Blocked-by: #34763\n- Governed surface: `skills/**`."

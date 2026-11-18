@@ -1,0 +1,36 @@
+{
+  "number": 34998,
+  "kind": "issue",
+  "title": "reading first: travel_expense operation file_and_submit_from_text answers 500 on every attempt — no persona linked to an employee, and a thrown script error reaches the caller as a bare 500",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:34:47Z",
+  "updated_at": "2026-11-17T23:21:18Z",
+  "closed_at": "2026-11-17T23:18:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34998",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, comment 6962937578), from area o3-F's iteration-1 diagnosis of the #34958 / #34951 recordings (travel_expense, template `b7ab31a7`). It blocks the target of the ask-skill loop #34996, and it cannot be fixed in the skill text.\n\n## What happens\nThe build's script action for `file_and_submit_from_text` fails on every rep.\n- **Likely cause:** no seeded employee is linked to a user (\"You have no employee record\").\n- **Separately:** the platform returns a thrown script error to the caller as a **bare 500 with no message**.\n\n## The reading settles two things\n1. Should the seed or the card link a persona to an employee, so the operation can succeed?\n2. Should a script action's thrown error reach the caller as a 4xx carrying its message, rather than a 500?\n   - Related, closed: #34273 (refusal catalogue for person-facing throws) and #34884 (an uncompilable body answering an opaque 500).\n   - If (2) is a platform change, split it out with its own grade.\n\nDone when both are answered, and the matching fixes are made or filed, so the operation is measurable, as the loop's \"operations 100%\" needs.\n\nParent: #34659. Blocks: #34996.\nGrade: **p1 · domain:server · area:ai** (reading first). Theme: MCP / 问数. It blocks the maintainer-requested loop, and a bare 500 tells an MCP agent nothing."
+}

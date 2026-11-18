@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
+    "lease:o3-I",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T17:43:13Z",
-  "updated_at": "2026-11-17T17:49:59Z",
+  "updated_at": "2026-11-18T00:59:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34948",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n**Found by** hotcrm#2617 (expense assistant skills), measured on 18.5.0 in a scratch copy; re-read on objectstack main b8408d8226.\n\n## What happens\n\nA skill that binds `read_file` or `create_upload_link` in `tools[]` gets `ai-skill-tool-unresolved` from `os lint --strict` (\"resolves to no stack, platform or materialised action tool, so the runtime drops it\"). Over MCP the same connection serves both tools, and the receipt round trip works end to end (`create_record` → `create_upload_link` → upload → `read_file` returns the file's facts and the image).\n\n## Why (code)\n\n- `packages/mcp/src/mcp-http-tools.ts:3781` registers `read_file`, `:3867` registers `create_upload_link` (since 18.4).\n- `packages/spec/src/system/constants/platform-tool-names.ts` (`PLATFORM_PROVIDED_TOOL_NAMES`) does not list either name.\n- `packages/lint/src/validate-ai-tool-references.ts` resolves `skill.tools[]` against stack tools, `PLATFORM_PROVIDED_TOOL_NAMES` and materialised `action_*` only, so both names fall through to the warning.\n\n## Effect on a package author\n\nA skill that needs receipts or attachments cannot bind the tools it uses without failing `--strict`, so the author leaves them unbound and names them in the instructions. MCP prompt offering keys on the bound tools, so the skill's real needs are not declared.\n\n## Expected\n\nThe lint universe and the MCP door agree: either the registry lists the file tools the door serves (`read_file`, `create_upload_link`), or the rule resolves against the same set the door registers. A test that holds the two lists equal would keep them from drifting again.\n\n## hotcrm side\n\nhotcrm#2617 ships the skills with both tools unbound and named in the instructions; it binds them once this is released."

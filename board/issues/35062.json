@@ -1,0 +1,31 @@
+{
+  "number": 35062,
+  "kind": "issue",
+  "title": "应用侧栏：收起后完全隐藏，不再留一列没有文字的图标；鼠标移到左边缘时浮出完整菜单",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T00:59:22Z",
+  "updated_at": "2026-11-18T01:47:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35062",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-17 原话：「销售应用侧栏收起后是 20 多个没有文字的图标， 我看到有的软件折叠后已经没有图标了，是否建议。」；看过「建议收起即完全隐藏、左边缘悬停浮出完整菜单」后：「同意」。优先级按同日「其他问题按照你的建议立卡 p2」。\n\n## 现状（界面实测：控制台是 objectstack `origin/main` 4443014630 的构建，zh-CN，2026-11-17；本地 HotCRM 销售应用，1280×800）\n\n- 销售应用的导航有 32 项。侧栏收起后是一列约 48 宽的图标，一屏 20 多个，没有文字，其中几组图标相同（多个仪表盘、多个报表），要逐个悬停才知道是什么。\n- 收起的模式写在 `ui/packages/app-shell/src/layout/UnifiedSidebar.tsx:619`（`collapsible=\"icon\"`）。\n\n## 要做的\n\n1. 收起 = 完全隐藏，内容区占满宽度。\n2. 找回菜单的三种方式：顶栏左侧的切换按钮（现有）；鼠标移到屏幕左边缘时，完整菜单（带文字和分组）以浮层浮出，移开后收回，不改变收起状态；⌘K 搜索（现有）。\n3. 收起 / 展开状态照旧按人记住。\n4. 键盘可达：切换按钮可聚焦，浮出的菜单能用键盘走完并用 Esc 关闭。\n\n## 不做的\n\n- 不改展开状态下的侧栏。\n- 不改手机端（手机用底部菜单栏，objectstack-ai/objectstack#34594）。\n- 不动 Studio 自己的左侧列表（那是 objectstack 上另一张「Studio 右栏打开时主区域自适应」的卡）。\n- 不改 `ui/packages/cli` 生成器里的模板，除非实现者确认它与控制台共用同一个组件行为。\n\n## 验收\n\n- 销售应用里收起侧栏后，左边没有图标列，列表和记录页多出对应宽度。\n- 鼠标移到左边缘，浮出带文字和分组的完整菜单；点一项后跳转，菜单收回，侧栏仍是收起状态。\n- 刷新后保持收起。\n\nReader: `domain:ui` 车道，`UnifiedSidebar.tsx` 与 `ui/packages/components` 的 `Sidebar`（`collapsible=\"offcanvas\"` 已有，见 components 的 CHANGELOG）。\n\nDedupe: `repo:objectstack-ai/objectstack is:open 侧栏 收起 图标 隐藏` → 0。"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 35016,
+  "kind": "issue",
+  "title": "记录页：审批条和记录标题各有一个「更多」菜单；手机上审批锁定时底部主位置是灰掉的「编辑」",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "lease:o3-D",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T23:12:05Z",
+  "updated_at": "2026-11-17T23:51:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35016",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-17 原话：「更新最新的代码，验收，并对这些关键核心界面重新进行一轮测试，提出优化改进意见和我沟通。」；看过意见后：「记录页有两个「更多」菜单 p1 …… 其他问题按照你的建议立卡 p2」。\n\n## 现状（界面实测：控制台是 objectstack `origin/main` 4443014630 的构建，zh-CN，2026-11-17；本地 HotCRM，商机 Wayne Enterprise License，处于「待你审批」）\n\n桌面 1280×800：\n- 页面顶部审批条：「通过」「拒绝」「··· 更多」。\n- 紧接着记录标题行：「生成报价单」「克隆商机」「记录通话」「编辑」（灰）「···」。\n- 同一屏上下两行各有一个「更多」，都是三个点，用户要分别点开才知道各自装了什么。\n\n手机 375×812：\n- 顶部审批条一个「···」，底部操作栏又一个「···」。\n- 底部操作栏的第一个位置是「编辑」，记录被审批锁定时它是灰的，占着主位置却点不了；第二个才是能用的「生成报价单」。\n\n## 要做的\n\n1. 一屏只留一个「更多」。建议：审批条只放审批自己的动作（通过、拒绝，以及转签 / 撤回这类审批动作直接平铺或收在「拒绝」旁的下拉里，带文字「其他审批操作」而不是三个点）；三个点只留给记录标题行。具体形态由实现者定，要求是两处入口从外观上就能区分。\n2. 手机底部操作栏：不可用的动作不占主位置。记录被锁定时「编辑」退到菜单里（或不显示并在审批条上说明「审批中已锁定」），主位置给当前能用的第一个动作。\n3. 手机上同样只留一个「更多」。\n\n## 不做的\n\n- 不改审批条的位置和「通过」「拒绝」的呈现（objectstack-ai/objectstack#34361 已裁决）。\n- 不改应用作者声明的动作顺序本身；只处理「不可用时占主位」。\n\n## 验收\n\n- 待审批的记录页，桌面和手机上各只有一个三个点的菜单；审批的其他操作有文字入口。\n- 手机上记录被审批锁定时，底部第一个按钮是可点的。\n- 没有审批的记录页不受影响。\n\nReader: `domain:ui` 车道，记录页头部动作与审批条（`ui/packages/plugin-detail`、审批条组件），手机底部操作栏见 objectstack-ai/objectstack#34595 的实现。\n\nDedupe: `repo:objectstack-ai/objectstack is:open 记录页 更多 菜单 审批条` → 0。"
+}

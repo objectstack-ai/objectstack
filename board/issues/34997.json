@@ -1,0 +1,36 @@
+{
+  "number": 34997,
+  "kind": "issue",
+  "title": "scenarios grader: the asked-back \"no figure\" check counts list ordinals (1. 2. 3.) and ISO dates in a clarifying reply as figures",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:34:20Z",
+  "updated_at": "2026-11-18T00:49:27Z",
+  "closed_at": "2026-11-18T00:47:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34997",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, comment 6962937578), from area o3-F's iteration-1 diagnosis of the #34958 / #34951 recordings (travel_expense, template `b7ab31a7`). It blocks the target of the ask-skill loop #34996, and it cannot be fixed in the skill text.\n\n## What happens\nIn `packages/qa/scenarios`, the asked-back \"no figure\" check treats option ordinals (\"1. 2. 3.\") and ISO dates (\"2026-11-17\") in a clarifying reply as figures. In reps 2 and 3 of `dq_travel_spend`, the agent asked back correctly and was still graded as failing.\n\n## Done when\n- The check ignores list ordinals and ISO dates in an asked-back reply.\n- It is pinned by a test using those two shapes.\n- The scorecard notes the grader change, so a round before and a round after are not compared as like for like.\n\nParent: #34659. Blocks: #34996.\nGrade: **p1 · domain:devx · area:ai**. A false fail in the grader caps the maintainer-requested loop's asked-back target."
+}

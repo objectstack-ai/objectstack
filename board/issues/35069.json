@@ -1,0 +1,31 @@
+{
+  "number": 35069,
+  "kind": "issue",
+  "title": "cloud: every hosted plan, the free tier included, mounts the approvals capability, so a submitted timesheet, expense report or project can be approved there (hotcrm#2570)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:cloud",
+    "pm:queue",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T01:27:21Z",
+  "updated_at": "2026-11-18T01:51:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35069",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAjTvcDNgUCBhULRSRe\n\nPath: none\n\n**Maintainer ruling.** On the hotcrm decision card for hotcrm#2570 (\"who approves timesheets, expense reports and projects where no approval component is installed\"), Irene picked 「免费版也带上审批」 on 2026-11-18: the hosted free tier ships the approval component too. Her follow-up the same minute: 「给cloud 车道立 p1 卡」.\n\n**Ask (one executable criterion).** Every hosted plan, the free tier included, mounts the `approvals` capability (`@objectstack/plugin-approvals`) for an organization whose installed packages `require` it. On a hosted free-tier tenant with HotCRM 6.5 installed, `GET /api/v1/meta/object` lists `sys_approval_request`. A timesheet set to Submitted opens one pending request for its approver, the project manager, and their decision moves the timesheet to Approved and the project's labor cost.\n\n**Why it is the control plane's.** The self-hosted / community edition already ships approvals: `@objectstack/plugin-approvals` is Apache-2.0 in this repo (`packages/plugins/plugin-approvals`), and `packages/core/src/capability-providers.ts:222` maps the `approvals` token to it. So `objectstack serve` mounts it whenever an app's `requires` names it, and HotCRM's psa, expense and sales packages declare `requires: [..., 'approvals', ...]`. Only the hosted plan leaves it out.\n\n**What a tenant without it sees today** (hotcrm#2570; re-measured on 18.5.0 with a boot that drops `approvals` from `requires` and the provider, `sys_approval_request` absent):\n- Every submission saves as an ordinary success. The flow run then fails at its approval node, `No executor registered for node type 'approval'` (NO_EXECUTOR). This holds for timesheet_approval, expense_report_project_approval, project_initiation_approval and project_budget_approval, and for opportunity_approval on the hosted tenant. Nobody gets an inbox notice.\n- The records stay Submitted / In Approval. The approver (the PM) and the Project Director are refused when they set Approved by hand (403, \"approved or rejected by its approver, from their Inbox\"). Only an org admin can move them, so no project reaches Active without an admin, and project cost, Budget Status and margin stay at zero.\n- `GET /api/v1/approvals/requests` answers 200 `{\"data\":[]}`, and the Inbox nav item is hidden (`requiresObject: 'sys_approval_request'`).\n- The hosted reading (zh-CN tenant, 2026-11-17): `GET /api/v1/meta/object` lists 136 objects and no `sys_approval_*`; the two submission runs failed at `approver_review`.\n\n**Related.** The framework half, a flow failing at a node with no executor reaching nobody and the boot only warning, is objectstack#34959. hotcrm#2570 stays open for its docs and test half once this lands.\n\nFiled at the maintainer's direction 「给cloud 车道立 p1 卡」 (2026-11-18). Grade p1.\n"
+}

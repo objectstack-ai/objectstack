@@ -2,8 +2,8 @@
   "number": 34916,
   "kind": "issue",
   "title": "Inline grid edit stores a boolean field as the text 'true' (SQL driver) — equality filters miss it and requiredWhen reads it as false",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "lease:o3-A",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T16:10:53Z",
-  "updated_at": "2026-11-17T19:44:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T21:45:36Z",
+  "closed_at": "2026-11-17T21:44:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34916",
   "body": "## What (18.5.0, dev SQL driver, measured in a browser)\n\nAn app has a master-detail object whose lines are edited in an inline grid (`inlineEdit: 'grid'`). Each line has a boolean field `won` (成交). Ticking 成交 for a line in the grid and saving:\n\n- succeeds (「已更新」);\n- **stores the value as the text `'true'`** in the database (`typeof` is text), whereas the single-record edit form stores the same field as integer `1`.\n\nConsequences:\n1. **Equality filters miss the row.** A REST read shows `won: true`, but a query filtered on `won = true` returns nothing; `won != false` does find it. The app's flow reads the won lines with `won: true`, finds none, and refuses with 「这笔成交没有勾选任何成交明细」, so the main \"confirm deal\" path is broken whenever the grid was used.\n2. **`requiredWhen` misreads it.** `requiredWhen: record.won == true` evaluates as false for the grid-saved row, so the grid saves 成交=是 with an empty required delivery date. The single-record form correctly refuses (「交期不能为空」).\n\n## Expected\n\nThe grid's save path coerces values by field type exactly as the form and REST paths do, so a boolean is stored as a boolean or integer. Filters and formula or CEL rules then see the same value whichever editor wrote it.\n\n## Workaround in the app\n\nNone in code: we do not work around platform defects. Users are told to tick lines through 更多操作 → 编辑 (the single-line form) until this is fixed."

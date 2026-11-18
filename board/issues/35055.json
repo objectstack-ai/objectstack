@@ -1,0 +1,35 @@
+{
+  "number": 35055,
+  "kind": "pull_request",
+  "title": "test(fields): wait for the schema-typed range bound before asserting its number value",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T00:25:51Z",
+  "updated_at": "2026-11-18T02:11:48Z",
+  "closed_at": "2026-11-18T02:11:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T02:11:46Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35055",
+  "body": "🤖 Generated with [Claude Code](https://claude.com/claude-code)\nhttps://claude.ai/code/session_01WGufzi3ezPzTysQPDEjmVz\n\nPart of #34991\n\nThe card stays open: two sibling test files with the same race (`FilterConditionField.emptyOperators-10790`, `FilterConditionField.builderRows-8748`) follow in a second PR under it (seat order 2026-11-18 00:31Z, claim amendment 6965218495).\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzi3ezPzTysQPDEjmVz\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:只改一个测试文件。两个“已保存的数值区间”用例改为等待带类型的数字输入框(`spinbutton` 角色)出现后再断言 `toHaveValue(5)` / `toHaveValue(1)`。\n- 为什么改:控件先用已保存的值画出区间行,`age` 的 number 类型要等异步的 `getObjectSchema` 返回才生效;在那之前框是文本框,值是字符串 \"5\"。原测试 `findByLabelText` 拿到第一个框就断言,在慢机上与 schema 赛跑,队列构建 44173515593 因此误踢 PR #34955。\n- 风险与回滚:零产品风险,不改任何发布代码;回滚即还原这一个测试文件。断言没有放宽,仍要求数字 5。\n- 先看:`ui/packages/fields/src/widgets/__tests__/FilterConditionField.betweenBlankBound-9914.test.tsx` 的 `findTypedBound` 及两处调用。\n- 两分钟验证:把该文件的 `getObjectSchema` 改成延迟 300ms 返回后跑 `pnpm --filter @object-ui/fields exec vitest run --root ../.. packages/fields/src/widgets/__tests__/FilterConditionField.betweenBlankBound-9914.test.tsx`,预期 14/14 通过(修复前同样改动会在 :174 报 `5 (string)`)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nThe stored-criteria `between` tests asserted a typed value straight after `findByLabelText`. `FilterConditionField` seeds the row from the stored value at once, but `age` is typed `number` only when the async `getObjectSchema` answers; until then `FilterBuilder` draws the bound as a text box holding `\"5\"`. The test now waits for the typed box itself (`findByRole('spinbutton', { name })`), via one helper `findTypedBound`, in both tests of this file that had the race (`:174` `To`, and `:198` `From` in the blank-bound migration test).\n\nNo skip, no retry, no quarantine; `toHaveValue(5)` and `toHaveValue(1)` are unchanged.\n\nWidget reading: after the schema lands the bound IS a number input showing the number, so no product change and no changeset. The untyped text box exists only in the window before the schema answers (see Acceptance notes).\n\n## Tests\n\n<details><summary>Reproduction: schema resolution delayed 300 ms (fails before, passes after)</summary>\n\nMutation landed with `scripts/ablation-replace.mjs` (anchor hit 1, blob changed, restored to HEAD blob, `git diff HEAD` empty), on the test-only anchor `getObjectSchema: async () => OBJECT_SCHEMA` replaced by a 300 ms `setTimeout` promise.\n\n- Leg A, test as on base 444301463 plus delay: `Tests 2 failed | 12 passed (14)`. `:174 expect(element).toHaveValue(5)` Expected `5 (number)`, Received `5 (string)`, the queue signature exactly; and `:198 toHaveValue(1)` Received `1 (string)`.\n- Leg B, test at 6dffff81d plus delay: `Test Files 1 passed (1)`, `Tests 14 passed (14)`.\n\n</details>\n\n<details><summary>Package and neighbours at 6dffff81d</summary>\n\n- `@object-ui/fields` package (`vitest run --root ../.. packages/fields/`, under os-verify-lock): `Test Files 307 passed | 1 skipped (308)`, `Tests 4651 passed | 7 skipped (4658)`, VERDICT command-exit 0.\n- The six `FilterConditionField*` files: `Test Files 6 passed (6)`, `Tests 128 passed (128)`.\n\n</details>\n\n## Acceptance notes\n\n- Same race, other file, not changed here (scope is this file): with the same 300 ms delay, `FilterConditionField.emptyOperators-10790.test.tsx` fails 6 tests (`findByDisplayValue('5')` then an edit expects `\"amount\":6`, receives `\"amount\":\"6\"`), and `FilterConditionField.builderRows-8748.test.tsx` fails 1 (`findAllByRole('combobox')` then `toHaveTextContent('Name')`, receives empty). Both are latent copies of this flake.\n- Widget behaviour in the pre-schema window: an edit typed into a number bound before `getObjectSchema` answers is emitted untyped (the emptyOperators probe above emits `\"amount\":\"6\"`). Measured only through the unit harness; not reached through a running app.\n- Type check of the test project (`type-check`) and the full UI farm are left to CI (`Type Check UI`, `Test UI`).\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands, 27 commands)</summary>\n\nAll 26 non-vitest commands exit 0 at 6dffff81d (one `check:type-check-debt` first run exited 3 while queued behind a held lock; rerun exit 0, `0 raw tsc error(s) total`). `pnpm --dir ui exec vitest run scripts/` (under os-verify-lock): `Test Files 171 passed | 2 skipped (173)`, `Tests 5077 passed | 2 skipped (5079)`, VERDICT command-exit 0. `dispatch-gates --ran`: 27 derived, 27 run, 0 NOT-MEASURED (a derived zero, every line carries its exit code).\n\n</details>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufzi3ezPzTysQPDEjmVz)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzi3ezPzTysQPDEjmVz -->\n\n"
+}

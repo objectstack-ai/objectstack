@@ -1,0 +1,33 @@
+{
+  "number": 34999,
+  "kind": "pull_request",
+  "title": "fix(approvals): a recall or subflow-parent strand reports the hook refusal that stranded the run",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:37:26Z",
+  "updated_at": "2026-11-17T23:19:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/34999",
+  "body": "Fixes #34638\n\nClause-②: yes\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：审批「撤回」这扇门，以及子流程把父流程卡住的那条路，以前在成功响应里用 `resumeFailure` 报告「运行卡住了」，但不带原因。现在 `resumeFailure` 带上 `innerRefusal`（拒绝码与原文）和 `userMessage`（钩子声明的、按调用方语言给用户看的那句话），与决策门抛出的 `RESUME_FAILED` 用同样的字段名和形状。\n- 为什么改：同一种「被钩子拒绝而卡住」，从决策门进来能看到原因，从撤回门或子流程进来却看不到，审批人只知道卡住、不知道为什么。\n- 风险与回滚：只新增两个可选字段（拒绝时才出现，故障时不出现），`code` / `repairable` 的读法不变；是对已发布类型 `ResumeFailureReport` 的放宽（`Clause-②: yes`），落地前欠一次契约审核。回滚即 revert。\n- 先看：`packages/spec/src/contracts/approval-service.ts`（`ResumeFailureReport` 两个新字段与文档块）、`packages/plugins/plugin-approvals/src/approval-service.ts`（撤回门与子流程父流程的填充点）、`packages/services/service-automation/src/engine.ts`（`takeSubflowParentStrand` 带回拒绝）。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-approvals exec vitest run src/resume-failure-refusal.test.ts`，预期全部通过。\n- 需要你做的：无，席位落地；落地前席位路由一次契约审核（L2）。\n\n## What changes\n\nWhen an approval decision strands its flow run because the next step was refused (a record hook's declared refusal, a validation rule, a permission), the thrown `RESUME_FAILED` already carries `innerRefusal` and the refusal's marked `userMessage` (#34579, PR #34619). Two doors report a stranded run on a success answer instead, through `resumeFailure`: the recall door, whose own resume stranded, and a subflow parent that stranded after the run this door resumed advanced (through `decide` and through `recall`). Those reports carried `code`, `runId`, `status` and `repairable` only.\n\n- `ResumeFailureReport` (`packages/spec/src/contracts/approval-service.ts`) gains two optional members, `innerRefusal` (`{ code, message }`, the engine's `AutomationResult.innerRefusal`) and `userMessage`. The names and shapes are the thrown `RESUME_FAILED`'s. Both are absent when the strand met no refusal. `ResumeFailureDetailsSchema` is unchanged: on the resume door these members already ride the error envelope.\n- `packages/services/service-automation/src/engine.ts`: `takeSubflowParentStrand` returns the stranded parent's `innerRefusal` / `userMessage` beside `runId`, `repairable` and `error`, read from the parent's own result (`inner-refusal.ts` docblock kept true).\n- `packages/plugins/plugin-approvals/src/approval-service.ts`: the recall door's own strand, the batch resume's strand and the subflow-parent sites (now built by one helper) fill both members when the strand met a refusal.\n- `scripts/engine-double-contract.pinned.json`: the gate-required ledger row for the new test's engine double.\n\n## Tests\n\n- `packages/plugins/plugin-approvals/src/resume-failure-refusal.test.ts` (new): recall into a refusing hook, and the subflow-parent strand through `decide` and `recall`, each carry `innerRefusal` and the marked `userMessage`; a CONTROL strand that met no refusal carries neither (absent, not empty).\n- `packages/services/service-automation/src/resume-failure-refusal.test.ts` (new): the engine's subflow-parent strand carries the parent's refusal.\n- `packages/spec/src/contracts/resume-failure-report.pin.test.ts`: the type pin restated for the two optional members.\n\n## Acceptance notes\n\n- Opened by the seat on the maintainer's order (「#34638、#34756 由席位代开 PR」): the cloud dev session `session_012MmDsNmJFXm6DALa3xPdkp` pushed this branch, and its own permission classifier refused its relay `pr_create`. This body is the seat's, written from the pushed commits and changeset.\n- The dev's open question, where the pair is declared, goes to the contract review: on `ResumeFailureReport` only (as pushed; the contracts interface), or on `ResumeFailureDetailsSchema` (the shared zod schema). The dev recommends the former, so nothing is declared that a channel does not fill.\n- Out of the claim's listed surface: `inner-refusal.ts` (a docblock in the same package) and `scripts/engine-double-contract.pinned.json` (written by the gate's `--write`).\n\n## Verification\n\nReported by the dev at 9b417c94 (origin/main e9f65a3b merged in): spec, service-automation and plugin-approvals typecheck exit 0; plugin-approvals 123 / 123 files, 1731 / 1731 tests; service-automation 288 / 288 files, 4134 / 4134 tests; spec 848 / 848 files; `dispatch-gates --commands` 103 derived, 103 run, all exit 0; overlap-check clean. Ablations: the recall spread removed (2 red), the pair removed from the parent-strand helper (4 red), the engine carry removed (the engine pin red, and after a rebuild the approvals pins 4 red); controls held. CI on this PR is the seat's to read.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012MmDsS4GoHCgYwA2uv3n3C)_\n\n<!-- signed: repo:objectstack#4 · os-lizheng · session_012MmDsS4GoHCgYwA2uv3n3C -->\n"
+}

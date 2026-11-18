@@ -2,8 +2,8 @@
   "number": 34740,
   "kind": "issue",
   "title": "console zh-CN: the list filter's empty state is a hard-coded \"No options\", and an object opened by URL without read access must be worded neutrally (split from #34699)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "domain:ui",
     "finding",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T09:19:53Z",
-  "updated_at": "2026-11-17T18:32:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T21:38:43Z",
+  "closed_at": "2026-11-17T21:37:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34740",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: split from #34699 (zh-CN: platform-authored refusals and console strings still answer in English) by its card thread's premise reading on `origin/main` `f6f5b50a` (rows 6 and 8 of that reading; the server rows stay on #34699). Dedupe: `UserFilters No options`, `object no access wording`; no open card.\n\nSuggested-grade: p1 (inherits #34699) · domain:ui\n\n## 维护者速读\n\n- 现象：中文界面里，列表筛选器的空状态写死成英文「No options」;用网址直接打开一个没有读权限的对象时，控制台的措辞会说成「无权访问」,这等于告诉用户这个对象存在。\n- 为什么要修：前一条是中文体验缺口；后一条和既有裁决 6787890900(对无读权限的对象，元数据门回答得和不存在的名字一模一样，不透露存在性)冲突。\n- 需要你做的：无(分诊定级)。\n\n## Change\n\n1. `ui/packages/plugin-list/src/UserFilters.tsx:957`: the empty state is a hard-coded `No options`; route it through `t()` with a key zh-Hans already translates (`fields.options.empty` or `lookup.noOptions`, whichever matches the meaning), with a pin.\n2. The console's wording when an object opened by URL is answered as absent: use a neutral sentence (\"does not exist, or you have no access\", as `rescheduleNotFound` already says), translated, so it never asserts the object exists (ruling 6787890900; `runtime/src/domains/meta.ts` `maskObjectSchema`).\n\n## Done when\n\nBoth strings read in Chinese under zh-CN, and the object wording does not distinguish an unreadable object from a missing one.\n"

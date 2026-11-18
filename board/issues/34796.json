@@ -2,8 +2,8 @@
   "number": 34796,
   "kind": "issue",
   "title": "Studio 自动化栏与界面栏：节点和视图的属性面板先标签后内部名，删除收进菜单，导航项类型用中文",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "lease:o3-C",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:53:57Z",
-  "updated_at": "2026-11-17T13:19:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T23:49:49Z",
+  "closed_at": "2026-11-17T23:48:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34796",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「studio 主要的常用界面也综合评估，看如何优化。」；看过图 21、22 后：「可以，立卡」。 追问：「studio 其他界面看了吗？不用改吗」。\n\n与同批的数据栏卡（字段属性面板）是同一条规则用在另外两栏：面板第一项是用户起的名字，内部名默认收起，删除不做成最显眼的按钮。没有单独的设计图，面板的目标样式参照图 21 右栏。\n\n## 现状（界面实测：本地 cloud 环境，objectstack `origin/main` a34eb0716a 的控制台，自建应用「会议纪要」，窗口宽 1280，zh-CN，2026-11-17）\n\n自动化栏（新建一个「新建记录时」的流程，加一个「更新记录」节点）：\n\n- 节点属性面板第一项是「ID」（`node_1`），第二项才是「标签」。\n- 「对象」下方直接显示内部名 `ti8v_meeting`；说明文字是「目标为启动此流程的那条 ti8v_meeting 记录」「ti8v_meeting 的字段」，并出现「CEL 表达式」「recordId」。\n- 面板底部固定一个整行的「删除节点」按钮（`ui/packages/app-shell/src/views/metadata-admin/inspectors/FlowNodeInspector.tsx:789`）。\n- 新建对话框标题是「新建自动化」，第一个输入框却叫「流程名称」，左栏叫「自动化」。\n- 做得好、请保留的：标识由名称自动生成；对象选择里本应用的对象排在前面；触发方式是四句人话。\n\n界面栏（选中「会议 / 默认视图」，点一下列头）：\n\n- 视图属性面板标题下直接是 `ti8v_meeting.default`，接着一段讲机制的话：「还没有列表视图「默认视图」。在这里做的第一次修改会在本包的草稿中创建它。」\n- 「列」清单每行右边是内部名（`meeting_name`、`meeting_date` …），与显示名同样醒目。\n- 导航编辑态里每一项的类型标签是英文 `object`；「待办状态看板」在左栏列表里标的是「视图」，进了编辑态也标 `object`。\n\n## 要做的\n\n1. 流程节点属性面板：「标签」排第一；「ID」收进默认折叠的「开发者信息」。\n2. 节点面板里的对象与字段一律用显示名（「目标为启动此流程的那条「会议」记录」）；内部名只在「开发者信息」或悬停提示里。「CEL 表达式」改成「公式」并保留「了解更多」链接。\n3. 「删除节点」从面板底部移到标题栏的「···」菜单；画布上选中节点按 Delete 的行为不变。\n4. 新建对话框的第一个输入框改叫「自动化名称」，与标题、左栏一致。\n5. 视图属性面板：标题下不显示 `对象.视图` 形式的内部名；「第一次修改会在草稿中创建它」这段缩成一句「改动先存为草稿」，或并入面板底部已有的那句。\n6. 「列」清单里内部名改为悬停提示。\n7. 导航编辑态的类型标签用中文（对象 / 视图 / 仪表盘 / 页面 …），并与左栏列表里的类型一致。\n\n## 不做的\n\n- 不改流程画布、节点种类、触发方式和发布流程。\n- 不改「界面」栏点列头即选中的交互（objectui#12725）。\n- 右栏 AI 面板里的「正在讨论：flow · xin_huiyi_tixing」归 objectstack-ai/objectstack#34725 第 6 条，不在本卡。\n\n## 验收\n\n- 选中一个流程节点，面板第一项是标签；不展开「开发者信息」看不到 `node_1` 和 `ti8v_meeting`。\n- 面板底部没有「删除节点」，「···」里有。\n- 新建对话框里没有「流程名称」这个叫法。\n- 界面栏选中一个视图，面板里看不到 `ti8v_meeting.default`；列清单不常显内部名。\n- 导航编辑态没有英文 `object`；看板项标「视图」。\n\nReader: `domain:ui` 车道，改 `ui/packages/app-shell/src/views/metadata-admin/inspectors/FlowNodeInspector.tsx`、`ui/packages/app-shell/src/views/studio-design/ObjectListViewInspector.tsx`、`StudioNavItemInspector.tsx` 与导航编辑态、`ui/packages/i18n/src/namespaces/studio/`。界面栏两处组件名是按文件名推断的，以实际渲染的组件为准。\n\nDedupe: `repo:objectstack-ai/objectstack Studio 流程 节点 属性 ID` → 0（未关）。"

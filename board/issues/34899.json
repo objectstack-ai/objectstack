@@ -2,8 +2,8 @@
   "number": 34899,
   "kind": "issue",
   "title": "Delete: the set_null walk's clear of a readonly lookup is stripped by the read-only rule, so rows keep the deleted record's id",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "lease:o3-G",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T15:25:55Z",
-  "updated_at": "2026-11-17T19:04:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T20:32:37Z",
+  "closed_at": "2026-11-17T20:31:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34899",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nFound by the hotcrm lane's probe for hotcrm#2618 (report: hotcrm#2618 comment 6952320824) on @objectstack 18.5.0, local SQLite. Read in code on objectstack `main` fc5913e117.\n\n## What happens\n\nA lookup `crm_time_entry.crm_billing_milestone` declared `readonly: true` (default `deleteBehavior`, so `set_null`). An admin deletes the referenced `crm_billing_milestone` row: the delete answers 200, and the time entries still hold the deleted row's id. The server logs `Field 'crm_billing_milestone' on 'crm_time_entry' is read-only: the caller-supplied value was DROPPED and the update is being COMMITTED WITHOUT IT`. Discriminator: the same delete with the lookup **not** readonly clears it to null.\n\n## Why, in code\n\n- `packages/objectql/src/engine-cascade-planning.ts` ~1145–1183: the walk writes the clear with `this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx })`, where `referentialCtx` is the caller's context plus `__referentialFieldClear: true`. It is not `isSystem`.\n- `packages/objectql/src/validation/rule-validator.ts`: the read-only strip runs on `!context.isSystem` (doc ~2054, message `readonlyStripWarning` ~2790). Nothing in the strip reads `__referentialFieldClear` (grep: the marker is read only in `engine-middleware-and-context.ts` and `engine-master-detail-related.ts`).\n\nSo the engine's own referential cleanup is treated as a forged caller write and dropped.\n\n## Consequence\n\nA dangling id survives every delete of a referenced row whenever the lookup is readonly, which is the normal shape for a stamp a system writes (here: \"billed on\" a plan step). The row then looks linked forever: in hotcrm's design, entries billed on a deleted step look billed and are never billed again. Not cross-package specific.\n\n## Asked\n\nThe referential clear written by the delete walk passes the read-only strip (it is the engine's write, not the caller's). Pin it with a test: readonly lookup, delete the target, the reference reads null.\n\n## Done when\n\nDeleting a record clears every `set_null` reference to it, readonly or not, and no read-only DROPPED line is logged for that clear."

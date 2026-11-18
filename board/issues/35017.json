@@ -1,0 +1,36 @@
+{
+  "number": 35017,
+  "kind": "issue",
+  "title": "首页：「在 AI 助手里使用本系统」的卡片排在问候语之前，手机上占掉首屏约四分之一",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T23:12:59Z",
+  "updated_at": "2026-11-18T02:08:48Z",
+  "closed_at": "2026-11-18T02:08:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35017",
+  "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-17 原话：「更新最新的代码，验收，并对这些关键核心界面重新进行一轮测试，提出优化改进意见和我沟通。」；看过意见后：「记录页有两个「更多」菜单 p1 …… 其他问题按照你的建议立卡 p2」。\n\n## 现状（界面实测：控制台是 objectstack `origin/main` 4443014630 的构建，zh-CN，2026-11-17；本地 HotCRM 首页）\n\n- 桌面 1280×800：首页第一块内容是「在 AI 助手里使用本系统」卡片（带「连接 AI 助手」按钮和关闭），在「下午好，…」问候语和「我的应用」之上。\n- 手机 375×812：这张卡片正文被挤成 5 行，连同标题占首屏约四分之一，「我的应用」被推到屏幕中部以下。\n- 卡片可以关闭，连接过之后也不再显示（`home.connectAssistant.*`，见 `ui/packages/app-shell/CHANGELOG.md` 对应条目）。问题只在它的位置和手机上的大小。\n\n## 要做的\n\n1. 位置：放到「我的工作」之后（或「我的应用」之后），不排在问候语和应用之前。\n2. 手机上缩成一行：图标 + 标题 + 「连接」按钮 + 关闭；正文收掉或点开再看。\n\n## 不做的\n\n- 不改显示条件（未连接才显示、关闭后记住）。\n- 不动首次设置清单里的同名条目。\n\n## 验收\n\n- 桌面首页第一屏从上到下是问候语、我的应用、我的工作，然后才是这张卡片。\n- 375 宽下卡片高度不超过 64px 左右的一行。\n\nReader: `domain:ui` 车道，首页（`ui/packages/app-shell` 里渲染 `home.connectAssistant` 的位置）。\n\nDedupe: `repo:objectstack-ai/objectstack is:open 首页 连接 AI 助手 卡片 位置` → 0。"
+}

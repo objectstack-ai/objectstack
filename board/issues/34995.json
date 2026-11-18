@@ -1,0 +1,36 @@
+{
+  "number": 34995,
+  "kind": "issue",
+  "title": "mcp: the stdio object resources serve labels and descriptions in the workspace default locale, as the object tools now do",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-17T22:29:40Z",
+  "updated_at": "2026-11-18T02:19:36Z",
+  "closed_at": "2026-11-18T02:18:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/34995",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic); the maintainer set who files this epic's cards, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported by the dispatching seat `repo:objectstack#3` on #34659 (comment 6953983684), from area o3-G's PR #34922 on #34872; the filer did not re-read the code behind it.\n\n## Why\n\nThe same object is described to a client in two places. After #34872 the two tools answer in the caller's language; the two resources still answer in the language the author wrote. A client that reads the resource sees English for an app the tools describe in Chinese.\n\n## Evidence\n\n- Per the report: `objectstack://objects` and `objectstack://objects/{name}` (`packages/mcp/src/mcp-server-runtime.ts`, `buildObjectListResource` and `buildObjectSchemaResource`) serve the authored text; PR #34922 localizes `list_objects` and `describe_object` only.\n\n## Scope\n\n- Both resources go through the same `translateMetaList` path the tools use, with the i18n default locale on stdio as #34787 did for datasets. No second translation routine.\n- A pin: a translated label in the resource under a workspace default locale, the authored one without.\n\n## Done when\n\n- A resource read and a tool call for the same object return the same labels.\n\n## Relations\n\n- Parent: #34659. Related: #34872 (PR #34922), #34787."
+}

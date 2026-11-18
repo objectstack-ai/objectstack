@@ -1,0 +1,30 @@
+{
+  "number": 35050,
+  "kind": "issue",
+  "title": "console: New from a related list fills only the relationship field — the parent's lookupAutofill does not run on that prefill, and the picker's \"+ New\" does not seed its dependsOn parent",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T00:10:45Z",
+  "updated_at": "2026-11-18T00:48:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35050",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n**Found by** hotcrm#2598 (bundle PR hotcrm#2628), measured on 18.5.0.\n\n1. From an opportunity, Related → Quotes → New opens a quote with **Opportunity** filled and **Account** empty, although `crm_quote.crm_opportunity` declares `lookupAutofill` copying the opportunity's account. The autofill runs when a person picks the opportunity, not when the related list pre-fills it, and the related-list props have no prefill key an app could use to pass more fields.\n2. In the Opportunity picker on that quote, **+ New Opportunity** opens a blank opportunity even though the picker `dependsOn` the quote's Account; the new record is not seeded with the parent the picker is filtered by.\n\n**Expected:** a related-list prefill runs the same `lookupAutofill` as a pick (`packages/spec/src/data/field.zod.ts` ~2339, #27945), and a picker's \"+ New\" seeds the `dependsOn` value it filters by. hotcrm makes no workaround."
+}

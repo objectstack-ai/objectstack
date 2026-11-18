@@ -2,8 +2,8 @@
   "number": 34933,
   "kind": "issue",
   "title": "Page header actions show no in-flight state: a click on a slow action (e.g. Convert Lead) leaves the button live and silent until the dialog or result arrives",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T16:40:46Z",
-  "updated_at": "2026-11-17T19:13:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T21:51:07Z",
+  "closed_at": "2026-11-17T21:49:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34933",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\nFound by the hotcrm lane on @objectstack 18.5.0 during hotcrm#2432 (row 7, \"a silent lead-conversion open\"; readings in hotcrm#2432 comment 6946609306). Read in code on objectstack `main` fc5913e117.\n\n## What happens\n\nOn a lead's record page, a click on the header action **Convert Lead** gives no feedback while the action loads its dialog: the button stays enabled and unchanged, nothing says work is under way, and a user clicks again.\n\n## Why, in code\n\n`ui/packages/components/src/renderers/layout/containers.tsx` ~2636–2660: the header action `Button` takes `disabled={isActionDisabled(action)}` (inline-edit lock or the declared `disabled`) and its `onClick` fires `void action.onClick()` or `dispatchHeaderAction(action)` without awaiting it. No pending state is kept, so the button is neither disabled nor marked busy (`aria-busy`, a spinner) between the click and the result.\n\n## Asked\n\nWhile a header action's click is in flight, the button shows it (disabled plus a spinner or `aria-busy`) and ignores further clicks; it returns to normal when the dialog opens or the action settles, success or failure. The same for the mobile action bar face, which shares this renderer.\n\n## Done when\n\nClicking Convert Lead on a slow environment shows a busy button at once, a second click does nothing, and the button is normal again once the dialog is open."

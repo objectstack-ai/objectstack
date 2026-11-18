@@ -1,0 +1,32 @@
+{
+  "number": 35075,
+  "kind": "issue",
+  "title": "Queue-flake anchor: packages/qa/scenarios/test/skill-evals/skill-evals.test.ts — '--regrade grades an old answer only against the case that ran' times out at 5000 ms under queue load",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2",
+    "queue-flake-anchor"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T01:45:23Z",
+  "updated_at": "2026-11-18T01:45:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35075",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nQueue-flake anchor, filed by triage (R1208).\n\n## Hits (Test Core, `@objectstack/scenarios`)\n- 2026-11-17 20:50Z: #34752's merge group, run 44173524776, Test Core 7/10.\n- 2026-11-18 01:07Z: #34709's merge group, run 44213369286, Test Core 7/10.\n\nBoth fail the same case, `skill-evals.test.ts` › \"--regrade grades an old answer only against the case that ran\" › \"the command: a reworded case keeps its recor…\", with **Test timed out in 5000ms**. Neither PR touches `packages/qa/scenarios`.\n\n## Reading\nThis is one root: a case that shells out to the `skill-evals` command (from #34764 / #34841), running against vitest's default 5 s timeout, under full-queue load. It is the same class as #34834's LIT case.\n\n## Done when\nEither give the case a timeout sized from a measured CI duration, with the measurement in a comment, or make the case cheaper (call the regrade function in process instead of spawning the command). Then pin it, and check it under `--repeat` locally.\n\nGrade: **p2 · domain:devx** under the queue-flake rule (#34152): one independent root, so p2 and no jump, even across two heads. It is raised to p0 only if a second, independent root appears."
+}

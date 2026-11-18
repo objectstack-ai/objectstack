@@ -2,8 +2,8 @@
   "number": 34818,
   "kind": "issue",
   "title": "流程设计器：发布前就能在「问题」页签看到检查结果；连线条件可视化填写；审批节点自带通过 / 驳回出边；补齐未翻译文案",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T11:33:14Z",
-  "updated_at": "2026-11-17T16:41:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-17T21:45:08Z",
+  "closed_at": "2026-11-17T21:45:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34818",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「把流程设计器剩下的部分也走一遍」。\n\n与 objectstack-ai/objectstack#34796（节点属性面板先标签后内部名、删除收进菜单）互补，那张卡管面板的排布，本卡管设计器的流程本身。没有设计图。\n\n## 现状（界面实测：本地 cloud 环境，objectstack `origin/main` a34eb0716a 的控制台，自建应用「会议纪要」，窗口宽 1280，zh-CN，2026-11-17）\n\n做法：新建「新建记录时」的流程，依次加「更新记录」「条件分支」「审批」三个节点，都不填配置，看「变量 / 运行 / 问题 / 调试」四个页签，然后发布。\n\n1. **「问题」页签说没有问题，发布之后才报。** 三个节点都没配完时，「问题」页签写「没有问题 —— 该流程结构有效。」（`engine.flowProblems.empty`，`ui/packages/app-shell/src/views/metadata-admin/previews/flow-problems.ts`）；发布抽屉里也没有任何提示。点「全部发布」后发布成功，随后弹出一条提示：「已发布 — 编辑检查提出了 2 条建议」，正文是两条检查的原文，带规则号 `[approval-approvers-may-resolve-empty]`、`[flow-decision-unconditional-branch]`，内部名 `xin_huiyi_tixing`、`node_2`、`node_3`，第二条整段英文（\"gates on NOTHING … the gateway is decoration …\"，出自 `packages/lint/src/lint-flow-patterns.ts`）。提示消失后界面上找不到这两条。\n2. **连线条件只能写公式。** 条件分支的每条出边只有一个输入框「CEL 表达式 —— 为真时走此连线」（`engine.inspector.flowEdge.conditionHint`）。旁边的引用选择器先列 `record.organization_id`、`record.created_at` 等平台字段，业务字段排在最后，主文字是内部路径，显示名是右侧小字。同一个设计器里「更新记录」节点的「筛选」已经是「添加条目」的逐行填写。\n3. **审批节点要用户自己接线。** 插入审批节点后只有一条普通出边，面板说明写「为节点的出边打上 \"approve\" 和 \"reject\" 标签」。不打标签也能发布，发布检查没有提到这一点。\n4. **面板里有未翻译的整段英文**（都在 `ui/packages/app-shell/src/views/metadata-admin/inspectors/flow-node-config.ts`）：条件分支的「Branch mode」及其说明；审批的「Resolve as」「If no approver resolves」及其说明、选项「Hold for admin takeover (default)」、分组占位「legal / finance — for per-group…」；中文说明里夹着 `quorum`、`per_group`。\n5. **调试页签放不下。** 1280 宽、右栏展开时，画布、调试面板、右栏三栏并排，调试面板约 150px，工具栏「运行 / 单步 / 继续 / 重置」和状态徽标被裁掉一半。右栏此时显示的还是之前选中节点的属性，与调试无关。\n6. **变量页签是死胡同。** 只有一句「未声明变量。」，没有新增入口。\n7. **保存提示盖住标题栏。** 每次自动保存弹「已保存 新会议提醒 的草稿」，位置正好压在流程标题栏的状态徽标、启用开关和工具图标上，连续编辑时这一行一直被盖着。\n8. **运行页签的空状态把两种情况说成一句**：「运行历史不可用 —— 自动化引擎已离线,或此流程尚未发布。」未发布的流程应只说未发布。\n\n做得好、请保留的：调试是纯模拟，走到审批会停下等决策；节点菜单带搜索和「最近使用」；连线中间和节点下方都能插入节点。\n\n## 要做的\n\n1. 发布检查（`packages/lint` 里针对流程的规则）在设计时就跑：结果进「问题」页签，点一条定位到对应节点；有结果时页签名带计数。发布抽屉里同样列出，用户确认后再发布。发布后的提示只留一句结果。\n2. 检查结果面向搭建者改写：用流程和节点的显示名，不带规则号和 `config.conditions[]` 这类写法，各语言都有译文。规则号可放在「了解更多」里。\n3. 连线条件默认用「字段 / 运算符 / 值」逐行填写（复用更新记录节点筛选的组件），可切到公式；引用选择器业务字段在前、显示名为主。\n4. 插入审批节点时自带「通过」「驳回」两条已打好标签的出边；缺任一条时在「问题」页签报出来。\n5. 补齐 `flow-node-config.ts` 里未翻译的标签、说明、选项和占位符；`quorum`、`per_group` 换成中文说法。\n6. 进入「调试」页签时右栏让位：调试面板占用右栏的位置，离开调试再还原。\n7. 「变量」页签加「新增变量」，空状态说明变量用来做什么。\n8. 自动保存不弹提示，改为标题栏状态徽标上的「已保存」；只有保存失败才弹。\n9. 运行页签：未发布时写「发布并启用后，这里显示每次运行的记录」；引擎不可用另写一句。\n\n## 不做的\n\n- 不改流程的元数据结构和引擎行为；第 4 条只是设计器在插入时多建两条边。\n- 不改发布检查的规则本身和它们的严重级别。\n- 节点属性面板的字段顺序、内部名、删除按钮归 #34796。\n\n## 验收\n\n- 重复上面的做法：发布前「问题」页签列出条件分支没有条件、审批人可能解析为空这两条，点击能定位节点；发布抽屉里也看得到。\n- 两条的文字里没有 `node_2`、`xin_huiyi_tixing`、规则号和英文段落。\n- 不写公式能配出「会议日期 晚于 今天」这样的分支条件。\n- 新插入的审批节点有「通过」「驳回」两条出边。\n- zh-CN 下节点面板没有英文标签或英文说明。\n- 1280 宽下调试工具栏四个按钮和状态都完整可见。\n- 连续改三处配置，标题栏不被提示盖住。\n\nReader: `domain:ui` 车道为主（`ui/packages/app-shell/src/views/metadata-admin/previews/flow-problems.ts`、`inspectors/flow-node-config.ts`、`inspectors/FlowNodeInspector.tsx`、流程连线面板、`ui/packages/i18n/src/namespaces/studio/`）；第 1、2 条要把 `packages/lint` 的流程规则接到设计时并改写文案，涉及 `packages/lint/src/lint-flow-patterns.ts`、`validate-approval-approvers.user-text.ts`、`rule-explanations.ts`。范围大，可按「检查前移（1、2）/ 条件与审批（3、4）/ 其余」拆 PR。\n\nDedupe: `repo:objectstack-ai/objectstack 流程设计器 问题 页签 发布 建议`、`flow designer condition builder CEL edge` → 0（未关）。"

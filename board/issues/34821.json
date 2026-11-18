@@ -21,11 +21,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T11:42:14Z",
-  "updated_at": "2026-11-17T11:44:23Z",
+  "updated_at": "2026-11-17T21:25:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34821",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ②: follow-ups of PR #34709 (Fixes #34465): two contract-review nits (comment 6943284591) and one out-of-scope finding from the dev report (6946193985). Dedupe: `bulk insert accumulator roll-up formula`; no open card.\n\nSuggested-grade: p2 · domain:server · bug · Blocked-by #34465\n\n## Items\n\n- Insert arm (finding): in the bulk-insert accumulator that landed with PR #34612 (#34466), the overlay patches only the roll-up summary field itself. A validation or trigger rule that reads a parent formula or stored computed field built on that roll-up still reads the stored value inside a bulk insert. This is the shape PR #34709 fixed on the predicate-update door (its L2 S1: recompute those fields over the folded values on the read path's own formula plan); the insert door needs the same.\n- N3 — the update fold replaces the stored roll-up with a base aggregated from the children even for row 0 and when the patch touches no foreign key, source field or filter field of the roll-up. An update that cannot move the roll-up could keep the old path at zero cost; as written, a stale stored roll-up or a column-scale difference on `avg` / `sum` can make it answer differently from its by-id form.\n- N4 — none of the three stand-downs leaves a trace; one debug line naming the roll-up left unfolded makes the published limit observable.\n"

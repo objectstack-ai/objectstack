@@ -1,0 +1,37 @@
+{
+  "number": 35048,
+  "kind": "issue",
+  "title": "scenarios replay: RecordedDriver createdIdOf reads only a top-level id, so a row created by run_action (result.id) is never remapped and the replayed follow-up operation gets RECORD_NOT_FOUND",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T00:10:09Z",
+  "updated_at": "2026-11-18T01:52:34Z",
+  "closed_at": "2026-11-18T01:51:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35048",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6964820901), from the #34996 loop (area o3-F).\n\n## What happens\nIn `packages/qa/scenarios`, the RecordedDriver's `createdIdOf` (`src/runner/driver.ts`) reads only a **top-level `id`**. `run_action` answers `{ok, action, objectName, result: {id}}`, so the id of a row an action creates is never remapped on replay.\n\nThe replayed `demotravel_submit_claim` then gets `RECORD_NOT_FOUND`, and `file_and_submit_from_text` reads NOT MEASURED on every replay regrade. Until this is fixed, the loop's operation score can be graded only offline.\n\n## Done when\n- `createdIdOf` also reads the created id from `result.id` on action answers.\n- A replay pin covers an action-created row that a later operation reads.\n\nParent: #34659. Blocks: #34996 (the ask-skill loop's operation target).\nGrade: **p1 · domain:devx · area:ai**. It blocks measurement for the maintainer-requested p1 loop."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 35049,
+  "kind": "issue",
+  "title": "print: a print action cannot name the PDF from the record — the attachment is always `<page>-<recordId>.pdf`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T00:10:16Z",
+  "updated_at": "2026-11-18T00:47:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35049",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n**Found by** hotcrm#2600 (bundle PR hotcrm#2628), measured on 18.5.0; re-read on objectstack main.\n\nPrinting a quote attaches `quote_print_page-<record id>.pdf`, which tells the reader nothing about which quote it is.\n\n**Why (code):** `packages/services/service-print/src/print-service.ts:323` — `const filename = req.filename ?? \\`${req.page}-${req.recordId}.pdf\\``. The service accepts a `filename`, but an app cannot fill it from the record: the action's `bodyExtra` takes static values and `{{page.<var>}}` only (`packages/spec/src/ui/action.zod.ts` ~2161), so no record field (e.g. the quote number) can reach it.\n\n**Expected:** a way to name the file from the record, e.g. `filename` as a template over record fields, or a default built from the record's title (ADR-0079 display field) instead of its id."
+}
