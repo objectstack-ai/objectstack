@@ -411,6 +411,13 @@ export function useConsoleSidebarRailPanel(
   // it (below).
   const width: FloatWidth = wide ? 'wide' : 'narrow';
   const [floatOn, setFloatOn] = useState<FloatWidth | null>(null);
+  // The reader's own toggle while the sidebar is hidden by hand (below): the
+  // open it brings is a float.
+  const [toggleFloats, setToggleFloats] = useState<FloatWidth | null>(null);
+  if (toggleFloats !== null && open) {
+    setToggleFloats(null);
+    if (desktop && !railMode && floatOn === null && toggleFloats === width) setFloatOn(toggleFloats);
+  }
   if (floatOn !== null && (!open || !desktop || floatOn !== width)) setFloatOn(null);
   const overlayOpen = desktop && open && (railMode || floatOn === width);
   const hidden = desktop && !open;
@@ -460,15 +467,18 @@ export function useConsoleSidebarRailPanel(
 
   // While the sidebar is hidden by hand, the reader's own toggle (the app
   // bar's trigger, ⌘B) floats the menu as on the fold, instead of docking it
-  // (ruling 6973617688). Noted in the capture phase, ahead of the provider's
-  // toggle, which then opens it; "Keep sidebar open" docks it.
+  // (ruling 6973617688); "Keep sidebar open" docks it. Noted in the capture
+  // phase, ahead of the provider's toggle, whose open the next render turns
+  // into the float. A browser may render between the two (its microtask
+  // checkpoint after each listener), so the note waits for the open.
   useEffect(() => {
     if (!hiddenByHand) return undefined;
     const asFloat = () => {
       holdWideWindowChoice(true);
-      setFloatOn(widthRef.current);
-      // A toggle another listener swallowed opens nothing: let go again.
+      setToggleFloats(widthRef.current);
+      // A toggle another listener swallowed opens nothing: drop the note.
       setTimeout(() => {
+        setToggleFloats(null);
         if (!overlayOpenRef.current) holdWideWindowChoice(false);
       }, 0);
     };

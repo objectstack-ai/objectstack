@@ -37,6 +37,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
+import { flushSync } from 'react-dom';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -493,6 +494,23 @@ describe('the trigger floats the collapsed menu, and the keyboard walks it (obje
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expectHidden();
     expect(document.activeElement, 'focus goes back to the trigger').toBe(trigger());
+    expect(readWideWindowOpen()).toBe(false);
+  });
+
+  it('collapsed by hand, the trigger floats it even when React renders between the capture phase and the trigger’s own click handler', () => {
+    renderShell(1600);
+    fireEvent.click(trigger());
+    expectHidden();
+    // A browser runs a microtask checkpoint after each listener, so React may
+    // render the capture phase's update before the trigger's own handler runs.
+    const renderBetween = () => flushSync(() => {});
+    document.body.addEventListener('click', renderBetween, true);
+    try {
+      fireEvent.click(trigger());
+    } finally {
+      document.body.removeEventListener('click', renderBetween, true);
+    }
+    expectFloat();
     expect(readWideWindowOpen()).toBe(false);
   });
 
