@@ -16,7 +16,7 @@
 - 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
 - ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
-- 析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟,照未分诊首触;⛔ 不凭 actor。
+- 析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟,谁打都首触;人定的级只补不改。
 - 首触定级与五析取 sweep 每 fire 跑到清空,先于旧卡重验:⛔ 无每轮预算、无逐卡豁免评论。
 - 五析取由 `node scripts/pm/first-touch-sweep.mjs --since=ISO` 照原文全量跑,⛔ 不手敲窄化或截断。
 - 排序:每轮清空时最新优先,清不空起最老优先;半状态积压 ②③④ 恒最老、P0 嫌疑先行。
@@ -65,10 +65,10 @@
 - 停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
 - 首触复核每张新卡的 area、type 与级(与 `domain:*` 同笔),错即改并留一行理由与原值。
 - 维护者或外部人立的卡首触补齐(照 `filing-gate.md`);日对账 fire 扫无 `area:*` 的公开卡补齐。
-- 判据照 `filing-gate.md` 两步;首行 `Path: <定义项> | <清单项 id/缺项> | P<路步> | none`。
-- 定义项取北极星「What gets built」或仪器卡的车队决定;无则关;`none` 非分诊缺口。
-- 「无则关」= 首触即关 not_planned,带理由与入队三门,⛔ 不定 p3、不 hold;下行同此。
-- 所入车道队列 P0/P1 未派时,三门皆无的 p2/p3 `tooling` 卡同样关;挡住在派工作的 p2 除外。
+- 判据照 `filing-gate.md` 两步:先仓库、area 与 type,再查北极星表;出货技能或文档说错 = `Bug`。
+- 定级评论首行 = 定级行 `area · type · severity · reach · evidence`。
+- 改级前照 `filing-gate.md` 读现级的 `labeled` 事件:人定的级不动,异议走 `pm:awaiting-maintainer`。
+- 所入车道队列 P0/P1 未派时,三门皆无的 p2/p3 `tooling` 卡首触即关;挡住在派工作的 p2 除外。
 - 路由属分诊技术判断,⛔ 不升级哪个仓的问题;父单永不派发,`pm:epic` 卡 `pm:retriage` 即答。
 - 算涉 cloud:亦含托管面(objectos-runtime)、修复待其改动的 `Blocked-by:` cloud 卡、病因在 cloud。
 - 不算涉 cloud:修复与验收全在本仓,只在 cloud 测得或只缺其事实读数;仅引 cloud 卡作历史。
@@ -86,7 +86,7 @@
 - 首触答责任三问:谁的代码出险/有正路否/谁可达且有人用否;据答改卡范围、域与路由。
 - 三类外不可逆或有硬时限(发版即固化、只被消费的文件、过窗不可补)⇒ 不关,报维护者。
 - 三类外首触关闭只清门前存量,关 not planned(不等批准可否决重开);三类内无证据拒收。
-- 三类内再过时前提检查,三选一:晋级 / 关闭 not planned / hold;判级只在此轮,不在立单时。
+- 三类内再过时前提检查,三选一:晋级 / 关闭 not planned / hold;级在立卡时已定,此轮复核。
 - ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:关卡行、下两行、锚卡首触。
 - 分诊活性复查:认领逾一天无自有产出(commit/PR/评论)⇒ 敲一次,首行键 `Owned-24h re-check:`。
 - 敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ 兄弟席一笔中继释放;无则轮次记录交总监。
