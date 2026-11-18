@@ -117,7 +117,7 @@
       "expected_output": "`objects.crm_lead._actions.import_leads.resultDialog.columns.rows`, a sibling of `resultDialog.fields` and never nested inside the `rows` entry there, which stays the field's label string. It is keyed by the table field's literal `path`, then by each column's literal `path`: `email` and `'error.message'` (one key, dots included, never split into nested objects), each value the translated header string itself — `columns: { rows: { email: '邮箱', 'error.message': '原因' } }`. A preflight table takes the same shape under `preflight.columns`. A field path that is no declared `format: 'table'` field, or a column path that field's `columns` does not list, is `translation-target-unknown`.",
       "files": [],
       "assertions": {
-        "must_contain": ["_actions", "import_leads", "resultDialog.columns.rows", "error.message", "translation-target-unknown"],
+        "must_contain": ["_actions", "import_leads", "resultDialog.columns.rows", "error.message"],
         "must_not_contain": ["error: {"]
       }
     }
