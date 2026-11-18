@@ -335,3 +335,26 @@ describe('import_sso_users draws the per-row report as a table', () => {
     ]);
   });
 });
+
+/**
+ * objectstack#34651: the add door answers `pendingAgain: true` only on a
+ * re-add of a person still pending, and never `false`. The result dialog
+ * skips a field whose path resolves to nothing, so a field reading that key
+ * draws its row exactly on a re-add; a field reading `alreadyPending`, which
+ * the door answers on every add, would draw a misleading `false` row on each
+ * fresh add (ruling A on objectstack#33187 turned that row down).
+ */
+describe('add_sso_user names an address that was already pending', () => {
+  const fields = () =>
+    ((declared('add_sso_user').resultDialog as { fields?: Array<{ path: string; label?: unknown; format?: string }> }).fields ?? []);
+
+  it('declares one field reading `pendingAgain`, drawn as the boolean it is', () => {
+    const matching = fields().filter((field) => field.path === 'pendingAgain');
+    expect(matching).toHaveLength(1);
+    expect(matching[0]).toMatchObject({ label: 'Already pending', format: 'json' });
+  });
+
+  it('CONTROL: no field reads `alreadyPending`, which the door answers on every add', () => {
+    expect(fields().map((field) => field.path)).not.toContain('alreadyPending');
+  });
+});

@@ -11,8 +11,9 @@
  *    `matchStudioSlotShortcut`); on the right, while the copilot shows,
  *    History, the in-place widen (objectstack#34610) and Close. The top bar's
  *    robot opens and closes the slot as the console's robot opens its drawer.
- *  - Its width is the console drawer's default, resizable from the left edge
- *    (`useStudioSlotWidth`); under `md` it overlays the page.
+ *  - Its width is resizable from the left edge within 320–560 px, and each
+ *    pane keeps its own (objectstack#35061: properties 360, copilot 420 by default,
+ *    `useStudioSlotWidth`); under `md` it overlays the page at its own width.
  *  - Properties are a portal target: a pillar that hosts its inspector here
  *    claims the slot through `useStudioRightSlot` (`studioRightSlotState.ts`)
  *    and renders into
@@ -38,7 +39,12 @@ import { History, Maximize2, Minimize2, SlidersHorizontal, Sparkles, X } from 'l
 import { Button, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { t, tFormat } from '../metadata-admin/i18n.js';
-import { useStudioSlotWidth, type StudioSlotMode } from './studioRightSlotState.js';
+import {
+  STUDIO_SLOT_MAX_WIDTH,
+  STUDIO_SLOT_MIN_WIDTH,
+  useStudioSlotWidth,
+  type StudioSlotMode,
+} from './studioRightSlotState.js';
 
 export interface StudioRightSlotProps {
   /** Whether the slot is shown (the top bar's toggle). */
@@ -99,7 +105,7 @@ export function StudioRightSlot({
   locale,
 }: StudioRightSlotProps): React.ReactElement {
   const { t: tc } = useObjectTranslation();
-  const slotWidth = useStudioSlotWidth();
+  const slotWidth = useStudioSlotWidth(mode);
   const shown = open && (hasProps || copilotAvailable);
   const showsProps = mode === 'props';
   const switchable = hasProps && copilotAvailable;
@@ -153,6 +159,8 @@ export function StudioRightSlot({
             aria-orientation="vertical"
             aria-label={t('engine.studio.slot.resize', locale)}
             aria-valuenow={Math.round(slotWidth.width)}
+            aria-valuemin={STUDIO_SLOT_MIN_WIDTH}
+            aria-valuemax={STUDIO_SLOT_MAX_WIDTH}
             tabIndex={0}
             data-testid="studio-slot-resize"
             onPointerDown={slotWidth.onResizePointerDown}

@@ -1811,6 +1811,10 @@ const DEFAULT_HTTP_INSTRUCTIONS =
  * `list_datasets` `candidates` (the ADR-0149 D3 amendment note): the rule makes
  * that the same question, listing each candidate's label, dataset label and
  * description, never a pick and never a match, even for a single candidate;
+ * [#35005] that question is owed only for a word with a measure among its
+ * candidates: a word whose candidates are all dimensions is at most a possible
+ * grouping, never asked about and never a stop for a matched measure, in the
+ * same words as `list_datasets`' description;
  * only a word with no match and no candidate falls back to the object tools,
  * with the answer labelled. [#34919] The answer itself then states the
  * case (`list_datasets` `nextStep`, composed by the service-analytics
@@ -1824,8 +1828,10 @@ const DATASET_SELECTION_RULE =
   + 'question\'s business words. A word matches only when it equals a measure\'s or dimension\'s name, label or '
   + 'synonym, never a similar word. Each word that matches exactly one measure: answer with query_dataset; two '
   + 'such words are two metrics, so compute both. One word matching several measures: ask the user which one '
-  + 'they mean; do not pick. A word with no match but with candidates in the answer: ask the same way, listing '
-  + 'each candidate\'s label, dataset label and description; do not pick one or treat it as a match. No match '
+  + 'they mean; do not pick. A word with no match and a measure among its candidates in the answer: ask the same '
+  + 'way, listing each candidate\'s label, dataset label and description; do not pick one or treat it as a match. '
+  + 'A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never '
+  + 'stops a matched measure. No match '
   + 'and no candidates: fall back to query_records / aggregate_records and say the answer is not from a governed '
   + 'metric. The list_datasets answer states which of these cases your words are in as nextStep: follow its note, '
   + 'which reports the first of several_measures, one_measure, candidates_only, no_measure when words differ. Cite '

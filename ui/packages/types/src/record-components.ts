@@ -225,8 +225,11 @@ export interface RecordDetailsComponentProps {
      * on the spec row since 17.3.0). Unauthored, `RecordDetailsRenderer` reads
      * it as on (`s.hideEmpty ?? true`), and a section whose fields are ALL
      * empty then renders nothing; `false` keeps the section — in read-only
-     * mode its heading plus one fold row that counts the empty fields and
-     * reveals them on request (objectui#13386), in edit mode every row.
+     * mode named in the one line that closes the body, beside every other
+     * all-empty section kept this way, and expanding that line draws each as
+     * its heading plus one fold row that counts the empty fields and reveals
+     * them on request (objectui#13386, objectstack#35019), in edit mode every
+     * row.
      * Permitted beside `group`.
      *
      * Missing here until objectui#12348: the spec declared it and the renderer

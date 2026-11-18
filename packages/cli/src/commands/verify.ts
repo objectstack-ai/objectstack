@@ -43,10 +43,13 @@ import { authoringRulesFor } from '@objectstack/lint';
 import { loadConfig, resolveConfigPath } from '../utils/config.js';
 import { loadProjectEnvFiles } from '../utils/schema-migrate.js';
 import { judgeAuthorTimeRules, VERIFY_RULE_COMMAND } from '../utils/author-time-rules.js';
+import { artifactPackages } from '../utils/artifact-packages.js';
+import { judgeDeclaredCapabilities } from '../utils/capability-preflight.js';
 import {
   printError,
   printStep,
   printSuccess,
+  printWarning,
   printAuthoringRuleErrors,
   formatZodErrors,
   JSON_FULL_LIST_REMEDY,
@@ -89,12 +92,25 @@ export function resolveVerifyMultiTenant(flags: { 'multi-tenant'?: boolean }): b
 }
 
 /**
+ * One capability finding on `os verify --json`'s `capabilities`: the sentence
+ * `os validate` prints for it, and that door's verdict on it. Advisory on this
+ * command whatever `validate` says.
+ */
+export interface VerifyCapabilityAdvisory {
+  readonly token: string;
+  readonly message: string;
+  readonly validate: 'error' | 'warning';
+}
+
+/**
  * `objectstack verify` — two stages, in order:
  *
  *   1. the author-time rules — the registry `os validate` runs, over the stack
  *      prepared the way `os validate` prepares it (`utils/author-time-rules.ts`).
  *      A gating finding fails the run with those findings, and stage 2 never
- *      starts (#21323);
+ *      starts (#21323). Then the capability provider check `os validate`
+ *      runs, reported as advisories that never change the exit code
+ *      (`capabilities` on the `--json` face);
  *   2. boot the app in-process, with the project's `.env*` files loaded as
  *      `os dev` loads them, and exercise it through the real HTTP stack,
  *      asserting runtime behavior the static gates can't see:
@@ -280,6 +296,7 @@ export default class Verify extends Command {
     // Stage 1 — the author-time rules, before anything boots. A failure here
     // exits inside the call; see `runAuthorTimeStage`.
     await this.runAuthorTimeStage(config as Record<string, unknown>, absolutePath, flags.json);
+    const capabilities = await this.runCapabilityAdvisories(config as Record<string, unknown>, absolutePath, flags.json);
 
     const multiTenant = resolveVerifyMultiTenant(flags);
 
@@ -495,7 +512,7 @@ export default class Verify extends Command {
       // `emitJson`, not `this.log`: stdout is reserved (see `run()`), so the
       // report has to leave through the real stream — and awaiting the write
       // drains a report larger than one pipe buffer before `this.exit` below.
-      await emitJson({ app: crud.app, config: absolutePath, multiTenant, seed, crud, rls, referenceShapes, deleteBehaviors, uniqueScopes, parentWriteReach, dashboardWindows, hardFailures });
+      await emitJson({ app: crud.app, config: absolutePath, multiTenant, capabilities, seed, crud, rls, referenceShapes, deleteBehaviors, uniqueScopes, parentWriteReach, dashboardWindows, hardFailures });
     } else {
       this.log(formatReport(crud));
       this.log(formatSeedReport(seed));
@@ -517,6 +534,45 @@ export default class Verify extends Command {
     // sqlite-wasm, better-auth timers) that keep the event loop alive after
     // stop(), so a bare return would hang. exit() also encodes the CI contract.
     this.exit(hardFailures > 0 ? 1 : 0);
+  }
+
+  /**
+   * Stage 1, second half — the capability provider check `os validate` runs,
+   * reported as ADVISORIES.
+   *
+   * `os verify` used to run none of it, so a stack declaring a capability no
+   * provider here enforces passed green: `requires: ['hierarchy-security']`
+   * with no enterprise provider (the hierarchy scopes then run owner-only,
+   * silently), and every cloud-only token `os validate` refuses. Each finding
+   * is the sentence `os validate` prints for it, with `validate` naming that
+   * door's verdict (`error`: it refuses the stack; `warning`: it reports it).
+   * Advisory here by decision: this stage never changes `verify`'s exit code,
+   * for any token. The text face prints them; the `--json` face carries them
+   * as `capabilities`.
+   */
+  private async runCapabilityAdvisories(
+    config: Record<string, unknown>,
+    absolutePath: string,
+    json: boolean,
+  ): Promise<VerifyCapabilityAdvisory[]> {
+    if (!json) printStep('Checking that every required capability has a provider in this edition...');
+    const judged = await judgeDeclaredCapabilities({
+      requires: config.requires,
+      packages: artifactPackages(config),
+      plugins: config.plugins,
+      projectDir: dirname(absolutePath),
+    });
+    const advisories: VerifyCapabilityAdvisory[] = [
+      ...judged.errors.map((a) => ({ ...a, validate: 'error' as const })),
+      ...judged.warnings.map((a) => ({ ...a, validate: 'warning' as const })),
+    ];
+    if (!json) {
+      for (const a of advisories) {
+        printWarning(a.validate === 'error' ? `${a.message} (\`os validate\` refuses this stack.)` : a.message);
+      }
+      if (advisories.length > 0) this.log('');
+    }
+    return advisories;
   }
 
   /**

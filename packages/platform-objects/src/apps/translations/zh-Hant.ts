@@ -20,6 +20,7 @@ export const zhHant: TranslationData = {
         nav_account_profile: { label: '個人資料' },
         nav_account_mobile_app: { label: '移動應用' },
         nav_account_notifications: { label: '通知' },
+        nav_account_notification_settings: { label: '通知設定' },
         nav_account_approvals: { label: '待我核准' },
         nav_account_memberships: { label: '我的組織' },
         nav_account_linked: { label: '已關聯帳戶' },

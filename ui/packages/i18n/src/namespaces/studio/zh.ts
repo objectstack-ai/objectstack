@@ -48,6 +48,8 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.bulk.all': '全选',
   'perm.bulk.none': '清空',
   'perm.bulk.allTip': '授予除导出外的所有列;导出只能单独勾选',
+  'perm.more.col': '更多权限',
+  'perm.more.count': '已开 {count} 项',
   // objectstack#26187 — 记录范围选择器（ADR-0057 D1 访问深度）。
   'perm.scope.unset': '未设置',
   'perm.scope.value.own': '本人',
@@ -2255,6 +2257,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.definitionTitle': '{label} · 定义',
   // The shared rail (objectstack#26733): the action under a search that matched nothing.
   'engine.studio.rail.clearSearch': '清除搜索',
+  // objectstack#35061: the narrow rail's top button, which floats the whole list over the content and back.
+  'engine.studio.rail.expand': '展开完整列表',
+  'engine.studio.rail.collapse': '收回窄栏',
   // Data pillar
   'engine.studio.data.newFieldLabel': '新字段',
   'engine.studio.data.nameFieldLabel': '名称',

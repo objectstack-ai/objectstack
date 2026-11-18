@@ -304,13 +304,15 @@ describe('record:details — an authored `hideEmpty` decides the ALL-EMPTY secti
     expect(emptyPlaceholders()).toHaveLength(0);
   });
 
-  it('`hideEmpty: false` KEEPS an all-empty section: its heading plus one fold row (#13386)', () => {
+  it('`hideEmpty: false` KEEPS an all-empty section: named in the empty-sections line, then its heading plus one fold row (#13386)', () => {
     // The escape hatch, and the half that makes the key worth declaring: a
     // brand-new record keeps the structure its author wrote. Under objectui#7129
     // this spelling parsed nowhere and read nowhere; it now does both. Ruling C
-    // on objectui#13386 settled HOW it is kept for a reader: the heading plus
-    // ONE fold row — the toggle a partly-filled section uses — not a column of
-    // placeholders. The rows are one click away.
+    // on objectui#13386 settled HOW a kept section draws for a reader: the
+    // heading plus ONE fold row — the toggle a partly-filled section uses — not
+    // a column of placeholders. A `record:details` body first names it in the
+    // one line that closes the body (objectstack#35019), and expanding that line
+    // draws it so. The rows are behind its fold row.
     renderDetails({
       sections: [
         { name: 'deal_terms', label: 'Deal Terms', fields: ['stage', 'amount', 'close_date', 'next_step'], hideEmpty: false },
@@ -319,6 +321,11 @@ describe('record:details — an authored `hideEmpty` decides the ALL-EMPTY secti
     });
 
     expect(screen.getByText('Firmographics')).toBeInTheDocument();
+    const line = document.querySelector('[data-empty-sections-line]') as HTMLElement;
+    expect(line.getAttribute('data-empty-sections-count')).toBe('1');
+    expect(line.textContent).toContain('Deal Terms');
+    fireEvent.click(line.querySelector('button[aria-expanded="false"]') as HTMLButtonElement);
+
     expect(screen.getByText('Deal Terms')).toBeInTheDocument();
     for (const label of ['Stage', 'Amount', 'Close Date', 'Next Step']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();

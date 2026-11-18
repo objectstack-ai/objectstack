@@ -1869,3 +1869,76 @@ describe('[#34912] the SSO-user doors admit the stamped organizationId only when
     expect(sessionReads.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup → Users: what the result dialogs read is what the doors answer
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('[#34651] add-sso-user says a re-added address was already pending, and only then', () => {
+  it('an email-only re-add of a still-pending person answers pendingAgain: true', async () => {
+    const s = await managedStage();
+    const email = 'pending.again@example.com';
+    expect((await s.fire('/admin/add-sso-user', { email }, s.bearers.admin)).status).toBe(201);
+
+    const res = await s.fire('/admin/add-sso-user', { email }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data.pendingAgain).toBe(true);
+    // Widening only: the key every answer carries is unchanged.
+    expect(body.data.alreadyPending).toBe(true);
+  });
+
+  it('CONTROL: a fresh add carries no pendingAgain at all, so the dialog draws no row for it', async () => {
+    const s = await managedStage();
+    const res = await s.fire('/admin/add-sso-user', { email: 'pending.fresh@example.com' }, s.bearers.admin);
+    const body: any = await res.json();
+
+    expect(res.status, JSON.stringify(body)).toBe(201);
+    expect(body.data).not.toHaveProperty('pendingAgain');
+    expect(body.data.alreadyPending).toBe(false);
+  });
+});
+
+describe('[#34651] the import result table reads members of a real row answer', () => {
+  /** The declared `table` field of `sys_user.import_sso_users`'s result dialog. */
+  function importTableColumns(): string[] {
+    const fields = (declaredAction('import_sso_users').resultDialog?.fields ?? []) as Array<{
+      path: string;
+      format?: string;
+      columns?: Array<{ path: string }>;
+    }>;
+    const table = fields.filter((field) => field.format === 'table');
+    expect(table, 'import_sso_users declares one table field').toHaveLength(1);
+    const columns = (table[0]!.columns ?? []).map((column) => column.path);
+    expect(columns.length, 'the table declares its columns').toBeGreaterThan(0);
+    return columns;
+  }
+
+  it('every column path\'s first segment is a member of a row the import door really answered', async () => {
+    const s = await managedStage();
+    // A person already pending, so one row of the file is a re-add.
+    expect((await s.fire('/admin/add-sso-user', { email: 'align.readd@example.com' }, s.bearers.admin)).status).toBe(201);
+    // Rows chosen so each member the door answers on some row is answered:
+    // a fresh add whose manager is unknown (`alreadyPending`, `host`,
+    // `managerError`), a malformed address (`error`), and a re-add that sends
+    // a column (`notApplied`).
+    const csv = [
+      'email,name,permission_sets,manager_id',
+      'align.fresh@example.com,Align Fresh,,nobody.align@example.com',
+      'not-an-address,Align Bad,,',
+      'align.readd@example.com,Align Readd,crm_user,',
+    ].join('\n');
+
+    const res = await s.fire('/admin/import-sso-users', { csv }, s.bearers.admin);
+    const body: any = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    const rows = body.data.rows as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.ok)).toEqual([true, false, true]);
+
+    const unanswered = importTableColumns()
+      .map((path) => path.split('.')[0]!)
+      .filter((member) => !rows.some((row) => Object.hasOwn(row, member)));
+    expect(unanswered, `row answers: ${JSON.stringify(rows)}`).toEqual([]);
+  });
+});

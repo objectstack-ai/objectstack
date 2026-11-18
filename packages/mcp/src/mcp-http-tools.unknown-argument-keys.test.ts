@@ -197,7 +197,9 @@ describe('MCP tool arguments — undeclared keys are refused (#16913)', () => {
       where: { status: 'open' },
       fields: ['name', 'amount'],
       orderBy: [{ field: 'amount', order: 'desc' }],
-      limit: 3,
+      // [#35138] The page asked for plus the one probe row the handler's
+      // `truncated` is decided by; the page served is still 3 rows.
+      limit: 4,
       offset: 6,
     });
   });

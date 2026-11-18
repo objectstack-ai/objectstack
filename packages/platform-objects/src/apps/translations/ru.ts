@@ -20,6 +20,7 @@ export const ru: TranslationData = {
         nav_account_profile: { label: 'Профиль' },
         nav_account_mobile_app: { label: 'Мобильное приложение' },
         nav_account_notifications: { label: 'Уведомления' },
+        nav_account_notification_settings: { label: 'Настройки уведомлений' },
         nav_account_approvals: { label: 'Ждут моего решения' },
         nav_account_memberships: { label: 'Мои организации' },
         nav_account_linked: { label: 'Связанные учётные записи' },

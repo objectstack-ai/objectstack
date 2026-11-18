@@ -2233,6 +2233,9 @@ importers:
       '@objectstack/service-i18n':
         specifier: workspace:*
         version: link:../../services/service-i18n
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../../services/service-messaging
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
