@@ -1313,8 +1313,18 @@ export const CEILINGS = new Map([
   // another passage (the 85 bytes above were what there was), so the same ruling's second
   // half carries it: the file is 11106 -> 11231 bytes -> 2808 tokens, zero headroom before,
   // ceiling +31, pinned AT the measurement.
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11231 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 2808],
+  // 2808 -> 2988: an action body refuses by code. One paragraph under the `ctx` section (which
+  // action may declare `refusals`; that the catalogue, the throws and the checks are a hook's,
+  // taught in objectstack-data and only pointed at here; the bundle key the sentence is translated
+  // at; that an authored `errorMessage` replaces the sentence in the console's toast), and the
+  // Add Line example declares one entry and throws its code where it threw a sentence. NOTHING
+  // TO PAY DOWN in this file: the entry above spent its last restatement and a re-read for this
+  // change found none, so the same ruling's second half carries it, as it did there. The file is
+  // 11231 -> 11952 bytes -> 2988 tokens, zero headroom before, ceiling +180, pinned AT the
+  // measurement. Same ruling as the lines above (2026-10-27, tap A): 「A:先削重复,余额按实测提高」
+  // (ruling record 6513306068).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11952 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2988],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

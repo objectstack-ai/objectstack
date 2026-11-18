@@ -118,6 +118,16 @@ Bodies execute **trusted** (`ctx.api` /
 `ctx.engine` bypass RLS/FLS). `ctx.session.positions` (absent when the caller holds none) is
 **not an authorization input** — ask the security service for privilege (ADR-0095).
 
+### Refusing by code (`refusals`)
+
+`throw new Error('…')` answers every caller in the author's language. A `type: 'script'` action
+with a `js` body (an inline `target` function is lowered to one; any other action is refused the
+key) declares `refusals` and throws the code, as `crm_add_invoice_line` below does: the catalogue,
+throws and checks are a hook's (objectstack-data → Lifecycle Hooks → Declared refusals). The
+sentence is answered as `userMessage`, translated at
+`objects.<object>._actions.<action>.refusals.<CODE>.message` (objectstack-i18n); the console's
+failure toast shows it unless the action authors `errorMessage`.
+
 ## Opening in a New Tab
 
 ### `openIn: 'new-tab'`
@@ -200,11 +210,12 @@ export const AddInvoiceLineAction = defineAction({
     { field: 'product', objectOverride: 'invoice_line', required: true },
     { field: 'quantity', objectOverride: 'invoice_line', required: true },
   ],
+  refusals: { PRODUCT_NOT_FOUND: { message: 'Product not found.', status: 404 } },
   body: {
     language: 'js',
     source: `
       const product = await ctx.api.object('product').findOne({ where: { id: input.product } });
-      if (!product) throw new Error('Product not found.');
+      if (!product) throw { code: 'PRODUCT_NOT_FOUND' };
       await ctx.api.object('invoice_line').insert({
         invoice: ctx.recordId, product: input.product, quantity: input.quantity,
         unit_price: product.list_price,

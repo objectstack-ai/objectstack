@@ -168,6 +168,7 @@ All translatable content for a single object is aggregated under
 | `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
+| `_actions.{action_name}.refusals.{CODE}` | `message`, and `reasons.{reason}.message` per declared reason — the sentences of the action's `refusals` catalogue (**objectstack-ui** → Actions), for a code and reason it declares (any other is `translation-target-unknown`); the same under `globalActions.{action_name}` |
 
 Top-level groups alongside `objects`: `apps` (label, description, navigation),
 `messages`, `globalActions` (actions with no `objectName` — a key naming a bound action is
@@ -342,9 +343,8 @@ The spec models coverage results for tooling — the return shapes of the option
 (totals, `coveragePercent`, per-group `breakdown`) and `TranslationDiffItem` —
 `key` (dot path), `status` (`missing | redundant | stale`), `locale`, optional
 `objectName`, optional `sourceHash` for stale detection, and AI-enrichment
-fields (`aiSuggested`, `aiConfidence`). Full Zod shape:
-`node_modules/@objectstack/spec/src/system/translation.zod.ts` —
-`TranslationCoverageResultSchema`, `TranslationDiffItemSchema`.
+fields (`aiSuggested`, `aiConfidence`). Full Zod shape: `TranslationCoverageResultSchema`,
+`TranslationDiffItemSchema` (`translation.zod.ts`).
 
 ---
 
@@ -406,7 +406,8 @@ produced; a client renders it as received.
   code is never handed Simplified text.
 - **App-authored** refusal text is not on this ladder: a hook's catalogued refusal is served
   through `hooks.<hook>.refusals.<CODE>.message` (a declared reason's through
-  `hooks.<hook>.refusals.<CODE>.reasons.<REASON>.message`) in the caller's locale, negotiated over
+  `….<CODE>.reasons.<REASON>.message`), an action's through its `_actions.{action_name}.refusals`
+  keys (table above), each in the caller's locale, negotiated over
   whatever locales the app's translations hold, and otherwise as declared, in the app's own
   source language. No `en` floor is supplied for it. Under an entry declaring `params`, a
   translation keeps its `{{ name }}` holes; the runtime fills them after picking it.
