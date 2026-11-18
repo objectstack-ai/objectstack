@@ -151,9 +151,9 @@ interface UnifiedSidebarProps {
   /**
    * The console's sidebar (objectstack#27593, objectstack#35062): from 768 px
    * up a collapsed sidebar is hidden, takes no width, and floats its full menu
-   * over the content from the window's left edge; below the fold width it
-   * collapses on its own, and the app bar's trigger floats the menu. The
-   * console layout sets it, and folds the sidebar with
+   * over the content from the window's left edge and from the app bar's
+   * trigger; below the fold width it collapses on its own. The console layout
+   * sets it, and folds the sidebar with
    * `useResponsiveSidebar`; off, the sidebar is drawn as the provider says at
    * every width, collapsed to the primitive's icon rail.
    */
@@ -883,18 +883,20 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
          )}
         </nav>
       </SidebarContent>
-      {/* "Keep sidebar open" turns the fold off for this browser; offered
-          where the fold applies, while the menu floats or is kept open. */}
-      {rail.narrow && (railPanel.overlayOpen || rail.keepOpen) && (
+      {/* "Keep sidebar open": in the floated menu it puts the sidebar back
+          beside the content and keeps it there (on the fold, for this
+          browser); in a sidebar kept open on a narrow window it is pressed,
+          and turns the fold back on (objectstack#35062). */}
+      {railPanel.keepOpenControl && (
         <SidebarFooter className="border-t border-sidebar-border">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
                 data-testid="sidebar-keep-open"
-                aria-pressed={rail.keepOpen}
-                isActive={rail.keepOpen}
+                aria-pressed={railPanel.keepOpenControl.pressed}
+                isActive={railPanel.keepOpenControl.pressed}
                 tooltip={keepOpenLabel}
-                onClick={() => rail.setKeepOpen(!rail.keepOpen)}
+                onClick={railPanel.keepOpenControl.onPress}
               >
                 <Pin className="h-4 w-4" />
                 <span>{keepOpenLabel}</span>

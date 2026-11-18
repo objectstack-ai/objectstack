@@ -23,11 +23,10 @@ const TOGGLE_SIDEBAR_CHORD: ShortcutChord = { key: 'b', mod: true };
  * The shell's one sidebar trigger (objectui#12429). It lives in the app bar's
  * left slot at every width: below the Shadcn mobile breakpoint it opens and
  * closes the drawer, above it it collapses the sidebar and expands it again.
- * In the console a collapsed sidebar is hidden, and while it is folded on a
- * narrow window the trigger floats its menu over the content instead
- * (objectstack#35062, `consoleSidebarRail`). `aria-expanded` follows whichever
- * of the two states the click toggles, and the tooltip names the keyboard
- * shortcut.
+ * In the console a collapsed sidebar is hidden, and the trigger floats its
+ * menu over the content instead of expanding it (objectstack#35062,
+ * `consoleSidebarRail`). `aria-expanded` follows whichever of the two states
+ * the click toggles, and the tooltip names the keyboard shortcut.
  */
 export const LocalizedSidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
