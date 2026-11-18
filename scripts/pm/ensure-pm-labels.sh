@@ -640,8 +640,10 @@ gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui l
 # file or layer, and `domain:*` beside it decides only which seat may edit
 # which files. Six values are the standing product areas (ai, build, data,
 # workflow, ux, package); two are not product (fleet: the fleet's own tooling;
-# cloud: work done in this repository for the hosted product, paused with the
-# cloud lane). What each area covers, its core-feature list and the boundaries
+# cloud: any card related to the cloud repository — it needs to read cloud
+# code, or its change serves only the hosted edition — and such a card takes
+# area:cloud in place of its product area; a seat with cloud access filters on
+# it). What each area covers, its core-feature list and the boundaries
 # between areas live in docs/NORTH-STAR.md ("Product areas") and are ⛔ not
 # copied here: the -d strings below are a label hover, not the definition.
 # Maintainer ruling 2026-11-18, verbatim: 「立一张专题卡，开始执行」, given on
@@ -703,7 +705,7 @@ gh label create area:workflow -R objectstack-ai/objectstack -c d2dae2 -d "Flows 
 gh label create area:ux       -R objectstack-ai/objectstack -c d2dae2 -d "Experience: looks right, easy to use, gives feedback; i18n, mobile, navigation, page load" 2>/dev/null || true
 gh label create area:package  -R objectstack-ai/objectstack -c d2dae2 -d "Packages and install: install, enable, disable, uninstall, seed data, upgrades, release notes" 2>/dev/null || true
 gh label create area:fleet    -R objectstack-ai/objectstack -c d2dae2 -d "Not product — the fleet's own tooling: CI, tests, lint, PM tools, internal skills, governance" 2>/dev/null || true
-gh label create area:cloud    -R objectstack-ai/objectstack -c d2dae2 -d "Not product — work here for the hosted product, hosted-only problems; paused with the cloud lane" 2>/dev/null || true
+gh label create area:cloud    -R objectstack-ai/objectstack -c d2dae2 -d "Not product — related to the cloud repo: needs to read cloud code, or serves only the hosted edition" 2>/dev/null || true
 
 # The cloud repository's OWN product areas — nine values, one per cloud card.
 # ⛔ This file is not their definition: what each area covers, cloud's core

@@ -22,14 +22,14 @@
 | `area:package` Packages and install | addressing by package, installing, enabling, disabling and uninstalling packages, seed data, upgrades and migrations, release notes | ① a package installs, enables, disables and uninstalls, and once disabled every surface says the same ② seed data lands exactly as written ③ an upgrade shows its plan first and loses no data ④ every release has release notes, and a breaking change has a migration guide | stable |
 | Security (no label) | security cards in the private security channel | graded by the security table below; the grade is recorded only in the security channel | private |
 | `area:fleet` Fleet | CI, tests, lint tools, PM tools, the fleet's internal skills, governance scripts | no core features; graded by which decision of the fleet will differ once it lands ("Instruments serve the fleet") | not product |
-| `area:cloud` Hosted dependencies | work in this repository done for the cloud; problems that appear only in the hosted environment | follows the cloud cards | paused (follows the cloud lane) |
+| `area:cloud` Cloud-related | any card related to the cloud repository: a card that needs to read cloud code, or a change that serves only the hosted edition | follows the cloud cards | not product |
 
 Area boundaries, one `area:*` per card:
 - The result is wrong or the thing cannot be done ⇒ the area of that feature; it can be done but looks wrong, is hard to use, cannot be understood or gives no feedback ⇒ `area:ux`. i18n and mobile go to `area:ux` even when the thing cannot be done.
 - Data and permissions inside the application (sign-in, organizations and search included) ⇒ `area:data`; across systems (the API, syncs, connectors) and step by step (flows, approvals, notifications, schedules) ⇒ `area:workflow`. A permission bypassed always goes to `area:data`, whether or not the door is MCP.
 - Writing metadata ⇒ `area:build`; installing, upgrading and releasing packages ⇒ `area:package`.
 - Slow: a slow query, a query not pushed down, data truncated because it is large ⇒ `area:data`; a slow page load ⇒ `area:ux`; any other slowness goes to the area of its feature.
-- A problem that appears only in the hosted environment always goes to `area:cloud`, and is graded all the same.
+- A card related to the cloud repository (it needs to read cloud code, or its change serves only the hosted edition, a problem that appears only in the hosted environment included) always goes to `area:cloud`, in place of its product area, and is graded all the same.
 - Product skills (the `skills/` shipped to users), evals and scenario cards ⇒ `area:ai`; CI, test tools, PM tools and the fleet's internal skills ⇒ `area:fleet`.
 - A security hole opens no public issue and carries no `area:*`: it goes to the private security channel, and the grading line of a public card never describes a security mechanism.
 - A card that fits no area: triage says so on the card and reports it to the maintainer, and never opens a new area itself.
