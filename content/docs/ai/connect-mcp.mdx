@@ -346,6 +346,8 @@ each answered as a list of at most 20 rows (`limit` lowers it):
 - Every expanded or related object is read as you, under that object's
   permissions, row-level security and field masking. A field you may not read is
   not offered for `expand` or as a link.
+- The record and each related list name the fields withheld from them in
+  `withheldFields`, as a plain `get_record` and `query_records` do.
 - Every object a new read shape reaches is judged by the MCP read guard exactly
   as the object the call names. An object the guard refuses (a system object
   that is not opted into AI reads) refuses the whole call with
