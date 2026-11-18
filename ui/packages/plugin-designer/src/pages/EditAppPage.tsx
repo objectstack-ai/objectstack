@@ -41,6 +41,25 @@ function getBrandingDeclaredKeys(): ReadonlySet<string> {
   return brandingDeclaredKeys;
 }
 
+/**
+ * The value the server stamps as `_packageId` on a row bound to NO package. It
+ * names no package, so it is never sent as one.
+ */
+const PACKAGELESS_SENTINEL = 'sys_metadata';
+
+/**
+ * The package that owns the served app, or `undefined` for an app no package
+ * owns: the one address this page reads the app at and saves it to
+ * (objectstack#35115). The same reading as App management's `owningPackage`
+ * (objectui#12300), so one served value means one scope across the console.
+ */
+function owningPackage(app: { _packageId?: unknown } | undefined): string | undefined {
+  const packageId = app?._packageId;
+  return typeof packageId === 'string' && packageId !== '' && packageId !== PACKAGELESS_SENTINEL
+    ? packageId
+    : undefined;
+}
+
 /** The entries of `record` whose key `declared` holds. */
 function pickDeclared(record: unknown, declared: ReadonlySet<string>): Record<string, unknown> {
   if (!record || typeof record !== 'object') return {};
@@ -58,7 +77,13 @@ export function EditAppPage() {
   // Find the app to edit. The served list only says the app exists and where
   // it is served from: its words are translated for the console's locale.
   const servedApp = apps.find((a: any) => a.name === targetAppName);
-  const servedPackageId = typeof servedApp?._packageId === 'string' ? servedApp._packageId : undefined;
+  // objectstack#35115 — the app's package is its address for the read below
+  // AND the save: a packaged app is saved with `{ packageId }` (`?package=`),
+  // the row the read came from. A package-less app is read and saved with no
+  // package, as before. A managed package's sealed app (ADR-0131 D6) is still
+  // refused by the server at either address; naming its package writes
+  // nothing the package-less save did not.
+  const servedPackageId = owningPackage(servedApp);
 
   // objectstack#35054 (route D) — the wizard edits the app as its author
   // stored it, read from the untranslated layers (`getAuthoredItem`). The
@@ -138,7 +163,9 @@ export function EditAppPage() {
         // Persist app metadata to backend
         const client = adapter?.getClient();
         if (client) {
-          await client.meta.saveItem('app', draft.name, merged);
+          await (servedPackageId
+            ? client.meta.saveItem('app', draft.name, merged, { packageId: servedPackageId })
+            : client.meta.saveItem('app', draft.name, merged));
         }
         toast.success(`Application "${draft.title}" updated successfully`);
         await refresh?.();
@@ -147,7 +174,7 @@ export function EditAppPage() {
         toast.error(err?.message || 'Failed to update application');
       }
     },
-    [navigate, refresh, adapter, appToEdit],
+    [navigate, refresh, adapter, appToEdit, servedPackageId],
   );
 
   const handleCancel = useCallback(() => {
