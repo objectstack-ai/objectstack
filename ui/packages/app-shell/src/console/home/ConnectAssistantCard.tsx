@@ -19,12 +19,19 @@
  *
  * Once the person connects one it is gone on the next read, and it does not
  * come back after a dismissal.
+ *
+ * Where and how big (objectstack#35017): the host draws it after the greeting,
+ * My apps and My work, never above them, so it brings no padding or width of
+ * its own; the host's column gives both. Below `sm` it is one row (icon,
+ * title, Connect, close): the title keeps one line and the sentence under it
+ * is visually collapsed but still read out, so a phone's first screen keeps
+ * the apps. From `sm` up it is the two-line card it always was.
  */
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
-import { Button } from '@object-ui/components';
+import { Button, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Bot, X } from 'lucide-react';
 import { useMetadata } from '../../providers/MetadataProvider.js';
@@ -33,7 +40,7 @@ import { useConnectedAccess } from '../connect/connectedAccess.js';
 import { cardStorage, markCardDismissed, wasCardDismissed } from './connectAssistantCardGate.js';
 import { useHomeItemClaimed } from './homeItemClaims.js';
 
-export function ConnectAssistantCard() {
+export function ConnectAssistantCard({ className }: { className?: string } = {}) {
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -55,35 +62,46 @@ export function ConnectAssistantCard() {
   };
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8 pt-4">
-      <div className="mx-auto max-w-[1120px]">
-        <section
-          className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
-          data-testid="home-connect-assistant"
-          aria-labelledby="home-connect-assistant-title"
+    <section
+      className={cn(
+        'flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 sm:gap-3 sm:px-4 sm:py-3',
+        className,
+      )}
+      data-testid="home-connect-assistant"
+      aria-labelledby="home-connect-assistant-title"
+    >
+      <Bot className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0 flex-1">
+        <h2
+          id="home-connect-assistant-title"
+          className="truncate text-sm font-medium sm:whitespace-normal"
+          data-testid="home-connect-assistant-title"
         >
-          <Bot className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
-          <div className="min-w-0 flex-1">
-            <h2 id="home-connect-assistant-title" className="text-sm font-medium">
-              {t('home.connectAssistant.title')}
-            </h2>
-            <p className="text-[13px] text-muted-foreground">{t('home.connectAssistant.body')}</p>
-          </div>
-          <Button size="sm" variant="outline" onClick={() => navigate(path)} data-testid="home-connect-assistant-open">
-            {t('home.connectAssistant.action')}
-          </Button>
-          <button
-            type="button"
-            onClick={dismiss}
-            aria-label={t('home.connectAssistant.dismiss')}
-            title={t('home.connectAssistant.dismiss')}
-            className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            data-testid="home-connect-assistant-dismiss"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </section>
+          {t('home.connectAssistant.title')}
+        </h2>
+        <p className="sr-only text-[13px] text-muted-foreground sm:not-sr-only" data-testid="home-connect-assistant-body">
+          {t('home.connectAssistant.body')}
+        </p>
       </div>
-    </div>
+      <Button
+        size="sm"
+        variant="outline"
+        className="shrink-0"
+        onClick={() => navigate(path)}
+        data-testid="home-connect-assistant-open"
+      >
+        {t('home.connectAssistant.action')}
+      </Button>
+      <button
+        type="button"
+        onClick={dismiss}
+        aria-label={t('home.connectAssistant.dismiss')}
+        title={t('home.connectAssistant.dismiss')}
+        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        data-testid="home-connect-assistant-dismiss"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </section>
   );
 }
