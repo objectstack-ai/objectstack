@@ -9,7 +9,7 @@
 
 feat(mcp): "each X with its latest Y" in one `query_records` call — `latestPer`
 
-Clause-②: yes (widening)
+Clause-②: yes (widening): a new read form on the published MCP tool surface. Judged from the card content; the build confirms it
 Metadata-protocol: none
 
 `query_records` takes `latestPer: { by, orderBy }`: one row per group, the group's first row in the given order. `by` names 1 to 3 fields, `orderBy` 1 to 3 keys (`asc` / `desc`); a tie goes to the record id in the direction of the last key, and an empty order value ranks last. "Each account with its latest deal" is `{ objectName: 'crm_opportunity', latestPer: { by: ['account'], orderBy: [{ field: 'close_date', order: 'desc' }] } }`.
