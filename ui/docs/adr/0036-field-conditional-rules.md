@@ -19,7 +19,7 @@ We express them as three optional CEL predicates on `Field`:
 
 | Prop           | When the predicate is TRUE                          | Enforced on        |
 | -------------- | --------------------------------------------------- | ------------------ |
-| `visibleWhen`  | the field is shown (else hidden)                    | client (UX only)   |
+| `visibleWhen`  | the field is shown (else hidden)                    | client; server reads it on a `required` field |
 | `readonlyWhen` | the field is read-only                              | **client + server**|
 | `requiredWhen` | the field is required                               | **client + server**|
 
@@ -73,6 +73,16 @@ import dragged into the bundle.
   affordance. The server's `requiredWhen` / `readonlyWhen` are the real guards,
   so hiding a field client-side never weakens enforcement.
 
+  > **Amended (2026-11-17) — one exception: a `required` field.** The framework
+  > (ADR-0113, amended that day; ruling A on objectstack#34905) evaluates the
+  > `visibleWhen` of a field that is also `required`, on every write, to decide
+  > whether the requirement applies: hidden means not required for that write,
+  > a write that reveals the field empty is refused, and a predicate it cannot
+  > evaluate counts as shown. Before, such a field was enforced while the form
+  > hid it, and every record outside the condition refused every save. The
+  > server still hides nothing: a field's value is returned to every reader
+  > whatever its `visibleWhen` says.
+
 ### The one fail-CLOSED fault (objectstack#4889)
 
 The exception is narrow, and worth stating in full because its symptom is
@@ -106,7 +116,8 @@ Everything else keeps the fail-open policy, deliberately:
   included, is logged and skipped, and the write proceeds. Rejecting a write
   because a header was momentarily unreadable is a louder failure than refusing
   one field.
-- **`visibleWhen`** is never evaluated server-side at all, per the bullet above.
+- **`visibleWhen`** is evaluated server-side only on a `required` field, per the
+  amendment above, and a fault there counts as shown (the field stays required).
 
 ## Client enforcement (objectui)
 
@@ -224,5 +235,6 @@ all of its errors.
 - Authors express conditional UX once, on the field, in the same CEL they
   already use for validation rules and formulas — no widget-level wiring.
 - Client and server cannot drift: identical engine, identical dialect.
-- `visibleWhen` is intentionally client-only; never rely on it for security —
+- `visibleWhen` hides nothing on the server (on a `required` field it only
+  decides the requirement); never rely on it for security —
   use `readonlyWhen` / `requiredWhen` (or a full validation rule) for guarantees.
