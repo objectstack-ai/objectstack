@@ -349,9 +349,11 @@ export const SeedSchema = lazySchema(() => strictObject({
    *   otherwise exact.
    * - **Judged after `env`.** A dataset `env` scoped out of the load neither
    *   matches nor falls back.
-   * - **At most one per object in a load.** Two datasets of one object both
-   *   marked `fallback: true` leave the loader no single choice: the load is
-   *   refused, naming the object, and no row is written.
+   * - **At most one per object in a load.** Two different datasets of one
+   *   object both marked `fallback: true` leave the loader no single choice:
+   *   none of that object's marked datasets loads, the load reports the object,
+   *   and its other datasets and every other object still seed. Identical
+   *   copies of one dataset (a package's list merged twice) count once.
    * - **A load with no locale** (package apply, draft publish, or a load no rung
    *   resolved a locale for) loads every dataset, the fallback set included,
    *   and warns, as for any locale-scoped dataset.
@@ -364,7 +366,8 @@ export const SeedSchema = lazySchema(() => strictObject({
       'Marks this locale-scoped dataset as its object\'s fallback: it also loads for a resolved locale that no ' +
       'other locale-scoped dataset of the same object lists. Requires `locale`: a dataset with no locale already ' +
       'loads everywhere, and the pair is refused. At most one dataset per object in a load may be marked; two ' +
-      'refuse the load, writing nothing. A load with no locale loads it like every other dataset. Omitted, the ' +
+      'different marked datasets of one object are both skipped and reported, while the rest of the load seeds ' +
+      '(identical copies count once). A load with no locale loads it like every other dataset. Omitted, the ' +
       'dataset loads only for the locales it lists.',
     ),
 

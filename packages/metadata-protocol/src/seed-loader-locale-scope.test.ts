@@ -440,23 +440,49 @@ describe('Seed.fallback fills in for a locale no set of the object names', () =>
   describe('at most one fallback set per object in a load', () => {
     const PRICE_BOOK_ZH_FALLBACK = { ...PRICE_BOOK_ZH, fallback: true };
 
-    it('refuses the whole load, writing nothing, when two sets of one object are marked', async () => {
-      const { store, result } = await seedUnder('ja-JP', [ACCOUNT_DATASET, PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
+    it('refuses only that object\'s marked sets when two distinct sets of it are marked; the rest still seed', async () => {
+      const PRICE_BOOK_SHARED_ROWS = { ...PRICE_BOOK_SHARED };
+      const { store, result, logger } = await seedUnder('ja-JP', [ACCOUNT_DATASET, PRICE_BOOK_SHARED_ROWS, PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
+      // Neither marked price-book set loads; the object's unmarked set and every other object do.
+      expect(names(store)).toEqual(['Internal']);
+      expect(store.account).toEqual([expect.objectContaining({ name: 'Acme Corporation' })]);
       expect(result.success).toBe(false);
-      expect(store).toEqual({});
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]).toMatchObject({ sourceObject: 'price_book', field: 'fallback', targetField: '(dataset)' });
       expect(result.errors[0]!.message.split('. ')[0]).toBe(
-        "Seed datasets of 'price_book' mark 2 sets `fallback: true` (locale: zh-CN; locale: en, en-US)",
+        "Seed datasets of 'price_book' mark 2 different sets `fallback: true` (locale: zh-CN; locale: en, en-US)",
       );
+      // Named once at warn, whatever level the caller reports a failed load at.
+      const warned = logger.warn.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes('fallback: true'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain("'price_book'");
     });
 
-    it('refuses it whatever the locale — the declaration is ambiguous on every load', async () => {
+    it('refuses the object\'s marked sets whatever the locale — the declaration is ambiguous on every load', async () => {
       for (const locale of ['zh-CN', 'en', undefined]) {
-        const { store, result } = await seedUnder(locale, [PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
+        const { store, result } = await seedUnder(locale, [ACCOUNT_DATASET, PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
         expect(result.success, `locale=${locale}`).toBe(false);
-        expect(store, `locale=${locale}`).toEqual({});
+        expect(store.price_book, `locale=${locale}`).toBeUndefined();
+        expect(store.account, `locale=${locale}`).toHaveLength(1);
       }
+    });
+
+    it('identical copies of one fallback set count once: a list merged twice seeds normally', async () => {
+      // The shared per-organization replay list holds a package's datasets once per merge.
+      const copy = structuredClone(PRICE_BOOK_EN_FALLBACK);
+      const reordered = Object.fromEntries(Object.entries(structuredClone(PRICE_BOOK_EN_FALLBACK)).reverse());
+      const { store, result } = await seedUnder('ja-JP', [PRICE_BOOK_ZH, PRICE_BOOK_EN_FALLBACK, structuredClone(PRICE_BOOK_ZH), copy, reordered]);
+      expect(result.success).toBe(true);
+      expect(result.errors).toEqual([]);
+      expect(names(store)).toEqual(['Standard']);
+    });
+
+    it('two packages marking the same object with different sets refuse only that object', async () => {
+      const otherPackage = { object: 'price_book', externalId: 'name', mode: 'upsert', locale: ['de-DE'], fallback: true, records: [{ name: 'Standardpreisliste' }], _packageId: 'com.example.other' };
+      const { store, result } = await seedUnder('ja-JP', [ACCOUNT_DATASET, PRICE_BOOK_ZH, { ...PRICE_BOOK_EN_FALLBACK, _packageId: 'com.example.first' }, otherPackage]);
+      expect(store.price_book).toBeUndefined();
+      expect(store.account).toHaveLength(1);
+      expect(result.errors.map((e) => e.sourceObject)).toEqual(['price_book']);
     });
 
     it('one fallback set on each of two objects is fine', async () => {

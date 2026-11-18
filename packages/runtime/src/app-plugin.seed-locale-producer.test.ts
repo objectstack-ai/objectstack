@@ -637,6 +637,48 @@ describe('Seed.fallback on the boot and install paths', () => {
             await (await replayerOf(MARKED))('org_new', { userId: 'usr_es' });
             expect(priceBooks()).toEqual(['Standard']);
         });
+
+        /**
+         * The shared `seed-datasets` list is appended to on every merge: boot
+         * rehydrate, install / upgrade and reseed each add the package's
+         * datasets again. The loader counts distinct declarations, so the
+         * second copy of the one fallback set is not a second fallback set.
+         */
+        it('a replay after the same package merged twice still gets the fallback set, and the rest seeds', async () => {
+            settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
+            const data = [ACCOUNT_DATASET, ...MARKED];
+            const replay = await replayerOf(data);
+            await app('en', data).start(ctx());
+            expect((services.get('seed-datasets') as unknown[]).length).toBe(6);
+
+            const summary = await replay('org_ja');
+            expect(priceBooks()).toEqual(['Standard']);
+            expect((store.account ?? []).map((r) => r.name)).toEqual(['Acme Corporation']);
+            expect(summary.errors ?? []).toEqual([]);
+        });
+
+        /**
+         * Object names are global: two packages that each mark a different
+         * fallback set for one object leave no single choice. Only that
+         * object's marked sets are skipped; every other object still seeds.
+         */
+        it('two packages marking different fallback sets of one object refuse only that object', async () => {
+            settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
+            const replay = await replayerOf([ACCOUNT_DATASET, ...MARKED]);
+            const DE = { object: 'price_book', externalId: 'name', mode: 'upsert', locale: ['de-DE'], fallback: true, records: [{ name: 'Standardpreisliste' }] };
+            await new AppPlugin({ id: 'com.example.second-app', data: [DE, PLAN_EN_DATASET] }).start(ctx());
+
+            settingFor.org_en = { value: 'en', source: 'tenant' };
+            await replay('org_ja');
+            expect(store.price_book).toBeUndefined();
+            expect((store.account ?? []).map((r) => r.name)).toEqual(['Acme Corporation']);
+            expect(logger.warn.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes("'price_book' mark 2 different sets"))).toHaveLength(1);
+
+            // The other package's other object seeds where its locale matches.
+            await replay('org_en');
+            expect((store.plan_en ?? []).map((r) => r.name)).toEqual(['Professional']);
+            expect(store.price_book).toBeUndefined();
+        });
     });
 
     /**
@@ -686,12 +728,20 @@ describe('Seed.fallback on the boot and install paths', () => {
             expect(priceBooks()).toEqual(['Standard']);
         });
 
-        it('two marked sets of one object refuse the load, writing nothing', async () => {
+        it('two different marked sets of one object refuse that object\'s marked sets; the rest seeds', async () => {
             settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
-            const result = await runInlineSeed([{ ...ZH, fallback: true }, { ...EN, fallback: true }], { organizationId: 'org_ja' });
+            const result = await runInlineSeed([ACCOUNT_DATASET, { ...ZH, fallback: true }, { ...EN, fallback: true }], { organizationId: 'org_ja' });
             expect(result.success).toBe(false);
             expect(result.errors.map((e) => e.field)).toEqual(['fallback']);
             expect(store.price_book).toBeUndefined();
+            expect((store.account ?? []).map((r) => r.name)).toEqual(['Acme Corporation']);
+        });
+
+        it('the same marked set twice in one request (a list merged twice) is one fallback set', async () => {
+            settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
+            const result = await runInlineSeed([...MARKED, ...structuredClone(MARKED)], { organizationId: 'org_ja' });
+            expect(result.success).toBe(true);
+            expect(priceBooks()).toEqual(['Standard']);
         });
 
         it('a marked set with no locale is refused when the request is parsed', () => {

@@ -380,9 +380,12 @@ The rules:
   `ja-JP` set of some *other* object does not stop the price book's fallback.
 - **`env` is applied first.** A set `env` scoped out of the load neither matches
   nor falls back.
-- **At most one fallback set per object in a load.** Two sets of one object both
-  marked `fallback: true` refuse the whole seed load — no row is written — and
-  the load's error names the object.
+- **At most one fallback set per object in a load.** Two different sets of one
+  object both marked `fallback: true` leave no single choice: none of that
+  object's marked sets loads, and the load's error (also logged at warn) names
+  the object. The object's other sets and every other object still seed.
+  Identical copies of one set — the same package's datasets merged twice —
+  count once.
 
 The loader logs, at info, each fallback set it loaded and the locale it filled
 in for. Datasets without the marker load exactly as before.
