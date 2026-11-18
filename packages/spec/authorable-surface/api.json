@@ -73,7 +73,7 @@
     "api/AiConversationMessage:content",
     "api/AiConversationMessage:parts",
     "api/AiConversationMessage:role",
-    "api/AiConversationMessage:turn_id",
+    "api/AiConversationMessage:turnId",
     "api/AiMessage:content",
     "api/AiMessage:parts",
     "api/AiMessage:role",
