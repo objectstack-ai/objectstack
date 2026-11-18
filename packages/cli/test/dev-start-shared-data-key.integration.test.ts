@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — spawns the real producer once per single-cause fixture: `os dev` then `os start` over one project, then two `os start` boots over that project's two key files (one reads back, one refuses); reading 24.3 s for the four boots on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s
+// test-budget: 40 — spawns the real producer once per single-cause fixture: `os dev`, `os user set-password` and `os start` over one project, then two `os start` boots over that project's two key files (one reads back, one refuses); reading 24.3 s for the four boots on a shared local box (no CI reading yet) x 1.25, rounded up to the next 10 s
 
 /**
  * #29934 — a secret saved under `os dev` reads back under `os start` over the
@@ -19,7 +19,8 @@
  *
  * The card's reproduction at the public door, with no env key anywhere and an
  * empty `HOME`: `os dev` → sign in → `PUT /api/settings/ai` with an
- * `openai_api_key` → stop; `os start --artifact ./dist/objectstack.json` in the
+ * `openai_api_key` → stop; `os user set-password` (a server outside development
+ * mode refuses the seed password); `os start --artifact ./dist/objectstack.json` in the
  * same project → sign in → `GET /api/settings/ai` must carry the stored value
  * (masked, from `global`), and the project directory must hold no second key.
  *
@@ -36,7 +37,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -64,6 +65,11 @@ const BOOT_TIMEOUT_MS = 180_000;
 /** The development dev-admin seed — the operator on both boots (one database). */
 const EMAIL = 'admin@objectos.ai';
 const PASSWORD = 'admin123';
+/**
+ * The password the operator sets with `os user set-password` before serving the
+ * database outside development mode, where the seed password is refused.
+ */
+const SERVED_PASSWORD = 'dsk-served-password-29934';
 const SECRET = 'sk-29934-shared-key';
 
 const MANIFEST = { id: 'com.example.dsk', namespace: 'dsk', version: '1.0.0', type: 'app', name: 'Dsk' };
@@ -104,40 +110,61 @@ let dir: string;
 let home: string;
 let reading: Reading = {};
 
+// `childEnv`, never a bare `...process.env` — see its header. No env key of
+// any spelling and no home override: the key FILE is the subject, and `HOME`
+// is this test's own empty directory.
+function projectEnv(): Record<string, string | undefined> {
+  return childEnv({
+    NO_COLOR: '1',
+    HOME: home,
+    OS_CLOUD_URL: 'off',
+    OS_DISABLE_CONSOLE: '1',
+    OS_LOG_LEVEL: 'warn',
+    // A production boot on a kernel-assigned port derives its own trusted
+    // origin from the port it was ASKED for (0), so the origin it bound is
+    // named here; `os dev` trusts `http://localhost:*` on its own.
+    OS_TRUSTED_ORIGINS: 'http://localhost:*',
+    OS_SECRET_KEY: undefined,
+    OS_DEV_CRYPTO_KEY: undefined,
+    OBJECTSTACK_DEV_CRYPTO_KEY: undefined,
+    OS_INTERNAL_CRYPTO_KEY_FILE: undefined,
+    OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE: undefined,
+    OS_HOME: undefined,
+    OBJECTSTACK_HOME: undefined,
+    OS_DATABASE_URL: undefined,
+    OS_ARTIFACT_URL: undefined,
+    OS_ARTIFACT_PATH: undefined,
+    OS_AUTH_SECRET: undefined,
+    OS_CLUSTER_DRIVER: undefined,
+    OS_MODE: undefined,
+    NODE_ENV: undefined,
+    OS_PORT: undefined,
+    PORT: undefined,
+  });
+}
+
+/**
+ * `os user set-password EMAIL --password-stdin` over the project database: the
+ * way a database `os dev` seeded is served outside development mode.
+ */
+function setServedPassword(): void {
+  const run = spawnSync(process.execPath, [CLI, 'user', 'set-password', EMAIL, '--password-stdin'], {
+    cwd: dir,
+    env: projectEnv(),
+    input: SERVED_PASSWORD,
+    encoding: 'utf8',
+    timeout: BOOT_TIMEOUT_MS,
+  });
+  if (run.status !== 0) {
+    throw new Error(`os user set-password exited ${String(run.status)}\n--- output ---\n${run.stdout}${run.stderr}`);
+  }
+}
+
 function boot(what: string, args: string[]): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: dir,
-      // `childEnv`, never a bare `...process.env` — see its header. No env key
-      // of any spelling and no home override: the key FILE is the subject, and
-      // `HOME` is this test's own empty directory.
-      env: childEnv({
-        NO_COLOR: '1',
-        HOME: home,
-        OS_CLOUD_URL: 'off',
-        OS_DISABLE_CONSOLE: '1',
-        OS_LOG_LEVEL: 'warn',
-        // A production boot on a kernel-assigned port derives its own trusted
-        // origin from the port it was ASKED for (0), so the origin it bound is
-        // named here; `os dev` trusts `http://localhost:*` on its own.
-        OS_TRUSTED_ORIGINS: 'http://localhost:*',
-        OS_SECRET_KEY: undefined,
-        OS_DEV_CRYPTO_KEY: undefined,
-        OBJECTSTACK_DEV_CRYPTO_KEY: undefined,
-        OS_INTERNAL_CRYPTO_KEY_FILE: undefined,
-        OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE: undefined,
-        OS_HOME: undefined,
-        OBJECTSTACK_HOME: undefined,
-        OS_DATABASE_URL: undefined,
-        OS_ARTIFACT_URL: undefined,
-        OS_ARTIFACT_PATH: undefined,
-        OS_AUTH_SECRET: undefined,
-        OS_CLUSTER_DRIVER: undefined,
-        OS_MODE: undefined,
-        NODE_ENV: undefined,
-        OS_PORT: undefined,
-        PORT: undefined,
-      }),
+      env: projectEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
@@ -209,8 +236,8 @@ function http(live: Live, method: string, path: string, token = '', body?: unkno
   );
 }
 
-async function signIn(live: Live): Promise<string> {
-  const r = await http(live, 'POST', '/api/v1/auth/sign-in/email', '', { email: EMAIL, password: PASSWORD });
+async function signIn(live: Live, password: string): Promise<string> {
+  const r = await http(live, 'POST', '/api/v1/auth/sign-in/email', '', { email: EMAIL, password });
   const token = r.body?.token;
   if (r.status !== 200 || typeof token !== 'string') {
     throw new Error(`sign-in answered ${r.status}: ${JSON.stringify(r.body)}\n--- output ---\n${live.output().slice(-3000)}`);
@@ -232,15 +259,19 @@ beforeAll(async () => {
   try {
     // `npm run dev`: the dev admin is seeded, the secret is sealed.
     live = await boot('os dev', ['dev', '--no-watch', '--no-restart', '-p', KERNEL_ASSIGNED_PORT]);
-    const devToken = await signIn(live);
+    const devToken = await signIn(live, PASSWORD);
     const put = await http(live, 'PUT', '/api/settings/ai', devToken, { openai_api_key: SECRET });
     transcript += `--- os dev ---\n${live.output().slice(-3000)}\n`;
     await stopGroup(live.child);
     live = undefined;
 
+    // A server outside development mode refuses the seed password: the
+    // operator sets one first, as the refusal says.
+    setServedPassword();
+
     // `npx os start --artifact ./dist/objectstack.json` in the same project.
     live = await boot('os start', ['start', '--artifact', './dist/objectstack.json', '--port', KERNEL_ASSIGNED_PORT]);
-    const startToken = await signIn(live);
+    const startToken = await signIn(live, SERVED_PASSWORD);
     const get = await http(live, 'GET', '/api/settings/ai', startToken);
     transcript += `--- os start ---\n${live.output().slice(-3000)}\n`;
     reading = { put, get, transcript };
@@ -331,7 +362,7 @@ describe('#30042 — two key files: the boot takes the one that opens the stored
       renameSync(homeKey(), projectKey());
       writeForeignKey(homeKey());
       live = await boot('os start (two keys)', ['start', '--artifact', './dist/objectstack.json', '--port', KERNEL_ASSIGNED_PORT]);
-      const token = await signIn(live);
+      const token = await signIn(live, SERVED_PASSWORD);
       const get = await http(live, 'GET', '/api/settings/ai', token);
       const transcript = live.output().slice(-4000);
       await stopGroup(live.child);
