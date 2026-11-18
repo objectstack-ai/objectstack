@@ -212,6 +212,12 @@ acts for (`actingAs`) and declares its `outcome`, so grading reads it with code 
 - `{ kind: "applied", state: [...], auditActor? }` — each state entry names a row by `id`
   (seeded) or `where` (a row the write creates) and carries the `values` the data API must
   read back, or `absent: true`; `auditActor` is the persona the audit trail must name.
+  A `where` key may be a relation path through `expect.lookups` (`claim.trip`), so a row the
+  write created is found through the parent row it belongs to. An entry may instead be an
+  aggregate over every row its `where` matches (at least one; never by `id`): `sum` (per
+  field, the rows' total) and `each` (per field, the value every row holds). Use it where
+  the ask fixes a total but not how the agent splits it into rows: two hotel nights are one
+  line of quantity 2 or two lines of quantity 1, and `sum: {"amount": 860}` meets both.
   A value equal to the card's `asOf` is also met by the date the run happened on in a
   field the platform's clock stamps (a default or a flow writing a decision date, an
   order date), which cannot hold the card's fixed today. A field the agent's own write

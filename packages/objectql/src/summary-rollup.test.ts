@@ -460,14 +460,25 @@ describe('roll-up summary seeding on the PARENT insert (#5749)', () => {
     expect(row(p.id).max_estimate ?? null).toBeNull();
   });
 
-  it('never overwrites a value the author supplied on insert', async () => {
-    const p = await engine.insert('project', { name: 'Imported', task_count: 7, total_estimate: 42 });
+  // [#34672] These two cases kept an ordinary caller's starting value until the
+  // create side of the roll-up lock landed. The seed still never overwrites a
+  // supplied value, but only the system principal (seed loads, package
+  // installs, historical imports) can still supply one; an ordinary caller's
+  // is dropped and the seed fills the column.
+  it('never overwrites a value a system writer supplied on insert (seed data, a historical import)', async () => {
+    const p = await engine.insert('project', { name: 'Imported', task_count: 7, total_estimate: 42 }, { context: { isSystem: true } } as any);
     expect(row(p.id).task_count).toBe(7);
     expect(row(p.id).total_estimate).toBe(42);
   });
 
-  it('seeds every row of a batch insert, and only the unsupplied ones', async () => {
-    const written = await engine.insert('project', [{ name: 'P1' }, { name: 'P2', task_count: 3 }]);
+  it('an ordinary caller\'s value on insert is dropped, and the seed fills the column', async () => {
+    const p = await engine.insert('project', { name: 'Typed', task_count: 7, total_estimate: 42 });
+    expect(row(p.id).task_count).toBe(0);
+    expect(row(p.id).total_estimate).toBe(0);
+  });
+
+  it('seeds every row of a batch insert, and only the unsupplied ones (system writer)', async () => {
+    const written = await engine.insert('project', [{ name: 'P1' }, { name: 'P2', task_count: 3 }], { context: { isSystem: true } } as any);
     expect(row(written[0].id).task_count).toBe(0);
     expect(row(written[0].id).total_estimate).toBe(0);
     expect(row(written[1].id).task_count).toBe(3);

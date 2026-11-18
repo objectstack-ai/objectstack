@@ -124,10 +124,12 @@ describe('ConsoleLayout — the dock learns the current app and holds the drawer
     mount(CRM);
     expect(dock.panel?.target).toBeUndefined();
     act(() => dock.panel?.onTargetChange?.({ agent: 'build', conversationId: 'c1', packageId: 'app.crm' }));
-    expect(dock.panel?.target).toEqual({ agent: 'build', conversationId: 'c1', packageId: 'app.crm' });
+    // objectstack#35014 — the host records the app the target was opened in.
+    const held = { agent: 'build', conversationId: 'c1', packageId: 'app.crm', app: 'app.crm' };
+    expect(dock.panel?.target).toEqual(held);
     cleanup();
     mount(CRM);
-    expect(dock.panel?.target).toEqual({ agent: 'build', conversationId: 'c1', packageId: 'app.crm' });
+    expect(dock.panel?.target).toEqual(held);
   });
 
   it('back to the ambient thread clears the held target', () => {
