@@ -4399,13 +4399,24 @@ export const AiModelsResponseSchema = lazySchema(() => z.object({
   defaultModel: z.string().optional().describe('Default model id, when the service reports one'),
 }));
 
+/**
+ * One message of a persisted conversation, as the `/ai/conversations` routes
+ * return it: {@link AiMessageSchema} plus the turn it belongs to.
+ */
+export const AiConversationMessageSchema = lazySchema(() => AiMessageSchema.extend({
+  turnId: z.string().nullable().optional().describe(
+    'The turn the server stamped on the message: the `turnId` of the chat request that wrote it. '
+    + 'Absent or null on a message stored with no turn',
+  ),
+}));
+
 /** A persisted AI conversation, as the `/ai/conversations` routes return it. */
 export const AiConversationSchema = lazySchema(() => z.object({
   id: z.string().describe('Conversation id'),
   title: z.string().optional().describe('Title / summary'),
   agentId: z.string().optional().describe('Agent this conversation is bound to'),
   userId: z.string().optional().describe('Owning user'),
-  messages: z.array(AiMessageSchema).describe('Message history'),
+  messages: z.array(AiConversationMessageSchema).describe('Message history'),
   createdAt: z.string().describe('Creation timestamp (ISO 8601)'),
   updatedAt: z.string().describe('Last update timestamp (ISO 8601)'),
   metadata: z.record(z.string(), z.unknown()).optional().describe('Conversation metadata'),
@@ -4958,6 +4969,7 @@ export type MarkAllNotificationsReadResponse = z.input<typeof MarkAllNotificatio
 
 // AI Types
 export type AiMessage = z.input<typeof AiMessageSchema>;
+export type AiConversationMessage = z.input<typeof AiConversationMessageSchema>;
 export type AiChatRequest = z.input<typeof AiChatRequestSchema>;
 export type AiChatResponse = z.input<typeof AiChatResponseSchema>;
 export type AiStreamChunk = z.input<typeof AiStreamChunkSchema>;
