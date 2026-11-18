@@ -1,10 +1,10 @@
 # ObjectStack Roadmap
 
-> **Last updated:** 2026-11-08
-> **Source of truth:** the *Features on the road* table in
-> [docs/NORTH-STAR.md](docs/NORTH-STAR.md). That table is the roadmap: its order is the
-> priority, and editing it is editing priority. This page is a short public summary of it
-> and decides nothing on its own. Where the two disagree, the North Star wins.
+> **Last updated:** 2026-11-18
+> **Source of truth:** the *Product areas* and *Features on the road* sections of
+> [docs/NORTH-STAR.md](docs/NORTH-STAR.md). Priority comes from its grading rules and the
+> areas the maintainer names, not from the order of rows. This page is a short public summary
+> of it and decides nothing on its own. Where the two disagree, the North Star wins.
 
 ObjectStack is measured by one road: a new AI developer, with a human accepting, starts
 from `npm create objectstack`, writes metadata, runs it locally, has verification reject

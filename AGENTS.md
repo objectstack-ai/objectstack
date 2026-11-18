@@ -206,8 +206,8 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
 7. **One Zod source per metadata type.** Each type (`view`, `flow`, `agent`, …) has exactly one schema in
    `packages/spec/src/{domain}/`. Environment-overlay opt-in lives only in `allowEnvironmentOverlay` on
    `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005, amended by ADR-0131 C5.
-8. **North Star alignment.** Read `docs/NORTH-STAR.md` before structural changes. If a change doesn't advance a row of
-   its *Features on the road* ladder, graded by its *Priority* — it probably shouldn't ship.
+8. **North Star alignment.** Read `docs/NORTH-STAR.md` before structural changes. If a change doesn't advance a core
+   feature of its *Product areas* or a *Features on the road* row, graded by *Priority* — it probably shouldn't ship.
 9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow
    **`OS_{DOMAIN}_{FEATURE}[_QUALIFIER]`** where `DOMAIN` is the subsystem (`AUTH`, `SEARCH`, `CORS`, `CLOUD`,
    `DATABASE`, `CLUSTER`, `MCP`, `SSO`, …) so related vars group together (cf. `OS_AUTH_*`, `OS_CORS_*`). Pick the
