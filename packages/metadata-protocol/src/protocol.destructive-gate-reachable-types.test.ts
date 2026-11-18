@@ -554,6 +554,8 @@ describe('[#24411 §4] the destructive diff reads the field\'s own storage decla
             code: 'field_removed',
             field: 'notes',
             message: "Field 'notes' removed — existing data in this column will become inaccessible.",
+            // Computed, and nothing in this fixture shows the field.
+            stillShownBy: [],
         }]);
         expect(metadataWrites(writes)).toEqual([]);
     });

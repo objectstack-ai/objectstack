@@ -53,7 +53,7 @@ import { flowVerdictBody } from './protocol-flow-save-replay.js';
 import { withParsedStoredActions } from './protocol-stored-action-parse.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
-import { withStillShownBy } from './protocol-destructive-still-shown-by.js';
+import { withStillShownBy } from './destructive-still-shown-by.js';
 import { canonicalMetaType, canonicalizeMetaRequestType, resolveOverlaySchema } from './protocol-meta-type-schema.js';
 import {
     permissionSetOwnerBindingRefusal,
