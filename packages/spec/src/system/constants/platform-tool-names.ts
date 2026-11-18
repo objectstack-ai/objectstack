@@ -38,7 +38,7 @@
  * bridge reads {@link PLATFORM_PROVIDED_TOOL_NAMES} to annotate the tools it
  * bridges from the cloud runtime. The door's file pair has its own constant,
  * {@link MCP_FILE_TOOL_NAMES}, which the `skill.tools[]` lint rule resolves
- * against beside this registry.
+ * against beside this registry for a skill offered over MCP.
  */
 
 /**
@@ -136,7 +136,9 @@ export const PLATFORM_PROVIDED_TOOL_NAMES: ReadonlySet<string> = new Set(
  * `create_upload_link` mints a single-use link to upload a file onto a record.
  * No cloud AI package registers either, so neither is in
  * {@link PLATFORM_PROVIDED_TOOL_NAMES}; a skill bound to them is served over
- * MCP, and the `skill.tools[]` lint rule resolves both names from this list.
+ * MCP, and the `skill.tools[]` lint rule resolves both names from this list
+ * for a skill offered there. An in-product turn runs without them, so a skill
+ * kept out of MCP (`mcpPrompt: false`) naming either is still reported.
  *
  * Maintenance contract: this is the exact set `registerFileTools` registers on
  * a bridge carrying every file member. `@objectstack/mcp` carries the

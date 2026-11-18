@@ -267,6 +267,28 @@ describe('validate-ai-tool-references', () => {
   });
 
   /**
+   * [#34948] The pair resolves only for a skill offered over MCP. No cloud
+   * package registers either tool, so a skill its owner keeps out of MCP
+   * (`mcpPrompt: false`) runs only in the in-product agents, which drop both
+   * names: the rule must keep reporting them there, as it did before the pair
+   * joined its universe.
+   */
+  it('still reports the MCP file tools on a skill kept out of MCP (mcpPrompt: false) (#34948)', () => {
+    const findings = validateAiToolReferences({
+      skills: [{ name: 'receipts', mcpPrompt: false, tools: ['read_file'] }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('skills[0].tools[0]');
+    expect(findings[0].message).toContain('"read_file"');
+    // The same skill with the key absent, or `true`, is offered over MCP and
+    // resolves: the verdict follows `mcpPrompt` and nothing else.
+    expect(validateAiToolReferences({ skills: [{ name: 'receipts', tools: ['read_file'] }] })).toEqual([]);
+    expect(
+      validateAiToolReferences({ skills: [{ name: 'receipts', mcpPrompt: true, tools: ['read_file'] }] }),
+    ).toEqual([]);
+  });
+
+  /**
    * The chat's confirmed record write (cloud#3565; it replaced cloud#3383's
    * `draft_record`): a skill naming `create_record` / `update_record` resolves;
    * a near name nobody registers does not, and neither does the retired name.
@@ -390,6 +412,8 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
       '`stack.tools`',
       '`PLATFORM_PROVIDED_TOOL_NAMES`',
       '`MCP_FILE_TOOL_NAMES`',
+      'only for a skill offered over MCP',
+      '`mcpPrompt: false`',
       '`stack.actions` or any object\'s `actions`',
       'trailing-wildcard',
       '`ai.exposed: true` with an `ai.description` (ADR-0011)',

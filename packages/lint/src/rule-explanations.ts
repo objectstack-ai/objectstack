@@ -5531,10 +5531,12 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
     'A `skill.tools` entry resolves, in order, against the stack\'s own `stack.tools` names; ' +
       '`PLATFORM_PROVIDED_TOOL_NAMES` (`@objectstack/spec/system`), the tools the cloud AI runtime ' +
       'registers at boot; `MCP_FILE_TOOL_NAMES` (same module), the file tools the MCP door registers ' +
-      '(`read_file`, `create_upload_link`); and the materialised action tools, one `action_<name>` ' +
-      'per declarative action in `stack.actions` or any object\'s `actions` (ADR-0109: the default ' +
-      'path declares no tool record at all). A trailing-wildcard entry (`action_*`, `crm_*`) resolves ' +
-      'when any member of that universe starts with its prefix.',
+      '(`read_file`, `create_upload_link`), only for a skill offered over MCP: no cloud package ' +
+      'registers either, so an in-product turn runs without them, and a skill kept out of MCP ' +
+      '(`mcpPrompt: false`) is still reported for naming them; and the materialised action tools, ' +
+      'one `action_<name>` per declarative action in `stack.actions` or any object\'s `actions` ' +
+      '(ADR-0109: the default path declares no tool record at all). A trailing-wildcard entry ' +
+      '(`action_*`, `crm_*`) resolves when any member of that universe starts with its prefix.',
     // The headless paths are held to the rule by its test, each one materialising.
     'An action materialises as a tool only when it opts in, `ai.exposed: true` with an ' +
       '`ai.description` (ADR-0011) of at least 40 characters, which the model reads, and has a headless ' +

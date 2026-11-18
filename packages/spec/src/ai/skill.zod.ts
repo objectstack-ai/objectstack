@@ -365,8 +365,11 @@ export const SkillSchema = lazySchema(() => strictObject({
    * A `tool` record is NEVER required, and the default third-party path
    * declares none (ADR-0109). A name here resolves against, in order: the
    * stack's own `stack.tools[]` names; `PLATFORM_PROVIDED_TOOL_NAMES`, the
-   * curated registry of tools the cloud AI runtime registers at boot; and the
-   * `action_<name>` family the runtime materialises from the app's own
+   * curated registry of tools the cloud AI runtime registers at boot;
+   * `MCP_FILE_TOOL_NAMES`, the file tools the MCP door registers (`read_file`,
+   * `create_upload_link`), only when the skill is offered over MCP
+   * (`mcpPrompt` is not `false`), since an in-product turn runs without them;
+   * and the `action_<name>` family the runtime materialises from the app's own
    * AI-exposed declarative actions (`ai.exposed` + `ai.description` on a
    * headless action type — ADR-0011). The first of those is the OPTIONAL
    * AI-presentation refinement layer (Phase 2: LLM-facing description,
