@@ -111,6 +111,16 @@ function declareCell(cell: DialectCell): void {
       expect(customers(byKeyDesc)[customers(byKeyDesc).length - 1]).toBeNull();
     });
 
+    it('a rank orders a group key by its listed values\' positions before the cut, any other value after them', async () => {
+      const declared = await driver.aggregate(TABLE, query(cut([{ column: 'customer', order: 'asc', rank: ['c05', 'c40', 'c02'] }], 3)), { tenantId: 'org_a' });
+      expect(customers(declared)).toEqual(['c05', 'c40', 'c02']);
+      expect(declared[0][COUNT_COLUMN]).toBe(62);
+      const reversed = await driver.aggregate(TABLE, query(cut([{ column: 'customer', order: 'desc', rank: ['c05', 'c40', 'c02'] }])), { tenantId: 'org_a' });
+      // Descending over the ranks: the 59 unlisted groups (rank 3, the NULL key among them) first, then c02, c40, c05.
+      expect(customers(reversed).slice(-3)).toEqual(['c02', 'c40', 'c05']);
+      expect(customers(reversed.slice(0, 59))).toContain(null);
+    });
+
     it('the cut runs inside the tenant wall and the where', async () => {
       const lost = await driver.aggregate(
         TABLE,

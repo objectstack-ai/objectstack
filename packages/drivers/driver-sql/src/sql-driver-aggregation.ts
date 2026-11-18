@@ -561,7 +561,12 @@ export class AggregationFacet {
       for (const key of orderCut.orderBy) {
         const ref = `${groups}.${this.aliasIdentifierSql(key.column)}`;
         const identity = foldedOutput.get(key.column);
-        if (identity !== undefined && Number.isFinite(identity)) {
+        if (key.rank !== undefined) {
+          // A declared order: each listed value ranks by its position, any
+          // other value (a NULL among them) after every listed one.
+          const arms = key.rank.map((_, i) => `when ? then ${i}`).join(' ');
+          outer.orderByRaw(`case ${ref} ${arms} else ${key.rank.length} end ${key.order}`, [...key.rank]);
+        } else if (identity !== undefined && Number.isFinite(identity)) {
           outer.orderByRaw(`coalesce(${ref}, ${String(identity)}) ${key.order}`);
         } else {
           outer.orderByRaw(`case when ${ref} is null then 1 else 0 end, ${ref} ${key.order}`);
@@ -624,8 +629,16 @@ export const AGGREGATE_ORDER_CUT_DIRECTIVE: unique symbol = Symbol.for('objectst
 
 /** The order, cut and group-count column, as the engine hands them. */
 export interface AggregateOrderCutDirective {
-  /** The full order, every key a column the grouped statement projects. */
-  readonly orderBy: ReadonlyArray<{ readonly column: string; readonly order: 'asc' | 'desc' }>;
+  /**
+   * The full order, every key a column the grouped statement projects. A key
+   * with a `rank` orders by each value's position in it, any value it does
+   * not list after every listed one.
+   */
+  readonly orderBy: ReadonlyArray<{
+    readonly column: string;
+    readonly order: 'asc' | 'desc';
+    readonly rank?: ReadonlyArray<string | number>;
+  }>;
   /** The most groups to answer; absent = every group. */
   readonly limit?: number;
   /** The column every row answers the pre-cut group count under. */
@@ -649,7 +662,9 @@ export function aggregateOrderCutOf(query: DriverQuery): AggregateOrderCutDirect
   const d = directive as Partial<AggregateOrderCutDirective> | null;
   const ok = d !== null && typeof d === 'object'
     && Array.isArray(d.orderBy)
-    && d.orderBy.every((k) => typeof k?.column === 'string' && k.column !== '' && (k.order === 'asc' || k.order === 'desc'))
+    && d.orderBy.every((k) => typeof k?.column === 'string' && k.column !== '' && (k.order === 'asc' || k.order === 'desc')
+      && (k.rank === undefined || (Array.isArray(k.rank) && k.rank.length >= 1
+        && k.rank.every((v: unknown) => typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))))))
     && (d.limit === undefined || (typeof d.limit === 'number' && Number.isInteger(d.limit) && d.limit >= 1))
     && typeof d.groupCountColumn === 'string' && d.groupCountColumn !== '';
   if (!ok) throw aggregateOrderCutFault('malformed');

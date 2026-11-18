@@ -97,6 +97,19 @@ describe('[aggregate order and cut] the HTTP MCP bridge over a real SQLite datab
     expect(answer.groupCount).toBe(CUSTOMERS);
   });
 
+  it('a declared order (a rank on a group key) reaches the statement: the listed groups first, in their order', async () => {
+    statements.length = 0;
+    const answer = await bridge.aggregateGroups(OBJECT, {
+      ...REVENUE,
+      orderBy: [{ field: 'customer', order: 'asc', rank: ['c03', 'c01', 'c02'] }],
+      limit: 3,
+    });
+    expect(answer.rows.map((r: any) => r.customer)).toEqual(['c03', 'c01', 'c02']);
+    expect(answer.groupCount).toBe(CUSTOMERS);
+    const ran = statements.filter((s) => /group by/i.test(s));
+    expect(ran[0]).toMatch(/order by case [^ ]+ when \? then 0 when \? then 1 when \? then 2 else 3 end asc/i);
+  });
+
   it('an order key naming no column of the aggregated row is refused INVALID_SORT, naming the columns', async () => {
     const err: any = await bridge.aggregateGroups(OBJECT, { ...REVENUE, orderBy: [{ field: 'amount', order: 'desc' }], limit: 5 })
       .then(() => undefined, (e: unknown) => e);

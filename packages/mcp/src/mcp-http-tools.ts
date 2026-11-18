@@ -301,7 +301,13 @@ export interface McpDataBridge {
       groupBy?: NonNullable<EngineAggregateOptions['groupBy']>;
       aggregations: NonNullable<EngineAggregateOptions['aggregations']>;
       timezone?: string;
-      orderBy: Array<{ field: string; order: 'asc' | 'desc' }>;
+      /**
+       * A key's `rank` orders a group key by its values' positions in the list
+       * (a declared option order read off the served schema), any value it
+       * does not list after every listed one — the tool's own, never a caller
+       * argument.
+       */
+      orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
       limit?: number;
     },
   ): Promise<{ rows: unknown[]; groupCount: number }>;

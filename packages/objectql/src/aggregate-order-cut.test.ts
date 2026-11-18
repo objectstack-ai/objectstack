@@ -136,6 +136,17 @@ describe('[aggregate order and cut] engine.aggregate — served as the driver\'s
     expect(rec.calls).toEqual([]);
   });
 
+  it('a rank orders a key by its listed values\' positions: handed to the driver as named', async () => {
+    rec.answer([]);
+    const request: AggregateOrderCutRequest = { orderBy: [{ field: 'area', order: 'asc', rank: ['west', 'east'] }], limit: 3 };
+    await engine.aggregate(ORDER, { ...BY_CUSTOMER }, withCut(request));
+    expect(rec.calls[0].ast[AGGREGATE_ORDER_CUT_DIRECTIVE].orderBy).toEqual([
+      { column: 'area', order: 'asc', rank: ['west', 'east'] },
+      { column: 'customer', order: 'asc' },
+    ]);
+    expect(request.outcome).toEqual({ kind: 'served', groupCount: 0 });
+  });
+
   it('a malformed request is INVALID_QUERY, and the driver is never asked', async () => {
     for (const bad of [
       { orderBy: 'revenue' },
@@ -143,6 +154,10 @@ describe('[aggregate order and cut] engine.aggregate — served as the driver\'s
       { orderBy: [], limit: 0 },
       { orderBy: [], limit: 2.5 },
       { orderBy: [{ field: 'revenue', order: 'asc' }, { field: 'revenue', order: 'desc' }] },
+      { orderBy: [{ field: 'area', order: 'asc', rank: [] }] },
+      { orderBy: [{ field: 'area', order: 'asc', rank: ['west', 'west'] }] },
+      { orderBy: [{ field: 'area', order: 'asc', rank: [{ v: 1 }] }] },
+      { orderBy: [{ field: 'area', order: 'asc', rank: 'west' }] },
     ]) {
       const err = await refusalOf(engine.aggregate(ORDER, { ...BY_CUSTOMER }, withCut(bad as any)));
       expect(err?.code, JSON.stringify(bad)).toBe('INVALID_QUERY');

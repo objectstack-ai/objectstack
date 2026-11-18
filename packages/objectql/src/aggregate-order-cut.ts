@@ -81,10 +81,26 @@ export const AGGREGATE_ORDER_CUT_DIRECTIVE: unique symbol = Symbol.for('objectst
  */
 export const AGGREGATE_GROUP_COUNT_COLUMN = '__os_group_count';
 
+/**
+ * The most values a {@link AggregateOrderKey.rank} may list: a declared option
+ * list, not a data set.
+ */
+export const AGGREGATE_ORDER_RANK_MAX = 500;
+
 /** One key of a request's order: an aggregated-row column and its direction. */
 export interface AggregateOrderKey {
   readonly field: string;
   readonly order: 'asc' | 'desc';
+  /**
+   * Order the column by these values' positions instead of by the values
+   * themselves: a value at position `i` ranks `i`, any value the list does not
+   * hold (a NULL among them) ranks after every listed one, and `order` runs
+   * over the ranks. For a group key whose values are declared options, so a
+   * cut keeps the groups first in the declared order — the order the caller
+   * reads off the schema it is served, handed down so the statement applies it
+   * before the cut. Groups the rank does not tell apart fall to the next key.
+   */
+  readonly rank?: ReadonlyArray<string | number>;
 }
 
 /** What the engine did with an {@link AggregateOrderCutRequest}: set only once the driver answered it. */
@@ -110,7 +126,12 @@ export interface AggregateOrderCutRequest {
 /** What the driver is handed, on the AST under {@link AGGREGATE_ORDER_CUT_DIRECTIVE}. */
 export interface DriverAggregateOrderCut {
   /** The full order: the request's keys, then every group key it does not name, ascending. */
-  readonly orderBy: ReadonlyArray<{ readonly column: string; readonly order: 'asc' | 'desc' }>;
+  readonly orderBy: ReadonlyArray<{
+    readonly column: string;
+    readonly order: 'asc' | 'desc';
+    /** {@link AggregateOrderKey.rank}, as the request named it. */
+    readonly rank?: ReadonlyArray<string | number>;
+  }>;
   readonly limit?: number;
   /** The column to answer the pre-cut group count under, on every row. */
   readonly groupCountColumn: string;
@@ -220,6 +241,20 @@ export function assertAggregateOrderCutShape(
     }
     if (seen.has(field)) throw refusal('INVALID_QUERY', object, `\`orderBy\` names '${field}' twice.`);
     seen.add(field);
+    const rank = (key as { rank?: unknown }).rank;
+    if (rank !== undefined) {
+      const values = Array.isArray(rank) ? rank : [];
+      const valid = values.length >= 1 && values.length <= AGGREGATE_ORDER_RANK_MAX
+        && values.every((v) => typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)))
+        && new Set(values).size === values.length;
+      if (!valid) {
+        throw refusal(
+          'INVALID_QUERY',
+          object,
+          `\`orderBy[${i}].rank\` must list 1 to ${AGGREGATE_ORDER_RANK_MAX} distinct strings or numbers, in the order to rank them.`,
+        );
+      }
+    }
   }
 }
 
@@ -283,7 +318,7 @@ export function aggregateOrderCutDirective(
   const named = new Set(request.orderBy.map((k) => k.field));
   return {
     orderBy: [
-      ...request.orderBy.map((k) => ({ column: k.field, order: k.order })),
+      ...request.orderBy.map((k) => ({ column: k.field, order: k.order, ...(k.rank !== undefined ? { rank: [...k.rank] } : {}) })),
       ...groupColumns.filter((c) => !named.has(c)).map((column) => ({ column, order: 'asc' as const })),
     ],
     ...(request.limit !== undefined ? { limit: request.limit } : {}),

@@ -1607,7 +1607,7 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     // driver's statement, and its rows are no answer.
     bridge.aggregateGroups = async (object, opts) => {
       const orderCut: {
-        orderBy: Array<{ field: string; order: 'asc' | 'desc' }>;
+        orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
         limit?: number;
         outcome?: { kind?: unknown; groupCount?: unknown };
       } = {
