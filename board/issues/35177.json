@@ -1,0 +1,30 @@
+{
+  "number": 35177,
+  "kind": "issue",
+  "title": "[Epic] Scenario library: business scenario cards (Build + Run/问数) scored by open code, moved from cloud#3600",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "pm:epic",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T10:34:11Z",
+  "updated_at": "2026-11-18T10:34:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35177",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling gate: ④ a coordination node, moved from objectstack-ai/cloud#3600 on the maintainer's word, 2026-11-18, verbatim: 「场景库主卡应该在开源仓库开吧」「迁移过去」. cloud#3600 closes as moved, pointing here. Its comments stay there as the history of record; this card carries the scope and the rulings forward.\n\n## What this is\n\nThe scenario library: business scenario cards with a **Build** half (AI authors the app) and a **Run** half (an agent connected to that app answers data questions and does business operations under the app's permissions), scored by deterministic open-source code and run on a developer's own Claude Code subscription. The output is a scorecard and a platform-gap list, not maintained packages.\n\nIts open home already exists: cards in `docs/qa/scenarios/` (9 cards today), the runner and scorer in `packages/qa/scenarios`, routine rounds owned by the `eval` lane (#31505).\n\n## Rulings carried over (recorded on cloud#3600)\n\n- **D1, card home: RULED (a) with overlay** (「同意」, 2026-11-05, cloud#3600 comment 6650176111). Generic public cards live here in `docs/qa/scenarios/`; held-out and customer-derived cards live in a private cloud overlay with the same schema. Customer-derived scenarios enter the open set only as sanitized generic rewrites.\n- **D2, scorer home: RULED open source** (「打分器可以迁移到开源项目」, 2026-11-05). Deterministic layers (shape score, capability-tag checks, Run-half truth / citation / leak grading) live in the open toolchain; LLM-judge and blinded A/B layers stay in cloud, out of this epic under the cost rule.\n- **Cost rule** (「目前阶段尽量不要用云端的token，api的更贵」): both halves run on subscription tokens; no in-product agent sweeps and no API-billed judges here.\n- **Phase 0 list: RULED** (「同意这9个场景」, cloud#3600 comment 6651166095, v3): 3 simple control cards and 6 medium cards, with the per-card capability floor written there. **Every later phase's list goes to the maintainer before any card is written** (「这个场景的清单是需要我人工审核和确认的」).\n- Behavioural metadata is package-scoped (ADR-0150, #31527); the scorer's bare-name check follows it (#31729).\n\n## Scope that continues here\n\n- Card format (six layers: prompt; structural `expect`; capability tags and category; Run 问数 with code-computed truth; Run operations and guardrails per persona; one-sentence iteration).\n- Route B runner (local files, `os validate` / `os verify`, `os dev`, MCP per persona) and its run records.\n- Scorer discrimination (a degraded build and a leaking or uncited answer must score lower).\n- Scorecard and gap radar: failures classified as \"AI got it wrong\" (skills / docs card) or \"the platform cannot express or expose it\" (platform card through the filing gate). Measurement only, never a merge gate.\n- Phased growth beyond phase 0, each phase's list confirmed by the maintainer first.\n\n## Not here\n\n- The private cloud overlay (held-out and customer-derived cards) and the Route A sample on the hosted MCP build door: a later cloud card, linked when filed.\n- Routine rounds: the `eval` lane (#31505). This epic finishes the building phase; rounds then belong to that lane.\n- The MCP epic's measurement needs are a customer of this library: #35154 files there what its readings depend on.\n\n## Ownership\n\nThe epic seat on cloud#3600 was `epic:#3600#1`. Who seats this card is set when it is staffed; until then the cards under `docs/qa/scenarios/**` and `packages/qa/scenarios` follow their current owners (the scenario seat and the devx lane)."
+}

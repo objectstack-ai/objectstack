@@ -2,7 +2,7 @@
   "number": 35100,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-ask follows list_datasets nextStep and cites query_dataset sourceLine as given",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/s",
     "tooling"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T03:09:37Z",
-  "updated_at": "2026-11-18T07:52:32Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-18T09:10:44Z",
+  "closed_at": "2026-11-18T08:28:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-18T08:28:11Z",
   "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35100",

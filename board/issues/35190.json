@@ -1,0 +1,31 @@
+{
+  "number": 35190,
+  "kind": "issue",
+  "title": "Narrow the required-field formula visibleWhen warning (lint and Studio) to formulas the form cannot compute",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T11:22:26Z",
+  "updated_at": "2026-11-18T12:49:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35190",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nPR #34978 (card #34905) adds two warnings on a `required` field whose `visibleWhen` reads a `formula` field. One is a lint warning, from `packages/lint/src/required-visible-when-formula-issue.ts` via `validate-expressions.ts`. The other is a Studio advisory, `designer.field.requiredVisibleWhenFormula` in `ui/packages/i18n` studio en/zh, built from `requiredVisibleWhenReference.ts`. Seat ruling S3 on #34905 asked for them when the form judged the predicate on a stale formula value.\n\nSince #35116 merged, the form computes the object's formula fields over the record being edited before it judges field rules. That is `planObjectFormulas` in `@object-ui/core`, used by `form.tsx` and the console `FormPage.tsx`. The form and the server now differ only on a formula the form cannot compute: one that reads through a reference, calls `label()` or `can()`, reads `os`, reads the user with nobody signed in, or is served without its expression. In those cases the form shows the field, keeps it required, and lets the server decide.\n\nSo the plain formula-read warning no longer names a real divergence. #34978 rewords both warnings so they are true (contract review 6977080790 S6, option B), but they still fire on every formula read.\n\n## Proposal (route A, recommended by the seat)\n\nNarrow the lint warning and the Studio advisory to the arm where the form and the server still differ, the formulas the form cannot compute, and drop the plain formula-read warning. This changes what fires: the lint rule and its test, the Studio inspector and its test, and the en and zh strings.\n\nThe alternative is to keep both firing as reworded in #34978.\n\n## Origin\n\n#34905 dev report 6976886520 (open question, options A/B/C). Contract review 6977080790 on PR #34978 (S6, where A is escalated to the seat). Seat 1 note (11:15Z): file as p2 for triage, route A.\n\nBlocked until #34978 merges, because the strings it narrows land there.\n\nRe-check (after #34978 merges): `git grep -n \"requiredVisibleWhenFormula\" origin/main -- packages/lint ui/packages`"
+}

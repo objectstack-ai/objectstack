@@ -2,8 +2,8 @@
   "number": 34651,
   "kind": "issue",
   "title": "Add User on a managed environment: an email-only re-add of a pending person does not say it was already pending",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,9 +14,7 @@
     "bug",
     "domain:server",
     "finding",
-    "lease:o1-B",
-    "pm:dispatched",
-    "priority:p1"
+    "priority:p2"
   ],
   "assignees": [
     "os-warren"
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T04:56:16Z",
-  "updated_at": "2026-11-18T07:57:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T09:53:35Z",
+  "closed_at": "2026-11-18T09:52:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34651",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmSYVw1sqCsaHSJS9JC\n\nFiling gate ①: an open question from the dev report on #33187 (comment 6938771548, PR #34647), ruled by seat `repo:objectstack#2` for option B; filed by area `o2-B`. Dedupe: `alreadyPending re-add email`, `pendingAgain`, `add_sso_user already pending`: no other card. The seat knocks triage.\n\nSuggested-grade: p2 · domain:server\nBlocked-by: #34531\n\n## 维护者速读\n\n- 现象：托管环境「设置 → 用户 → 添加用户」只填邮箱、重加一个已在等激活的人时，结果弹窗和正常新加完全一样，看不出「此人已在等激活」。\n- 原因：门 `sys_user.add_sso_user`(plugin-auth `runAddSsoUser`)每次都回 `alreadyPending`,新加时为 `false`。结果弹窗的契约没有「条件显示」,读它的任何字段都会在每次正常新加时画出一行误导的「false」,维护者裁决 A(6915677641)不接受这一行。\n- 需要你做的：无。新键名由席位按先例定。\n\n## Change\n\n- plugin-auth `runAddSsoUser` (`packages/plugins/plugin-auth/src/pending-sso-users.ts`): on a re-add of an address that is already pending, the answer gains one key that is present only then, with the value `true` (name settled by the seat from precedent; the dev cites the precedent on this card). `alreadyPending` stays as it is, so the change only widens the answer.\n- `sys_user.add_sso_user` (`packages/platform-objects/src/identity/sys-user.object.ts`): one `resultDialog` field reads that key. The dialog already skips a field whose path resolves to nothing, so the row appears exactly on a re-add.\n- Real-answer alignment pin (from the same report, open question 4): a case in `pending-sso-users.test.ts` stages the doors and asserts that the first segment of every column path of `sys_user.import_sso_users`'s `table` field (PR #34647) is a member of a real row answer.\n- Root `.changeset/`.\n\n## Done when\n\n- A door test pins the new key: present and `true` on an email-only re-add of a pending address, absent on a fresh add.\n- A `sys_user` test pins the new field, and its ablation turns red.\n- The alignment pin above is green, and removing a column path's member from the staged answer turns it red.\n- The released #33186 sentence \"The Add User result names an address that was already pending\" (`packages/platform-objects/CHANGELOG.md` 18.5.0, entry 2e1e3b9) is true once this lands; the PR says so. If this card is declined, a docs-only PR amends that entry instead.\n- Serial: after PR #34531 (area o2-D) merges, since it holds `pending-sso-users.ts`."

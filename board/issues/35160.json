@@ -1,0 +1,29 @@
+{
+  "number": 35160,
+  "kind": "issue",
+  "title": "[Epic base] Shared by every way of building: publish-time checks, build probes, and the published skills' content",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T08:36:01Z",
+  "updated_at": "2026-11-18T10:29:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35160",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a coordination node under the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18. On the structure, verbatim: 「现在就改结构」; on what this parent restores, verbatim: 「你之前的公共底座不用优化吗」. This session had proposed a shared base and then left it out when it split the epic into lines; this card puts it back.\n\n## What this is\n\nThe part of building that belongs to no door. A code-first project, a draft saved over MCP and a hosted build are all judged by the same checks at publish and taught by the same published skills.\n\n**Order: third**, with the MCP build line (#35152), after MCP ask and MCP write (#35176): the draft door's verdict is only as good as the checks behind it. Nothing here is wanted ahead of a queued ask or write card.\n\n## What belongs here\n\n- Publish-time checks for metadata that saves and does not work, in two batches.\n- Probes after a build: an empty card, a roll-up that never computed, an unresolved connector action.\n- What a refused change names.\n- The content and shape of the metadata skills: descriptions that trigger on the task, a router-sized `SKILL.md`, a JSON form in the sections the hosted door serves.\n- What a build gets wrong about its own rules, such as seed rows its own validation refuses.\n\n## What does not\n\n- The draft door itself, its version statement, the thin build skill, the build-over-the-door eval: the open MCP door's, on #35152.\n- A local flow run from the CLI: code-first, on #35153.\n- The hosted build tools' defaults, blueprints and tiers: hosted.\n\n## Why it is its own parent\n\nHosted build does not wait for the open draft door. It waits for exactly this: when the checks here are in the pin, the hosted rule text that restates them is deleted and the hosted copies of the checks go (objectstack-ai/cloud#4829, objectstack-ai/cloud#4842). This card's state is that gate.\n\nA card here takes its place in the order from the first line that needs it. Code-first authors gain from every check too; that is a benefit, not a reason to move a card ahead."
+}

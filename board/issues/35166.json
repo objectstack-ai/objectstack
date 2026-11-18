@@ -1,0 +1,32 @@
+{
+  "number": 35166,
+  "kind": "issue",
+  "title": "record page: the empty-sections line ignores the reader's remembered 「显示空字段」 choice on authored pages, and does not remember being expanded",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T09:19:41Z",
+  "updated_at": "2026-11-18T09:49:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35166",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling category: out-of-scope findings from the review of PR #35161 (#35019: the empty-sections line now draws on authored `record:details` pages too), filed by the seat. ⛔ Not a claim.\n\n## What is wrong\n\n1. **The reader's remembered choice is not honoured on authored pages** (contract review N2, record 6974227988). A reader who has chosen \"show empty fields\" does not get the empty-sections line opened for them, and the line's expanded state is not remembered. Since #35161, on an authored record page such a reader expands the line again on every visit.\n2. **A stale comment** (L1 N1, 6974197194): a comment in `ui/packages/app-shell/src/views/RecordDetailView.tsx` still says only the synthesized default page draws the empty-sections line, which #35161 made false.\n\n## Done when\n\n- With \"show empty fields\" remembered, the empty-sections line opens on its own on both the default and authored pages, and a reader's expand/collapse of the line is remembered the same way; pinned on both page kinds.\n- The comment says what ships."
+}

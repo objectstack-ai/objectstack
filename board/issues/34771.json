@@ -2,8 +2,8 @@
   "number": 34771,
   "kind": "issue",
   "title": "skills: a JSON form beside the TypeScript in the sections served to MCP clients, and a pin on those section headings",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:ai",
     "domain:skills",
-    "lease:o1-C",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:10:57Z",
-  "updated_at": "2026-11-18T06:39:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T09:09:31Z",
+  "closed_at": "2026-11-18T08:28:13Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34771",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent objectstack-ai/objectstack#34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are objectstack-ai/objectstack#34659 comment 6940528935 and objectstack-ai/objectstack#34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nA client building through MCP writes JSON. The sections the hosted door serves it are illustrated in TypeScript, with `import` lines, so the client translates every example by itself. And those sections are found by their heading text: rename one here and the hosted product fails at start.\n\nWho acts: the skills lane (`skills/objectstack-{data,ui,automation}/**`), plus a framework-side pin. Governed surface.\n\n## Evidence\n\n- Code fences in the six metadata skills: 204 TypeScript, 2 JSON. NocoBase's skills, the nearest analogue, carry 454 JSON fences to 269 TypeScript.\n- The hosted door reads 24 sections of the data, UI and automation skills by exact heading text and serves them verbatim, TypeScript fences included. A renamed or duplicated heading throws at module load there.\n- No check in this repository knows which headings are read.\n\n## Scope\n\n- Each of the 24 sections gains the item's JSON form beside its TypeScript form, or a form neutral to both.\n- A list of the 24 headings lives in this repository, and a check fails here when one is renamed, removed or duplicated. The list of sections is on the cloud handover card.\n- File surface: the three skills, one list file, one check script.\n\n## Done when\n\n- Every one of the 24 sections reads correctly to a client that has no TypeScript project.\n- Renaming a pinned heading fails in this repository's CI.\n\n## Relations\n\n- Parent: objectstack-ai/objectstack#34659. Decision record: objectstack-ai/objectstack#34691 S3 = A. Related: objectstack-ai/cloud#4842 (the hosted half).\n- Dedup, open and closed: none found for `skills JSON examples MCP`."

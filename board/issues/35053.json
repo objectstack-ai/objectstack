@@ -2,8 +2,8 @@
   "number": 35053,
   "kind": "issue",
   "title": "Console list: grouping headers and the filter value picker label a lookup by its raw id when the target is titled by a nameField other than name, and the empty group reads \"(empty)\" untranslated",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -12,8 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "lease:o1-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T00:23:25Z",
-  "updated_at": "2026-11-18T07:38:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T08:29:07Z",
+  "closed_at": "2026-11-18T08:28:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35053",
   "body": "Found in a browser regression run of a downstream app (steedos-labs/os-project-blackcat-crm) on the published 18.5.0 packages. The code paths below are unchanged on `origin/main` at `4443014630`.\n\nThis is **not** #33107. That card fixed the analytics dimension-label pass (`service-analytics`). This one is the console grid's own label resolution, in a different package.\n\n## What a user sees (zh-CN, sales manager)\n\nSetup: the object `crm_cb_order` has a lookup `deal_confirmation` → `crm_deal_confirmation`. The target declares `nameField: 'deal_number'` (an autonumber, `DEAL-{YYYY}-{0000}`) and has no `name`, `label` or `title` field.\n\n| Surface | Rendered | Expected |\n|---|---|---|\n| Grid cell of `deal_confirmation` in the same list | `DEAL-2026-0001` ✅ | — |\n| Group headers of a list view with `grouping: { fields: [{ field: 'deal_confirmation' }] }` | `T1lF9T1kq45KAN06`, `mhHko1m3h9-1aahG`, … (raw ids) | `DEAL-2026-0001`, … |\n| Filter builder → field 成交编号 → value picker options | `KC3TKTKQPLwGVqsJ`, `T1lF9T1kq45KAN06`, … (raw ids) | `DEAL-2026-0002`, … |\n| Group header for rows with no value | `(empty)` in English under zh-CN | a localized empty label |\n\nGrouping and filter results are correct. Only the labels are wrong.\n\n## Controlled check\n\nI used the same database, the same user and the same view twice:\n- **Run 1:** the lookup as shipped, with no `displayField`.\n- **Run 2:** the same lookup with `displayField: 'deal_number'` added.\n\nIn run 2, both the group headers and the filter picker show `DEAL-…`, and `(empty)` stays English. So the label code honours an explicit field-level `displayField` but never falls back to the target object's declared `nameField`.\n\nThe spec documents the opposite default. `packages/spec/src/data/field.zod.ts:2239`, for the lookup `displayField`, reads: \"defaults to the referenced object's name/title\".\n\n## Producers (origin/main)\n\n- **Server-grouped headers.** `ui/packages/plugin-grid/src/useServerGrouping.ts:227` takes `displayField` from the field definition only. Line ~292 then labels each id `(displayField ? rec[displayField] : undefined) ?? rec.name ?? rec.label ?? rec.title`, and with none of these the raw id is shown.\n- **Client grouping.** `ui/packages/plugin-grid/src/useGroupedData.ts` follows the same `name ?? label ?? title` heuristic: line 124, and `buildSegmentLabel` at ~156–193. `buildSegmentLabel` also returns the literal `'(empty)'` at lines 161, 176 and 193, with no i18n key.\n- **Filter value picker.** `ui/packages/components/src/custom/filter-builder.tsx:2715` sets `const displayField = field.displayField || \"name\"`. Line 2742 then falls back to `r?.label ?? r?.name ?? String(id)`.\n\n## Suggested fix shape (for the lane to judge)\n\n- When the lookup field has no `displayField`, resolve the label from the target object's declared `nameField` (the title the grid cell and record header already use), before the `name/label/title` heuristic. This applies to all three producers. A shared helper would keep them from drifting; `ui/packages/core/src/utils/record-title.ts` already resolves record titles.\n- Localize the empty-group label, using the console's existing empty-value string.\n- Keep grouping and filtering by id, so two records with the same title stay separate.\n\n## Reach\n\nAny lookup whose target is titled by a `nameField` other than `name`, with no field-level `displayField`. In the downstream app this covers about 15 objects (order numbers, rating numbers, plan names, line labels, …). Every user who groups or filters on such a lookup sees ids.\n\nThe app will not work around this platform-wide. It may still set `displayField` on individual lookups as declared config.\n\nDedupe words: grouping header lookup raw id · filter builder value picker lookup id · nameField fallback displayField · buildSegmentLabel (empty) i18n · useServerGrouping keyLabels nameField."

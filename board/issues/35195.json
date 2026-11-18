@@ -1,0 +1,30 @@
+{
+  "number": 35195,
+  "kind": "issue",
+  "title": "runtime: GET /api/v1/search returns a disabled package's records while its data routes answer 404 OBJECT_PACKAGE_DISABLED",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T12:45:33Z",
+  "updated_at": "2026-11-18T13:46:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35195",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a product defect, reproduced once through a public entry point.\n\n**Business reason.** An admin turns a module off so that its records stop being served, for example the service desk's cases during a rollout. Every data route honours that: reading the record answers 404. Global search does not, so the same records, with their titles and matched text, still reach any user who can search. The admin docs cannot honestly say a disabled module's records are hidden. hotcrm's modules page had to drop \"or searched\" for this reason (objectstack-ai/hotcrm#2648, PR objectstack-ai/hotcrm#2651).\n\n**Reach (measured once).** hotcrm main `89c4d999`, `@objectstack/*` 18.6.0, `objectstack dev` on a scratch SQLite DB, demo data:\n\n1. `PATCH /api/v1/packages/app.objectstack.hotcrm.service/disable` → 200.\n2. `GET /api/v1/data/crm_case/<id of CASE-00005>` → **404** `OBJECT_PACKAGE_DISABLED`, \"belongs to a disabled package and is not being served\".\n3. `GET /api/v1/search?q=PDF` → **200**, and the hits include `crm_case` CASE-00005.\n\nExpected: step 3 leaves out objects of a disabled package, the same as the data routes. The console's command palette is app-scoped and does not reach these hits. The leak is through the REST search route.\n\n**Seam.** `runtime:/api/v1/search`, which does not consult the package-disabled gate that the data routes apply.\n\n**Reader.** objectstack triage grades it and routes it to the runtime lane. Not a claim; awaits triage.\n\n**Dedupe** (`search/issues`, `repo:objectstack-ai/objectstack is:issue`, open and closed):\n- `search disabled package OBJECT_PACKAGE_DISABLED`: 22 hits. The closest are sibling doors, all closed: #25296 (actions route), #24097 (meta/object), #28877 (/auth/me/permissions), #24210 (meta by-name). None covers `/api/v1/search`.\n- `api/v1/search disabled package`: 29 hits, all QA run records."
+}

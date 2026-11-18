@@ -14,17 +14,17 @@
     "area:ai",
     "domain:devx",
     "pm:queue",
-    "priority:p1"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T22:31:35Z",
-  "updated_at": "2026-11-18T03:21:49Z",
+  "updated_at": "2026-11-18T09:43:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34996",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, comment 6962850643), on the maintainer's word as relayed by that seat (2026-11-17 22:26Z): 「34951 既然还不完美，是不是应该继续优化问数技能，继续迭代测试」「不要等每天」. This is a fast iteration loop instead of waiting for the daily round (#34869).\n\nParent: #34659. Dispatch: seat 3 → area o3-F, which already holds the runner and the recordings.\n\n## Why\nDay 1 (#34951) and the five-rep round (#34958), on haiku-5-5 medium with the skill:\n- 问数 23/25;\n- datasets 18/25, with asked-back only 3/10;\n- operations 2/3 in every rep;\n- 8 questions and 3 operations unmeasured, because the seed refused 584 rows. The fix is in PR #34985 for #34897.\n\n## Loop\n1. Read the failing turns in the recordings.\n2. Change the skill text (`skills/objectstack-ask/**` and its generated ask-skill data) and/or the MCP tool descriptions.\n3. Rerun the with-skill arm, ask only, 5 reps, against the same verified template.\n4. Keep a change only when the 5-rep round improves on the last kept one.\n\nOne PR per kept change set, `Part of` this card. `skills/**` is governed, so it needs L2.\n\n## Target (with-skill, haiku-5-5 medium, 5 reps, full seed after #34985)\n- All 13 questions and 6 operations measured.\n- 问数 ≥ 95% of graded questions, and no rep below 90%.\n- Metric-selected and fallback-labelled 100%.\n- Asked-back ≥ 8/10.\n- Operations 100% in every rep.\n- 0 leak flags.\n\n## Done when\nTwo consecutive 5-rep rounds meet the target. Each is recorded as an `eval-run` issue, with a no-skill arm once per round as the comparison.\n\n## Stop rule\nThree iterations in a row with no gain → the area reports a diagnosis to seat 3 instead of continuing.\n\nGrade: **p1 · domain:devx · area:ai**. Theme: MCP / 问数 (epic #34659), and the maintainer asked for it directly. Triage does not add a cost line here; the runner uses subscription logins."

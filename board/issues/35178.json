@@ -1,0 +1,30 @@
+{
+  "number": 35178,
+  "kind": "issue",
+  "title": "ui skill router: name action refusals on the Actions row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T10:47:42Z",
+  "updated_at": "2026-11-18T10:47:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35178",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbWDsbbJizuYnDwBxT8\n\nFollow-up of #34824 (PR #35087), from L1-b's nit 1 (comment 6976263388 on #35087) and the #34824 dev report's out-of-scope note. #35087 teaches the action `refusals` declaration in `skills/objectstack-ui/rules/actions.md`, but the router in `skills/objectstack-ui/SKILL.md` (the task table row \"A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx`\" → [Actions](./rules/actions.md)) does not name refusals, so a model looking for \"a refused action's message\" is not sent to that rule. The router row was card #34770's file and #35077 merged without it, so this finding has no other carrier.\n\n## Done when\n\n- The Actions router row names `refusals` (the declared refusal codes and their messages) in the same few words as the rule file's heading.\n- `scripts/check-skills-token-ratchet.mjs`: the `skills/objectstack-ui/SKILL.md` row is paid in the same file first (ruling record 6513306068, letter B); regenerate whatever the skill generators derive.\n- Text-only change to served skill text: `Clause-②: no` (seat ruling kept by seat 1).\n\n## Order\n\nTier H (`skills/**`). After #35087 merges (it owns `rules/actions.md`'s heading)."
+}

@@ -2,8 +2,8 @@
   "number": 35033,
   "kind": "issue",
   "title": "form: formula fields are not recomputed in the form, so a required field whose visibleWhen reads a formula stays hidden on create and on an edit that crosses the condition, while the server requires it (follow-up of #34905)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:ui",
     "finding",
-    "lease:o1-B",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T23:26:16Z",
-  "updated_at": "2026-11-18T06:48:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T09:31:58Z",
+  "closed_at": "2026-11-18T09:30:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35033",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6964002215), from the seat's contract review of PR #34978. This follows up #34905, which took the user-chosen route A: required is judged together with visibility, on the server.\n\n## What happens\nThe form does **not recompute a formula field** from the live inputs. So a required field whose `visibleWhen` reads a formula behaves like this:\n- **On a create form:** it stays hidden whatever the user types.\n- **On an edit whose inputs move the computed value into the condition:** the form keeps the field hidden, while the server, correctly under the ruling, requires it. The user cannot recover in the form, because the save is refused for a field they cannot see.\n\n## Done when\n- The form evaluates `visibleWhen` over formula values recomputed from the live inputs, client-side or through a server preview.\n- It is pinned on create and on an edit that crosses the condition.\n\nGrade: **p1 · domain:ui**. Themes: zh-CN customers / HotCRM and console operations. The named effect is that a user is blocked from saving with no way out in the form, on the same configuration #34905 (p1) was fixed for.\n\nIt is not linked under #34571, because that would move the release gate. The maintainer decides whether it joins."

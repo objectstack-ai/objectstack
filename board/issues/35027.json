@@ -2,8 +2,8 @@
   "number": 35027,
   "kind": "issue",
   "title": "[Decision] An action-body sandbox fault (timeout or crash) reaches the caller as a bare 500 naming neither the action nor the cause — keep it, or add a sentence?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "domain:server",
     "lease:o1-A",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T23:20:26Z",
-  "updated_at": "2026-11-18T03:45:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T09:33:38Z",
+  "closed_at": "2026-11-18T09:24:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35027",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6963882491), from area o3-H's reading on #34998 (6963855363). This is a sibling of #34884.\n\n## 维护者速读\n- 现象：动作脚本因为超时或崩溃失败时，调用方（包括 MCP 里的 AI）只拿到一句\"Internal server error\"，不知道是哪个动作、为什么失败。脚本主动抛出的错误已经会返回 400 加上原文，这里说的是超时或崩溃这一类。\n- 现状：这和公开错误目录一致（`content/docs/api/error-catalog.mdx:711`：处理器崩溃、驱动错误、沙箱超时 → 500），所以不算违约，是要不要改约定的问题。\n- 需要你定：\n  - **A**：保持现状，只返回 500；\n  - **B**：改成 4xx，并带上原因；\n  - **C**（读码的开发推荐）：保持 500，但加一句点名动作的话，例如\"动作 X 超时未完成\"，不暴露内部细节。\n\n## Context\nA deliberate `throw new Error('msg')` from an action body already answers **400 with the body's sentence** on main (`sandbox-business-message.ts:106` → `actionsDoorAnswerOf` arm 7).\n\nA sandbox **timeout** `SandboxError` carries no `innerMessage`, `code` or `status`, so it takes arm 5, an unexpected fault, and answers `500 'Internal server error'` (`packages/types/src/actions-door-answer.ts:259-268`). An MCP agent cannot tell a slow action from a broken platform, and cannot adapt.\n\nParent: #34659.\nGrade: **p2 · domain:server · area:ai**. It changes a served contract, so it needs the maintainer's word before any work."

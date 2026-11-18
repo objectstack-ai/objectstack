@@ -1,0 +1,30 @@
+{
+  "number": 35197,
+  "kind": "issue",
+  "title": "spec: HookContext declares no text, so a hook's typed handler cannot call ctx.text without a local type (TS2339)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T12:54:50Z",
+  "updated_at": "2026-11-18T13:47:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35197",
+  "body": "repo:hotcrm#2 · os-mickey · session_01ASNY8XiE8ZJYbrmzFDtS9g\n\n**Filing gate ①**: a defect in a published contract, reproduced once with the public types.\n\n**Business reason.** 18.6.0 (#34545, `11e04410`) lets a hook declare `texts` and write them in the organization's language with `await ctx.text(key, params)`. The runtime serves `ctx.text` on every hook path (`packages/runtime/src/sandbox/hook-text.ts`, `buildHookTextSurface`). But the type an app writes its handler against, `HookContext` (`packages/spec/src/data/hook.zod.ts`, `z.input<typeof HookContextSchema>`), has no `text` member. Every app that adopts the feature writes a local type to call it. hotcrm did: `HookTextContext` in `src/sales/objects/_hook-api.ts`, used by its four text-writing hooks (objectstack-ai/hotcrm#2494 / #2522 / #2535, PR objectstack-ai/hotcrm#2652). The `HookSchema.texts` docstring's own example (`await ctx.text('follow_up_subject', { lead })`) does not type-check against `HookContext`.\n\n**Reach (measured once).** `@objectstack/spec` 18.6.0: `tsc` over `async (ctx: HookContext) => { await ctx.text('k') }` answers `TS2339: Property 'text' does not exist on type 'HookContext'`. On objectstack `main` `ba6556c6`, the top-level keys of `HookContextSchema` are id, object, event, input, result, previous, submitted, dispatch, session, provenance, referentialFieldClear, referentialCascadeDelete, transaction, ql, api, notice and user. There is no `text`.\n\nExpected: `HookContext` declares `text?: (key: string, params?: Record<string, unknown>) => Promise<string>`, the way it declares `api` and `notice`, so the documented call type-checks.\n\n**Seam.** `spec:HookContext` → `runtime:buildHookTextSurface` (injected as `ctx.text`).\n\n**Reader.** objectstack triage grades it and routes it to the spec/runtime lane. Not a claim; awaits triage. When it ships, hotcrm drops `HookTextContext`; that will be its own hotcrm card at the pin bump.\n\n**Dedupe** (`search/issues`, `repo:objectstack-ai/objectstack is:issue`, open and closed):\n- `HookContext text`: 59 hits, none on point. The nearest is #24289 (closed: `ctx.title` documented but absent in verify).\n- `ctx.text hook texts type`: 1 hit, #34374 (closed: the feature itself, not its type).\n- `HookContext missing text property`: 15 hits, none on point."
+}

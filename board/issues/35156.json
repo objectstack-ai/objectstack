@@ -1,0 +1,37 @@
+{
+  "number": 35156,
+  "kind": "pull_request",
+  "title": "fix(analytics): a grouping or time word with only a near dimension does not stop a matched measure",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T08:26:20Z",
+  "updated_at": "2026-11-18T09:28:05Z",
+  "closed_at": "2026-11-18T09:28:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T09:28:03Z",
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35156",
+  "body": "Part of #35005\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：`list_datasets` 的 `nextStep.note` 不再为「候选全是维度」的词追问。「按行业看销售额」里 销售额 精确命中、「按行业」只靠近维度 行业，现在 note 直接让模型计算 销售额，并把 行业 作为「可能的分组」点名，明确说不要就它追问；候选里有指标的词（如单独的「销售」）照旧追问、不计算。`list_datasets` 工具说明和 MCP `initialize` 规则用同一句话写明这条限定。\n- **为什么改**：#35005 卡面 p1。普通问法（按行业看销售额、本季度营收）因为分组词/时间词碰巧靠近某个维度，被反问一句，用户体验差；只有被度量的那个词才值得追问。\n- **风险与回滚**：只改 note 文案与两处说明文字。`decision`、`terms`、`matches`、`candidates` 对任何输入都与改前一致（规范对 `candidates_only` 的定义不动）。回滚即 revert 本 PR。\n- **先看**：`packages/services/service-analytics/src/dataset-next-step.ts`（`readTerm` 的 `groupingOnly` 与 `candidates_only` 分支）；`packages/services/service-analytics/src/dataset-tools.ts`（说明文字）；`packages/mcp/src/mcp-server-runtime.ts`（`DATASET_SELECTION_RULE`）。\n- **两分钟验证**：`pnpm --filter @objectstack/service-analytics exec vitest run src/__tests__/dataset-tools.test.ts`，预期 79 个测试全过，其中 `[#35005]` 一组 7 个覆盖「按行业+销售额 不追问」与「单独 销售 仍追问」。\n- **需要你做的**：无，席位落地；ADR-0149 D3 修订注与 `skills/objectstack-ask` 的对应句子由单独的 `domain:skills` 卡改（治理面，不在本 PR）。\n\n## What changes\n\n- `dataset-next-step.ts`: `readTerm` keeps the candidate kind (it was already on the member `memberOf` returns; the type dropped it) and marks a `candidates_only` reading whose candidates are all dimensions as `groupingOnly`. The note offers such a word as a possible grouping (`groupingCandidateHit` + `groupingCandidateTail`, four locales) and never emits the ask-first sentence for it, under `one_measure` (left-out words) and under `candidates_only` (reported words). A word with a measure among its candidates is unchanged: asked about beside a matched measure, and `candidates_only` with compute-nothing when nothing matched. When every reported `candidates_only` word is grouping-only (a lone \"this quarter\"), the note offers the grouping and adds the existing `groupingTail` (ask which number is meant), as for a word that equals a dimension.\n- Decision values, `terms`, `matches` and `candidates` are unchanged for every input. The spec defines `candidates_only` as \"matched no member and has entries in `candidates`\", so a lone grouping-only word stays `candidates_only` (see Acceptance notes).\n- `LIST_DATASETS_DESCRIPTION` and `DATASET_SELECTION_RULE` both now carry the identical sentence \"A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never stops a matched measure.\", and scope the ask-back to \"a word with a measure among its candidates\".\n- One `patch` changeset for `@objectstack/service-analytics` and `@objectstack/mcp`.\n\n## Tests\n\n- `service-analytics` `dataset-tools.test.ts`: a new `[#35005]` describe over a dataset with one 销售额 / Revenue measure, a Churn Rate measure, and Industry (行业) / Quarter (季度) dimensions. Pins: 「按行业」+销售额 is `one_measure`, no ask-first sentence, grouping offered, `candidates` still lists `dimensions.industry` (four locales); \"this quarter\"+\"revenue\" and 本季度+销售额 likewise; bare 销售 still `candidates_only` with compute-nothing (four locales); revenue+churn still asks about churn (four locales); a word near both a measure and a dimension keeps the question; both kinds at once; a lone \"this quarter\" keeps `candidates_only`, offers the grouping and asks which number. Plus a description pin for the scoped sentence.\n- `mcp` `initialize-selection-rule-34686.test.ts`: the `initialize` rule and the real `list_datasets` description (from `getDatasetToolDefinitions`) both contain the scoped sentence, and the unscoped form is gone from both.\n- Ablation (one-time, not kept): the kind check `const groupingOnly = decision === 'candidates_only' && offered.every((m) => m.kind === 'dimensions');` replaced by `const groupingOnly = false;` via `scripts/ablation-replace.mjs` (anchor 1 to 0, blob bfd1844761e7 to df278719790e): 4 of the 7 new pins red (the grouping ones); the bare-measure, churn and mixed-kind controls stayed green as they should. Restored: blob equals HEAD, `git diff HEAD` empty. The suite imports the executor by relative path, so no dist is involved.\n\n## Acceptance notes\n\n- Open sub-part, not taken: reading a lone grouping-only word as `no_measure` instead of `candidates_only`. The spec's `DatasetNextStepDecision` describes `no_measure` as \"has no entry in `candidates`\", so that relabel would change the published meaning of a decision value. This PR keeps the decision and scopes only the note; whether to relabel is a question for the seat.\n- The ADR-0149 D3 amendment note still says \"With candidates, the AI asks in rule 3's form and acts on none\", and `skills/objectstack-ask/SKILL.md` step 2 still asks for every word with candidates. Both are governed surfaces left to the follow-up `domain:skills` card named in the claim.\n- No dataset eval set exists in `service-analytics`. The scenario cards (`docs/qa/scenarios/*.json`) belong to the eval seat and are not touched here.\n\n## Verification\n\n<details><summary>Local runs at 9c885ebac5</summary>\n\n- `pnpm --filter '@objectstack/mcp^...' build`: VERDICT command-exit 0.\n- `pnpm --filter @objectstack/service-analytics test`: Test Files 218 passed (218), Tests 5592 passed, 335 skipped.\n- `pnpm --filter @objectstack/mcp test`: Test Files 71 passed (71), Tests 1267 passed (1267).\n- `pnpm --filter @objectstack/service-analytics typecheck` and `pnpm --filter @objectstack/mcp typecheck` (which includes `check:test-typecheck`): exit 0. Both edited test files are in their package's tsc program (`--listFiles`).\n- `dispatch-gates --commands` derived 70 families; all 70 run, `--ran` reconciliation: 69 exit 0, 1 NOT MEASURED (`check:dual-build-cjs-loads`, PREREQUISITE NOT MET: it reads every package's dist and only the mcp closure was built). CI runs it.\n- `overlap-check --branch=HEAD`: VERDICT clean exit 0 (origin/main and #35103 merge cleanly).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWDsbbJizuYnDwBxT8)_\n\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbWDsbbJizuYnDwBxT8 -->\n"
+}

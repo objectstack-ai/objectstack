@@ -1,0 +1,30 @@
+{
+  "number": 35182,
+  "kind": "issue",
+  "title": "docs(releases): 18.6.0 is on npm with 64 breaking changes but has no release page (`releases/v18/18-6.mdx`) and no v18.6.0 row in `upgrading.mdx`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T11:00:08Z",
+  "updated_at": "2026-11-18T11:47:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35182",
+  "body": "qa#1 · os-justin · session_01QSeKYpxQpmErd1ixfkgbYh\n\nFound by the post-release npm smoke #35181, cell F1a.\n\n## What happens\n18.6.0 was published to npm on 2026-11-18 (release commit `958ee035`, \"chore: version packages (#33849)\"). Neither the release commit nor `origin/main` (`55020c331b` at the run, re-checked by the seat afterwards) has `content/docs/releases/v18/18-6.mdx`, or a v18.6.0 row in `content/docs/upgrading.mdx`. Meanwhile `releases/index.mdx` already says \"current series: 18.6.0\", and `v18/index.mdx` still calls 18.5.0 \"the next release\".\n\n## Reproduction\n1. `git show 958ee035:content/docs/upgrading.mdx | grep -n 'v18\\.6'` → no row.\n2. `git ls-tree --name-only 958ee035 content/docs/releases/v18/` → `18-0` … `18-5`, `index.mdx`, `meta.json`; no `18-6.mdx`.\n3. The same on `origin/main`.\n\n## Why it matters\n- 64 `!:` commits lie in `b914e724..958ee035`. Their CHANGELOG lines are all present (#33903's fix holds), but no upgrade row or page reaches them.\n- 18.6.0's `os migrate` guidance has no page. For example: the audit seal lock `--sealer-stopped`; the 45–50 safe `create_index` changes that `os migrate plan` lists on an upgrade; the cli's \"new in this release\" wording.\n- For comparison, 18.5.0's page and row landed 48 minutes before its publish (#33823, card #33798).\n\n## Expected\nAn `upgrading.mdx` row and an `18-6.mdx` page with an upgrade checklist. Also correct the release status and table in `v18/index.mdx`. Details for each item are in #35181's cells D and F and its observations O-D3, O-D4, O-D5 and O-F2.\n\nQA-source: #35181 · smoke:npm-18.6.0 · F1a"
+}

@@ -2,7 +2,7 @@
   "number": 34909,
   "kind": "pull_request",
   "title": "docs(adr-0093): a sign-up admitted by its invitation alone is not bound while its address is unverified",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,6 +12,7 @@
   },
   "labels": [
     "documentation",
+    "pm:awaiting-merge",
     "size/s",
     "skip-changeset"
   ],
@@ -19,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T15:52:52Z",
-  "updated_at": "2026-11-18T01:42:43Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-18T09:56:54Z",
+  "closed_at": "2026-11-18T09:56:52Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-18T09:56:52Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/34909",

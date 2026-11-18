@@ -1,0 +1,32 @@
+{
+  "number": 35163,
+  "kind": "issue",
+  "title": "Console sign-in: the \"wrong account\" refusal page stacks a red banner over a \"Welcome back / Continue with SSO\" card, hides who is signed in, and buries \"Switch account\" as a text link",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T08:56:43Z",
+  "updated_at": "2026-11-18T09:10:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35163",
+  "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\nFiling gate: ① a defect seen on staging, raised by the maintainer on the page itself, verbatim: 「右边这个界面也是很丑很奇怪」「就是刚才账户不对，提示切换的界面」 (director session, 2026-11-18). `reach:` staging cloud main `19de5755a6` (objectstack pin `936d3356fbef`), 2026-11-18T08:5xZ. A signed-in cloud account that is not a member opens another organization's environment (`/_console/`). It lands on `/_console/login?error=access_denied&…&objectstack_error_reason=not_member`. Desktop width 800 px, zh-CN.\nReader: the `domain:ui` lane. The page is `ui/apps/console/src/pages/auth/LoginPage.tsx`, with the refusal mapping in `ssoCallbackRefusal.ts` and strings `ssoSwitchAccount*` in `ui/packages/i18n/src/locales/*.ts`. The sentence and the reason codes come from cloud#4471 (PR cloud#4841) and objectstack#34265; this card changes only the page around them. Related topic: objectstack#34571 (console core experience, 云端入口).\nDedupe: `repo:objectstack-ai/objectstack sso refusal page` 0 hits; `repo:objectstack-ai/objectstack not a member login page` 0 hits; `repo:objectstack-ai/objectstack switch account login` 0 hits; `repo:objectstack-ai/objectstack 切换账号` 100 hits, none about this page (nearest: topic objectstack#34571).\n\n## 维护者速读\n\n- **现象**：用错账号打开别的组织的环境，页面上面是红色提示「不是本系统所属组织的成员」，下面却还是「欢迎回来 · 继续单点登录」的登录卡，而且那是唯一的大按钮。点了会用同一个账号再被拒一次，原地打转。\n- **还缺什么**：不显示当前登录的是哪个账号；顶部是主机名 `OS-3V9XRQ.OBJECTOS.APP` 而不是组织名；「切换账号」「返回控制台」只是两个小文字链接，外加一段「在新标签页中打开你的登录服务并在那里退出登录」的实现说明；「技术详情」直接给普通用户看。\n- **要做的**：拒绝时只显示一张卡：说清「你没有「组织名」的访问权限」、当前账号是谁、主按钮切换账号、次按钮回到自己的组织；技术信息折叠。参照 Google、Microsoft 365、Slack、Notion 的同类页面。\n\n## Measured (staging, 2026-11-18)\n\nTop to bottom, as rendered:\n1. ObjectOS logo, then the host `OS-3V9XRQ.OBJECTOS.APP` in a monospace chip.\n2. A red banner: 「你登录所用的账号不是本系统所属组织的成员。请使用该组织成员的账号登录，或请该组织的管理员邀请你。」\n3. Two text links, 「切换账号」 and 「返回控制台」, then a grey paragraph: 「\"切换账号\"会在新标签页中打开你的登录服务并在那里退出登录。之后请在此处使用有权访问的账号重新登录。」\n4. A disclosure, 「▸ 技术详情」, holding the English `error_description`, which carries the organization name: \"This account is not a member of 'My Organization'…\".\n5. A white card: 「欢迎回来」 / 「使用你所在组织的单点登录。」 / a full-width primary button 「继续单点登录」.\n\n**The primary action loops.** 「继续单点登录」 signs in again with the same cloud session and lands on the same refusal.\n\n## How comparable products do it\n\n- **Google (Docs, Workspace), \"You need access\":** the signed-in account (avatar and email) is shown in the card. The primary button is \"Request access\". \"Switch account\" is next to it. There is no second sign-in form.\n- **Microsoft 365 / Entra, \"You can't access this\":** \"Signed in as …\", then \"Sign in with a different account\". The error code and request id sit under \"More details\".\n- **Slack, \"You don't have an account on this workspace\":** your email, \"Try another email\" and \"Request to join\". The workspaces you do belong to are listed, one click each.\n- **Notion, \"No access\":** \"Logged in as …\", \"Request access\", \"Switch account\", and a way back to your own workspace.\n\nWhat they share: one card, the current account shown, a clear next step as a button, and the technical detail folded.\n\n## Expected\n\nOn a refusal (`not_member` and `invitation_pending`), the page shows **one** card, and the SSO sign-in card is not rendered.\n- **Title:** names the organization, e.g. 「你没有「My Organization」的访问权限」. For `invitation_pending`: 「你有一个「…」的邀请还没接受」 plus an accept step.\n- **The current account** (avatar or initial, and email), so the person sees which account was refused.\n- **Primary button 「切换账号」:** signs out and returns to sign-in in place. If the IdP sign-out must open elsewhere, the page still offers one button, not a paragraph about tabs.\n- **Secondary 「回到我的组织」:** to the cloud console's environment list. This replaces the ambiguous 「返回控制台」.\n- **Technical details:** one folded line with the reason code, for support.\n- Show the organization name in place of the host chip, or above it.\n- **Optional, the maintainer's call (needs a product flow that does not exist today):** 「申请加入」, which notifies the organization's admins.\n\n## Acceptance\n\n- On staging, the same probe (a non-member opening another organization's environment) renders one card, with the org name and the signed-in email, 「切换账号」 as the only primary button, and no 「继续单点登录」 card.\n- `invitation_pending` renders its own title and next step.\n- A component test pins: when `objectstack_error_reason` is present, the SSO sign-in card is not rendered.\n- zh-CN and en strings are reviewed for plain wording (no 「本系统所属组织」)."
+}

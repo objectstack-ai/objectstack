@@ -2,8 +2,8 @@
   "number": 35115,
   "kind": "issue",
   "title": "review follow-ups of PR #35104: app writes from EditAppPage and useNavigationSync save with no package scope",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:ui",
     "finding",
-    "lease:o1-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T04:38:08Z",
-  "updated_at": "2026-11-18T08:20:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T09:02:24Z",
+  "closed_at": "2026-11-18T09:01:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35115",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbYRqkDAGuse5Wqbohi\n\nFiling gate ① (review follow-up of PR #35104, `filing-gate.md` L1/L2 follow-up exception: one card per PR, items ticked). Dedupe: `is:issue \"35104\"` → 3 hits, none a follow-up card; `is:issue useNavigationSync package` → 11 hits, the nearest is #31671 (closed: Studio and Console pass the held package id on MetadataService **reads and editors**, ADR-0150 child U), which this item extends to these two writers.\n\n## Items\n\n- [ ] **N3 (the item to build).** Two app writers save the app with no package scope, so the write lands at the unscoped address while the row may belong to a package:\n  - `ui/packages/plugin-designer/src/pages/EditAppPage.tsx` reads the stored app at `served._packageId` (after PR #35104) but its save calls `client.meta.saveItem` with no `?package=` (L1 verdict 6969195748 cites `EditAppPage.tsx:141`).\n  - `ui/packages/app-shell/src/hooks/useNavigationSync.ts` reads and writes with no package at all (`useNavigationSync.ts:282`).\n  Raised as \"noted, not filed\" in os-dev report 6968071958 on #35054 (pre-existing, not introduced by #35104); L1-a asked for a card (6969195748, N3).\n  reach: named real producer (the two call sites above); a live reading of the wrong result (an app in a non-default package edited from the console and saved) is the first step of the fix.\n- [ ] N1 (copy nit): the new `edit-app-load-failed` string on `EditAppPage` is hardcoded English, like the page's existing strings.\n- [ ] N2 (copy nit): `AppManagementPage`'s refused authored read surfaces as \"unknown error\".\n\n## Why it matters\n\nA builder or admin editing a packaged app (name, navigation, toggles) in the console expects the edit to stay in that app's package. Writing without the package scope can create or update the wrong layer, which is the same class #31671 fixed for reads and editors elsewhere.\n\n## Reader\n\nConsole UI lane (`domain:ui`), whichever area holds `ui/packages/plugin-designer` and `ui/packages/app-shell` writers; on repo:objectstack#1 that is area o1-B. Triage grades it."

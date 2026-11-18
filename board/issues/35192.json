@@ -1,0 +1,30 @@
+{
+  "number": 35192,
+  "kind": "issue",
+  "title": "console: Notification Settings shows external members switches whose writes all answer 403",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T11:36:57Z",
+  "updated_at": "2026-11-18T11:51:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35192",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling category: out-of-scope finding from the contract review of PR #35122 (card #34728, merged as c9b3f7a10e): nit F4, 6971590801 and 6975907450. It was deferred from that PR and had no carrier. Filed by the seat. ⛔ Not a claim.\n\n## What is wrong\n\nAn external member (`org_external` identity, `external_default` baseline) can open the Account app's **Notification Settings** page. It shows them every switch, digest and quiet-hours control, but each write they try answers `403`, because `external_default` grants no write on `sys_notification_preference`. Nothing leaks: the read answers only their own effective cells. The page offers actions it then refuses.\n\n## Scope\n\n- Show the controls disabled, with a short reason, when the caller holds no create or edit grant on `sys_notification_preference`. Alternatively, hide the nav entry for such callers. Pick one when the card is taken, and record why.\n- The decision comes from the framework's own permission answer for the caller. The page does not check identity names.\n\n## Done when\n\n- An `org_external` caller sees the page read-only (or does not see the entry), and no write is attempted.\n- A member and an organization administrator see no change.\n- A pin for each of the three personas."
+}

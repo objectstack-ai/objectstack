@@ -2,8 +2,8 @@
   "number": 35019,
   "kind": "issue",
   "title": "记录页：字段全空的分组各占一张卡，卡里只有一行「显示 N 个空字段」",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,7 @@
     "domain:ui",
     "enhancement",
     "lease:o1-E",
-    "pm:dispatched",
-    "priority:p1"
+    "priority:p2"
   ],
   "assignees": [
     "os-warren"
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T23:14:05Z",
-  "updated_at": "2026-11-18T06:32:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T09:53:48Z",
+  "closed_at": "2026-11-18T09:52:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35019",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派）。⛔ 不是认领。\n维护者 2026-11-17 原话：「更新最新的代码，验收，并对这些关键核心界面重新进行一轮测试，提出优化改进意见和我沟通。」；看过意见后：「记录页有两个「更多」菜单 p1 …… 其他问题按照你的建议立卡 p2」。\n\n## 现状（界面实测：控制台是 objectstack `origin/main` 4443014630 的构建，zh-CN，2026-11-17；本地 HotCRM，商机 Wayne Enterprise License，1280×800）\n\n- 「明细」页签里，「商机叙述」这张卡里只有一行「显示 4 个空字段」，「备注与下一步」只有一行「显示 2 个空字段」。「资格评估」有 3 个字段，下面再跟一行「显示 5 个空字段」。\n- 两张全空的卡各占约 80px 高，带图标、标题和边框，看起来像有内容的分组，实际什么都没有。\n- 文案来自 `showEmptyFields`（`ui/packages/i18n/src/locales/zh-Hans.ts:1556`）。\n\n## 要做的\n\n1. 字段全空的分组不单独成卡：折成一行（分组名 + 「N 个空字段」+ 展开），或者把所有全空分组并到页面末尾的一行「还有 2 个分组没有内容：商机叙述、备注与下一步」。点开后恢复成正常的卡。\n2. 有内容的分组里「显示 N 个空字段」保持现状。\n\n## 不做的\n\n- 不改「隐藏空字段」这个默认本身。\n- 不影响编辑表单（表单里空字段照常显示）。\n\n## 验收\n\n- 上述商机记录页上，「商机叙述」「备注与下一步」不再各占一张带边框的卡。\n- 展开后能看到全部空字段，并能就地编辑（如果该页支持就地编辑）。\n\nReader: `domain:ui` 车道，`ui/packages/plugin-detail` 渲染分组与 `showEmptyFields` 的位置。\n\nDedupe: `repo:objectstack-ai/objectstack is:open 记录页 空字段 分组 卡片` → 0。"

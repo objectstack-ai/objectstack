@@ -1,0 +1,30 @@
+{
+  "number": 35188,
+  "kind": "issue",
+  "title": "18.6.0: a losing concurrent queue claim answers 404 RECORD_NOT_FOUND instead of 409 CONCURRENT_UPDATE",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "baozhoutao",
+    "id": 6194462,
+    "type": "User"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T11:18:49Z",
+  "updated_at": "2026-11-18T11:53:19Z",
+  "closed_at": "2026-11-18T11:53:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35188",
+  "body": "## What changed\n\nOn 18.5.0, when two queue members claim the same parked record at the same time (`update(object, { id, owner_id: me }, { where: { id }, context })`), exactly one wins and the other gets **`409 CONCURRENT_UPDATE`**, the answer the queue-claim design documents (\"the record was taken\").\n\nOn 18.6.0 the winner is still unique, but the loser gets **`404 RECORD_NOT_FOUND`** (\"This record does not exist, or you do not have access to it.\").\n\n## Likely cause\n\n18.6.0 opens a unit of work at the write door for an object with a bound `before*` hook (objectql changelog: \"FROM … has no `after*` hook able to abort. The write door opened no unit of work\"). The two claims are now serialized. The loser's by-id prior-row read (`readUpdatePriorRow` → `if (!priorRecord) throw recordNotFoundError(...)` in `engine-update.ts`) runs after the winner commits. The row is now owned and outside the loser's queue visibility, so the read finds nothing and the 404 fires before the claim precondition can answer 409.\n\n## Why it matters\n\nThe person who lost the race is told the record does not exist or they lack access, when it was simply claimed by a colleague a moment earlier. The 409 told them exactly that.\n\n## Repro\n\nA downstream app test pins this (`test/ownership-queues.test.ts`, \"concurrent claims leave exactly one owner, and every loser gets 409\"): `crm_case` with `ownership: 'user'`, queue members, and `before*` hooks bound. It passes on 18.5.0 and fails consistently on 18.6.0 with `{ code: 'RECORD_NOT_FOUND', status: 404 }`.\n\n## Ask\n\nHave a losing claim answer `409 CONCURRENT_UPDATE` again. For example, when a by-id update carries a claim/write precondition and the prior read comes back empty because of visibility, answer the precondition's 409 rather than a 404."
+}

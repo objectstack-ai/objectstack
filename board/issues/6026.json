@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:36Z",
-  "updated_at": "2026-11-16T06:01:21Z",
+  "updated_at": "2026-11-18T12:21:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 144,
+  "comments": 145,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6026",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\n**This post is the registration of `repo:cloud` seat 1** (`Seat: repo:cloud#1`) — the `objectstack-ai/cloud` whole-repo lane. Seat-post protocol: index = `label:pm:seat`; only the sitting PM edits this body; takeover or handover = body edit + audit comment; re-fetch before editing, first stamp wins, read back after writing. The lane's platform facts, standing bans and permanent notes that earlier bodies of this post carried are in its edit history; the rules themselves live in the pm-dispatch skill (`references/cross-repo-coordination.md`, `references/true-green.md` 〈cloud〉) and cloud's `AGENTS.md`.\n\n## 当前 PM\n\n**🟢 `os-warren`** · session `session_01JQwxbYK6SZCmyzbGnrvmkk` · seat `repo:cloud#1` · seated 2026-11-08T16:47Z on the maintainer's words in the `objectstack cloud` Claude project: 「开一个 cloud 车道」. Project seat (a project thread; card threads open through the project coordinator). Posture, ledger and round reports live in the project; this post is the stub other accounts read.\n\n- **Seating basis:** `os-bob`'s stand-down brief `6720645533` was the newest event, so the seat was taken at once; opening marker `6724222897`.\n- **Patrol:** `trig_0118Jm4dLBbP98vLUZZiZRmT` · `46 * * * *` (hourly, self-bound to the seat session).\n- **Mailbox:** objectstack-ai/objectstack#31612 (subscribed by the seat session).\n- **Siblings:** seat 2 (`os-zhuang`, #24145, mailbox #31364) and seat 3 (`os-zhuang`, #30278, mailbox #31366) are live and not taken over. The seats share the queue; the split is agreed by mailbox (`Notify: split`), and claim timestamps arbitrate.\n\n## 继承台账\n\nNone carried as obligations: brief `6720645533` is the record of the previous shift, and everything it held went to the lane with `Release:` + `Resume-from:`.\n\n## 热文件串行队\n\nNone declared by this seat.\n\n## 说明\n\n- Scope: the `objectstack-ai/cloud` whole-repo queue plus objectstack cards carrying `domain:cloud` + `repo:cloud`; ⛔ no `domain:*` is produced here.\n- 由 os-warren 账户的项目负责.\n"

@@ -1,0 +1,31 @@
+{
+  "number": 35204,
+  "kind": "issue",
+  "title": "query_dataset: count totalGroups in the database on the ObjectQL face (date buckets) through aggregate_records' order-and-cut",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T13:33:15Z",
+  "updated_at": "2026-11-18T13:49:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35204",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nPR #35201 (card #35194) computes `query_dataset`'s `totalGroups` in the database only. It uses `COUNT(*) OVER ()` on the one pushed-down native SQL query, on a known dialect. Where the executor leaves native SQL, the member is absent and never approximated. That happens on the ObjectQL face (a date bucket, a `$field` filter, an external object, a driver with no raw SQL) and on an assembled grid (a measure filter, a derived member, `compareTo`, a label order).\n\nPR #35193 (card #35144) adds an order-and-cut option to `aggregate_records` (`packages/objectql/src/aggregate-order-cut.ts`, `AGGREGATE_ORDER_CUT`). That option counts groups in the database, including date-bucketed ones.\n\n## Proposal\n\nOnce #35193 lands, route the dataset executor's ObjectQL-face cut through that order-and-cut option. Date-bucketed and other ObjectQL-face queries then get a database `totalGroups`, with no in-app path. Assembled grids stay absent unless a database count exists for them.\n\nThe alternative, reported by the dev and not taken: report the in-memory grid length where the cut already ran in memory. That is exact and costs no extra read. But it reopens the card's ruling that the count is the database's.\n\nBlocked until #35193 and #35201 merge.\n\n## Origin\n\n#35194 dev report 6980036117 (open question, option C, the dev's recommendation). The seat's answer is on #35194.\n\nRe-check (after both merge): `git grep -n \"groupCount\\|AGGREGATE_ORDER_CUT\" origin/main -- packages/services/service-analytics/src packages/objectql/src`"
+}

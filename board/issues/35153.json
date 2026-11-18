@@ -18,12 +18,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T08:18:08Z",
-  "updated_at": "2026-11-18T08:18:08Z",
+  "updated_at": "2026-11-18T10:28:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
   "comments": 0,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35153",
-  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a coordination node under the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「现在就改结构」. The lines are the maintainer's: 「我们有代码搭建，mcp搭建，云端搭建，，mcp问数，云端问数」; so is their order: 「代码搭建已经可用，只是优化，mcp问数优先，其次是mcp搭建」; and the cloud lines are linked, not held here: 「云端子专题和卡片开在云项目，你只是链接，而且暂时不启动」. A parent may hold 100 children; #34659 had 72 after two days, which is why it is split.\n\n## What this line is\n\nA developer writes the project as code, checks it locally and deploys it. This path works today. What sits here improves it; none of it is a missing ability.\n\n**Order: third**, after lines 1 and 2. The maintainer: 「代码搭建已经可用，只是优化」.\n\n## What belongs here\n\n- The shape of the skills a code-first author reads (a router-sized `SKILL.md`).\n- A local flow run before submitting.\n- Findings about what a build authors wrong and which text led it there (a roll-up its own persona cannot read; seed rows its own rule refuses).\n\n## Acceptance reading\n\nThe weekly scenario-card round, which is the eval lane's own and predates this epic."
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a coordination node under the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「现在就改结构」. The lines are the maintainer's: 「我们有代码搭建，mcp搭建，云端搭建，，mcp问数，云端问数」; so is their order: 「代码搭建已经可用，只是优化，mcp问数优先，其次是mcp搭建」; and the cloud lines are linked, not held here: 「云端子专题和卡片开在云项目，你只是链接，而且暂时不启动」. A parent may hold 100 children; #34659 had 72 after two days, which is why it is split.\n\n## What this line is\n\nA developer writes the project as code, checks it locally and deploys it. This path works today. What sits here improves it; none of it is a missing ability.\n\n**Order: fourth**, after MCP ask, MCP write (#35176) and MCP build. The maintainer: 「代码搭建已经可用，只是优化」.\n\n## What belongs here\n\n- The shape of the skills a code-first author reads (a router-sized `SKILL.md`).\n- A local flow run before submitting.\n- Findings about what a build authors wrong and which text led it there (a roll-up its own persona cannot read; seed rows its own rule refuses).\n\n## Acceptance reading\n\nThe weekly scenario-card round, which is the eval lane's own and predates this epic."
 }

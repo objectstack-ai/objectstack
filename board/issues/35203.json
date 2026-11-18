@@ -1,0 +1,31 @@
+{
+  "number": 35203,
+  "kind": "issue",
+  "title": "objectstack-ask skill: teach query_dataset's totalGroups next to truncated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T13:32:46Z",
+  "updated_at": "2026-11-18T13:48:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35203",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nPR #35201 (card #35194) adds an optional `totalGroups` to `query_dataset`'s output (`QueryDatasetOutputSchema`). It is the number of groups before `offset` and `limit` cut the result, with the same name and meaning as `aggregate_records`. It is absent where the database could not count them.\n\n`skills/objectstack-ask/SKILL.md` (served as `packages/mcp/src/ask-skill.generated.ts`) already teaches `truncated: true` (\"more rows existed than came back\"). It doesn't yet teach the client to answer \"how many X are there\" after a top-N cut from `totalGroups`, or to say the total is unknown when `totalGroups` is absent.\n\n## Scope\n\nAdd one line beside the `truncated` lines, then regenerate `ask-skill.generated.ts`. This is `skills/**`, so it needs a domain:skills PR, which is why it is not in the domain:server PR #35201. If the skill teaches `aggregate_records`' `totalGroups` by the time this is picked up (#35144 / PR #35193), use one shared sentence for both.\n\nBlocked until #35201 merges.\n\n## Origin\n\nCard #35194's scope (\"the ask skill's served text gains one line, only if it already teaches `truncated`\"). It was moved here at claim 6978120534. The #35194 dev report is 6980036117.\n\nRe-check: `git grep -n \"totalGroups\\|truncated\" origin/main -- skills/objectstack-ask/SKILL.md`"
+}

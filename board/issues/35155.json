@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T08:20:03Z",
-  "updated_at": "2026-11-18T08:20:03Z",
+  "updated_at": "2026-11-18T09:11:20Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35155",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbYRqkDAGuse5Wqbohi\n\nFiling gate ① via the L1/L2 follow-up exception (`filing-gate.md`: p3 copy and doc nits go to the area's `<area> loose ends` card; none existed). Dedupe: `is:issue is:open \"loose ends\"` → 13 hits, none for the console UI area; `is:issue edit-app-load-failed`, `is:issue AppManagementPage \"unknown error\"`, `is:issue GroupRow \"(empty)\"` → only #35115 (the source of items 1-2) and closed, unrelated cards.\n\nLater rounds append items here; ⛔ no separate card per nit.\n\n## Items\n\n- [ ] **1. EditAppPage load-failed sentence is hard-coded English** (`ui/packages/plugin-designer/src/pages/EditAppPage.tsx`, `edit-app-load-failed`), like the page's other strings. Needs a new locale key in every pack. From #35115 item N1 (L1 6969195748 on PR #35104); PR #35151 found no existing key that fits.\n- [ ] **2. App management: an empty (null) authored read says \"unknown error\"** (`AppManagementPage`). A refused read already shows the server's message; only the null read lacks a sentence, which needs a new locale key. From #35115 item N2.\n- [ ] **3. Two doc comments still say \"(empty)\"** after PR #35140 moved the empty group heading to `grid.empty`: `GroupRowProps.label` in `ui/packages/plugin-grid/src/GroupRow.tsx:17` (ships in the published `.d.ts`) and `ui/packages/plugin-grid/src/temporalCellFace.ts:81`. From contract record 6972345919, N2.\n\n## Why it matters\n\nItems 1-2 show English or a vague \"unknown error\" to a zh-CN builder on the console's app pages; item 3 leaves a published type comment describing a label the grid no longer shows.\n\n## Reader\n\nConsole UI lane (`domain:ui`), area o1-B of repo:objectstack#1, when p3 work resumes (p3 is paused by the maintainer); or any PR that next touches these files, which carries the item and ticks it.\n\nGrading: p3 · copy and doc-comment nits (北极星 p3: review nits and tails)."

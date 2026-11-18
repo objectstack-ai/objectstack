@@ -2,8 +2,8 @@
   "number": 34728,
   "kind": "issue",
   "title": "console: a personal Notification Settings page in the Account app over sys_notification_preference (per topic × channel, digest, quiet hours)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,22 +12,22 @@
   },
   "labels": [
     "domain:ui",
-    "lease:o1-B",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T08:52:52Z",
-  "updated_at": "2026-11-18T04:36:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T11:36:12Z",
+  "closed_at": "2026-11-18T11:34:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 11,
+  "comments": 16,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34728",
-  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ③ the maintainer's direct order, in the cloud seat 5 thread on 2026-11-17. The seat proposed three quick steps for \"how do I receive platform notifications in time\". The maintainer answered, verbatim: 「第一步同意，但是手机app还没上架，接 slack」. Step 1 is this card plus the @mention email card; mobile push is out, and Slack is the next channel. Reader: `domain:ui`. Dedupe: `notification preference page account` found no card. Triage grades it; the seat suggests p2 for a feature.\n\n## 维护者速读\n\n1. **问题**：每个人「哪类消息走哪个渠道、汇总、免打扰」的偏好数据和规则平台早就有了，但入口只在管理员的「设置」里，普通用户找不到，也改不了自己的。\n2. **改法**：在个人账户里加一个「通知设置」页：按消息类型和渠道开关，选择即时 / 每日汇总 / 每周汇总，设置免打扰时段。\n3. **验收**：普通成员能改自己的设置，改完立即按新设置收消息；看不到也改不了别人的设置和管理员的全局默认；「必达」类消息不能被关掉。\n4. **范围**：只做控制台页面，用平台现有的偏好对象和接口，不改后端规则。\n5. **以后**：Slack 渠道上线后，这个页面就是用户连接自己 Slack 账号、勾选 Slack 渠道的地方。\n6. **需要你做的**：无。\n\n## What exists (read on objectstack main)\n\n- **Object:** `sys_notification_preference` (`packages/services/service-messaging/src/objects/notification-preference.object.ts`): `user_id` (empty means the admin default for everyone), `topic`, `channel`, `enabled`, `digest` (none/daily/weekly), `quiet_hours`.\n- **Resolver:** `preference-resolver.ts` applies it during `emit`. The most specific rule wins, and mandatory topics bypass it.\n- **Options:** `GET /api/v1/messaging/preference-options` (`preference-options-routes.ts:58`) lists the topics and channels.\n- **Nav today:** Setup only, \"Notification Preferences\" (`messaging-service-plugin.ts` ~:408). The Account app (`packages/platform-objects/src/apps/account.app.ts`) lists `sys_inbox_message` but not preferences.\n\n## Ask\n\n- A page in the Account app where the signed-in person reads and writes only their own rows (`user_id` = self).\n  - It lists the topics × channels from `preference-options`, each row showing whether it is inherited from the admin default.\n  - Digest choice per row, and quiet hours.\n  - Mandatory topics are shown as locked.\n- It writes through the normal data door as the user. Sharing and permissions must let a person write only their own preference rows. Verify that, and fix the object's access rules if they do not hold.\n- Leave room for a future Slack row and \"connect your Slack\" (ADR-0013 / ADR-0022), without building it here.\n- Tests: a member edits their own, and cannot read or edit another's or the default; the change takes effect on the next `emit`.\n\nRuled: 6968686390 · letter A · 2026-11-18T04:03Z\nRuled: 6969143776 · letter A · 2026-11-18T04:32Z\n"
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ③ the maintainer's direct order, in the cloud seat 5 thread on 2026-11-17. The seat proposed three quick steps for \"how do I receive platform notifications in time\". The maintainer answered, verbatim: 「第一步同意，但是手机app还没上架，接 slack」. Step 1 is this card plus the @mention email card; mobile push is out, and Slack is the next channel. Reader: `domain:ui`. Dedupe: `notification preference page account` found no card. Triage grades it; the seat suggests p2 for a feature.\n\n## 维护者速读\n\n1. **问题**：每个人「哪类消息走哪个渠道、汇总、免打扰」的偏好数据和规则平台早就有了，但入口只在管理员的「设置」里，普通用户找不到，也改不了自己的。\n2. **改法**：在个人账户里加一个「通知设置」页：按消息类型和渠道开关，选择即时 / 每日汇总 / 每周汇总，设置免打扰时段。\n3. **验收**：普通成员能改自己的设置，改完立即按新设置收消息；看不到也改不了别人的设置和管理员的全局默认；「必达」类消息不能被关掉。\n4. **范围**：只做控制台页面，用平台现有的偏好对象和接口，不改后端规则。\n5. **以后**：Slack 渠道上线后，这个页面就是用户连接自己 Slack 账号、勾选 Slack 渠道的地方。\n6. **需要你做的**：无。\n\n## What exists (read on objectstack main)\n\n- **Object:** `sys_notification_preference` (`packages/services/service-messaging/src/objects/notification-preference.object.ts`): `user_id` (empty means the admin default for everyone), `topic`, `channel`, `enabled`, `digest` (none/daily/weekly), `quiet_hours`.\n- **Resolver:** `preference-resolver.ts` applies it during `emit`. The most specific rule wins, and mandatory topics bypass it.\n- **Options:** `GET /api/v1/messaging/preference-options` (`preference-options-routes.ts:58`) lists the topics and channels.\n- **Nav today:** Setup only, \"Notification Preferences\" (`messaging-service-plugin.ts` ~:408). The Account app (`packages/platform-objects/src/apps/account.app.ts`) lists `sys_inbox_message` but not preferences.\n\n## Ask\n\n- A page in the Account app where the signed-in person reads and writes only their own rows (`user_id` = self).\n  - It lists the topics × channels from `preference-options`, each row showing whether it is inherited from the admin default.\n  - Digest choice per row, and quiet hours.\n  - Mandatory topics are shown as locked.\n- It writes through the normal data door as the user. Sharing and permissions must let a person write only their own preference rows. Verify that, and fix the object's access rules if they do not hold.\n- Leave room for a future Slack row and \"connect your Slack\" (ADR-0013 / ADR-0022), without building it here.\n- Tests: a member edits their own, and cannot read or edit another's or the default; the change takes effect on the next `emit`.\n\nRuled: 6968686390 · letter A · 2026-11-18T04:03Z\nRuled: 6969143776 · letter A · 2026-11-18T04:32Z\nRuled: 6973785798 · letter A · 2026-11-18T08:54Z\n\n"
 }

@@ -2,7 +2,7 @@
   "number": 35102,
   "kind": "pull_request",
   "title": "fix(objectql)!: an action body's write inside ctx.api.transaction keeps its audit rows beside a telemetry datasource",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -23,10 +23,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T03:22:58Z",
-  "updated_at": "2026-11-18T07:55:35Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-18T08:42:38Z",
+  "closed_at": "2026-11-18T08:42:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-18T08:42:36Z",
   "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35102",

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-18T08:22:33.156Z",
+  "generated_at": "2026-11-18T14:18:29.889Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-18T08:07:22.898Z",
-      "since": "2026-11-18T02:07:31.147Z",
+      "cursor": "2026-11-18T14:02:59.854Z",
+      "since": "2026-11-18T08:07:22.898Z",
       "slice": 300
     },
     "history": {
@@ -20,28 +20,28 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-18T02:07:31.147Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-18T02:07:31.147Z)",
-  "next_since": "2026-11-18T08:07:22.898Z",
+  "since": "2026-11-18T08:07:22.898Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-18T08:07:22.898Z)",
+  "next_since": "2026-11-18T14:02:59.854Z",
   "resume": null,
   "counts": {
-    "issues_open": 469,
-    "issues_closed": 15468,
+    "issues_open": 481,
+    "issues_closed": 15487,
     "issues_transferred": 11,
-    "pulls_open": 52,
-    "pulls_closed": 17042,
-    "records": 33042
+    "pulls_open": 47,
+    "pulls_closed": 17065,
+    "records": 33091
   },
   "board": {
-    "open_issues_count": 454,
-    "open_pull_requests": 47,
-    "read_at": "2026-11-18T08:22:32.124Z"
+    "open_issues_count": 461,
+    "open_pull_requests": 42,
+    "read_at": "2026-11-18T14:18:23.191Z"
   },
   "count_check": {
     "verdict": "ok",
     "reason": null,
-    "expected": 407,
-    "archived": 469,
+    "expected": 419,
+    "archived": 481,
     "shortfall": 0,
     "surplus": 0,
     "gone_ledger": 62,
@@ -52,10 +52,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 357,
+  "requests": 234,
   "run": {
-    "numbers_read": 200,
-    "files_written": 364,
+    "numbers_read": 123,
+    "files_written": 226,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -64,22 +64,17 @@
     "blank_pages_reasked": 0,
     "reconcile": {
       "first": {
-        "verdict": "surplus",
-        "expected": 407,
-        "archived": 470,
+        "verdict": "ok",
+        "expected": 419,
+        "archived": 481,
         "shortfall": 0,
-        "surplus": 1
+        "surplus": 0
       },
-      "listed": 454,
-      "candidates": 6,
+      "listed": 461,
+      "candidates": 5,
       "left": 0,
       "reread": [],
-      "transferred": [
-        {
-          "number": 34690,
-          "to": "a repository this token cannot read"
-        }
-      ],
+      "transferred": [],
       "destroyed": [
         {
           "number": 19374,
@@ -105,7 +100,7 @@
       "unreadable": [],
       "blank_pages_reasked": 0,
       "reason": null,
-      "wrote": 1,
+      "wrote": 0,
       "cut_short": false
     }
   }

@@ -1,0 +1,37 @@
+{
+  "number": 35185,
+  "kind": "pull_request",
+  "title": "feat(mcp): query_records says truncated: true on a capped page, and the stdio door counts its total",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T11:07:38Z",
+  "updated_at": "2026-11-18T12:04:07Z",
+  "closed_at": "2026-11-18T12:04:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T12:04:04Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35185",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8AJJJRiYjshMUNgyMZSqBsr)_\n\nRefs #35138 (item capped)\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:MCP 的 `query_records` 在一页被行数上限截断时多答一个 `truncated: true`;stdio 通道的 `total` 改为真实计数,不再拿本页行数冒充总数。\n- 为什么改:模型会把被截断的一页当成全集去求和、排名;托管端已有这个提示,开源 MCP 门此前没有(#35138 的 capped 一项)。\n- 风险与回滚:只加字段(仅为真时出现),不删不改既有字段;stdio 分页读多一次 count。回滚 = revert 本 PR。\n- 先看:`packages/mcp/src/mcp-http-tools.ts`(`servedQueryPage` / `queryPageProbeFits` 与 `query_records` 处理器);`packages/mcp/src/stdio-data-bridge.ts`(`query` 末尾的计数);`packages/mcp/src/query-records-truncated.test.ts`。\n- 两分钟验证:`pnpm --filter @objectstack/mcp exec vitest run src/query-records-truncated.test.ts`,预期 11 条全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `query_records` (`packages/mcp/src/mcp-http-tools.ts`, this handler only) asks the bridge for one row more than the page. When that row comes back, the tool serves the page and adds `truncated: true`. The member is present only when true: a page holding every matching row, exactly `limit` rows included, answers as before. Where the bridge answers `hasMore`, it is restated from the probe, because the door counted it against the widened read.\n- The data door's read window refuses, never clamps, a read over `OS_DATA_MAX_PAGE_SIZE` or past `OS_DATA_QUERY_ROW_BUDGET` (`packages/types/src/query-read-limits.ts` `planQueryReadWindow`). Where the probe row would cross either, the page is read as asked and the door's counted `hasMore` decides `truncated`. Without this, a host with `OS_DATA_MAX_PAGE_SIZE` equal to the MCP page cap would refuse every full-page `query_records`.\n- The tool description now says the answer is one page and that a `truncated` page must not be summed, counted or ranked as if whole: read on with `offset`, or use `aggregate_records` where it is offered.\n- The stdio bridge's `query` (`packages/mcp/src/stdio-data-bridge.ts`) answered `{ object, records, total: records.length }` with no `hasMore` (origin/main `7d8dcf693a`, line 1378), so a capped stdio page claimed to be the whole set. The HTTP door goes through `callData('query')` (`packages/runtime/src/action-execution.ts` 858-867) into `findData`, which counts (`packages/metadata-protocol/src/protocol-data-crud.ts` 761-822). The stdio bridge now answers the same page facts: a paged read is counted under the same `where`, as the caller (`engine.count(object, { where }, { context })`). `total` is the match total and `hasMore` says whether rows remain. If the count fails, `total` is left out and `hasMore` answers from the page alone, as the data door's `$count=false` arm does. An unpaged read keeps `total: records.length` and `hasMore: false`, and no count runs.\n- The type stays local to `packages/mcp`. The spec types only the `source` block of `query_records`' result (`packages/spec/src/ai/object-query-source.zod.ts`), not the result itself, so nothing enters `packages/spec` (ADR-0149 M1).\n- No existing member is renamed or removed. `aggregate_records` and its `totalGroups` / `truncated` are untouched.\n\n## Tests\n\n- New `packages/mcp/src/query-records-truncated.test.ts` drives `query_records` through `registerObjectTools` over an in-memory MCP client on both doors. The HTTP door uses a bridge answering `findData`'s counted page facts. The stdio door uses `createStdioDataBridge` over a stand-in engine. Pins per door: a capped page answers `truncated: true` with the page only, and the probe asks for `limit + 1`. A page of exactly `limit` rows answers no `truncated`. The last page of a paged read is not capped. Under `OS_DATA_MAX_PAGE_SIZE` equal to the page, no probe is sent and `hasMore` decides. Pins on the stdio bridge itself: a capped page answers the counted total, not the page length. A failing count states no total. An unpaged read runs no count.\n- Two preservation pins now expect the probe row the bridge receives: `mcp-http-tools.unknown-argument-keys.test.ts` (limit 3 becomes 4) and `mcp-server-runtime.http.test.ts` (5 becomes 6). The page served is unchanged.\n- `stdio-data-bridge.stored-metadata-body.test.ts`: the engine-read census names the new `count(object)` site. It is a number, never a row, counted under the `where` that the stored-body and hash refusals already judged.\n\n<details><summary>Ablations (scripts/ablation-replace.mjs, each restored to the HEAD blob, git diff HEAD empty)</summary>\n\n- A1, the `truncated` member deleted from `servedQueryPage`: 4 failed, 7 passed (both doors' capped and read-window pins).\n- A2, `records.length > page` mutated to `>=`: 2 failed, 9 passed (both doors' exact-limit pins).\n- A3, the stdio bridge back to `total: records.length`: 5 failed, 6 passed (the stdio door's capped, exact-limit, last-page and read-window pins, and the counted-total pin).\n\n</details>\n\n## Acceptance notes\n\n- `findData` falls back to a page-local `total` when `engine.count` throws (`packages/metadata-protocol/src/protocol-data-crud.ts` 804-808). That is a total the HTTP door did not count. It is outside this PR's file surface, so it is noted here and not changed.\n- On the stdio door, every paged `bridge.query` now runs one `engine.count`. That includes `delete_records`' selection read, which goes through the same bridge member.\n\n## Verification\n\nAll readings below were taken at head `d85434872f`.\n\n<details><summary>Local runs</summary>\n\n- `pnpm --filter '@objectstack/mcp^...' build` (under the verify lock): VERDICT command-exit 0.\n- `pnpm --filter @objectstack/mcp test`: Test Files 72 passed (72), Tests 1281 passed (1281).\n- `pnpm --filter @objectstack/mcp typecheck`: tsc clean; `check:test-typecheck` OK, 6 files / 53 errors / 8 pinned signatures held, unchanged.\n- `dispatch-gates --commands`: 68 derived families. 67 exited 0. `pnpm check:dual-build-cjs-loads` exited 3, PREREQUISITE NOT MET (it reads every package's `dist/`, and only the mcp dependency closure is built here). NOT MEASURED locally; CI's Lint and Repo Gates runs it. `--ran` reconciliation: 68 derived, 67 run, 1 NOT-MEASURED, 0 UNRUN.\n- `overlap-check.mjs`: clean against origin/main, 0 open PR heads share a file.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbYRqkDAGuse5Wqbohi)_\n"
+}
