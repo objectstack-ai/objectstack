@@ -708,7 +708,8 @@ value directly (single wrap).
 | Caller lacks `requiredPermissions` | **403** | `{ success: false, error: { message, code } }` |
 | Type has no server dispatch (`url`/`modal`/`form`/`api`), or a param-contract violation | **400** | `{ success: false, error: { message, code } }` |
 | Data engine or automation service unavailable | **503** | `{ success: false, error: { message, code } }` |
-| Handler **crashed** (`TypeError`, driver error, sandbox timeout) | **500** | `{ success: false, error: { message, code } }` |
+| Handler **crashed** (`TypeError`, driver error) | **500** | `{ success: false, error: { message, code } }` |
+| Sandboxed body **timed out** (its CPU-time limit, or the wall-clock ceiling while waiting on platform calls) | **500** | `{ success: false, error: { message, code: 'INTERNAL_ERROR' } }` — `message` names the action and its limit: `Action 'NAME' timed out: it exceeded its N ms time limit and was stopped.` (the ceiling's adds `while waiting on platform calls`). MCP `run_action` answers the same sentence. A crash's own text is never served; a hook's or a job's timeout keeps `Internal server error` |
 | Sandboxed body **does not compile** in its `(async (input, ctx) => { … })` wrapper | **500** | `{ success: false, error: { message, code: 'INTERNAL_ERROR' } }` — `message` names the action and the compile error |
 
 A rejection and a crash are told apart by the thrown error: a plain

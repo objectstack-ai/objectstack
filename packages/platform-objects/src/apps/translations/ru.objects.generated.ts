@@ -240,6 +240,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Готово",
           fields: {
             email: "Электронная почта",
+            pendingAgain: "Уже ожидает",
             notApplied: "Уже ожидает входа, поэтому не применено (задайте в записи)",
             managerError: "Руководитель",
             "host.reason": "Приглашение не отправлено"

@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest';
 // Paid at collection, not inside a case's clocked window: the dispatcher's
 // reach loads `@objectstack/metadata` lazily (`check:test-source-alias`).
 import '@objectstack/metadata';
-import { mapDataError } from '@objectstack/types';
+import { actionsDoorAnswerOf, mapDataError } from '@objectstack/types';
 
 import { actionBodyRunnerFactory } from './body-runner.js';
 import { QuickJSScriptRunner, SandboxError } from './quickjs-runner.js';
@@ -52,13 +52,21 @@ const ZH_GLOBAL = '（全局）只有草稿发票可以签核。';
 /** A `script` action with a `js` body and the catalogue, bound through the real factory. */
 function boundAction(
     source: string,
-    opts: { refusals?: object; objectName?: string | null; i18n?: () => HookRefusalI18nService | undefined } = {},
+    opts: {
+        refusals?: object;
+        objectName?: string | null;
+        i18n?: () => HookRefusalI18nService | undefined;
+        runner?: QuickJSScriptRunner;
+        logger?: Record<string, (...args: any[]) => void>;
+        timeoutMs?: number;
+    } = {},
 ) {
     const objectName = opts.objectName === undefined ? 'crm_invoice' : opts.objectName ?? undefined;
-    const fn = actionBodyRunnerFactory(runner, { ql: {}, appId: 'crm', i18n: opts.i18n })({
+    const fn = actionBodyRunnerFactory(opts.runner ?? runner, { ql: {}, appId: 'crm', i18n: opts.i18n, logger: opts.logger as any })({
         name: 'submit_signoff',
         type: 'script',
         ...(objectName !== undefined ? { objectName, object: objectName } : {}),
+        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
         body: { language: 'js', source, capabilities: [] },
         refusals: 'refusals' in opts ? opts.refusals : REFUSALS,
     } as any);
@@ -269,5 +277,96 @@ describe('[#34273] the `/actions` door answers the declared refusal in the calle
         const response = await throughActionsDoor(err);
         expect(response.status).toBe(400);
         expect(response.body.error.userMessage).toBeUndefined();
+    });
+});
+
+/**
+ * The runner's own faults are the platform speaking, never a refusal the body
+ * chose, so an action that declares `refusals` answers them exactly as an
+ * action without one does. A timeout keeps the sentence naming the action and
+ * its limit, a body that does not compile keeps the sentence naming the
+ * compiler's reason, and the operator log keeps the runner's own line, never
+ * the catalogue's "threw no code" fault.
+ *
+ * Driven through the real bound handler (`actionBodyRunnerFactory`), which
+ * hands every throw to `resolveActionRefusal` before it logs and rethrows it,
+ * and read on both action doors: the `/actions` HTTP door and the reader the
+ * MCP `run_action` tool renders a throw with (`actionsDoorAnswerOf`).
+ */
+describe('the runner\'s own faults pass an action\'s refusal catalogue untouched', () => {
+    const CPU_SENTENCE = "Action 'submit_signoff' timed out: it exceeded its 50 ms time limit and was stopped.";
+    const WALL_SENTENCE =
+        "Action 'submit_signoff' timed out: it exceeded its 300 ms time limit while waiting on platform calls, and was stopped.";
+    const COMPILE_BODY = 'const input = ctx.input || {}; return 1;';
+
+    /**
+     * Records the `.message` of each error logged at `error`, read when it is
+     * logged: the door later rewrites `.message` to the caller sentence.
+     */
+    function capturingLogger() {
+        const logged: string[] = [];
+        const error = vi.fn((_line: string, err: { message: string }) => { logged.push(err.message); });
+        return { error, logged, logger: { error, info: vi.fn(), warn: vi.fn(), debug: vi.fn() } };
+    }
+
+    /** Both doors' answers to one thrown error, as `{ status, code, message }`. */
+    async function bothDoors(err: unknown) {
+        const response = await throughActionsDoor(err);
+        const mcp = actionsDoorAnswerOf(err, 'crm_invoice');
+        return {
+            actions: { status: response.status, code: response.body.error.code, message: response.body.error.message },
+            mcp: { status: mcp.status, code: mcp.code, message: mcp.message },
+        };
+    }
+
+    it('a CPU timeout answers its sentence on both doors, and the log keeps the budget line', async () => {
+        const { error, logged, logger } = capturingLogger();
+        const err = await rejectionOf(boundAction('while (true) {}', { logger, timeoutMs: 50 })(actionCtx()));
+        expect(err).toBeInstanceOf(SandboxError);
+        const expected = { status: 500, code: 'INTERNAL_ERROR', message: CPU_SENTENCE };
+        expect(await bothDoors(err)).toEqual({ actions: expected, mcp: expected });
+
+        expect(error).toHaveBeenCalledTimes(1);
+        expect(error.mock.calls[0][1]).toBe(err);
+        expect(logged[0]).toMatch(/^action 'submit_signoff' exceeded CPU budget of 50ms/);
+    });
+
+    it('a wall-clock timeout answers its sentence on both doors, and the log keeps the ceiling line', async () => {
+        const { logged, logger } = capturingLogger();
+        const wallRunner = new QuickJSScriptRunner({ actionTimeoutMs: 250, wallCeilingMs: 300 });
+        const err = await rejectionOf(
+            boundAction('await new Promise(() => {});', { logger, runner: wallRunner })(actionCtx()),
+        );
+        const expected = { status: 500, code: 'INTERNAL_ERROR', message: WALL_SENTENCE };
+        expect(await bothDoors(err)).toEqual({ actions: expected, mcp: expected });
+        expect(logged).toHaveLength(1);
+        expect(logged[0]).toMatch(/^action 'submit_signoff' exceeded wall-clock ceiling of 300ms/);
+    });
+
+    it('a body that does not compile answers its sentence on both doors, and the log names the compiler', async () => {
+        const { logged, logger } = capturingLogger();
+        const err = await rejectionOf(boundAction(COMPILE_BODY, { logger })(actionCtx()));
+        const answers = await bothDoors(err);
+        expect(answers.mcp).toEqual(answers.actions);
+        expect(answers.actions.status).toBe(500);
+        expect(answers.actions.code).toBe('INTERNAL_ERROR');
+        expect(answers.actions.message).toContain("Action 'submit_signoff' cannot run: its body does not compile");
+        expect(logged).toHaveLength(1);
+        expect(logged[0]).toMatch(/^action 'submit_signoff' does not compile: SyntaxError/);
+    });
+
+    it('CONTROL: a body\'s own code-less throw is still refused as undeclared, a declared 500 and the timeout\'s own words included', async () => {
+        for (const source of [
+            "throw new Error('no code');",
+            "throw Object.assign(new Error('The server is busy.'), { status: 500 });",
+            `throw Object.assign(new Error(${JSON.stringify(CPU_SENTENCE)}), { status: 500 });`,
+        ]) {
+            const err = await rejectionOf(boundAction(source)(actionCtx()));
+            expect(err.message, source).toContain('threw no `code`');
+            expect(err.innerMessage, source).toBeUndefined();
+            const answers = await bothDoors(err);
+            expect(answers.actions, source).toEqual({ status: 500, code: 'INTERNAL_ERROR', message: 'Internal server error' });
+            expect(answers.mcp, source).toEqual(answers.actions);
+        }
     });
 });

@@ -11,6 +11,7 @@ export * from './ExpressionEvaluator.js';
 export * from './predicateInput.js';
 export * from './declaredPredicate.js';
 export * from './fieldRules.js';
+export { planObjectFormulas, type ObjectFormulaPlan } from './formulaRecord.js';
 // Named, not `export *`: `SUBJECT_PERMISSIONS`, `SUBJECT_CAPABILITIES` stay in
 // the module for its in-package readers and off the public entry
 // (objectstack#25921: zero consumers).
