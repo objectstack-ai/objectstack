@@ -116,6 +116,7 @@ const CHILD_VIEWS = [
   'object-map',
   'object-tree',
   'object-chart',
+  'object-timesheet',
 ] as const;
 type ChildView = (typeof CHILD_VIEWS)[number];
 
@@ -726,6 +727,17 @@ describe('objectui#13047 — each kind\'s own block, handed to the node of the v
     const tree = lastHanded('object-tree');
     expect(tree.parentField).toBe('parent');
     expect(tree.labelField).toBe('owner');
+  });
+
+  it('`timesheet`: the `rowFields` / `dateField` / `valueField` binding reaches the grid', async () => {
+    // No block-less control here: the spec refuses `type: 'timesheet'` without a
+    // `timesheet` block (checkListViewTimesheetBinding), so, as for `chart`, the
+    // fixture always carries one.
+    const block = { rowFields: ['owner'], dateField: 'due', valueField: 'amount' };
+    const { dataSource } = mount({ type: 'timesheet', timesheet: block });
+    await handedTo('object-timesheet');
+    await loaded(dataSource);
+    expect(lastHanded('object-timesheet').timesheet).toEqual(block);
   });
 
   it('`chart`: the `dataset` binding and its `values` / `dimensions` reach the chart', async () => {

@@ -1515,6 +1515,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
   'engine.inspector.view.type.tree': 'Tree',
+  'engine.inspector.view.type.timesheet': 'Timesheet',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',

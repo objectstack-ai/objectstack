@@ -1348,6 +1348,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.view.type.map': '地图',
   'engine.inspector.view.type.chart': '图表',
   'engine.inspector.view.type.tree': '树形',
+  'engine.inspector.view.type.timesheet': '工时表',
   // Report default ("home") inspector
   'engine.inspector.report.kind': '报表',
   'engine.inspector.report.close': '关闭报表',

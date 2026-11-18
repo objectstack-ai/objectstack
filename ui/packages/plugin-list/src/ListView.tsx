@@ -2208,7 +2208,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * typed term itself is kept: switching back to a view that draws the
    * fetched rows applies it again.
    */
-  const searchlessViewOnScreen = currentView === 'tree' || currentView === 'chart';
+  // `timesheet` (objectstack#34382) is searchless for the same reason: its
+  // week query takes the view filter and the date window, and no term.
+  const searchlessViewOnScreen = currentView === 'tree' || currentView === 'chart' || currentView === 'timesheet';
 
   // The object definition, read from the data source below ("Fetch object
   // definition"). Declared here because the toolbar's search decision reads it.
@@ -4556,6 +4558,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       resolvable.push('chart');
     }
 
+    // Check for Timesheet capabilities — the three keys `ObjectTimesheet`'s
+    // `resolveTimesheetConfig` requires, so the switcher never offers a grid
+    // that would draw its "configuration required" screen (objectstack#34382).
+    const timesheet = schema.timesheet;
+    if (Array.isArray(timesheet?.rowFields) && timesheet.rowFields.length > 0 && timesheet?.dateField && timesheet?.valueField) {
+      resolvable.push('timesheet');
+    }
+
     // Always allow switching back to the viewType defined in schema — but only
     // when it names a visualization this renderer actually draws.
     //
@@ -4583,7 +4593,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
 
     return resolvable;
-  }, [schema.viewType, schema.kanban, schema.calendar, schema.gantt, schema.gallery, schema.timeline, schema.map, schema.tree, schema.chart, schema.appearance?.allowedVisualizations]);
+  }, [schema.viewType, schema.kanban, schema.calendar, schema.gantt, schema.gallery, schema.timeline, schema.map, schema.tree, schema.chart, schema.timesheet, schema.appearance?.allowedVisualizations]);
 
   /**
    * Whether the visualization switcher is actually WORTH drawing (objectui#7547).
@@ -4888,7 +4898,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    */
   const selfQueryFilterRef = React.useRef<{ key: string; value: unknown } | null>(null);
   let selfQueryFilter: unknown = authoredFilter;
-  if (currentView === 'gantt' || currentView === 'tree' || currentView === 'chart' || gridOwnsGroupedFetch || kanbanLanesPaged) {
+  if (currentView === 'gantt' || currentView === 'tree' || currentView === 'chart' || currentView === 'timesheet' || gridOwnsGroupedFetch || kanbanLanesPaged) {
     try {
       const value = buildEffectiveFilter(authoredFilter, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, draftOnlyFields);
       const key = JSON.stringify(value ?? null);
@@ -5497,6 +5507,20 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           labelField: treeCfg.labelField || 'name',
           fields: treeCfg.fields || effectiveFields,
           defaultExpandedDepth: treeCfg.defaultExpandedDepth,
+        };
+      }
+      case 'timesheet': {
+        // objectstack#34382 — the editable row × weekday grid. It runs its own
+        // week query from `filter` (the effective filter, so the toolbar
+        // Filter and the chips reach it — see `selfQueryFilter` above) and
+        // reads the spec's `timesheet` block by name; `ObjectTimesheet`'s
+        // `resolveTimesheetConfig` judges it and draws the refusal screen
+        // when it is incomplete.
+        return {
+          type: 'object-timesheet',
+          ...baseProps,
+          filter: selfQueryFilter,
+          timesheet: schema.timesheet,
         };
       }
       case 'chart': {
