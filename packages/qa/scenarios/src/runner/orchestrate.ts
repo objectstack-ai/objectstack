@@ -1250,9 +1250,12 @@ function seedLoadLetters(n: number): string {
 /**
  * Write rows through the platform's own seed path: one data-only package
  * whose `data[]` carries them, each object a dataset keyed on `id`
- * (`externalId: 'id'`, `mode: 'insert'`), installed through the managed
- * install door (`installManaged`). The platform's seed loader writes a
- * package's `data[]` under its seed posture (`SEED_WRITE_EXECUTION_CONTEXT` in
+ * (`externalId: 'id'`) under the default seed mode (`ignore`: a row whose `id`
+ * the object does not hold yet is created, one it holds is left as it is),
+ * installed through the managed install door (`installManaged`). The dataset
+ * names no `mode`: `insert` and `replace` are retired (#34613), and the door
+ * refuses a dataset declaring either, every row of it. The platform's seed
+ * loader writes a package's `data[]` under its seed posture (`SEED_WRITE_EXECUTION_CONTEXT` in
  * `@objectstack/spec/kernel`): the object's `state_machine` rule is skipped,
  * every other validation rule and hook still runs, and record-triggered flows
  * do not fire. A row keeps the card's own `id`, and a lookup value naming a
@@ -1284,7 +1287,7 @@ async function loadSeedRows(app: AppHarness, datasets: readonly SeedDataset[]): 
     type: 'app',
     scope: 'project',
     name: 'Scenario seed',
-    data: datasets.map((d) => ({ object: d.object, mode: 'insert', externalId: 'id', records: d.records })),
+    data: datasets.map((d) => ({ object: d.object, externalId: 'id', records: d.records })),
   };
   const answer = await app.installManaged(manifest);
   if (!answer.ok) return all(`the seed package was refused: ${answer.status}${answer.code ? ` ${answer.code}` : ''}${answer.message ? ` ${answer.message}` : ''}`);

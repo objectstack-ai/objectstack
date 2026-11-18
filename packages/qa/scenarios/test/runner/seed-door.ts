@@ -14,8 +14,13 @@
  * it, and the answer carries one entry with `field` set to that lookup, as the
  * real loader reports a reference it could not resolve (`referencesDropped`).
  * A row whose write then fails carries both entries.
+ *
+ * A dataset whose `mode` `SeedMode` does not accept (a retired `insert` or
+ * `replace`, #34613) is refused whole, as the real door refuses it: every row
+ * carries a `(write)` entry with `SeedMode`'s own message, and none is written.
  */
 
+import { SeedMode } from '@objectstack/spec/data';
 import type { HttpAnswer } from '../../src/runner/app.js';
 
 export async function seedDoorAnswer(
@@ -23,10 +28,17 @@ export async function seedDoorAnswer(
   manifest: Record<string, unknown>,
   drops: (object: string, row: Record<string, unknown>) => Record<string, string> = () => ({}),
 ): Promise<HttpAnswer> {
-  const datasets = manifest.data as Array<{ object: string; records: Array<Record<string, unknown>> }>;
+  const datasets = manifest.data as Array<{ object: string; mode?: unknown; records: Array<Record<string, unknown>> }>;
   let inserted = 0;
   const errorList: Array<Record<string, unknown>> = [];
-  for (const { object, records } of datasets) {
+  for (const { object, mode, records } of datasets) {
+    const judged = mode === undefined ? undefined : SeedMode.safeParse(mode);
+    if (judged && !judged.success) {
+      const said = judged.error.issues[0]?.message ?? `seed mode ${String(mode)} refused`;
+      for (const [recordIndex, sent] of records.entries())
+        errorList.push({ sourceObject: object, field: '(write)', targetObject: object, targetField: 'id', attemptedValue: sent.id, recordIndex, message: said });
+      continue;
+    }
     for (const [recordIndex, sent] of records.entries()) {
       const row = { ...sent };
       for (const [field, targetObject] of Object.entries(drops(object, sent))) {

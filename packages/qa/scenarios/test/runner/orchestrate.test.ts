@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import { validateRollupSourceVisibility } from '@objectstack/lint';
+import { RETIRED_SEED_MODE_VALUES } from '@objectstack/spec/data';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score/index.js';
@@ -966,6 +967,42 @@ describe('seedApp — a card row already past its entry state loads through the 
     app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
     expect(await restoreSeededRows(scenario, app, [], seeded)).toEqual({ restored: { reinserted: ['demotravel_expense_claim/c001'] } });
     expect(app.rows.demotravel_expense_claim!.find((r) => r.id === 'c001')).toMatchObject({ status: 'paid' });
+  });
+
+  it('[#34613] the seed and restore packages declare no retired seed mode: each dataset names no `mode`, so the default (`ignore`) loads it', async () => {
+    /** Records every data-only package the runner sends the managed door. */
+    class ManifestTap extends TravelRulesApp {
+      readonly seedPackages: Array<Record<string, unknown>> = [];
+      override async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+        if (Array.isArray(manifest.data)) this.seedPackages.push(manifest);
+        return super.installManaged(manifest);
+      }
+    }
+    const scenario = travel();
+    const app = new ManifestTap();
+    expect((await seedApp(scenario, app, [])).refused).toEqual([]);
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
+    await restoreSeededRows(scenario, app, [], seeded);
+    expect(app.seedPackages.length).toBeGreaterThanOrEqual(2); // the seed, then the restore
+    const datasets = app.seedPackages.flatMap((m) => m.data as Array<Record<string, unknown>>);
+    expect(datasets.filter((d) => 'mode' in d)).toEqual([]);
+    for (const d of datasets) expect(d.externalId).toBe('id');
+  });
+
+  it('[#34613] control: the test door refuses a dataset declaring a retired mode whole, with SeedMode\'s own message, as the real door does', async () => {
+    for (const mode of RETIRED_SEED_MODE_VALUES) {
+      const written: string[] = [];
+      const answer = await seedDoorAnswer(async (_o, row) => (written.push(String(row.id)), { ok: true, status: 200, body: {} }), {
+        id: 'com.scenario.seed.x',
+        data: [{ object: 'demotravel_department', mode, externalId: 'id', records: [{ id: 'dep_a' }, { id: 'dep_b' }] }],
+      });
+      const seeded = (answer.body as { data: { seeded: { inserted: number; errorList: Array<{ field: string; message: string }> } } }).data.seeded;
+      expect(written).toEqual([]);
+      expect(seeded.inserted).toBe(0);
+      expect(seeded.errorList.map((e) => e.field)).toEqual(['(write)', '(write)']);
+      expect(seeded.errorList[0]!.message).toContain(`seed.mode: '${mode}'\` was removed`);
+    }
   });
 
   it('a reference the loader drops from a row it wrote refuses that row with the field and keeps its second-pass patch; a row also refused on write counts once; a restore counts the written row as reinserted', async () => {
