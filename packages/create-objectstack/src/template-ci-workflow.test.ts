@@ -156,6 +156,9 @@ describe('bundled template CI workflow', () => {
     expect(invoked).toContain('validate');
     expect(invoked).toContain('lint');
     expect(invoked).toContain('typecheck');
+    // The README and AGENTS.md tell users their tests run in CI; without this
+    // step the sample test in note.test.ts ran nowhere.
+    expect(invoked).toContain('test');
   });
 
   // Derived from the Dockerfile's build stage rather than restated: the
