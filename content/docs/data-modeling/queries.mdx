@@ -711,9 +711,11 @@ Buckets are computed in **UTC**. A non-UTC reference timezone is only reachable 
 route does not forward `timezone` to the engine, so a query sent over REST always
 buckets on UTC calendar boundaries.
 
-The optional `alias` on a structured `groupBy` node is honoured only on the in-memory
-path. The SQL driver ignores it and always projects the bucket under the **field name**,
-so don't depend on the aliased key being present.
+The optional `alias` on a structured `groupBy` node renames the projected column on
+both paths: the SQL driver's pushed-down bucket and the in-memory fallback put the
+bucket under the **alias** (`alias ?? field`), and grouping still keys on the field.
+Read the result under that name, and reference it from `having`. Once an alias is set,
+a `having` on the field name is refused, because the row has no such column.
 </Callout>
 
 ---

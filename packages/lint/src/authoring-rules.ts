@@ -149,6 +149,7 @@ import {
   type MembershipKeyOwners,
 } from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
+import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
@@ -2888,6 +2889,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleCompilability(stack),
+  },
+  // An L2 action body that does not compile in the wrapper the runtime runs it
+  // in (`(async (input, ctx) => { SOURCE })`, built from the same function the
+  // rule compiles inside). Such a body passed every author-time door and then
+  // failed every run, on every door; `const input = ctx.input || {}` is the
+  // shape an AI author writes, a redeclared parameter. Gating: no reading of
+  // the metadata behaves as written, because the body never starts. A
+  // regular-expression literal the host refuses is the one `warning` arm (the
+  // two engines' regular-expression dialects measurably differ; see the
+  // module). Across the runtime publish gate for `action` writes and for
+  // `object` writes, whose inline `actions[]` the same walk reads; the
+  // differential charges a write only with the bodies it adds. The rule loads
+  // no dependency: compiling goes through the host's `node:vm`.
+  {
+    name: 'validateActionBodyCompiles',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-body-compiles.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action', 'object'],
+    run: (stack) => validateActionBodyCompiles(stack),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
   // NOT close: under `strict: false` a MISSPELLED format name (`emial`) is

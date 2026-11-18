@@ -1346,6 +1346,20 @@ admin plugin, and both are platform-admin gated:
   with its own message and the good rows land. The answer carries a
   `summary` and one result per row.
 
+Both doors, and `remove-sso-user` below, also take an optional
+`organizationId`. A console action forwarded to the auth mount carries the
+caller's active organization there, so the key is admitted only when it
+equals the organization the caller's session is working in. A different
+organization gets `400 INVALID_REQUEST` naming both organizations; a
+non-string or empty value gets `400 INVALID_REQUEST` saying the key must be
+the id of the organization you are working in (a non-string value is checked
+before the session, so this is the answer even when the session has no
+organization); a string organization from a caller whose session works in no
+organization gets `400 NO_ACTIVE_ORGANIZATION` naming the organization sent. Every refusal
+comes before anything is written or any host is told. The value never
+widens or chooses scope: the organization a person joins is always read from
+the session.
+
 The person is stored **pending** (`sys_user.source` reads `idp_pending`): no
 password, and no session until they sign in through the hosting
 organisation's identity provider. Every password door refuses a pending
@@ -1414,9 +1428,10 @@ it are listed on the answer as `notApplied`; set them on the person's record.
 
 A pending person who never signs in, for example one added with a mistyped
 address, can be removed: `POST /api/v1/auth/admin/remove-sso-user` takes
-`{ userId }`, removes the person with their positions, permission sets and
-membership, and cancels their invitation at the host. The host is asked
-first, through its `userRemoved` member; a host without that member is asked
+`{ userId }` (and the optional `organizationId` described above), removes
+the person with their positions, permission sets and membership, and cancels
+their invitation at the host. The host is asked first, through its
+`userRemoved` member; a host without that member is asked
 through `userDeactivated` for the pending person instead, which means the same
 thing, but a host should implement `userRemoved`. A host's refusal leaves the
 person as they are. A host that cannot be reached refuses the removal too,
