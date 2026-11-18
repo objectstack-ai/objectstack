@@ -1903,6 +1903,7 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
   'map',
   'chart',
   'tree',
+  'timesheet',
 ]).describe('Visualization type that users can switch to'));
 
 /**
@@ -2783,6 +2784,35 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * Timesheet (weekly entry grid) Settings
+ *
+ * Pivots the view's records into an editable row × weekday grid: one row per
+ * distinct `rowFields` value tuple, one column per day of the displayed week,
+ * and in each cell the `valueField` of the one record that row and day hold.
+ * Typing a value creates or updates that record, clearing the cell deletes it,
+ * and every write goes through the ordinary record door, so hooks, validation
+ * and permissions judge each cell on its own. Row, day and week totals are
+ * always shown. A cell that holds two or more records shows their sum and is
+ * read-only, because one typed value could not say which record it changes.
+ *
+ * The week follows the viewer's locale for its first day; there is no period
+ * key, because a week is the only window the renderer draws. Every key is
+ * required: an unbound timesheet has nothing to pivot, and the renderer
+ * refuses it with a "Timesheet configuration required" screen.
+ */
+export const TimesheetConfigSchema = lazySchema(() => strictObject({
+  surface: 'this timesheet configuration',
+  history: VIEW_HISTORY,
+}, {
+  rowFields: z.array(z.string()).min(1).max(3)
+    .describe('One to three fields whose values key a row (e.g. ["project", "task"]); a record\'s values for these fields place it on its row, and a new row\'s values are written onto each record it creates'),
+  dateField: z.string()
+    .describe('Date field placing a record on a day column; the renderer fetches only the records whose value falls in the displayed week'),
+  valueField: z.string()
+    .describe('Numeric field (number, currency or percent) a cell shows and edits; row, day and week totals sum it'),
+}));
+
+/**
  * Map View Settings
  *
  * Configures the geospatial (`type: 'map'`) list view: which fields provide
@@ -3269,6 +3299,43 @@ export function checkListViewChartBinding(
   ctx.addIssue({ code: 'custom', path: ['chart'], message: LIST_VIEW_CHART_NEEDS_BINDING });
 }
 
+/** [#34382] `type: 'timesheet'` with no `timesheet` block — refused at `timesheet`. */
+const LIST_VIEW_TIMESHEET_NEEDS_BINDING =
+  "This list view is `type: 'timesheet'` but declares no `timesheet` block, so the weekly grid has no "
+  + "rows, day or value to pivot. Declare `timesheet: { rowFields: ['<field>'], dateField: '<date_field>', "
+  + "valueField: '<number_field>' }`: `rowFields` names the 1 to 3 fields whose distinct values make the "
+  + 'rows, `dateField` the date each record falls on, and `valueField` the number each cell edits. There is '
+  + 'no default binding to fall back on. A view that is not meant to be a timesheet takes another `type`.';
+
+/**
+ * [#34382] A `type: 'timesheet'` list view must bind its grid: a `timesheet`
+ * block naming its row fields, date field and value field.
+ *
+ * - No block ⇒ one issue at `timesheet`.
+ * - A declared block ⇒ nothing here: {@link TimesheetConfigSchema} is strict
+ *   and requires all three keys, at `timesheet.*`.
+ *
+ * Without the block the renderer has nothing to fall back on (only the
+ * author knows which fields make the rows, the day and the value), so it
+ * draws only its "configuration required" screen — the fully inert case
+ * ADR-0078 §1 grades an error. The type is new in this release, so refusing
+ * the block-less shape here narrows nothing a published version accepted;
+ * the six older binding rows in `kernel/functional-completeness.ts` stay
+ * warnings because escalating THEM would be that narrowing.
+ *
+ * Reads `type` as the door hands it, exactly as
+ * {@link checkListViewChartBinding} does, and is attached beside it at the
+ * same three list-view doors, exported for the same reason: a mirror built
+ * from `ListViewSchema.shape` re-attaches it.
+ */
+export function checkListViewTimesheetBinding(
+  view: { type?: unknown; timesheet?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (view.type !== 'timesheet' || view.timesheet !== undefined) return;
+  ctx.addIssue({ code: 'custom', path: ['timesheet'], message: LIST_VIEW_TIMESHEET_NEEDS_BINDING });
+}
+
 /**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
@@ -3344,7 +3411,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     'gantt',      // Project Timeline
     'map',        // Geospatial
     'chart',      // Aggregate visualisation
-    'tree'        // Self-referencing hierarchy (tree-grid)
+    'tree',       // Self-referencing hierarchy (tree-grid)
+    'timesheet'   // Editable row × weekday entry grid
   ], {
     error: (issue) => (issue.input === 'page' ? LIST_VIEW_TYPE_PAGE_RETIRED : undefined),
   }).default('grid'),
@@ -3487,6 +3555,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
     .describe('Chart binding — applies when the view renders as a chart. A `type: \'chart\'` view must bind one: it names the ADR-0021 `dataset` and the measures (`values`) the chart plots, and there is no default binding'),
   map: ListMapConfigSchema.optional().describe('Map configuration — applies when the view renders as a map layout'),
   tree: TreeConfigSchema.optional().describe('Tree/hierarchy configuration — applies when the view renders as a tree layout'),
+  timesheet: TimesheetConfigSchema.optional().describe('Timesheet binding — applies when the view renders as a timesheet. A `type: \'timesheet\'` view must bind one: the row fields, the date field and the numeric value field the weekly grid pivots and edits'),
 
   /**
    * [#17063] REMOVED — the `type: 'page'` mount this key named was never
@@ -3704,7 +3773,8 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 export const ListViewSchema = lazySchema(() =>
   ListViewShapeSchema
     .superRefine(checkListViewCalendarVisualization)
-    .superRefine(checkListViewChartBinding));
+    .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding));
 
 /**
  * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
@@ -5654,7 +5724,8 @@ export const ObjectListViewSchema = lazySchema(() =>
     // authoring surface — as the one door where a calendar-enabled view with
     // no `calendar:` block, or a chart view binding no dataset, parses clean.
     .superRefine(checkListViewCalendarVisualization)
-    .superRefine(checkListViewChartBinding));
+    .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding));
 
 /**
  * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
@@ -7169,6 +7240,7 @@ const ListViewOverlayWireSchema = lazySchema(() =>
     .superRefine(checkListOverlayTypeNeedsColumns)
     .superRefine(checkListViewCalendarVisualization)
     .superRefine(checkListViewChartBinding)
+    .superRefine(checkListViewTimesheetBinding)
     .overwrite(applyListOverlayTypeDefault),
 );
 
@@ -8227,4 +8299,5 @@ export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;
+export type TimesheetConfig = z.input<typeof TimesheetConfigSchema>;
 export type ViewItemName = z.input<typeof ViewItemNameSchema>;
