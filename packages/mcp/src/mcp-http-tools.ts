@@ -131,6 +131,15 @@ import {
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
 import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
 import type { McpLatestPer } from './types.js';
+// [#35145] `expand` and `related`: the relation reads, judged before any read.
+import {
+  GET_RECORD_MAX_RELATED_LISTS,
+  QUERY_EXPAND_MAX_FIELDS,
+  RELATED_LIST_MAX_ROWS,
+  judgeQueryExpand,
+  judgeRelatedLists,
+  relatedListWhere,
+} from './mcp-relation-reads.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -250,6 +259,14 @@ export interface McpDataBridge {
       limit?: number;
       offset?: number;
       orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
+      /**
+       * [#35145] Reference fields of `object` to answer with the record each
+       * one names (`query_records`' `expand`), one level deep. The tool has
+       * judged every name and the read guard every target before it calls; the
+       * bridge resolves them through the engine's one expansion path, under
+       * each target's own permissions, row and field security.
+       */
+      expand?: string[];
       /**
        * One row per group (`query_records`' `latestPer`): the bridge hands it
        * to the engine's read as the engine's own read option, never as a query
@@ -3602,6 +3619,12 @@ export function registerObjectTools(
           'For "each X with its latest Y", pass latestPer: one record per group, e.g. each account\'s latest deal: ' +
           'latestPer {"by":["account"],"orderBy":[{"field":"close_date","order":"desc"}]}; ties go by record id. ' +
           'where filters the records first; limit counts groups; truncated: true means more groups exist than came back. ' +
+          // [#35145] One level of forward relations in the same call.
+          `To read the records a lookup points at in the same call, pass expand: up to ${QUERY_EXPAND_MAX_FIELDS} of the ` +
+          'object\'s lookup, master-detail, user or tree fields, e.g. expand ["account","owner_id"]; each one comes back ' +
+          'as the record it names, under your permissions on that object. One level only. A field whose object this ' +
+          'door does not serve you refuses the call; a record you may not read on a served object is not expanded, ' +
+          'and the field keeps its stored id. ' +
           WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           {
@@ -3643,6 +3666,15 @@ export function registerObjectTools(
               .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
               .optional()
               .describe('Sort order'),
+            expand: z
+              .array(z.string().min(1))
+              .min(1)
+              .max(QUERY_EXPAND_MAX_FIELDS)
+              .optional()
+              .describe(
+                `Up to ${QUERY_EXPAND_MAX_FIELDS} lookup / master-detail fields of this object to return as the record `
+                  + 'each one names, one level deep, e.g. ["account","owner_id"]',
+              ),
             latestPer: z
               .object({
                 by: z.array(z.string().min(1)).min(1).max(LATEST_PER_MAX_KEYS)
@@ -3660,10 +3692,14 @@ export function registerObjectTools(
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, where, fields, limit, offset, orderBy, latestPer }) => {
+      async ({ objectName, where, fields, limit, offset, orderBy, latestPer, expand }) => {
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
+          // [#35145] Every expanded field's target is judged by the read guard
+          // as `objectName` was, before anything is read; a refused one
+          // refuses the call (`judgeQueryExpand`).
+          const expanded = expand !== undefined ? await judgeQueryExpand(bridge, readGuard, objectName, expand) : undefined;
           // [#35138] A capped page says so: one row past the page is asked
           // for, and its coming back is the cap (`servedQueryPage`).
           const page = Math.min(limit ?? maxLimit, maxLimit);
@@ -3673,7 +3709,10 @@ export function registerObjectTools(
           const probed = latestPer === undefined && queryPageProbeFits(page, offset);
           const result = latestPer !== undefined
             ? servedQueryPage(
-              latestPerAnswer(objectName, await bridge.query(objectName, { where, fields, limit: page, offset, orderBy, latestPer })),
+              latestPerAnswer(objectName, await bridge.query(objectName, {
+                where, fields, limit: page, offset, orderBy, latestPer,
+                ...(expanded !== undefined ? { expand: expanded } : {}),
+              })),
               page,
               false,
             )
@@ -3684,6 +3723,7 @@ export function registerObjectTools(
                 limit: probed ? page + 1 : page,
                 offset,
                 orderBy,
+                ...(expanded !== undefined ? { expand: expanded } : {}),
               }),
               page,
               probed,
@@ -3835,23 +3875,73 @@ export function registerObjectTools(
       );
     }
 
+    // [#35145] A related list's row cap: never above the door's own page cap.
+    const relatedMaxRows = Math.min(RELATED_LIST_MAX_ROWS, maxLimit);
     server.registerTool(
       note('get_record'),
       {
-        description: `Fetch a single record by id. ${WITHHELD_FIELDS_DESCRIPTION}`,
+        description:
+          'Fetch a single record by id. ' +
+          // [#35145] A parent with its children in one call.
+          `To read it with the records that point at it, pass related: up to ${GET_RECORD_MAX_RELATED_LISTS} child ` +
+          'objects, e.g. an account with its deals and activities: related [{"object":"crm_opportunity"},' +
+          '{"object":"crm_activity","field":"account"}]. Name field when the child points at this object through ' +
+          `several fields. Each list holds at most ${relatedMaxRows} rows (limit), filtered only by the link to this ` +
+          'record, under your permissions on that object; fields and orderBy are that object\'s. The answer is then ' +
+          '{ record, related: [{ object, field, records, total, hasMore }] }; a list that carries "truncated": true ' +
+          'has more rows than came back. An object you may not read refuses the call. ' +
+          WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
             recordId: z.string().describe(RECORD_ID_DESCRIPTION),
+            related: z
+              .array(
+                z
+                  .object({
+                    object: z.string().min(1).describe('A child object that points at this record'),
+                    field: z
+                      .string()
+                      .min(1)
+                      .optional()
+                      .describe('Its field that points at this record; needed only when it has several'),
+                    fields: z.array(z.string()).optional().describe('Field names to return (defaults to all)'),
+                    orderBy: z
+                      .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }).strict())
+                      .optional()
+                      .describe('Sort order'),
+                    limit: z
+                      .number()
+                      .int()
+                      .positive()
+                      .max(relatedMaxRows)
+                      .optional()
+                      .describe(`Max rows in this list (≤ ${relatedMaxRows}, the default)`),
+                  })
+                  .strict(),
+              )
+              .min(1)
+              .max(GET_RECORD_MAX_RELATED_LISTS)
+              .optional()
+              .describe(`Up to ${GET_RECORD_MAX_RELATED_LISTS} lists of child records that point at this record`),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, recordId }) => {
+      async ({ objectName, recordId, related }) => {
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
+        // A related list's refusal is the whole call's, rendered against the
+        // child object it was read on.
+        let refusedOn: string | undefined;
         try {
+          // [#35145] Every related object is judged by the read guard as
+          // `objectName` was, and each link field against the child as the
+          // caller is served it, before any record is read.
+          const plans = related !== undefined
+            ? await judgeRelatedLists(bridge, readGuard, objectName, related, relatedMaxRows)
+            : undefined;
           const record = await bridge.get(objectName, recordId);
           // A bridge that answers a miss with `null` (the stdio bridge, by
           // design) is refused with the repo's ONE not-found envelope, thrown
@@ -3862,10 +3952,49 @@ export function registerObjectTools(
           // read reach here as the same empty read, so they answer alike.
           if (record == null) throw recordNotFoundError(objectName, recordId);
           // [#35137] …with the fields field-level security withheld from it named.
-          return textResult(withWithheldFields(record, await withheldFieldsFor(bridge, objectName, undefined)));
+          const served = withWithheldFields(record, await withheldFieldsFor(bridge, objectName, undefined));
+          if (plans === undefined) return textResult(served);
+          // [#35145] Each list is one `query_records` read of the child as the
+          // caller, filtered by the link to the record just read (so no list
+          // is read for a record the caller cannot see), capped the way a
+          // `query_records` page is: a probe row past the cap is `truncated`.
+          const parentId = (record as { id?: unknown }).id;
+          const linkId = typeof parentId === 'string' || typeof parentId === 'number' ? String(parentId) : recordId;
+          const lists = await Promise.all(plans.map(async (plan) => {
+            const probed = queryPageProbeFits(plan.limit, undefined);
+            let read: unknown;
+            try {
+              read = await bridge.query(plan.object, {
+                where: relatedListWhere(plan, linkId),
+                ...(plan.fields !== undefined ? { fields: plan.fields } : {}),
+                ...(plan.orderBy !== undefined ? { orderBy: plan.orderBy } : {}),
+                limit: probed ? plan.limit + 1 : plan.limit,
+              });
+            } catch (err) {
+              refusedOn ??= plan.object;
+              throw err;
+            }
+            const page = servedQueryPage(read, plan.limit, probed);
+            const answer = page !== null && typeof page === 'object' && !Array.isArray(page)
+              ? (page as Record<string, unknown>)
+              : { records: page };
+            // [#35137] …each list naming the fields withheld from its own rows.
+            const list = withWithheldFields(
+              { ...answer, object: plan.object, field: plan.field },
+              await withheldFieldsFor(bridge, plan.object, plan.fields),
+            );
+            // [ADR-0090 D10] …and, as `query_records` states it, a list the
+            // agent ceiling narrowed carries the narrowing beside its `total`.
+            // ⛔ The probe never fails the list it annotates.
+            const diagnosed = typeof bridge.diagnoseDelegation === 'function'
+              ? await bridge.diagnoseDelegation(plan.object).catch(() => undefined)
+              : undefined;
+            return diagnosed?.narrowed && diagnosed.statement ? withDelegationNotice(list, diagnosed.statement) : list;
+          }));
+          return textResult({ record: served, related: lists });
         } catch (err) {
           // [#35138] …and an object the caller's schema does not show is said to be not recorded.
-          return recordReadErrorResult(bridge, err, 'get_record', objectName, []);
+          return recordReadErrorResult(bridge, err, 'get_record', refusedOn ?? objectName, []);
         }
       },
     );
