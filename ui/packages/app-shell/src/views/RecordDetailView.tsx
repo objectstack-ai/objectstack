@@ -5559,8 +5559,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 ) : pageColumns ? null : (
                   // objectstack#27055 — a synthesized page whose strip cannot
                   // be laid out keeps the record page v3 face as its tab strip
-                  // (frameless sections, the empty-sections line, the
-                  // highlight grid); an authored page keeps its own face.
+                  // (frameless sections, the highlight grid); an authored page
+                  // keeps its own face. Every `record:details` body, authored
+                  // or not, draws the empty-sections line (objectstack#35019).
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
                       {/* A page drawn as its strip is drawn as written: the

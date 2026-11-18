@@ -37,10 +37,18 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { InlineEditProvider, PrintPageProvider, RecordContextProvider } from '@object-ui/react';
+import {
+  InlineEditProvider,
+  PrintPageProvider,
+  RecordContextProvider,
+  RecordPagePreferencesProvider,
+  type RecordPagePreference,
+  type RecordPagePreferencesStore,
+} from '@object-ui/react';
 import type { DetailViewSchema, DetailViewSection } from '@object-ui/types';
 import { RecordDetailsRenderer } from '../renderers/record-details';
 import { DetailView } from '../DetailView';
+import { DefaultRecordPageContext } from '../defaultRecordPage';
 
 /** `useRecordEditable`'s explain probe, answered with its fail-open 501 (the binding suites do the same). */
 vi.stubGlobal('fetch', (async () => new Response(null, { status: 501 })) as unknown as typeof globalThis.fetch);
@@ -283,5 +291,105 @@ describe('objectstack#35019 — CONTROL: a standalone DetailView keeps a card pe
 
     expect(emptySectionsLine()).toBeNull();
     expect(screen.getByRole('button', { name: /Show 6 empty fields/ })).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#35166 — the line follows the reader's ONE remembered "show empty
+ * fields" choice for the object (`showEmptyFields`, the entry each section's
+ * own row reads, objectstack#25883), on both page kinds: a reader who chose to
+ * see empty fields finds the line open, and an expand or collapse of the line
+ * is that choice, remembered across a remount.
+ */
+describe('objectstack#35166 — the empty-sections line follows the remembered "show empty fields" choice', () => {
+  /** An in-memory host store; `writes` records every update. */
+  function memoryStore(initial: Record<string, RecordPagePreference> = {}) {
+    const state: Record<string, RecordPagePreference> = { ...initial };
+    const writes: Array<[string, RecordPagePreference]> = [];
+    const listeners = new Set<() => void>();
+    const store: RecordPagePreferencesStore = {
+      get: (objectName) => state[objectName] ?? {},
+      update: (objectName, patch) => {
+        writes.push([objectName, patch]);
+        state[objectName] = { ...(state[objectName] ?? {}), ...patch };
+        listeners.forEach((l) => l());
+      },
+    };
+    return { store, writes, listeners };
+  }
+
+  /** A host that hands down a new store value per change, as the console's provider does. */
+  function Host({ mem, children }: { mem: ReturnType<typeof memoryStore>; children: React.ReactNode }) {
+    const [version, setVersion] = React.useState(0);
+    React.useEffect(() => {
+      const l = () => setVersion((v) => v + 1);
+      mem.listeners.add(l);
+      return () => {
+        mem.listeners.delete(l);
+      };
+    }, [mem]);
+    const value = React.useMemo<RecordPagePreferencesStore>(
+      () => ({ get: (o) => mem.store.get(o), update: (o, p) => mem.store.update(o, p) }),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- `version` is the change signal
+      [mem, version],
+    );
+    return <RecordPagePreferencesProvider value={value}>{children}</RecordPagePreferencesProvider>;
+  }
+
+  const PAGE_KINDS = [
+    ['authored page', (node: React.ReactNode) => node],
+    [
+      'default page',
+      (node: React.ReactNode) => <DefaultRecordPageContext.Provider value>{node}</DefaultRecordPageContext.Provider>,
+    ],
+  ] as const;
+
+  const renderUnder = (mem: ReturnType<typeof memoryStore>, kind: (node: React.ReactNode) => React.ReactNode) =>
+    renderAuthoredPage(authoredSections, DEAL, (node) => <Host mem={mem}>{kind(node)}</Host>);
+
+  for (const [kindName, kind] of PAGE_KINDS) {
+    it(`${kindName}: a remembered "show empty fields" opens the line, and every empty field shows`, () => {
+      renderUnder(memoryStore({ crm_opportunity: { showEmptyFields: true } }), kind);
+
+      expect(lineToggle().getAttribute('aria-expanded')).toBe('true');
+      for (const label of ['Customer Background', 'Payment Terms', 'Next Step']) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+    });
+
+    it(`${kindName}: CONTROL — another object's remembered choice leaves the line folded`, () => {
+      renderUnder(memoryStore({ crm_account: { showEmptyFields: true } }), kind);
+
+      expect(lineToggle().getAttribute('aria-expanded')).toBe('false');
+      expect(screen.queryByText('Customer Background')).toBeNull();
+    });
+
+    it(`${kindName}: expanding is remembered across a remount, and collapsing too`, () => {
+      const mem = memoryStore();
+      const first = renderUnder(mem, kind);
+      expect(lineToggle().getAttribute('aria-expanded')).toBe('false');
+      fireEvent.click(lineToggle());
+      expect(mem.writes).toEqual([['crm_opportunity', { showEmptyFields: true }]]);
+      first.unmount();
+
+      const second = renderUnder(mem, kind);
+      expect(lineToggle().getAttribute('aria-expanded')).toBe('true');
+      fireEvent.click(lineToggle());
+      expect(mem.writes.at(-1)).toEqual(['crm_opportunity', { showEmptyFields: false }]);
+      second.unmount();
+
+      renderUnder(mem, kind);
+      expect(lineToggle().getAttribute('aria-expanded')).toBe('false');
+    });
+  }
+
+  it('CONTROL: with no host store the line keeps its own state, forgotten on unmount', () => {
+    const first = renderAuthoredPage();
+    fireEvent.click(lineToggle());
+    expect(lineToggle().getAttribute('aria-expanded')).toBe('true');
+    first.unmount();
+
+    renderAuthoredPage();
+    expect(lineToggle().getAttribute('aria-expanded')).toBe('false');
   });
 });
