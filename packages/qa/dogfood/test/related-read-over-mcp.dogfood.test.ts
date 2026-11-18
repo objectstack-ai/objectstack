@@ -230,6 +230,18 @@ describe('query_records expand and get_record related over MCP on the CRM exampl
     }
   });
 
+  it('expand combines with latestPer: each account\'s latest deal, its account answered as a record', async () => {
+    const payload = await ok(tok.a, 'query_records', {
+      objectName: OPP,
+      where: { account: { $in: [acct.a1, acct.a2] } },
+      latestPer: { by: ['account'], orderBy: [{ field: 'name', order: 'desc' }] },
+      expand: ['account'],
+    });
+    const byAccount = Object.fromEntries(rowsOf(payload).map((r) => [String(r.account?.id), String(r.id)]));
+    expect(byAccount).toEqual({ [acct.a1]: opp.x2, [acct.a2]: opp.y1 });
+    for (const row of rowsOf(payload)) expect(row.account.annual_revenue).toBeUndefined();
+  });
+
   it('⭐ related: an account answers its deals and activities by the link alone; the hidden deal never appears; withheld fields stay withheld', async () => {
     const payload = await ok(tok.a, 'get_record', {
       objectName: ACCOUNT, recordId: acct.a1, related: [{ object: OPP }, { object: ACTIVITY }],
