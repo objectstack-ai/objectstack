@@ -85,8 +85,11 @@ grant, then two parts:
   and no candidates falls back to the object tools and says the answer is not
   from a governed metric. A grant without `data:read` gets no such sentence.
 - **The skills install line**: `Published skills: @objectstack/skills <version>`
-  and its `pnpm add -D` command, at this package's own version (the two are
-  released together), never the `version` option.
+  and the command that installs it into the agent's skills directory with or
+  without a project, `os skills install --version <version>` (with its
+  `npx -p @objectstack/cli@<version>` form for a machine without the CLI), at
+  this package's own version (the packages are released together), never the
+  `version` option.
 
 The stdio server's instructions are fixed when it is constructed, before its
 tools are bridged, and carry neither part.
