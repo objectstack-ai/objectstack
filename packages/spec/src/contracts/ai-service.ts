@@ -1343,12 +1343,12 @@ export interface AIObjectResult<T> {
 /**
  * One message of a persisted conversation: a Vercel `ModelMessage` plus the
  * turn it belongs to, the `turnId` it was written under
- * ({@link IAIConversationService.addMessage}). Absent on a message stored with
- * no turn. The wire shape is `AiConversationMessageSchema` (`api/protocol.zod.ts`).
+ * ({@link IAIConversationService.addMessage}). Absent or null on a message
+ * stored with no turn. The wire shape is `AiConversationMessageSchema` (`api/protocol.zod.ts`).
  */
 export type AIConversationMessage = ModelMessage & {
-    /** The turn the message was written under. */
-    turnId?: string;
+    /** The turn the message was written under; absent or null when it had none. */
+    turnId?: string | null;
 };
 
 /**

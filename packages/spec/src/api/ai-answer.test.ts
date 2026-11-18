@@ -29,6 +29,7 @@ import {
   SetAiAnswerFeedbackRequestSchema,
   SetAiAnswerFeedbackResponseSchema,
 } from './index';
+import { serviceUnavailableMessage } from '../system';
 
 /** Drop one key from a fixture. */
 function without<T extends Record<string, unknown>>(value: T, key: keyof T): Record<string, unknown> {
@@ -197,6 +198,35 @@ describe('answer feedback', () => {
   });
 });
 
+describe('the framework door\'s refusals parse against each route error', () => {
+  // The door answers ahead of the route handler. `packages/runtime/src/domains/ai.ts:63-67`:
+  // `deps.error(ANONYMOUS_DENY_MESSAGE, 401, { code: 'UNAUTHENTICATED' })`, written by
+  // `error-envelope.ts` `buildApiError` as `{ code, message, httpStatus }` (the `details.code`
+  // is promoted, so no `details` remains). `dispatcher-plugin.ts:290-301` answers the same
+  // code on a route mounted on the HTTP server. 501 (`domains/unavailable.ts`) and 503
+  // (`domains/ai.ts`) carry the status-derived code (`HttpStatusErrorCodeMap`).
+  const DOOR = [
+    { code: 'UNAUTHENTICATED', message: 'Authentication is required to access this endpoint.', httpStatus: 401 },
+    { code: 'NOT_IMPLEMENTED', message: serviceUnavailableMessage('ai'), httpStatus: 501 },
+    { code: 'SERVICE_UNAVAILABLE', message: 'AI service routes not yet initialized', httpStatus: 503 },
+  ];
+  const ROUTE_ERRORS = {
+    savedQuestion: AiSavedQuestionErrorSchema,
+    artifact: AiAnswerArtifactErrorSchema,
+    feedback: AiAnswerFeedbackErrorSchema,
+  };
+
+  for (const [route, schema] of Object.entries(ROUTE_ERRORS)) {
+    it(`the ${route} error admits the door's 401, 501 and 503`, () => {
+      for (const body of DOOR) expect(schema.safeParse(body).success, `${route} ${body.code}`).toBe(true);
+    });
+
+    it(`CONTROL: the ${route} code list stays closed`, () => {
+      expect(schema.safeParse({ ...DOOR[0], code: 'RATE_LIMIT_EXCEEDED', httpStatus: 429 }).success).toBe(false);
+    });
+  }
+});
+
 describe('a conversation message carries its turnId', () => {
   const conversation = {
     id: 'conv_1',
@@ -207,6 +237,11 @@ describe('a conversation message carries its turnId', () => {
 
   it('CONTROL: a stored conversation with no turnId still parses', () => {
     expect(AiConversationSchema.safeParse(conversation).success).toBe(true);
+  });
+
+  it('a message stored with no turn may carry turnId: null (the column is nullable)', () => {
+    const unstamped = { ...conversation, messages: conversation.messages.map((m) => ({ ...m, turnId: null })) };
+    expect(AiConversationSchema.safeParse(unstamped).success).toBe(true);
   });
 
   it('a message with turnId keeps it, typed', () => {

@@ -28,12 +28,20 @@ import { StandardErrorCode } from './errors.zod';
  * `routes/feedback-routes.ts`, `saved/saved-question-store.ts`,
  * `saved/source-artifact.ts`, `feedback/answer-feedback-store.ts`). Every
  * success body is the platform envelope `{ success: true, data }` and each
- * response schema here is the `data` payload; every failure body is
- * `{ success: false, error }` with `error` one of the three route errors below.
+ * response schema here is the `data` payload. A failure body is
+ * `{ success: false, error }` with `error` one of the three route errors below,
+ * whose `code` lists hold both the route handler's codes and the framework
+ * door's. The door answers ahead of the handler, with no `details`: 401
+ * UNAUTHENTICATED for a caller with no session (`packages/runtime`
+ * `domains/ai.ts`; a route mounted on the HTTP server answers the flat
+ * `{ error, code, message }` body instead, `dispatcher-plugin.ts`, ADR-0112),
+ * 501 NOT_IMPLEMENTED when the deployment serves no AI, and 503
+ * SERVICE_UNAVAILABLE before the AI routes are published.
  *
  * Every route is the signed-in caller's own: a saved question that is not the
  * caller's answers 404, and a conversation that is not the caller's answers 403
- * on the artifact and feedback routes.
+ * when a question is saved from one of its answers, and on the artifact and
+ * feedback routes.
  */
 
 // ── Saved questions ───────────────────────────────────────────────────────
@@ -99,8 +107,12 @@ export const RunAiSavedQuestionResponseSchema = lazySchema(() => z.object({
   result: z.unknown().describe('The data tool\'s result, parsed from its JSON text'),
 }));
 
-/** The `error.code` vocabulary of the saved-question routes. */
+/**
+ * The `error.code` vocabulary of the saved-question routes: the handler's codes
+ * and the framework door's (UNAUTHENTICATED, NOT_IMPLEMENTED, SERVICE_UNAVAILABLE).
+ */
 export const AiSavedQuestionErrorCodeSchema = lazySchema(() => StandardErrorCode.extract([
+  'UNAUTHENTICATED',
   'PERMISSION_DENIED',
   'MISSING_REQUIRED_FIELD',
   'VALIDATION_ERROR',
@@ -108,6 +120,8 @@ export const AiSavedQuestionErrorCodeSchema = lazySchema(() => StandardErrorCode
   'RESOURCE_NOT_FOUND',
   'RESOURCE_CONFLICT',
   'INTERNAL_ERROR',
+  'NOT_IMPLEMENTED',
+  'SERVICE_UNAVAILABLE',
 ]));
 
 /**
@@ -196,14 +210,19 @@ export const CreateAiAnswerArtifactResponseSchema = lazySchema(() => z.discrimin
   AnswerWidgetArtifactSchema(),
 ]));
 
-/** The `error.code` vocabulary of the artifact route. */
+/**
+ * The `error.code` vocabulary of the artifact route: the handler's codes and the
+ * framework door's (UNAUTHENTICATED, NOT_IMPLEMENTED, SERVICE_UNAVAILABLE).
+ */
 export const AiAnswerArtifactErrorCodeSchema = lazySchema(() => StandardErrorCode.extract([
+  'UNAUTHENTICATED',
   'PERMISSION_DENIED',
   'MISSING_REQUIRED_FIELD',
   'VALIDATION_ERROR',
   'RESOURCE_NOT_FOUND',
   'NOT_IMPLEMENTED',
   'INTERNAL_ERROR',
+  'SERVICE_UNAVAILABLE',
 ]));
 
 /**
@@ -270,14 +289,20 @@ export const SetAiAnswerFeedbackResponseSchema = lazySchema(() => z.object({
   feedback: AiAnswerFeedbackSchema.describe('The stored rating'),
 }));
 
-/** The `error.code` vocabulary of the feedback routes. */
+/**
+ * The `error.code` vocabulary of the feedback routes: the handler's codes and the
+ * framework door's (UNAUTHENTICATED, NOT_IMPLEMENTED, SERVICE_UNAVAILABLE).
+ */
 export const AiAnswerFeedbackErrorCodeSchema = lazySchema(() => StandardErrorCode.extract([
+  'UNAUTHENTICATED',
   'PERMISSION_DENIED',
   'MISSING_REQUIRED_FIELD',
   'VALIDATION_ERROR',
   'VALUE_TOO_LONG',
   'RESOURCE_NOT_FOUND',
   'INTERNAL_ERROR',
+  'NOT_IMPLEMENTED',
+  'SERVICE_UNAVAILABLE',
 ]));
 
 /** The `error` of a feedback route failure. */
