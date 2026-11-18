@@ -31,6 +31,14 @@
  * consumers now trust it. A new name also needs its `chatbot.tool.<name>`
  * label in every pack under `ui/packages/i18n/src/locales/` — the ui
  * plugin-chatbot label-parity tests read this registry.
+ *
+ * Tools the MCP door in THIS repository registers (`@objectstack/mcp`) are not
+ * cloud registrations, so they never join {@link PLATFORM_TOOLS_BY_PACKAGE}:
+ * a group there is the exact set one cloud package registers, and the MCP
+ * bridge reads {@link PLATFORM_PROVIDED_TOOL_NAMES} to annotate the tools it
+ * bridges from the cloud runtime. The door's file pair has its own constant,
+ * {@link MCP_FILE_TOOL_NAMES}, which the `skill.tools[]` lint rule resolves
+ * against beside this registry for a skill offered over MCP.
  */
 
 /**
@@ -121,6 +129,23 @@ export const PLATFORM_TOOLS_BY_PACKAGE: Readonly<Record<string, readonly string[
 export const PLATFORM_PROVIDED_TOOL_NAMES: ReadonlySet<string> = new Set(
   Object.values(PLATFORM_TOOLS_BY_PACKAGE).flat(),
 );
+
+/**
+ * The file tools the MCP door registers (`registerFileTools` in
+ * `@objectstack/mcp`): `read_file` reads a file a record carries, and
+ * `create_upload_link` mints a single-use link to upload a file onto a record.
+ * No cloud AI package registers either, so neither is in
+ * {@link PLATFORM_PROVIDED_TOOL_NAMES}; a skill bound to them is served over
+ * MCP, and the `skill.tools[]` lint rule resolves both names from this list
+ * for a skill offered there. An in-product turn runs without them, so a skill
+ * kept out of MCP (`mcpPrompt: false`) naming either is still reported.
+ *
+ * Maintenance contract: this is the exact set `registerFileTools` registers on
+ * a bridge carrying every file member. `@objectstack/mcp` carries the
+ * conformance test that holds the two equal, so a file tool added to or
+ * renamed at the door fails there until this list follows it.
+ */
+export const MCP_FILE_TOOL_NAMES: readonly string[] = ['create_upload_link', 'read_file'];
 
 /**
  * Name prefixes of tool FAMILIES the runtime materialises dynamically — names
