@@ -37,6 +37,16 @@
  *             row can hold, such as a `capability`) it installs the same build
  *             managed instead, and records which mode it ran on
  *             (`ModeRun.template.installMode`); no other refusal falls back.
+ *   door      scaffold a blank host → boot → the runner, as a person, creates a
+ *             writable package in the card's namespace and connects an MCP
+ *             client (an OAuth token scoped to the draft door) → the agent
+ *             builds from the card prompt through the draft door ALONE, in an
+ *             empty directory of its own with no project file → the runner
+ *             publishes the package's drafts as Studio's Changes > Publish
+ *             does → score what the environment then serves, as template mode
+ *             scores its iterate → seed → the Run half. No iterate. The arm
+ *             the client ran in (skills and rules given and left out, `door.ts`)
+ *             is the driver's, on the record (`DriverInfo.door`).
  *
  * Names: the app is always in the card's own namespace, `demo` + its code
  * (`democrm`). Scratch mode scaffolds the project under that name; template
@@ -47,6 +57,10 @@
  * Scoring is `@objectstack/scenarios/score` (ruling D on #30291) and nothing
  * else; this module only gathers what the graders take.
  */
+
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { resolveStackCollection } from '@objectstack/core';
 import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type RollupSourceVisibilityFinding } from '@objectstack/lint';
@@ -81,12 +95,14 @@ import {
 } from '../score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
+import { DOOR_COLLECTIONS, DOOR_TOKEN_SCOPE } from './door.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
 import { agentSetOf, clockDates, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
   confirmPrompt,
+  doorBuildPrompt,
   datasetQuestionPrompt,
   iteratePrompt,
   operationPrompt,
@@ -121,7 +137,12 @@ export interface ProjectOps {
   scaffold(name: string, under: string): Promise<{ dir: string; result: CommandResult }>;
   os(dir: string, args: readonly string[]): Promise<CommandResult>;
   readArtifact(dir: string): unknown | undefined;
-  boot(dir: string): Promise<BootedApp>;
+  /**
+   * `objectstack dev` in `dir`. `options.authoringDoor` (door mode) boots it
+   * with the OAuth authorization server on (`OS_OIDC_PROVIDER_ENABLED`), which
+   * the draft door's tokens come from.
+   */
+  boot(dir: string, options?: { authoringDoor?: boolean }): Promise<BootedApp>;
   harness(url: string): AppHarness;
   /** The `namespace` the scaffolded project's manifest declares; checked against the card's own before a build. */
   namespace?(dir: string): string | undefined;
@@ -151,7 +172,7 @@ function freshBoot(ops: Pick<ProjectOps, 'boot' | 'harness'>, dir: string): Fres
 }
 
 export interface RunOptions {
-  modes: ReadonlyArray<'scratch' | 'template' | 'ask'>;
+  modes: ReadonlyArray<'scratch' | 'template' | 'ask' | 'door'>;
   /** Re-run the Run half after the iterate (scratch mode). Default true. */
   iterateRun?: boolean;
   /**
@@ -472,7 +493,7 @@ export interface ChangeSize {
 }
 
 export interface ModeRun {
-  mode: 'scratch' | 'template' | 'ask';
+  mode: 'scratch' | 'template' | 'ask' | 'door';
   /** Absent in template and ask modes, which build nothing first. */
   build?: BuildHalf;
   run?: RunHalf;
@@ -484,8 +505,31 @@ export interface ModeRun {
    * install door answered the install the mode ran on ({@link InstalledBuild}).
    */
   template?: InstalledBuild;
+  /** Door mode's own steps, each as its door answered ({@link DoorSteps}). */
+  door?: DoorSteps;
   skipped?: string;
   findings: string[];
+}
+
+/**
+ * What door mode's person-equivalent steps met, each as its door answered:
+ * the package created for the build, the token minted for the client (never
+ * the token itself), the drafts the client left pending, and the publish.
+ */
+export interface DoorSteps {
+  package: { id: string; namespace: string; create: InstallAnswer };
+  token?: InstallAnswer & { scope?: string };
+  /** The package's pending drafts when the client finished, as Studio's Changes review lists them. */
+  drafts?: { answer: InstallAnswer; items: Array<{ type: string; name: string }> };
+  /** The publish of the package's drafts, as Studio's Changes > Publish sends it. */
+  publish?: DoorPublish;
+}
+
+/** The publish's answer: its `outcome`, and each draft it refused with the reason. */
+export interface DoorPublish extends InstallAnswer {
+  outcome?: string;
+  publishedCount?: number;
+  failed?: Array<{ type: string; name: string; code?: string; error: string }>;
 }
 
 /** A refused install, as the door answered it. */
@@ -2109,6 +2153,130 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
   return mode;
 }
 
+/** The package door mode builds into: `com.scenario.<namespace>`, declaring the card's namespace. */
+export function doorPackageOf(card: { code: string }): { id: string; namespace: string } {
+  const namespace = scenarioNamespace(card);
+  return { id: `com.scenario.${namespace}`, namespace };
+}
+
+/** A publish's answer as the record keeps it: `outcome`, the counts, and each refused draft. */
+function doorPublishOf(a: HttpAnswer): DoorPublish {
+  const bag = (v: unknown): Record<string, unknown> | undefined => (typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);
+  const body = bag(a.body);
+  const data = bag(body?.data) ?? body;
+  const failed = Array.isArray(data?.failed)
+    ? data.failed.map(bag).filter((f): f is Record<string, unknown> => f !== undefined).map((f) => ({
+        type: String(f.type ?? ''),
+        name: String(f.name ?? ''),
+        ...(typeof f.code === 'string' ? { code: f.code } : {}),
+        error: String(f.error ?? '').slice(0, 500),
+      }))
+    : undefined;
+  return {
+    ...installAnswerOf(a),
+    ...(typeof data?.outcome === 'string' ? { outcome: data.outcome } : {}),
+    ...(typeof data?.publishedCount === 'number' ? { publishedCount: data.publishedCount } : {}),
+    ...(failed?.length ? { failed } : {}),
+  };
+}
+
+/** Why a harness cannot run door mode, or `undefined` when it can: each door it needs, named. */
+export function doorHarnessGap(app: AppHarness): string | undefined {
+  const missing = (['createPackage', 'mintAuthoringToken', 'listDrafts', 'publishDrafts'] as const).filter((m) => typeof app[m] !== 'function');
+  return missing.length ? `this app harness has no ${missing.join(', ')}: door mode creates a package, connects a client, lists and publishes its drafts` : undefined;
+}
+
+/**
+ * Door mode (the module header states the steps). The client's directory is
+ * a fresh empty one, made here and removed after the turn: the turn's `cwd`
+ * holds no project file, and the host project lives elsewhere. The token is
+ * minted for the turn and handed to the driver, never recorded. A step the
+ * app refuses is a finding with the door's answer, and what needed it does
+ * not run; a publish that refuses drafts is recorded with each refusal, and
+ * what the environment then serves is scored as it is.
+ */
+async function doorMode(original: LoadedScenario, driver: AgentDriver, ops: ProjectOps, opts: RunOptions): Promise<ModeRun> {
+  const scenario = namespacedScenario(original);
+  const labels = citationLabels(original);
+  const card = scenario.card;
+  const mode: ModeRun = { mode: 'door', findings: [] };
+  const target = doorPackageOf(card);
+  // The host gets a namespace of its own (`templateHostName`): the package the runner creates holds the card's.
+  const { dir, result } = await ops.scaffold(templateHostName(card), modeDir(card, 'door'));
+  if (result.exit !== 0) {
+    mode.skipped = `scaffold failed: ${result.tail.slice(-500)}`;
+    return mode;
+  }
+  let booted: BootedApp | undefined;
+  try {
+    booted = await ops.boot(dir, { authoringDoor: true });
+    const app = ops.harness(booted.url);
+    const gap = doorHarnessGap(app);
+    if (gap) {
+      mode.skipped = gap;
+      return mode;
+    }
+    await app.signInAdmin();
+    const baseline = await app.metadataAsArtifact(DOOR_COLLECTIONS);
+    // The person: a new package in Studio, in the card's namespace.
+    const created = await app.createPackage!({ id: target.id, name: card.title.en, version: '0.1.0', type: 'app', namespace: target.namespace });
+    mode.door = { package: { ...target, create: installAnswerOf(created) } };
+    if (!created.ok) {
+      mode.findings.push(`the package \`${target.id}\` was not created: ${created.status} ${created.code ?? ''} ${created.message ?? ''}`.trim());
+      return mode;
+    }
+    // The person connects an MCP client: an OAuth token scoped to the authoring tools.
+    const minted = await app.mintAuthoringToken!(DOOR_TOKEN_SCOPE);
+    const scope = (minted.body as { scope?: unknown } | null)?.scope;
+    mode.door.token = { ...installAnswerOf(minted), ...(typeof scope === 'string' ? { scope } : {}) };
+    if (!minted.ok || minted.token === undefined) {
+      mode.findings.push(`no token for the draft door: ${minted.status} ${minted.code ?? ''} ${minted.message ?? ''}`.trim());
+      return mode;
+    }
+    const token = minted.token;
+    const build: BuildHalf = { commands: [], score: null };
+    const cwd = mkdtempSync(join(tmpdir(), 'scenario-door-client-'));
+    try {
+      await authorInto(build, async () =>
+        (
+          await driver.author({
+            card: card.id,
+            mode: 'door',
+            phase: 'build',
+            step: 'author',
+            cwd,
+            prompt: doorBuildPrompt(card, { packageId: target.id }, opts.promptChoice),
+            tier: card.tier,
+            door: { mcp: { url: app.mcpUrl, token }, callTool: (tool, args) => app.callTool(token, tool, args) },
+          })
+        ).turn,
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+    mode.build = build;
+    if (build.notMeasured) return mode;
+    // The person reviews the package's drafts, then publishes them.
+    const drafts = await app.listDrafts!(target.id);
+    mode.door.drafts = { answer: installAnswerOf(drafts), items: drafts.drafts };
+    const published = await app.publishDrafts!(target.id);
+    mode.door.publish = doorPublishOf(published);
+    if (!published.ok) {
+      const failed = mode.door.publish.failed?.map((f) => `${f.type} ${f.name}${f.code ? ` (${f.code})` : ''}`).join(', ');
+      mode.findings.push(`the publish of \`${target.id}\` answered ${mode.door.publish.outcome ?? `${published.status} ${published.code ?? ''}`.trim()}${failed ? `: ${failed}` : ''}`);
+    }
+    // What the environment serves now is the build, as a person meets it.
+    const served = withoutItems(await app.metadataAsArtifact(DOOR_COLLECTIONS), baseline);
+    scoreInto(build, scenario, scenario, served);
+    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice);
+  } catch (e) {
+    mode.findings.push(`boot/run: ${errText(e)}`);
+  } finally {
+    await booted?.stop();
+  }
+  return mode;
+}
+
 /**
  * Ask mode: the verified build template mode installs, installed the same way
  * ({@link withInstalledBuild}) — or managed, when the unmanaged door refuses it
@@ -2179,5 +2347,6 @@ export async function runCard(scenario: LoadedScenario, driver: AgentDriver, ops
   }
   if (opts.modes.includes('template')) out.modes.push(await templateMode(scenario, driver, ops, opts, verified));
   if (opts.modes.includes('ask')) out.modes.push(await askMode(scenario, driver, ops, opts, verified));
+  if (opts.modes.includes('door')) out.modes.push(await doorMode(scenario, driver, ops, opts));
   return out;
 }

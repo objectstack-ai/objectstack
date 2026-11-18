@@ -45,6 +45,7 @@ import { join } from 'node:path';
 import { ApiBillingRefusedError, DEFAULT_AUTHOR_TIMEOUT_MIN, snapshotSources, type AgentDriver, type AskTask, type AuthorResult, type AuthorTask, type DriverInfo } from '../driver.js';
 import type { ParsedTurn, RunnerToolCall } from '../transcript.js';
 import { contentText, noResult, runTurnProcess } from './process.js';
+import { doorModeRefusal } from '../door.js';
 
 /** Environment variables that would make the Codex CLI bill an API key instead of the ChatGPT login. */
 export const CODEX_API_BILLING_ENV = ['OPENAI_API_KEY', 'CODEX_API_KEY'] as const;
@@ -280,6 +281,8 @@ export class CodexDriver implements AgentDriver {
   }
 
   async author(task: AuthorTask): Promise<AuthorResult> {
+    // Door mode hands the client an MCP door and no project; only the `claude` driver is given one (`doorMode` in `orchestrate.ts`).
+    if (task.door) throw new Error(doorModeRefusal('the Codex driver'));
     const turn = await this.turn({
       cwd: task.cwd,
       prompt: task.prompt,
