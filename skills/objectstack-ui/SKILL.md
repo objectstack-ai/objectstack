@@ -32,7 +32,7 @@ This page routes; keys and option lists live in the contract (first check 3).
 1. **Version.** This skill targets the `@objectstack/spec` major in its
    `compatibility` line. Read the installed one
    (`node_modules/@objectstack/spec/package.json`); where they differ, the
-   installed contract is right (objectstack-upgrade moves a project across).
+   installed contract is right.
 2. **Read what exists.** Read the object's declaration (fields, `fieldGroups`,
    relationships) and the project's own files for it (the globs under Where to
    go). Add beside what is there; reuse a declared dataset, field group or view.
@@ -42,10 +42,10 @@ This page routes; keys and option lists live in the contract (first check 3).
    of property names. A running environment serves the same contract as JSON
    Schema: `GET /api/v1/meta/types`, `entries[].schema`.
 4. **Verify before reporting done.** `os validate` (`npm run validate` in a
-   scaffolded project; `os build` runs the same gates). It
-   catches a bare field ref in a predicate (`done` for `record.done`) and a
-   widget `dataset` / `dimensions` / `values` that resolves to nothing declared
-   (an empty chart). The traps below pass it.
+   scaffolded project; `os build` runs the same gates). It catches a bare field
+   ref in a predicate (`done` for `record.done`) and a widget `dataset` /
+   `dimensions` / `values` that resolves to nothing declared (an empty chart).
+   The traps below pass it.
 
 ## Traps — each parses, then fails at run time
 
@@ -57,14 +57,15 @@ This page routes; keys and option lists live in the contract (first check 3).
    entry, never `list` retyped, and a board over a field added in the same
    change opens empty:
    [List Views](./rules/list-views.md#adding-a-board-calendar-gallery-or-gantt-beside-the-list).
-2. **A long form stays `simple`**, at any field count: collapse what is rarely
-   filled and size it with `columns` and `modalSize`. `tabbed` flags a required
-   field only on its own tab and overflows on a phone
-   ([Forms](./rules/forms.md)).
+2. **A long form stays `simple`**: collapse what is rarely filled and size it
+   with `columns` and `modalSize`. `tabbed` flags a required field only on its
+   own tab and overflows on a phone
+   ([Form Views](./rules/list-views.md#form-views)).
 3. **A record entered with its line items is `inlineEdit` on the child's
    `master_detail` field**, before any custom page, and its grid needs no "Add
    line" button. A parent or child declaring `enable.apiMethods` must list
-   `'bulk'`, or the save is refused `405` ([Forms](./rules/forms.md)).
+   `'bulk'`, or the save is refused `405`
+   ([Master-Detail Forms](./rules/list-views.md#master-detail-forms-parent--child-line-items)).
 4. **An operation is an `action`, never a view, and a write button must
    write.** "Mark as done", "approve", "set status to X" is `defineAction` with
    `objectName` and `locations`; with neither `locations` nor a view naming it,
@@ -84,12 +85,12 @@ This page routes; keys and option lists live in the contract (first check 3).
 6. **A filter token is presentation scope, not security.** `{current_user_id}`,
    `{today}` and the rest (vocabulary: objectstack-query → `rules/filters.md`,
    load it before writing one; an unrecognised token is a build error) decide
-   what a surface *shows*; RLS decides what a caller may *read*. Removing a
-   `{current_user_id}` filter only widens a view.
+   what a surface *shows*; RLS decides what a caller may *read*. Such a filter
+   must never be what keeps a user from someone else's data.
 7. **The object declares its record page.** Related lists, their order and
-   filter, and how a record opens are flags on the object and its fields, not a
-   page file; the reader's own display choices are never metadata
-   ([Record Page](./rules/record-page.md)).
+   filter are flags on the object and its fields, not a page file; how a record
+   opens is one list-view key, and the reader's own display choices are never
+   metadata ([Record Page](./rules/record-page.md)).
 
 ## Where to go
 
@@ -98,7 +99,7 @@ Open the file before writing: the rules and examples are there.
 | Authoring | In | Open |
 |:--|:--|:--|
 | A list, board, calendar, gallery or gantt: columns, `filter`, quick filters, toolbar search, sorting, grouping | `src/views/*.view.ts` | [List Views](./rules/list-views.md) |
-| A form (`simple` / `tabbed` / `wizard`), master-detail (a parent with its line items), a public form, field conditional rules | `src/views/*.view.ts` | [Forms](./rules/forms.md) |
+| A form (`simple` / `tabbed` / `wizard`), master-detail (a parent with line items), a public form, field conditional rules | `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
 | An app and its navigation; who sees or opens it; object nav, a `filters` slice or an interface page; form width, columns and `sections` | `src/apps/*.app.ts` | [Navigation](./rules/navigation.md) |
 | What a record page shows: related lists, a slotted or full page, drawer or page | the object | [Record Page](./rules/record-page.md) |
 | A button or operation: `locations`, visibility, dialog and toast copy, params, new tab, the body's `ctx` | `src/actions/*.actions.ts` | [Actions](./rules/actions.md) |
@@ -110,8 +111,8 @@ Open the file before writing: the rules and examples are there.
 
 One App per package: `defineStack` refuses a second, so audiences sharing a
 product are `requiredPermissions`-gated groups inside it. Hiding an app
-(`tabPermissions`) is not gating it: its URL still opens
-([Navigation](./rules/navigation.md#who-sees-or-opens-an-app)).
+(`tabPermissions`) is not gating it: its URL still opens. Both, and each item
+type's keys: [Navigation](./rules/navigation.md).
 
 ### Navigation Item Types
 
@@ -127,8 +128,6 @@ product are `requiredPermissions`-gated groups inside it. Hiding an app
 | `component` | Built-in platform component; `componentRef` is a colon-joined registry key (`metadata:resource`) |
 | `doc` | Package docs; inherits the docs audience |
 | `separator` | Visual separator |
-
-Each type's keys: [Navigation](./rules/navigation.md).
 
 ## Actions
 
