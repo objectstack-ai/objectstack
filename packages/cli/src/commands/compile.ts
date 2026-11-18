@@ -27,7 +27,11 @@ import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
-import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
+import {
+  preflightDeclaredCapabilities,
+  preflightProviderWiring,
+  renderCapabilityMessage,
+} from '../utils/capability-preflight.js';
 import { collectAndLintDocs, placeCollectedDocs, type DocIssue } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
 import {
@@ -1023,7 +1027,16 @@ export default class Compile extends Command {
       //     `{ token, message }` record beside its own preflight call, so
       //     mirroring it is what keeps the two commands from reporting
       //     different sets. One list cannot drift from itself.
-      capProviderWarnings = capPreflight.warnings.map((c) => ({
+      // An `enterprise` token whose package resolves but which no `plugins[]`
+      // entry provides is enforced by nothing (`preflightProviderWiring`), the
+      // same advisory `os validate` raises.
+      const capWiring = await preflightProviderWiring({
+        requires: (config as { requires?: unknown }).requires,
+        packages: packageEntries,
+        plugins: (config as { plugins?: unknown }).plugins,
+        projectDir: path.dirname(absolutePath),
+      });
+      capProviderWarnings = [...capPreflight.warnings, ...capWiring].map((c) => ({
         token: c.token,
         message: renderCapabilityMessage(c),
       }));
