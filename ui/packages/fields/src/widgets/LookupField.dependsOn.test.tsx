@@ -279,7 +279,7 @@ describe('LookupField — "+ New" seeds the dependsOn value it filters by (objec
   }
 
   it('opens the create form seeded with the parent, under the filter\'s field name', async () => {
-    const onModal = vi.fn(async () => ({ success: true, data: { id: 'c9', name: 'Pia Quill', account: 'a1' } }));
+    const onModal = vi.fn(async (_schema: unknown) => ({ success: true, data: { id: 'c9', name: 'Pia Quill', account: 'a1' } }));
     await openCreate({ ...dependentField, dependsOn: [{ field: 'account', param: 'account_id' }] }, { account: 'a1' }, onModal);
 
     await waitFor(() => expect(onModal).toHaveBeenCalled());
@@ -294,7 +294,7 @@ describe('LookupField — "+ New" seeds the dependsOn value it filters by (objec
   });
 
   it('control: a lookup with no dependsOn seeds nothing', async () => {
-    const onModal = vi.fn(async () => ({ success: false }));
+    const onModal = vi.fn(async (_schema: unknown) => ({ success: false }));
     const { dependsOn: _d, ...plain } = dependentField;
     await openCreate(plain, { account: 'a1' }, onModal);
 
