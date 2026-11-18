@@ -104,9 +104,12 @@ async function publishAll() {
     name,
     item: { name, type: pageTypes[name] ?? 'app' },
   }));
-  const adapter = { getClient: () => ({ meta: { saveItem, getItem } }) } as unknown as React.ComponentProps<
-    typeof AdapterCtx.Provider
-  >['value'];
+  const adapter = {
+    getClient: () => ({ meta: { saveItem, getItem } }),
+    // objectstack#35054 — a navigation write starts from the stored app (the
+    // layers read), not the served list; here the two are the same app.
+    getAuthoredItem: async (_type: string, name: string) => (name === crm.name ? crm : null),
+  } as unknown as React.ComponentProps<typeof AdapterCtx.Provider>['value'];
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <AdapterCtx.Provider value={adapter}>
       <MetadataCtx.Provider value={metaValue()}>{children}</MetadataCtx.Provider>
