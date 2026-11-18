@@ -15,12 +15,18 @@ import { runBuildProbes, type ProbeAutomation, type ProbeEngine, type RunBuildPr
 
 type Row = Record<string, unknown>;
 
-/** Fixed tables; honours `where.id.$in` and `limit` (`check:objectql-double-limit`). */
+/** One `where` clause on one row: `{ $in: [...] }`, else equality. */
+const matches = (row: Row, where: Record<string, unknown> | undefined): boolean =>
+    Object.entries(where ?? {}).every(([key, want]) => {
+        const $in = want && typeof want === 'object' ? (want as { $in?: unknown[] }).$in : undefined;
+        return Array.isArray($in) ? $in.includes(row[key]) : row[key] === want;
+    });
+
+/** Fixed tables; honours `where` and then `limit` (`check:objectql-double-limit`). */
 const engineOver = (tables: Record<string, Row[]>): ProbeEngine => ({
     find: async (object, query) => {
-        const q = query as { where?: { id?: { $in?: unknown[] } }; limit?: unknown } | undefined;
-        const ids = q?.where?.id?.$in;
-        const rows = (tables[object] ?? []).filter((r) => !ids || ids.includes(r.id));
+        const q = query as { where?: Record<string, unknown>; limit?: unknown } | undefined;
+        const rows = (tables[object] ?? []).filter((r) => matches(r, q?.where));
         return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
 });

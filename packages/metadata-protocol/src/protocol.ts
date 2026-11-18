@@ -1859,21 +1859,8 @@ export class ObjectStackProtocolImplementation implements
         userTextLocales?: readonly (string | undefined)[];
     }): Promise<RuntimeAuthoringIssue[]> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
-        const readAuthoringChannel = () => this.authoringChannel;
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof assertRuntimeAuthoringRules> = {
-            get authoringChannel() { return readAuthoringChannel(); },
-            get engine() { return readEngine(); },
-            foldStoredCollection: (...a) => this.foldStoredCollection(...a),
-            hierarchyResolverMounted: (...a) => this.hierarchyResolverMounted(...a),
-            orgWallEnforced: (...a) => this.orgWallEnforced(...a),
-            resolveSduiManifest: (...a) => this.resolveSduiManifest(...a),
-            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
-            rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
-            sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
-            tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
-        };
-        return assertRuntimeAuthoringRules.call(host, evt);
+        // [#34776] Its host is the draft verdicts' (a superset of the members it reads), so the two cannot drift.
+        return assertRuntimeAuthoringRules.call(this.draftVerdictHost(), evt);
     }
 
     /**
@@ -2239,18 +2226,7 @@ export class ObjectStackProtocolImplementation implements
         return rlsMembershipResolverKeys.call(host);
     }
 
-    /**
-     * The node types the registered automation engine runs, read through its
-     * `getSealedNodeTypeVocabulary()` — the input the runtime publish gate
-     * refuses a flow node no executor runs with (`flow-node-type-no-executor`).
-     *
-     * Read per publish, as {@link rlsMembershipResolverKeys} reads its service,
-     * and recorded nowhere. `undefined` — the CLI's reading, under which no node
-     * type is judged — when this host has no registry, no automation service, or
-     * an engine that has not sealed its vocabulary yet: before the seal a plugin
-     * may still contribute a type, so "no executor" is not a verdict anyone may
-     * act on (AGENTS.md "Startup registry reads").
-     */
+    /** [#34776] The automation engine's sealed node-type vocabulary; the body's docblock is its contract. */
     private sealedFlowNodeTypeVocabulary(): readonly string[] | undefined {
         const readGetServicesRegistry = () => this.getServicesRegistry;
         const host: ThisParameterType<typeof sealedFlowNodeTypeVocabulary> = {

@@ -99,7 +99,8 @@ export interface AuthoringGateHost {
     unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
     unknownPicklistBindingSaveRefusal: ObjectStackProtocolImplementation['unknownPicklistBindingSaveRefusal'];
     seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
-    sealedFlowNodeTypeVocabulary: ObjectStackProtocolImplementation['sealedFlowNodeTypeVocabulary'];
+    /** [#34776] The automation engine's sealed node-type vocabulary ({@link sealedFlowNodeTypeVocabulary}). */
+    sealedFlowNodeTypeVocabulary: () => readonly string[] | undefined;
 }
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyDerivation`; the method's docblock there is its contract. */
@@ -880,8 +881,16 @@ export async function draftPublishJudgement(
 }
 
 /**
- * The body of `ObjectStackProtocolImplementation#sealedFlowNodeTypeVocabulary`;
- * the method's docblock there is its contract.
+ * [#34776] The node types the registered automation engine runs, read through
+ * its `getSealedNodeTypeVocabulary()`: the input the runtime publish gate
+ * refuses a flow node no executor runs with (`flow-node-type-no-executor`).
+ *
+ * Read per write, as the posture probes read their services, and recorded
+ * nowhere. `undefined` (the CLI's reading, under which no node type is judged)
+ * when the host has no registry, no automation service, or an engine that has
+ * not sealed its vocabulary yet: before the seal a plugin may still contribute
+ * a type, so "no executor" is not a verdict anyone may act on (AGENTS.md
+ * "Startup registry reads").
  */
 export function sealedFlowNodeTypeVocabulary(
     this: { readonly getServicesRegistry?: () => Map<string, any> },

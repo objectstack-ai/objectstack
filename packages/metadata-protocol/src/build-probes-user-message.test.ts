@@ -144,14 +144,19 @@ const engineThrowing: ProbeEngine = {
     },
 };
 
+/** One `where` clause on one row: `{ $in: [...] }`, else equality. */
+const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean =>
+    Object.entries(where ?? {}).every(([key, want]) => {
+        const $in = want && typeof want === 'object' ? (want as { $in?: unknown[] }).$in : undefined;
+        return Array.isArray($in) ? $in.includes(row[key]) : row[key] === want;
+    });
 /**
- * An engine over fixed tables: honours `where.id.$in` and `limit`, so the
- * roll-up and reference probes read exactly the rows a real engine would give.
+ * An engine over fixed tables: honours `where`, then `limit`, so the roll-up
+ * and reference probes read exactly the rows a real engine would give.
  */
 const engineOver = (tables: Record<string, Array<Record<string, unknown>>>): ProbeEngine => ({
     find: async (object, query) => {
-        const ids = ((query as { where?: { id?: { $in?: unknown[] } } } | undefined)?.where?.id?.$in);
-        const rows = (tables[object] ?? []).filter((r) => !ids || ids.includes(r.id));
+        const rows = (tables[object] ?? []).filter((r) => matches(r, (query as { where?: Record<string, unknown> } | undefined)?.where));
         return limited(rows, query);
     },
 });
