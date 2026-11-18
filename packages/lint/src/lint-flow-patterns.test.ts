@@ -42,6 +42,8 @@ import {
   FLOW_TRY_CATCH_WITHOUT_CATCH,
   FLOW_DECISION_MODE_INVALID,
   FLOW_DECISION_INCLUSIVE_OVERLAP,
+  FLOW_APPROVAL_DECISION_UNROUTED,
+  FLOW_HTTP_TIMEOUT_MISSING,
 } from './lint-flow-patterns.js';
 // [#17495] Cross-site pin only — the re-judged `flow-inert-node-condition`
 // case below. This family's own coverage is unaffected by it;
@@ -903,7 +905,8 @@ function edgeFlow(edge: Record<string, unknown>, sourceType = 'http') {
       type: 'autolaunched',
       nodes: [
         { id: 'start', type: 'start', config: {} },
-        { id: 'op', type: sourceType, config: { url: 'https://x.test' } },
+        // A timeout, so the http source is judged only on its edges here.
+        { id: 'op', type: sourceType, config: { url: 'https://x.test', timeoutMs: 10000 } },
         { id: 'handler', type: 'notify', config: { topic: 'x' } },
         { id: 'end', type: 'end' },
       ],
@@ -2404,7 +2407,7 @@ describe('per-iteration containment (#13681 / #14394)', () => {
           name: 'charge', label: 'Charge', type: 'autolaunched',
           nodes: [
             { id: 'start', type: 'start', label: 'Start', config: { triggerType: 'api' } },
-            { id: 'guard', type: 'try_catch', label: 'Guarded', config: { try: { nodes: [{ id: 'pay', type: 'http', label: 'Pay', config: { url: 'https://example.test' } }], edges: [] } } },
+            { id: 'guard', type: 'try_catch', label: 'Guarded', config: { try: { nodes: [{ id: 'pay', type: 'http', label: 'Pay', config: { url: 'https://example.test', timeoutMs: 10000 } }], edges: [] } } },
           ],
           edges: [{ id: 'e1', source: 'start', target: 'guard' }],
         }],
@@ -4139,5 +4142,77 @@ describe('lintFlowPatterns — a retried inline outbound call in an after-save f
 
   it('has an os explain entry', () => {
     expect(explainRule(FLOW_AFTER_SAVE_INLINE_RETRY)).toBeDefined();
+  });
+});
+
+describe('flow-approval-decision-unrouted — an approval decision continues only down an exact `approve` / `reject` edge', () => {
+  const approvalFlow = (edges: Array<Record<string, unknown>>) => ({
+    flows: [{
+      name: 'expense_signoff',
+      label: 'Expense sign-off',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'signoff', type: 'approval', label: 'Sign-off', config: { approvers: [{ type: 'user', value: 'u1' }] } },
+        { id: 'paid', type: 'update_record', label: 'Mark paid', config: { objectName: 'expense', filter: { id: 'x' }, fields: { status: 'paid' } } },
+        { id: 'refused', type: 'update_record', label: 'Mark refused', config: { objectName: 'expense', filter: { id: 'x' }, fields: { status: 'refused' } } },
+      ],
+      edges: [{ id: 'e0', source: 'start', target: 'signoff' }, ...edges],
+    }],
+  });
+  const unrouted = (stack: Record<string, unknown>) =>
+    lintFlowPatterns(stack).filter((f) => f.rule === FLOW_APPROVAL_DECISION_UNROUTED);
+
+  it('refuses edges labelled in other words, naming both missing decisions and the labels written', () => {
+    const findings = unrouted(approvalFlow([
+      { id: 'e1', source: 'signoff', target: 'paid', label: 'Approved' },
+      { id: 'e2', source: 'signoff', target: 'refused', label: '驳回' },
+    ]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: 'error', path: 'flows[0].nodes[1]' });
+    expect(findings[0].message).toContain("'approve' or 'reject'");
+    expect(findings[0].message).toContain("'Approved', '驳回'");
+  });
+
+  it('refuses an approval that claims one decision and not the other', () => {
+    const findings = unrouted(approvalFlow([{ id: 'e1', source: 'signoff', target: 'paid', label: 'approve' }]));
+    expect(findings.map((f) => f.message.includes("'reject'"))).toEqual([true]);
+  });
+
+  it('is silent when both decisions are claimed, beside a fault edge, and on an approval with no out-edge', () => {
+    expect(unrouted(approvalFlow([
+      { id: 'e1', source: 'signoff', target: 'paid', label: 'approve' },
+      { id: 'e2', source: 'signoff', target: 'refused', label: 'reject' },
+      { id: 'e3', source: 'signoff', target: 'refused', type: 'fault' },
+    ]))).toEqual([]);
+    expect(unrouted(approvalFlow([]))).toEqual([]);
+  });
+});
+
+describe('flow-http-timeout-missing — an http node without a timeout of its own', () => {
+  const httpFlow = (config: Record<string, unknown>) => ({
+    flows: [{
+      name: 'push_order',
+      label: 'Push order',
+      type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'call', type: 'http', label: 'Call ERP', config: { url: 'https://erp.example.com/orders', ...config } },
+      ],
+      edges: [{ id: 'e0', source: 'start', target: 'call' }],
+    }],
+  });
+  const missing = (stack: Record<string, unknown>) =>
+    lintFlowPatterns(stack).filter((f) => f.rule === FLOW_HTTP_TIMEOUT_MISSING);
+
+  it('warns on an http node with no `config.timeoutMs`, at its config', () => {
+    const findings = missing(httpFlow({}));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: 'warning', path: 'flows[0].nodes[1].config' });
+    expect(findings[0].hint).toContain('timeoutMs');
+  });
+
+  it('is silent once the node sets one', () => {
+    expect(missing(httpFlow({ timeoutMs: 10000 }))).toEqual([]);
   });
 });
