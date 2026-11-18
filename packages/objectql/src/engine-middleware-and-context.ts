@@ -38,13 +38,13 @@ import type { IPubSub } from '@objectstack/spec/contracts';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isWriteEpochOperation } from './write-epoch.js';
+import { trioTransactionScopeOf } from './engine-execute-transactions.js';
 import { READABLE_IDS_WRITE_IN_FLIGHT } from './engine-readable-ids-permission-formula.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
 import { isFederatedObject } from './federated-object.js';
 import { cascadeBatchIdsOf } from './engine-top-level.js';
-import { trioTransactionScopeOf } from './engine-execute-transactions.js';
 import type { EngineMiddleware, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
