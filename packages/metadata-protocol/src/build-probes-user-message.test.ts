@@ -144,11 +144,15 @@ const engineThrowing: ProbeEngine = {
     },
 };
 
-/** One `where` clause on one row: `{ $in: [...] }`, else equality. */
+/** One `where` on one row: equality and `{ $in: [...] }`; any other operator or combinator is refused. */
 const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean =>
     Object.entries(where ?? {}).every(([key, want]) => {
-        const $in = want && typeof want === 'object' ? (want as { $in?: unknown[] }).$in : undefined;
-        return Array.isArray($in) ? $in.includes(row[key]) : row[key] === want;
+        if (key.startsWith('$')) throw new Error(`double: combinator ${key} not implemented`);
+        if (!want || typeof want !== 'object') return row[key] === want;
+        const ops = Object.keys(want);
+        const $in = (want as { $in?: unknown }).$in;
+        if (ops.length !== 1 || !Array.isArray($in)) throw new Error(`double: operator ${ops.join(',')} not implemented`);
+        return $in.includes(row[key]);
     });
 /**
  * An engine over fixed tables: honours `where`, then `limit`, so the roll-up

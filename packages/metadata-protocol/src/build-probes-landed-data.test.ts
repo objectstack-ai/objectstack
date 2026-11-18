@@ -15,11 +15,15 @@ import { runBuildProbes, type ProbeAutomation, type ProbeEngine, type RunBuildPr
 
 type Row = Record<string, unknown>;
 
-/** One `where` clause on one row: `{ $in: [...] }`, else equality. */
+/** One `where` on one row: equality and `{ $in: [...] }`; any other operator or combinator is refused. */
 const matches = (row: Row, where: Record<string, unknown> | undefined): boolean =>
     Object.entries(where ?? {}).every(([key, want]) => {
-        const $in = want && typeof want === 'object' ? (want as { $in?: unknown[] }).$in : undefined;
-        return Array.isArray($in) ? $in.includes(row[key]) : row[key] === want;
+        if (key.startsWith('$')) throw new Error(`double: combinator ${key} not implemented`);
+        if (!want || typeof want !== 'object') return row[key] === want;
+        const ops = Object.keys(want);
+        const $in = (want as { $in?: unknown }).$in;
+        if (ops.length !== 1 || !Array.isArray($in)) throw new Error(`double: operator ${ops.join(',')} not implemented`);
+        return $in.includes(row[key]);
     });
 
 /** Fixed tables; honours `where` and then `limit` (`check:objectql-double-limit`). */
