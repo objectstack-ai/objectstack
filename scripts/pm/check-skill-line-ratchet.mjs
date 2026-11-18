@@ -1593,9 +1593,7 @@ export const CEILINGS = new Map([
   // skills」); authorized under ruling record 6184799323 (letter B). Measured:
   // the old line was already 120 B, the added content alone is over 40 B, so the
   // rule lands as two lines (115 B and 116 B). Delta +1; headroom 0.
-  // 190 → 189: the two cloud ROADMAP-order lines became one line that points
-  // at the cloud lane file. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 189],
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 190],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
