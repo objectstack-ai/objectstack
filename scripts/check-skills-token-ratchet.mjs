@@ -1870,7 +1870,36 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6959 / 4)
   // = 1740 (+249), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1740],
+  // 1740 -> 1750, the card that makes the dataset tools answer `nextStep` and
+  // `sourceLine` (ruling #34894 = A): one line under the step 2 table says to
+  // follow `nextStep` (its `decision` and `note`), and step 3's citation bullet
+  // says to cite `sourceLine` as given and to build the source from
+  // `provenance` only without one (one citation instruction, in the step that
+  // cites). Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling
+  // record 6513306068, letter B). PAID DOWN FIRST — two restatements cut, each
+  // keeping its other home: the fallback row's ", and say in the answer that no
+  // governed metric was used" (step 4: "Open the answer with one line saying it
+  // is not from a governed metric") and "no figure, and " in the paragraph under
+  // the table (its next sentence: "State no figure of your own in it"). Text
+  // +111 bytes, cuts -71: 6979 -> 7019 bytes, less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6999 / 4)
+  // = 1750 (+10), the measured remainder only. Pinned AT the measurement, zero
+  // headroom; no other row moves.
+  // 1750 -> 1779, re-measured on the same PR before it landed, after its
+  // contract review (record 6969596617, S1) found the `nextStep` line and the
+  // question-alone paragraph under it giving opposite orders for a note that
+  // answers one measure and leaves a word with candidates out. The note wins:
+  // one sentence says to do both and to use none of that word's candidates
+  // until the user answers, and the paragraph now opens "When you only ask".
+  // Same raise path (ruling record 6513306068, letter B). PAID DOWN FIRST — one
+  // restatement cut from the left cell of step 2's `candidates` row, keeping
+  // its other home: ", one or several" (the same row's right cell: "with one
+  // candidate, ask whether it is the one meant"). Text +133 bytes, cut -17:
+  // 7019 -> 7135 bytes, less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7115 / 4)
+  // = 1779 (+29), the measured remainder only. Pinned AT the measurement, zero
+  // headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1779],
 ]);
 
 /**
