@@ -81,9 +81,9 @@ async function pref(ql: ObjectQL, organization: string, row: Record<string, unkn
     return String((await ql.insert('sys_notification_preference', row, sys(organization))).id);
 }
 
-/** `count` rows of `user`'s in `organization`, one per topic `bulk.N`, written in chunks the driver can bind. */
-async function bulk(ql: ObjectQL, organization: string, user: string, count: number): Promise<void> {
-    const rows = Array.from({ length: count }, (_, i) => ({ user_id: user, topic: `bulk.${i}`, channel: 'inbox', enabled: false }));
+/** `count` rows of `user`'s in `organization`, one per topic `PREFIX.N`, written in chunks the driver can bind. */
+async function bulk(ql: ObjectQL, organization: string, user: string, count: number, prefix = 'bulk'): Promise<void> {
+    const rows = Array.from({ length: count }, (_, i) => ({ user_id: user, topic: `${prefix}.${i}`, channel: 'inbox', enabled: false }));
     for (let i = 0; i < rows.length; i += 500) await ql.insert('sys_notification_preference', rows.slice(i, i + 500), sys(organization));
 }
 
@@ -302,16 +302,20 @@ describe('the caller\'s own preferences door — the effective matrix', () => {
 
     it("an organization with more rows than one read's cap still answers the caller's own row, with its id", async () => {
         const ql = await boot();
-        // Bob alone holds more rows than a read may answer; Alice's row is written last.
+        // Bob holds more rows than a read may answer on EACH side of Alice's
+        // row and the default's, so a capped read of the whole organization
+        // misses them in insertion order and in its reverse alike.
         await bulk(ql, 'org_a', BOB, EFFECTIVE_PREFERENCES_READ_CAP + 1);
         await pref(ql, 'org_a', { topic: 'approval.requested', channel: 'email', enabled: false });
         const alices = await pref(ql, 'org_a', { user_id: ALICE, topic: 'approval.requested', channel: 'inbox', enabled: false });
+        await bulk(ql, 'org_a', BOB, EFFECTIVE_PREFERENCES_READ_CAP + 1, 'late');
         const answer = await door(ql).call({ bearer: 'alice' });
         expect(answer.status).toBe(200);
         const data = answer.body.data;
         expect(cellOf(data, 'approval.requested', 'inbox')).toEqual({ channel: 'inbox', enabled: false, source: 'own', ownRowId: alices });
         expect(cellOf(data, 'approval.requested', 'email')).toEqual({ channel: 'email', enabled: false, source: 'default' });
         expect(JSON.stringify(data)).not.toContain('bulk.');
+        expect(JSON.stringify(data)).not.toContain('late.');
     }, 120_000);
 
     it('a caller with no organization reads no preference row, and is answered the built-in defaults', async () => {
