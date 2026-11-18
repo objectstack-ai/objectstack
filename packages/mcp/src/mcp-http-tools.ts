@@ -43,12 +43,15 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
+import type { DisplayNameObjectMeta, EngineAggregateOptions } from '@objectstack/spec/data';
 // [#28550, #28609] The engine's aggregation entry. Each `aggregate_records`
 // entry IS this node, so this door and the REST query door (which parses
 // `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
 // with one refusal.
 import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
+// [#35138] ADR-0079's one reading of an object's name field
+// (`nameField ?? displayNameField ?? derived`), which names a lookup group.
+import { resolveDisplayField } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
@@ -126,6 +129,7 @@ import {
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
 import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+import type { McpLatestPer } from './types.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -228,6 +232,14 @@ export interface McpDataBridge {
       limit?: number;
       offset?: number;
       orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
+      /**
+       * One row per group (`query_records`' `latestPer`): the bridge hands it
+       * to the engine's read as the engine's own read option, never as a query
+       * key, and answers `{ object, records, hasMore }` — at most `limit`
+       * groups, `hasMore` from a read of one row more, and no `total` (a row
+       * count is no group count). A bridge that cannot serve it refuses.
+       */
+      latestPer?: McpLatestPer;
     },
   ): Promise<unknown>;
   /**
@@ -581,6 +593,38 @@ export interface RegisterActionToolsOptions {
 
 const DEFAULT_MAX_LIMIT = 50;
 
+/** The most partition fields, and the most order keys, one `latestPer` may name (the engine's own bound). */
+const LATEST_PER_MAX_KEYS = 3;
+
+/**
+ * [latest per group] `query_records`' answer under `latestPer`, from the
+ * bridge's `{ object, records, hasMore }`: the records (at most `limit`
+ * groups) and `hasMore`, which {@link servedQueryPage} turns into
+ * `truncated: true` as for any capped page. No `total`: a row count is no
+ * group count. An answer that is not that shape — a bridge that served the
+ * read as an ordinary list — is no answer, and is refused.
+ */
+function latestPerAnswer(
+  objectName: string,
+  result: unknown,
+): { object: unknown; records: unknown[]; hasMore: boolean } {
+  const answer = result as { object?: unknown; records?: unknown; hasMore?: unknown; total?: unknown } | null;
+  if (!answer || !Array.isArray(answer.records) || typeof answer.hasMore !== 'boolean' || answer.total !== undefined) {
+    const err = new Error(
+      `query_records on '${objectName}' with latestPer: this host's data bridge did not serve one record per group, `
+      + 'so its rows are not the answer and none is returned.',
+    ) as Error & { code?: string; status?: number };
+    err.code = StandardErrorCode.enum.INTERNAL_ERROR;
+    err.status = 500;
+    throw err;
+  }
+  return {
+    object: answer.object ?? objectName,
+    records: answer.records,
+    hasMore: answer.hasMore,
+  };
+}
+
 /** A `sys_`-prefixed object is a system table — off-limits to external agents. */
 function isSystemObject(name: string): boolean {
   return /^sys_/i.test(name);
@@ -750,15 +794,31 @@ async function servedFieldsOf(
   bridge: McpDataBridge,
   objectName: string,
 ): Promise<Record<string, unknown> | undefined> {
+  return fieldMapOf(await servedDefinitionOf(bridge, objectName));
+}
+
+/**
+ * The object `objectName` as this caller is served it, or `undefined` when the
+ * bridge cannot say (no member, no object, or a throw).
+ */
+async function servedDefinitionOf(
+  bridge: McpDataBridge,
+  objectName: string,
+): Promise<Record<string, unknown> | undefined> {
   if (typeof bridge.servedObjectDefinitionOf !== 'function') return undefined;
   try {
-    const fields = (await bridge.servedObjectDefinitionOf(objectName))?.fields;
-    return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
-      ? (fields as Record<string, unknown>)
-      : undefined;
+    return (await bridge.servedObjectDefinitionOf(objectName)) ?? undefined;
   } catch {
     return undefined;
   }
+}
+
+/** A served definition's name-keyed field map, or `undefined` when it carries none. */
+function fieldMapOf(def: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const fields = def?.fields;
+  return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
+    ? (fields as Record<string, unknown>)
+    : undefined;
 }
 
 /** The served field `name`, or `undefined` when the caller's view has no such field. */
@@ -882,6 +942,127 @@ function inDeclaredOptionOrder(
     }
     return 0;
   });
+}
+
+/**
+ * [#35138] The field types whose group value is the id of a record of another
+ * object, the field's `reference`.
+ */
+const LOOKUP_GROUP_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+
+/** [#35138] The member beside a lookup group key that names its record: `<key>__label`. */
+const LOOKUP_LABEL_SUFFIX = '__label';
+
+/**
+ * [#35138] `aggregate_records`' groups with each lookup key's record named
+ * beside it, in `<key>__label`, where `<key>` is the group column (the key's
+ * alias when it has one).
+ *
+ * A group key is a lookup key when the caller's served schema shows it as a
+ * `lookup` or `master_detail` field with a `reference`. The name is the
+ * referenced record's value of the referenced object's name field (ADR-0079,
+ * {@link resolveDisplayField}), read AS THE CALLER: one `bridge.query` per
+ * referenced object, for the ids of the groups served, through the same
+ * bridge and context as the aggregate. Nothing is read with other rights, so
+ * the caller's object, field and record permissions apply as to any read the
+ * caller makes.
+ *
+ * A label is set only for a key whose record that read returns with a
+ * non-blank name. Every other key carries no label, and nothing else in the
+ * answer changes, so the answer says nothing about why a key has none.
+ * No label at all is added, and the rows come back as they are, when the
+ * referenced object is not one this tool reads (`admitsRead`), when the
+ * caller is not served it or its name field, or when the read fails.
+ * ⛔ This read never fails the aggregate it annotates.
+ */
+async function withLookupGroupLabels(
+  bridge: McpDataBridge,
+  rows: unknown[],
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+  admitsRead: (objectName: string) => Promise<boolean>,
+): Promise<unknown[]> {
+  const keysByTarget = new Map<string, string[]>();
+  for (const entry of groupBy ?? []) {
+    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
+    if (item.dateGranularity !== undefined) continue;
+    const def = servedFieldOf(fields, item.field);
+    if (!def || typeof def.type !== 'string' || !LOOKUP_GROUP_TYPES.has(def.type)) continue;
+    if (typeof def.reference !== 'string' || def.reference === '') continue;
+    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
+    keysByTarget.set(def.reference, [...(keysByTarget.get(def.reference) ?? []), column]);
+  }
+  if (keysByTarget.size === 0) return rows;
+
+  const namesByColumn = new Map<string, Map<string, string>>();
+  for (const [target, columns] of keysByTarget) {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (row === null || typeof row !== 'object') continue;
+      for (const column of columns) {
+        const id = (row as Record<string, unknown>)[column];
+        if (typeof id === 'string' && id !== '') ids.add(id);
+      }
+    }
+    if (ids.size === 0) continue;
+    const names = await recordNamesAsCaller(bridge, target, [...ids], admitsRead);
+    if (!names || names.size === 0) continue;
+    for (const column of columns) namesByColumn.set(column, names);
+  }
+  if (namesByColumn.size === 0) return rows;
+
+  return rows.map((row) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) return row;
+    const source = row as Record<string, unknown>;
+    const labelled: Record<string, unknown> = {};
+    for (const [member, value] of Object.entries(source)) {
+      labelled[member] = value;
+      const names = namesByColumn.get(member);
+      const name = names && typeof value === 'string' ? names.get(value) : undefined;
+      const labelMember = `${member}${LOOKUP_LABEL_SUFFIX}`;
+      // A column the aggregate itself answers under that name is never overwritten.
+      if (name !== undefined && !Object.prototype.hasOwnProperty.call(source, labelMember)) labelled[labelMember] = name;
+    }
+    return labelled;
+  });
+}
+
+/**
+ * [#35138] The name of each of `ids` in `target` that the caller's own read
+ * returns with a non-blank name, by id. `undefined` when no name can be read
+ * at all: the object is not one this tool reads, the caller is not served it
+ * or its name field, or the read fails.
+ */
+async function recordNamesAsCaller(
+  bridge: McpDataBridge,
+  target: string,
+  ids: string[],
+  admitsRead: (objectName: string) => Promise<boolean>,
+): Promise<Map<string, string> | undefined> {
+  try {
+    if (!(await admitsRead(target))) return undefined;
+    const def = await servedDefinitionOf(bridge, target);
+    const targetFields = fieldMapOf(def);
+    if (!def || !targetFields) return undefined;
+    const nameField = resolveDisplayField(def as DisplayNameObjectMeta);
+    if (!nameField || !servedFieldOf(targetFields, nameField)) return undefined;
+    const answer = await bridge.query(target, { where: { id: { $in: ids } }, fields: ['id', nameField], limit: ids.length });
+    const records = (answer as { records?: unknown } | null | undefined)?.records;
+    if (!Array.isArray(records)) return undefined;
+    const asked = new Set(ids);
+    const names = new Map<string, string>();
+    for (const record of records) {
+      if (record === null || typeof record !== 'object') continue;
+      const id = idOfRow(record as Record<string, unknown>);
+      const name = (record as Record<string, unknown>)[nameField];
+      if (id === undefined || !asked.has(id)) continue;
+      if (typeof name === 'string' && name.trim() !== '') names.set(id, name);
+      else if (typeof name === 'number' && Number.isFinite(name)) names.set(id, String(name));
+    }
+    return names;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -3197,7 +3378,11 @@ export function registerObjectTools(
           // Names repeat (ruling 6867150851), so the text says to tell
           // namesakes apart by email.
           'To fill a person field, find the colleague\'s id: objectName "sys_user", where {"email":"..."} for exactly ' +
-          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email.',
+          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email. ' +
+          // [latest per group] "each X with its latest Y" in one call.
+          'For "each X with its latest Y", pass latestPer: one record per group, e.g. each account\'s latest deal: ' +
+          'latestPer {"by":["account"],"orderBy":[{"field":"close_date","order":"desc"}]}; ties go by record id. ' +
+          'where filters the records first; limit counts groups; truncated: true means more groups exist than came back.',
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
@@ -3238,29 +3423,51 @@ export function registerObjectTools(
               .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
               .optional()
               .describe('Sort order'),
+            latestPer: z
+              .object({
+                by: z.array(z.string().min(1)).min(1).max(LATEST_PER_MAX_KEYS)
+                  .describe('The fields that form a group, e.g. ["account"] or ["owner_id"]'),
+                orderBy: z
+                  .array(z.object({ field: z.string().min(1), order: z.enum(['asc', 'desc']) }).strict())
+                  .min(1)
+                  .max(LATEST_PER_MAX_KEYS)
+                  .describe('The order whose first record is each group\'s answer, e.g. [{"field":"close_date","order":"desc"}]'),
+              })
+              .strict()
+              .optional()
+              .describe('One record per group: each group\'s first record in orderBy, ties broken by id. limit counts groups.'),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, where, fields, limit, offset, orderBy }) => {
+      async ({ objectName, where, fields, limit, offset, orderBy, latestPer }) => {
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
           // [#35138] A capped page says so: one row past the page is asked
           // for, and its coming back is the cap (`servedQueryPage`).
           const page = Math.min(limit ?? maxLimit, maxLimit);
-          const probed = queryPageProbeFits(page, offset);
-          const result = servedQueryPage(
-            await bridge.query(objectName, {
-              where,
-              fields,
-              limit: probed ? page + 1 : page,
-              offset,
-              orderBy,
-            }),
-            page,
-            probed,
-          );
+          // [latest per group] One record per group: the door reads its own
+          // probe group and answers `hasMore`, so the page is served unprobed
+          // here and `truncated` is the same key, set the same way.
+          const probed = latestPer === undefined && queryPageProbeFits(page, offset);
+          const result = latestPer !== undefined
+            ? servedQueryPage(
+              latestPerAnswer(objectName, await bridge.query(objectName, { where, fields, limit: page, offset, orderBy, latestPer })),
+              page,
+              false,
+            )
+            : servedQueryPage(
+              await bridge.query(objectName, {
+                where,
+                fields,
+                limit: probed ? page + 1 : page,
+                offset,
+                orderBy,
+              }),
+              page,
+              probed,
+            );
           // [ADR-0090 D10 — ruling 2026-09-08, consequence 2] A delegated read
           // the agent ceiling NARROWED is served with the narrowing stated. The
           // rows are still served — a partial answer is the most useful true
@@ -3292,6 +3499,10 @@ export function registerObjectTools(
             'Groups of a select field come back in the order the field declares its options. ' +
             'An amount column over a field with one fixed currency is named in currencies, alias to ISO 4217 code; ' +
             'an amount whose records each carry their own currency is answered only grouped by its currency code field. ' +
+            // [#35138] The name of a lookup group's record, read as the caller.
+            'A group keyed by a lookup or master-detail field carries <key>__label beside the record id: the name of that record, ' +
+            'read with the caller\'s own permissions. Name such a group by its __label, never by the id; ' +
+            'where a group has no __label, its record cannot be named, so say that rather than quoting the id. ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
             // [aggregate order and cut] A ranking question ("the top five
             // customers by revenue") is answered by the database: ordered,
@@ -3446,8 +3657,14 @@ export function registerObjectTools(
             // Group count is unbounded (a high-cardinality groupBy can return
             // thousands of rows) — cap the tool output like query_records does.
             const truncated = groups.length > maxLimit;
+            const served = truncated ? groups.slice(0, maxLimit) : groups;
+            // [#35138] Each lookup key's record named beside it, read as the
+            // caller, for the groups served only.
+            const labelled = fields
+              ? await withLookupGroupLabels(bridge, served, groupBy, fields, async (name) => (await readGuard(name)) === undefined)
+              : served;
             return textResult({
-              rows: truncated ? groups.slice(0, maxLimit) : groups,
+              rows: labelled,
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
               ...(Object.keys(currencies).length > 0 ? { currencies } : {}),

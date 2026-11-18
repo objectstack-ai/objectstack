@@ -46,6 +46,10 @@ export {
   UnsupportedDialectEmissionError,
   renderDialectEmissionRefusal,
 } from './dialect-emission-refusal.js';
+// [latest per group] The window directive `find` compiles, so a subclass that
+// answers `find` on another transport (Turso's remote face) can tell it rode in.
+export { LATEST_PER_DIRECTIVE, latestPerDirectiveOf } from './sql-driver-latest-per.js';
+export type { LatestPerDirective, LatestPerDirectiveOrder } from './sql-driver-latest-per.js';
 // [ADR-0131 D9] The autonumber counter's refusal of an organization-less row on
 // a tenant table — exported for the same reason: a caller recognises it by `code`.
 export {

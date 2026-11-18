@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#34766] The open MCP draft door's admission and its three read tools.
+ * [#34766] The open MCP draft door's admission, its three read tools, its two
+ * draft writes, and the publish verdict a save and each listed draft answer with.
  *
  * The effective right is the intersection of the token's consent
  * (`metadata:write`) and the HUMAN's own `manage_metadata` (seat ruling D1 A).
@@ -19,7 +20,19 @@
  * resolution that throws admits nothing.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import {
+  SysMetadataObject,
+  SysMetadataHistoryObject,
+  SysMetadataAuditObject,
+  SysMetadataCommitObject,
+} from '@objectstack/metadata-core';
 // The `/mcp` domain reaches the dispatcher, which loads this package lazily;
 // paid here, during collection, never inside a clocked case.
 import '@objectstack/metadata';
@@ -28,6 +41,7 @@ import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@ob
 import { handleMcpRequest } from './mcp.js';
 import {
   OPEN_AUTHORING_READ_TOOL_NAMES,
+  OPEN_AUTHORING_WRITE_TOOL_NAMES,
   createOpenAuthoringRegistry,
   resolveOpenAuthoringInjection,
   type OpenAuthoringInjection,
@@ -79,6 +93,16 @@ async function oauthEnvelope(scopes: string[], systemPermissions: string[]) {
 }
 
 const ADMIN = ['manage_metadata', 'manage_users'];
+
+/** One publish finding, every member the publish 422 carries. */
+const UNROUTABLE_ISSUE = {
+  rule: 'flow-trigger-unroutable',
+  path: 'flows[0].nodes[0].config.triggerType',
+  where: 'flow "lead_intake" › start node',
+  message: 'declares type: \'record_change\' but its start node has no triggerType at all',
+  hint: 'Set triggerType to record-{before,after}-{create,update,delete,write}',
+  severity: 'error' as const,
+};
 const NOT_AN_AUTHOR = ['manage_users'];
 
 /**
@@ -124,6 +148,18 @@ function fakeProtocol(store: Record<string, any[]> = {}, opts: { listThrows?: st
       calls.push(['listDrafts', request]);
       return { drafts: [{ type: 'flow', name: 'lead_intake', label: 'Lead intake', packageId: 'com.acme.crm', updatedAt: null }] } as any;
     },
+    async saveMetaItem(request: any) {
+      calls.push(['saveMetaItem', request]);
+      return { success: true, version: 'v8', seq: 1, state: 'draft' } as any;
+    },
+    async deleteMetaItem(request: any) {
+      calls.push(['deleteMetaItem', request]);
+      return { success: true } as any;
+    },
+    async draftPublishJudgement(draft: any) {
+      calls.push(['draftPublishJudgement', draft]);
+      return { refusals: [UNROUTABLE_ISSUE], advisories: [] };
+    },
   };
   return { protocol, calls };
 }
@@ -144,10 +180,18 @@ interface Served {
  */
 async function serve(
   executionContext: unknown,
-  opts: { systemPermissions?: string[]; qlThrows?: boolean; store?: Record<string, any[]>; listThrows?: string } = {},
+  opts: {
+    systemPermissions?: string[]; qlThrows?: boolean; store?: Record<string, any[]>; listThrows?: string;
+    /** A protocol to serve in place of the recording double (the real one, for the end-to-end pin). */
+    protocol?: OpenAuthoringProtocol;
+    /** The `tenancy` service the walled refusal reads its posture from. */
+    tenancy?: { posture: string };
+  } = {},
 ): Promise<Served> {
   const { ql, reads } = userQl(opts.systemPermissions ?? ADMIN);
-  const { protocol, calls } = fakeProtocol(opts.store, { listThrows: opts.listThrows });
+  const fake = fakeProtocol(opts.store, { listThrows: opts.listThrows });
+  const protocol = opts.protocol ?? fake.protocol;
+  const calls = fake.calls;
   // The holdings the docs audience reads: the permission sets on the caller the
   // gate is handed, so a set the human does not hold is not held.
   const security = { resolvePermissionSetNames: async (ctx: any) => (Array.isArray(ctx?.permissions) ? ctx.permissions : []) };
@@ -161,7 +205,7 @@ async function serve(
   };
   const deps = {
     resolveService: async (_ctx: unknown, name: string) => (name === 'mcp' ? mcp : name === 'protocol' ? protocol : name === 'security' ? security : undefined),
-    resolveServiceOrLoud: async () => undefined,
+    resolveServiceOrLoud: async (_ctx: unknown, name: string) => (name === 'tenancy' ? opts.tenancy : undefined),
     getObjectQL: async () => {
       if (opts.qlThrows) throw new Error('engine lookup failed');
       return ql;
@@ -235,14 +279,14 @@ describe('the open draft door is served only where the token consents AND the us
     expect(served.protocolCalls).toEqual([]);
   });
 
-  it('a metadata:write token whose user holds manage_metadata lists the three read tools, and a read is served', async () => {
+  it('a metadata:write token whose user holds manage_metadata lists the five tools, and a read is served', async () => {
     const ec = await oauthEnvelope(['metadata:write'], ADMIN);
     // The envelope itself carries no capability: the door read the human's grant.
     expect(ec.systemPermissions).toEqual([]);
     const served = await serve(ec);
     expect(served.grantReads.length).toBeGreaterThan(0);
     const authoring = served.authoring!;
-    expect(authoring.registry.getAll().map((t) => t.name)).toEqual([...OPEN_AUTHORING_READ_TOOL_NAMES]);
+    expect(authoring.registry.getAll().map((t) => t.name)).toEqual([...OPEN_AUTHORING_READ_TOOL_NAMES, ...OPEN_AUTHORING_WRITE_TOOL_NAMES]);
     expect(authoring.principal).toMatchObject({ userId: 'u1', clientId: 'c1', scopes: ['metadata:write'] });
     expect(authoring.environmentId).toBe('env_1');
 
@@ -382,7 +426,7 @@ describe('the read tools answer from the metadata protocol\'s public reads', () 
     const listed = await call(authoring, 'list_drafts', { package: 'com.acme.crm' });
     await call(authoring, 'list_drafts', {});
     expect(listed.body.count).toBe(1);
-    expect(calls).toEqual([['listDrafts', { packageId: 'com.acme.crm' }], ['listDrafts', {}]]);
+    expect(calls.filter((c: any) => c[0] === 'listDrafts')).toEqual([['listDrafts', { packageId: 'com.acme.crm' }], ['listDrafts', {}]]);
   });
 
   it('a coded protocol refusal keeps its code; an uncoded throw is a fault answered without its text', async () => {
@@ -542,12 +586,348 @@ describe('the read tools withhold what every /meta door withholds from this huma
   });
 });
 
-describe('the read tools\' names', () => {
+describe('the tools\' names', () => {
   it('collide with no hosted platform tool (seat ruling D3: not list_metadata)', () => {
-    for (const name of OPEN_AUTHORING_READ_TOOL_NAMES) {
+    for (const name of [...OPEN_AUTHORING_READ_TOOL_NAMES, ...OPEN_AUTHORING_WRITE_TOOL_NAMES]) {
       expect(PLATFORM_PROVIDED_TOOL_NAMES.has(name), name).toBe(false);
       expect(PLATFORM_TOOL_FAMILY_PREFIXES.some((prefix) => name.startsWith(prefix)), name).toBe(false);
     }
     expect(PLATFORM_PROVIDED_TOOL_NAMES.has('list_metadata')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The draft writes, and the publish verdict each answers with
+// ---------------------------------------------------------------------------
+
+const FLOW_DRAFT = { name: 'lead_intake', label: 'Lead intake', type: 'record_change', nodes: [], edges: [] };
+
+/**
+ * An admitted author's injection through the real domain, over `protocol` (the
+ * recording double by default). The fixture's user holds `admin_full_access`,
+ * which a single-posture resolution anchors as the platform operator; `posture`
+ * replaces that rung, as a walled deployment's resolution would not grant it.
+ */
+async function authorThroughDomain(opts: Parameters<typeof serve>[1] & { posture?: string } = {}) {
+  const resolved = await oauthEnvelope(['metadata:write'], ADMIN);
+  const ec = opts.posture ? { ...resolved, posture: opts.posture } : resolved;
+  const served = await serve(ec, opts);
+  return { authoring: served.authoring!, served };
+}
+
+describe('save_metadata_draft saves a draft and answers with its publish verdict', () => {
+  it('saves through saveMetaItem as an mcp draft by the token\'s client, and the reply carries the verdict whole and the Studio routes', async () => {
+    const { authoring, served } = await authorThroughDomain();
+    const saved = await call(authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm', ifMatch: 'v7' });
+
+    expect(saved.isError).toBe(false);
+    const save = served.protocolCalls.find((c: any) => c[0] === 'saveMetaItem') as any[];
+    expect(save[1]).toEqual({
+      type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, packageId: 'com.acme.crm',
+      mode: 'draft', surface: 'mcp', client: { id: 'c1' }, writeFace: 'meta-dispatch',
+      // The languages the real envelope states (`userTextLocalesOf`).
+      parentVersion: 'v7', actor: 'u1', userTextLocales: ['en-US', 'en-US'],
+    });
+    // The verdict is the protocol's judgement of the STORED draft at the saved address.
+    expect(served.protocolCalls.find((c: any) => c[0] === 'draftPublishJudgement')).toEqual(
+      ['draftPublishJudgement', { type: 'flow', name: 'lead_intake', packageId: 'com.acme.crm', userTextLocales: ['en-US', 'en-US'] }],
+    );
+    expect(saved.body).toEqual({
+      saved: { type: 'flow', name: 'lead_intake', package: 'com.acme.crm', state: 'draft', version: 'v8' },
+      verdict: { publishable: false, refusals: [UNROUTABLE_ISSUE], advisories: [] },
+      review: {
+        changes: '/studio/com.acme.crm/interfaces?changes=review',
+        item: '/studio/com.acme.crm/metadata/flow/lead_intake?review=1',
+        note: expect.any(String),
+      },
+    });
+  });
+
+  it('a plural type spelling is folded once: the save, the verdict, the discard and the review route name the canonical singular', async () => {
+    const { authoring, served } = await authorThroughDomain();
+    const saved = await call(authoring, 'save_metadata_draft', { type: 'flows', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
+    await call(authoring, 'delete_metadata_draft', { type: 'flows', name: 'lead_intake', package: 'com.acme.crm' });
+    const typesSent = served.protocolCalls
+      .filter((c: any) => ['saveMetaItem', 'draftPublishJudgement', 'deleteMetaItem'].includes(c[0]))
+      .map((c: any) => [c[0], c[1].type]);
+    expect(typesSent).toEqual([['saveMetaItem', 'flow'], ['draftPublishJudgement', 'flow'], ['deleteMetaItem', 'flow']]);
+    expect(saved.body.saved.type).toBe('flow');
+    expect(saved.body.review.item).toBe('/studio/com.acme.crm/metadata/flow/lead_intake?review=1');
+  });
+
+  it('a type the caller may not write is refused on the save and the discard before anything is written', async () => {
+    const { authoring, served } = await authorThroughDomain();
+    for (const type of ['datasource', 'datasources']) {
+      const saved = await call(authoring, 'save_metadata_draft', { type, name: 'warehouse', item: { name: 'warehouse' }, package: 'com.acme.crm' });
+      expect(saved.body.error, type).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      const discarded = await call(authoring, 'delete_metadata_draft', { type, name: 'warehouse', package: 'com.acme.crm' });
+      expect(discarded.body.error, type).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    }
+    expect(served.protocolCalls.filter((c: any) => ['saveMetaItem', 'deleteMetaItem', 'draftPublishJudgement'].includes(c[0]))).toEqual([]);
+
+    // The control: a human who holds the type's capability writes it.
+    const holder = [...ADMIN, 'manage_platform_settings'];
+    const ec = await oauthEnvelope(['metadata:write'], holder);
+    const allowed = await serve(ec, { systemPermissions: holder });
+    expect((await call(allowed.authoring!, 'save_metadata_draft', { type: 'datasource', name: 'warehouse', item: { name: 'warehouse' }, package: 'com.acme.crm' })).isError).toBe(false);
+    expect((await call(allowed.authoring!, 'delete_metadata_draft', { type: 'datasource', name: 'warehouse', package: 'com.acme.crm' })).isError).toBe(false);
+    expect(allowed.protocolCalls.filter((c: any) => ['saveMetaItem', 'deleteMetaItem'].includes(c[0])).map((c: any) => [c[0], c[1].type])).toEqual(
+      [['saveMetaItem', 'datasource'], ['deleteMetaItem', 'datasource']],
+    );
+  });
+
+  it('a save of a type the caller may not read lands, and its verdict is withheld rather than read', async () => {
+    const { authoring, served } = await authorThroughDomain();
+    const saved = await call(authoring, 'save_metadata_draft', { type: 'external_catalog', name: 'warehouse_catalog', item: { name: 'warehouse_catalog' }, package: 'com.acme.crm' });
+    expect(saved.isError).toBe(false);
+    expect(saved.body.saved).toMatchObject({ type: 'external_catalog', name: 'warehouse_catalog' });
+    expect(saved.body.verdict).toBeNull();
+    expect(saved.body.verdictWithheld).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'draftPublishJudgement')).toEqual([]);
+  });
+
+  it('a save naming no package is refused 400 naming the writable packages, and nothing is written (seat ruling D4)', async () => {
+    const store = {
+      package: [
+        { manifest: { id: 'com.acme.crm' }, writable: true },
+        { manifest: { id: 'com.objectstack.platform' }, writable: false },
+      ],
+    };
+    const { authoring, served } = await authorThroughDomain({ store });
+    const refused = await call(authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT });
+
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(refused.body.error.message).toContain('com.acme.crm');
+    expect(refused.body.error.message).not.toContain('com.objectstack.platform');
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
+  it('under a walled tenancy posture the save is refused 403 before anything is written', async () => {
+    const { authoring, served } = await authorThroughDomain({ tenancy: { posture: 'isolated' }, posture: 'TENANT_ADMIN' });
+    const refused = await call(authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+  });
+
+  it('a verdict that cannot be read after the save landed is said beside the saved draft, never as a refused save', async () => {
+    const { protocol, calls } = fakeProtocol();
+    protocol.draftPublishJudgement = async () => { throw Object.assign(new Error('No pending draft exists for flow/lead_intake.'), { code: 'NO_DRAFT', status: 404 }); };
+    const { authoring } = await authorThroughDomain({ protocol });
+    const saved = await call(authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
+    expect(saved.isError).toBe(false);
+    expect(saved.body.saved).toMatchObject({ type: 'flow', name: 'lead_intake', package: 'com.acme.crm' });
+    expect(saved.body.verdict).toBeNull();
+    expect(saved.body.verdictError).toMatchObject({ code: 'NO_DRAFT', status: 404 });
+    expect(calls.filter((c: any) => c[0] === 'saveMetaItem')).toHaveLength(1);
+  });
+
+  it('a registry handed no writer writes nothing', async () => {
+    const { protocol, calls } = fakeProtocol();
+    const registry = createOpenAuthoringRegistry({ admitted: true, userId: 'u1', getProtocol: async () => protocol, readGate: AUTHOR_READ_GATE });
+    for (const [toolName, input] of [
+      ['save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' }],
+      ['delete_metadata_draft', { type: 'flow', name: 'lead_intake' }],
+    ] as const) {
+      const result = await registry.execute({ toolCallId: 't', toolName, input }, CONTEXT);
+      expect(JSON.parse(result.output.value).error, toolName).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    }
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('delete_metadata_draft discards a pending draft only', () => {
+  it('deletes the draft state, at the package named, attributed to the human', async () => {
+    const { authoring, served } = await authorThroughDomain();
+    const discarded = await call(authoring, 'delete_metadata_draft', { type: 'flow', name: 'lead_intake', package: 'com.acme.crm' });
+    expect(discarded.body).toEqual({ discarded: { type: 'flow', name: 'lead_intake', package: 'com.acme.crm' } });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'deleteMetaItem')).toEqual(
+      [['deleteMetaItem', { type: 'flow', name: 'lead_intake', state: 'draft', packageId: 'com.acme.crm', actor: 'u1' }]],
+    );
+  });
+
+  it('under a walled tenancy posture the discard is refused 403 before anything is deleted', async () => {
+    const { authoring, served } = await authorThroughDomain({ tenancy: { posture: 'isolated' }, posture: 'TENANT_ADMIN' });
+    const refused = await call(authoring, 'delete_metadata_draft', { type: 'flow', name: 'lead_intake' });
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'deleteMetaItem')).toEqual([]);
+  });
+});
+
+describe('list_drafts answers each draft with its publish verdict, told where the item gate admits the draft read', () => {
+  it('a draft the human may read carries its verdict; one the item gate refuses them is listed with the verdict withheld', async () => {
+    const store = {
+      dashboard: [{ name: 'finance_board', label: 'Finance', requiredPermissions: ['finance.access'], widgets: [] }],
+    };
+    const { protocol, calls } = fakeProtocol(store);
+    protocol.listDrafts = async () => ({
+      drafts: [
+        { type: 'flow', name: 'lead_intake', label: 'Lead intake', packageId: 'com.acme.crm', updatedAt: null, updatedBy: null },
+        { type: 'dashboard', name: 'finance_board', label: 'Finance', packageId: 'com.acme.crm', updatedAt: null, updatedBy: null },
+        { type: 'datasource', name: 'warehouse', label: 'Warehouse', packageId: 'com.acme.crm', updatedAt: null, updatedBy: null },
+      ],
+    } as any);
+    const { authoring } = await authorThroughDomain({ protocol });
+    const listed = await call(authoring, 'list_drafts', {});
+
+    expect(listed.body.count).toBe(3);
+    const [flow, dashboard, typeRefused] = listed.body.drafts;
+    // A type the caller may not read: its body is not read and no verdict is told.
+    expect(typeRefused).toMatchObject({ type: 'datasource', name: 'warehouse', verdict: null, verdictWithheld: { code: 'PERMISSION_DENIED', status: 403 } });
+    expect(calls.some((c: any) => c[1]?.type === 'datasource')).toBe(false);
+    // The list stays ungated, as /meta/_drafts: both drafts are listed.
+    expect(flow).toMatchObject({ type: 'flow', name: 'lead_intake', verdict: { publishable: false, refusals: [UNROUTABLE_ISSUE] } });
+    expect(dashboard).toMatchObject({ type: 'dashboard', name: 'finance_board', verdict: null, verdictWithheld: { code: 'PERMISSION_DENIED', status: 403 } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Done when: the app-crm shape, end to end, on the real metadata protocol
+// ---------------------------------------------------------------------------
+
+/**
+ * The card's done-when on the `examples/app-crm` shape (its `com.example.crm`
+ * code package and its `crm_opportunity` object, declared here: this
+ * package's tests read nothing outside it). A booted code package is
+ * read-only, so the author saves into a Studio-created base beside it,
+ * `com.example.crm_studio`, the writable package the D4 refusal would name. The metadata protocol is the real one over a
+ * real SQL store, the envelope is the real identity door's for an OAuth token
+ * with `metadata:write` alone, and the door is the real `/mcp` domain: the
+ * reply's finding is the publish gate's own, not a fixture's.
+ */
+describe('done when: an OAuth author saves an app-crm flow draft with no routable trigger and gets that finding in the same reply', () => {
+  let cleanup: Array<() => void> = [];
+  afterEach(() => {
+    for (const c of cleanup.reverse()) c();
+    cleanup = [];
+  });
+
+  async function realProtocol() {
+    const dir = mkdtempSync(join(tmpdir(), 'os-34766-'));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
+    const platform = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject] as any[];
+    await driver.initObjects(platform);
+    const engine = new ObjectQL();
+    engine.registerDriver(driver as any, true);
+    await engine.init();
+    for (const o of platform) engine.registry.registerObject(o, '@objectstack/platform-objects');
+    engine.registry.registerObject({
+      name: 'crm_opportunity',
+      label: 'Opportunity',
+      sharingModel: 'private',
+      fields: { name: { type: 'text', label: 'Name' }, amount: { type: 'currency', label: 'Amount' } },
+    } as any, 'com.example.crm');
+    engine.registry.installPackage({ id: 'com.example.crm', name: 'CRM', version: '1.0.0', type: 'app', scope: 'project' } as any, 'code' as never);
+    engine.registry.installPackage({ id: STUDIO_BASE, name: 'CRM Studio', version: '1.0.0', type: 'app' } as any, 'authored');
+    cleanup.push(() => { void engine.destroy(); });
+    return new ObjectStackProtocolImplementation(engine as any) as unknown as OpenAuthoringProtocol;
+  }
+
+  const STUDIO_BASE = 'com.example.crm_studio';
+
+  /** A record-triggered flow on the opportunity whose start node names no trigger. */
+  const unroutable = {
+    name: 'crm_opportunity_followup',
+    label: 'Opportunity follow-up',
+    type: 'record_change',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { objectName: 'crm_opportunity' } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+  };
+
+  it('the save answers flow-trigger-unroutable with its rule id, path and hint, and list_drafts lists the draft with the same verdict', async () => {
+    const protocol = await realProtocol();
+    const { authoring } = await authorThroughDomain({ protocol });
+    expect(authoring.registry.getAll().map((t) => t.name)).toEqual([...OPEN_AUTHORING_READ_TOOL_NAMES, ...OPEN_AUTHORING_WRITE_TOOL_NAMES]);
+
+    // Seat ruling D4: a save naming no package is refused, naming the packages the
+    // protocol's own writability verdict admits (the base among them).
+    const unnamed = await call(authoring, 'save_metadata_draft', { type: 'flow', name: 'crm_opportunity_followup', item: unroutable });
+    expect(unnamed.body.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(unnamed.body.error.message).toContain(STUDIO_BASE);
+    expect((await call(authoring, 'list_drafts', {})).body.drafts).toEqual([]);
+
+    const saved = await call(authoring, 'save_metadata_draft', {
+      type: 'flow', name: 'crm_opportunity_followup', item: unroutable, package: STUDIO_BASE,
+    });
+    expect(saved.isError, JSON.stringify(saved.body)).toBe(false);
+    expect(saved.body.saved).toMatchObject({ type: 'flow', name: 'crm_opportunity_followup', package: STUDIO_BASE, state: 'draft' });
+    const finding = saved.body.verdict.refusals.find((issue: any) => issue.rule === 'flow-trigger-unroutable');
+    expect(finding, JSON.stringify(saved.body.verdict)).toBeDefined();
+    expect(finding.path).toBe('flows[0].nodes[0].config.triggerType');
+    expect(typeof finding.hint === 'string' && finding.hint.length > 0).toBe(true);
+    expect(saved.body.verdict.publishable).toBe(false);
+    expect(saved.body.review.changes).toBe(`/studio/${STUDIO_BASE}/interfaces?changes=review`);
+
+    // The Studio Changes source: the package's pending drafts.
+    const listed = await call(authoring, 'list_drafts', { package: STUDIO_BASE });
+    expect(listed.body.drafts.map((d: any) => [d.type, d.name, d.packageId])).toEqual([['flow', 'crm_opportunity_followup', STUDIO_BASE]]);
+    expect(listed.body.drafts[0].verdict).toEqual(saved.body.verdict);
+
+    // Discarded, it leaves the list; there was no active item to touch.
+    expect((await call(authoring, 'delete_metadata_draft', { type: 'flow', name: 'crm_opportunity_followup', package: STUDIO_BASE })).isError).toBe(false);
+    expect((await call(authoring, 'list_drafts', { package: STUDIO_BASE })).body.drafts).toEqual([]);
+  });
+
+  it('list_drafts collects a package\'s publish closure once for all its drafts, and each verdict equals the draft judged alone', async () => {
+    const protocol = await realProtocol();
+    const { authoring } = await authorThroughDomain({ protocol });
+    const routed = structuredClone(unroutable);
+    (routed.nodes[0]!.config as Record<string, unknown>).triggerType = 'record-after-create';
+    const names = ['crm_opportunity_followup', 'crm_opportunity_followup_b', 'crm_opportunity_followup_c'];
+    for (const [i, name] of names.entries()) {
+      const item = { ...(i === 1 ? routed : unroutable), name };
+      expect((await call(authoring, 'save_metadata_draft', { type: 'flow', name, item, package: STUDIO_BASE })).isError).toBe(false);
+    }
+
+    const collect = vi.spyOn(protocol as any, 'collectBatchPendingDeclarations');
+    const listed = await call(authoring, 'list_drafts', { package: STUDIO_BASE });
+    expect(listed.body.count).toBe(3);
+    // Each strict draft read collects for the verdict it folds into its own
+    // `_diagnostics`; the door's judgements share one collection per package.
+    expect(collect).toHaveBeenCalledTimes(names.length + 1);
+
+    // Each draft judged alone, one closure collection per call: the same verdict.
+    collect.mockClear();
+    for (const entry of listed.body.drafts) {
+      const alone = await protocol.draftPublishJudgement!({ type: 'flow', name: entry.name, packageId: STUDIO_BASE });
+      expect(entry.verdict, entry.name).toEqual({ publishable: alone.refusals.length === 0, refusals: alone.refusals, advisories: alone.advisories });
+    }
+    expect(collect).toHaveBeenCalledTimes(3);
+    const unroutableOf = (d: any) => d.verdict.refusals.some((issue: any) => issue.rule === 'flow-trigger-unroutable');
+    expect(listed.body.drafts.map((d: any) => [d.name, unroutableOf(d)]).sort())
+      .toEqual([[names[0], true], [names[1], false], [names[2], true]]);
+  });
+
+  it('a save the schema refuses answers its structured findings beside the headline, and writes nothing', async () => {
+    const protocol = await realProtocol();
+    const { authoring } = await authorThroughDomain({ protocol });
+    const refused = await call(authoring, 'save_metadata_draft', {
+      type: 'flow', name: 'crm_opportunity_followup', item: { ...unroutable, bogus_key: 1 }, package: STUDIO_BASE,
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    // The message is the face's headline; the finding that names the key is in `issues`.
+    expect(refused.body.error.message).not.toContain('bogus_key');
+    expect(JSON.stringify(refused.body.error.issues)).toContain('bogus_key');
+    expect((await call(authoring, 'list_drafts', {})).body.drafts).toEqual([]);
+  });
+
+  it('an inherited member\'s name as `type`, which the fold keeps as sent, is refused and writes nothing', async () => {
+    const protocol = await realProtocol();
+    const { authoring } = await authorThroughDomain({ protocol });
+    for (const type of ['constructor', 'toString']) {
+      // Refused, not written. The status is the protocol's answer for such a name,
+      // not pinned here: its own fold reads a plain object (Acceptance notes).
+      const saved = await call(authoring, 'save_metadata_draft', { type, name: 'crm_opportunity_followup', item: unroutable, package: STUDIO_BASE });
+      expect(saved.isError, `${type}: ${JSON.stringify(saved.body)}`).toBe(true);
+      expect(saved.body.saved, type).toBeUndefined();
+      const discarded = await call(authoring, 'delete_metadata_draft', { type, name: 'crm_opportunity_followup', package: STUDIO_BASE });
+      expect(discarded.isError, `${type}: ${JSON.stringify(discarded.body)}`).toBe(true);
+    }
+    expect((await call(authoring, 'list_drafts', {})).body.drafts).toEqual([]);
   });
 });

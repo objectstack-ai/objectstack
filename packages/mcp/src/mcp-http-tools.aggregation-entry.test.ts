@@ -33,12 +33,19 @@
  * `distinct` as a schema nothing satisfies (`not: {}`), with the removal text.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import { AggregationNodeSchema } from '@objectstack/spec/data';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
+import { registerObjectTools } from './mcp-http-tools.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
+import { createStdioDataBridge } from './stdio-data-bridge.js';
 
 interface RecordingBridge extends McpDataBridge {
   calls: any[];
@@ -603,5 +610,207 @@ describe('aggregate_records — the declared option order on the order-and-cut p
     const out = await answer(bare, { groupBy: ['stage'], limit: 5 });
     expect(bare.cuts[0][1].orderBy).toEqual([]);
     expect(out).toEqual({ rows: DRIVER_ORDER, totalGroups: 5 });
+  });
+});
+
+/**
+ * [#35138] A group keyed by a lookup (or master-detail) field names its
+ * record beside the id, in `<key>__label`: the referenced record's name field
+ * (ADR-0079), read AS THE CALLER in one batched `query` of the referenced
+ * object, through the same bridge as the aggregate.
+ *
+ * The rule pinned: a label is present only for a key whose record the
+ * caller's read returns with a non-blank name; every other key answers the
+ * same (no label), and nothing else in the answer changes. A referenced
+ * object, name field or lookup field the caller is not served, a referenced
+ * object this tool does not read, and a read that throws all leave the answer
+ * exactly as it was before.
+ *
+ * Both doors serve the tool from one handler: the HTTP door over a recording
+ * bridge below, and the stdio door over its own bridge and a stand-in engine
+ * at the foot of this block.
+ */
+describe('aggregate_records — a lookup group names its record beside the id, read as the caller (#35138)', () => {
+  const DEAL = {
+    name: 'deal',
+    fields: {
+      account: { type: 'lookup', reference: 'account' },
+      parent: { type: 'master_detail', reference: 'account' },
+      partner: { type: 'lookup', reference: 'sys_partner' },
+      stage: { type: 'select', options: [{ value: 'won' }, { value: 'lost' }] },
+      ref_code: { type: 'text' },
+      amount: { type: 'number' },
+    },
+  };
+  const ACCOUNT = { name: 'account', nameField: 'title', fields: { title: { type: 'text' }, code: { type: 'text' } } };
+  /** Every account record that exists, and the ones the caller's read returns. */
+  const STORE: Record<string, string> = { a1: 'Acme', a2: 'Globex', a3: '   ', a4: 'Initech' };
+
+  interface LookupBridge extends RecordingBridge {
+    reads: Array<[string, any]>;
+  }
+
+  function lookupBridge(
+    rows: unknown[],
+    opts: { readable?: (id: string) => boolean; store?: Record<string, string>; defs?: Record<string, unknown> } = {},
+  ): LookupBridge {
+    const bridge = makeBridge() as LookupBridge;
+    const readable = opts.readable ?? (() => true);
+    const store = opts.store ?? STORE;
+    const defs: Record<string, unknown> = opts.defs ?? { deal: DEAL, account: ACCOUNT };
+    bridge.reads = [];
+    bridge.aggregate = async (object: string, o: any) => {
+      bridge.calls.push([object, o]);
+      return rows;
+    };
+    bridge.servedObjectDefinitionOf = async (name: string) => (defs[name] ?? null) as Record<string, unknown> | null;
+    bridge.query = async (object: string, o: any) => {
+      bridge.reads.push([object, o]);
+      const ids: string[] = o?.where?.id?.$in ?? [];
+      const records = ids
+        .filter((id) => Object.prototype.hasOwnProperty.call(store, id) && readable(id))
+        .map((id) => ({ id, title: store[id] }));
+      return { object, records, total: records.length };
+    };
+    return bridge;
+  }
+
+  async function answer(bridge: RecordingBridge, args: Record<string, unknown>) {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const { refused, text } = await aggregate(runtime, bridge, { objectName: 'deal', ...args });
+    expect(refused, text).toBe(false);
+    return JSON.parse(text) as { rows: Array<Record<string, unknown>>; totalGroups: number; truncated?: true };
+  }
+
+  const COUNT = [{ function: 'count', alias: 'n' }];
+
+  it('a lookup and a master-detail group carry `<key>__label`: the referenced record\'s name field, beside the key', async () => {
+    const bridge = lookupBridge([{ account: 'a1', n: 3 }, { account: 'a2', n: 1 }]);
+    const out = await answer(bridge, { aggregations: COUNT, groupBy: ['account'] });
+    expect(out.rows).toEqual([{ account: 'a1', account__label: 'Acme', n: 3 }, { account: 'a2', account__label: 'Globex', n: 1 }]);
+    expect(Object.keys(out.rows[0]!)).toEqual(['account', 'account__label', 'n']);
+
+    const aliased = await answer(lookupBridge([{ p: 'a2', n: 2 }]), { aggregations: COUNT, groupBy: [{ field: 'parent', alias: 'p' }] });
+    expect(aliased.rows).toEqual([{ p: 'a2', p__label: 'Globex', n: 2 }]);
+  });
+
+  it('CONTROL — a second key that is not a lookup carries no label, even where its value is a record id', async () => {
+    const bridge = lookupBridge([{ account: 'a1', ref_code: 'a2', n: 2 }, { account: 'a2', ref_code: 'a1', n: 1 }]);
+    const out = await answer(bridge, { aggregations: COUNT, groupBy: ['account', 'ref_code'] });
+    expect(out.rows).toEqual([
+      { account: 'a1', account__label: 'Acme', ref_code: 'a2', n: 2 },
+      { account: 'a2', account__label: 'Globex', ref_code: 'a1', n: 1 },
+    ]);
+    for (const row of out.rows) expect(row).not.toHaveProperty('ref_code__label');
+  });
+
+  it('CONTROL — a record the caller\'s read does not return and a deleted record answer the same, with no label', async () => {
+    const rows = [{ account: 'a1', n: 1 }, { account: 'a4', n: 2 }];
+    const args = { aggregations: COUNT, groupBy: ['account'] };
+    // a4 exists, and the caller's read does not return it.
+    const unreadable = await answer(lookupBridge(rows, { readable: (id) => id !== 'a4' }), args);
+    // a4 no longer exists.
+    const { a4: _deleted, ...rest } = STORE;
+    const deleted = await answer(lookupBridge(rows, { store: rest }), args);
+    expect(unreadable).toEqual(deleted);
+    expect(JSON.stringify(unreadable)).toBe(JSON.stringify(deleted));
+    expect(unreadable.rows[1]).toEqual({ account: 'a4', n: 2 });
+    expect(unreadable.rows[0]).toEqual({ account: 'a1', account__label: 'Acme', n: 1 });
+  });
+
+  it('CONTROL — a record whose name is blank, and a null key, carry no label', async () => {
+    const out = await answer(lookupBridge([{ account: 'a3', n: 1 }, { account: null, n: 4 }]), { aggregations: COUNT, groupBy: ['account'] });
+    expect(out.rows).toEqual([{ account: 'a3', n: 1 }, { account: null, n: 4 }]);
+  });
+
+  it('CONTROL — a referenced object, a name field or a lookup field the caller is not served, or a system object, answers as before', async () => {
+    const rows = [{ account: 'a1', n: 1 }, { partner: 'p1', n: 2 }];
+    const args = { aggregations: COUNT, groupBy: ['account'] };
+    const { account: _lookup, ...dealWithout } = DEAL.fields;
+    const cases: Array<Record<string, unknown>> = [
+      { deal: DEAL },
+      { deal: DEAL, account: { ...ACCOUNT, fields: { code: { type: 'text' } } } },
+      { deal: { ...DEAL, fields: dealWithout }, account: ACCOUNT },
+    ];
+    for (const defs of cases) {
+      const bridge = lookupBridge(rows, { defs });
+      const out = await answer(bridge, args);
+      expect(out).toEqual({ rows, totalGroups: 2 });
+      expect(bridge.reads).toEqual([]);
+    }
+    // A referenced `sys_*` object this tool does not read is never read for a name.
+    const system = lookupBridge(rows, { defs: { deal: DEAL, sys_partner: ACCOUNT } });
+    const out = await answer(system, { aggregations: COUNT, groupBy: ['partner'] });
+    expect(out).toEqual({ rows, totalGroups: 2 });
+    expect(system.reads).toEqual([]);
+  });
+
+  it('CONTROL — a name read that throws, or answers no records list, answers as before', async () => {
+    const rows = [{ account: 'a1', n: 1 }];
+    const throwing = lookupBridge(rows);
+    throwing.query = async () => { throw new Error('read refused'); };
+    const shapeless = lookupBridge(rows);
+    shapeless.query = async () => [{ id: 'a1', title: 'Acme' }];
+    for (const bridge of [throwing, shapeless]) {
+      const out = await answer(bridge, { aggregations: COUNT, groupBy: ['account'] });
+      expect(out).toEqual({ rows, totalGroups: 1 });
+    }
+  });
+
+  it('the names are one batched read of the referenced object, for the groups served, as the caller', async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => ({ account: `x${i}`, parent: i % 2 === 0 ? 'a1' : 'a2', n: i }));
+    const bridge = lookupBridge(rows, { store: { ...STORE, x0: 'First', x49: 'Last served', x50: 'Past the cap' } });
+    const out = await answer(bridge, { aggregations: COUNT, groupBy: ['account', 'parent'] });
+    expect(bridge.reads).toHaveLength(1);
+    const [object, read] = bridge.reads[0]!;
+    expect(object).toBe('account');
+    expect(read.fields).toEqual(['id', 'title']);
+    expect(read.limit).toBe(52);
+    expect([...read.where.id.$in].sort()).toEqual([...rows.slice(0, 50).map((r) => r.account), 'a1', 'a2'].sort());
+    expect(out.rows).toHaveLength(50);
+    expect(out.rows[0]).toEqual({ account: 'x0', account__label: 'First', parent: 'a1', parent__label: 'Acme', n: 0 });
+    expect(out.rows[49]).toMatchObject({ account__label: 'Last served', parent__label: 'Globex' });
+    expect(out.rows[1]).toEqual({ account: 'x1', parent: 'a2', parent__label: 'Globex', n: 1 });
+  });
+
+  it('the stdio door: the name is read through the stdio bridge under the caller\'s own context', async () => {
+    const principal = { userId: 'u1', isSystem: false } as unknown as ExecutionContext;
+    const engine = {
+      aggregate: vi.fn(async () => [{ account: 'a1', n: 2 }, { account: 'a4', n: 1 }]),
+      // The caller's read returns a1 only.
+      find: vi.fn(async (_object: string, query: any) =>
+        ((query?.where?.id?.$in ?? []) as string[]).filter((id) => id === 'a1').map((id) => ({ id, title: STORE[id] }))),
+    };
+    const defs: Record<string, unknown> = { deal: DEAL, account: ACCOUNT };
+    const metadataService = { getObject: vi.fn(async (name: string) => defs[name]) };
+    const bridge = createStdioDataBridge({
+      engine: engine as unknown as IDataEngine,
+      metadataService: metadataService as unknown as IMetadataService,
+      resolvePrincipal: async () => principal,
+    });
+    const server = new McpServer({ name: 'pin', version: '0' });
+    registerObjectTools(server, bridge);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: 'pin', version: '0' });
+    await client.connect(clientSide);
+    try {
+      const res = (await client.callTool({
+        name: 'aggregate_records',
+        arguments: { objectName: 'deal', aggregations: COUNT, groupBy: ['account'] },
+      })) as { isError?: boolean; content: Array<{ text: string }> };
+      expect(res.isError, res.content[0]?.text).not.toBe(true);
+      expect(JSON.parse(res.content[0]!.text)).toEqual({
+        rows: [{ account: 'a1', account__label: 'Acme', n: 2 }, { account: 'a4', n: 1 }],
+        totalGroups: 2,
+      });
+      expect(engine.find).toHaveBeenCalledTimes(1);
+      const [object, query, opts] = engine.find.mock.calls[0] as unknown as [string, any, unknown];
+      expect(object).toBe('account');
+      expect(query).toMatchObject({ where: { id: { $in: ['a1', 'a4'] } }, fields: ['id', 'title'], limit: 2 });
+      expect(opts).toEqual({ context: principal });
+    } finally {
+      await client.close();
+    }
   });
 });

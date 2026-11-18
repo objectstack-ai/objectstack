@@ -51,6 +51,7 @@ import { declaresOptions } from '@objectstack/formula';
 // The engine's order-cut-count read option for `aggregate` (and the request it
 // carries): `aggregate_records`' ranking form rides to the engine on it.
 import { AGGREGATE_ORDER_CUT, type AggregateOrderCutRequest } from '@objectstack/objectql';
+import { LATEST_PER, type LatestPerRequest } from '@objectstack/objectql';
 import { RUNTIME_OWNED_FIELD_TYPES, SEARCH_COMPANION_FIELD, isVirtualSearchField } from '@objectstack/spec/data';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
@@ -1190,7 +1191,12 @@ export function buildMcpBridge(
             if (typeof o?.limit === 'number') query.limit = o.limit;
             if (typeof o?.offset === 'number') query.offset = o.offset;
             if (o?.orderBy) query.orderBy = o.orderBy;
-            return await callData('query', { object, query }, driver, envId, ec);
+            if (!o?.latestPer) return await callData('query', { object, query }, driver, envId, ec);
+            // [latest per group] One row per group rides to the engine on the
+            // engine's own symbol key (never a wire key), through `findData`,
+            // which judges the query as it judges every other.
+            const latestPer: LatestPerRequest = { by: o.latestPer.by, orderBy: o.latestPer.orderBy };
+            return await callData('query', { object, query, [LATEST_PER]: latestPer }, driver, envId, ec);
         },
         /**
          * [ADR-0090 D10 — maintainer ruling 2026-09-08, #16549] The

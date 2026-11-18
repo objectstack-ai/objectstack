@@ -33,6 +33,10 @@ import { SortNodeSchema, lowerFilterCondition, resolveSearchFieldResolution } fr
 import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryInput, ServiceObject } from '@objectstack/spec/data';
 import { mergeDriverOptionsIntoHookView } from './engine-driver-options.js';
 import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
+import {
+  assertLatestPerShape, latestPerFieldRefusal, latestPerJudgedSortKeys, latestPerRegistryRefusal, latestPerRequestOf,
+  withLatestPerDirective, type LatestPerOrder,
+} from './latest-per.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { collectCredentialFields, collectInternalReadFields } from './secret-fields.js';
@@ -78,6 +82,7 @@ export interface FindHost {
   formulaFaultSink: ObjectQL['formulaFaultSink'];
   formulaOptionLabels: ObjectQL['formulaOptionLabels'];
   getDriver: ObjectQL['getDriver'];
+  hasHooksFor: ObjectQL['hasHooksFor'];
   readonly logger: ObjectQL['logger'];
   lowerRelationConditions: ObjectQL['lowerRelationConditions'];
   maskSecretFields: ObjectQL['maskSecretFields'];
@@ -417,7 +422,7 @@ export class FindFacet {
   }
 
   /** The body of `ObjectQL#find`; the method's docblock there is its contract. */
-  static async find(this: Pick<FindHost, '_registry' | 'buildDriverOptions' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandRelatedRecords' | 'expandSearchOnAst' | 'facade' | 'fillQueryAstDefaults' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'logger' | 'maskSecretFields' | 'permissionResolution' | 'relatedSchemaOf' | 'reportFindFailure' | 'resolveFileReferences' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveObjectName' | 'resolveWhereTokens' | 'stripSearchCompanionFromRead' | 'triggerHooks'>, object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
+  static async find(this: Pick<FindHost, '_registry' | 'buildDriverOptions' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandRelatedRecords' | 'expandSearchOnAst' | 'facade' | 'fillQueryAstDefaults' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'hasHooksFor' | 'logger' | 'maskSecretFields' | 'permissionResolution' | 'relatedSchemaOf' | 'reportFindFailure' | 'resolveFileReferences' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveObjectName' | 'resolveWhereTokens' | 'stripSearchCompanionFromRead' | 'triggerHooks'>, object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
     // spec's slot table — the driver AST only understands the canonical keys,
@@ -434,6 +439,23 @@ export class FindFacet {
     query = lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object), this.relatedSchemaOf);
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
+    // [latest per group] The engine-internal request for one row per group
+    // (`latest-per.ts`). Its shape, the registry facts and its fields are
+    // judged first, before anything is read: a driver that does not compile
+    // the window, an object whose rows can be narrowed after the driver call,
+    // or a field no driver can group or order by is refused here.
+    const latestPer = latestPerRequestOf(options);
+    if (latestPer !== undefined) {
+      assertLatestPerShape(object, latestPer);
+      const latestPerSchema = this._registry.getObject(object);
+      const refused = latestPerRegistryRefusal(object, {
+        driver: driver as { readonly name?: unknown; readonly find?: unknown } | undefined,
+        schema: latestPerSchema,
+        hasAfterFindHook: this.hasHooksFor('afterFind', object),
+        hasObjectMiddleware: this.facade.hasObjectMiddleware(object),
+      }) ?? latestPerFieldRefusal(object, latestPerSchema, latestPer);
+      if (refused !== undefined) throw refused;
+    }
     // `object` LAST: the resolved name must win. Spread-first used to let a
     // stray `query.object` overwrite it, splitting the AST's object from the
     // table actually queried (#4371 option-2 survey) — every middleware and
@@ -446,6 +468,12 @@ export class FindFacet {
     // schemas declare are filled here, before anything downstream reads the AST.
     const { context: _findContext, ...findQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object };
+    // [latest per group] The partition and order fields are sort keys to
+    // every door from here on: appended to the AST the doors and the
+    // middleware chain judge, taken back out at the executor boundary below.
+    const _latestPerOwnOrderBy = ast.orderBy;
+    const _latestPerJudged: LatestPerOrder[] = latestPer !== undefined ? latestPerJudgedSortKeys(latestPer, ast.orderBy) : [];
+    if (_latestPerJudged.length > 0) ast.orderBy = [...(ast.orderBy ?? []), ..._latestPerJudged];
     // [ADR-0100] A `secret` / `password` column is never a filter or sort key
     // for a non-system caller — judged on the caller's own `where` / `orderBy`
     // / `expand`, before the search term is expanded into `where` and before
@@ -546,7 +574,13 @@ export class FindFacet {
       // [ADR-0139 D2] The executor boundary: the AST is final here — after the
       // doors, the middleware chain and `beforeFind` — so every `ReadableIds`
       // leaf is composed (or refused) on it, immediately before the driver.
-      const driverAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context, driverOptions);
+      const composedAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context, driverOptions);
+      // [latest per group] The window directive goes on HERE, on the final
+      // AST whose `where` carries every composed scope, and the judged sort
+      // keys come back off it — so the window runs over the caller's own rows.
+      const driverAst = latestPer !== undefined
+          ? withLatestPerDirective(composedAst, _latestPerJudged, _latestPerOwnOrderBy, latestPer)
+          : composedAst;
       // [relation semi-join] A PLANNED read (`relation-semi-join.ts`): the
       // final `where` and the driver options are handed to the planner in
       // place of the driver call, and the read answers the plan's own empty
@@ -554,6 +588,8 @@ export class FindFacet {
       // symbol-keyed option.
       const plan = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN] as RelationScopePlan | undefined;
       if (plan !== undefined) {
+          // A planned read is never a latest-per read: the planner reads ids.
+          if (latestPer !== undefined) throw new Error(`find('${object}'): a planned read cannot carry a latest-per request.`);
           plan.capture(driverAst.where as FilterCondition | undefined, driverOptions);
           opCtx.result = plan.rows;
           return opCtx.result;
@@ -561,6 +597,10 @@ export class FindFacet {
 
       try {
           let result = await driver.find(object, driverAst, driverOptions);
+          // [latest per group] The driver answered the window: the request's
+          // carriers read this back, and a read that comes back without it
+          // was not served as one row per group.
+          if (latestPer !== undefined) latestPer.outcome = { kind: 'served' };
 
           // [#21571] The read's default projection is the DECLARED field set:
           // a column no metadata declares (a field retired in an upgrade,
