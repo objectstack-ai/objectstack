@@ -346,7 +346,8 @@ describe('[#35138] stdio door: the answer names only what the caller can see', (
     return { call, close: () => client.close() };
   }
 
-  async function under<T>(testCase: ObjectSchemaMaskCase, run: () => Promise<T>): Promise<T> {
+  /** Run `run` with masking on: none of these cases switches it off. */
+  async function underMasking<T>(run: () => Promise<T>): Promise<T> {
     const previous = process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
     delete process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
     try {
@@ -368,7 +369,7 @@ describe('[#35138] stdio door: the answer names only what the caller can see', (
     '%s: a field the caller cannot see gets the members a field that does not exist gets',
     async (_id, testCase) => {
       const expected = testCase.expect as { present: readonly string[]; absent: readonly string[] };
-      await under(testCase, async () => {
+      await underMasking(async () => {
         const session = await connect(testCase);
         try {
           const ask = (field: string) =>
@@ -405,7 +406,7 @@ describe('[#35138] stdio door: the answer names only what the caller can see', (
   it.each(objectCases.map((c) => [c.id, c] as const))(
     '%s: an object the caller cannot read gets the members an object that does not exist gets',
     async (_id, testCase) => {
-      await under(testCase, async () => {
+      await underMasking(async () => {
         const session = await connect(testCase);
         try {
           for (const [tool, extra] of [
