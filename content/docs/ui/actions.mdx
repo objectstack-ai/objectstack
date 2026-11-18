@@ -653,9 +653,10 @@ Failures speak HTTP — the status code is the signal (#3962):
 - **404 / 403 / 503** — it never dispatched: no such action, denied, service
   unavailable. A `url`/`modal`/`form` type, or an `api` type whose `target`
   is on another origin, has no server dispatch and is also a 400.
-- **500** — it **crashed**: a `TypeError` in your handler, a driver error, a
-  sandbox timeout. A deliberate `throw new Error('…')` is a 400 rejection,
-  not a crash.
+- **500** — it **crashed** (a `TypeError` in your handler, a driver error) or
+  **timed out**; a timeout's message names the action and its limit, while a
+  crash answers only `Internal server error`. A deliberate
+  `throw new Error('…')` is a 400 rejection, not a crash.
 
 Full table in the [error catalog](/docs/api/error-catalog). The
 [client SDK](/docs/api/client-sdk) folds all of it into one
