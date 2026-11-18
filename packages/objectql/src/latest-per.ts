@@ -160,19 +160,32 @@ type CodedError = Error & {
   object?: string; param?: string; field?: string;
 };
 
-/** A refusal of the request, `INVALID_QUERY` (or the named code) / 400, nothing read. */
-function refusal(object: string, detail: string, code: string = StandardErrorCode.enum.INVALID_QUERY, field?: string): CodedError {
+/** The refusal's shared shape: 400, the object and the parameter named, nothing read. The code is stamped by the caller. */
+function refusalOf(object: string, detail: string): CodedError {
   const err = new Error(
     `find('${object}') with latestPer: ${detail} The query was NOT run and nothing was read.`,
   ) as CodedError;
-  err.code = code;
   err.status = 400;
   // …and `httpStatus`, the same number under ADR-0112 D5's spelling — what a
   // consumer holding the THROWN error reads; `status` stays for the HTTP doors.
   err.httpStatus = 400;
   err.object = object;
   err.param = 'latestPer';
-  if (field !== undefined) err.field = field;
+  return err;
+}
+
+/** A refusal of the request, `INVALID_QUERY` / 400, nothing read. */
+function refusal(object: string, detail: string): CodedError {
+  const err = refusalOf(object, detail);
+  err.code = StandardErrorCode.enum.INVALID_QUERY;
+  return err;
+}
+
+/** A partition or order field refused, `INVALID_FIELD` / 400 naming the field, nothing read. */
+function fieldRefusal(object: string, detail: string, field: string): CodedError {
+  const err = refusalOf(object, detail);
+  err.code = StandardErrorCode.enum.INVALID_FIELD;
+  err.field = field;
   return err;
 }
 
@@ -225,21 +238,21 @@ export function latestPerFieldRefusal(object: string, schema: unknown, request: 
   ];
   for (const { field, role } of named) {
     if (field.includes('.')) {
-      return refusal(object, `the ${role} field '${field}' is a dotted path; name a field of '${object}' itself.`, StandardErrorCode.enum.INVALID_FIELD, field);
+      return fieldRefusal(object, `the ${role} field '${field}' is a dotted path; name a field of '${object}' itself.`, field);
     }
     if (provisioned.has(field)) continue;
     if (!Object.prototype.hasOwnProperty.call(fields, field)) {
-      return refusal(object, `the ${role} field '${field}' is not a field of '${object}'.`, StandardErrorCode.enum.INVALID_FIELD, field);
+      return fieldRefusal(object, `the ${role} field '${field}' is not a field of '${object}'.`, field);
     }
     const def = (fields as Record<string, { type?: unknown; multiple?: unknown } | undefined>)[field];
     const type = typeof def?.type === 'string' ? def.type : undefined;
     if (type === 'formula') {
-      return refusal(object, `the ${role} field '${field}' is a formula, computed on read, so no column holds it; `
-        + `store the value in a field of its own and name that field.`, StandardErrorCode.enum.INVALID_FIELD, field);
+      return fieldRefusal(object, `the ${role} field '${field}' is a formula, computed on read, so no column holds it; `
+        + `store the value in a field of its own and name that field.`, field);
     }
     if (type !== undefined && (STRUCTURED_JSON_TYPES.has(type) || isMultiValueField({ type, multiple: def?.multiple === true }))) {
-      return refusal(object, `the ${role} field '${field}' holds a list or a JSON document, which is no group key or `
-        + `order the drivers share; name a field that stores one scalar value.`, StandardErrorCode.enum.INVALID_FIELD, field);
+      return fieldRefusal(object, `the ${role} field '${field}' holds a list or a JSON document, which is no group key or `
+        + `order the drivers share; name a field that stores one scalar value.`, field);
     }
   }
   return undefined;

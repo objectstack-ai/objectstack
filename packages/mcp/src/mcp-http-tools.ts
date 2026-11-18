@@ -126,7 +126,7 @@ import {
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
 import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
-import type { McpCappedListAnswer, McpLatestPer } from './types.js';
+import type { McpLatestPer } from './types.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -562,15 +562,15 @@ const LATEST_PER_MAX_KEYS = 3;
 /**
  * [latest per group] `query_records`' answer under `latestPer`, from the
  * bridge's `{ object, records, hasMore }`: the records (at most `limit`
- * groups), `hasMore`, and the shared truncation flag ({@link
- * McpCappedListAnswer}) when more groups exist than came back. No `total`: a
+ * groups), `hasMore`, and `truncated: true` when more groups exist than came
+ * back (present only then, never `false`). No `total`: a
  * row count is no group count. An answer that is not that shape — a bridge
  * that served the read as an ordinary list — is no answer, and is refused.
  */
 function latestPerAnswer(
   objectName: string,
   result: unknown,
-): { object: unknown; records: unknown[]; hasMore: boolean } & McpCappedListAnswer {
+): { object: unknown; records: unknown[]; hasMore: boolean; truncated?: true } {
   const answer = result as { object?: unknown; records?: unknown; hasMore?: unknown; total?: unknown } | null;
   if (!answer || !Array.isArray(answer.records) || typeof answer.hasMore !== 'boolean' || answer.total !== undefined) {
     const err = new Error(

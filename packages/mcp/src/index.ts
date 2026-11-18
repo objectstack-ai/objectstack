@@ -40,7 +40,7 @@ export type {
 export type { McpCallerExecutionContext } from './tool-call-interceptor.js';
 // The capped-list truncation flag the read tools share, and `query_records`'
 // one-row-per-group form a bridge receives.
-export type { McpCappedListAnswer, McpLatestPer } from './types.js';
+export type { McpLatestPer } from './types.js';
 export {
   registerObjectTools,
   registerActionTools,

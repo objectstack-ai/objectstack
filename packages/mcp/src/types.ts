@@ -287,19 +287,6 @@ export type McpToolInterceptor = (
   next: () => Promise<McpToolCallResult>,
 ) => Promise<McpToolCallResult | McpToolCallRefusal>;
 
-// ── Capped list answers ───────────────────────────────────────────────────────
-
-/**
- * The truncation flag of a capped list answer from an MCP read tool: ONE key
- * across the read tools — `aggregate_records`' groups and `query_records`'
- * one-row-per-group answer. Present, and `true`, only when more items existed
- * than came back; absent otherwise, never `false`. A client says a result
- * carrying it is partial.
- */
-export interface McpCappedListAnswer {
-  truncated?: true;
-}
-
 /**
  * `query_records`' one-row-per-group form (`latestPer`): the fields that form a
  * group, and the order whose first record is each group's answer; ties are
