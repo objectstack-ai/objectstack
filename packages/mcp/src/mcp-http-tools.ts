@@ -2629,7 +2629,8 @@ export function registerObjectTools(
       {
         description:
           'Get the schema of a data object as you may read it, with what a write needs: its name, label and description '
-          + '(where the author wrote one). Each field: name, type, label, description (where written), '
+          + '(where the author wrote one). Each field: name, type, label, description (where set: the author\'s, or '
+          + 'the platform\'s on a column it injects), '
           + 'required, readonly (a write never sets it: declared read-only, or a value the platform computes, such as a '
           + 'formula, an autonumber or a field with an expression; leave it out of a write), system (a platform-injected '
           + 'column), options (value + label; send the value) on a field that offers a fixed set, and defaultValue when '

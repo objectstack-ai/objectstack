@@ -317,11 +317,11 @@ model: opus
 ## 干净收尾 —— 报告是你的终局动作
 
 - 全文 ⛔ 不出现 HTML 注释:sanitizer 落库后吃短尖括号片段,连反引号里的也吃。
-- 例外:harness 自写的 PR 正文首行归属注释原样留、只报;`Fixes #<n>` 紧随其后;dev 自写仍禁。
+- 例外二:harness 自写 PR 正文首行归属注释原样留、只报,`Fixes #<n>` 紧随;派发令要求才独占
+  末个非空行写 `<!-- signed: LANE#N · ACCOUNT · SESSION -->`(`PR_BODY_TRAILER_SHAPE`);其余 dev 自写仍禁。
 - 凡要上 GitHub 的文本,尖括号形状片段一律改占位词拼写(`FIELD`、`IDENT.MEMBER` 一类)。
 - 各派发模式(`mode:subagent`、`mode:cloud`、`mode:thread`)下 GitHub 都是报告的权威源。
-- 写完读回那条评论到尾部:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。
-- PR 正文同欠一次全文回读,评审读的正是它。
+- 评论、PR 正文都读回到尾:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。
 
 1. **后台子进程不得比本轮运行活得久,monitor 不得比它看的东西活得久。**
    - monitor 按自己的死线触发,不按对象生命周期:杀掉被看的进程 ⇒ 同一步杀它的 monitor。

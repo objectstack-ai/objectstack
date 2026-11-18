@@ -28,6 +28,7 @@
  */
 
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, Trash2, X } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import {
@@ -83,9 +84,15 @@ export interface InspectorShellProps {
  *
  * `onSelectionChange` lets a field inside move the host's selection — the
  * decision's branch cards use it to open a connection's own inspector.
+ *
+ * `headerActionsTarget` is an element inside the host's own header. When it is
+ * set, the shell draws its header actions there, so a selection's menu (the
+ * flow node's "···") sits in the one title bar the author sees instead of at
+ * the top of the body.
  */
 export interface InspectorShellHost {
   onSelectionChange?: (selection: { kind: string; id: string; label?: string }) => void;
+  headerActionsTarget?: HTMLElement | null;
 }
 
 const InspectorShellHostContext = React.createContext<InspectorShellHost | null>(null);
@@ -108,7 +115,12 @@ export function InspectorShell({ kindLabel, title, onClose, closeLabel: closeLab
     return (
       <div className="flex h-full flex-col" data-testid="inspector-shell-hosted">
         <div className="flex-1 space-y-3.5 overflow-auto p-4">
-          {headerActions && <div className="flex items-center justify-end gap-1">{headerActions}</div>}
+          {headerActions &&
+            (host.headerActionsTarget ? (
+              createPortal(headerActions, host.headerActionsTarget)
+            ) : (
+              <div className="flex items-center justify-end gap-1">{headerActions}</div>
+            ))}
           {children}
         </div>
         {footer && <div className="border-t px-4 py-2.5">{footer}</div>}

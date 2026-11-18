@@ -8,6 +8,18 @@ import { extractRegions, NODE_H } from './flow-canvas-layout';
 import { predictExpandedNodeHeight } from './flow-region-metrics';
 import type { FlowProblem } from './flow-problems';
 import { browserClick, browserDrag } from './__tests__/browserClick';
+// FlowPreview reaches a dynamic `import('@objectstack/lint')`; pay its load at collection, not in a test's clock.
+import '@objectstack/lint';
+import { createI18n, I18nProvider, transformSpecTranslations } from '@object-ui/i18n';
+import type { TranslationData } from '@objectstack/spec/system';
+import { FlowPreview, FlowSelectionTitle, flowSelectionHeading } from './FlowPreview';
+import {
+  FlowLabelTranslationsProvider,
+  flowLabelTranslations,
+  useFlowLabelTranslations,
+  type FlowLabelTranslations,
+} from './flow-label-translations';
+import { activeFlowsBundle } from '../../../utils/flowsBundle';
 
 afterEach(cleanup);
 
@@ -594,5 +606,130 @@ describe('FlowCanvas — a node press on a read-only design canvas selects, and 
     expect(browserDrag(card('b'), 60, 60)).toBe(viewport);
     expect(panTransform()).not.toBe(before);
     expect(onPatch).not.toHaveBeenCalled();
+  });
+});
+
+
+/**
+ * The flow designer reads a package's `flows` translations: the flow's label
+ * (`flows.<flow>.label`) and an approval node's step label
+ * (`flows.<flow>.approvals.<node_id>.label`), in the viewer's language, from
+ * the bundle `FlowRunner` reads. A decision node and an edge have no key, so
+ * they stay authored; with no translation everything is authored, as before.
+ */
+describe('Flow designer — package label translations (flows.<flow>.label, approvals.<step>.label)', () => {
+  const ZH_CN: TranslationData = {
+    flows: {
+      opportunity_approval: {
+        label: '大额商机审批',
+        approvals: { manager_review: { label: '经理审核' }, director_signoff: { label: '总监签批' } },
+      },
+    },
+  };
+  const NODES = [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'manager_review', type: 'approval', label: 'Manager review' },
+    { id: 'big', type: 'decision', label: 'Over 1M?' },
+    {
+      id: 'each',
+      type: 'loop',
+      label: 'For each signer',
+      config: { body: { nodes: [{ id: 'director_signoff', type: 'approval', label: 'Director sign-off' }], edges: [] } },
+    },
+  ];
+  const EDGES = [
+    { source: 'start', target: 'manager_review' },
+    { source: 'manager_review', target: 'big', label: 'approve' },
+    { source: 'big', target: 'each', label: 'Yes, over 1M' },
+  ];
+  const DRAFT = { name: 'opportunity_approval', label: 'Large Deal Approval', nodes: NODES, edges: EDGES };
+
+  function zhInstance() {
+    const instance = createI18n({ defaultLanguage: 'zh-CN', detectBrowserLanguage: false });
+    instance.addResourceBundle('zh-CN', 'translation', transformSpecTranslations(ZH_CN as Record<string, unknown>), true, true);
+    return instance;
+  }
+  const zh = (): FlowLabelTranslations => {
+    const t = flowLabelTranslations(activeFlowsBundle(zhInstance(), 'zh-CN', 'opportunity_approval'), 'opportunity_approval', 'zh-CN');
+    expect(t).toBeDefined();
+    return t!;
+  };
+
+  it('resolves the flow label and approval-step labels out of the loaded resource tree, and nothing else', () => {
+    const t = zh();
+    expect(t.flowLabel).toBe('大额商机审批');
+    expect(t.stepLabel({ id: 'manager_review', type: 'approval' })).toBe('经理审核');
+    expect(t.stepLabel({ id: 'director_signoff', type: 'approval' })).toBe('总监签批');
+    // No key for any other node type, even under an approval's id.
+    expect(t.stepLabel({ id: 'manager_review', type: 'decision' })).toBeUndefined();
+    expect(t.stepLabel({ id: 'unknown_step', type: 'approval' })).toBeUndefined();
+    // No bundle for the flow: nothing to translate with.
+    expect(flowLabelTranslations(activeFlowsBundle(zhInstance(), 'zh-CN', 'other_flow'), 'other_flow', 'zh-CN')).toBeUndefined();
+  });
+
+  it('useFlowLabelTranslations reads the console provider’s active language', () => {
+    let seen: FlowLabelTranslations | undefined;
+    function Probe() {
+      seen = useFlowLabelTranslations('opportunity_approval');
+      return null;
+    }
+    render(
+      <I18nProvider instance={zhInstance()} persistLanguage={false}>
+        <Probe />
+      </I18nProvider>,
+    );
+    expect(seen?.flowLabel).toBe('大额商机审批');
+    expect(seen?.stepLabel({ id: 'manager_review', type: 'approval' })).toBe('经理审核');
+  });
+
+  it('draws the translated approval-step labels on the canvas, nested ones included; decision and branch-edge labels stay authored', () => {
+    const { container } = render(
+      <FlowLabelTranslationsProvider value={zh()}>
+        <FlowCanvas nodes={NODES} edges={EDGES} editable={false} designMode={false} selectedId={null} onSelect={() => {}} />
+      </FlowLabelTranslationsProvider>,
+    );
+    const card = (id: string) => container.querySelector(`[data-node-id="${id}"]`) as HTMLElement;
+    expect(card('manager_review').textContent).toContain('经理审核');
+    expect(card('manager_review').textContent).not.toContain('Manager review');
+    expect(card('big').textContent).toContain('Over 1M?');
+    // A decision branch's authored edge label has no package key, so it stays as written. (An approval's
+    // `approve` / `reject` outcome pills are the designer's own vocabulary, not the package bundle's.)
+    expect(screen.getByText('Yes, over 1M')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand nested regions' }));
+    expect(card('each').textContent).toContain('总监签批');
+    expect(card('each').textContent).not.toContain('Director sign-off');
+  });
+
+  it('with no translation the canvas draws the authored labels, as before', () => {
+    const { container } = render(
+      <FlowCanvas nodes={NODES} edges={EDGES} editable={false} designMode={false} selectedId={null} onSelect={() => {}} />,
+    );
+    expect((container.querySelector('[data-node-id="manager_review"]') as HTMLElement).textContent).toContain('Manager review');
+  });
+
+  it('FlowPreview hands the bundle in from the console provider', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })));
+    const { container } = render(
+      <I18nProvider instance={zhInstance()} persistLanguage={false}>
+        <FlowPreview type="flow" name="opportunity_approval" draft={DRAFT} selection={null} onSelectionChange={() => {}} />
+      </I18nProvider>,
+    );
+    expect((container.querySelector('[data-node-id="manager_review"]') as HTMLElement).textContent).toContain('经理审核');
+  });
+
+  it('the inspector header titles an approval step by its translation and shows the authored label beside it', () => {
+    const t = zh();
+    const top = flowSelectionHeading(DRAFT, { kind: 'node', id: 'manager_review' }, undefined, t);
+    expect(top).toMatchObject({ title: '经理审核', source: 'Manager review' });
+    render(<FlowSelectionTitle heading={top} />);
+    expect(screen.getByText('经理审核')).toBeInTheDocument();
+    expect(screen.getByTestId('flow-selection-source').textContent).toContain('Manager review');
+    // A decision node has no key: authored title, no source line.
+    const decision = flowSelectionHeading(DRAFT, { kind: 'node', id: 'big' }, undefined, t);
+    expect(decision.title).toBe('Over 1M?');
+    expect(decision).not.toHaveProperty('source');
+    // No translations: exactly as before.
+    expect(flowSelectionHeading(DRAFT, { kind: 'node', id: 'manager_review' })).not.toHaveProperty('source');
+    expect(flowSelectionHeading(DRAFT, { kind: 'node', id: 'manager_review' }).title).toBe('Manager review');
   });
 });

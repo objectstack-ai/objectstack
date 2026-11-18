@@ -566,6 +566,7 @@ const zh = {
         '此视图已分组，但其数据源未实现 queryGroupHeaders，因此无法统计分组。移除分组即可显示记录。',
       needsWholeRows:
         '分组需要全部记录，但此表格只收到其中一页，因此无法统计分组。请传入全部记录，或让表格从实现了 queryGroupHeaders 的数据源获取记录。',
+      draftOnly: '未按 {{fields}} 分组：它仅存在于草稿中，发布后才生效。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -961,6 +962,7 @@ const zh = {
     removeGroup: '删除',
     groupingUnstoredNotice: '无法按 {{fields}} 分组：它的值在显示时计算，并未存储。列表已暂不按它分组显示。',
     groupingUnstoredRemove: '从分组中移除',
+    draftOnlyQueryDropped: '未按 {{fields}} 筛选或排序：它仅存在于草稿中，发布后才生效。',
     inlineEditShort: '行内编辑',
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
   },
@@ -1606,6 +1608,9 @@ const zh = {
   dashboard: {
     total: '总计',
     noDataSourceFor: '没有可用的数据源：',
+    drillTooMany: '与该值关联的记录过多，无法在此列出。请缩小仪表盘筛选范围后重试。',
+    drillUnavailable: '无法在此列出该值对应的记录。',
+    drillFailed: '无法加载该值对应的记录，请稍后重试。',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
@@ -2506,7 +2511,7 @@ const zh = {
       unavailableRetry: '重试',
       unavailableHome: '返回首页',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手对话',
         resize: '调整对话宽度',
         collapse: '收起对话',
@@ -2643,7 +2648,7 @@ const zh = {
       expandToPage: '整页打开',
       openAsPage: '整页打开',
       objectNotFound: '未找到对象',
-      objectNotFoundDescription: '对象"{{objectName}}"在当前配置中不存在。',
+      objectNotFoundDescription: '对象"{{objectName}}"不存在，或者您无权访问它。',
       objectNotFoundHint: '请检查您的应用导航设置或从侧边栏选择其他对象。',
       objectPackageDisabled: '对象“{{objectName}}”所属的软件包已被禁用，因此当前不提供该对象。',
       filterOrGroupNotEditable: '该筛选条件在其他条件之外还含有一个「或」分组，筛选编辑器无法显示这种结构，因此此处只读。视图仍会应用它。',
@@ -3499,7 +3504,6 @@ const zh = {
   },
   empty: {
     objectNotFound: '未找到对象',
-    objectNotFoundDescription: '对象 “{{name}}” 的定义不存在。请检查配置或返回选择有效的对象。',
     interfacePageSourceMissing: '此界面页引用了 “{{name}}”，但该来源不可用。',
     recordNotFound: '未找到记录',
     recordNotFoundDescription: '您查找的记录不存在、已被删除，或您没有访问权限。',
@@ -3699,7 +3703,7 @@ const zh = {
       securityBlockTitle: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_one: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
       securityBlockTitle_other: '发布会被拒绝 —— 有 {{count}} 项需要先做出决定',
-      securityBlockWhere: '请在对象的“设置 → 记录共享模型”中修改后重新发布。',
+      securityBlockWhere: '请在对象的“设置 → 谁能看到哪些记录”中修改后重新发布。',
       flowChecksTitle: '发布前请先看 —— 发布检查会提出以下几点',
       securityRule: {
         owdUnset: '未声明记录共享模型（sharingModel）。运行时会按 private 处理，但这个基线必须是明确做出的决定。',

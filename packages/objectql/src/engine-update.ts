@@ -57,6 +57,7 @@ import { stripSearchCompanion } from './search-companion.js';
 import { declaredOptionLabels } from './formula-option-labels.js';
 import { ValidationError, coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFields, normalizeNumericStringValues, validateRecordInScope } from './validation/record-validator.js';
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, hasReadonlyWhenInPayload, needsPriorRecord, stripReadonlyFields, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti } from './validation/rule-validator.js';
+import type { ReferentialClearExemption } from './validation/rule-validator.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
@@ -72,7 +73,8 @@ import {
   stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, writeFailureLogMeta,
   callerInputRefusalLogMeta,
 } from './engine-top-level.js';
-import type { OperationContext, StoredExpressionServing } from './engine-top-level.js';
+import type { OperationContext, ReferentialClearOption, StoredExpressionServing } from './engine-top-level.js';
+import { REFERENTIAL_CLEAR_OPTION } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
 
@@ -276,6 +278,27 @@ export class UpdateFacet {
      const suppliedValues: Readonly<Record<string, unknown>> = {
        ...((opCtx.data ?? {}) as Record<string, unknown>),
      };
+
+     // The engine's referential write to one lookup — the `set_null` delete
+     // walk's clear (`cascadeDeleteRelations`) or the recycle-bin restore's
+     // re-link and its undo (ADR-0148 D2): the one key the read-only strips
+     // below leave to the engine, at the value this write received — see
+     // `ReferentialClearExemption`. Read off the engine's module-private option
+     // only, never off the context: a caller (or
+     // a hook's `ctx.api` write, which inherits the cleanup context) carrying
+     // `__referentialFieldClear` gets nothing here. And only on the by-id write
+     // of the row and field the writer named, so the option forwarded into any
+     // other write exempts nothing there.
+     const referentialClearOption = (options as Record<symbol, unknown> | undefined)?.[REFERENTIAL_CLEAR_OPTION] as
+       ReferentialClearOption | undefined;
+     const referentialClear: ReferentialClearExemption | undefined =
+       referentialClearOption !== undefined
+       && id !== undefined && id !== null
+       && referentialClearOption.object === object
+       && referentialClearOption.id === String(id)
+       && Object.prototype.hasOwnProperty.call(suppliedValues, referentialClearOption.field)
+         ? { field: referentialClearOption.field, value: suppliedValues[referentialClearOption.field] }
+         : undefined;
 
      // [#3407] Structured strip observability. The readonly/readonlyWhen strips
      // below — and, since #6437, the primary-key strip at each branch's head —
@@ -575,9 +598,10 @@ export class UpdateFacet {
            delete suppliedDataOnly.id;
            // No logger, deliberately: this pass is SILENT by construction. The
            // strip below owns every word said about these keys.
+           // The walk's referential clear is stored, so its hooks see it.
            const hidden = stripReadonlyFields(
              readonlyUpdateSubject as any, preHookPayload, suppliedDataOnly, undefined,
-             { preserveAudit: opCtx.context?.preserveAudit === true },
+             { preserveAudit: opCtx.context?.preserveAudit === true, referentialClear },
            ) as Record<string, unknown>;
            if (hidden !== preHookPayload) {
              readonlyHiddenFromHooks = {};
@@ -827,7 +851,7 @@ export class UpdateFacet {
            // Scope: the BY-ID branch only. A `multi: true` predicate update
            // that matches zero rows is legitimately "0 rows affected", not a
            // missing record — same line both siblings draw.
-           if (!priorRecord) throw recordNotFoundError(object, id);
+           if (!priorRecord) throw recordNotFoundError(object, id, opCtx.context);
            // Never fabricate: a row that is not there leaves `previous`
            // UNBOUND rather than `{}`/`null`, so a condition reading it
            // faults loudly instead of answering for a record nobody read
@@ -1375,13 +1399,13 @@ export class UpdateFacet {
                // [#24822] ...with the wall's flag read once above, so the views
                // these consumers read agree with the strip below about
                // `organization_id`.
-               const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys, wallJudgesOrganization };
+               const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys, wallJudgesOrganization, referentialClear };
                const landing = wantsParentBinding
                    ? await this.settleMasterDetailLanding({
                        schema: updateSchema, data: preRoWhen, supplied: judgedSupplied,
                        staticStrip,
                        resolve: (view) => this.resolveMasterDetailParent(updateSchema, view, priorRecord, opCtx.context),
-                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: judgedSupplied, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhen, judgedSupplied, staticStrip)) }) as Record<string, unknown>,
+                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: judgedSupplied, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhen, judgedSupplied, staticStrip)), referentialClear }) as Record<string, unknown>,
                      })
                    : undefined;
                const roWhenParent = landing?.header;
@@ -1433,7 +1457,7 @@ export class UpdateFacet {
                // so a value forged for a static `readonly` field (stripped
                // below) cannot unlock a field whose predicate reads it.
                const roWhenSubject = landing?.subject ?? preRoWhen;
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? judgedSupplied, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubject, judgedSupplied, staticStrip)) }) as any;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? judgedSupplied, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubject, judgedSupplied, staticStrip)), referentialClear }) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -1474,7 +1498,7 @@ export class UpdateFacet {
                    // taken with the row's own organization kept; it is not
                    // reported, and not refused under `strictReadonlyWrites`,
                    // which refuses exactly what this strip takes.
-                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, judgedSupplied, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
+                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, judgedSupplied, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys, referentialClear }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // Both strips are done: wrap and judge what is left.

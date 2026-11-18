@@ -33,7 +33,7 @@
  * objectui bumps its `@objectstack/spec` dependency (cross-repo spec skew).
  */
 
-import { useContext, useEffect, useMemo, useState, type ReactElement, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ReactElement, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 // `useDatasetDimensionMeta` is the analytics label net's SHARED React glue
 // (objectui#4389): the locale-free metadata read this widget and the dataset
 // report block both take, lifted out of the two longhand copies PR #4388 left
@@ -56,6 +56,9 @@ import {
   formatDimensionValue,
   buildDatasetFieldHelpers,
   buildDatasetDrillFilter,
+  datasetDrillHasRelationshipPath,
+  datasetDrillPathsResolvable,
+  resolveDatasetDrillFilter,
   FilterOperatorError,
   // The pivot key encoders now live in `@object-ui/core` so this widget and the
   // report renderer's cross-tab share ONE implementation — each having written
@@ -105,7 +108,7 @@ import {
   metricTileValueClass,
   metricTileValueTitle,
 } from './metricTile';
-import { DrillDownDrawer } from './DrillDownDrawer';
+import { DrillDownDrawer, type DrillDownNotice } from './DrillDownDrawer';
 import { DatasetQueryCoalescerContext } from './datasetQueryBatch';
 import { metricDrillFilter, readMeasureDrillScope } from './metricDrill';
 import { sharedMeasureDrillScope, scopeDrillFilter } from './measureDrill';
@@ -915,7 +918,13 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // a re-read of that same query in flight (objectui#10815, see the effect).
   const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Array<Record<string, unknown>>; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; drillScopes?: unknown; error?: string; forbidden?: boolean; signature?: string; refreshing?: boolean }>({ status: 'idle', rows: [] });
   // Drill-through (ADR-0021 D2): the clicked bucket's record-list filter + title.
-  const [drill, setDrill] = useState<{ filter: Record<string, unknown>; title: string } | null>(null);
+  // A bucket on a relationship-path dimension opens the drawer on a `notice`
+  // while its related ids are read, and keeps one when they cannot be
+  // (`resolveDatasetDrillFilter`); `filter` is set once there is a list to read.
+  const [drill, setDrill] = useState<{ filter?: Record<string, unknown>; title: string; notice?: DrillDownNotice } | null>(null);
+  // The click a pending relationship resolution answers: a later click, or the
+  // drawer closing, makes an earlier answer stale.
+  const drillRequest = useRef(0);
   // ── The flat table's client-side sort (objectui#5827) ────────────────────
   // `null` = the dataset's own order. Declared up here with the other hooks
   // because the table branch sits AFTER this component's early returns, where a
@@ -1334,7 +1343,11 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   const drillDims = dimensionFields ? dimensions.filter((d) => d in dimensionFields) : [];
   // objectstack-ai/objectstack#1752: a date-only widget has no equality drill dim but still drills by the
   // server's per-row date RANGE, so the presence of ranges makes it drillable too.
-  const canDrill = !!drillObject && (drillDims.length > 0 || !!drillRanges?.length);
+  // A relationship path deeper than ADR-0071's hop limit offers no drill at all:
+  // dropping its condition would list a superset of what the bucket counted.
+  const canDrill = !!drillObject
+    && (drillDims.length > 0 || !!drillRanges?.length)
+    && datasetDrillPathsResolvable(drillDims, dimensionFields);
   // objectstack-ai/objectstack#30615 — a drill stands for the MEASURES the
   // clicked mark or cell shows: a chart mark its series' measure, a cross-tab
   // cell its column's, a table row every measure it holds. It opens only when
@@ -1343,6 +1356,38 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     if (!drillObject) return;
     const scope = sharedMeasureDrillScope(state, measures);
     if (!scope) return;
+    const drillTitle = title || String(widget?.title ?? '');
+    const request = ++drillRequest.current;
+    const scopedFilter = scopeDrillFilter(runtimeFilter, scope);
+    // A dimension whose field is a `relationship.field` path is filtered on the
+    // relationship field `$in` the related ids matching the clicked value, read
+    // through this widget's data source first: the data API refuses the dotted
+    // path itself. The drawer opens at once on a notice and lists once the
+    // ids are in; a path it cannot resolve, or too many ids, keeps a notice.
+    if (datasetDrillHasRelationshipPath(drillDims, dimensionFields)) {
+      setDrill({ title: drillTitle, notice: 'resolving' });
+      resolveDatasetDrillFilter({
+        object: drillObject,
+        rawRow: drillRawRows?.[index],
+        drillDims,
+        dimensionFields: dimensionFields ?? {},
+        runtimeFilter: scopedFilter,
+        rawRanges: drillRanges?.[index],
+        dataSource,
+      }).then(
+        (resolution) => {
+          if (drillRequest.current !== request) return;
+          if (resolution.status === 'resolved') setDrill({ filter: resolution.filter, title: drillTitle });
+          else setDrill({ title: drillTitle, notice: resolution.status === 'too-many' ? 'too-many' : 'unavailable' });
+        },
+        (error: unknown) => {
+          if (drillRequest.current !== request) return;
+          console.warn('[DatasetWidget] drill-down could not resolve its relationship dimension:', error);
+          setDrill({ title: drillTitle, notice: 'failed' });
+        },
+      );
+      return;
+    }
     // objectui#10789 — composing the widget's filter with the clicked bucket
     // lowers both through the throwing converter form. A widget filter the
     // dataset query carried to the server can still be one this layer refuses
@@ -1354,21 +1399,26 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     let merged: Record<string, unknown>;
     try {
       // The clicked bucket AND the widget filter AND the measure's scope.
-      merged = buildDrillFilter(drillRawRows?.[index], drillDims, dimensionFields ?? {}, scopeDrillFilter(runtimeFilter, scope), drillRanges?.[index]);
+      merged = buildDrillFilter(drillRawRows?.[index], drillDims, dimensionFields ?? {}, scopedFilter, drillRanges?.[index]);
     } catch (error) {
       if (!(error instanceof FilterOperatorError)) throw error;
       console.warn(`[DatasetWidget] drill-down refused — the drilled list cannot be scoped: ${error.message}`);
       return;
     }
-    setDrill({ filter: merged, title: title || String(widget?.title ?? '') });
+    setDrill({ filter: merged, title: drillTitle });
+  };
+  const closeDrill = () => {
+    drillRequest.current += 1;
+    setDrill(null);
   };
   const drillDrawer = drill && drillObject ? (
     <DrillDownDrawer
       open
-      onClose={() => setDrill(null)}
+      onClose={closeDrill}
       title={drill.title || String(widget?.title ?? tt('dashboard.details', 'Details'))}
       objectName={drillObject}
       filter={drill.filter}
+      notice={drill.notice}
       dataSource={dataSource}
     />
   ) : null;

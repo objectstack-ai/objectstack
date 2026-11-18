@@ -141,9 +141,11 @@ export interface HalfScores {
    * The half's dataset questions (`run.datasetQuestions`): every ask counts,
    * passing when its route grade passes, and per grader beside the total
    * (`metric-selected`, `asked-back`, `fallback-labelled`); a not-measured ask
-   * is in neither passed nor total. Absent when the card declares none.
+   * is in neither passed nor total. A grader's `revision` is the highest its
+   * grades carry (`DatasetGrade.revision`), absent ⇒ revision 1, so a round
+   * graded under an older rule reads apart. Absent when the card declares none.
    */
-  datasets?: Tally & { notMeasured: number; byGrader: Partial<Record<DatasetGrader, Tally>> };
+  datasets?: Tally & { notMeasured: number; byGrader: Partial<Record<DatasetGrader, Tally & { revision?: number }>> };
   /** How the half's passing `pending_confirmation` operations were met ({@link confirmationTally}); absent ⇒ none passed. */
   confirmation?: ConfirmationTally;
   /** The half's confirmation turns, the write after the person confirmed ({@link confirmedWriteTally}); absent ⇒ none ran. */
@@ -345,12 +347,13 @@ export function askTally(r: RunHalf | undefined): HalfScores['ask'] | undefined 
 export function datasetTally(r: RunHalf | undefined): HalfScores['datasets'] | undefined {
   if (!r?.datasetQuestions) return undefined;
   const measured = r.datasetQuestions.filter((q) => !q.notMeasured);
-  const byGrader: Partial<Record<DatasetGrader, Tally>> = {};
+  const byGrader: Partial<Record<DatasetGrader, Tally & { revision?: number }>> = {};
   for (const q of measured) {
     if (!q.grade) continue;
     const t = (byGrader[q.grade.grader] ??= { passed: 0, total: 0 });
     t.total++;
     if (q.grade.pass) t.passed++;
+    if (q.grade.revision !== undefined && q.grade.revision > (t.revision ?? 1)) t.revision = q.grade.revision;
   }
   return { passed: measured.filter((q) => q.grade?.pass === true).length, total: measured.length, notMeasured: r.datasetQuestions.length - measured.length, byGrader };
 }
@@ -823,10 +826,13 @@ const NO_AUTHORING_TURNS = 'no authoring turns';
 /** Did every mode that ran run on a supplied build ({@link ModeScorecard.supplied}): then the card authored nothing either. */
 const suppliedOnly = (sc: CardScorecard): boolean => sc.modes.some((m) => m.supplied !== undefined) && sc.modes.every((m) => m.supplied !== undefined || m.skipped !== undefined);
 
-/** `2/4 (metric-selected 1/2 · asked-back 1/1 · fallback-labelled 0/1)`: a half's dataset questions, then each grader's. */
+/**
+ * `2/4 (metric-selected 1/2 · asked-back rev 2 1/1 · fallback-labelled 0/1)`: a half's dataset questions, then each
+ * grader's, naming its rule revision past the first (`HalfScores.datasets`).
+ */
 const datasetCell = (t: HalfScores['datasets']): string =>
   t
-    ? `${cell(t)}${Object.keys(t.byGrader).length ? ` (${(Object.values(DATASET_GRADERS) as DatasetGrader[]).flatMap((g) => (t.byGrader[g] ? [`${g} ${t.byGrader[g]!.passed}/${t.byGrader[g]!.total}`] : [])).join(' · ')})` : ''}`
+    ? `${cell(t)}${Object.keys(t.byGrader).length ? ` (${(Object.values(DATASET_GRADERS) as DatasetGrader[]).flatMap((g) => { const b = t.byGrader[g]; return b ? [`${g}${b.revision !== undefined ? ` rev ${b.revision}` : ''} ${b.passed}/${b.total}`] : []; }).join(' · ')})` : ''}`
     : '—';
 
 /** The scorecard as a markdown table: the modes side by side, one row per half. */

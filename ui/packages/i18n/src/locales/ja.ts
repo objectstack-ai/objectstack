@@ -583,6 +583,7 @@ const ja = {
         "このビューはグループ化されていますが、データソースが queryGroupHeaders を実装していないため、グループの件数を数えられません。レコードを表示するにはグループ化を解除してください。",
       needsWholeRows:
         "グループ化にはすべてのレコードが必要ですが、このグリッドにはその一部のページしか渡されていないため、グループの件数を数えられません。すべてのレコードを渡すか、queryGroupHeaders を実装したデータソースからグリッドに読み込ませてください。",
+      draftOnly: "{{fields}} ではグループ化されていません：公開するまで下書きにのみ存在します。",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -934,6 +935,7 @@ const ja = {
     removeGroup: "削除",
     groupingUnstoredNotice: "{{fields}} ではこの一覧をグループ化できません。値は表示時に計算され、保存されていません。このグループ化を除いて一覧を表示しています。",
     groupingUnstoredRemove: "グループ化から削除",
+    draftOnlyQueryDropped: "{{fields}} での絞り込みと並べ替えは行われていません。下書きにのみ存在し、公開後に有効になります。",
     inlineEditShort: "インライン編集",
     inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
   },
@@ -1590,6 +1592,9 @@ const ja = {
     },
     total: "合計",
     noDataSourceFor: "データソースが利用できません：",
+    drillTooMany: 'この値に関連するレコードが多すぎるため、ここには一覧表示できません。ダッシュボードのフィルターを絞り込んでから再度お試しください。',
+    drillUnavailable: 'この値に対応するレコードはここでは一覧表示できません。',
+    drillFailed: 'この値に対応するレコードを読み込めませんでした。しばらくしてから再度お試しください。',
     config: {
       breadcrumb: {
         dashboard: "ダッシュボード",
@@ -2224,7 +2229,7 @@ const ja = {
       unavailableRetry: "再試行",
       unavailableHome: "ホームに戻る",
       dock: {
-        title: "アシスタント",
+        title: "AI アシスタント",
         description: "AI アシスタントのチャット",
         resize: "チャットのサイズを変更",
         collapse: "チャットを折りたたむ",
@@ -2552,7 +2557,7 @@ const ja = {
       expandToPage: "フルページで開く",
       openAsPage: "フルページで開く",
       objectNotFound: "オブジェクトが見つかりません",
-      objectNotFoundDescription: "オブジェクト「{{objectName}}」は現在の設定に存在しません。",
+      objectNotFoundDescription: "オブジェクト「{{objectName}}」は存在しないか、アクセスする権限がありません。",
       objectNotFoundHint: "アプリのナビゲーション設定を確認するか、サイドバーから別のオブジェクトを選択してください。",
       objectPackageDisabled: "オブジェクト「{{objectName}}」が属するパッケージは無効になっているため、提供されていません。",
       filterOrGroupNotEditable: "このフィルターには他の条件と並んで OR グループが含まれており、フィルターエディターでは表示できないため、ここでは読み取り専用です。ビューには引き続き適用されます。",
@@ -3420,7 +3425,6 @@ const ja = {
   },
   empty: {
     objectNotFound: "オブジェクトが見つかりません",
-    objectNotFoundDescription: "オブジェクト「{{name}}」の定義が見つかりません。設定を確認するか、有効なオブジェクトを選択してください。",
     interfacePageSourceMissing: "このインターフェースページは「{{name}}」を参照していますが、利用できません。",
     pageNotFound: "ページが見つかりません",
     pageNotFoundDescription: "ページ「{{name}}」が見つかりません。削除または名前変更された可能性があります。",
@@ -4721,7 +4725,7 @@ const ja = {
       securityBlockTitle: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_one: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
       securityBlockTitle_other: '公開は拒否されます — {{count}} 件の項目に先に決定が必要です',
-      securityBlockWhere: 'オブジェクトの「設定 → レコード共有」で修正してから、もう一度公開してください。',
+      securityBlockWhere: 'オブジェクトの「設定 → 誰がどのレコードを見られるか」で修正してから、もう一度公開してください。',
       flowChecksTitle: '公開する前に確認してください — 公開チェックが次の点を指摘します',
       securityRule: {
         owdUnset: 'レコード共有のベースライン（sharingModel）が宣言されていません。ランタイムは private として扱いますが、ベースラインは明示的に決める必要があります。',

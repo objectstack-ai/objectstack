@@ -593,6 +593,7 @@ const pt = {
         "Esta visão está agrupada, mas sua fonte de dados não implementa queryGroupHeaders, portanto os grupos não podem ser contados. Remova o agrupamento para mostrar os registros.",
       needsWholeRows:
         "O agrupamento precisa de todos os registros, mas esta grade recebeu apenas uma página deles, portanto os grupos não podem ser contados. Entregue todos os registros ou deixe a grade buscá-los em uma fonte de dados que implemente queryGroupHeaders.",
+      draftOnly: "Não agrupado por {{fields}}: existe apenas no rascunho até você publicar.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -959,6 +960,7 @@ const pt = {
     removeGroup: "Remover",
     groupingUnstoredNotice: "Esta lista não pode ser agrupada por {{fields}}: o valor é calculado ao ser exibido e não é armazenado. A lista é exibida sem esse agrupamento.",
     groupingUnstoredRemove: "Remover do agrupamento",
+    draftOnlyQueryDropped: "Sem filtrar nem ordenar por {{fields}}: existe apenas no rascunho até você publicar.",
     inlineEditShort: "Edição em linha",
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
   },
@@ -1639,6 +1641,9 @@ const pt = {
     },
     total: "Total",
     noDataSourceFor: "Sem fonte de dados para",
+    drillTooMany: 'Há registros demais relacionados a este valor para listá-los aqui. Restrinja os filtros do painel e tente novamente.',
+    drillUnavailable: 'Os registros deste valor não podem ser listados aqui.',
+    drillFailed: 'Não foi possível carregar os registros deste valor. Tente novamente mais tarde.',
     config: {
       breadcrumb: {
         dashboard: "Painel",
@@ -2283,7 +2288,7 @@ const pt = {
       unavailableRetry: "Tentar novamente",
       unavailableHome: "Voltar ao início",
       dock: {
-        title: "Assistente",
+        title: "Assistente de IA",
         description: "Conversa com o assistente de IA",
         resize: "Redimensionar a conversa",
         collapse: "Recolher a conversa",
@@ -2613,7 +2618,7 @@ const pt = {
       expandToPage: "Abrir como página inteira",
       openAsPage: "Abrir como página inteira",
       objectNotFound: "Objeto não encontrado",
-      objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe na configuração atual.",
+      objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe ou você não tem acesso a ele.",
       objectNotFoundHint: "Verifique as configurações de navegação do seu aplicativo ou selecione um objeto diferente na barra lateral.",
       objectPackageDisabled: "O objeto \"{{objectName}}\" pertence a um pacote desativado e, por isso, não está sendo servido.",
       filterOrGroupNotEditable: "Este filtro tem um grupo OU ao lado de outras condições, que o editor de filtros não consegue exibir, por isso aqui é somente leitura. A visão continua aplicando o filtro.",
@@ -3489,7 +3494,6 @@ const pt = {
   },
   empty: {
     objectNotFound: "Objeto não encontrado",
-    objectNotFoundDescription: "A definição do objeto \"{{name}}\" está ausente. Verifique sua configuração ou navegue de volta.",
     interfacePageSourceMissing: "Esta página de interface faz referência a \"{{name}}\", que não está disponível.",
     pageNotFound: "Página não encontrada",
     pageNotFoundDescription: "A página \"{{name}}\" não foi encontrada. Ela pode ter sido removida ou renomeada.",
@@ -4856,7 +4860,7 @@ const pt = {
       securityBlockTitle_one: 'A publicação será recusada — {{count}} item precisa de uma decisão primeiro',
       securityBlockTitle_many: 'A publicação será recusada — {{count}} de itens precisam de uma decisão primeiro',
       securityBlockTitle_other: 'A publicação será recusada — {{count}} itens precisam de uma decisão primeiro',
-      securityBlockWhere: 'Corrija no objeto em Configurações → Compartilhamento de registros e publique novamente.',
+      securityBlockWhere: 'Corrija no objeto em Configurações → Quem pode ver quais registros e publique novamente.',
       flowChecksTitle: 'Antes de publicar: a verificação de publicação vai apontar o seguinte',
       securityRule: {
         owdUnset: 'Nenhuma base de compartilhamento de registros (sharingModel) foi declarada. O runtime usa private, mas a base precisa ser uma decisão explícita.',

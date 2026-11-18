@@ -164,7 +164,7 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
     {
       label: 'arms: the with-skill project holds the bundle without its evals/',
       run: () => {
-        const d = prepareArmWorkdir('with-skill', 'demo-skill', fixtureRoot, scratch);
+        const d = prepareArmWorkdir('with-skill', 'demo-skill', fixtureRoot);
         const skill = join(d.cwd, '.claude', 'skills', 'demo-skill');
         const ok = existsSync(join(skill, 'SKILL.md')) && existsSync(join(skill, 'rules', 'filters.md')) && !existsSync(join(skill, 'evals'));
         rmSync(d.root, { recursive: true, force: true });
@@ -174,7 +174,7 @@ export function runSelfTest(deps: SelfTestDeps): SelfTestResult {
     {
       label: 'arms: the no-skill project holds no skill',
       run: () => {
-        const d = prepareArmWorkdir('no-skill', 'demo-skill', fixtureRoot, scratch);
+        const d = prepareArmWorkdir('no-skill', 'demo-skill', fixtureRoot);
         const ok = !existsSync(join(d.cwd, '.claude'));
         rmSync(d.root, { recursive: true, force: true });
         return ok ? true : 'the no-skill project has a .claude/ directory';

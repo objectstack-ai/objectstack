@@ -2078,7 +2078,7 @@ export function DraftChangesPanel({
             </ul>
             <p className="mt-1.5 text-[11px] text-amber-800/80 dark:text-amber-300/80">
               {t('preview.changes.securityBlockWhere', {
-                defaultValue: 'Fix it on the object under Settings → Record sharing, then publish again.',
+                defaultValue: 'Fix it on the object under Settings → Who can see which records, then publish again.',
               })}
             </p>
           </div>

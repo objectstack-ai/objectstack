@@ -598,6 +598,7 @@ const es = {
         "Esta vista está agrupada, pero su origen de datos no implementa queryGroupHeaders, por lo que no se pueden contar los grupos. Quite la agrupación para mostrar los registros.",
       needsWholeRows:
         "La agrupación necesita todos los registros, pero esta cuadrícula recibió solo una página de ellos, por lo que no se pueden contar los grupos. Entregue todos los registros o deje que la cuadrícula los obtenga de un origen de datos que implemente queryGroupHeaders.",
+      draftOnly: "No agrupado por {{fields}}: solo existe en el borrador hasta que publique.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -964,6 +965,7 @@ const es = {
     removeGroup: "Eliminar",
     groupingUnstoredNotice: "Esta lista no se puede agrupar por {{fields}}: su valor se calcula al mostrarse y no se almacena. La lista se muestra sin esa agrupación.",
     groupingUnstoredRemove: "Quitar de la agrupación",
+    draftOnlyQueryDropped: "Sin filtrar ni ordenar por {{fields}}: solo existe en el borrador hasta que publiques.",
     inlineEditShort: "Edición en línea",
     inlineEditLabel: "Editar registros en línea (haga clic en una celda para editar)",
   },
@@ -1644,6 +1646,9 @@ const es = {
     },
     total: "Total",
     noDataSourceFor: "Sin fuente de datos para",
+    drillTooMany: 'Hay demasiados registros relacionados con este valor para mostrarlos aquí. Acota los filtros del panel e inténtalo de nuevo.',
+    drillUnavailable: 'Los registros de este valor no se pueden mostrar desde aquí.',
+    drillFailed: 'No se pudieron cargar los registros de este valor. Inténtalo de nuevo más tarde.',
     config: {
       breadcrumb: {
         dashboard: "Panel de control",
@@ -2288,7 +2293,7 @@ const es = {
       unavailableRetry: "Reintentar",
       unavailableHome: "Volver al inicio",
       dock: {
-        title: "Asistente",
+        title: "Asistente de IA",
         description: "Chat con el asistente de IA",
         resize: "Redimensionar el chat",
         collapse: "Contraer el chat",
@@ -2618,7 +2623,7 @@ const es = {
       expandToPage: "Abrir como página completa",
       openAsPage: "Abrir como página completa",
       objectNotFound: "Objeto no encontrado",
-      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe en la configuración actual.",
+      objectNotFoundDescription: "El objeto \"{{objectName}}\" no existe o no tiene acceso a él.",
       objectNotFoundHint: "Verifique la configuración de navegación de su aplicación o seleccione un objeto diferente en la barra lateral.",
       objectPackageDisabled: "El objeto \"{{objectName}}\" pertenece a un paquete deshabilitado, por lo que no se está sirviendo.",
       filterOrGroupNotEditable: "Este filtro tiene un grupo O junto a otras condiciones, que el editor de filtros no puede mostrar, así que aquí es de solo lectura. La vista lo sigue aplicando.",
@@ -3494,7 +3499,6 @@ const es = {
   },
   empty: {
     objectNotFound: "Objeto no encontrado",
-    objectNotFoundDescription: "Falta la definición del objeto \"{{name}}\". Verifique su configuración o navegue hacia atrás.",
     interfacePageSourceMissing: "Esta página de interfaz hace referencia a \"{{name}}\", que no está disponible.",
     pageNotFound: "Página no encontrada",
     pageNotFoundDescription: "La página \"{{name}}\" no fue encontrada. Puede haber sido eliminada o renombrada.",
@@ -4861,7 +4865,7 @@ const es = {
       securityBlockTitle_one: 'La publicación será rechazada: {{count}} elemento necesita una decisión primero',
       securityBlockTitle_many: 'La publicación será rechazada: {{count}} de elementos necesitan una decisión primero',
       securityBlockTitle_other: 'La publicación será rechazada: {{count}} elementos necesitan una decisión primero',
-      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Uso compartido de registros y vuelva a publicar.',
+      securityBlockWhere: 'Corríjalo en el objeto en Configuración → Quién puede ver qué registros y vuelva a publicar.',
       flowChecksTitle: 'Antes de publicar: la comprobación de publicación señalará lo siguiente',
       securityRule: {
         owdUnset: 'No se ha declarado la base de uso compartido de registros (sharingModel). El entorno de ejecución usa private, pero la base debe ser una decisión explícita.',

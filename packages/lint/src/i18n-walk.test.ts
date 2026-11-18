@@ -82,6 +82,27 @@ describe('collectExpectedEntries — a hook\'s declared texts (#34374)', () => {
   });
 });
 
+describe('collectExpectedEntries — a named import mapping\'s label', () => {
+  const entries = collectExpectedEntries({
+    mappings: [
+      { name: 'lead_feed', label: 'Lead feed', targetObject: 'lead', fieldMapping: [{ source: 'Company', target: 'company' }] },
+      { name: 'unlabelled_feed', targetObject: 'lead', fieldMapping: [] },
+    ],
+  }, { warnedGroups: new Set() });
+
+  it('yields mappings.<mapping>.label with the authored label, from the mapping', () => {
+    const entry = entries.find((e) => e.path.join('.') === 'mappings.lead_feed.label');
+    expect(entry?.sourceValue).toBe('Lead feed');
+    expect(entry?.source).toBe('mapping');
+  });
+
+  it('keys nothing from the field mapping, and no authored text for a mapping with no label', () => {
+    const keys = entries.map((e) => e.path.join('.'));
+    expect(keys.filter((k) => k.startsWith('mappings.lead_feed.'))).toEqual(['mappings.lead_feed.label']);
+    expect(entries.find((e) => e.path.join('.') === 'mappings.unlabelled_feed.label')?.sourceValue).toBeUndefined();
+  });
+});
+
 describe('authorWarnedTranslationGroups on the shipped ledger', () => {
   // A browser reads no ledger file, so there the default leaves no group out.
   // That matches the CLI only while the ledger warns on no translation group;
@@ -220,5 +241,37 @@ describe('collectExpectedEntries — answer table column labels', () => {
       ['preflight', 'columns', 'rows', 'email'],
       ['preflight', 'columns', 'rows', 'error.message'],
     ]);
+  });
+});
+
+describe('collectExpectedEntries — an action\'s refusal catalogue (#34273)', () => {
+  const refusals = {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
+    STAGE_LOCKED: { message: 'Locked.', reasons: { closed: { message: 'A {{ stage }} deal is closed.' } }, params: ['stage'] },
+  };
+  const body = { language: 'js', source: "throw { code: 'NOT_DRAFT' };" };
+  const entries = collectExpectedEntries({
+    objects: [{
+      name: 'crm_invoice',
+      fields: {},
+      actions: [{ name: 'submit_signoff', label: 'Submit', type: 'script', body, refusals }],
+    }],
+    actions: [{ name: 'export_all', label: 'Export', type: 'script', body, refusals: { NOT_DRAFT: refusals.NOT_DRAFT } }],
+  }, { warnedGroups: new Set() });
+  const at = (path: string) => entries.find((e) => e.path.join('.') === path);
+
+  it('yields objects.<object>._actions.<action>.refusals.<CODE>.message with the declared sentence', () => {
+    expect(at('objects.crm_invoice._actions.submit_signoff.refusals.NOT_DRAFT.message')?.sourceValue)
+      .toBe('Only a draft invoice can be signed off.');
+  });
+
+  it('yields each declared reason under its code', () => {
+    expect(at('objects.crm_invoice._actions.submit_signoff.refusals.STAGE_LOCKED.reasons.closed.message')?.sourceValue)
+      .toBe('A {{ stage }} deal is closed.');
+  });
+
+  it('yields an object-less action\'s refusals under globalActions', () => {
+    expect(at('globalActions.export_all.refusals.NOT_DRAFT.message')?.sourceValue)
+      .toBe('Only a draft invoice can be signed off.');
   });
 });

@@ -354,6 +354,19 @@ export interface AppShellRuntimeConfig {
    * withdraws it. Read it through {@link getUpgradeUrl}.
    */
   upgradeUrl?: string;
+  /**
+   * The control plane's console home page (objectstack#34622): the absolute
+   * URL `RuntimeConfigPlugin` serves as the top-level `cloudHomeUrl` when the
+   * host declares one, absent otherwise. Same contract as `upgradeUrl`
+   * (maintainer ruling cloud#1850 option A's shape).
+   *
+   * Taken VERBATIM: the producer already refuses a value that is not an
+   * absolute http(s) URL, and nothing here composes, trims or defaults one.
+   * Re-derived from each payload in full: absent, empty and non-string all
+   * leave it absent, and a later payload without the key withdraws it. Read
+   * it through {@link getCloudHomeUrl}.
+   */
+  cloudHomeUrl?: string;
 }
 
 const defaults: AppShellRuntimeConfig = {
@@ -486,6 +499,11 @@ export async function initRuntimeConfig(baseUrl: string = ''): Promise<void> {
       upgradeUrl:
         typeof body.upgradeUrl === 'string' && body.upgradeUrl.trim()
           ? body.upgradeUrl
+          : undefined,
+      // objectstack#34622 — the declared console home page, verbatim, or none.
+      cloudHomeUrl:
+        typeof body.cloudHomeUrl === 'string' && body.cloudHomeUrl.trim()
+          ? body.cloudHomeUrl
           : undefined,
       defaultOrgId: body.defaultOrgId ?? current.defaultOrgId ?? null,
       defaultEnvironmentId: body.defaultEnvironmentId ?? current.defaultEnvironmentId ?? null,
@@ -651,6 +669,20 @@ export function getCloudBase(): string {
  */
 export function getUpgradeUrl(): string | undefined {
   return current.upgradeUrl;
+}
+
+/**
+ * The control plane's declared console home page, or `undefined` when this
+ * runtime declares none (objectstack#34622,
+ * {@link AppShellRuntimeConfig.cloudHomeUrl}).
+ *
+ * The marketplace's "Open on Cloud" link opens this when it is present and
+ * keeps its `cloudConsoleUrl()` target, with its show/hide rule, when it is
+ * absent. ⛔ Never compose a substitute from {@link getCloudBase}: the path
+ * below the origin belongs to the control plane.
+ */
+export function getCloudHomeUrl(): string | undefined {
+  return current.cloudHomeUrl;
 }
 
 /**
