@@ -2,12 +2,11 @@
 //
 // `os verify --flow` takes the triggering record (`--flow-record`) and the
 // start's input (`--flow-input`) as JSON objects, judged before anything loads
-// or boots. This pins the exported decision, `parseFlowJsonFlag`, the way this
-// package pins `resolveVerifyMultiTenant`: the command body hands each flag to
-// it once, before the author-time stage.
+// or boots. This pins the decision, `parseFlowJsonFlag`, on its own: the
+// command body hands each flag to it once, before the author-time stage.
 
 import { describe, it, expect } from 'vitest';
-import { parseFlowJsonFlag } from './verify.js';
+import { parseFlowJsonFlag } from '../utils/flow-json-flag.js';
 
 describe('parseFlowJsonFlag', () => {
   it('an absent flag is no value', () => {

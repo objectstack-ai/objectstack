@@ -33,6 +33,10 @@ import { bootStack, type VerifyStack } from './harness.js';
 import { runFlowProof, formatFlowRunReport } from './flow-run.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
 
+// Paid at collection: the harness's boot loads these lazily (check:test-source-alias).
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
+
 await warmUpBoot({ automation: true }, { requires: ['automation', 'triggers'] });
 
 // Booting the full in-process stack runs well past vitest's 5s default.
