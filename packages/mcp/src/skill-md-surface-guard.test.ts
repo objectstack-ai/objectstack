@@ -207,3 +207,29 @@ describe('SKILL.md ↔ native tool surface drift guard', () => {
     expect(taughtButUnregistered, `the Build section teaches a tool this grant does not register: ${taughtButUnregistered.join(', ')}`).toEqual([]);
   });
 });
+
+/**
+ * [#34766] The open draft door's read tools, named as the runtime registry
+ * names them (`OPEN_AUTHORING_READ_TOOL_NAMES` in
+ * `@objectstack/runtime`, `src/domains/mcp-authoring.ts`; this package cannot
+ * import it). The SDK refuses a second registration under a name already on
+ * the server by throwing, so a collision with any native tool would fail
+ * every `metadata:write` request the open runtime serves.
+ */
+const OPEN_DRAFT_DOOR_READ_TOOLS = ['list_metadata_items', 'get_metadata_item', 'list_drafts'];
+
+describe('[#34766] the open draft door\'s read tools collide with no native tool', () => {
+  it('registers beside the full native surface under every scope', async () => {
+    const native = await listRegisteredToolNames({ grantedScopes: EVERY_SCOPE });
+    for (const name of OPEN_DRAFT_DOOR_READ_TOOLS) expect(native, name).not.toContain(name);
+
+    const registry: McpAuthoringToolRegistry = {
+      getAll: () => OPEN_DRAFT_DOOR_READ_TOOLS.map((name) => ({ name, description: name, parameters: { type: 'object', properties: {} } })),
+      async execute(toolCall): Promise<ToolExecutionResult> {
+        return { type: 'tool-result', toolCallId: toolCall.toolCallId, toolName: toolCall.toolName, output: { type: 'text', value: '' } } as ToolExecutionResult;
+      },
+    };
+    const withDoor = await listRegisteredToolNames({ grantedScopes: EVERY_SCOPE, registry });
+    expect(withDoor.sort()).toEqual([...native, ...OPEN_DRAFT_DOOR_READ_TOOLS].sort());
+  });
+});

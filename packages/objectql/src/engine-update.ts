@@ -170,7 +170,7 @@ export class UpdateFacet {
      // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
      // carve an append-only system ledger out of the transaction. Before any
      // hook, default or validation runs, so a refusal costs nothing.
-     this.enforceTransactionOrigin(object, driver, 'update');
+     this.enforceTransactionOrigin(object, driver, 'update', options?.context?.transaction);
 
      // Fold the `filter` alias into `where` FIRST (#4346): everything below —
      // token resolution, the by-id fast path, the #2982 AST seeding — reads

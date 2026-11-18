@@ -27,7 +27,7 @@
  *
  * CONTROLS, which hold before and after the change: the groups keep the order
  * and counts of their stored keys (the headings are drawn, not sorted), the
- * empty group keeps its "(empty)" heading, and a text key reads as itself.
+ * empty group keeps its "Empty" heading, and a text key reads as itself.
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
@@ -269,7 +269,7 @@ describe.each<Source>(['server', 'client'])('a %s-grouped grid heads a date grou
     it('each heading reads the Period Start cell under it, never the stored key', async () => {
       const ds = renderGrouped(source, [{ field: 'period_start', order: 'desc' }], { date: format });
       const bands = await settledBands(ds, 'Period Start', 5);
-      for (const band of bands.filter((b) => b.heading !== '(empty)')) {
+      for (const band of bands.filter((b) => b.heading !== 'Empty')) {
         expect(band.heading).toBe(band.cell);
         expect(DAY_KEYS_DESC).not.toContain(band.heading);
       }
@@ -280,7 +280,7 @@ describe.each<Source>(['server', 'client'])('a %s-grouped grid heads a date grou
     it('each heading reads the Closed At cell under it, never the stored instant', async () => {
       const ds = renderGrouped(source, [{ field: 'closed_at', order: 'desc' }], { datetime: format });
       const bands = await settledBands(ds, 'Closed At', 5);
-      for (const band of bands.filter((b) => b.heading !== '(empty)')) {
+      for (const band of bands.filter((b) => b.heading !== 'Empty')) {
         expect(band.heading).toBe(band.cell);
         expect(band.heading).not.toMatch(/^\d{4}-\d{2}-\d{2}T/);
       }
@@ -297,7 +297,7 @@ describe.each<Source>(['server', 'client'])('a %s-grouped grid heads a date grou
       ['0:2026-08-01', '1'],
       ['0:', '1'],
     ]);
-    expect(bands[4].heading).toBe('(empty)');
+    expect(bands[4].heading).toBe('Empty');
   });
 
   it('CONTROL — ascending order is the stored keys\' order too', async () => {
@@ -334,7 +334,7 @@ describe('two-level grouping, date first (objectui#13234)', () => {
       '0:2026-08-01',
       '0:',
     ]);
-    for (const band of bands.filter((b) => b.heading !== '(empty)')) {
+    for (const band of bands.filter((b) => b.heading !== 'Empty')) {
       expect(band.heading).toBe(band.cell);
       expect(DAY_KEYS_DESC).not.toContain(band.heading);
     }

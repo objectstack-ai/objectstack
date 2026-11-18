@@ -661,6 +661,7 @@
     "REFERENCE_VALUE_TYPES": "src/data/field-value.zod.ts#REFERENCE_VALUE_TYPES (const)",
     "RETIRED_DRIVER_ID_GUIDANCE": "src/data/driver/config-registry.zod.ts#RETIRED_DRIVER_ID_GUIDANCE (const)",
     "RETIRED_FILTER_OPERATORS": "src/data/filter.zod.ts#RETIRED_FILTER_OPERATORS (const)",
+    "RETIRED_SEED_MODE_VALUES": "src/data/seed.zod.ts#RETIRED_SEED_MODE_VALUES (const)",
     "RETIRED_SUB_DAY_INTERVALS": "src/data/analytics.zod.ts#RETIRED_SUB_DAY_INTERVALS (const)",
     "RLS_DENY_FILTER": "src/data/readable-ids.ts#RLS_DENY_FILTER (const)",
     "ROUTE_SHADOWED_DATASOURCE_NAMES": "src/data/datasource.zod.ts#ROUTE_SHADOWED_DATASOURCE_NAMES (const)",
