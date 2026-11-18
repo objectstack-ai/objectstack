@@ -36,10 +36,12 @@
  * engine and a real SQL driver, and read the stored rows back.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { markAppAutomationElevation } from '@objectstack/core';
-import { ObjectQL } from '@objectstack/objectql';
+import { describe, it, expect, vi, afterEach, afterAll, beforeAll, beforeEach } from 'vitest';
+import { ObjectKernel, markAppAutomationElevation, type Plugin, type PluginContext } from '@objectstack/core';
+import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { AuditPlugin } from '@objectstack/plugin-audit';
+import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 
 import { SecurityPlugin } from './security-plugin.js';
@@ -636,5 +638,113 @@ describe('an elevated automation\'s insert into an append-only object is told, o
     expect(warnAppAutomationAppendOnlyInsert({ object: 'sys_activity', operation: 'find', context: hook }, schemaOf, warn)).toBeUndefined();
     expect(warnAppAutomationAppendOnlyInsert({ object: 'crm_note', operation: 'insert', context: hook }, schemaOf, warn)).toBeUndefined();
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The platform's own ledger rows are not the automation's insert.
+ *
+ * Every audited write is followed by the audit writer's `sys_audit_log` row
+ * and its `sys_activity` mirror (plugin-audit `persistAuditTrailRow`). Those
+ * rows are the platform's, written by the service that owns both objects, so
+ * the elevation that judges an automation's insert into an append-only object
+ * must not read them as the automation's — whatever context the audited write
+ * ran under. A body's own insert into `sys_activity` still is the body's.
+ *
+ * Real stack: an `ObjectKernel` with `ObjectQLPlugin` over better-sqlite3,
+ * the real `AuditPlugin` (its shipped `sys_audit_log` and `sys_activity`) and
+ * the real `SecurityPlugin`; the body's `ctx.api` is `createContext` over the
+ * context `buildActionExecutionContext` builds (the envelope, `isSystem`, the
+ * `'action'` mark).
+ */
+describe("the platform's own audit and activity rows for an elevated automation's write", () => {
+  const ORG = 'org_ledger';
+  const INVOKER = 'usr_ledger_invoker';
+  const NOTE = 'qa_ledger_note';
+  const SYSTEM = { isSystem: true, tenantId: ORG } as const;
+  const envelope = { userId: INVOKER, tenantId: ORG, positions: [], permissions: ['member_default'] };
+  let kernel: ObjectKernel;
+  let ql: ObjectQL;
+  let warn: ReturnType<typeof vi.fn>;
+
+  const ELEVATED: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    ['an action body', markAppAutomationElevation({ ...envelope, isSystem: true }, 'action')],
+    ["a hook that runs as system", markAppAutomationElevation({ ...envelope, isSystem: true }, 'hook')],
+    ["a flow that runs as system", { ...envelope, isSystem: true, actor: 'svc:flow:qa_ledger', flowRunId: 'run_ledger' }],
+    // Not elevated itself: the ledger writer's own elevation must not make it one.
+    ["a flow that runs as the user", { ...envelope, isSystem: false, flowRunId: 'run_ledger_user' }],
+  ];
+
+  beforeAll(async () => {
+    const driver: Plugin = {
+      name: 'test.driver.sqlite', type: 'standard', version: '1.0.0',
+      async init(ctx: PluginContext) {
+        ctx.registerService('driver.default', new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }));
+      },
+    };
+    const objects: Plugin = {
+      name: 'test.objects', type: 'standard', version: '1.0.0', dependencies: ['com.objectstack.engine.objectql'],
+      async init(ctx: PluginContext) {
+        ctx.getService<{ register(m: unknown): unknown }>('manifest').register({
+          id: 'test.platform-ledger-rows', namespace: 'qa_ledger', version: '1.0.0', type: 'plugin', name: 'Platform ledger rows',
+          objects: [
+            SysUser, SysMember, SysOrganization,
+            { name: NOTE, label: 'Note', sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } },
+          ],
+        });
+      },
+    };
+    kernel = new ObjectKernel({ logger: { level: 'silent' } } as never);
+    await kernel.use(driver);
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(objects);
+    await kernel.use(new AuditPlugin());
+    await kernel.use(new SecurityPlugin({ fallbackPermissionSet: 'member_default' }));
+    await kernel.bootstrap();
+    ql = kernel.getService<ObjectQL>('objectql');
+    await ql.insert('sys_organization', { id: ORG, name: 'Ledger', slug: 'ledger' }, { context: SYSTEM } as never);
+    await ql.insert('sys_user', { id: INVOKER, name: 'Invoker', email: 'invoker@ledger.test', email_verified: true }, { context: SYSTEM } as never);
+    await ql.insert('sys_member', { user_id: INVOKER, organization_id: ORG, role: 'member' }, { context: SYSTEM } as never);
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) await Promise.race([kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+  }, 30_000);
+
+  beforeEach(() => {
+    resetAppAutomationAppendOnlyInsertWarnings();
+    // The SecurityPlugin's middleware warns through the kernel's logger.
+    warn = vi.spyOn((kernel as any).logger, 'warn') as never;
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetAppAutomationAppendOnlyInsertWarnings();
+  });
+
+  const deprecations = () =>
+    warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('Deprecated: inserting into'));
+  const ledgerRows = async (object: 'sys_audit_log' | 'sys_activity', recordId: string) =>
+    ((await ql.find(object, { where: { record_id: recordId }, context: SYSTEM } as never)) as Array<Record<string, unknown>>);
+
+  for (const [subject, context] of ELEVATED) {
+    it(`${subject}'s insert of a record leaves its audit and activity rows, and no deprecation for them`, async () => {
+      const id = `note_${subject.replace(/\W+/g, '_')}`;
+      await (ql as any).createContext(context).object(NOTE).insert({ id, name: id });
+
+      expect(deprecations()).toEqual([]);
+      expect(await ledgerRows('sys_audit_log', id)).toEqual([expect.objectContaining({ action: 'create', object_name: NOTE })]);
+      expect(await ledgerRows('sys_activity', id)).toEqual([expect.objectContaining({ object_name: NOTE })]);
+    });
+  }
+
+  it("CONTROL: an action body's own insert into sys_activity, through its own sudo(), is still the body's", async () => {
+    const [, action] = ELEVATED[0];
+    await (ql as any).createContext(action).sudo().object('sys_activity').insert({
+      type: 'note', summary: 'Written by the body', object_name: NOTE, record_id: 'note_body_own', organization_id: ORG,
+    });
+
+    const lines = deprecations();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/inserting into 'sys_activity' from an action body/);
   });
 });
