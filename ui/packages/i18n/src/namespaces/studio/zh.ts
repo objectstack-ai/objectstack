@@ -4161,6 +4161,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.translationPreview.category.positions': '岗位',
   'engine.translationPreview.category.permissions': '权限集',
   'engine.translationPreview.category.books': '文档书',
+  'engine.translationPreview.category.mappings': '导入映射',
   'engine.translationPreview.category.metadataForms': '元数据表单',
   'engine.translationPreview.category.settingsCommon': '设置界面',
   'engine.translationPreview.coverage': '分类覆盖率：',
