@@ -10,6 +10,7 @@
 import React, { useEffect, useState } from 'react';
 import type { ObjectGridSchema, DataSource, ListColumn, ViewData } from '@object-ui/types';
 import type { usePermissions } from '@object-ui/permissions';
+import { withheldFieldNamesOfFieldMap } from '@object-ui/core';
 import { isMaskedGridColumn } from './maskedColumn';
 import { usableGroupingFields } from './useGroupedData';
 import { normalizeColumns } from './objectGridColumns';
@@ -106,17 +107,38 @@ export function useObjectGridGroupingDecisions({
     () => JSON.parse(draftOnlyGroupingKey) as string[],
     [draftOnlyGroupingKey],
   );
+  // objectstack#34901 — a field a disabled package withholds from the served
+  // object is REFUSED as a grouping key on the same terms: the door refuses
+  // every `groupBy` name the served object does not declare. The names are
+  // the ones the row load read beside this field map (`_withheldFields`, via
+  // `readWithheldFieldNames`), so the entry groups again on the first
+  // definition read after the package is enabled. Dropped without a note of
+  // the grid's own: a list view names it in its line above the rows.
+  const packageWithheld = withheldFieldNamesOfFieldMap(objectFields);
+  const packageWithheldGroupingKey = JSON.stringify(
+    packageWithheld.size === 0
+      ? []
+      : usableGroupingFields(groupingFieldsRaw)
+        .map((gf) => gf.field)
+        .filter((field) => packageWithheld.has(field)),
+  );
+  const packageWithheldGroupingFields = React.useMemo(
+    () => JSON.parse(packageWithheldGroupingKey) as string[],
+    [packageWithheldGroupingKey],
+  );
   // Keyed on the authored array and the signature STRING, never on a memo's
   // identity (AGENTS.md #10). Read only when something was refused: the
   // unmasked path below hands `useGroupedData` the authored config itself.
   const unmaskedGroupingFields = React.useMemo(() => {
     const { refused }: { refused: string[] } = JSON.parse(maskedGroupingSignature);
     const draftOnly: string[] = JSON.parse(draftOnlyGroupingKey);
+    const byPackage: string[] = JSON.parse(packageWithheldGroupingKey);
     return usableGroupingFields(groupingFieldsRaw)
-      .filter((gf) => !refused.includes(gf.field) && !draftOnly.includes(gf.field));
-  }, [groupingFieldsRaw, maskedGroupingSignature, draftOnlyGroupingKey]);
+      .filter((gf) => !refused.includes(gf.field) && !draftOnly.includes(gf.field) && !byPackage.includes(gf.field));
+  }, [groupingFieldsRaw, maskedGroupingSignature, draftOnlyGroupingKey, packageWithheldGroupingKey]);
   const groupingRefusesNothing = maskedGroupingSignature === NO_GROUPING_REFUSAL
-    && draftOnlyGroupingFields.length === 0;
+    && draftOnlyGroupingFields.length === 0
+    && packageWithheldGroupingFields.length === 0;
   useEffect(() => {
     const { warned: masked }: { warned: string[] } = JSON.parse(maskedGroupingSignature);
     if (masked.length === 0) return;
@@ -158,8 +180,9 @@ export function useObjectGridGroupingDecisions({
     () => [
       ...(JSON.parse(maskedGroupingSignature) as { warned: string[] }).warned,
       ...(JSON.parse(draftOnlyGroupingKey) as string[]),
+      ...(JSON.parse(packageWithheldGroupingKey) as string[]),
     ],
-    [maskedGroupingSignature, draftOnlyGroupingKey],
+    [maskedGroupingSignature, draftOnlyGroupingKey, packageWithheldGroupingKey],
   );
   // A grouping field this principal may not READ is not a key the server may
   // group by: a header row carries every key's raw value, so grouping by it
@@ -252,6 +275,7 @@ export function useObjectGridGroupingDecisions({
   return {
     unmaskedGroupingFields,
     draftOnlyGroupingFields,
+    packageWithheldGroupingFields,
     groupingRefusesNothing,
     groupingKeyReadable,
     serverGroupedFetch,

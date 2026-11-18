@@ -1,5 +1,142 @@
 # @objectstack/types
 
+## 18.6.0
+
+### Patch Changes
+
+- 62d9d0d: fix(approvals): a decision stranded by a refused next step says which refusal stranded it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Say an approval flow's next step after the decision is an `update_record`, and a record hook refuses that write (a declared refusal, a validation rule, a permission). `POST /api/v1/approvals/requests/{id}/approve` answers `500 RESUME_FAILED`. The status code and the four #13807 facts are unchanged: the decision stands (`finalized: true`), and `runId` and `repairable` name the stranded run. The body did not say why the run stopped. The engine reported the refusal (`AutomationResult.innerRefusal` and `.userMessage`), and the approvals service dropped it before it built the error.
+  
+  The `RESUME_FAILED` body now also carries that refusal when there was one:
+  
+  - `innerRefusal`: `{ code, message }`, the same member the flow doors serve in their `FLOW_FAILED` details;
+  - `userMessage`: the refusal's marked end-user text at the top level, for example a hook's declared sentence in the caller's locale.
+  
+  Both are absent when the run met a fault rather than a refusal. `StrandedDecisionDetails` (`@objectstack/types`) declares them as optional members, and `strandedDecisionDetails` drops a malformed one without dropping the four facts.
+  
+  A flow author who wants the refusal handled instead of stranded can draw a `fault` edge from that step. The engine routes the refusal down it, and the decision then answers normally. This is now pinned and documented in the approvals guide.
+- 6c1f9b3: feat(studio): an installed app's action is switched on or off on the action itself, in Studio; Setup › Packaged Actions retires (ADR-0146 D4, amended 2026-11-17)
+  
+  Clause-②: yes (narrowing: Setup's `nav_packaged_actions` entry and its `automation:packaged-actions` console page retire, and `PackagedActionsPage` leaves the private `@object-ui/app-shell`; widening: new studio-namespace locale keys, an optional `options` argument and the exported `TurnedOffPackagedItemOptions` on `@objectstack/types`' `describeTurnedOffPackagedItem`, and `ActionActivationProjection.disabledPackageOf` plus an optional `platform` argument on `describeDisabled` in `@objectstack/objectql`)
+  Metadata-protocol: none (no spec schema changes; `platform-objects` serves one fewer Setup navigation item, and one `.describe()` sentence changes)
+  
+  **BREAKING** for an administrator who used Setup › Packaged Actions, and for a nav entry or link that names its `automation:packaged-actions` page: the Setup entry and page are gone. An installed app's action is now switched on or off on the action itself in Studio (the object's Actions view, or a standalone action's page), and an old link to the page opens Studio. A platform action (one a kernel package ships) has no switch in the console any more; it is switched through the activation door, `POST /api/v1/actions/_activation/<object>/<action>`, and the `409 ACTION_DISABLED` message for one now says so.
+  
+  Before this change, the deployment's on/off switch for an installed app's actions lived on a separate Setup page, "Packaged Actions", away from where the action is read. It now sits on the action:
+  
+  - On the object's Actions view in Studio, a read-only app package's vendor action carries a "Switched on / off for this deployment" switch, the flow switch's twin. A switched-off action is marked in the list. A refusal is the server's sentence, shown verbatim; a caller the deployment's posture walls off sees the switch disabled with the reason.
+  - A standalone `action` item's page in Studio's "All metadata" area carries the same switch.
+  - The platform's own actions (any action a kernel package ships) carry no switch anywhere. When the package list cannot be read, no switch is offered.
+  - Studio's landing leads to them: an app's "N switched off" count opens the switched-off action (one) or the action list (several), and when that does not land on an action (several, or flows among them), the line names each switched-off action as a link, three at most, then a "more" link to the list. An action its object holds opens on that object's Actions view (a new `?action=<name>` beside `?surface=object:<object>` in the Data pillar selects it), since an action declared inside its object has no page of its own; any other action opens its own page. The landing's "Customizations in this environment" panel links its switched-off action rows the same way.
+  
+  The doors are unchanged: the read is the `sys_metadata_activation` ledger, the write is `POST /api/v1/actions/_activation/:object/:action` with body `{ enabled }`.
+  
+  Setup › Packaged Actions is removed in the same change. A bookmark of `/apps/setup/component/automation/packaged-actions` redirects to Studio (to the package's Data pillar when the URL names `?package=`). The runtime's "turned off" sentence for a dispatched app action now points at the action in Studio, and the `disabledActions` description in `@objectstack/spec` says the same; no schema shape changes.
+  
+  **Platform actions already switched off.** The retired page also listed the platform's own actions (those a kernel package ships, such as `sys_user`'s Ban User), so a deployment may hold ledger rows that switch one off. Those rows stay in force: no boot or upgrade step turns them back on, and the activation door is unchanged. Because Studio has no switch for them, the `409 ACTION_DISABLED` sentence for a platform action now names the activation door instead of Studio. To find them on a deployment, as a platform operator:
+  
+  1. `GET /api/v1/data/sys_metadata_activation?top=1000` and keep the rows with `metadata_type: "action"` and `active: false`. If the response says `hasMore: true`, the list is incomplete; page through it before concluding.
+  2. `GET /api/v1/packages`: a row whose `package_id` belongs to a package with `manifest.scope` `system` or `cloud` is a switched-off platform action.
+  
+  To turn one on again: `POST /api/v1/actions/_activation/<object>/<action>` with body `{"enabled": true}` (use `global` as `<object>` for an action that belongs to no object). The `packagedAutomation.*` console locale keys the page read are no longer read and are left in place for a later sweep.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what retires is a Setup navigation entry, its console page and the PackagedActionsPage export of the private @object-ui/app-shell package. Ledger rows, the activation door and authored metadata are unchanged, so there is nothing for objectstack migrate meta to rewrite. -->
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

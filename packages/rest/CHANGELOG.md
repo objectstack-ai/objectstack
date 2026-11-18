@@ -1,5 +1,333 @@
 # @objectstack/rest
 
+## 18.6.0
+
+### Minor Changes
+
+- 2068e03: feat(i18n): the serving layer reads `i18n.sourceLocale` as the authored label's language
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  
+  `II18nService` (`@objectstack/spec/contracts`) gains an optional `getSourceLocale()` / `setSourceLocale(locale)` pair, shaped like the fallback pair; `FileI18nAdapter` and the kernel's in-memory fallback implement both.
+  
+  An app authored in one language that defaults its users to another now serves its inline labels to a request in the authored language. Take `defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, English inline labels, a `zh-CN` bundle and no `fallbackLocale`:
+  
+  - Before: an `en` request was not treated as the authored language, walked the fallback chain (`zh-CN`) ahead of the inline text and was served the Chinese bundle row, unless the stack also declared `fallbackLocale: 'en'`.
+  - Now: an `en` request answers the English inline label; a `zh-CN` request answers the `zh-CN` row; any other locale walks the declared fallback chain exactly as before.
+  
+  `AppPlugin` threads the declared `i18n.sourceLocale` into the i18n service, and every metadata-document translation (the REST metadata reads, a formula's `label()`, an email template's `option` hole, analytics select-option labels and the upload-link page) passes `getSourceLocale()`, else `getDefaultLocale()`, as `ResolveOptions.defaultLocale`. A stack that declares no `sourceLocale` is served exactly as before. A `fallbackLocale: 'en'` added only to work around this can stay; it is no longer needed for the `en` request.
+  
+  Writing your own i18n provider: implement `setSourceLocale` to receive the declaration and `getSourceLocale` to report it, answering `undefined` when nothing was declared — never `defaultLocale`; the serving layer does that collapse itself.
+- 071323e: feat(i18n): a dependent package's `fieldPatches` text is translated from that package's own translations
+  
+  Clause-②: yes (widening) — `TranslateDocumentOptions` gains an exported member, `patchBundles`; nothing accepted before is refused
+  Metadata-protocol: semantic — a dependent package's translations of its own `fieldPatches` text now take effect on `/meta` and on the public form; on a patched slot the pair `.custom` translation is laid over the package's locale by locale, so a pair that translates the slot only in a fallback locale (`en`) no longer wins over the package's translation in the requested one (`zh-CN`)
+  Skills-docs: follow-up #34785
+  
+  A code package that relabels a vendor's field with `fieldPatches` (ADR-0146 D10) can now translate the text it writes. Before this change, a patched label, help text, description or option label was served exactly as the patch wrote it in every locale: a patched slot read only the pair `.custom` package's catalog, and the deployment catalog merges every package's translations with the package ids dropped, so the patching package's own `zh-CN` rows for the slot never applied.
+  
+  A patched slot now reads, in order:
+  
+  1. the pair `.custom` package's translation of that key, as before, laid over the package's translations locale by locale along the fallback chain;
+  2. the translations of the code package whose patch wrote the served value: its shipped `translations` and its own active translation rows;
+  3. the served text.
+  
+  The slots read this way are the field `label`, the help text (`inlineHelpText`, or `description` when the field has none), an option `label` on a field not bound to a shared picklist, and, through the same rule, `inlineTitle` and `relatedListTitle`. The owner's translation of the text the patch replaced never applies to a patched slot, as before. A slot the patch did not write (a tenant's rename on top of it) keeps its own text. When two packages patch the same slot, the slot reads the package whose text it serves. Nothing is stamped on the served document: which package wrote a slot is found by comparing the served value with the packaged base plus that one package's patches (ADR-0029 D9.2a).
+  
+  New reads beside the option: `SchemaRegistry.getPackagedFieldPatchBases(name)` and `ObjectStackProtocolImplementation.getPackagedFieldPatchBases(name)` (one entry per patching code package, highest precedence first) and `ObjectStackProtocolImplementation.getPackageTranslationBundle(packageId)` (one package's own translations, locale-keyed). The `/meta` object item and list reads and `GET /forms/:slug` pass `patchBundles` to the translator. The public form reads no pair translation, before this change as after it, so there a patched slot reads the package's translation, then the text.
+  
+  The save door's inverse of the read (the translated-echo restore that keeps a Studio save in another locale from storing the read's translation) translates with the same patch translations. A zh-CN read of a patched label, saved back whole, stores the patch text and not the patching package's translation, both over a stored row that carries the patch text and with no stored row; an `en` read after it serves the patch text.
+- d4b2a75: feat(spec): a named import mapping's label is translatable at `mappings.NAME.label`
+  
+  Clause-②: yes (widening) — a new optional translation group `mappings` (one key per mapping, `label`) on `TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema` and `TranslationItemSchema`, a new `translateMapping` export from `@objectstack/spec/system` registered for the `mapping` type, and a new `ObjectStackProtocolImplementation.getPackagedMappingBase`; nothing that parsed before is refused
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — #34962 (skills/objectstack-i18n/SKILL.md group list)
+  
+  An import mapping's `label` is the name the import wizard offers it by, and until now it showed the authored text in every locale: the bundle had no key for it. A bundle now translates it:
+  
+  ```ts
+  'zh-CN': { mappings: { crm_lead_feed: { label: '线索导入' } } }
+  ```
+  
+  - `GET /meta/mapping` (list and item) serves the label in the reader's locale. A shipped mapping overridden through its `.custom` pair follows the ADR-0146 D2 order every other translated label follows: a label the override changed keeps its own text unless the pair translates it, and a label it left alone takes the pair's translation, then the package's. The packaged base is now available for `mapping` (`getPackagedMappingBase`), so the override's label is judged against it.
+  - Only `label` has a key. A mapping declares no `description`, and its `fieldMapping` holds column and field names rather than copy — the refusal for either names where to translate instead (a target field's label is `objects.OBJECT.fields.FIELD.label`). The singular `mapping` and the label aliases `name` / `title` are refused with the declared spelling named.
+  - `os i18n extract` scaffolds the key, `os i18n check` reports a gap as `i18n/missing-mapping`, and `os validate` reports a key naming no mapping of the stack as `translation-target-unknown`, with the nearest name suggested.
+  - Studio's translation preview shows the group as **Import Mappings** (导入映射), and the Studio translation table walks it.
+
+### Patch Changes
+
+- 661ede2: fix(metadata-protocol, rest)!: the layered read of a name two packages hold refuses as the plain read does, naming the holders as `details.candidates` (ADR-0150 D3/D5)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are reads of a name two packages hold, which now refuse as the plain read of that name already did: no stored row, layer, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a reader of the layers, or of the REST published view, of a name two or more served packages register in code, naming no package. Such a name has no one holder (ADR-0150 D3/D5), and the plain read already refused it. Three answers move, measured in both registration orders:
+  
+  - FROM: on a host that wires no engine for the REST door chain, `GET /meta/:type/:name/layers` (and `?layers=true`) answered 200 with the layers of the holder that registered first. TO: it answers `409 RESOURCE_CONFLICT` naming both holders as `details.candidates`.
+  - FROM: in process, the protocol's `getMetaItemLayered({ type, name })` with no `packageId` resolved the holder that registered first. TO: it throws `PackageScopedNameRefusedError` (`RESOURCE_CONFLICT`, 409) naming both, as `getMetaItem` does.
+  - FROM: on a REST host with no `objectQLProvider`, `GET /meta/:type/:name/published` served the name's package-unbound active row (200) when one stands. With no such row, it went on past its overlay read to the published exit: what the host's metadata service `getPublished` answers, or `501 NOT_IMPLEMENTED` when the host resolves no metadata service. TO: it answers `409 RESOURCE_CONFLICT`, without `details.candidates`. The dispatcher's `/published`, where its engine registry is not reachable, swallows the same refusal. With no such row it serves its snapshot as before. With one, it served that row and now serves the code snapshot instead.
+  
+  **Not moved.** A name one package holds, and every read naming the package (`?package=`, `packageId`), answer as before. On a host whose door chain has an engine, `/layers` already refused 409; it now also names the holders. The save and delete doors do not move.
+  
+  The fix for a caller: name the package whose layers it means.
+  
+  `GET /meta/:type/:name/layers` (and the deprecated `?layers=true`) of a name two or more packages hold, read naming no package, now answers like the plain read on every exit and on both transports: `409 RESOURCE_CONFLICT` with the holders as `details.candidates` (`[{ kind: 'package', packageId }, …]`), never one holder's layers.
+  
+  - A name two served packages register in code: the protocol's layered read (`getMetaItemLayered`) asks the registry's package-scoped resolver before it reads any layer, as `getMetaItem` does, so it throws the same `PackageScopedNameRefusedError` naming both, in process too, whatever the metadata service holds. It used to answer the holder that registered first, and so did the REST door on a host that wires no engine for its door chain. `?package=` still reads each holder's layers; a name one package holds is unchanged.
+  - The REST `/layers` route's catch carries the candidates of a package-scoped refusal, as the plain read's catch does. Before, it answered the refusal by its sentence alone (the dispatcher already carried them).
+  - A name whose active rows two packages hold keeps the package-less writes' refusal (its sentence, code, status and `?package=` remedy) and gains the same `details.candidates`. The save and delete doors' answer does not move.
+  - Stored-row holders beside a disabled package keep their in-process answer: the protocol's layered read still serves its in-process readers there, and the door refuses.
+- bb17350: fix(metadata-protocol)!: the diff door of a by-package name refuses the bare name two holders hold, and `?package=` compares one holder's versions (ADR-0150 D3/D4, #33308)
+  
+  Clause-②: yes (narrowing) — narrowed: for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), `GET /meta/:type/:name/diff` naming no package is refused `409 RESOURCE_CONFLICT` before any version is read wherever the history and rollback doors refuse the name (two or more row slots hold it, `details.candidates` naming every holder, or the bare plain read refuses it), where it answered one holder's version compared against another holder's as one item's change; an addressed diff (`?package=`) naming a version of another holder, or a version attributed to no package while two hold the name, is refused `404 VERSION_NOT_FOUND` saying whose it is, and nothing is compared. Widened: the door accepts `?package=` on a by-package type (the `/layers?package=` spelling), which compares that holder's versions only, its own active row as the default `to` side and its own nearest earlier differing version as the default `from` side; on any other type it stays refused `400` (now `VALIDATION_ERROR` on param `package`, saying the type is not stored per package), never accepted and dropped. A name one holder holds diffs bare exactly as on `main`.
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/` names the diff door, and the docs that do (`content/docs/api/client-sdk.mdx`, `content/docs/permissions/system-context.mdx`, `content/docs/ui/apps.mdx`) name the route without teaching how a name two packages hold is addressed, so no sentence there turns false; the generated API reference (`content/docs/references/api/protocol.mdx`) carries the new `DiffMetaItemRequest` with its `packageId`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped (`DiffMetaItemRequestSchema` is a new schema declaring a request the door already took, its two bounds read as the same whole numbers as before, plus the optional `packageId`), and no stored row changes shape. What moves is which versions the door compares, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a bare diff request of a by-package name two holders hold (two `.custom` pairs, a package's row beside the environment's, one package's row while a second package ships the name, or a name two packages ship with no stored row). The fix:
+  
+  - FROM `GET /meta/TYPE/NAME/diff?from=N&to=M` TO `GET /meta/TYPE/NAME/diff?package=PKG&from=N&to=M`, with both versions that holder's (its `?package=` history lists them), once per holder the `409` names. The SDK's `client.meta.diffItem` sends no `package`, so for an SDK caller the TO request is a raw request.
+  
+  `?package=` names a holder exactly as the history and rollback doors read it (`historySlotOf`): the row a read naming that package serves, else the package's own slot when it ships the name; a package that neither holds nor ships the name is refused `409` (`not-held-by-qualifier`) while another row slot holds the name; with no stored row of the name it answers an empty comparison. `all` and the empty string name no package.
+  
+  Levels follow the metadata protocol alone (maintainer ruling A, 2026-10-21): `minor` for `@objectstack/spec`, the one package that carries the added protocol surface (the new `DiffMetaItemRequestSchema`, declaring the diff door's request with its two whole-number bounds and `packageId`), and the level `Check Changeset` demands for `Metadata-protocol: added`. Every other package is `patch` under the BREAKING banner above: `@objectstack/metadata-protocol` (`diffMetaItem` takes `packageId`) and `@objectstack/rest` (the diff door accepts `?package=` and reads its bounds through the declaration).
+- 66f6638: fix(metadata-protocol,rest,runtime)!: a name only disabled packages hold answers 404 at `_env`, and an environment customization of such a name is hidden until a holder is enabled again (ADR-0150 D3, D4)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: updated here — content/docs/data-modeling/import-mappings.mdx (no `skills/**` file teaches an `_env` answer)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are by-name reads under a reversible package state: no stored row is changed or deleted, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a read of an environment customization of a name whose every holding package is disabled. Such a customization is a row saved without a package, for a name an installed package holds. It belongs to that package (ADR-0150 D4), and a disabled package holds no name (ADR-0150 D3).
+  
+  - **The read that names no package (`GET /meta/:type/:name`, and the execution read).** When every package holding the name is disabled, this read now answers as if the customization were not saved: `404`, where it served the row. That includes a translation the package never shipped, such as an email template's `fr-FR` that only the environment wrote. A customization at a member the package ships was already hidden.
+  - **The list and the execution list (`GET /meta/:type`).** They now leave out the same customization, so they agree with the read of the name: while every package holding the name is disabled, neither list carries any item of it. Enable a holder again and both list it again.
+  - **A save or delete naming no package while every holder is disabled.** A save at a member the package never ships is accepted and kept, as before, but it is now hidden from the reads above until a holder is enabled again. A delete of it still removes the row. A save at a member the package ships is still refused `403 NOT_OVERRIDABLE`.
+  - **`GET /meta/:type/_env/:name`.** When every package holding the name is disabled, the environment address now answers `404`, as for a name no package holds, on both the REST server and the runtime dispatcher. It used to refuse `409 RESOURCE_CONFLICT` naming the disabled packages. It still refuses `409` in three cases: an enabled package holds the name; a package holds it through a saved metadata row that the read of the name serves; or the read carries `?state=draft`, `?preview=draft` or `?layers=`, which read other rows than the plain read. That `409` names only the disabled package the registry holds the name for, as before; it does not name an enabled package that holds the name through a saved row. On a composition whose metadata engine has no package-scoped resolver for the type (its registry lacks the by-name reads), `_env` of a name only disabled packages hold now answers `501 NOT_IMPLEMENTED`, the refusal of a read that engine cannot judge, where it answered `409`. Refusal to refusal; no production composition lacks those reads.
+  - **The import door's `mappingName: "_env/NAME"`.** The same move, as `GET /meta/mapping/_env/NAME` answers it: `404 MAPPING_NOT_FOUND`, naming no package, where it was refused `409` naming the disabled package.
+  
+  **Not moved.** With an enabled holder, every answer is unchanged. That includes an enabled package that holds the name only through a saved row the registry has not read yet: the customization is still served and listed, whether the list or the read of the name comes first. A customization of a name no installed package holds is the environment's own item and is still served.
+  
+  **No migration.** Nothing is deleted or rewritten. Enable the package again and the customization is served again, unchanged. The fix for a caller who needs the row while the package is disabled is to re-enable the package.
+- d3bea96: fix(metadata-protocol): on PostgreSQL the `sys_metadata` ACTIVE overlay key becomes the partial NULL-safe unique index, as on SQLite, instead of the declared NULL-distinct constraint
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On PostgreSQL the declared `idx_sys_metadata_overlay_active` is a UNIQUE constraint over `(type, name, package_id, bundle_member)`. `bundle_member` is NULL on nearly every row, so this constraint enforced nothing. Two ACTIVE overlays for one `(type, name, package)` could both be stored, and which one a metadata read returned was undefined. The runtime migration that replaces the constraint ran `DROP INDEX` on it. PostgreSQL refuses that (2BP01), so every process printed one `[sql-driver] DATABASE_ERROR … (2BP01)` line at its first `sys_metadata` read, kept the constraint and reported nothing else.
+  
+  The migration now gets the dialect and a seam that returns rows, so it takes the PostgreSQL path the `sys_setting` and `sys_notification_preference` identity migrations already take. That path frees the name with `ALTER TABLE … DROP CONSTRAINT`, builds `UNIQUE (type, name, COALESCE(package_id, ''), COALESCE(bundle_member, '')) WHERE state = 'active'`, and checks the result by reading the index definition back. The 2BP01 line no longer appears.
+  
+  If the database already holds two ACTIVE rows for one key, the old constraint stays and no row is deleted. One `[metadata-protocol] cannot rebuild 'idx_sys_metadata_overlay_active'` line is printed at `error`. It names the key that is not enforced, gives the query that lists the blocking rows and points to `os migrate duplicates`. Resolve the duplicates and restart, and the next boot builds the index. If the name cannot be freed at all, the line says the existing index is unchanged. The step never reports success it did not get.
+- 6cc3f97: fix(metadata-protocol,rest,runtime): beside a disabled package, the read naming no package, `/layers` and `/published` serve the one enabled holder of a `doc`, `view` or any other type the registry does not read by package
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A disabled package holds no name (ADR-0150 D3). Take a name that one enabled and one disabled package both ship. For a type the registry reads by package, the bare read (`GET /api/v1/meta/TYPE/NAME`), `/layers` and `/published` already served the enabled holder. For every other type they read the layer they find by name alone. That layer is the metadata service's copy, which belongs to the package registered last, or else the registry's first composite. Either one could be the disabled holder's.
+  
+  - The plain read answered `404` (the disabled body, withheld) although an enabled package ships the name. FROM `404`, TO the enabled holder's item.
+  - `/layers` served the disabled holder's body as `effective`. FROM that body, TO the enabled holder's item.
+  - `/published` answered `404` on both transports. FROM `404`, TO the enabled holder's item.
+  
+  This covers `doc`, `view`, `translation`, `field`, `seed`, `datasource`, `external_catalog`, `object_extension`, `hook`, `job`, `sharing_rule`, `queue` and `assignment_rule`. `object`, `action` and `package` are not changed: an `action`'s own bare judge already serves the enabled holder.
+  
+  Unchanged: no answer that was served becomes refused. Two enabled holders of a doc are still refused `409` naming both. A name only disabled packages hold still answers `404`. A name no disabled package holds reads as before. The bare save door is unchanged.
+- c9ef653: fix(rest): a csv export opens with the UTF-8 byte-order mark, so Excel reads non-ASCII headers and cells correctly
+  
+  Clause-②: no
+  Metadata-protocol: none (no authorable key or value; the CSV export body gains a leading UTF-8 byte-order mark. The dev confirms against the diff.)
+  
+  `GET /api/v1/data/:object/export?format=csv` (the default format) now writes the UTF-8 byte-order mark (U+FEFF, the bytes `EF BB BF`) once, in front of the first thing in the body: the header row, the first data row under `header=false`, or the header row alone when an export with an explicit `fields=` or a readable projection has no rows. An export that writes nothing at all stays a zero-byte file.
+  
+  Before, the answer carried `Content-Type: text/csv; charset=utf-8`, but that charset does not travel with the saved file. Excel on Windows and on Mac opens a csv without the mark in the system ANSI code page, so every Chinese, Japanese or accented header and cell came out garbled, while the xlsx export of the same list opened correctly.
+  
+  The headers (`Content-Type`, `Content-Disposition`, `X-Export-*`) are unchanged, and there is no new query parameter. `format=json` and `format=xlsx` carry no mark. The csv import already strips one leading mark, so an exported file re-imports unchanged.
+  
+  A client that compares the export body byte for byte, or splits it as text without a decoder that drops the mark, sees U+FEFF at the start of the first cell. `Response.text()` and other WHATWG UTF-8 decoders drop it; read the body as bytes, or strip one leading U+FEFF, to compare.
+- 89d5a41: fix(metadata-protocol)!: an exact `?package=X` read of a doc, view or other type the exact qualifier does not judge answers X's own item, never another package's: where another package holds the name it is refused 409 `not-held-by-qualifier` naming the holders (ruling 6917064203 on #34398), and a name nothing holds stays 404; a bare doc read of a name two enabled packages ship, beside the environment's own package-less entry, serves that entry, never the package registered last (ADR-0150 D3/D5, red line 2, ruling 6893582352)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no skill teaches a moved answer: `skills/**` teaches `?package=` reads of a holder or of its pair (objectstack-platform SKILL.md, "Customizing an installed package"), which do not move, and never the read of a package that holds no item of the name or the bare doc read beside a package-less entry
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are by-name reads and one save's code-layer read: no stored row, registry slot or package binding changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that reads `?package=X` of a name X ships no item of, for the types the exact qualifier does not judge (`doc`, `view`, `translation`, `field`, `seed`, `datasource`, `external_catalog`, `object_extension`). Measured on the composed artifact rig (the `MetadataPlugin` artifact door plus `AppPlugin`), on the dispatcher and on `RestServer`, in both registration orders:
+  
+  - `GET /meta/TYPE/NAME?package=X`, where X ships no item of NAME and another package does: was 200 with that package's item (the registry's first composite, or the metadata service's copy). It is now `409 RESOURCE_CONFLICT`, reason `not-held-by-qualifier`, with `details.candidates` naming each package that holds NAME (ruling 6917064203 on #34398), the refusal the covered types already answer. X need not be an installed package: a qualifier that names none (the Console's app-name segment) gets the same answer. A name no package holds stays the read's own 404. The read gate answers before the `not-held-by-qualifier` refusal names any holder: for a `doc`, a caller the ADR-0046 §6.7 docs audience refuses is answered the gate's `401 UNAUTHENTICATED` or `403 PERMISSION_DENIED`; for a `view`, a member the list view audience (`requiredPermissions`) refuses is answered the gate's `403 PERMISSION_DENIED`, as the holder's own address answers them. A caller the gate admits is answered the 409.
+  - `GET /meta/TYPE/NAME/layers?package=X`, same address: was 200 with another package's `code` and `effective`. It is now the same 409.
+  - `GET /meta/TYPE/NAME/layers?package=X`, where X and Y ship NAME and Y registered last: was 200 with Y's `code` and `effective` (the metadata service keeps such a type by name alone). It is now X's, as the plain read answers since #34040.
+  - `GET /meta/doc/NAME` and its `/layers` and `/published`, where two enabled packages ship NAME and the registry's bare slot holds a package-less entry: was 200 with the doc of the package the metadata service registered last. It is now 200 with the environment's own item, as the registry and `MetadataFacade.get` already served it. Without such an entry the read stays refused 409 naming both (#34036). Per entry:
+    - A stamp-less runtime registration: the plain read and `/published` serve its body; `/layers` reports it as `code` and `effective`.
+    - The same registration beside a different package-less stored row: all three doors serve the registration; `/layers` reports it as `code` and `effective` and the row as `overlay`.
+    - A stored package-less row the hydrator registered before any package shipped the name (its entry is tenant-authored, `_provenance: 'org'`, so it is no code layer): the plain read and `/published` serve the row; `/layers` reports `code: null` and the row as `overlay` and `effective`.
+    - Both `/published` doors (the dispatcher's and `RestServer`'s) serve that item in place of the metadata service's package copy.
+  - The same stored row hydrated after the packages' artifacts registered wears the first registered holder's envelope (the hydrator grafts it), so no package-less entry exists: the bare doors stay refused 409 naming both, as before.
+  - A save naming package X of a `datasource` with no stored row at X (the credential carry-forward reads the code layer, `readCodeLayerForCarryForward`): carried forward the credential of the package the metadata service kept, or of the first registered holder. It now carries X's own credential, or none when X ships no datasource of the name (the incoming body is kept as sent; the carry-forward is no read answer, so it does not refuse). Of this family only `datasource` carries a credential, so no other save moves. Path: a save door naming the package (`PUT /meta/datasource/NAME?package=X`), its draft save, and any carry-forward of a body whose credentials the read redacted.
+  
+  **Console.** The doc page under an app (`/apps/X/docs/...`) and the flat permalink every cross-reference is rewritten to (`/apps/X/docs/NAME`, whose single-item read tells a refused name from an absent one) read with X as ADR-0048 prefer-local context. When that read answers the `not-held-by-qualifier` 409 (X not among the candidates) or a 404, each now reads the name again by name. A cross-reference from X's docs to another package's doc, and the app-name segment of a package that ships several apps (which names no package), keep rendering the doc's one holder, or its holder's audience refusal on the flat permalink; a name two other packages ship lists them (the 409 candidate list), where it showed one of them by registration order.
+  
+  **Not moved.**
+  - A holder's own address, a customization pair's address of its base's item, and an item bound to no package (the environment's entry).
+  - Any read naming no package other than the bare doc case above.
+  - `object`, and the covered types (`action`, `hook`, `job`, `sharing_rule`, `queue`, `assignment_rule`), whose exact qualifier already refuses 409 `not-held-by-qualifier`.
+  - The security catalog types `position` and `capability`: the registry keeps one package holder of such a name, so `?package=` of another package keeps the code layers' answer (that holder's item).
+  - One enabled holder beside a stamp-less bare entry: the bare doors serve the holder's doc while the registry and `MetadataFacade.get` serve the entry (measured, unresolved here; the entry answers first beside two or more holders only). Follow-up card #34452 carries this cell; it needs a ruling first on whether the environment's entry answers first beside one holder, before any reader moves.
+  
+  **No migration.** No schema key, stored row or registry slot changes; nothing is rewritten.
+  
+  The fix for a caller: address a package the refusal names (or its pair), or read with no package. For the bare doc read beside the environment's own entry, address a holder with `?package=` to read that holder's doc.
+- 62d9d0d: fix(approvals): a decision stranded by a refused next step says which refusal stranded it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Say an approval flow's next step after the decision is an `update_record`, and a record hook refuses that write (a declared refusal, a validation rule, a permission). `POST /api/v1/approvals/requests/{id}/approve` answers `500 RESUME_FAILED`. The status code and the four #13807 facts are unchanged: the decision stands (`finalized: true`), and `runId` and `repairable` name the stranded run. The body did not say why the run stopped. The engine reported the refusal (`AutomationResult.innerRefusal` and `.userMessage`), and the approvals service dropped it before it built the error.
+  
+  The `RESUME_FAILED` body now also carries that refusal when there was one:
+  
+  - `innerRefusal`: `{ code, message }`, the same member the flow doors serve in their `FLOW_FAILED` details;
+  - `userMessage`: the refusal's marked end-user text at the top level, for example a hook's declared sentence in the caller's locale.
+  
+  Both are absent when the run met a fault rather than a refusal. `StrandedDecisionDetails` (`@objectstack/types`) declares them as optional members, and `strandedDecisionDetails` drops a malformed one without dropping the four facts.
+  
+  A flow author who wants the refusal handled instead of stranded can draw a `fault` edge from that step. The engine routes the refusal down it, and the decision then answers normally. This is now pinned and documented in the approvals guide.
+- 9cf74ae: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four refusals the platform writes now carry a `userMessage` in the caller's language (the request locale, else the workspace default), beside a code, status and `message` that do not change. Before this a zh-CN user read each of them in English.
+  
+  - `404 RECORD_NOT_FOUND`: "This record does not exist, or you do not have access to it." (`record_not_found`). It names no id and no API name, and it says both causes because the by-id doors answer an unreadable id exactly as a missing one.
+  - `403 PERMISSION_DENIED` for a query that filters, sorts or groups by a field the caller may not read (`query_field_not_readable`), from all four producers of that refusal: plugin-security, the approval snapshot guard, the audit parent-field guard and analytics. It names no field. The aggregate refusal is unchanged.
+  - `403 DELEGATION_SCOPE_VIOLATION`, a delegated administrator's write outside their own scope (`delegation_scope_violation`). The gate's reason stays in `message`.
+  - `409 RECORD_LOCKED` from an approval's record lock: the localized sentence is now also the `userMessage`, without the `RECORD_LOCKED: ` prefix. The bound refusals that name an API name for the developer mark none.
+  
+  The three sentences are new keys of the shared operation-message catalog (`BUILTIN_OPERATION_MESSAGES`, in `en`, `zh-CN`, `ja-JP` and `es-ES`), so a deployment can override them under `errors.<key>` where the producer holds an i18n service. The widening: `@objectstack/spec` adds the catalog keys `record_not_found`, `query_field_not_readable` and `delegation_scope_violation`; `@objectstack/core` exports `operationUserMessage(messageKey, caller)` and its caller type `UserMessageCaller` for producers that hold no i18n service, and `recordNotFoundError` takes the caller as an optional third argument. Every door that holds the caller's execution context passes it, the action door's subject load, the flow-start door's row admission and the bulk update faces' existence check included, so the same miss reads in the same language at the data, action and flow-start doors.
+- aa0fde3: feat(flow designer): the publish checks show in the Problems tab and the publish drawer before the publish, worded for the builder
+  
+  Clause-②: yes (widening: optional userTextLocales on GetMetaItemRequestSchema)
+  Metadata-protocol: added
+  
+  Before, a flow's publish checks were seen only after the publish, as a toast that listed rule ids, machine names and English prose, and then disappeared.
+  
+  - **The draft read carries what the publish would still report.** A flow draft read (`state: 'draft'`) now adds the publish gate's advisory findings to `_diagnostics.warnings`, next to the refusals it already carried. Each warning has the finding's user sentence in the reader's language. The REST door and the runtime dispatcher pass the request's locales, through a new optional `userTextLocales` on `GetMetaItemRequestSchema`. With no locales the sentence is English. `valid` does not change, and the drafts of other types read as before.
+  - **The sentences name what the builder sees.** `flow-decision-unconditional-branch` has user text in all 11 platform locales. It names the flow, the branch step and the paths by their labels, and says what the shape does to a run and how to fix it. The `approval-approvers-*` sentences now name the flow and the approval step by their labels instead of the flow's machine name and the node id. A step or flow with no label falls back to its id or name. The findings' `message`, `where`, rules and severities do not change.
+  - **The console shows them before the publish.** The designer's Problems tab already lists a draft's warnings, so the checks now appear there after each save, and clicking one selects its step. The pending-changes drawer lists each flow draft's checks under the flow's label, above Publish. A publish from the drawer or the designer, made after the checks were listed, ends with the toast's title line only. A publish the author did not review, such as one an AI surface performs, keeps the full toast.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/metadata@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/observability@18.6.0
+  - @objectstack/service-package@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes
