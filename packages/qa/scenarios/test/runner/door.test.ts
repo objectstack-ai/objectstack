@@ -300,7 +300,7 @@ describe('a replay and a summary state the door arm', () => {
 
   it('runs with no arm print no arm; runs in one arm print it', () => {
     const [none] = summaryTables([record('a.json'), record('b.json')]);
-    expect(none!.refused).toEqual([]);
+    expect(none!.refused).toBeUndefined();
     expect(renderSummaryTable(none!)).not.toContain('door arm');
     const [one] = summaryTables([record('a.json', arm), record('b.json', arm)]);
     expect(renderSummaryTable(one!)).toContain(`door arm: skills: none · rules: rules.json (sha256 ${'c'.repeat(12)}) 1 active, 1 omitted (rule-b)`);

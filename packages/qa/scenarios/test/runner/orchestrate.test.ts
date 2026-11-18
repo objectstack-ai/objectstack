@@ -2885,7 +2885,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(parseArgs(['--template', 'dist/objectstack.json', '--modes', 'ask']).modes).toEqual(['ask']);
     expect(parseArgs(['--modes', 'scratch,ask']).modes).toEqual(['scratch', 'ask']);
     expect(parseArgs([]).modes).toEqual(['scratch', 'template']); // the default is unchanged
-    expect(() => parseArgs(['--modes', 'asks'])).toThrow('unknown mode `asks` (scratch, template, ask)');
+    expect(() => parseArgs(['--modes', 'asks'])).toThrow('unknown mode `asks` (scratch, template, ask, door)');
 
     const { scenario, ops, driver } = setup();
     await expect(runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN })).rejects.toThrow(ASK_REFUSAL);
@@ -4225,9 +4225,9 @@ describe('runCard — `--modes door` builds through the MCP draft door with no p
     // ⛔ The token is the turn's, never the record's.
     const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
     expect(JSON.stringify(record)).not.toContain(app.tokens[0]!);
-    const results = record.results as Array<{ id: string; verdict: string }>;
+    const results = record.results as Array<{ id: string; verdict: string; notes: string }>;
     expect(results.find((r) => r.id === 'crm_account_with_contacts.door.build')!.verdict).toBe('pass');
-    expect(results.find((r) => r.id === 'crm_account_with_contacts.door.iterate')!.verdict).toBe('not-run');
+    expect(results.find((r) => r.id === 'crm_account_with_contacts.door.iterate-build')).toMatchObject({ verdict: 'not-run', notes: 'not run: door mode builds once and runs no iterate' });
   });
 
   it('⛔ a publish the door refuses on a 200 is a finding naming each refused draft, and the build is graded on what is served', async () => {
@@ -4245,13 +4245,13 @@ describe('runCard — `--modes door` builds through the MCP draft door with no p
 
   it('⛔ no token, no turn: a refused authorization is a finding with the door’s answer, and the client is never asked to author', async () => {
     const { scenario, ops, driver } = doorSetup({
-      app: () => Object.assign(new DoorApp(), { mintAnswer: { ok: false, status: 403, body: {}, code: 'consent', message: 'the consent step answered 403' } }),
+      app: () => Object.assign(new DoorApp(), { mintAnswer: { ok: false, status: 403, body: {}, code: 'PERMISSION_DENIED', message: 'the consent step answered 403' } }),
     });
     const run = await runCard(scenario, driver, ops, { modes: ['door'], admin: ADMIN });
     const [mode] = run.modes;
     expect(driver.doorTasks).toEqual([]);
     expect(mode!.build).toBeUndefined();
-    expect(mode!.findings).toEqual(['no token for the draft door: 403 consent the consent step answered 403']);
+    expect(mode!.findings).toEqual(['no token for the draft door: 403 PERMISSION_DENIED the consent step answered 403']);
     expect(mode!.door!.token).toMatchObject({ ok: false, status: 403 });
   });
 
