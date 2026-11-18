@@ -55,14 +55,20 @@ import { templateExpressionInput } from '../shared/typed-expression-input';
 import { HookBodySchema } from '../data/hook-body.zod';
 // [#34273] An action's refusal catalogue: the hook catalogue's entry shape,
 // code spelling, literal-throw reading and sentences — import-free leaves.
-import { declaredRefusalEntrySchema } from '../data/declared-entry.zod';
+// [#34374 PR2] …and its declared texts: the hook texts' entry shape, key
+// spelling, literal `ctx.text` reading and sentences, from the same leaves.
+import { declaredRefusalEntrySchema, declaredTextEntrySchema } from '../data/declared-entry.zod';
 import {
   HOOK_REFUSAL_CODE_PATTERN,
+  HOOK_TEXT_KEY_PATTERN,
   actionRefusalsWithoutSandboxedBody,
+  actionTextsWithoutRunnableCode,
   hookRefusalCodesThrownIn,
   hookRefusalReasonsThrownIn,
+  hookTextKeysAskedIn,
   undeclaredActionRefusalCodeAtSave,
   undeclaredActionRefusalReasonAtSave,
+  undeclaredActionTextKeyAtSave,
 } from '../data/hook-refusal-codes';
 // [#25653] Import-free leaf, shared with `HookSchema`: the identity-assignment
 // set, the body-source reading and the refusal text.
@@ -1542,6 +1548,55 @@ const actionObject = () => strictObject({
   ),
 
   /**
+   * The action's declared texts (#34374 PR2, ruling 6913660232 parameter 7) —
+   * the twin of `HookSchema.texts`: every sentence the action's body writes
+   * into a record for people to read, keyed by a snake_case key the body asks
+   * for.
+   *
+   *   texts: {
+   *     email_subject: { message: 'Email: {{ subject }}', params: ['subject'] },
+   *   }
+   *
+   *   await ctx.api.object('crm_activity').insert({ subject: await ctx.text('email_subject', { subject }) });
+   *
+   * `ctx.text(key, params?)` answers the sentence in the ORGANIZATION's
+   * language, never the caller's (parameter 2): the Localization setting when
+   * somebody set it, else the app's `i18n.defaultLocale` (parameter 3, the
+   * one shared reader a hook text and the flow record write read). It picks
+   * the translation beside the action's other copy first —
+   * `objects.<object>._actions.<action>.texts.<key>.message`, or
+   * `globalActions.<action>.texts.<key>.message` for an object-less action —
+   * and fills the `{{ }}` holes from `params` after (parameter 1). With no
+   * translation, or no language, the declared sentence is answered and the
+   * action goes on (parameter 5). A Localization setting that cannot be READ
+   * rejects the call. A string the body builds itself is written as it is
+   * (parameter 4).
+   *
+   * A key the body asks for literally that `texts` does not declare is
+   * refused at save; any other undeclared key is refused when the action
+   * runs, as a fault naming the action and the key. Served where an action
+   * runs code of its own: a `type: 'script'` action's sandboxed `js` body —
+   * which is also what `os build` lowers an inline `target` function to.
+   * Refused on every other action: another `type` (its `target` is a URL,
+   * page, flow or endpoint), an `expression` body, or no body. Absent:
+   * `ctx.text` has nothing to answer.
+   */
+  texts: z.record(
+    z.string().regex(HOOK_TEXT_KEY_PATTERN, {
+      message: 'A text key is snake_case (e.g. email_subject) — the key the action\'s body asks for with ctx.text',
+    }),
+    ActionTextSchema,
+  ).optional().describe(
+    'Texts the action\'s js body writes into records, keyed by the snake_case key it asks for with ctx.text(KEY, '
+    + 'params): { message, params? }. ctx.text answers the sentence in the organization\'s language (the Localization '
+    + 'setting when somebody set it, else the app\'s i18n.defaultLocale), translated through '
+    + 'objects.<object>._actions.<action>.texts.<key>.message (globalActions.<action>.texts.<key>.message for an '
+    + 'object-less action) with the declared message as the fallback, its holes filled from params. A key not declared '
+    + 'here is refused — at save when the body asks for it literally, otherwise at run time. Only a type: \'script\' '
+    + 'action with a js body declares one',
+  ),
+
+  /**
    * The declarative single-record field write — the row-level counterpart of
    * a list view's `bulkActionDefs` `{ operation: 'update', patch }` (#14092,
    * maintainer ruling 2026-09-01), spelled with the same words on purpose:
@@ -2584,6 +2639,53 @@ export const ActionRefusalSchema = declaredRefusalEntrySchema('action');
 export type ActionRefusal = z.input<typeof ActionRefusalSchema>;
 
 /**
+ * [#34374 PR2] One declared text of an action (`ActionSchema.texts`): a
+ * sentence the action's body writes into a record for people to read, picked
+ * in the ORGANIZATION's language when the body asks for it
+ * (`ctx.text(key, params)`). The same entry a hook's texts hold
+ * (`HookTextSchema`), built by the one factory so the two cannot drift; only
+ * its words name the action and its translation address. With `params`, a
+ * hole over an undeclared name is refused at parse; a hole holding logic, an
+ * unknown formatter, an empty hole and a `currency` formatter with no code
+ * are refused where the text is compiled (`@objectstack/lint`
+ * `validate-hook-refusal-templates.ts`).
+ */
+export const ActionTextSchema = declaredTextEntrySchema('action');
+
+export type ActionText = z.input<typeof ActionTextSchema>;
+
+/**
+ * [#34374 PR2] The object-level check on an action's `texts`, the twin of
+ * `HookSchema`'s: `texts` nothing the action runs could ask for is refused at
+ * `texts`, and a key the body's source asks for literally
+ * (`ctx.text('key')`) that `texts` does not declare is refused at
+ * `body.source`, one issue each. A key that arrives any other way is the
+ * run-time refusal's.
+ */
+function refuseUndeclaredLiteralActionTextKey(
+  data: {
+    type?: string;
+    body?: { language?: string; source?: unknown };
+    texts?: Record<string, unknown>;
+  },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (!data.texts) return;
+  const type = data.type ?? 'script';
+  if (type !== 'script' || data.body?.language !== 'js') {
+    ctx.addIssue({ code: 'custom', path: ['texts'], message: actionTextsWithoutRunnableCode(type, data.body?.language) });
+    return;
+  }
+  const source = data.body.source;
+  if (typeof source !== 'string') return;
+  const declared = Object.keys(data.texts);
+  for (const key of hookTextKeysAskedIn(source)) {
+    if (Object.prototype.hasOwnProperty.call(data.texts, key)) continue;
+    ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: undeclaredActionTextKeyAtSave(key, declared) });
+  }
+}
+
+/**
  * [#34273] The object-level check on an action's `refusals`, the twin of
  * `HookSchema`'s: a catalogue nothing the action runs could answer is
  * refused at `refusals`, and a code (or a reason under a code that declares
@@ -3142,6 +3244,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   .superRefine(refuseInertOutcomeMessages)
   .superRefine(refuseIdentityAssignmentBodyWrite)
   .superRefine(refuseUndeclaredLiteralActionRefusalCode)
+  .superRefine(refuseUndeclaredLiteralActionTextKey)
   .superRefine(refusePreflightContradictions)
   // Grade gate first, feature gate last: `requiresFeature` composes onto
   // whatever `visible` it finds, so this order keeps `features.*` the final

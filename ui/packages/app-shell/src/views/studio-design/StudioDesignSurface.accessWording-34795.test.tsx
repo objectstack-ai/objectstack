@@ -6,7 +6,8 @@
  *   • an accepted member-access suggestion reads as one sentence, and its
  *     action reads 「取消默认授予」 while it makes the same call 撤销 made
  *     (the dismiss door on the accepted row, ADR-0090 D5/D9 unchanged);
- *   • the open set's title is "app · set label"; the set's machine name is
+ *   • the open set's title is the set's label alone (objectstack#35018: the
+ *     app's name is the top bar's, not repeated); the set's machine name is
  *     the title's tooltip, not page text, and the rail row's too;
  *   • every object row draws 「全选 · 只读 · 清空」 (and the CRUD arm as a
  *     fourth) without a hover, and each writes what All / R / None / CRUD
@@ -127,7 +128,7 @@ async function mountZh(withSuggestion = true) {
   render(
     <I18nProvider instance={i18n}>
       <MemoryRouter>
-        <AccessPillar packageId={PKG} packageLabel="会议纪要" />
+        <AccessPillar packageId={PKG} />
       </MemoryRouter>
     </I18nProvider>,
   );
@@ -169,18 +170,31 @@ describe('objectstack#34795 — the accepted suggestion reads as one business se
 });
 
 describe('objectstack#34795 — the open set: title, tooltip, terms', () => {
-  it('the title reads "app · set label"; the machine name is its tooltip and the rail row tooltip', async () => {
+  it('the title reads the set label alone — no app name; the machine name is its tooltip and the rail row tooltip', async () => {
     api.list.mockResolvedValue([ACCEPTED]);
     await mountZh();
     const title = within(screen.getByTestId('access-item-header')).getByTestId('perm-studio-title');
-    expect(title).toHaveTextContent('会议纪要 · 组织成员');
+    // objectstack#35018 — the app's name is the top bar's; the title is the set's label, whole.
+    expect(title.textContent).toBe('组织成员');
+    expect(screen.getByTestId('access-item-header').textContent).not.toContain('会议纪要');
     // CONTROL: the machine name stays reachable — on the title's tooltip and the rail row's.
     expect(title).toHaveAttribute('title', SET);
     expect(screen.getByTestId(`access-rail-set-${SET}`)).toHaveAttribute('title', SET);
     // The three labels are the line under the title.
     const note = screen.getByTestId('perm-studio-title-note');
-    expect(note).toHaveTextContent(zh('perm.badge.package'));
+    expect(note).toHaveTextContent(zh('engine.studio.access.origin.app'));
     expect(note).toHaveTextContent(zh('perm.badge.default'));
+  });
+
+  it('objectstack#35018 — the note and the tab row say it in the builder words: no 包内置, no 本包', async () => {
+    api.list.mockResolvedValue([ACCEPTED]);
+    await mountZh();
+    const header = screen.getByTestId('access-item-header');
+    expect(within(header).getByTestId('perm-studio-title-note')).toHaveTextContent(
+      `${zh('engine.studio.access.origin.app')}·${zh('perm.badge.default')}`,
+    );
+    expect(header.textContent).not.toContain('包内置');
+    expect(header.textContent).not.toContain('本包');
   });
 
   it('the tabs read in the card words', async () => {
@@ -208,7 +222,7 @@ describe('objectstack#34795 — the open set: title, tooltip, terms', () => {
     expect(text).not.toContain('CRUD');
     // CONTROL: the scan reads the rendered page — the sentence and the title are in it.
     expect(text).toContain('所有成员默认拥有这个权限集');
-    expect(text).toContain('会议纪要 · 组织成员');
+    expect(text).toContain('组织成员');
     expect(text).toContain('谁能看到哪些记录');
   });
 });

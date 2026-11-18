@@ -132,7 +132,6 @@ import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
-import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
@@ -1343,9 +1342,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // belongs to the whole-stack rule (ruling `5791822697` on #19527, letter
     // B; ADR-0109 Decision §3). `ai-skill-tool-unresolved` is a verdict of
     // `os validate` / `os lint` / `os build`, and this door NEVER emits it.
-    // `validateAiToolReferences` resolves a skill's tools against a universe of
-    // three limbs — `stack.tools`, the platform registry and the materialised
-    // `action_<name>` family — and a per-write snapshot carries neither
+    // `validateAiToolReferences` resolves a skill's tools against `stack.tools`,
+    // the platform registry, the MCP door's file tools (for a skill offered
+    // over MCP) and the materialised `action_<name>` family — and a per-write
+    // snapshot carries neither
     // `stack.tools` nor `stack.actions`, while a tool a runtime plugin
     // registers outside the registry is invisible to every static universe.
     // So at this door the member has no truthful `unresolved` verdict to give:
@@ -1854,18 +1854,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateAssignmentRules(stack),
   },
-  // framework#3434 — seeds replay on every boot, so a `mode: 'insert'` dataset
-  // duplicates its table on every restart.
-  {
-    name: 'validateSeedReplaySafety',
-    tier: 'advisory',
-    input: 'parsed',
-    commands: ALL,
-    source: 'packages/lint/src/validate-seed-replay-safety.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
-    run: (stack) => validateSeedReplaySafety(stack),
-  },
+  // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
+  // replay warning) is retired: `SeedMode` itself refuses `insert` and
+  // `replace` at parse (ruling 6942780880), so no stack this rule could flag
+  // gets past the schema.
   // framework#3433 follow-up — #3433 exempts seed writes from the
   // `state_machine` rule, so a seeded status the FSM does not declare is no
   // longer rejected at write time. Re-added at author time; advisory, because

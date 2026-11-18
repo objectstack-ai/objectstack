@@ -104,7 +104,7 @@
     {
       "id": 10,
       "prompt": "In zh-CN the `crm_renew` action on `crm_opportunity` opens its param dialog with the rows of its pre-submit read still in English. Its `preflight.fields` declares the paths `amount` and `verdict.summary`.",
-      "expected_output": "`objects.crm_opportunity._actions.crm_renew.preflight.fields`, keyed by each declared field's literal `path`: `amount` and `'verdict.summary'` (one key, dots included, never split into nested objects), each value the translated label string itself, with no `.label`. The node holds nothing else: the panel has no heading of its own to translate, and `defineTranslationBundle` refuses any other key under `preflight`. A path the action's `preflight.fields` does not declare is `translation-target-unknown`.",
+      "expected_output": "`objects.crm_opportunity._actions.crm_renew.preflight.fields`, keyed by each declared field's literal `path`: `amount` and `'verdict.summary'` (one key, dots included, never split into nested objects), each value the translated label string itself, with no `.label`. Beside `fields` the node holds only `columns` (a table field's column headers): the panel has no heading of its own to translate, and `defineTranslationBundle` refuses any other key under `preflight`. A path the action's `preflight.fields` does not declare is `translation-target-unknown`.",
       "files": [],
       "assertions": {
         "must_contain": ["_actions", "crm_renew", "preflight", "fields", "verdict.summary"],
@@ -119,6 +119,16 @@
       "assertions": {
         "must_contain": ["sourceLocale", "defaultLocale: 'zh-CN'", "fallbackLocale: 'en'", "supportedLocales"],
         "must_not_contain": ["defaultLocale: 'en'", "sourceLocale: 'zh-CN'"]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "In zh-CN the `import_leads` action on `crm_lead` shows the per-row table in its result dialog with English column headers, though `resultDialog.fields.rows` is translated. The `rows` field is `format: 'table'` and its `columns` declare the paths `email` and `error.message`. Which bundle key carries the headers?",
+      "expected_output": "`objects.crm_lead._actions.import_leads.resultDialog.columns.rows`, a sibling of `resultDialog.fields` and never nested inside the `rows` entry there, which stays the field's label string. It is keyed by the table field's literal `path`, then by each column's literal `path`: `email` and `'error.message'` (one key, dots included, never split into nested objects), each value the translated header string itself — `columns: { rows: { email: '邮箱', 'error.message': '原因' } }`. A preflight table takes the same shape under `preflight.columns`. A field path that is no declared `format: 'table'` field, or a column path that field's `columns` does not list, is `translation-target-unknown`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["_actions", "import_leads", "resultDialog.columns.rows", "error.message"],
+        "must_not_contain": ["error: {"]
       }
     }
   ]

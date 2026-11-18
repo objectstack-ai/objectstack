@@ -1022,13 +1022,18 @@
             },
             {
               "object": "claim_line",
-              "where": {"expense_type": "hotel", "quantity": 2, "unit_amount": 430},
-              "values": {"amount": 860, "over_standard": false}
+              "where": {"claim.trip": "t121", "expense_type": "hotel"},
+              "sum": {"amount": 860}
             },
             {
               "object": "claim_line",
-              "where": {"expense_type": "meals", "quantity": 3, "unit_amount": 115},
-              "values": {"amount": 345, "over_standard": false}
+              "where": {"claim.trip": "t121", "expense_type": "meals"},
+              "sum": {"amount": 345}
+            },
+            {
+              "object": "claim_line",
+              "where": {"claim.trip": "t121"},
+              "each": {"over_standard": false}
             }
           ],
           "auditActor": "employee"

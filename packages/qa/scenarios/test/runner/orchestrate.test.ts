@@ -22,17 +22,18 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import { validateRollupSourceVisibility } from '@objectstack/lint';
+import { RETIRED_SEED_MODE_VALUES } from '@objectstack/spec/data';
 
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
-import { seedDoorAnswer } from './seed-door.js';
+import { reseedDoorAnswer, seedDoorAnswer, type SeedDoorRecord } from './seed-door.js';
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
-import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
+import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
-import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
+import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, CONFIRMATION_WORDS, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -193,15 +194,32 @@ class FakeApp implements AppHarness {
   seedDrops(_object: string, _row: Record<string, unknown>): Record<string, string> {
     return {};
   }
-  /** The managed door: a data-only package's `data[]` is the seed ({@link seedDoorAnswer}); any other manifest is a build. */
+  /** The organization's record of landed seed rows (`sys_seed_landed_key`), `object/id`, kept across every package the door loads ({@link seedDoorAnswer}). */
+  landed = new Set<string>();
+  /** The data-only packages the managed door installed, by id: what the reseed door loads again. */
+  seedPackageById = new Map<string, Record<string, unknown>>();
+  private seedRecord(): SeedDoorRecord {
+    return { landed: this.landed, holds: (object, id) => (this.rows[object] ?? []).some((r) => String(r.id) === id) };
+  }
+  /** The managed door: a data-only package's `data[]` is the seed ({@link seedDoorAnswer}), under the install's `honour` posture; any other manifest is a build. */
   async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
     if (!Array.isArray(manifest.data)) {
       this.installed = manifest;
       return this.installAnswer;
     }
+    this.seedPackageById.set(String(manifest.id), manifest);
     this.seeding = true;
     try {
-      return await seedDoorAnswer((object, row) => this.insertRow(object, row), manifest, (object, row) => this.seedDrops(object, row));
+      return await seedDoorAnswer((object, row) => this.insertRow(object, row), manifest, (object, row) => this.seedDrops(object, row), this.seedRecord());
+    } finally {
+      this.seeding = false;
+    }
+  }
+  /** The sample-data reseed door of an installed data-only package ({@link reseedDoorAnswer}): every missing row, whatever the record says. */
+  async reseedManaged(manifestId: string): Promise<HttpAnswer> {
+    this.seeding = true;
+    try {
+      return await reseedDoorAnswer((object, row) => this.insertRow(object, row), this.seedPackageById.get(manifestId), manifestId, this.seedRecord(), (object, row) => this.seedDrops(object, row));
     } finally {
       this.seeding = false;
     }
@@ -966,6 +984,101 @@ describe('seedApp — a card row already past its entry state loads through the 
     app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
     expect(await restoreSeededRows(scenario, app, [], seeded)).toEqual({ restored: { reinserted: ['demotravel_expense_claim/c001'] } });
     expect(app.rows.demotravel_expense_claim!.find((r) => r.id === 'c001')).toMatchObject({ status: 'paid' });
+  });
+
+  it('[#34613] the seed and restore packages declare no retired seed mode: each dataset names no `mode`, so the default (`ignore`) loads it', async () => {
+    /** Records every data-only package the runner sends the managed door. */
+    class ManifestTap extends TravelRulesApp {
+      readonly seedPackages: Array<Record<string, unknown>> = [];
+      override async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+        if (Array.isArray(manifest.data)) this.seedPackages.push(manifest);
+        return super.installManaged(manifest);
+      }
+    }
+    const scenario = travel();
+    const app = new ManifestTap();
+    expect((await seedApp(scenario, app, [])).refused).toEqual([]);
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
+    await restoreSeededRows(scenario, app, [], seeded);
+    expect(app.seedPackages.length).toBeGreaterThanOrEqual(2); // the seed, then the restore
+    const datasets = app.seedPackages.flatMap((m) => m.data as Array<Record<string, unknown>>);
+    expect(datasets.filter((d) => 'mode' in d)).toEqual([]);
+    for (const d of datasets) expect(d.externalId).toBe('id');
+  });
+
+  it('[#34613] control: the test door refuses a dataset declaring a retired mode whole, with SeedMode\'s own message, as the real door does', async () => {
+    for (const mode of RETIRED_SEED_MODE_VALUES) {
+      const written: string[] = [];
+      const answer = await seedDoorAnswer(async (_o, row) => (written.push(String(row.id)), { ok: true, status: 200, body: {} }), {
+        id: 'com.scenario.seed.x',
+        data: [{ object: 'demotravel_department', mode, externalId: 'id', records: [{ id: 'dep_a' }, { id: 'dep_b' }] }],
+      });
+      const seeded = (answer.body as { data: { seeded: { inserted: number; errorList: Array<{ field: string; targetField: string; recordIndex: number; message: string }> } } }).data.seeded;
+      expect(written).toEqual([]);
+      expect(seeded.inserted).toBe(0);
+      // One entry for the dataset, as `loadStored` answers it: the mode is the dataset's, no row was attempted.
+      expect(seeded.errorList.map(({ field, targetField, recordIndex }) => ({ field, targetField, recordIndex }))).toEqual([{ field: 'mode', targetField: '(dataset)', recordIndex: 0 }]);
+      expect(seeded.errorList[0]!.message).toContain(`seed.mode: '${mode}'\` was removed`);
+    }
+  });
+
+  it('[#34613] control: the test door keeps the landed-row record as the real door does — an install withholds a recorded row that is gone, the package\'s reseed brings it back, an unrecorded row lands', async () => {
+    const app = new FakeApp();
+    const pkg = (id: string, rows: Array<Record<string, unknown>>) => ({ id, data: [{ object: 'x', externalId: 'id', records: rows }] });
+    const seededOf = (a: HttpAnswer) => (a.body as { data: { seeded: { inserted: number; skipped: number; errors: number } } }).data.seeded;
+    expect(seededOf(await app.installManaged(pkg('com.scenario.seed.a', [{ id: 'r1' }, { id: 'r2' }])))).toMatchObject({ inserted: 2, skipped: 0, errors: 0 });
+    app.rows.x = app.rows.x!.filter((r) => r.id !== 'r2');
+    // A second package carrying the recorded, removed row: withheld, `skipped`, no error.
+    expect(seededOf(await app.installManaged(pkg('com.scenario.seed.b', [{ id: 'r2' }])))).toMatchObject({ inserted: 0, skipped: 1, errors: 0 });
+    expect(app.rows.x!.map((r) => r.id)).toEqual(['r1']);
+    // That package's reseed inserts it, whatever the record says.
+    const reseed = await app.reseedManaged('com.scenario.seed.b');
+    expect(reseed).toMatchObject({ ok: true, body: { data: { inserted: 1, skipped: 0, errors: 0 } } });
+    expect(app.rows.x!.map((r) => r.id)).toEqual(['r1', 'r2']);
+    // A row the object holds is left as it is; a row no load recorded lands.
+    expect(seededOf(await app.installManaged(pkg('com.scenario.seed.c', [{ id: 'r1' }, { id: 'r3' }])))).toMatchObject({ inserted: 1, skipped: 1, errors: 0 });
+    expect(app.rows.x!.map((r) => r.id)).toEqual(['r1', 'r2', 'r3']);
+    expect(await app.reseedManaged('com.scenario.seed.none')).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it('[#34613] a restore puts back a seeded row the install withholds: the restore package\'s reseed brings it in, and is the only reseed asked', async () => {
+    class ReseedTap extends TravelRulesApp {
+      readonly reseeds: string[] = [];
+      override async reseedManaged(manifestId: string): Promise<HttpAnswer> {
+        this.reseeds.push(manifestId);
+        return super.reseedManaged(manifestId);
+      }
+    }
+    const scenario = travel();
+    const app = new ReseedTap();
+    expect((await seedApp(scenario, app, [])).refused).toEqual([]);
+    expect(app.reseeds).toEqual([]); // a fresh seed meets no record
+    expect(app.landed.has('demotravel_expense_claim/c001')).toBe(true);
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
+    expect(await restoreSeededRows(scenario, app, [], seeded)).toEqual({ restored: { reinserted: ['demotravel_expense_claim/c001'] } });
+    expect(app.reseeds).toHaveLength(1);
+    expect(app.reseeds[0]).toMatch(/^com\.scenario\.seed\.scenarioseed[a-z]+$/);
+    expect(app.rows.demotravel_expense_claim!.filter((r) => r.id === 'c001')).toEqual([expect.objectContaining({ status: 'paid' })]);
+  });
+
+  it('[#34613] a withheld row a restore cannot put back is refused by name with the reason, never booked as reinserted', async () => {
+    const scenario = travel();
+    const app = new TravelRulesApp();
+    Object.assign(app, { reseedManaged: undefined }); // a harness with no reseed door
+    await seedApp(scenario, app, []);
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
+    const out = await restoreSeededRows(scenario, app, [], seeded);
+    expect(out.restored).toBeUndefined();
+    expect(out.failed).toContain('the rows could not be restored to the seeded state: demotravel_expense_claim: 1 missing (c001)');
+    // The refusal names the row, the record that withheld it, and why the reseed did not run.
+    const refusal = /\(refused: (.*)\)$/.exec(out.failed!)?.[1] ?? '';
+    expect(refusal).toMatch(/^insert demotravel_expense_claim c001: /);
+    expect(refusal).toContain('sys_seed_landed_key');
+    expect(refusal).toContain('no reseed door');
+    expect(app.rows.demotravel_expense_claim!.some((r) => r.id === 'c001')).toBe(false);
   });
 
   it('a reference the loader drops from a row it wrote refuses that row with the field and keeps its second-pass patch; a row also refused on write counts once; a restore counts the written row as reinserted', async () => {
@@ -2083,6 +2196,77 @@ describe('runHalf — a replay re-sends the turn\'s recorded writes before the r
       ['create_record', { objectName: 'o', data: { name: 'x' } }],
       ['update_record', { objectName: 'o', recordId: 'new-0', data: { parent: 'new-0', tags: ['new-0', 'seed-1'] } }],
       ['delete_record', { objectName: 'o', recordId: 'new-0', confirm: true }],
+    ]);
+  });
+
+  // The action door answers what the action body returned under `result`; a filed claim names its row there.
+  const actionAnswer = (action: string, result: Record<string, unknown>) => JSON.stringify({ ok: true, action, objectName: 'claim', result });
+  const refusal = (code: string) => JSON.stringify({ error: { code, message: `${code} (stand-in)` } });
+  /** The build's own action pair, as the travel_expense recording shows it: filing creates a claim; submitting it is refused HOOK_ABORTED, and RECORD_NOT_FOUND for an id the app never gave. */
+  const claimDoor = () => {
+    const sent: Array<[string, Record<string, unknown>]> = [];
+    const live = new Set<string>();
+    let n = 0;
+    const callTool: AskTask['callTool'] = async (tool, args) => {
+      sent.push([tool, args]);
+      if (tool === 'run_action' && args.actionName === 'file_claim') {
+        const id = `cl-live-${n++}`;
+        live.add(id);
+        return { output: actionAnswer('file_claim', { id, name: 'EC-0001' }), isError: false };
+      }
+      if (tool === 'create_record') {
+        const id = `new-${n++}`;
+        live.add(id);
+        return { output: JSON.stringify({ id }), isError: false };
+      }
+      const known = live.has(String(args.recordId));
+      if (tool === 'run_action') return { output: refusal(known ? 'HOOK_ABORTED' : 'RECORD_NOT_FOUND'), isError: true };
+      return known ? { output: JSON.stringify({ id: args.recordId }), isError: false } : { output: refusal('RECORD_NOT_FOUND'), isError: true };
+    };
+    return { sent, callTool };
+  };
+
+  it('a row a recorded run_action created (its answer\'s result.id) is named by the id the replay\'s app gave it, in a later write of the same turn and of a later turn', async () => {
+    const replay = new RecordedDriver({
+      driver: { driver: 'claude-code-cli', apiBilled: false },
+      turns: {
+        'c/scratch/run/a/p': turnOf(
+          call('run_action', { actionName: 'file_claim', params: { trip: 't1' } }, actionAnswer('file_claim', { id: 'cl-rec', name: 'EC-0007' })),
+          call('run_action', { actionName: 'submit_claim', recordId: 'cl-rec' }, refusal('HOOK_ABORTED'), true),
+        ),
+        'c/scratch/run/b/p': turnOf(call('update_record', { objectName: 'claim', recordId: 'cl-rec', data: { note: 'cl-rec' } }, '{"id":"cl-rec"}')),
+      },
+      files: {},
+    });
+    const { sent, callTool } = claimDoor();
+    // Before the action's result.id was read, the submit went out naming `cl-rec` and the app answered RECORD_NOT_FOUND: not faithful.
+    await replay.ask(task('a', callTool));
+    await replay.ask(task('b', callTool));
+    expect(sent).toEqual([
+      ['run_action', { actionName: 'file_claim', params: { trip: 't1' } }],
+      ['run_action', { actionName: 'submit_claim', recordId: 'cl-live-0' }],
+      ['update_record', { objectName: 'claim', recordId: 'cl-live-0', data: { note: 'cl-live-0' } }],
+    ]);
+  });
+
+  it('control: a create_record row is still remapped from its top-level id, in a later update_record and a later run_action', async () => {
+    const replay = new RecordedDriver({
+      driver: { driver: 'claude-code-cli', apiBilled: false },
+      turns: {
+        'c/scratch/run/a/p': turnOf(
+          call('create_record', { objectName: 'claim', data: {} }, '{"id":"rec-1"}'),
+          call('update_record', { objectName: 'claim', recordId: 'rec-1', data: {} }, '{"id":"rec-1"}'),
+          call('run_action', { actionName: 'submit_claim', recordId: 'rec-1' }, refusal('HOOK_ABORTED'), true),
+        ),
+      },
+      files: {},
+    });
+    const { sent, callTool } = claimDoor();
+    await replay.ask(task('a', callTool));
+    expect(sent).toEqual([
+      ['create_record', { objectName: 'claim', data: {} }],
+      ['update_record', { objectName: 'claim', recordId: 'new-0', data: {} }],
+      ['run_action', { actionName: 'submit_claim', recordId: 'new-0' }],
     ]);
   });
 
@@ -3839,5 +4023,64 @@ describe('runHalf — a live turn that throws is recorded as a failed turn, and 
     const replayRun = await runCard(fresh.scenario, new RecordedDriver(JSON.parse(JSON.stringify(recorder.recording)) as Recording), fresh.ops, { modes: ['scratch'], admin: ADMIN });
     expect(liveRun.modes[0]!.build).toMatchObject({ error: 'author: spawn claude ENOENT', notMeasured: 'author turn failed: spawn claude ENOENT' });
     expect(replayRun.modes[0]!.build).toEqual(liveRun.modes[0]!.build);
+  });
+});
+
+describe('the card stamp: the record and the scorecard name the card file a run graded (its sha256)', () => {
+  const run = { card: 'travel_expense', counts: { questions: 10, questionTurns: 13, operations: 6, personas: 3 }, modes: [] } as unknown as CardRun;
+  const driverInfo: DriverInfo = { driver: 'recorded', apiBilled: false };
+  const bytes = readFileSync(TRAVEL_FILE);
+
+  it('stamps `card: {id, sha256}` at the record top level and on its scorecard, and the scorecard prints the line', () => {
+    const card = cardStampOf('travel_expense', bytes);
+    expect(card.sha256).toMatch(/^[0-9a-f]{64}$/);
+    const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driverInfo, runner: 'test', evidenceDir: '/tmp', card }, run);
+    expect(record.card).toEqual(card);
+    expect((record.scorecard as { cardStamp?: unknown }).cardStamp).toEqual(card);
+    expect(renderScorecard(cardScorecard(run, PUBLISHED, card)).split('\n')).toContain(`card: travel_expense (sha256 ${card.sha256.slice(0, 12)})`);
+  });
+
+  // The runner stamps from the bytes the loader parsed (`loadedCardStamp`, `LoadedScenario.fileSha256`), never a
+  // second read after the run: a card edited, or deleted, between load and record write keeps its load-time hash,
+  // and its record is still written.
+  const loadCopy = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-card-stamp-'));
+    const file = join(dir, 'travel_expense.json');
+    writeFileSync(file, bytes);
+    const { card: loaded, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    expect(refusals).toEqual([]);
+    return { dir, file, loaded: loaded! };
+  };
+  const writeRecord = (loaded: LoadedScenario, out: string) => {
+    const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driverInfo, runner: 'test', evidenceDir: '/tmp', card: loadedCardStamp(loaded) }, run);
+    writeFileSync(out, JSON.stringify(record));
+    return JSON.parse(readFileSync(out, 'utf8')) as { card: { id: string; sha256: string } };
+  };
+
+  it('a card file edited between load and record write is stamped with the hash of the card that was loaded', () => {
+    const { dir, file, loaded } = loadCopy();
+    const atLoad = cardStampOf('travel_expense', bytes).sha256;
+    expect(loaded.fileSha256).toBe(atLoad);
+    writeFileSync(file, bytes.toString('utf8').replace('"sum": {"amount": 860}', '"sum": {"amount": 861}'));
+    expect(cardStampOf('travel_expense', readFileSync(file)).sha256).not.toBe(atLoad);
+    expect(writeRecord(loaded, join(dir, 'record.json')).card).toEqual({ id: 'travel_expense', sha256: atLoad });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a card file deleted between load and record write still gets its record, stamped with the load-time hash', () => {
+    const { dir, file, loaded } = loadCopy();
+    rmSync(file);
+    expect(existsSync(file)).toBe(false);
+    expect(writeRecord(loaded, join(dir, 'record.json')).card).toEqual({ id: 'travel_expense', sha256: cardStampOf('travel_expense', bytes).sha256 });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a changed card moves the hash, so the scorecard line differs; a record without a stamp keeps its bytes and prints no line', () => {
+    const changed = Buffer.from(bytes.toString('utf8').replace('"sum": {"amount": 860}', '"sum": {"amount": 861}'));
+    expect(changed.equals(bytes)).toBe(false);
+    expect(cardStampOf('travel_expense', changed).sha256).not.toBe(cardStampOf('travel_expense', bytes).sha256);
+    const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driverInfo, runner: 'test', evidenceDir: '/tmp' }, run);
+    expect('card' in record).toBe(false);
+    expect(renderScorecard(cardScorecard(run, PUBLISHED))).not.toContain('card: ');
   });
 });

@@ -1,5 +1,133 @@
 # @objectstack/plugin-hono-server
 
+## 18.6.0
+
+### Patch Changes
+
+- 1a30a17: fix(console,plugin-hono-server): the organization's Localization language decides the Console language for a user with no personal language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An administrator who set the organization's language (Setup → Localization, or the first-run checklist's "Default language and country") never changed the Console language of a member with no `sys_user.locale`. The Console stated a language on every `GET /api/v1/auth/me/localization` read (the browser's language when the app ships it, else the app's declared default), so the server's request rung always answered and its deployment-default rung, the only one that reads the organization's setting, never did. That rung also answered the settings manifest's built-in `en-US` placeholder over the app's declared `i18n.defaultLocale`.
+  
+  `/auth/me/localization` now resolves `locale` in the order the maintainer ruled for a user with no personal language: the user's own `sys_user.locale`; else the request's `Accept-Language` top tag when the app lists that language (`i18n.getLocales()`, what discovery serves as `locale.supported`), answered in the app's own spelling (`en-US` → `en`, `ja` → `ja-JP`); else the organization's `localization.locale` when somebody set it (not the manifest's `en-US` placeholder); else the app's declared `i18n.defaultLocale`; else the settings cascade's answer, as before. `resolveSignedInUserLocale` answers the same. A host with no `i18n` service has no list to match against, so the request's language answers as before; a host with no `settings` service keeps the cascade's answer for the deployment default.
+  
+  The Console now states a language only when the app lists the browser's language. Otherwise the browser's own header goes out and the server's deployment default decides. A stored `sys_user.locale` or a language picked on the device still wins. No response key or discovery key is added.
+- e61af97: feat: the list toolbar offers the "In a queue" toggle only on objects that actually use queues
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Until now the toggle appeared on every list of an object with a user owner as soon as the organization had a single queue, although on most of those objects no record ever sits in a queue, so it could only return an empty list. It now appears only on an object where a queue can hold something:
+  
+  - a record of the object sits in a queue now (no owner, a queue set), or
+  - an active assignment rule routes the object's new records into a queue: one of the organization's own rules, or a rule an installed package declares that is not switched off.
+  
+  Nothing is authored for this. The server works it out from the rules and the records.
+  
+  `GET /auth/me/permissions` carries the answer as a new field beside `hasAnyQueue`: `objectsUsingQueues`, a list of object names, declared in `MePermissionsAuthenticatedResponseSchema`. It names only objects the caller may read, and never a queue name or a count. It is empty when the organization has no queue, when no ownership-queue service is registered, and on the closed body. The ownership-queue service contract gains the optional method `objectsUsingQueues(organizationId)`, implemented by `@objectstack/plugin-sharing`. The method checks each owned object for one sitting record (`limit 1`) and reads the routing rules once. The route asks only when `hasAnyQueue` is true, so an organization with no queue pays nothing extra.
+  
+  **Migration.** `objectsUsingQueues` is required on the strict `MePermissionsAuthenticatedResponseSchema`. Code that builds a `MePermissionsAuthenticatedResponse` (a test fixture, a stub server) adds `objectsUsingQueues: []` beside `hasAnyQueue`. Code that parses a body from a server older than this release with the schema gets a parse failure for the missing key: parse with `.partial({ objectsUsingQueues: true })` or default it to `[]` until the server is upgraded. The console does not parse; it reads the field and treats its absence as "no object".
+  
+  The console reads the field from the payload it already loads once per session. A record that starts sitting in a queue on an object not listed yet shows the toggle from the next time the permissions are read. An answer without the field is treated as "no", the same way an unknown `hasAnyQueue` is.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/observability@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

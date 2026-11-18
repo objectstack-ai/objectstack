@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin';
 import { readSeedDatasets } from './seed-datasets.js';
 import { readSeedSettlement } from './seed-settlement.js';
@@ -288,7 +290,7 @@ describe('AppPlugin flat-bundle seed collection (#15262)', () => {
         data: [
             {
                 object: 'sys_user',
-                mode: 'insert',
+                mode: 'ignore',
                 records: [{ id: 'flat_u1', name: 'Flat One' }],
             },
         ],
@@ -332,9 +334,9 @@ describe('AppPlugin flat-bundle seed collection (#15262)', () => {
         const bundle = {
             manifest: {
                 id: 'com.test.nested-seed',
-                data: [{ object: 'sys_user', mode: 'insert', records: [{ id: 'legacy_u1' }] }],
+                data: [{ object: 'sys_user', mode: 'ignore', records: [{ id: 'legacy_u1' }] }],
             },
-            data: [{ object: 'sys_user', mode: 'insert', records: [{ id: 'top_u1' }] }],
+            data: [{ object: 'sys_user', mode: 'ignore', records: [{ id: 'top_u1' }] }],
         };
 
         await new AppPlugin(bundle).start(ctx);

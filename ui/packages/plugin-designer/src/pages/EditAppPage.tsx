@@ -7,7 +7,7 @@
  * @module
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppCreationWizard, navObjectNames } from '../AppCreationWizard';
 import { wizardDraftToAppSchema } from '@object-ui/types';
@@ -55,8 +55,35 @@ export function EditAppPage() {
 
   const targetAppName = editAppName || appName;
 
-  // Find the app to edit
-  const appToEdit = apps.find((a: any) => a.name === targetAppName);
+  // Find the app to edit. The served list only says the app exists and where
+  // it is served from: its words are translated for the console's locale.
+  const servedApp = apps.find((a: any) => a.name === targetAppName);
+  const servedPackageId = typeof servedApp?._packageId === 'string' ? servedApp._packageId : undefined;
+
+  // objectstack#35054 (route D) — the wizard edits the app as its author
+  // stored it, read from the untranslated layers (`getAuthoredItem`). The
+  // served app is translated for the console's locale (its label and every
+  // navigation label), and the save below sends a whole document the door
+  // stores verbatim, so seeding the wizard with it stored the translations as
+  // the app's source text. A read that fails or finds nothing opens nothing.
+  const [authored, setAuthored] = useState<
+    { for: string; app: Record<string, any> | null; error?: string } | null
+  >(null);
+  useEffect(() => {
+    if (!servedApp?.name) return;
+    let cancelled = false;
+    const name = servedApp.name as string;
+    const read = adapter?.getAuthoredItem
+      ? adapter.getAuthoredItem('app', name, servedPackageId ? { packageId: servedPackageId } : {})
+      : Promise.reject(new Error('No metadata client'));
+    read.then(
+      (app) => { if (!cancelled) setAuthored({ for: name, app }); },
+      (err: any) => { if (!cancelled) setAuthored({ for: name, app: null, error: String(err?.message ?? err) }); },
+    );
+    return () => { cancelled = true; };
+  }, [adapter, servedApp?.name, servedPackageId]);
+  const appToEdit: Record<string, any> | undefined =
+    authored && authored.for === servedApp?.name && authored.app ? authored.app : undefined;
 
   // Map metadata objects to ObjectSelection format. An object is selected when
   // the stored navigation has an object entry for it ANYWHERE, a group's
@@ -139,6 +166,20 @@ export function EditAppPage() {
       // localStorage full
     }
   }, [targetAppName]);
+
+  if (servedApp && (!authored || authored.for !== servedApp.name)) {
+    return <div className="mx-auto max-w-4xl py-8 px-4" data-testid="edit-app-loading" />;
+  }
+
+  if (servedApp && !appToEdit) {
+    return (
+      <div className="mx-auto max-w-4xl py-8 px-4 text-center" data-testid="edit-app-load-failed">
+        <p className="text-muted-foreground">
+          Application &quot;{targetAppName}&quot; could not be read for editing{authored?.error ? `: ${authored.error}` : '.'}
+        </p>
+      </div>
+    );
+  }
 
   if (!appToEdit) {
     return (

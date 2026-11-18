@@ -154,7 +154,11 @@ export const AFFORDANCE_GRANTS = {
   listImport: { crud: 'import', grant: 'create', field: 'create' },
   /** The import wizard's template download — its endpoint answers 403 without the create grant. */
   importTemplate: { crud: null, grant: 'create' },
-  /** A list's inline (in-cell) editing, each of whose cells asks the update question (objectui#12103). */
+  /**
+   * A list's inline (in-cell) editing, each of whose cells asks the update
+   * question (objectui#12103) — and a timesheet's retyped one-record cell,
+   * which updates that record's value field (#34382).
+   */
   listInlineEdit: { crud: 'edit', grant: 'update', field: 'write' },
   /** A list's bulk Delete. */
   listBulkDelete: { crud: 'delete', grant: 'delete' },
@@ -165,9 +169,9 @@ export const AFFORDANCE_GRANTS = {
    * and progress, its title edited in place, and its dependency links).
    */
   rowEdit: { crud: 'edit', grant: 'update' },
-  /** A grid row's Delete — and a gantt row's Delete. */
+  /** A grid row's Delete — and a gantt row's Delete, and a timesheet's cleared one-record cell (#34382). */
   rowDelete: { crud: 'delete', grant: 'delete' },
-  /** A grid's inline add-record row. */
+  /** A grid's inline add-record row — and a timesheet's empty cell typed into, and its Add row (#34382). */
   gridAddRow: { crud: 'create', grant: 'create' },
   /**
    * A related list's "+ New", asked of the CHILD object — and a line-items

@@ -18,10 +18,11 @@
  *    and renders into
  *    `propsTarget`. A pillar that claims nothing keeps its own aside, and the
  *    slot shows the copilot alone (the header reads as a title, not a switch).
- *  - While the properties show, the copilot folds to a 40 px strip at the
- *    slot's foot that leads back to the conversation.
- *  - The copilot segment and the strip say how many items the copilot
- *    proposed await the author's confirmation (「N 项待确认」, objectstack#25943).
+ *  - objectstack#35018 — while the properties show, the header's 属性 | AI 助手
+ *    switch is the one way back to the conversation: the 40 px 「AI 助手 /
+ *    回到对话 →」 strip that also stood at the slot's foot is gone.
+ *  - The copilot segment says how many items the copilot proposed await the
+ *    author's confirmation (「N 项待确认」, objectstack#25943).
  *  - Both bodies stay MOUNTED and are hidden by mode: a turn the copilot is
  *    streaming survives a look at the properties, and a pillar's portal target
  *    never disappears under an open editor.
@@ -33,7 +34,7 @@
  */
 
 import * as React from 'react';
-import { ArrowRight, History, Maximize2, Minimize2, SlidersHorizontal, Sparkles, X } from 'lucide-react';
+import { History, Maximize2, Minimize2, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { t, tFormat } from '../metadata-admin/i18n.js';
@@ -267,29 +268,6 @@ export function StudioRightSlot({
         >
           {copilot}
         </div>
-        {showsProps && copilotAvailable && (
-          <button
-            type="button"
-            data-testid="studio-slot-copilot-strip"
-            onClick={() => onModeChange('copilot')}
-            className="flex h-10 shrink-0 items-center gap-2 border-t bg-primary/5 px-3 text-left text-[13px] text-primary hover:bg-primary/10"
-          >
-            <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate">
-              {t('engine.studio.aiCopilot', locale)}
-              {planPending && (
-                <>
-                  {' · '}
-                  <span data-testid="studio-slot-strip-plan-pending">{pendingText}</span>
-                </>
-              )}
-            </span>
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs">
-              {t('engine.studio.slot.backToChat', locale)}
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
-          </button>
-        )}
       </aside>
     </>
   );
