@@ -72,8 +72,6 @@ export const ConvertLeadAction = defineAction({
 });
 ```
 
-**Script-typed action**:
-
 <!-- os:check -->
 ```typescript
 import { defineAction } from '@objectstack/spec/ui';

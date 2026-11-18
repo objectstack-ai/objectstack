@@ -1313,18 +1313,20 @@ export const CEILINGS = new Map([
   // another passage (the 85 bytes above were what there was), so the same ruling's second
   // half carries it: the file is 11106 -> 11231 bytes -> 2808 tokens, zero headroom before,
   // ceiling +31, pinned AT the measurement.
-  // 2808 -> 2988: an action body refuses by code. One paragraph under the `ctx` section (which
+  // 2808 -> 2982: an action body refuses by code. One paragraph under the `ctx` section (which
   // action may declare `refusals`; that the catalogue, the throws and the checks are a hook's,
   // taught in objectstack-data and only pointed at here; the bundle key the sentence is translated
   // at; that an authored `errorMessage` replaces the sentence in the console's toast), and the
-  // Add Line example declares one entry and throws its code where it threw a sentence. NOTHING
-  // TO PAY DOWN in this file: the entry above spent its last restatement and a re-read for this
-  // change found none, so the same ruling's second half carries it, as it did there. The file is
-  // 11231 -> 11952 bytes -> 2988 tokens, zero headroom before, ceiling +180, pinned AT the
-  // measurement. Same ruling as the lines above (2026-10-27, tap A): 「A:先削重复,余额按实测提高」
-  // (ruling record 6513306068).
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11952 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 2988],
+  // Add Line example declares one entry and throws its code where it threw a sentence. PAID DOWN
+  // FIRST by 26 bytes of true restatement in this file: the label line "**Script-typed action**:"
+  // above the Add to Campaign example (the block's own `type: 'script'` says it, under the H2
+  // "Examples"). Two reads of the file found no other passage restating another, so the same
+  // ruling's second half carries the rest. Arithmetic: the text adds 721 bytes, the cut removes
+  // 26, so the file is 11231 -> 11926 bytes -> 2982 tokens, zero headroom before, ceiling +174,
+  // the measured remainder only, pinned AT the measurement. Same ruling as the lines above
+  // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(11926 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2982],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
