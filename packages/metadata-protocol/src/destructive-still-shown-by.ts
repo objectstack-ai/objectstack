@@ -34,9 +34,25 @@
  * item is read on its own. A listing that cannot be read leaves `stillShownBy`
  * absent — "not computed" — rather than an empty list that would read as
  * "shown nowhere".
+ *
+ * The `view` listing serves view items (`viewKind` + `config`) and flattened
+ * list overlays, never an aggregated `{ list, form, listViews }` container:
+ * the served read filters every container out after expanding stored ones
+ * (`protocol-meta-list-reads.ts`, `isAggregatedViewContainer`). So the
+ * type-change half reads `config` and the item's own root, and nothing else.
+ *
+ * ## How it reaches the judges
+ *
+ * The three judges live only on `@objectstack/lint`'s ROOT entry, and this
+ * module sits on the object save path, which reaches lint through
+ * `@objectstack/lint/runtime` alone (#4463). So the root is loaded lazily, as
+ * `build-probes.ts` loads it: one dynamic `import()`, taken only when a
+ * `field_removed` finding needs the judges. A failed load leaves those findings
+ * without `stillShownBy` ("not computed"); the refusal itself is unchanged.
+ * `destructive-still-shown-by.lint-entry.test.ts` pins that no static import of
+ * the root lands on the save path.
  */
 
-import { validateFormLayout, validateReferenceIntegrity, validateWidgetBindings } from '@objectstack/lint';
 import type { FieldStillShownBy } from '@objectstack/spec/api';
 import { filterOperatorFieldTypeFit } from '@objectstack/spec/data';
 import { isViewFilterOrGroup } from '@objectstack/spec/ui';
@@ -110,7 +126,8 @@ export async function withStillShownBy(
         return [...issues];
     }
 
-    const shownByRemoval = removed.length > 0 ? removalSurfaces(stack, objectName, prev, next, removed) : undefined;
+    const judges = removed.length > 0 ? await loadJudges(objectName) : undefined;
+    const shownByRemoval = judges ? removalSurfaces(judges, stack, objectName, prev, next, removed) : undefined;
     const nextFields = isRecord(next) && isRecord(next.fields) ? next.fields : {};
     return issues.map((issue) => {
         if (!issue.field) return { ...issue };
@@ -152,14 +169,27 @@ interface Finding {
     path: string;
 }
 
-/** Every finding the three judges `os validate` runs answer for `stack`, or `undefined` when one threw. */
-function judge(stack: AnyRec): Finding[] | undefined {
+type Judge = (stack: AnyRec) => readonly Finding[];
+
+/** The three judges `os validate` runs, loaded lazily from lint's root entry; `undefined` when the load failed. */
+async function loadJudges(objectName: string): Promise<readonly Judge[] | undefined> {
     try {
-        return [
-            ...validateReferenceIntegrity(stack),
-            ...validateFormLayout(stack),
-            ...validateWidgetBindings(stack),
-        ];
+        const lint = await import('@objectstack/lint');
+        return [lint.validateReferenceIntegrity, lint.validateFormLayout, lint.validateWidgetBindings];
+    } catch (error) {
+        console.warn(
+            `[Protocol] the destructive-change refusal of object '${objectName}' could not load the judges it names `
+            + `still-shown items with: ${(error as { message?: string } | null)?.message ?? String(error)}. `
+            + 'Its `field_removed` findings carry no `stillShownBy`.',
+        );
+        return undefined;
+    }
+}
+
+/** Every finding the judges answer for `stack`, or `undefined` when one threw. */
+function judge(judges: readonly Judge[], stack: AnyRec): Finding[] | undefined {
+    try {
+        return judges.flatMap((j) => [...j(stack)]);
     } catch {
         return undefined;
     }
@@ -174,6 +204,7 @@ const findingKey = (f: Finding): string => `${f.rule}@${f.path}`;
  * field out again. `undefined` for a field when a judge could not run.
  */
 function removalSurfaces(
+    judges: readonly Judge[],
     stack: Stack,
     objectName: string,
     prev: unknown,
@@ -191,13 +222,13 @@ function removalSurfaces(
     const others = stack.objects.filter((o) => !(isRecord(o) && o.name === objectName));
     const at = (objectBody: AnyRec): Stack => ({ ...stack, objects: [...others, objectBody] });
     const baselineStack = at(withAll);
-    const baseline = judge(baselineStack);
+    const baseline = judge(judges, baselineStack);
     if (!baseline) return answers;
     const seen = new Set(baseline.map(findingKey));
 
     for (const field of removed) {
         const { [field]: _gone, ...rest } = restored;
-        const findings = judge(at({ ...withAll, fields: rest }));
+        const findings = judge(judges, at({ ...withAll, fields: rest }));
         if (!findings) continue;
         answers.set(field, surfacesOf(baselineStack, findings.filter((f) => !seen.has(findingKey(f)))));
     }
@@ -257,17 +288,13 @@ function boundObject(view: AnyRec): string | undefined {
     return str(view.objectName) ?? str(view.object) ?? (isRecord(view.data) ? str(view.data.object) : undefined);
 }
 
-/** True when the record is a view container (it carries a sub-view of its own). */
-function isContainer(view: AnyRec): boolean {
-    return ['list', 'form', 'listViews', 'formViews'].some((k) => isRecord(view[k]));
-}
-
 /**
- * Each list-view filter rule bound to `objectName` that names `field` by its
- * bare name and whose operator does not fit `definition`'s type. A rule's view
- * binds the object it names, else its container's binding, else — for a
- * container — the object its name is (an object-scoped container is filed
- * under its object's name).
+ * Each filter rule of a served view item bound to `objectName` that names
+ * `field` by its bare name and whose operator does not fit `definition`'s type.
+ * The rules read: the item's own `filter` (a flattened list overlay), its
+ * `config.filter` (a view item, the canonical served shape), and the
+ * `userFilters.tabs[].filter` of either. A site binds the object it names, else
+ * the item's binding.
  */
 function unfitViewFilters(
     views: readonly unknown[],
@@ -284,27 +311,31 @@ function unfitViewFilters(
         if (!isRecord(raw)) continue;
         const name = str(raw.name);
         if (!name) continue;
-        const containerBinding = boundObject(raw) ?? (isContainer(raw) ? name : undefined);
-        // The record itself (a flattened list overlay), a ViewItem record's
-        // `config`, the container's `list` and each `listViews` entry.
-        const sites: Array<[string, AnyRec]> = [['', raw]];
-        if (isRecord(raw.config)) sites.push(['config.', raw.config]);
-        if (isRecord(raw.list)) sites.push(['list.', raw.list]);
-        if (isRecord(raw.listViews)) {
-            for (const [key, sub] of Object.entries(raw.listViews)) if (isRecord(sub)) sites.push([`listViews.${key}.`, sub]);
-        }
+        const itemBinding = boundObject(raw);
+        const roots: Array<[string, AnyRec]> = [['', raw]];
+        if (isRecord(raw.config)) roots.push(['config.', raw.config]);
         const entries: Array<{ where: string; operator: string }> = [];
-        for (const [prefix, site] of sites) {
-            if ((boundObject(site) ?? containerBinding) !== objectName || !Array.isArray(site.filter)) continue;
-            site.filter.forEach((element, i) => {
-                const rules: Array<[string, unknown]> = isViewFilterOrGroup(element) && Array.isArray(element.or)
-                    ? element.or.map((rule, j) => [`${prefix}filter[${i}].or[${j}]`, rule])
-                    : [[`${prefix}filter[${i}]`, element]];
-                for (const [where, rule] of rules) {
-                    if (!isRecord(rule) || rule.field !== field || typeof rule.operator !== 'string') continue;
-                    if (filterOperatorFieldTypeFit(rule.operator, meta) === 'unfit') entries.push({ where, operator: rule.operator });
-                }
-            });
+        for (const [prefix, root] of roots) {
+            if ((boundObject(root) ?? itemBinding) !== objectName) continue;
+            const filters: Array<[string, unknown]> = [[`${prefix}filter`, root.filter]];
+            const tabs = isRecord(root.userFilters) ? root.userFilters.tabs : undefined;
+            if (Array.isArray(tabs)) {
+                tabs.forEach((tab, k) => {
+                    if (isRecord(tab)) filters.push([`${prefix}userFilters.tabs[${k}].filter`, tab.filter]);
+                });
+            }
+            for (const [at, filter] of filters) {
+                if (!Array.isArray(filter)) continue;
+                filter.forEach((element, i) => {
+                    const rules: Array<[string, unknown]> = isViewFilterOrGroup(element) && Array.isArray(element.or)
+                        ? element.or.map((rule, j) => [`${at}[${i}].or[${j}]`, rule])
+                        : [[`${at}[${i}]`, element]];
+                    for (const [where, rule] of rules) {
+                        if (!isRecord(rule) || rule.field !== field || typeof rule.operator !== 'string') continue;
+                        if (filterOperatorFieldTypeFit(rule.operator, meta) === 'unfit') entries.push({ where, operator: rule.operator });
+                    }
+                });
+            }
         }
         // One entry per operator, so each entry names the one operator its positions share.
         const byOperator = new Map<string, string[]>();

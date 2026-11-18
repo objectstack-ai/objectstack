@@ -12,9 +12,11 @@
  * the MCP draft door saves with `mode: 'draft'` and `writeFace: 'meta-dispatch'`.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { DestructiveChangeIssueSchema } from '@objectstack/spec/api';
+import './lint-root-preload.testkit.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 interface Row {
@@ -65,6 +67,44 @@ const leadList = row('view', 'crm_lead_open', {
     filter: [{ field: 'status', operator: 'contains', value: 'op' }],
 });
 
+/**
+ * A view item in the shape the served `view` listing presents (`viewKind` +
+ * `config`): the listing never serves a `{ list, listViews }` container, only
+ * the items it expands into. Its `config` shows `status` as a column, filters
+ * on it, and carries a `userFilters` tab preset that filters on it too.
+ */
+const leadItem = row('view', 'crm_lead.pipeline', {
+    name: 'crm_lead.pipeline',
+    object: 'crm_lead',
+    viewKind: 'list',
+    config: {
+        type: 'grid',
+        columns: ['name', 'status'],
+        filter: [{ field: 'status', operator: 'contains', value: 'a' }],
+        userFilters: {
+            element: 'tabs',
+            tabs: [{ name: 'hot', label: 'Hot', filter: [{ field: 'status', operator: 'contains', value: 'h' }] }],
+        },
+    },
+});
+
+/** A dataset with a dimension on `status`, and a dashboard card bound to that dimension. */
+const leadDataset = row('dataset', 'lead_stats', {
+    name: 'lead_stats',
+    label: 'Lead stats',
+    object: 'crm_lead',
+    dimensions: [{ name: 'by_status', label: 'Status', field: 'status' }],
+    measures: [{ name: 'lead_count', label: 'Leads', aggregate: 'count' }],
+});
+const leadDashboard = row('dashboard', 'lead_board', {
+    name: 'lead_board',
+    label: 'Lead board',
+    widgets: [
+        { id: 'w_total', type: 'metric', dataset: 'lead_stats', values: ['lead_count'] },
+        { id: 'w_status', type: 'bar', dataset: 'lead_stats', dimensions: ['by_status'], values: ['lead_count'] },
+    ],
+});
+
 /** A form view editing `status`. */
 const leadForm = row('view', 'crm_lead_edit', {
     name: 'crm_lead_edit',
@@ -79,7 +119,7 @@ const whereValueMatches = (actual: unknown, want: unknown): boolean =>
         ? (want as { $in: unknown[] }).$in.includes(actual)
         : actual === want;
 
-function makeKernel(seed: Row[]) {
+function makeKernel(seed: Row[], failTypes: readonly string[] = []) {
     const rows = new Map<string, Row>();
     for (const r of seed) rows.set(r.id, r);
     const match = (r: Row, where: Record<string, unknown>): boolean =>
@@ -93,7 +133,9 @@ function makeKernel(seed: Row[]) {
     const engine: any = {
         async find(table: string, o?: { where?: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
-            finds.push(String(o?.where?.type));
+            const type = String(o?.where?.type);
+            finds.push(type);
+            if (failTypes.includes(type)) throw new Error(`fixture: the ${type} listing is unreadable`);
             const matched = Array.from(rows.values()).filter((r) => match(r, o?.where ?? {}));
             return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
         },
@@ -119,8 +161,17 @@ function makeKernel(seed: Row[]) {
     return { protocol, finds };
 }
 
-async function refusal(seed: Row[], fields: Record<string, unknown>, extra: Record<string, unknown> = {}): Promise<any> {
-    const { protocol } = makeKernel(seed);
+async function refusal(
+    seed: Row[],
+    fields: Record<string, unknown>,
+    extra: Record<string, unknown> = {},
+    failTypes: readonly string[] = [],
+): Promise<any> {
+    const { protocol } = makeKernel(seed, failTypes);
+    return refusalOf(protocol, fields, extra);
+}
+
+async function refusalOf(protocol: any, fields: Record<string, unknown>, extra: Record<string, unknown> = {}): Promise<any> {
     try {
         await protocol.saveMetaItem({ type: 'object', name: 'crm_lead', item: { name: 'crm_lead', label: 'Lead', fields }, ...extra });
     } catch (e: any) {
@@ -172,11 +223,81 @@ describe('a refused field removal names the views and forms that still show the 
         expect(removed.stillShownBy.map((s: any) => s.name)).toEqual(expect.arrayContaining(['crm_lead_open', 'crm_lead_edit']));
     });
 
-    it('reads one served listing per type, not one read per item', async () => {
-        const { protocol, finds } = makeKernel([leadObject, leadList, leadForm]);
-        await protocol.saveMetaItem({ type: 'object', name: 'crm_lead', item: { name: 'crm_lead', fields: withoutStatus } }).catch(() => {});
-        const viewReads = finds.filter((t) => t === 'view' || t === 'views');
-        expect(viewReads.length).toBeLessThanOrEqual(2);
+    it('reads each type\'s served listing a fixed number of times, however many items it holds', async () => {
+        // The view listing is read (a positive count, so the bound cannot pass
+        // with no reads), and five more view items add no read at all.
+        const viewReads = async (seed: Row[]): Promise<number> => {
+            const { protocol, finds } = makeKernel(seed);
+            await refusalOf(protocol, withoutStatus);
+            return finds.filter((t) => t === 'view').length;
+        };
+        const extra = [1, 2, 3, 4, 5].map((n) => row('view', `crm_lead_extra_${n}`, {
+            name: `crm_lead_extra_${n}`, viewKind: 'list', object: 'crm_lead', type: 'grid', columns: ['status'],
+        }));
+        const one = await viewReads([leadObject, leadList]);
+        const six = await viewReads([leadObject, leadList, ...extra]);
+        expect(one).toBeGreaterThan(0);
+        expect(six).toBe(one);
+    });
+
+    it('names a served view item at its config positions', async () => {
+        const err = await refusal([leadObject, leadItem], withoutStatus);
+        const removed = err.issues.find((i: any) => i.code === 'field_removed' && i.field === 'status');
+        expect(removed.stillShownBy).toEqual([
+            {
+                type: 'view',
+                name: 'crm_lead.pipeline',
+                where: ['config.columns[1]', 'config.filter[0]', 'config.userFilters.tabs[0].filter[0]'],
+            },
+        ]);
+    });
+
+    it('names a dashboard card that shows the field through a dataset (via)', async () => {
+        const err = await refusal([leadObject, leadDataset, leadDashboard], withoutStatus);
+        const removed = err.issues.find((i: any) => i.code === 'field_removed' && i.field === 'status');
+        expect(removed.stillShownBy).toEqual([
+            { type: 'dataset', name: 'lead_stats', where: ['dimensions[0]'] },
+            { type: 'dashboard', name: 'lead_board', where: ['widgets[1]'], via: 'lead_stats' },
+        ]);
+        expect(removed.message).toContain('through dataset "lead_stats"');
+    });
+
+    it('leaves stillShownBy absent, not [], when a listing cannot be read, and still refuses', async () => {
+        const err = await refusal([leadObject, leadList, leadForm], withoutStatus, {}, ['dashboard']);
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.status).toBe(409);
+        const removed = err.issues.find((i: any) => i.code === 'field_removed' && i.field === 'status');
+        expect(removed).toBeDefined();
+        expect('stillShownBy' in removed).toBe(false);
+    });
+
+    it('still refuses when naming the items throws, with stillShownBy absent', async () => {
+        // A listing answer that is not a list makes the namer throw past its
+        // own read guard; the save's call site must catch it rather than let
+        // the enclosing catch read it as "skip the safety check".
+        const { protocol } = makeKernel([leadObject, leadList, leadForm]);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(protocol, 'getMetaItems').mockResolvedValue({ type: 'view', items: 7 });
+        try {
+            const err = await refusalOf(protocol, { ...FIELDS, status: { name: 'status', type: 'number' } });
+            expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+            expect(err.status).toBe(409);
+            const retyped = err.issues.find((i: any) => i.code === 'field_type_change' && i.field === 'status');
+            expect(retyped).toBeDefined();
+            expect('stillShownBy' in retyped).toBe(false);
+        } finally {
+            warn.mockRestore();
+        }
+    });
+
+    it('produces findings the declared wire shape parses (DestructiveChangeIssueSchema)', async () => {
+        const err = await refusal([leadObject, leadList, leadForm, leadDataset, leadDashboard], withoutStatus);
+        const removed = err.issues.find((i: any) => i.code === 'field_removed' && i.field === 'status');
+        expect(removed.stillShownBy.length).toBeGreaterThan(0);
+        for (const issue of err.issues) {
+            const parsed = DestructiveChangeIssueSchema.safeParse(issue);
+            expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+        }
     });
 });
 
@@ -189,5 +310,16 @@ describe('a refused type change names the list-view filters whose operator no lo
         expect(retyped.stillShownBy).toEqual([
             { type: 'view', name: 'crm_lead_open', where: ['filter[0]'], operator: 'contains' },
         ]);
+    });
+
+    it('names a served view item\'s config filter and its userFilters tab filter', async () => {
+        const err = await refusal([leadObject, leadItem], { ...FIELDS, status: { name: 'status', type: 'number' } });
+        const retyped = err.issues.find((i: any) => i.code === 'field_type_change' && i.field === 'status');
+        expect(retyped.stillShownBy).toEqual([{
+            type: 'view',
+            name: 'crm_lead.pipeline',
+            where: ['config.filter[0]', 'config.userFilters.tabs[0].filter[0]'],
+            operator: 'contains',
+        }]);
     });
 });

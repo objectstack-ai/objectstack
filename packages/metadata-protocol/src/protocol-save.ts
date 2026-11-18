@@ -1172,10 +1172,22 @@ export class ProtocolSaveFacet {
                     // A removed or retyped field names the items that still
                     // show it (`stillShownBy`), read from one served listing per
                     // type; it rides `issues`, which every door relays.
-                    const issues = await withStillShownBy(
-                        request.name, prev, request.item, counted,
-                        async (type) => (await host.getMetaItems({ type }))?.items ?? [],
-                    );
+                    // Caught HERE: the enclosing `catch` reads any other throw as
+                    // "skip the safety check", so a failure computing the names
+                    // must leave them absent and the 409 standing.
+                    let issues = counted;
+                    try {
+                        issues = await withStillShownBy(
+                            request.name, prev, request.item, counted,
+                            async (type) => (await host.getMetaItems({ type }))?.items ?? [],
+                        );
+                    } catch (error) {
+                        console.warn(
+                            `[Protocol] object '${request.name}': naming the items that still show a removed or `
+                            + `retyped field failed (${(error as { message?: string } | null)?.message ?? String(error)}); `
+                            + 'the refusal carries no `stillShownBy`.',
+                        );
+                    }
                     if (issues.length > 0) {
                         // [commit 809e61221] Deliberately NOT trimmed to a headline, and
                         // this is a MEASURED verdict rather than an oversight —

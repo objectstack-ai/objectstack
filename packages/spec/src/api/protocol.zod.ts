@@ -1395,10 +1395,16 @@ export const FieldStillShownBySchema = lazySchema(() => z.object({
     'The metadata type of the item: `view` (a list view or a form), `dataset`, `dashboard`, `page`, '
     + '`flow`, `report`, or `object` (another object, or the saved object\'s own body).',
   ),
-  name: z.string().describe('The item\'s name, as the served list names it.'),
+  name: z.string().describe(
+    'The item\'s name, as the served list names it. One item can appear in more than one entry: a '
+    + 'dashboard once directly and once per `via` dataset, a view once per unfit `operator`.',
+  ),
   where: z.array(z.string()).describe(
-    'Each position inside the item that names the field, as a path relative to the item '
-    + '(`listViews.all.columns[1]`, `formViews.edit.sections[0].fields[2]`, `widgets[3]`).',
+    'Each position inside the item that names the field, as a path relative to the item as the '
+    + 'served listing presents it: `config.columns[1]` or `config.sections[0].fields[2]` on a view '
+    + 'item (the served listing never presents a `{ list, form, listViews }` container, only the '
+    + 'view items it expands into), `columns[1]` on a flattened list overlay, `widgets[3]` on a '
+    + 'dashboard. The literal `(root)` when the finding sits on the item itself.',
   ),
   via: z.string().optional().describe(
     'A dashboard widget shows the field through this dataset: it names a dimension or measure of '
@@ -1415,7 +1421,7 @@ export const FieldStillShownBySchema = lazySchema(() => z.object({
  * save door's destructive-change diff): an entry of the refusal's `issues[]`,
  * which every door relays verbatim beside the message — the REST `PUT` doors
  * as a top-level `issues`, the runtime dispatcher as `details.issues`, the MCP
- * draft door as `issues` on its refusal.
+ * draft door as `error.issues` on its refusal.
  */
 export const DestructiveChangeIssueSchema = lazySchema(() => z.object({
   code: z.string().describe(
@@ -1431,17 +1437,22 @@ export const DestructiveChangeIssueSchema = lazySchema(() => z.object({
     + 'metadata (one served listing per type: what the code packages register, with this '
     + 'environment\'s stored active rows folded over them; drafts are not read, and no record is read). '
     + 'On `field_removed` and `field_type_change` findings only; absent on every other code, and '
-    + 'absent when a listing could not be read (absent is "not computed", `[]` is "computed, none"). '
+    + 'absent when it could not be computed: a listing could not be read, a judge threw or could not '
+    + 'be loaded, or the retyped field\'s new definition carries no readable `type` (absent is "not '
+    + 'computed", `[]` is "computed, none"). '
     + 'On `field_removed`: the `object`, `view`, `dataset`, `dashboard`, `page`, `flow` and `report` '
     + 'items in which the platform\'s reference-integrity suite, form-layout check and widget-binding '
     + 'check (`@objectstack/lint`, the judges `os validate` runs) find a reference that resolves with '
     + 'the field and dangles without it, the saved body taken as the save would write it; plus each '
     + 'dashboard widget bound to a dataset dimension or measure that dangles (`via`). A position '
     + 'those judges do not read is not seen, nor is an item of any other type (an app, an action, a '
-    + 'permission set), nor code outside the metadata. On `field_type_change`: each list-view filter '
-    + 'rule (a view\'s own `filter`, its `list` view\'s and each `listViews` entry\'s, rules inside '
-    + 'an any-of group included) bound to the saved object that names the field by its bare name '
-    + 'and whose operator does not fit the new type, judged by `filterOperatorFieldTypeFit`. Filters '
+    + 'permission set), nor code outside the metadata. On `field_type_change`: each filter rule of a '
+    + 'served `view` item bound to the saved object that names the field by its bare name and whose '
+    + 'operator does not fit the new type, judged by `filterOperatorFieldTypeFit` (an operator is '
+    + 'unfit only where a declared-type door refuses it; a filter another door refuses, such as any '
+    + 'filter on a field retyped to `formula`, is not named). The rules read are a view item\'s '
+    + '`config.filter` (the canonical served shape), a flattened list overlay\'s own `filter`, and '
+    + 'the `userFilters.tabs[].filter` of either, rules inside an any-of group included. Filters '
     + 'elsewhere (datasets, dashboards, reports, flows), dotted paths, and comparands are not judged '
     + 'there. The save does not edit any listed item.',
   ),
