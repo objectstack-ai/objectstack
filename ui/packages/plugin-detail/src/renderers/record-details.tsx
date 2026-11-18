@@ -34,6 +34,7 @@ import {
 } from '@object-ui/core';
 import { DetailView } from '../DetailView';
 import { hasCellValue } from '../emptiness';
+import { EmptySectionsLineContext } from '../EmptySectionsFold';
 import { RecordPageProvenanceContext } from '../recordPageProvenance';
 import { RecordFieldAccessForRecord } from '../recordFieldAccess';
 import { deriveFieldGroupDetailEntries, type FieldGroupDetailEntry } from '../synth/buildDefaultPageSchema';
@@ -1198,13 +1199,17 @@ const RecordDetailsBody: React.FC<RecordDetailsRendererProps> = ({
         >
           {/* objectui#12701 — the record is the context host's (the record
               page's read, or the binding's row above); this body never reads it
-              again, it waits for `ctx.data`. */}
-          <DetailView
-            schema={synthesized}
-            dataSource={ctx.dataSource}
-            inlineEdit={inlineEditDefault}
-            recordFromHost
-          />
+              again, it waits for `ctx.data`. objectstack#35019 — a details
+              body folds its entirely empty sections into one closing line,
+              on an authored page as on the default one. */}
+          <EmptySectionsLineContext.Provider value>
+            <DetailView
+              schema={synthesized}
+              dataSource={ctx.dataSource}
+              inlineEdit={inlineEditDefault}
+              recordFromHost
+            />
+          </EmptySectionsLineContext.Provider>
         </RecordFieldAccessForRecord>
       </RecordPageProvenanceContext.Provider>
     </div>
