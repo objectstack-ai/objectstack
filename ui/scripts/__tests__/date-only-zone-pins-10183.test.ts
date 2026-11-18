@@ -130,6 +130,10 @@ const PINS = [
   // objectui#12759: the same editor moves a `datetime` to another day and
   // keeps its wall-clock time, at UTC+8 and at UTC-5.
   'packages/plugin-detail/src/__tests__/InlineFieldInput.datetimePicker-12759.test.tsx',
+  // objectstack#34382: a timesheet bound to a `datetime` field bounds its week
+  // query by local midnight, so a cell typed on the first day reads back in it,
+  // at UTC+13 and at UTC-8.
+  'packages/plugin-timesheet/src/__tests__/timesheet.dateTimeZone-34382.test.ts',
 ] as const;
 
 /** The vitest CLI entry, resolved rather than assumed at a `node_modules` path. */

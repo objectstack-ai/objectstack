@@ -189,13 +189,55 @@ export const fr: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Nombre d’utilisateurs' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Nombre d’organisations' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Nombre de sessions' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Nombre d’installations' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'Nombre d’utilisateurs',
+          description: 'Nombre de comptes utilisateur enregistrés, actifs ou non.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'Nombre d’organisations',
+          description: 'Nombre d’organisations enregistrées ; chacune possède ses propres membres, données et paramètres.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'Nombre de sessions',
+          description: 'Nombre de sessions de connexion enregistrées, une par connexion depuis un navigateur ou un appareil.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'Nombre d’installations',
+          description: 'Nombre d’installations de paquets enregistrées, une par paquet installé.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Type d’action' }, user_id: { label: 'Utilisateur' } },
-      measures: { event_count: { label: 'Nombre d’événements' } },
+      dimensions: {
+        action: {
+          label: 'Type d’action',
+          description: 'Type d’action enregistré par une entrée du journal d’audit, par exemple une création, une modification, une suppression, une connexion ou un changement de configuration.',
+        },
+        user_id: {
+          label: 'Utilisateur',
+          description: 'Utilisateur qui a effectué l’action auditée ; les entrées écrites par la plateforme elle-même sont regroupées sous « Système ».',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'Nombre d’événements',
+          description: 'Nombre d’entrées du journal d’audit ; chacune enregistre une action effectuée dans le système, par un utilisateur ou par la plateforme elle-même.',
+        },
+      },
     },
   },
 

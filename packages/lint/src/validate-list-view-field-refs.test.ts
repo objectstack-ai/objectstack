@@ -373,6 +373,10 @@ describe('#14107 — every other walked position', () => {
     [{ tree: { parentField: BAD } }, 'views[0].list.tree.parentField', 'error'],
     [{ tree: { labelField: BAD } }, 'views[0].list.tree.labelField', 'warning'],
     [{ tree: { fields: [BAD] } }, 'views[0].list.tree.fields[0]', 'warning'],
+    // [#34382] Every timesheet binding is written into the records its cells create.
+    [{ timesheet: { rowFields: [BAD] } }, 'views[0].list.timesheet.rowFields[0]', 'error'],
+    [{ timesheet: { dateField: BAD } }, 'views[0].list.timesheet.dateField', 'error'],
+    [{ timesheet: { valueField: BAD } }, 'views[0].list.timesheet.valueField', 'error'],
   ];
 
   for (const [patch, path, severity] of cases) {

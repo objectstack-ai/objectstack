@@ -1090,7 +1090,22 @@ export const CEILINGS = new Map([
   // now carries it), the related-list example's "write side" comment (the paragraph above
   // says it) and "(no UI config)" (the sentence says "purely from how you model"). 16925 ->
   // 16916 bytes -> ceil(16916 / 4) = 4229; the row follows the measurement down.
-  ['skills/objectstack-data/rules/relationships.md', 4229],
+  // 4229 -> 4221: the roll-up section names the third way out of
+  // `security-rollup-source-unreadable` (the set is meant to see the total but not the
+  // children: keep the column readable and add `rollupSourceUnreadableReason` to the set's
+  // entry; refused blank or beside `readable: false`), with the acknowledged entry in the
+  // `client_viewer` example, and its mask sentence names Modify All alone (a set's own mask
+  // binds beside its own View All). +419 bytes, PAID IN FULL by restatement cut from the
+  // same file (-451), each keeping a home: the `'grid'` / `'form'` bullets (the code
+  // comments beside the three `inlineEdit` values and the smart-default sentence), the
+  // "`inlineEdit` is the write side, the related list is the read side" lead-in (the
+  // heading's "read-side mirror" and the `relatedList` comment), "part of the record's main
+  // content" (the same bullet's "full-width table in the record's detail body") and four
+  // code comments the code or the prose above them states (the junction index's "one
+  // assignment per pair", "On the PARENT object", the second "On the CHILD object's FK
+  // field", the contact example's "independent lifecycle"). 16916 -> 16884 bytes ->
+  // ceil(16884 / 4) = 4221; the row follows the measurement down.
+  ['skills/objectstack-data/rules/relationships.md', 4221],
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.

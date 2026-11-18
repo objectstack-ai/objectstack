@@ -97,3 +97,8 @@ export type { UserTextParams } from './finding-user-text.js';
 // through it. One ladder for every producer of platform-composed user text.
 export { renderUserText, userTextLocaleOf } from './finding-user-text.js';
 export type { UserTextEntry } from './finding-user-text.js';
+// The wrapper an action body runs in, for the runtime that builds it
+// (`@objectstack/runtime`'s QuickJS runner). The author-time rule
+// `action-body-does-not-compile` compiles the body inside the same expression,
+// so the check and the run cannot disagree about the wrapper.
+export { actionBodyFunctionExpression } from './action-body-wrapper.js';
