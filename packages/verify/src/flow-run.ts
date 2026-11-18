@@ -18,12 +18,32 @@
 //    update leg seeds it first (the seed door fires no trigger) and then saves
 //    it unchanged, so a condition comparing old and new values sees no change;
 //    a delete leg seeds it and deletes it.
-//  - A flow its own trigger starts with no caller (a schedule, an API trigger,
-//    or a flow declared `runAs: 'system'`) is started as that trigger starts it:
-//    the `automation` service's own `execute`, with no caller (`flows.run(…,
-//    { system: true })`).
+//  - A flow its own trigger starts with no caller is started with no caller,
+//    through the `automation` service's own `execute`, with the context that
+//    trigger builds:
+//     - an API trigger hands the request body in as both `record` and
+//       `params`, with `event: 'api'` (`trigger-api/src/api-trigger.ts`, the
+//       queue consumer in `arm`). The body is `--flow-input`.
+//     - a time-relative sweep hands each swept row in as `record` and as
+//       `params`, with the watched `object` and `event: 'time_relative'`
+//       (`trigger-schedule/src/time-relative-trigger.ts`, the per-row context
+//       in the sweep). The row is `--flow-record`, seeded first (the seed door
+//       fires no trigger), so the run gets a row that is in the table, as a
+//       swept one is.
+//     - a schedule, or any other flow declared `runAs: 'system'`, gets
+//       `--flow-input` as its `params` and no caller-supplied keys
+//       (`flows.run(…, { system: true })`). A real tick seeds its own
+//       `jobId` / `flowName` / `schedule` params instead, and an acting
+//       organization a binding declares; neither is reproduced here.
 //  - Every other flow is started by a person: through the runtime's trigger
 //    route as the dev admin (`flows.run(…, { as })`).
+//
+// A trigger the deployment's scheduled-work switch keeps unarmed
+// (`unboundCause: 'deployment_policy'`, which the spec's
+// `FLOW_UNBOUND_CAUSES` calls an operator setting and not a defect) is
+// reported as not armed, with the engine's sentence, and the flow still runs
+// through the no-caller start above: the graph is what is under test. Every
+// other unbound cause is a defect, and the flow is not run.
 //
 // Nothing here re-derives an engine decision. Whether the trigger is bound,
 // and why not, is the engine's own runtime state (`getFlowRuntimeStates`, the
@@ -44,6 +64,20 @@
 // before the driver is called, so the other datasource is never touched; the
 // node that wrote fails with the refusal, and the report names the object and
 // its datasource. `flow-run.test.ts` pins it against a recording driver.
+//
+// ## Outbound nodes are not executed
+//
+// A node that calls out of the process (`http`, `connector_action`,
+// `notify`, `script`) would reach real systems with the project's own
+// credentials. Before the run starts, this family replaces each of those
+// executors the boot registered, on this stack's engine only, with a
+// stand-in that executes nothing and fails the node with a guard-class
+// result: the run stops at the first one (a guard result never follows a
+// `fault` edge), and the report names it with kind `outbound_not_run`. The
+// run log stays the engine's own: every node before it ran for real. A
+// `try_catch` region catches a guard result like any other failure, so an
+// outbound node inside one hands the run to the catch region, and the report
+// says so. Running outbound nodes locally is not offered.
 
 import { isServiceNotRegisteredError } from '@objectstack/core';
 import { collectFlowGraphs } from '@objectstack/spec/automation';
@@ -66,7 +100,7 @@ export interface FlowRunRequest {
 }
 
 /** What the run came to. */
-export type FlowRunVerdict = 'completed' | 'failed' | 'paused' | 'refused' | 'skipped' | 'not_run';
+export type FlowRunVerdict = 'completed' | 'failed' | 'paused' | 'refused' | 'skipped' | 'stopped' | 'not_run';
 
 /** How the run was started (see the file header). */
 export type FlowRunStart = 'record_write' | 'trigger_route' | 'system' | 'none';
@@ -121,6 +155,8 @@ export type FlowRunFailureKind =
   | 'run_failed'
   /** A write outside the ephemeral stack was refused. */
   | 'confined_write'
+  /** The run reached an outbound node, which this run does not execute: it stopped there. Not a defect. */
+  | 'outbound_not_run'
   /** The ephemeral driver could not be identified, so the run was not started. */
   | 'confinement_unavailable';
 
@@ -163,11 +199,12 @@ export interface FlowRunReport {
   /** What the run wrote: every write the engine received while it was open, the triggering write excluded. */
   writes: FlowRunWrite[];
   /**
-   * The confinement: the one datasource the run may write, and how many writes
-   * it refused. `datasource` is empty when the report ends before the
-   * confinement is set (nothing was started, so nothing could write).
+   * The confinement: the one datasource the run may write, how many writes it
+   * refused, and the outbound node types this run does not execute.
+   * `datasource` is empty when the report ends before the confinement is set
+   * (nothing was started, so nothing could write).
    */
-  confinement: { datasource: string; refused: number };
+  confinement: { datasource: string; refused: number; outbound: string[] };
   /** Notes the reader needs (a skipped start, an ignored record, a paused node). */
   notes: string[];
   summary: { steps: number; failedSteps: number; writes: number; hardFailures: number };
@@ -191,7 +228,14 @@ const RUN_HISTORY_OBJECTS: ReadonlySet<string> = new Set(['sys_automation_run'])
 /** The automation members this family reads, each typed as the engine's own member. */
 type FlowRunAutomation = Pick<
   AutomationEngine,
-  'getFlow' | 'listRuns' | 'getFlowRuntimeStates' | 'getUnknownNodeTypeAudit'
+  | 'getFlow'
+  | 'listRuns'
+  | 'getFlowRuntimeStates'
+  | 'getUnknownNodeTypeAudit'
+  | 'execute'
+  | 'getRegisteredNodeTypes'
+  | 'getActionDescriptor'
+  | 'registerNodeExecutor'
 >;
 type RunLogEntry = Awaited<ReturnType<AutomationEngine['listRuns']>>[number];
 type RuntimeState = ReturnType<AutomationEngine['getFlowRuntimeStates']>[number];
@@ -256,6 +300,57 @@ function confineToEphemeral(ql: ObjectQL, refused: ConfinedRefusal[]): string | 
     throw confinementRefusal(op.object, datasource, op.operation);
   });
   return defaultName;
+}
+
+/** The node types that call out of the process: this run does not execute them. */
+const OUTBOUND_NODE_TYPES: readonly string[] = ['http', 'connector_action', 'notify', 'script'];
+
+/** One outbound node the run reached, and that the stand-in did not execute. */
+interface OutboundStop {
+  nodeId: string;
+  nodeType: string;
+}
+
+/**
+ * The engines whose outbound executors are already stood in, each with the
+ * list the current run's stops go to (the same swap as the confinement).
+ */
+const standInEngines = new WeakMap<object, { types: string[]; stopped: OutboundStop[] }>();
+
+/**
+ * Replace each outbound executor the engine registered with a stand-in that
+ * executes nothing. Once per engine; answers the types it stands in for.
+ */
+function standInOutbound(automation: FlowRunAutomation, stopped: OutboundStop[]): string[] {
+  const held = standInEngines.get(automation);
+  if (held) {
+    held.stopped = stopped;
+    return held.types;
+  }
+  const registered = new Set(automation.getRegisteredNodeTypes());
+  const types = OUTBOUND_NODE_TYPES.filter((type) => registered.has(type));
+  const sink = { types, stopped };
+  standInEngines.set(automation, sink);
+  for (const type of types) {
+    const descriptor = automation.getActionDescriptor(type);
+    automation.registerNodeExecutor({
+      type,
+      ...(descriptor ? { descriptor } : {}),
+      async execute(node) {
+        sink.stopped.push({ nodeId: node.id, nodeType: type });
+        return {
+          success: false,
+          // Guard class: the stop must not follow a `fault` edge into the
+          // author's handler for a call that was never made.
+          errorClass: 'guard',
+          error:
+            `verify --flow does not execute outbound nodes: '${node.id}' (${type}) would call out of the process, ` +
+            'so the run stopped here and nothing after it is proven',
+        };
+      },
+    });
+  }
+  return types;
 }
 
 function strings(values: unknown[]): string[] {
@@ -356,7 +451,7 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
     steps: [],
     missingExecutors: [],
     writes: [],
-    confinement: { datasource: '', refused: 0 },
+    confinement: { datasource: '', refused: 0, outbound: [] },
     notes: [],
     summary: { steps: 0, failedSteps: 0, writes: 0, hardFailures: 0 },
   };
@@ -412,7 +507,13 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
   const triggerName = report.trigger
     ? `'${report.trigger.type}'${report.trigger.object ? ` on '${report.trigger.object}'` : ''}`
     : undefined;
-  if (report.trigger && !report.trigger.bound) {
+  const policyUnarmed = report.trigger?.bound === false && report.trigger.cause === 'deployment_policy';
+  if (policyUnarmed) {
+    report.notes.push(
+      `the trigger ${triggerName} is not armed on this deployment: ${report.trigger!.reason ?? 'its scheduled-work switch is off'}. ` +
+        'That is an operator setting, not a defect; the flow was run anyway with no caller, as the trigger would start it',
+    );
+  } else if (report.trigger && !report.trigger.bound) {
     report.firstFailure = {
       kind: 'trigger_unbound',
       trigger: triggerName,
@@ -444,6 +545,8 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
     return finish();
   }
   report.confinement.datasource = ephemeral;
+  const stopped: OutboundStop[] = [];
+  report.confinement.outbound = [...standInOutbound(automation, stopped)];
 
   // 6. Start it, the way production starts it, observing every write.
   const runsBefore = new Set((await automation.listRuns(flow, { limit: 100 })).map((r) => r.id));
@@ -497,8 +600,53 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
       startRefusal = { code: (e as { code?: string })?.code, message: (e as Error)?.message ?? String(e) };
     }
     triggerWrite = observed.find((w) => w.object === object && w.operation === operation);
+  } else if (report.trigger?.type === 'api' || report.trigger?.type === 'time_relative') {
+    // The context the trigger itself builds (file header): the API trigger's
+    // queue consumer, or the time-relative sweep's per-row context.
+    const api = report.trigger.type === 'api';
+    report.start = 'system';
+    let context: Record<string, unknown> | undefined;
+    if (api) {
+      if (request.record) report.notes.push("the record was ignored: an API-triggered flow's record is the request body, given as --flow-input");
+      const body = { ...(request.input ?? {}) };
+      context = { record: body, params: { ...body }, event: 'api' };
+    } else {
+      const object = report.trigger.object;
+      if (!request.record) {
+        report.firstFailure = {
+          kind: 'record_required',
+          trigger: triggerName,
+          message:
+            `a time-relative flow runs once per swept '${object ?? 'record'}' row; name the row's fields ` +
+            `(--flow-record '{"field":"value"}') and the run seeds it and hands it in as the sweep does`,
+        };
+        return finish();
+      }
+      if (request.input) report.notes.push("the input was ignored: a time-relative sweep's params are the swept row");
+      try {
+        let row: EngineRow = { ...request.record };
+        if (object && stack.metadata.object(object)) {
+          const [seeded] = await stack.seed(object, [{ ...request.record }]);
+          if (seeded) row = seeded;
+          report.record = { object, operation: 'insert', ...(row.id !== undefined ? { id: String(row.id) } : {}) };
+          report.notes.push('the record was seeded first, so the run is handed a row that is in the table, as a swept row is');
+        }
+        context = { record: row, ...(object ? { object } : {}), event: 'time_relative', params: row };
+      } catch (e) {
+        startRefusal = { code: (e as { code?: string })?.code, message: (e as Error)?.message ?? String(e) };
+      }
+    }
+    if (context) {
+      try {
+        observed = await stack.observeWrites(async () => {
+          result = { ...(await automation.execute(flow, context as never)), flowName: flow };
+        });
+      } catch (e) {
+        startRefusal = { code: (e as { code?: string })?.code, message: (e as Error)?.message ?? String(e) };
+      }
+    }
   } else {
-    if (request.record) report.notes.push('the record was ignored: only a record-change flow starts from a record');
+    if (request.record) report.notes.push('the record was ignored: only a record-change or time-relative flow starts from a record');
     const selfStarted = report.trigger !== undefined || definition.runAs === 'system';
     report.start = selfStarted ? 'system' : 'trigger_route';
     const opts = selfStarted ? ({ system: true } as const) : { as: await stack.signIn() };
@@ -551,8 +699,18 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
     if (failing) {
       const confinedWrite = refused.length > 0 && CONFINEMENT_SENTENCE.test(failing.error?.message ?? '');
       const missing = report.missingExecutors.some((m) => m.nodeId === failing.nodeId);
+      const outbound = stopped.some((o) => o.nodeId === failing.nodeId && o.nodeType === failing.nodeType);
+      if (outbound) {
+        if (report.verdict === 'failed') report.verdict = 'stopped';
+        report.notes.push(
+          `the run reached outbound node '${failing.nodeId}' (${failing.nodeType}), which verify --flow does not execute` +
+            (report.verdict === 'stopped'
+              ? ': it stopped there, and no node after it is proven'
+              : `; a try region caught the stop, so the run went on as it would after a failed call`),
+        );
+      }
       report.firstFailure = {
-        kind: confinedWrite ? 'confined_write' : missing ? 'no_executor' : 'node_failed',
+        kind: outbound ? 'outbound_not_run' : confinedWrite ? 'confined_write' : missing ? 'no_executor' : 'node_failed',
         nodeId: failing.nodeId,
         nodeType: failing.nodeType,
         ...(failing.error?.code ? { code: failing.error.code } : {}),
@@ -600,7 +758,8 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
 /** Count what the report proves and what it failed. */
 function summarize(report: FlowRunReport): FlowRunReport {
   const failedSteps = report.steps.filter((s) => s.status === 'failure').length;
-  let hardFailures = report.firstFailure ? 1 : 0;
+  // An outbound node this run did not execute is not a defect of the flow.
+  let hardFailures = report.firstFailure && report.firstFailure.kind !== 'outbound_not_run' ? 1 : 0;
   // A node with no executor the run did not reach is still a node that cannot run.
   hardFailures += report.missingExecutors.filter((m) => m.nodeId !== report.firstFailure?.nodeId).length;
   // A confined write the flow swallowed (a fault edge, a try region) left the run green and the write unlanded.
@@ -619,13 +778,19 @@ export function formatFlowRunReport(report: FlowRunReport): string {
   const t = report.trigger;
   lines.push(
     `  flow: ${report.flow}; started by ${report.start === 'record_write' ? 'a record write' : report.start === 'system' ? 'its own trigger (no caller)' : report.start === 'trigger_route' ? 'the trigger route, as the dev admin' : 'nothing'}` +
-      (t ? `; trigger ${t.type}${t.object ? ` on ${t.object}` : ''}${t.event ? ` (${t.event})` : ''} ${t.bound ? 'bound' : 'NOT BOUND'}` : ''),
+      (t
+        ? `; trigger ${t.type}${t.object ? ` on ${t.object}` : ''}${t.event ? ` (${t.event})` : ''} ` +
+          (t.bound ? 'bound' : t.cause === 'deployment_policy' ? 'not armed on this deployment (scheduled work is switched off)' : 'NOT BOUND')
+        : ''),
   );
   if (report.record) {
     lines.push(`  record: ${report.record.operation} ${report.record.object}${report.record.id ? ` ${report.record.id}` : ''}`);
   }
   if (report.confinement.datasource) {
     lines.push(`  confined to datasource '${report.confinement.datasource}' (the in-memory database this run booted)`);
+  }
+  if (report.confinement.outbound.length > 0) {
+    lines.push(`  not executed: outbound node types ${report.confinement.outbound.join(', ')} (the run stops at the first one it reaches)`);
   }
   for (const s of report.steps) {
     const mark = s.status === 'success' ? '✓' : s.status === 'failure' ? '✗' : '–';

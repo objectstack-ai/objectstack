@@ -5,7 +5,7 @@
  * against the booted ephemeral stack the way production starts it, reported
  * node by node.
  *
- * Four pins, each read off what only the real engine produces:
+ * The pins, each read off what only the real engine produces:
  *
  *  - CONTROL: a healthy record-change flow, started by a real write of its
  *    triggering record, reports each node's status and the row it wrote, and
@@ -14,14 +14,24 @@
  *  - a trigger that never binds is reported with the trigger named, and
  *    nothing runs;
  *  - a write to an object bound to another datasource is refused before that
- *    datasource's driver is called: the recording driver below sees no write.
+ *    datasource's driver is called: the recording driver below sees no write;
+ *  - an outbound node is not executed: the run stops there with the node
+ *    named, and the local server below receives no request;
+ *  - a schedule the deployment's scheduled-work switch keeps unarmed is not a
+ *    defect: it is reported as not armed and still run with no caller;
+ *  - an API-triggered flow gets its body as `record` as well as `params`, and
+ *    a time-relative flow gets the given row as `record`, as their triggers
+ *    hand them in;
+ *  - the update and delete legs of a record-change flow fire it.
  *
  * ⚠️ This suite resolves `@objectstack/runtime` and
  * `@objectstack/service-automation` through their BUILT `dist/`. Rebuild both
  * before trusting a run of this file.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -36,6 +46,26 @@ import { warmUpBoot } from './boot-warm-up.testkit.js';
 // Paid at collection: the harness's boot loads these lazily (check:test-source-alias).
 import '@objectstack/service-datasource';
 import '@objectstack/service-automation';
+
+// The local server an `http` node below would reach. The egress guard opens
+// loopback only when the allowlist names it, so a request that left the run
+// would land here and be counted.
+const outboundHits: string[] = [];
+const outboundServer = createServer((req, res) => {
+  outboundHits.push(req.url ?? '');
+  res.setHeader('content-type', 'application/json');
+  res.end('{}');
+});
+await new Promise<void>((resolve) => outboundServer.listen(0, '127.0.0.1', resolve));
+const OUTBOUND_URL = `http://127.0.0.1:${(outboundServer.address() as AddressInfo).port}/ping`;
+vi.stubEnv('OS_EGRESS_ALLOWED_TARGETS', '127.0.0.1');
+// The default deployment: package-authored scheduled work switched off.
+vi.stubEnv('OS_AUTOMATION_SCHEDULED_WORK_ENABLED', 'false');
+vi.stubEnv('FR_HOOK_SECRET', 'flow-run-fixture-hook-secret');
+afterAll(async () => {
+  vi.unstubAllEnvs();
+  await new Promise<void>((resolve) => outboundServer.close(() => resolve()));
+});
 
 await warmUpBoot({ automation: true }, { requires: ['automation', 'triggers'] });
 
@@ -61,6 +91,16 @@ const Ledger = ObjectSchema.create({
   label: 'Ledger',
   pluralLabel: 'Ledgers',
   fields: { name: Field.text({ label: 'Name', required: true }) },
+});
+
+const CONTRACT = 'fr_contract';
+
+const Contract = ObjectSchema.create({
+  name: CONTRACT,
+  sharingModel: 'public_read_write',
+  label: 'Contract',
+  pluralLabel: 'Contracts',
+  fields: { name: Field.text({ label: 'Name', required: true }), end_date: Field.date({ label: 'End date' }) },
 });
 
 // ── A datasource that is not the ephemeral stack: a driver that records every call ──
@@ -183,6 +223,114 @@ const confined: Flow = {
   ],
 } as Flow;
 
+/** One node that writes a Ledger row named by a CEL expression. */
+const ledgerNode = (id: string, source: string) => ({
+  id,
+  type: 'create_record',
+  label: id,
+  config: { objectName: LEDGER, fields: { name: { dialect: 'cel', source } } },
+});
+
+/** start → an `http` call → a Ledger write that must not run → end. */
+const OUTBOUND = 'fr_outbound';
+const outbound: Flow = {
+  name: OUTBOUND,
+  label: OUTBOUND,
+  type: 'autolaunched',
+  status: 'active',
+  runAs: 'system',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'call', type: 'http', label: 'Call out', config: { url: OUTBOUND_URL, method: 'GET' } },
+    ledgerNode('after_call', "'after the call'"),
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'call' },
+    { id: 'e2', source: 'call', target: 'after_call' },
+    { id: 'e3', source: 'after_call', target: 'end' },
+  ],
+} as Flow;
+
+/** A nightly schedule that writes one Ledger row. */
+const NIGHTLY = 'fr_nightly';
+const nightly: Flow = {
+  name: NIGHTLY,
+  label: NIGHTLY,
+  type: 'schedule',
+  status: 'active',
+  runAs: 'system',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start', config: { schedule: '0 3 * * *' } },
+    ledgerNode('write_nightly', "'nightly'"),
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'write_nightly' },
+    { id: 'e2', source: 'write_nightly', target: 'end' },
+  ],
+} as Flow;
+
+/** An inbound hook whose Ledger row is named from `record`, the request body. */
+const HOOK = 'fr_hook';
+const hook: Flow = {
+  name: HOOK,
+  label: HOOK,
+  type: 'api',
+  status: 'active',
+  runAs: 'system',
+  nodes: [
+    // The hook secret is named, not carried: the deployment fills it (stubbed above).
+    { id: 'start', type: 'start', label: 'Start', config: { triggerType: 'api', secretRef: 'FR_HOOK_SECRET' } },
+    ledgerNode('write_hook', "'hook for ' + record.name"),
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'write_hook' },
+    { id: 'e2', source: 'write_hook', target: 'end' },
+  ],
+} as Flow;
+
+/** A renewal sweep over contracts whose Ledger row is named from `record`, the swept row. */
+const RENEWAL = 'fr_renewal';
+const renewal: Flow = {
+  name: RENEWAL,
+  label: RENEWAL,
+  type: 'autolaunched',
+  status: 'active',
+  runAs: 'system',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start', config: { timeRelative: { object: CONTRACT, dateField: 'end_date', withinDays: 30 } } },
+    ledgerNode('write_renewal', "'renewal of ' + record.name + ' ' + record.id"),
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'write_renewal' },
+    { id: 'e2', source: 'write_renewal', target: 'end' },
+  ],
+} as Flow;
+
+/** A record-change flow on a Watch save or delete. */
+const legFlow = (name: string, triggerType: string, label: string): Flow =>
+  ({
+    name,
+    label: name,
+    type: 'record_change',
+    status: 'active',
+    runAs: 'system',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { objectName: WATCH, triggerType } },
+      ledgerNode('write_leg', `'${label}'`),
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'write_leg' },
+      { id: 'e2', source: 'write_leg', target: 'end' },
+    ],
+  }) as Flow;
+const ON_UPDATE = 'fr_on_update';
+const ON_DELETE = 'fr_on_delete';
+
 const fixtureStack = defineStack({
   manifest: {
     id: 'com.objectstack.verify.flow-run',
@@ -206,6 +354,7 @@ const fixtureStack = defineStack({
   objects: [
     Watch,
     Ledger,
+    Contract,
     {
       name: REMOTE,
       label: 'Remote',
@@ -216,7 +365,17 @@ const fixtureStack = defineStack({
       fields: { name: { type: 'text', label: 'Name' } },
     },
   ],
-  flows: [healthy, noExecutor, confined],
+  flows: [
+    healthy,
+    noExecutor,
+    confined,
+    outbound,
+    nightly,
+    hook,
+    renewal,
+    legFlow(ON_UPDATE, 'record-after-update', 'a watch was saved'),
+    legFlow(ON_DELETE, 'record-after-delete', 'a watch was deleted'),
+  ],
   plugins: [remoteDriverPlugin],
 } as never);
 
@@ -295,6 +454,70 @@ describe('runFlowProof — the local flow run', () => {
     // The recording driver saw nothing: the refusal came before the driver call.
     expect(remoteCalls.slice(mark)).toEqual([]);
     expect(report.summary.hardFailures).toBe(1);
+  });
+
+  it('an outbound node is not executed: the run stops there, the node is named, and no request leaves', async () => {
+    const mark = outboundHits.length;
+    const report = await runFlowProof(stack, fixtureStack, { flow: OUTBOUND });
+    expect(report.confinement.outbound).toContain('http');
+    expect(report.verdict, formatFlowRunReport(report)).toBe('stopped');
+    expect(report.firstFailure).toMatchObject({ kind: 'outbound_not_run', nodeId: 'call', nodeType: 'http' });
+    // The run log is the engine's own: the start ran, the call is the failing step, nothing after it ran.
+    expect(report.steps.map((s) => [s.nodeId, s.status])).toEqual([
+      ['start', 'success'],
+      ['call', 'failure'],
+    ]);
+    expect(outboundHits.slice(mark)).toEqual([]);
+    expect(await stack.rows(LEDGER, { name: 'after the call' })).toEqual([]);
+    // Not a defect of the flow: it does not fail `os verify`.
+    expect(report.summary.hardFailures).toBe(0);
+  });
+
+  it('a schedule the scheduled-work switch keeps unarmed is reported as not armed, and still run with no caller', async () => {
+    const report = await runFlowProof(stack, fixtureStack, { flow: NIGHTLY });
+    expect(report.trigger).toMatchObject({ type: 'schedule', bound: false, cause: 'deployment_policy' });
+    expect(report.firstFailure, formatFlowRunReport(report)).toBeUndefined();
+    expect(report.start).toBe('system');
+    expect(report.verdict).toBe('completed');
+    expect(report.notes.some((n) => n.includes("'schedule'") && n.includes('not a defect'))).toBe(true);
+    expect(report.writes.filter((w) => w.object === LEDGER)).toHaveLength(1);
+    expect(await stack.rows(LEDGER, { name: 'nightly' })).toHaveLength(1);
+    expect(report.summary.hardFailures).toBe(0);
+  });
+
+  it('an API-triggered flow is handed its body as the record, as the inbound hook hands it', async () => {
+    const report = await runFlowProof(stack, fixtureStack, { flow: HOOK, input: { name: 'zeta' } });
+    expect(report.trigger?.type).toBe('api');
+    expect(report.start).toBe('system');
+    expect(report.verdict, formatFlowRunReport(report)).toBe('completed');
+    expect(await stack.rows(LEDGER, { name: 'hook for zeta' })).toHaveLength(1);
+  });
+
+  it('a time-relative flow is handed the given row, seeded, as the record the sweep hands it', async () => {
+    const report = await runFlowProof(stack, fixtureStack, { flow: RENEWAL, record: { name: 'acme', end_date: '2030-01-01' } });
+    expect(report.trigger).toMatchObject({ type: 'time_relative', object: CONTRACT });
+    expect(report.verdict, formatFlowRunReport(report)).toBe('completed');
+    expect(report.record).toMatchObject({ object: CONTRACT, operation: 'insert' });
+    const id = report.record?.id;
+    expect(id).toBeTruthy();
+    expect(await stack.rows(LEDGER, { name: `renewal of acme ${id}` })).toHaveLength(1);
+    // The seed is the fixture, not the flow's write.
+    expect(report.writes.filter((w) => w.object === CONTRACT)).toEqual([]);
+  });
+
+  it('the update leg seeds the record and saves it, and the save fires the flow', async () => {
+    const report = await runFlowProof(stack, fixtureStack, { flow: ON_UPDATE, record: { name: 'gamma' } });
+    expect(report.record).toMatchObject({ object: WATCH, operation: 'update' });
+    expect(report.verdict, formatFlowRunReport(report)).toBe('completed');
+    expect(await stack.rows(LEDGER, { name: 'a watch was saved' })).toHaveLength(1);
+  });
+
+  it('the delete leg seeds the record and deletes it, and the delete fires the flow', async () => {
+    const report = await runFlowProof(stack, fixtureStack, { flow: ON_DELETE, record: { name: 'delta' } });
+    expect(report.record).toMatchObject({ object: WATCH, operation: 'delete' });
+    expect(report.verdict, formatFlowRunReport(report)).toBe('completed');
+    expect(await stack.rows(LEDGER, { name: 'a watch was deleted' })).toHaveLength(1);
+    expect(await stack.rows(WATCH, { name: 'delta' })).toEqual([]);
   });
 });
 

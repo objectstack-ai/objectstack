@@ -3101,23 +3101,35 @@ os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   
    names (its fields as a JSON object) as the dev admin, inserting it for a
    create or write leg, seeding it and saving it unchanged for an update leg
    (so a condition comparing old and new values sees no change), and seeding
-   it and deleting it for a delete leg. A flow its own trigger starts with no
-   caller (a schedule, an API trigger, or a flow declared `runAs: 'system'`)
-   is started the way that trigger starts it, with no caller; any other flow
-   goes through the trigger route as the dev admin. `--flow-input` (a JSON
-   object) is handed to a directly started flow as its params. Before the run
-   starts, every node whose type no installed plugin runs is named, reached or
-   not, and a flow whose trigger never binds is reported with the trigger and
-   the engine's reason, and is not run. A run that fails, a node with no
-   executor, a trigger that never binds, a record-change flow given no record,
-   and a write refused because its object lives outside the ephemeral stack
-   each fail `os verify`; a run the start condition skipped, or one that paused at a
-   screen, wait or approval, is reported and does not. The run writes to the
-   in-memory database this boot creates and nowhere else: a write to an object
-   bound to any other datasource is refused before that datasource's driver is
-   called, and the node that made it fails naming the object and the
-   datasource. Only data writes are confined: a node that calls out (`http`,
-   `connector_action`, `notify`, `script`) runs for real.
+   it and deleting it for a delete leg. A flow its own trigger starts is
+   started with no caller, with the context that trigger builds: an
+   API-triggered flow is handed `--flow-input` (a JSON object) as its record
+   and its params, as the inbound hook hands it the request body; a
+   time-relative flow is handed the `--flow-record` row as its record, seeded
+   first so it is in the table, as a swept row is; a schedule, or another
+   flow declared `runAs: 'system'`, is handed `--flow-input` as its params
+   (a real tick's own `jobId`, `flowName` and `schedule` params and a
+   binding's acting organization are not reproduced). Any other flow goes
+   through the trigger route as the dev admin, with `--flow-input` as its
+   params. Before the run starts, every node whose type no installed plugin
+   runs is named, reached or not, and a flow whose trigger never binds is
+   reported with the trigger and the engine's reason, and is not run. A
+   schedule or time-relative trigger the deployment's scheduled-work switch
+   keeps unarmed (the default) is not a defect: it is reported as not armed
+   and the flow is still run. A run that fails, a node with no executor, a
+   trigger that never binds, a record-change or time-relative flow given no
+   record, and a write refused because its object lives outside the
+   ephemeral stack each fail `os verify`; a run the start condition skipped,
+   one that paused at a screen, wait or approval, and one stopped at an
+   outbound node are reported and do not. The run writes to the in-memory
+   database this boot creates and nowhere else: a write to an object bound to
+   any other datasource is refused before that datasource's driver is called,
+   and the node that made it fails naming the object and the datasource.
+   Nothing calls out of the machine either: an outbound node (`http`,
+   `connector_action`, `notify`, `script`) is not executed. The run stops at
+   the first one it reaches, and the report names it (`outbound_not_run`);
+   every node before it ran for real. Inside a `try_catch` region the catch
+   region handles the stop as it would a failed call.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
    apply; a walled tenancy posture (`OS_TENANCY_POSTURE` set to `isolated` or
    `group`) asks for the same boot.

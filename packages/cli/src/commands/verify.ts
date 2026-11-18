@@ -146,7 +146,9 @@ export interface VerifyCapabilityAdvisory {
  *          production starts it (a record-change flow by a real write of the
  *          record --flow-record names), reported node by node with the first
  *          failure and what it wrote; every write outside the ephemeral
- *          stack is refused before its datasource is called
+ *          stack is refused before its datasource is called, and an
+ *          outbound node (http, connector_action, notify, script) is not
+ *          executed: the run stops there
  *
  * Exits non-zero on either stage's failures so it drops straight into CI.
  */
@@ -198,15 +200,15 @@ export default class Verify extends Command {
     }),
     flow: Flags.string({
       description:
-        "Also run this flow once on a fresh boot and report each node's status, the first failure with its code and the node named, and what the run wrote. It starts the way production starts it: a record-change flow by a real write of the record --flow-record names, a flow its own trigger starts (a schedule, an API trigger, runAs: 'system') with no caller, any other flow through the trigger route as the dev admin. Every write outside the in-memory database this run boots is refused before its datasource is called",
+        "Also run this flow once on a fresh boot and report each node's status, the first failure with its code and the node named, and what the run wrote. It starts the way production starts it: a record-change flow by a real write of the record --flow-record names, a flow its own trigger starts with no caller (an API-triggered flow with --flow-input as its record and params, a time-relative flow with --flow-record seeded and handed in as its record, a schedule or runAs: 'system' flow with --flow-input as its params), any other flow through the trigger route as the dev admin. A schedule the deployment's scheduled-work switch keeps unarmed is reported as not armed and still run. Every write outside the in-memory database this run boots is refused before its datasource is called. Outbound nodes (http, connector_action, notify, script) are not executed: the run stops at the first one and names it, so nothing calls out of this machine
     }),
     'flow-record': Flags.string({
       description:
-        'With --flow on a record-change flow: the triggering record\'s fields as a JSON object. A create or write leg inserts it; an update leg seeds it and saves it unchanged; a delete leg seeds it and deletes it',
+        'With --flow on a record-change or time-relative flow: the record\'s fields as a JSON object. A create or write leg inserts it; an update leg seeds it and saves it unchanged; a delete leg seeds it and deletes it; a time-relative flow is handed the seeded row as the swept record',
       dependsOn: ['flow'],
     }),
     'flow-input': Flags.string({
-      description: 'With --flow on a flow started directly: its input as a JSON object, handed to the start as its params',
+      description: 'With --flow on a flow started directly: its input as a JSON object, handed to the start as its params (and, for an API-triggered flow, as its record, the request body)',
       dependsOn: ['flow'],
     }),
     'multi-tenant': Flags.boolean({
@@ -558,7 +560,8 @@ export default class Verify extends Command {
       (dashboardWindows?.summary.hardFailures ?? 0) +
       // The flow did not run, failed at a node, has a node no executor runs,
       // or had a write outside the ephemeral stack refused. A skipped or
-      // paused run is reported, not counted.
+      // paused run, a run stopped at an outbound node, and a schedule left
+      // unarmed by the deployment's switch are reported, not counted.
       (flowRun?.summary.hardFailures ?? 0);
 
     if (flags.json) {
