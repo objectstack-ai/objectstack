@@ -1761,11 +1761,11 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  // Lowered 53 → 19: each repository's rules live in that repository, so the
-  // product content left for hotcrm's own AGENTS.md and docs/PRIORITIES.md and
-  // one pointer stayed, beside the shared seat mechanics. Landed count,
-  // headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 19],
+  // Lowered 53 → 21: each repository's rules live in that repository, so the
+  // product content left for hotcrm's own AGENTS.md and docs/PRIORITIES.md. One
+  // pointer there and one to cross-repo-coordination.md stayed, beside the
+  // shared seat mechanics. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 21],
   // repo:mobile lane charter — the on-demand seat for the native shell that
   // hosts the Console (maintainer choice 2026-11-02, verbatim: "Register, seat
   // on demand (Recommended)"). A NEW file, so this is an added row and no other
