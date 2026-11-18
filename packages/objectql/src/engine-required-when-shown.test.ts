@@ -230,6 +230,17 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
       },
     } as any, 'test-package');
     engine.registry.registerObject({
+      name: 'rws_formula_user',
+      fields: {
+        title: { type: 'text' },
+        // The authorable way to role-gate a field: the lint refuses
+        // `current_user` in a field `visibleWhen`, not in a formula. A read
+        // computes it for the reader; a write with no acting user cannot.
+        is_admin: { type: 'formula', expression: "'org_admin' in current_user.positions", returnType: 'boolean' },
+        admin_note: { type: 'text', required: true, visibleWhen: 'record.is_admin' },
+      },
+    } as any, 'test-package');
+    engine.registry.registerObject({
       name: 'rws_flag',
       fields: {
         title: { type: 'text' },
@@ -474,6 +485,30 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
       const acc = await engine.insert('rws_tier_account', { name: 'Acme', tier: 'gold' }, ADMIN);
       await engine.insert('rws_tiered', { account: acc.id, review_note: 'checked' }, ADMIN);
       expect(rows('rws_tiered')).toHaveLength(1);
+    });
+  });
+
+  // ── (i) a formula that reads the acting user, on a write with none ──────
+  describe('(i) a formula that reads `current_user` is judged per writer, and counts as shown with no acting user', () => {
+    it('a system write with no acting user counts as shown: refused, and logged as `no-acting-user` naming the formula', async () => {
+      const err = await refusalOf(() => engine.insert('rws_formula_user', { title: 'Q3' }));
+      expectRequired(err, 'admin_note');
+      expect(rows('rws_formula_user')).toHaveLength(0);
+      const warn = logger.lines.find((l: any) => l.level === 'warn' && /admin_note/.test(l.msg) && /counted as shown/.test(l.msg));
+      expect(warn?.msg).toMatch(/'is_admin'/);
+      expect(warn?.meta).toMatchObject({ field: 'admin_note', reason: 'no-acting-user' });
+    });
+
+    it('the writer the formula shows the field to must fill it', async () => {
+      const err = await refusalOf(() => engine.insert('rws_formula_user', { title: 'Q3' }, ADMIN));
+      expectRequired(err, 'admin_note');
+      expect(rows('rws_formula_user')).toHaveLength(0);
+    });
+
+    it('the writer it is hidden from saves without it, nothing logged', async () => {
+      await engine.insert('rws_formula_user', { title: 'Q3' }, MEMBER);
+      expect(rows('rws_formula_user')).toHaveLength(1);
+      expect(logger.lines.filter((l: any) => l.level === 'warn' && /admin_note/.test(l.msg))).toHaveLength(0);
     });
   });
 
