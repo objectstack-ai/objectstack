@@ -1593,7 +1593,9 @@ export const CEILINGS = new Map([
   // skills」); authorized under ruling record 6184799323 (letter B). Measured:
   // the old line was already 120 B, the added content alone is over 40 B, so the
   // rule lands as two lines (115 B and 116 B). Delta +1; headroom 0.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 190],
+  // 190 → 189: the two cloud ROADMAP-order lines became one line that points
+  // at the cloud lane file. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 189],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
@@ -1759,7 +1761,11 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 53],
+  // Lowered 53 → 19: each repository's rules live in that repository, so the
+  // product content left for hotcrm's own AGENTS.md and docs/PRIORITIES.md and
+  // one pointer stayed, beside the shared seat mechanics. Landed count,
+  // headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 19],
   // repo:mobile lane charter — the on-demand seat for the native shell that
   // hosts the Console (maintainer choice 2026-11-02, verbatim: "Register, seat
   // on demand (Recommended)"). A NEW file, so this is an added row and no other
@@ -1937,7 +1943,11 @@ export const CEILINGS = new Map([
   // whose workload names `lanes/cloud.md`. A NEW file, so this is an added
   // row and no other row moves; set at the landed line count (headroom 0,
   // same convention as every lane charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 28],
+  // Lowered 28 → 19 on the same ground as the hotcrm charter: cloud's first
+  // touch, grading, take order, enterprise and security rules are one pointer
+  // to the cloud repo; the cross-repo mechanics stayed. Landed count,
+  // headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 19],
   // repo:objectstack lane charter: the whole-repo dispatch lane, several seats on several
   // accounts, each running area-lease mode and splitting areas through the lease tables on
   // their seat posts (#33959; ruling of record: the maintainer, 2026-11-15, verbatim in that

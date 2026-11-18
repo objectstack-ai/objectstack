@@ -647,10 +647,11 @@ gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui l
 # Maintainer ruling 2026-11-18, verbatim: 「立一张专题卡，开始执行」, given on
 # the plan that named this set; the rollout epic's body quotes the exchange.
 #
-# ⛔ Two values that deliberately do not exist. Security: a security card lives
-# only in the private security channel and carries no `area:*`. Performance:
-# slowness goes to the area of what is slow — a slow query is data, a slow page
-# load is ux.
+# ⛔ Two values that deliberately do not exist in THIS repository's set.
+# Security: a security problem here is a private advisory and carries no
+# `area:*` (cloud is a private repository and its set below does have
+# area:security). Performance: slowness goes to the area of what is slow — a
+# slow query is data, a slow page load is ux.
 #
 # Triage applies it at FIRST TOUCH — step one of grading, in the same label
 # write as `domain:*`, together with the card's GitHub issue type (Bug /
@@ -681,12 +682,14 @@ gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui l
 # area:data gains its first row, so on those three `--reconcile` is what
 # rewrites the live description (default mode leaves an existing object alone).
 #
-# ONE repo, and not the per-repo loop above. The objectui repository no longer
+# TWO repos, each with its OWN set, and not the per-repo loop above: the eight
+# rows here and cloud's nine further down. The objectui repository no longer
 # exists — its code is this repository's ui/ tree — so the two-repo loop this
-# block used to be is gone. objectos is the docs/site repo, and hotcrm is the
-# exemplar APP: its cards are app cards, and a platform gap found there is
-# filed here, where it gets its area. Widening this to another repository is a
-# vocabulary decision, not a maintenance edit.
+# block used to be is gone. objectos is the docs/site repo. hotcrm is a
+# product whose rules, areas included, live in its own repository; it has no
+# rows here, and a platform gap found there is filed here, where it gets this
+# repository's area. Widening this to another repository is a vocabulary
+# decision, not a maintenance edit.
 #
 # ⚠️ Every -d below is ≤100 characters (`check:pm-label-desc-cap`), and each
 # names what the CUSTOMER gets rather than the packages that implement it — the
@@ -701,6 +704,29 @@ gh label create area:ux       -R objectstack-ai/objectstack -c d2dae2 -d "Experi
 gh label create area:package  -R objectstack-ai/objectstack -c d2dae2 -d "Packages and install: install, enable, disable, uninstall, seed data, upgrades, release notes" 2>/dev/null || true
 gh label create area:fleet    -R objectstack-ai/objectstack -c d2dae2 -d "Not product — the fleet's own tooling: CI, tests, lint, PM tools, internal skills, governance" 2>/dev/null || true
 gh label create area:cloud    -R objectstack-ai/objectstack -c d2dae2 -d "Not product — work here for the hosted product, hosted-only problems; paused with the cloud lane" 2>/dev/null || true
+
+# The cloud repository's OWN product areas — nine values, one per cloud card.
+# ⛔ This file is not their definition: what each area covers, cloud's core
+# functions and its grading rules live in the cloud repository
+# (docs/strategy/core-functions.md and docs/strategy/triage-rules.md), and the
+# pm-dispatch skill only points there. The rows sit here because this script
+# is the one place the fleet's label vocabulary is created and reconciled, for
+# every repo; the -d strings are the cloud seat's own wording, copied.
+#
+# All nine label objects already exist on cloud — created by first use, grey
+# and with no description — so the default create-only mode changes nothing
+# there and `--reconcile` is what gives them this colour and these
+# descriptions. Same shade as the eight above: an area is an area in either
+# repository's label list.
+gh label create area:control     -R objectstack-ai/cloud -c d2dae2 -d "云控制台:注册登录、组织与成员、套餐与计费、平台邮件、开发者版" 2>/dev/null || true
+gh label create area:environment -R objectstack-ai/cloud -c d2dae2 -d "云环境:环境运行时、域名路由、租户库、pin 升级、推送" 2>/dev/null || true
+gh label create area:marketplace -R objectstack-ai/cloud -c d2dae2 -d "市场与发布:市场装应用、发布者上架与审核、套件、连接的运行时" 2>/dev/null || true
+gh label create area:ai          -R objectstack-ai/cloud -c d2dae2 -d "云端 AI:托管的 AI 搭建、问数、写数、MCP 入口" 2>/dev/null || true
+gh label create area:enterprise  -R objectstack-ai/cloud -c d2dae2 -d "企业版:安装升级、许可证、登录、已发版企业功能、企业版新功能" 2>/dev/null || true
+gh label create area:security    -R objectstack-ai/cloud -c d2dae2 -d "云端安全:鉴权、跨组织、密钥、隐私删除" 2>/dev/null || true
+gh label create area:ops         -R objectstack-ai/cloud -c d2dae2 -d "运维与上线:备份、告警、厂商额度、生产密钥与配置、上线验收" 2>/dev/null || true
+gh label create area:fleet       -R objectstack-ai/cloud -c d2dae2 -d "车队工具:CI、测试工具、部署流水线、PM 流程(不是产品)" 2>/dev/null || true
+gh label create area:ux          -R objectstack-ai/cloud -c d2dae2 -d "体验:控制台和环境里的慢、难用、步骤多、难懂、界面不一致" 2>/dev/null || true
 
 # No `target:<major>` family. A release blocker is `priority:p0` inside the
 # release window and nothing else (pm-dispatch references/filing-gate.md

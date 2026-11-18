@@ -67,7 +67,7 @@
 - 维护者或外部人立的卡首触补齐(照 `filing-gate.md`);日对账 fire 扫无 `area:*` 的公开卡补齐。
 - 判据照 `filing-gate.md` 两步:先仓库、area 与 type,再查北极星表;出货技能或文档说错 = `Bug`。
 - 定级评论首行 = 定级行 `area · type · severity · reach · evidence`;type 由中继 `issue_patch` 写。
-- 单车道元数据应用仓(hotcrm 等)的首触照 `lanes/hotcrm.md` 〈简化分诊〉,该节胜本文同题条。
+- 单车道应用仓(cloud、hotcrm 等)的首触照其本仓所载规则,入口见该仓的 `lanes/*.md` 指针。
 - 所入车道队列 P0/P1 未派时,三门皆无的 p2/p3 `tooling` 卡首触即关;挡住在派工作的 p2 除外。
 - 路由属分诊技术判断,⛔ 不升级哪个仓的问题;父单永不派发,`pm:epic` 卡 `pm:retriage` 即答。
 - 算涉 cloud:亦含托管面(objectos-runtime)、修复待其改动的 `Blocked-by:` cloud 卡、病因在 cloud。

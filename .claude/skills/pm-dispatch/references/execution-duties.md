@@ -51,8 +51,7 @@
 - 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
 - 标签序:`priority:p0` > p1(任何 area,含暂停)> 维护者点名的 area 或子专题里的下一张 > 无级。
-- 云车道企业版卡:取卡序 = `cloud/ROADMAP.md` 的档位与行序,⛔ 席位不在单卡上另调顺序。
-- 改序即改该表,由维护者或代其改并链裁决;改法见其「Maintaining this file」,⛔ 不抄表行。
+- 云车道同按专题派,⛔ 不按 `cloud/ROADMAP.md` 行序;细则照 `lanes/cloud.md` 所指的 cloud 仓文件。
 - 点名范围内:子专题照其子卡次序与 `Blocked-by:`;无子专题先 p2 后 p3;级只决定插队。
 - 全序每级现读/现算,零逐卡维护;无级/无 area/无 type 轮报记分诊缺口。
 - 同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄;⛔ 不升级、不越 p0。
