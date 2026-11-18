@@ -155,7 +155,11 @@ describe('form renderer — fields an update action would require (objectstack#2
     const { getObjectSchema } = renderInvoiceForm({ edit: false });
     // Let any effect settle before reading the absence.
     await new Promise((r) => setTimeout(r, 20));
-    expect(getObjectSchema).not.toHaveBeenCalled();
+    // Exactly one read, and it is not this feature's: a form whose fields
+    // declare a rule reads the object once for its formula fields
+    // (objectstack#35033), on a create as on an edit. The action requirements
+    // add none on a create.
+    expect(getObjectSchema).toHaveBeenCalledTimes(1);
     expect(noteOnIssuedOn()).toBeNull();
   });
 
