@@ -11,6 +11,9 @@ describe('[#35138] pickSentenceLocale — the language of a sentence in a tool r
     expect(pickSentenceLocale(['zh-TW'], WRITTEN)).toBe('zh-Hant');
     expect(pickSentenceLocale(['zh-Hant-HK'], WRITTEN)).toBe('zh-Hant');
     expect(pickSentenceLocale(['fr-FR', 'ja-JP'], WRITTEN)).toBe('ja');
+    // Not in the table whole: named by a shorter prefix.
+    expect(pickSentenceLocale(['ja-JP-u-ca-japanese'], WRITTEN)).toBe('ja');
+    expect(pickSentenceLocale(['zh-Hans-SG-x-a'], WRITTEN)).toBe('zh-Hans');
   });
 
   it('a language the producer does not write takes the next rung, and `en` is the floor', () => {
