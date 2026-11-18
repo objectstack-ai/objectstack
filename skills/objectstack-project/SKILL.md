@@ -10,7 +10,7 @@ description: >
   "升级平台"). Not for writing a metadata type (see the domain skills) or for
   crossing a protocol major (objectstack-upgrade).
 license: Apache-2.0
-compatibility: Requires @objectstack/cli and @objectstack/verify 18.x; the check lists below are that version's.
+compatibility: Requires @objectstack/cli 18.x and @objectstack/verify 18.x; the check lists below are that version's.
 metadata:
   author: objectstack-ai
   version: "18.6.0"

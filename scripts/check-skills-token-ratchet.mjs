@@ -1924,6 +1924,22 @@ export const CEILINGS = new Map([
   // = 1779 (+29), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
   ['skills/objectstack-ask/SKILL.md', 1779],
+
+  // ── the objectstack-project skill joins the catalog ──
+  // A new published process skill: how a change moves through a metadata-app
+  // project (app or platform, what to write per stage, what the app tests
+  // against what `os validate` / `os lint` / `os verify` already check,
+  // platform gaps, customer-facing changesets, pin bumps and backfills). The
+  // maintainer ordered it into the catalog — 「这个skills是整个元数据项目的核心指引」
+  // and, on its decision card, 「p1，放进专题现在派」 (2026-11-18). The row is an
+  // INITIAL measurement of the new file on the PR that adds it, pinned AT it —
+  // zero headroom, on the same terms as the objectstack-ask row above. Its
+  // evals are unpriced (population 1b). No existing row moves: the one pointer
+  // to it, in `objectstack-platform/references/operations.md`, lands inside that
+  // row's headroom (3388 -> 3392 of 3394). The PR that adds the row is Tier H and lands only on an authorized
+  // approval, which is the pricing act the header reserves to the maintainer.
+  //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11092 / 4)
+  ['skills/objectstack-project/SKILL.md', 2773],
 ]);
 
 /**
