@@ -118,6 +118,7 @@ export interface PluginListHost {
   enforceSessionControls: AuthManager['enforceSessionControls'];
   getAppName: AuthManager['getAppName'];
   getAudience: AuthManager['getAudience'];
+  getAuthContext: AuthManager['getAuthContext'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
@@ -290,6 +291,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         emailLocaleArg: (...a) => this.emailLocaleArg(...a),
         getAppName: (...a) => this.getAppName(...a),
         getAudience: (...a) => this.getAudience(...a),
+        getAuthContext: (...a) => this.getAuthContext(...a),
         getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
         getDataEngine: (...a) => this.getDataEngine(...a),
         getEmailService: (...a) => this.getEmailService(...a),
