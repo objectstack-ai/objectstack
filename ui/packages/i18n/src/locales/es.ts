@@ -1617,7 +1617,6 @@ const es = {
     widgetForbiddenMessage: "No tienes permiso para ver los datos de este widget.",
     allWidgetsForbiddenMessage: "No tienes permiso para ver los datos de este panel.",
     details: "Detalles",
-    exportCsv: "Exportar CSV",
     openInList: "Abrir en la lista",
     filters: {
       label: "Filtros del panel",

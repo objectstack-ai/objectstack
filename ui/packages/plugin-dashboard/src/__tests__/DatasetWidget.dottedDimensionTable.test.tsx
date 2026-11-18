@@ -43,8 +43,7 @@
  *    resolve it) and now reads `Education`;
  *  - `a LOCAL-only table … resolving nothing` becomes `… issues the ONE read`:
  *    it still renders the server's string untouched under `en`, but the read
- *    that makes it translatable is now expected rather than forbidden;
- *  - the CSV follows its table's cells, as it always has.
+ *    that makes it translatable is now expected rather than forbidden.
  *
  * What did NOT change, and is still pinned here: the dotted walk itself, the
  * multi-hop walk, the METRIC branch's silence (it renders no dimension value,
@@ -312,52 +311,6 @@ describe('DatasetWidget dotted-dimension labels on table / pivot (objectui#4263,
 
     await waitFor(() => expect(firstRowCells()[0]).toBe('Research & Development'));
     expect(requested).toEqual(['crm_opportunity', 'crm_account', 'crm_user']);
-  });
-
-  it('exports the resolved label for BOTH the dotted and the local column (#4330)', async () => {
-    // The CSV is the table's data, so it follows the table's cells — unchanged
-    // as a rule, and the cells it follows are the amended ones. Under #4263
-    // this expected `education,Education,10`; the local column now resolves for
-    // the same reason its cell does. Measures stay numeric either way.
-    const origCreate = URL.createObjectURL;
-    const origRevoke = URL.revokeObjectURL;
-    const blobs: any[] = [];
-    (URL as any).createObjectURL = (b: any) => { blobs.push(b); return 'blob:x'; };
-    (URL as any).revokeObjectURL = () => {};
-    try {
-      installMetaRouter({ crm_opportunity: OPPORTUNITY, crm_account: ACCOUNT });
-      render(
-        <DatasetWidget
-          widget={{
-            type: 'table',
-            dataset: 'd',
-            dimensions: ['industry', 'account_industry'],
-            values: ['total_amount'],
-          }}
-          dataSource={sourceOf({
-            rows: [{ industry: 'education', account_industry: 'education', total_amount: 10 }],
-            fields: [
-              { name: 'industry', type: 'select', label: 'Industry' },
-              { name: 'account_industry', type: 'select', label: 'Account Industry' },
-              { name: 'total_amount', type: 'number', label: 'Total Amount' },
-            ],
-            object: 'crm_opportunity',
-            dimensionFields: { industry: 'industry', account_industry: 'crm_account.industry' },
-          })}
-        />,
-      );
-      // Wait for the resolution to land before exporting.
-      await waitFor(() => expect(firstRowCells()[1]).toBe('Education'));
-      fireEvent.click(await screen.findByTestId('dataset-export'));
-      expect(blobs).toHaveLength(1);
-      // downloadCsv prepends a UTF-8 BOM so Excel reads non-ASCII labels.
-      const text: string = (await blobs[0].text()).replace(/^\uFEFF/, '');
-      const [, body] = text.split('\r\n');
-      expect(body).toBe('Education,Education,10');
-    } finally {
-      (URL as any).createObjectURL = origCreate;
-      (URL as any).revokeObjectURL = origRevoke;
-    }
   });
 
   it('METRIC: the branch renders no dimension value at all, so there is nothing to resolve', async () => {

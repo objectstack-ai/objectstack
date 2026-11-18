@@ -1613,7 +1613,6 @@ const fr = {
     widgetForbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce widget.",
     allWidgetsForbiddenMessage: "Vous n’avez pas l’autorisation de voir les données de ce tableau de bord.",
     details: "Détails",
-    exportCsv: "Exporter en CSV",
     openInList: "Ouvrir dans la liste",
     filters: {
       label: "Filtres du tableau de bord",

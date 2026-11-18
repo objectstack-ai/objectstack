@@ -91,7 +91,7 @@ import {
 } from '@object-ui/core';
 import { cn, Skeleton, ChartSkeleton, GridSkeleton, RefreshIndicator } from '@object-ui/components';
 import { builtinAggregateLabels, useSafeFieldLabel, useSafeTranslate, useDisplayLocale } from '@object-ui/i18n';
-import { AlertTriangle, ShieldAlert, Download, ArrowUpIcon, ArrowDownIcon, MinusIcon, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, ArrowUpIcon, ArrowDownIcon, MinusIcon, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 // objectui#7063 — the default empty state is stated ONCE for the dashboard
 // surface (see that component's header for why it is dashboard-local).
 import { WidgetEmptyState } from './WidgetEmptyState';
@@ -197,34 +197,6 @@ export function buildPivot(
     cellIndex.set(pivotCellKey(rid, cid), index);
   });
   return { rowHeaders, colHeaders, cellIndex };
-}
-
-/** RFC4180-ish CSV cell: quote when it contains a comma, quote, or newline. */
-function csvCell(v: string | number | null | undefined): string {
-  if (v == null) return '';
-  const str = String(v);
-  return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-}
-
-/** Serialize a 2D array (first row = headers) to CSV text. */
-export function toCsv(rows: Array<Array<string | number | null | undefined>>): string {
-  return rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
-}
-
-/** Trigger a client-side CSV download (no-op outside the browser). A UTF-8 BOM
- *  is prepended so Excel opens non-ASCII labels (e.g. Chinese) correctly. */
-function downloadCsv(filename: string, rows: Array<Array<string | number | null | undefined>>): void {
-  if (typeof document === 'undefined') return;
-  const base = filename && filename.trim() ? filename.trim() : 'export';
-  const blob = new Blob([`\uFEFF${toCsv(rows)}`], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = base.endsWith('.csv') ? base : `${base}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 /** Column the executor attaches a comparison window's value under. */
@@ -1151,8 +1123,8 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // ── The analytics label net's OUTPUT, with the locale bundle applied ──────
   // objectui#4030 (source thread objectstack#5076): the net above RESOLVES a
   // select dimension's option label but used to hand the object's authored
-  // English label straight to the axis, the legend, the table cells and the
-  // CSV — the same screen's related list showing the translation beside it.
+  // English label straight to the axis, the legend, and the table cells —
+  // the same screen's related list showing the translation beside it.
   // The bundle is applied HERE, once, on the shared `{value → label}` /
   // localized-options pair every one of those consumers reads, rather than per
   // surface. `fieldOptionLabel` is the resolver list and form surfaces already
@@ -1567,9 +1539,6 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     const displayRows = relabelDimensions(state.rows, dimensionLabels);
     // Drill-through (canDrill / openDrill / drillDrawer) is computed above and
     // shared with the chart path — tables/pivots drill by flat row index.
-    // CSV export — display-label headers + the underlying grouped rows (measures
-    // kept numeric so the data round-trips into a spreadsheet). Shared by the flat
-    // table and the cross-tab.
     // Measure columns, each followed by its comparison column when the executor
     // attached one. `compareOf` names the base measure a comparison column
     // belongs to — its format, and the label it is qualified with, both come
@@ -1587,49 +1556,6 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     const measureColumns = values.flatMap((m) =>
       comparedValues.includes(m) ? [m, compareColumn(m)] : [m],
     );
-    // The cross-tab exports its comparison columns too (objectui#3614), even
-    // though its DISPLAY stacks them inside the cell: a CSV is data, not a
-    // picture of the table. So each compared measure keeps its own flat
-    // `<measure>__compare` column here and every exported cell stays the bare
-    // number a spreadsheet can compute on — serializing the stacked cell would
-    // emit strings like "$120 $100 20%", which is a screenshot in CSV clothing.
-    const exportColumns = [...dimensions, ...measureColumns];
-    // `rows` is a parameter because the flat table now renders its rows in an
-    // order of its own (objectui#5827 — blank bucket last, plus whatever the
-    // user sorted by), and "the CSV follows the table" has to mean the order
-    // too, not just the cell text. The cross-tab passes `displayRows`, which is
-    // what this always exported.
-    const exportCsv = (rows: Row[]) => downloadCsv(String(widget?.title ?? datasetName ?? 'export'), [
-      exportColumns.map((c) => columnLabel(c)),
-      // The CSV follows the table's own cells (objectui#4263): a dotted
-      // dimension exports the label the table now shows, and a local one is
-      // unchanged for the same reason its cell is.
-      // …and #4330 widens that to a LOCAL select dimension for the same
-      // reason: the CSV is the table's data, so it exports the cell. Measures
-      // stay numeric (the raw values that must round-trip into a spreadsheet);
-      // the drill filter — the identity key — reads `drillRawRows`, untouched.
-      ...rows.map((r) => exportColumns.map((c) => {
-        const v = r[c];
-        return v == null ? '' : (typeof v === 'number' ? v : String(v));
-      })),
-    ]);
-    const exportBtnFor = (rows: Row[]) => (
-      <button
-        type="button"
-        onClick={() => exportCsv(rows)}
-        data-testid="dataset-export"
-        title={tt('dashboard.exportCsv', 'Export CSV')}
-        aria-label={tt('dashboard.exportCsv', 'Export CSV')}
-        // objectstack#29078 — below `sm` the button is a 44 px touch target.
-        // At that size, pinned over the table's top-right corner, it would
-        // cover the last column's sort button, so on a phone it leaves the
-        // corner and takes its own right-aligned row above the table.
-        className="absolute right-1 top-1 z-10 rounded p-1 text-muted-foreground opacity-70 hover:bg-accent/50 hover:text-foreground hover:opacity-100 max-sm:static max-sm:ml-auto max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center"
-      >
-        <Download className="h-3.5 w-3.5" />
-      </button>
-    );
-    const exportBtn = exportBtnFor(displayRows);
 
     // pivot → a true cross-tab when there are ≥2 dimensions: the LAST dimension
     // spreads ACROSS as columns, the rest go DOWN as rows, measures fill the
@@ -1736,7 +1662,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       const showTotalRow = colTotalById.size > 0;
       const totalLabel = tt('dashboard.total', 'Total');
       return (
-        <div className="relative h-full w-full overflow-auto p-1" data-testid="dataset-matrix">{refreshBar}{exportBtn}
+        <div className="relative h-full w-full overflow-auto p-1" data-testid="dataset-matrix">{refreshBar}
           <table className="w-full text-xs">
             {compareCaption}
             <thead className="bg-muted/40">
@@ -1976,7 +1902,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     };
 
     return (
-      <div className="relative h-full w-full overflow-auto p-1">{refreshBar}{exportBtnFor(orderedEntries.map((e) => e.row))}
+      <div className="relative h-full w-full overflow-auto p-1">{refreshBar}
         <table className="w-full text-xs">
           <thead className="bg-muted/40">
             <tr>

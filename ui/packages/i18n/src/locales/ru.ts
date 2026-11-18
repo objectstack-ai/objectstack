@@ -1671,7 +1671,6 @@ const ru = {
     widgetForbiddenMessage: "У вас нет прав на просмотр данных этого виджета.",
     allWidgetsForbiddenMessage: "У вас нет прав на просмотр данных этой панели.",
     details: "Подробности",
-    exportCsv: "Экспорт в CSV",
     openInList: "Открыть в списке",
     filters: {
       label: "Фильтры дашборда",

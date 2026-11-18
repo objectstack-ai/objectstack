@@ -1563,7 +1563,6 @@ const ko = {
     widgetForbiddenMessage: "이 위젯의 데이터를 볼 수 있는 권한이 없습니다.",
     allWidgetsForbiddenMessage: "이 대시보드의 데이터를 볼 수 있는 권한이 없습니다.",
     details: "세부 정보",
-    exportCsv: "CSV 내보내기",
     openInList: "목록에서 열기",
     filters: {
       label: "대시보드 필터",
