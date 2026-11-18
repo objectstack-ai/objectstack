@@ -1,6 +1,6 @@
 # ADR-0093: Tenancy mode as a first-class capability, and a single owner for the user→membership lifecycle
 
-**Status**: Accepted (2026-07-13) — implemented: `tenancy` kernel service (`plugin-auth/src/tenancy-service.ts`), membership reconciler (`reconcile-membership.ts`), locked by `dogfood/test/membership-reconciler.dogfood.test.ts` · **Amended** (2026-11-08, [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) D1, proposed, adopted by its merge) — D7's machine / service-account row: the first-class marker it waited on is `sys_user.principal_kind`. The membership reconciler never binds an account of kind `agent`, whose one membership its registration creates. · **Amended** (2026-11-11, maintainer ruling 6796108313) — D8.1 reversed: under every tenancy posture, a person's data access requires a current membership in the organization, judged on each request; see the amendment note under D8.
+**Status**: Accepted (2026-07-13) — implemented: `tenancy` kernel service (`plugin-auth/src/tenancy-service.ts`), membership reconciler (`reconcile-membership.ts`), locked by `dogfood/test/membership-reconciler.dogfood.test.ts` · **Amended** (2026-11-08, [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) D1, proposed, adopted by its merge) — D7's machine / service-account row: the first-class marker it waited on is `sys_user.principal_kind`. The membership reconciler never binds an account of kind `agent`, whose one membership its registration creates. · **Amended** (2026-11-11, maintainer ruling 6796108313) — D8.1 reversed: under every tenancy posture, a person's data access requires a current membership in the organization, judged on each request; see the amendment note under D8. · **Amended** (2026-11-17, maintainer ruling 6942842013) — D3 amendment: under a walled posture, bulk import (`POST /api/v1/auth/admin/import-users`) joins each row to the administrator's current organization; see the amendment note under the D3 amendment.
 - **Date:** 2026-07-13
 - **Deciders:** ObjectStack Protocol Architects
 - **Implementation:** #2882 (Phase 0 — tactical create-user bind, merged) → this PR (Phases 1–3 — `tenancy` service, fail-fast boot guard, membership reconciler, consumer migration, backfill, docs). One revision from the original plan, ratified in D2: the endpoint-level create-user bind **delegates to the shared reconciler** (one implementation, two call sites) instead of being deleted. Runtime verification confirmed the hook fires for `admin.createUser`, but better-auth *defers* `user.create.after` post-commit (#1881), so the endpoint keeps its delegated call to report `organizationId` / `membershipCreated` deterministically in its response. Cloud-host semantics (personal-org hook precedence, multi-org non-binding, D5 blast radius) verified against `objectstack-ai/cloud` — see D2/D3/D5.
@@ -272,6 +272,39 @@ to add a user to another organization, switch to it first.
 This is not the reconciler guessing a tenant: the reconciler, and every other
 creation path (self sign-up, bulk import, SSO JIT, host hooks), still binds
 nothing in multi mode.
+
+> **Amendment note (2026-11-17, maintainer ruling 6942842013 on #34535, option B — PR #34750,
+> `36af6b05a7`): bulk import joins each row to the administrator's current organization.** The
+> sentence above no longer holds for bulk import. Under a walled posture
+> `POST /api/v1/auth/admin/import-users` follows this amendment's rule row by row, through the one
+> settlement and the one join Create User runs:
+> `packages/plugins/plugin-auth/src/admin-user-endpoints.ts#settleCurrentOrganizationJoin`, `#joinCurrentOrganization`.
+> For the reconciler and the other creation paths that sentence names (self sign-up, SSO JIT, host
+> hooks) it stands as ruled: they still bind nothing in multi mode.
+>
+> - **Settled once, before any row is written, on a dry run too.** An administrator with no current
+>   organization is refused whole (`400 NO_ACTIVE_ORGANIZATION`, Create User's code and sentence),
+>   and so is an import on a host that wires no unit of work for the creation, or whose better-auth
+>   offers no `addMember` (`501 NOT_IMPLEMENTED`). Nothing is created. A dry run that is not
+>   refused joins nothing.
+> - **One unit of work per created row.** The row's account and its join, as `member` through
+>   better-auth's `addMember`, run inside the seam's `runAtomically`
+>   (`packages/plugins/plugin-auth/src/admin-import-users.ts#runAdminImportUsers`, its `inRowUnit`):
+>   the engine transaction, with the limit
+>   [ADR-0119](./0119-plugin-reachable-transactions-and-honest-atomic-batch.md) D1 declares for it.
+>   A refused join (the organization's member cap, say) rolls that row's account back: the row
+>   fails with the vendor's code, is handed no temporary password and is sent no invitation. The
+>   other rows go on.
+> - **A row that matches an existing user (upsert) joins that user too** (the seat's reading in the
+>   same ruling record), whichever other organizations that user already belongs to. The profile
+>   update and the join are one unit of work, so a refused join fails the row and leaves the
+>   profile as it was. A user already in the current organization is not added twice.
+> - **Single mode (a degraded wall included) is unchanged**: the import joins nothing, and the
+>   reconciler binds the default org.
+>
+> Pinned by the multi-org cases of
+> `packages/plugins/plugin-auth/src/admin-import-users-manager-pass.test.ts` and, on the real
+> engine, by I1 and I2 of `packages/qa/dogfood/test/create-user-organization-join.dogfood.test.ts`.
 
 ### D4 — The `tenancy` kernel service
 
