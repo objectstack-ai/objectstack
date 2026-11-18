@@ -2114,16 +2114,20 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
 
   for (const field of fields) {
     try {
-      // One scan classifies every text cell: legacy (converted below) or
-      // other text (withheld and warned about).
+      // One scan classifies every text cell: legacy (converted below),
+      // canonical text, or other text (withheld and warned about). Canonical
+      // text is the `'1'` / `'0'` a column with TEXT affinity (one whose type
+      // changed to boolean without a rebuild) stores for the driver's own
+      // `1` / `0`: it already reads as its boolean, so it is not withheld.
       const counted: any = await this.knex.raw(
-        `select count(*) as text_rows, coalesce(sum(case when ${SQLITE_LEGACY_BOOLEAN_TEXT} then 1 else 0 end), 0) as legacy ` +
+        `select count(*) as text_rows, coalesce(sum(case when ${SQLITE_LEGACY_BOOLEAN_TEXT} then 1 else 0 end), 0) as legacy, ` +
+          `coalesce(sum(case when ?? in ('1', '0') then 1 else 0 end), 0) as canonical ` +
           `from ?? where typeof(??) = 'text'`,
-        [field, field, table, field],
+        [field, field, field, table, field],
       );
       const tally = Array.isArray(counted) ? counted[0] : counted;
       const legacy = Number(tally?.legacy ?? 0);
-      const withheld = Number(tally?.text_rows ?? 0) - legacy;
+      const withheld = Number(tally?.text_rows ?? 0) - legacy - Number(tally?.canonical ?? 0);
       if (legacy > 0) {
         const sample: Array<{ id: unknown }> = await this.knex.raw(
           `select id from ?? where ${SQLITE_LEGACY_BOOLEAN_TEXT} order by id limit ?`,
@@ -2133,7 +2137,11 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
           `update ?? set ?? = case ?? when 'true' then 1 when 'false' then 0 end where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
           [table, field, field, field, field],
         );
-        const converted = (res as any)?.changes ?? 0;
+        // better-sqlite3 reports `changes`; a client whose raw path returns
+        // rows instead (driver-sqlite-wasm, knex `sqlite3`) does not, and the
+        // guarded UPDATE converts exactly the rows counted above.
+        const changes = (res as any)?.changes;
+        const converted = typeof changes === 'number' ? changes : legacy;
         if (converted) {
           this.logger.info?.(
             `[sql-driver] canonicalised boolean storage for ${table}.${field}: rows that held the ` +

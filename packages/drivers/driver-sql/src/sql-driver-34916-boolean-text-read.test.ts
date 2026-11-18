@@ -317,3 +317,69 @@ describe('[#34973] driver-sql — os migrate plan previews the boolean convergen
     expect(await driver.previewDeferredSchemaWork()).toEqual([]);
   });
 });
+
+describe('[#34973] driver-sql — the convergence record on other column and client shapes (sqlite)', () => {
+  let driver: SqlDriver | undefined;
+
+  afterEach(async () => {
+    await driver?.disconnect();
+    driver = undefined;
+  });
+
+  it('a TEXT-affinity column: the canonical text 1 / 0 is not withheld, and the legacy text still converges', async () => {
+    const TXT = 'bool_text_affinity_34973';
+    const TXT_OBJECT = { name: TXT, fields: { flag: { type: 'boolean' } } };
+    driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+    const knex = (driver as any).knex;
+    // A column whose type changed to boolean without a rebuild keeps TEXT
+    // affinity, so the driver's own 1 / 0 lands as the text '1' / '0'.
+    await knex.raw(`create table ${TXT} (id varchar(255) primary key, flag text)`);
+    await knex(TXT).insert([
+      { id: 'canon_one', flag: '1' },
+      { id: 'canon_zero', flag: '0' },
+      { id: 'legacy_true', flag: 'true' },
+    ]);
+    const warn: Logged[] = [];
+    const info: Logged[] = [];
+    (driver as any).logger = {
+      info: (msg: string, meta?: any) => { info.push({ msg, meta }); },
+      warn: (msg: string, meta?: any) => { warn.push({ msg, meta }); },
+    };
+    await driver.initObjects([TXT_OBJECT]);
+    const rows = await knex.raw(`select id, flag from ${TXT} order by id`);
+    expect(rows).toEqual([
+      { id: 'canon_one', flag: '1' },
+      { id: 'canon_zero', flag: '0' },
+      { id: 'legacy_true', flag: '1' },
+    ]);
+    expect(converged(info).map((l) => l.meta)).toEqual([
+      { table: TXT, field: 'flag', rowsConverted: 1, sampleIds: ['legacy_true'] },
+    ]);
+    expect(warn.filter((l) => l.msg.includes('unconverted'))).toEqual([]);
+  });
+
+  it('a client whose raw UPDATE reports no changes still records the rows it converted', async () => {
+    let info: Logged[];
+    ({ driver, info } = await legacyBooleanDatabase());
+    const knex = (driver as any).knex;
+    // driver-sqlite-wasm and knex `sqlite3` answer a raw statement with rows,
+    // not `{ changes }`: the UPDATE runs, the count is not reported. knex's
+    // own `raw` is read-only, so the driver gets a facade that answers so.
+    const raw = async (sql: string, bindings?: unknown) => {
+      const res = await knex.raw(sql, bindings);
+      return /^update /i.test(sql) ? [] : res;
+    };
+    (driver as any).knex = new Proxy(function facade(this: unknown, ...args: unknown[]) { return knex.apply(this, args); }, {
+      get: (_t, prop) => {
+        if (prop === 'raw') return raw;
+        const v = knex[prop];
+        return typeof v === 'function' ? v.bind(knex) : v;
+      },
+    });
+    await driver.initObjects([CONV_OBJECT]);
+    expect(converged(info).map((l) => l.meta)).toEqual([
+      { table: CONV, field: 'flag', rowsConverted: 2, sampleIds: ['text_false', 'text_true'] },
+      { table: CONV, field: 'live', rowsConverted: 1, sampleIds: ['text_false'] },
+    ]);
+  });
+});

@@ -361,8 +361,9 @@ export interface PendingSchemaWork {
    * How much data the step touches, when that is knowable up front and worth
    * knowing — absent for the additive kinds, which touch none.
    *
-   * For `normalize_datetime_storage` it is the number of row-writes (summed
-   * across `columns`, since each is its own `UPDATE`). For
+   * For `normalize_datetime_storage` and `normalize_boolean_storage` it is the
+   * number of row-writes (summed across `columns`, since each is its own
+   * `UPDATE`). For
    * `widen_datetime_columns` it is the table's row count, because MySQL's
    * `ALTER … MODIFY` is a full rebuild holding a metadata lock — which is the
    * number that decides "now" versus "in a maintenance window".
