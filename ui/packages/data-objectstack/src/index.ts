@@ -96,6 +96,7 @@ import { AppBundleStore, indexAppBundle, type AppBundleAnswer, type AppBundlePee
 import { MetadataClient } from './metadata-client';
 import { formatMetadataError } from './metadata-error';
 import { getSharedDiscovery } from './sharedDiscovery';
+import { authoredBuffer } from './authored-layers';
 import {
   ObjectStackError,
   MetadataNotFoundError,
@@ -6827,6 +6828,22 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * over-invalidation is the seam's uniform rule rather than a per-branch
    * decision this method has to keep re-making.
    *
+   * **Both halves merge onto the view as its author STORED it**
+   * (objectstack#35054, route D). The served reads (`?state=draft` and
+   * `client.meta.getItem`) are translated for the console's locale: a view's
+   * `label`, a form's section titles and thank-you text. This method writes
+   * the merged body back whole, and the door stores a body verbatim, so a
+   * Pin, a Set as Default or a Rename of anything but the label, made in a
+   * zh-CN session, stored the translations as the view's source text. The
+   * body is the layered read's instead, through the one reading the Studio
+   * editors share (`authoredBuffer`): the stored `draft` layer while a draft
+   * is pending, else the published view as authored. The served reads still
+   * decide which home is written and, for the published home, where
+   * ({@link viewCustomizationHome} reads the served `_packageId`). A pending
+   * draft whose stored copy the layers do not serve (`unserved`), or a
+   * published view with nothing stored to read, is refused: ⛔ never merged
+   * onto the served copy.
+   *
    * @throws when the view resolves in neither home, or when either read fails
    *   for any other reason (network, permission). Both used to be swallowed
    *   and converted into the bad partial write above; a caller that wants a
@@ -6844,11 +6861,25 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // `MetadataClient.get` answers `null` on 404 (no draft pending) and throws
     // on anything else, so a transport failure here is NOT read as "published".
     const metaClient = this.metadataClient();
-    const draft = unwrapViewDraft(
-      await metaClient.get('view', viewName, { state: 'draft' }),
-    );
-    if (draft) {
-      const mergedDraft = mergeViewPatch(draft, partial, viewName, objectName);
+    const [servedDraft, layers] = await Promise.all([
+      metaClient.get('view', viewName, { state: 'draft' }).then(unwrapViewDraft),
+      metaClient.layered('view', viewName),
+    ]);
+    const authored = authoredBuffer('view', layers, servedDraft);
+    if (authored.kind === 'unserved') {
+      throw new Error(
+        `updateView: view "${viewName}" has a pending draft whose stored copy was not served,` +
+          ' so it cannot be edited from here: the served draft is translated for this locale. Nothing was written.',
+      );
+    }
+    // The stored body, read the way the served one is: decorations off, the
+    // `{list: {...}}` artifact wrapper unwrapped.
+    const stored = unwrapViewDraft(authored.body);
+    if (authored.fromDraft) {
+      if (!stored) {
+        throw new Error(`updateView: the pending draft of view "${viewName}" is empty. Nothing was written.`);
+      }
+      const mergedDraft = mergeViewPatch(stored, partial, viewName, objectName);
       await metaClient.save('view', viewName, mergedDraft, { mode: 'draft' });
       this.invalidateViewKeys(objectName, viewName);
       return mergedDraft;
@@ -6878,7 +6909,13 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       throw err;
     }
 
-    const merged = mergeViewPatch(current, partial, viewName, objectName);
+    if (!stored) {
+      throw new Error(
+        `updateView: view "${viewName}" on object "${objectName}" has no stored body to read` +
+          ' (the layered read served none), so it is not written from the served, translated copy. Nothing was written.',
+      );
+    }
+    const merged = mergeViewPatch(stored, partial, viewName, objectName);
     // A view a read-only package ships is written into that package's
     // customization pair, declaring the override ({@link viewCustomizationHome}).
     // Every other view is written where it always was, naming no package.

@@ -17,6 +17,19 @@
  * Field loading is network-free: `objectDef.fields` is mapped into the
  * inspector's `objectFieldsOverride` so neither the inspector nor its
  * column editor issue a `client.get('object', …)` request.
+ *
+ * objectstack#35054 (route D) — an edit of a stored view edits the view as its
+ * author STORED it, never the view as it is served. `activeView` comes from the
+ * served view list, which the server translates for the console's
+ * Accept-Language (a view's `label`, a form's section titles), and the save
+ * door stores a view body verbatim, so a Save seeded from it stored the
+ * translations as the view's source text. With a metadata client the buffer is
+ * the layered read's authored document (`authoredBuffer`, the reading the
+ * Studio editors share): the stored pending draft, else the published view.
+ * The served draft read only says whether a draft is pending; a pending draft
+ * whose stored copy the layers do not serve opens no editor. ⛔ Never seed from
+ * the served copy instead. The draft bar no longer resumes its (served,
+ * translated) draft into the inspector: the host seeds the stored one.
  */
 
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react';
@@ -25,7 +38,9 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { ViewVariantInspector } from './metadata-admin/inspectors/ViewVariantInspector.js';
 import { RuntimeDraftBar } from './RuntimeDraftBar.js';
 import { isFormFamilyKey } from './metadata-admin/view-variant-model.js';
-import { useMetadataLocale } from './metadata-admin/i18n.js';
+import { useMetadataLocale, t as tStudio, tFormat } from './metadata-admin/i18n.js';
+import { authoredBuffer, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
+import { readRuntimeDraft } from './runtime-metadata-persistence.js';
 import type { ObjectFieldInfo } from './metadata-admin/previews/useObjectFields.js';
 import {
     runtimeViewToInspectorDraft,
@@ -103,6 +118,16 @@ export interface ViewConfigPanelProps {
 }
 
 /**
+ * objectstack#35054 — the authored view an edit-mode panel edits, read for one
+ * view id: still being read, read (the runtime shape of the stored body), or
+ * refused with the sentence the panel shows in place of the inspector.
+ */
+type AuthoredSeed =
+    | { for: string; state: 'loading' }
+    | { for: string; state: 'ready'; view: RuntimeView }
+    | { for: string; state: 'refused'; message: string };
+
+/**
  * Map an Object definition's `fields` record into the inspector's flat field
  * catalog so it can render field-reference pickers (columns, groupByField, …)
  * without a network fetch.
@@ -142,16 +167,79 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
         sort: [],
     }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // objectstack#35054 — an edit with a metadata client edits the stored
+    // view (module header). Read on every open, and again after a publish or a
+    // discard from the draft bar, which change what is stored.
+    const readsAuthored = mode === 'edit' && !!metadataClient && !!activeView.id;
+    const [seed, setSeed] = useState<AuthoredSeed | null>(null);
+    const [authoredReads, setAuthoredReads] = useState(0);
+    useEffect(() => {
+        if (!open || !readsAuthored) return;
+        const id = activeView.id;
+        let cancelled = false;
+        setSeed({ for: id, state: 'loading' });
+        (async () => {
+            let next: AuthoredSeed;
+            try {
+                const [layers, servedDraft] = await Promise.all([
+                    metadataClient.layered('view', id),
+                    readRuntimeDraft<Record<string, unknown>>('view', id, { metadataClient }),
+                ]);
+                const authored = authoredBuffer('view', layers as AuthoredLayers, servedDraft);
+                if (authored.kind === 'unserved') {
+                    next = { for: id, state: 'refused', message: tStudio('engine.studio.refusal.draftUnreadable', locale) };
+                } else if (Object.keys(authored.body).length === 0) {
+                    next = {
+                        for: id,
+                        state: 'refused',
+                        message: tFormat('engine.edit.loadFailed', locale, {
+                            type: 'view',
+                            name: id,
+                            message: tStudio('engine.form.notFound', locale),
+                        }),
+                    };
+                } else {
+                    // The stored body is a ViewItem envelope or a flat view;
+                    // its identity is the view the panel was opened on.
+                    next = { for: id, state: 'ready', view: { ...storedViewToRuntimeView(authored.body), id } };
+                }
+            } catch (err) {
+                next = {
+                    for: id,
+                    state: 'refused',
+                    message: tFormat('engine.edit.loadFailed', locale, { type: 'view', name: id, message: formatMetadataError(err) }),
+                };
+            }
+            if (!cancelled) setSeed(next);
+        })();
+        return () => { cancelled = true; };
+    }, [open, readsAuthored, activeView.id, metadataClient, authoredReads]); // eslint-disable-line react-hooks/exhaustive-deps
+    const seedFor = readsAuthored && seed?.for === activeView.id ? seed : null;
+    const authoredView = seedFor?.state === 'ready' ? seedFor.view : null;
+    // While the stored view is read, or when it cannot be, there is no buffer:
+    // nothing is shown to edit and nothing can be saved.
+    const awaitingAuthored = readsAuthored && !authoredView;
+
     // Inspector draft state. Rebuilt only when the source view ID (or create
-    // mode) changes — not on every parent re-render — so in-flight edits are
-    // not clobbered (same stabilization the legacy panel used with stableKey).
+    // mode) changes, or the stored view arrives — not on every parent
+    // re-render — so in-flight edits are not clobbered (same stabilization the
+    // legacy panel used with stableKey).
     const stableKey = mode === 'create' ? 'create' : activeView.id;
-    const initialDraft = useMemo<InspectorViewDraft>(
+    // The view as the host previews it when the panel opened: what Discard
+    // replays to the host's live list (the host's copy is the served one).
+    const openingDraft = useMemo<InspectorViewDraft>(
         () => runtimeViewToInspectorDraft(
             mode === 'create' ? defaultNewView : (activeView as RuntimeView),
             objectDef.name,
         ),
         [stableKey, objectDef.name], // eslint-disable-line react-hooks/exhaustive-deps
+    );
+    // The buffer the inspector edits and Save sends: the stored view when one
+    // was read (objectstack#35054), else the opening view (create mode, or a
+    // host with no metadata client, which saves nothing).
+    const initialDraft = useMemo<InspectorViewDraft>(
+        () => (authoredView ? runtimeViewToInspectorDraft(authoredView, objectDef.name) : openingDraft),
+        [authoredView, openingDraft, objectDef.name],
     );
     const [draft, setDraft] = useState<InspectorViewDraft>(initialDraft);
     const [isDirty, setIsDirty] = useState(false);
@@ -242,7 +330,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     const handleDiscard = useCallback(() => {
         if (mode === 'edit') {
             if (onViewUpdate) {
-                const original = inspectorDraftToRuntimeView(initialDraft);
+                const original = inspectorDraftToRuntimeView(openingDraft);
                 const edited = inspectorDraftToRuntimeView(draftRef.current);
                 const fields = new Set([...Object.keys(edited), ...Object.keys(original)]);
                 for (const field of fields) {
@@ -255,19 +343,14 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
             setIsDirty(false);
         }
         onClose();
-    }, [initialDraft, mode, onClose, onViewUpdate]);
+    }, [initialDraft, openingDraft, mode, onClose, onViewUpdate]);
 
-    // ADR-0034 (#1515): resume a pending draft into the inspector when the
-    // panel reopens (flag-ON only; the bar never fires this when the flag is
-    // off). The stored body is a ViewItem envelope (objectui#10210) or, for a
-    // draft saved before that, the flat runtime view — read it back to the
-    // runtime shape, then adapt that to the inspector draft before seeding.
-    const handleResumeDraft = useCallback((body: Record<string, unknown>) => {
-        const resumed = runtimeViewToInspectorDraft(storedViewToRuntimeView(body), objectDef.name);
-        draftRef.current = resumed;
-        setDraft(resumed);
-        setIsDirty(false);
-    }, [objectDef.name]);
+    // A publish or a discard from the draft bar changes what is stored: the
+    // buffer is read again (objectstack#35054), then the host refreshes.
+    const handleAfterChange = useCallback(() => {
+        setAuthoredReads((n) => n + 1);
+        onAfterChange?.();
+    }, [onAfterChange]);
 
     const panelTitle = mode === 'create'
         ? t('console.objectView.createView')
@@ -289,6 +372,17 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
             className="flex h-full flex-col"
         >
             <div className="min-h-0 flex-1 overflow-auto">
+                {awaitingAuthored ? (
+                    seedFor?.state === 'refused' ? (
+                        <p role="alert" data-testid="view-config-authored-refused" className="p-4 text-sm text-destructive">
+                            {seedFor.message}
+                        </p>
+                    ) : (
+                        <p data-testid="view-config-authored-loading" className="p-4 text-sm text-muted-foreground">
+                            {tStudio('engine.form.loadingEditor', locale)}
+                        </p>
+                    )
+                ) : (
                 <ViewVariantInspector
                     type="view"
                     name={draft.name}
@@ -301,6 +395,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                     objectFieldsOverride={objectFields}
                     onPatch={handlePatch}
                 />
+                )}
             </div>
             <div
                 data-testid="view-config-footer"
@@ -314,9 +409,8 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                         dataSource={dataSource}
                         objectName={objectDef.name}
                         dirty={isDirty}
-                        onResume={handleResumeDraft}
                         savedSignal={savedSignal}
-                        onAfterChange={onAfterChange}
+                        onAfterChange={handleAfterChange}
                     />
                 )}
                 <Button
@@ -330,7 +424,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 <Button
                     size="sm"
                     onClick={handleSave}
-                    disabled={saving || (mode === 'edit' && !isDirty)}
+                    disabled={saving || awaitingAuthored || (mode === 'edit' && !isDirty)}
                     data-testid="view-config-save"
                 >
                     {t('console.objectView.save')}
