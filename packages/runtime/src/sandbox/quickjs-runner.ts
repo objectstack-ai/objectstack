@@ -238,13 +238,33 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // Map a settled-VM state to the right budget error, or null if the body is
     // simply still progressing. Callers add the just-run slice to `cpuMs` first,
     // so `cpuMs` here is inclusive.
+    //
+    // An ACTION's timeout carries a caller sentence naming the action and its
+    // limit ({@link actionTimeoutSentence}); a hook's or a job's does not, and
+    // keeps the bare fault every door answers with the sanitised 500. Each
+    // construction keeps its message a literal template, which is what the core
+    // sandbox-fault census renders.
     const budgetError = (pumps: number): SandboxError | null => {
       if (cpuMs > cpuBudget) {
+        if (args.origin.kind === 'action') {
+          return new SandboxError(
+            `action '${args.origin.name}' exceeded CPU budget of ${cpuBudget}ms (after ${pumps} pump iterations)`,
+            actionTimeoutSentence(args.origin.name, cpuBudget, false),
+            { status: 500 },
+          );
+        }
         return new SandboxError(
           `${args.origin.kind} '${args.origin.name}' exceeded CPU budget of ${cpuBudget}ms (after ${pumps} pump iterations)`,
         );
       }
       if (Date.now() > wallDeadline) {
+        if (args.origin.kind === 'action') {
+          return new SandboxError(
+            `action '${args.origin.name}' exceeded wall-clock ceiling of ${wallCeiling}ms while awaiting host calls (after ${pumps} pump iterations)`,
+            actionTimeoutSentence(args.origin.name, wallCeiling, true),
+            { status: 500 },
+          );
+        }
         return new SandboxError(
           `${args.origin.kind} '${args.origin.name}' exceeded wall-clock ceiling of ${wallCeiling}ms while awaiting host calls (after ${pumps} pump iterations)`,
         );
@@ -2412,6 +2432,31 @@ function actionBodyCompileFailure(actionName: string, compilerError: string): Sa
   );
 }
 
+/**
+ * The caller sentence an action that ran out of time answers with: the action's
+ * name and the limit it hit, in milliseconds, and nothing the body was doing.
+ *
+ * A timeout is neither a refusal nor a crash. It stays a server fault, so the
+ * declared status is `500` and no code is declared: the doors answer the
+ * status's own `INTERNAL_ERROR` and relay this sentence, as they do for an
+ * action body that does not compile ({@link actionBodyCompileFailure}). What
+ * the sentence adds is the one fact a caller cannot get any other way: this
+ * action was slow, the platform did not break. A crash keeps the sanitised
+ * `Internal server error`, because its native text may carry the data the body
+ * was reading; a limit and a name carry none.
+ *
+ * Actions only. A hook's or a job's timeout keeps no `innerMessage`, so the
+ * `/data` door and the import rows answer it as the sandbox's own fault, as
+ * before. The declared `500` is also what keeps this sentence off the `/data`
+ * door should an action's timeout ever reach it: that door relays an
+ * `innerMessage` only below the server band.
+ */
+function actionTimeoutSentence(actionName: string, limitMs: number, waitingOnHostCalls: boolean): string {
+  return waitingOnHostCalls
+    ? `Action '${actionName}' timed out: it exceeded its ${limitMs} ms time limit while waiting on platform calls, and was stopped.`
+    : `Action '${actionName}' timed out: it exceeded its ${limitMs} ms time limit and was stopped.`;
+}
+
 function formatErr(err: unknown): string {
   if (err && typeof err === 'object') {
     const o = err as { message?: string; name?: string; stack?: string };
@@ -2427,8 +2472,12 @@ export class SandboxError extends Error {
    * message without the `<kind> '<name>' threw:` debug wrapper that lives in
    * `.message`. Safe to surface to end users (e.g. an action's error toast);
    * the wrapped `.message` stays for server logs. Undefined for the sandbox's
-   * own internal errors (timeouts, marshalling failures), which have no
-   * user-meaningful inner message.
+   * own internal errors (a hook's or a job's timeout, marshalling failures),
+   * which have no user-meaningful inner message.
+   *
+   * An ACTION's timeout is not one of those either: it carries the sentence
+   * naming the action and the limit it hit, at a declared `500`
+   * (`actionTimeoutSentence`).
    *
    * [#26903/#26965] A capability denial is not one of those: it is a refusal
    * naming the body and the capability, so it carries this field and its

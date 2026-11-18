@@ -158,5 +158,9 @@ describe('[#23723] CONTROL — the door\'s other answers stand', () => {
         const response = await postAction('never_settles');
         expect(response.status, JSON.stringify(response.body)).toBe(500);
         expect(response.body?.error?.code).toBe('INTERNAL_ERROR');
+        // The timeout names the action and its limit, never a refusal.
+        expect(response.body?.error?.message).toBe(
+            `Action 'never_settles' timed out: it exceeded its ${CEILING_MS} ms time limit while waiting on platform calls, and was stopped.`,
+        );
     });
 });
