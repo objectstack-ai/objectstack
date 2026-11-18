@@ -119,7 +119,7 @@ const whereValueMatches = (actual: unknown, want: unknown): boolean =>
         ? (want as { $in: unknown[] }).$in.includes(actual)
         : actual === want;
 
-function makeKernel(seed: Row[], failTypes: readonly string[] = []) {
+function makeKernel(seed: Row[]) {
     const rows = new Map<string, Row>();
     for (const r of seed) rows.set(r.id, r);
     const match = (r: Row, where: Record<string, unknown>): boolean =>
@@ -133,9 +133,7 @@ function makeKernel(seed: Row[], failTypes: readonly string[] = []) {
     const engine: any = {
         async find(table: string, o?: { where?: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
-            const type = String(o?.where?.type);
-            finds.push(type);
-            if (failTypes.includes(type)) throw new Error(`fixture: the ${type} listing is unreadable`);
+            finds.push(String(o?.where?.type));
             const matched = Array.from(rows.values()).filter((r) => match(r, o?.where ?? {}));
             return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
         },
@@ -161,13 +159,8 @@ function makeKernel(seed: Row[], failTypes: readonly string[] = []) {
     return { protocol, finds };
 }
 
-async function refusal(
-    seed: Row[],
-    fields: Record<string, unknown>,
-    extra: Record<string, unknown> = {},
-    failTypes: readonly string[] = [],
-): Promise<any> {
-    const { protocol } = makeKernel(seed, failTypes);
+async function refusal(seed: Row[], fields: Record<string, unknown>, extra: Record<string, unknown> = {}): Promise<any> {
+    const { protocol } = makeKernel(seed);
     return refusalOf(protocol, fields, extra);
 }
 
@@ -263,7 +256,15 @@ describe('a refused field removal names the views and forms that still show the 
     });
 
     it('leaves stillShownBy absent, not [], when a listing cannot be read, and still refuses', async () => {
-        const err = await refusal([leadObject, leadList, leadForm], withoutStatus, {}, ['dashboard']);
+        // The served `dashboard` listing fails; every other listing answers.
+        const { protocol } = makeKernel([leadObject, leadList, leadForm]);
+        const served = protocol.getMetaItems.bind(protocol);
+        vi.spyOn(protocol, 'getMetaItems').mockImplementation(async (request: any) => {
+            if (request?.type === 'dashboard') throw new Error('fixture: the dashboard listing is unreadable');
+            return served(request);
+        });
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const err = await refusalOf(protocol, withoutStatus).finally(() => warn.mockRestore());
         expect(err.code).toBe('DESTRUCTIVE_CHANGE');
         expect(err.status).toBe(409);
         const removed = err.issues.find((i: any) => i.code === 'field_removed' && i.field === 'status');

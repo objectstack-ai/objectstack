@@ -83,6 +83,9 @@ import { assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objec
 // Reason 1 is a claim about the AUTHORABLE SHAPE of a `field` body, so it is
 // asserted against the schema itself rather than restated in prose here.
 import { FieldSchema } from '@objectstack/spec/data';
+// The refusal names still-shown items with lint's judges, loaded lazily: pay
+// that first load during collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
