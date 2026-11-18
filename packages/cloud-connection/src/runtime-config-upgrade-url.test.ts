@@ -19,6 +19,9 @@
  * ABSOLUTE http(s) URL. A relative path is the defect this key exists to remove
  * (opened from the tenant origin it resolves against the wrong host), so it is
  * refused and named at mount, never forwarded.
+ *
+ * The last top-level group pins `cloudHomeUrl` (#34622), the control plane's
+ * console home page, which the producer holds to the same contract.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -195,5 +198,73 @@ describe('RuntimeConfigPlugin — upgradeUrl (#14514)', () => {
             const { warnings } = await serve({ upgradeUrl: PRICING });
             expect(warnings.some((w) => w.includes('upgradeUrl'))).toBe(false);
         });
+    });
+});
+
+/** The second declared control-plane address: the console home page (#34622). */
+function hasCloudHomeUrlKey(body: any): boolean {
+    return Object.prototype.hasOwnProperty.call(body, 'cloudHomeUrl');
+}
+
+/** The shape the cloud distribution will declare — the control plane's console mount. */
+const CLOUD_HOME = 'https://cloud.example.com/_console/';
+
+describe('RuntimeConfigPlugin — cloudHomeUrl (#34622), the same contract as upgradeUrl', () => {
+    it('declared: served verbatim at the top level beside cloudUrl and upgradeUrl, silently', async () => {
+        const { body, warnings } = await serve({
+            controlPlaneUrl: 'https://cloud.example.com',
+            upgradeUrl: PRICING,
+            cloudHomeUrl: CLOUD_HOME,
+        });
+        expect(hasCloudHomeUrlKey(body)).toBe(true);
+        expect(body.cloudHomeUrl).toBe(CLOUD_HOME);
+        expect(body.cloudUrl).toBe('https://cloud.example.com');
+        expect(body.upgradeUrl).toBe(PRICING);
+        expect(Object.keys(body.features)).not.toContain('cloudHomeUrl');
+        expect(Object.keys(body.branding)).not.toContain('cloudHomeUrl');
+        expect(JSON.parse(JSON.stringify(body)).cloudHomeUrl).toBe(CLOUD_HOME);
+        expect(warnings).toEqual([]);
+    });
+
+    it('declared: verbatim — no trailing-slash trimming, no case folding, no re-serialisation', async () => {
+        const spelled = 'http://Cloud.Example.com:8443/_console/?from=marketplace#home';
+        const { body } = await serve({ cloudHomeUrl: spelled });
+        expect(body.cloudHomeUrl).toBe(spelled);
+    });
+
+    it('absent: no key at all when nothing declared it, and nothing derived from cloudUrl or upgradeUrl', async () => {
+        const { body, warnings } = await serve({ controlPlaneUrl: 'https://cloud.example.com', upgradeUrl: PRICING });
+        expect(hasCloudHomeUrlKey(body)).toBe(false);
+        expect(Object.prototype.hasOwnProperty.call(JSON.parse(JSON.stringify(body)), 'cloudHomeUrl')).toBe(false);
+        expect(warnings).toEqual([]);
+    });
+
+    it.each(['', '   '])('empty: a declaration of %j reads as unset — absent, and silent', async (value) => {
+        const { body, warnings } = await serve({ cloudHomeUrl: value });
+        expect(hasCloudHomeUrlKey(body)).toBe(false);
+        expect(warnings).toEqual([]);
+    });
+
+    it.each([
+        '/_console',
+        '_console/',
+        'cloud.example.com/_console',
+        'javascript:alert(1)',
+        'ftp://cloud.example.com/_console',
+    ])('refused: %j is not served, and the mount names the option and the value', async (value) => {
+        const { body, warnings } = await serve({ cloudHomeUrl: value });
+        expect(hasCloudHomeUrlKey(body)).toBe(false);
+        const warning = warnings.find((w) => w.includes('cloudHomeUrl'));
+        expect(warning).toBeDefined();
+        expect(warning).toContain(JSON.stringify(value));
+        expect(warning).toContain('absolute');
+    });
+
+    it('a refused cloudHomeUrl leaves a declared upgradeUrl and the rest of the payload untouched', async () => {
+        const { body, warnings } = await serve({ upgradeUrl: PRICING, cloudHomeUrl: '/_console' });
+        expect(body.upgradeUrl).toBe(PRICING);
+        expect(body.cloudUrl).toBe('');
+        expect(body.features.aiStudio).toBe(true);
+        expect(warnings.some((w) => w.includes('upgradeUrl'))).toBe(false);
     });
 });

@@ -21,7 +21,7 @@ import {
     type BuiltinMembershipRole,
     type MembershipReachEntry,
 } from '@objectstack/spec/identity';
-import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
+import type { AIActionConfirmation, IExternalDatasourceService, ScreenSpec } from '@objectstack/spec/contracts';
 import {
     FEDERATION_READ_CAPABILITY,
     FEDERATION_WRITE_CAPABILITY,
@@ -29,6 +29,7 @@ import {
     metaRequestLocale,
     translateMetaList,
     type FederationCallKind,
+    type MetaListTranslationSources,
 } from '@objectstack/rest';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
@@ -699,10 +700,13 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
     return {
         name: def.name,
         label: def.label ?? def.name,
+        // [#34721] The authored descriptions, off the same served object.
+        ...authoredDescription(def),
         fields: Object.entries(def.fields ?? {}).filter(([k]) => k !== SEARCH_COMPANION_FIELD).map(([k, f]: [string, any]) => ({
             name: k,
             type: f?.type,
             label: f?.label ?? k,
+            ...authoredDescription(f),
             required: f?.required ?? false,
             // [#32530] Judged on the DECLARED field, never the served one: the
             // caller's mask deletes a readable field's `expression` when it
@@ -717,6 +721,23 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
         validations: describedRules(def.validations),
         enableFeatures: def.enable ?? {},
     };
+}
+
+/**
+ * [#34721] An object's or a field's `description` as `list_objects` and
+ * `describe_object` serve it: `{ description }` when the definition, as the
+ * caller is served it ({@link servedToCaller}), carries a non-blank string
+ * there, and nothing otherwise, so an answer for a definition that authors
+ * none keeps the shape it always had. The existing key only: the ADR-0106
+ * projection removes an unreadable field whole, its description with it, and
+ * keeps the prose of everything the caller may read, as the `/meta` object
+ * door serves it.
+ *
+ * The twin is `authoredDescription` in `packages/mcp/src/mcp-server-runtime.ts`.
+ */
+function authoredDescription(def: any): { description?: string } {
+    const text = def?.description;
+    return typeof text === 'string' && text.trim() !== '' ? { description: text } : {};
 }
 
 /**
@@ -1000,6 +1021,24 @@ export function buildMcpBridge(
         return { obj: projected.object ?? obj };
     };
 
+    /**
+     * [#34872] Served objects in THIS caller's locale: the `/meta` object
+     * door's translation (`translateMetaList`, the routine `GET /meta/object`
+     * and the dataset tools below run) for this request's locale
+     * ({@link metaTranslationSources}), ⛔ never a second translation routine.
+     * Handed the objects AS THIS CALLER IS SERVED THEM ({@link servedToCaller}):
+     * the translator rewrites the text of the fields it is given and adds
+     * none, so a field the mask removed stays absent, its translated label and
+     * description with it (ADR-0106 D3/D5). Computed per request (ADR-0156).
+     * No locale, or a key the bundle does not carry, leaves the authored text;
+     * names never change.
+     */
+    const inCallerLocale = async (served: readonly any[]): Promise<any[]> => {
+        if (served.length === 0) return [...served];
+        const translated = await translateMetaList(metaTranslationSources(deps, context, getProtocol), 'object', [...served]);
+        return Array.isArray(translated) ? translated : [...served];
+    };
+
     /** {@link readServedObject}, as this caller is served it ({@link servedToCaller}). */
     const readObjectForCaller = async (name: string): Promise<any> => {
         const def: any = await readServedObject(name);
@@ -1008,7 +1047,7 @@ export function buildMcpBridge(
 
     const listObjectSummaries = async (): Promise<any[]> => {
         const objs = await readServedObjects();
-        const out: any[] = [];
+        const served: any[] = [];
         // [ADR-0106 D5(2)] Every listed object as this caller is served it,
         // so `fieldCount` counts the fields that exist for them. One object
         // that cannot be projected refuses the listing, as the `/meta`
@@ -1016,10 +1055,16 @@ export function buildMcpBridge(
         for (const listed of objs) {
             const o = await servedToCaller(listed);
             // [ruling record 6787890900] An object the caller may not read is left out.
-            if (o === undefined) continue;
+            if (o !== undefined) served.push(o);
+        }
+        const out: any[] = [];
+        // [#34872] …in the caller's locale, the page translated in one call.
+        for (const o of await inCallerLocale(served)) {
             out.push({
                 name: o.name,
                 label: o.label ?? o.name,
+                // [#34721] …and its authored description, as the stdio twin serves it.
+                ...authoredDescription(o),
                 fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
             });
         }
@@ -1099,8 +1144,11 @@ export function buildMcpBridge(
             const declared: any = await readServedObject(name);
             const def: any = declared ? await servedToCaller(declared) : declared;
             if (!def) return null;
+            // [#34872] …in the caller's locale. `declared` is read for the
+            // `readonly` verdict alone, which no translation touches.
+            const [localized] = await inCallerLocale([def]);
             // [#32435] …each field and rule carrying what a write needs.
-            return describeServedObject(def, declared);
+            return describeServedObject(localized, declared);
         },
         // [#28715] The fields `validate_expression` judges a `label()` call
         // against, from the object `describeObject` reads: the served object,
@@ -1494,6 +1542,34 @@ export async function resolveMcpDatasetToolsService(
 }
 
 /**
+ * [ADR-0149 D2 · #34872] What the `/meta` translation reads for THIS request:
+ * the request's i18n service (a lookup that throws is none, and the text is
+ * then served untranslated), its protocol (an object's packaged base and a
+ * declared override's pair translations) and its locale — the
+ * `Accept-Language` / `?locale=` reading every `/meta` answer takes
+ * (`metaRequestLocale`), the i18n service's default last. One reading for the
+ * dataset tools and the object tools, so the two answer one caller in one
+ * locale.
+ */
+function metaTranslationSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    getProtocol: () => Promise<unknown>,
+): MetaListTranslationSources {
+    return {
+        resolveI18nService: async () => {
+            try {
+                return await deps.resolveService(context, 'i18n', context.environmentId);
+            } catch {
+                return undefined;
+            }
+        },
+        resolveProtocol: getProtocol,
+        requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
+    };
+}
+
+/**
  * [ADR-0149 D2] The bridge's three dataset members over the analytics
  * service's executor, bound to THIS request's principal.
  *
@@ -1521,17 +1597,7 @@ function datasetToolMembers(
         const protocol = await getProtocol();
         const items = (await actionExec.readMergedItems(protocol, 'dataset')) ?? [];
         const translated = await translateMetaList(
-            {
-                resolveI18nService: async () => {
-                    try {
-                        return await deps.resolveService(context, 'i18n', envId);
-                    } catch {
-                        return undefined;
-                    }
-                },
-                resolveProtocol: async () => protocol as any,
-                requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
-            },
+            metaTranslationSources(deps, context, async () => protocol),
             'dataset',
             items,
         );
@@ -1929,7 +1995,11 @@ function notResumableRunMessage(runId: string): string {
  *     the run is not resumed.
  *  5. **A screen pause only.** `getSuspendedScreen` must return a screen.
  *     The verb submits screen values. A run parked on any other node (a
- *     timer `wait`, for example) is refused 409 and left alone.
+ *     timer `wait`, for example) is refused 409 and left alone. [#34515] An
+ *     approval is bound to the screen it was given on (an approved hand-off's
+ *     `screenNodeId` at the host door, the screen an elicited person was
+ *     asked about): a run now paused on another screen is refused 409
+ *     `RESOURCE_CONFLICT` and left alone.
  *  6. **Resume.** The signal is built one field at a time and the input is
  *     never spread, as the REST door does (#3801). The engine's answer goes
  *     through {@link classifyResumeResult}, the table both doors share.
@@ -1979,8 +2049,12 @@ export async function resumeActionRun(
          * `actionConfirmationRefusal`): nothing is handed off or elicited,
          * an AI service account is refused whatever it carries, and the
          * invocation row names no MCP surface.
+         *
+         * [#34515] `screenNodeId` is the screen the approved hand-off was given
+         * on (`ActionConfirmationHandOff.run.screenNodeId`): step 5 refuses a
+         * run no longer paused on it.
          */
-        hostDoor?: { confirmation: AIActionConfirmation };
+        hostDoor?: { confirmation: AIActionConfirmation; screenNodeId?: string };
     },
 ): Promise<any> {
     const { driver, envId, ec, getMeta, readObjects, readActions, callData, hostDoor } = wiring;
@@ -2092,8 +2166,12 @@ export async function resumeActionRun(
     // instead, after the same steps: `accept` resumes the run below, as any
     // admitted resume; any other answer refuses the call and the run stays
     // parked. Nothing is handed off then.
+    // [#34515] The screen an approval is bound to: the one the host passed
+    // back for an approved hand-off, or the one an elicited person was asked
+    // about (below). Step 5 refuses a run no longer paused on it.
+    let boundScreenNodeId = hostDoor?.screenNodeId;
     if (handOff && elicitConfirmation) {
-        const subject = await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
+        const { subject, screen } = await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
         const elicited = await actionExec.elicitActionConfirmation(
             elicitConfirmation,
             actionExec.actionConfirmationElicitSubject(
@@ -2113,15 +2191,21 @@ export async function resumeActionRun(
         // the subject and the screen again itself (`continueAdmittedRun`).
         const regated = resumeAdmissionRefusal(deps, admitted, ec, activationEngine);
         if (regated instanceof Error) throw regated;
+        // [#34515] The person answered for the screen the run was parked on
+        // then: a run that moved on meanwhile is refused at step 5.
+        boundScreenNodeId = screenNodeIdOf(screen);
     } else if (handOff) {
-        await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
+        // [#34515] The hand-off names the screen the values were given for,
+        // so the host can bind its approval to it (`dispatchActionResume`).
+        const { screen } = await refuseUnresumableAdmittedRun(deps, automation, runId, { objectName, recordId, driver, envId, ec, callData });
+        const screenNodeId = screenNodeIdOf(screen);
         const answer = await actionExec.handOffActionConfirmation(deps, context, envId, {
             actionName: typeof action?.name === 'string' && action.name ? action.name : String(flowName),
             ...(actionExec.isObjectLessActionKey(objectName) ? {} : { objectName }),
             ...(recordId !== undefined ? { recordId } : {}),
             params: {},
             door: 'mcp',
-            run: { runId, values: values ?? {} },
+            run: { runId, values: values ?? {}, ...(screenNodeId !== undefined ? { screenNodeId } : {}) },
         }, ec);
         if ('refused' in answer) {
             throw resumeDoorError(deps, answer.refused.message, answer.refused.status, {
@@ -2152,7 +2236,7 @@ export async function resumeActionRun(
     let answer: any;
     try {
         answer = await continueAdmittedRun(deps, automation, runId, values, {
-            action, objectName, recordId, driver, envId, ec, callData,
+            action, objectName, recordId, driver, envId, ec, callData, boundScreenNodeId,
         });
     } catch (err) {
         await recordActionInvocation(deps, context, envId, {
@@ -2187,9 +2271,14 @@ export async function resumeActionRun(
  *    the run to be paused on a screen; step 6 resumes it.
  *
  * Step 2 refuses only a run that is no longer paused: a wizard moved on to
- * its next screen is still paused under the same run id, and a second call
- * with the same hand-off resumes that screen with the values given. Deciding
- * a pending item once is the host's.
+ * its next screen is still paused under the same run id. [#34515] So the
+ * host passes back the screen the hand-off was given on
+ * (`ActionConfirmationHandOff.run.screenNodeId`, as `screenNodeId`), and
+ * step 5 refuses a run no longer paused on it, `409 RESOURCE_CONFLICT`,
+ * leaving it where it is: a second approval of the same hand-off, or one
+ * that lands after the person advanced the wizard in the app, resumes
+ * nothing. Without it, the run's current screen is resumed with the values
+ * given. Deciding a pending item once is the host's.
  *
  * Placement is the host action door's ({@link PlaceRequestInEnvironment}).
  * What stays the host's before it calls, as for `dispatchAction`: resolving
@@ -2235,6 +2324,11 @@ export async function resumeActionRunRequest(
     }
     const { getMeta, readServedObjects, readServedActions } = actionDeclarationReads(deps, context);
     const confirmation: AIActionConfirmation = request.confirm !== undefined ? { confirm: request.confirm } : {};
+    // [#34515] The screen the approved hand-off was given on, when the host passes it back.
+    const screenNodeId = request.screenNodeId;
+    if (screenNodeId !== undefined && (typeof screenNodeId !== 'string' || screenNodeId === '')) {
+        return deps.error('dispatchActionResume\'s `screenNodeId` names the screen the hand-off was given on: a non-empty string', 400) as ActionDispatchAnswer;
+    }
     try {
         const answer = await resumeActionRun(deps, context, runId, request.values !== undefined ? { values: request.values } : {}, {
             driver: (context as any).dataDriver,
@@ -2244,7 +2338,7 @@ export async function resumeActionRunRequest(
             readObjects: readServedObjects,
             readActions: readServedActions,
             callData: actionExec.callData.bind(null, deps, context),
-            hostDoor: { confirmation },
+            hostDoor: { confirmation, ...(screenNodeId !== undefined ? { screenNodeId } : {}) },
         });
         return deps.success(answer) as ActionDispatchAnswer;
     } catch (err) {
@@ -2271,6 +2365,8 @@ async function continueAdmittedRun(
         envId?: string;
         ec: any;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
+        /** [#34515] The screen the approval was given on, when it is bound to one. */
+        boundScreenNodeId?: string;
     },
 ): Promise<any> {
     const { action, objectName, recordId } = admitted;
@@ -2289,6 +2385,14 @@ async function continueAdmittedRun(
  * `resume_run` steps 4–5 for an admitted run: the subject record read again
  * as the caller, and the screen-pause check. Throws the refusal; reads
  * nothing else. Asked before a resume and before a hand-off (#33690) alike.
+ *
+ * [#34515] Step 5 also binds an approval to its screen: given
+ * `boundScreenNodeId`, a run paused on another screen is refused 409 and left
+ * where it is. A multi-screen wizard stays `paused` under the same run id as
+ * it moves from screen to screen, so step 2 alone would let an approval given
+ * for one screen (a second approval of the same hand-off, or one that lands
+ * after the person advanced the wizard in the app) submit its values to the
+ * next screen, as the approver.
  */
 async function refuseUnresumableAdmittedRun(
     deps: DomainHandlerDeps,
@@ -2301,9 +2405,10 @@ async function refuseUnresumableAdmittedRun(
         envId?: string;
         ec: any;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
+        boundScreenNodeId?: string;
     },
-): Promise<actionExec.ActionSubjectRecordLoad> {
-    const { objectName, recordId, driver, envId, ec, callData } = admitted;
+): Promise<{ subject: actionExec.ActionSubjectRecordLoad; screen: ScreenSpec }> {
+    const { objectName, recordId, driver, envId, ec, callData, boundScreenNodeId } = admitted;
 
     // ── 4. the subject record, read again in the caller's own scope ──────────
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
@@ -2320,8 +2425,24 @@ async function refuseUnresumableAdmittedRun(
             409,
         );
     }
+    // [#34515] An approval bound to a screen resumes that screen and no other.
+    if (boundScreenNodeId !== undefined && screenNodeIdOf(screen) !== boundScreenNodeId) {
+        throw resumeDoorError(
+            deps,
+            `Run '${runId}' has moved on: this approval was given for screen '${boundScreenNodeId}', and the run is `
+                + `now paused on ${screenNodeIdOf(screen) !== undefined ? `screen '${screenNodeIdOf(screen)}'` : 'another screen'}. `
+                + 'Nothing was resumed and the run stays where it is; ask again on the screen it is on now.',
+            409,
+        );
+    }
     // [#33712] The subject as read, so an elicitation can name the record by its title.
-    return subject;
+    return { subject, screen };
+}
+
+/** [#34515] A screen's node id (`ScreenSpec.nodeId`), when the engine named one. */
+function screenNodeIdOf(screen: ScreenSpec | null | undefined): string | undefined {
+    const nodeId = (screen as { nodeId?: unknown } | null | undefined)?.nodeId;
+    return typeof nodeId === 'string' && nodeId !== '' ? nodeId : undefined;
 }
 
 /**

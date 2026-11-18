@@ -40,11 +40,15 @@ import {
   InspectorReadOnlyReason,
   spliceArray,
 } from './_shared.js';
-import { Label } from '@object-ui/components';
+import { Button, FilterBuilder, Label, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
+import { ChevronDown, Code2, ListFilter } from 'lucide-react';
 import { edgeKey, conditionText } from '../previews/flow-canvas-layout.js';
 import { validateExpressionClient } from './expression-validate.js';
 import { useEdgeScope } from './useFlowScope.js';
-import { hasCommittedConnectorAction } from './flow-scope.js';
+import { businessFieldsFirst, hasCommittedConnectorAction } from './flow-scope.js';
+import { useObjectFields } from '../previews/useObjectFields.js';
+import { celToRows, rowsToCel, type EdgeConditionField, type EdgeConditionGroup } from './flow-edge-condition-rows.js';
+import type { ScopeGroup } from './useFlowScope.js';
 import { useConnectorRegistry } from './connector-input-fields.js';
 import { VariableTextInput } from './VariableTextInput.js';
 import { findUnknownRefs, scopeRoots, describeUnknownRefs } from './flow-ref-check.js';
@@ -91,7 +95,23 @@ export function FlowEdgeInspector({
   // (#1934) plus the source's own outputs, which the engine has written by the
   // time it evaluates this guard (objectui#11085). Called unconditionally — a
   // missing edge resolves the flow variables alone.
-  const { groups: scopeGroups } = useEdgeScope(draft as Record<string, unknown>, edge, connectors);
+  const { groups: scopeGroups, trigger, loading: scopeLoading } = useEdgeScope(draft as Record<string, unknown>, edge, connectors);
+  // objectstack#34818 item 3 — the trigger record's columns, as the rows name
+  // them: the spelling this edge's scope offers (`record.meeting_date`), by
+  // label, business fields first. No record trigger, no rows.
+  const { fields: triggerFields, loading: fieldsLoading } = useObjectFields(trigger?.objectName);
+  const rowFields = React.useMemo<EdgeConditionField[]>(
+    () =>
+      trigger
+        ? businessFieldsFirst(triggerFields.filter((f) => !f.hidden)).map((f) => ({
+            value: `${trigger.fieldPrefix}${f.name}`,
+            label: f.label || f.name,
+            type: f.type,
+            ...(f.options ? { options: f.options } : {}),
+          }))
+        : [],
+    [trigger, triggerFields],
+  );
   // objectstack#26858 — what the page's served verdict says at this edge's
   // `condition` (an `expression-invalid` its publish would refuse), as written.
   const conditionVerdict = useServerErrorsAt(index >= 0 ? `edges.${index}.condition` : undefined);
@@ -297,23 +317,20 @@ export function FlowEdgeInspector({
         placeholder={t('engine.inspector.flowEdge.labelHint', locale)}
         disabled={readOnly || isDefault}
       />
-      <div className="space-y-1">
-        <Label className="text-xs text-muted-foreground">{t('engine.inspector.flowEdge.condition', locale)}</Label>
-        {/* #3216 converged the READ on `conditionText`; the write stayed a
-            bare string, which the spec's pipe would have re-stamped as
-            `dialect: 'cel'` — silently swapping the engine of a `cron` /
-            `template` guard and dropping its `ast` / `meta`. Same rule as the
-            hook guard now (#3218). */}
-        <VariableTextInput
-          mode="expression"
-          mono
-          value={conditionText(edge.condition) ?? ''}
-          onValueChange={(v) => patchEdge({ condition: writeExpressionSource(edge.condition, v) })}
-          groups={scopeGroups}
-          placeholder={t('engine.inspector.flowEdge.conditionHint', locale)}
-          disabled={readOnly || isDefault}
-        />
-      </div>
+      <EdgeConditionEditor
+        // A fresh editor per edge: its rows are that edge's.
+        key={selection.id}
+        value={conditionText(edge.condition) ?? ''}
+        // #3216 converged the READ on `conditionText`; the write stays
+        // `writeExpressionSource`, which keeps a stored envelope's dialect
+        // (#3218) — in both modes.
+        onCommit={(v) => patchEdge({ condition: writeExpressionSource(edge.condition, v) })}
+        fields={rowFields}
+        fieldsReady={!!trigger && !fieldsLoading && !scopeLoading}
+        scopeGroups={scopeGroups}
+        disabled={readOnly || isDefault}
+        locale={locale}
+      />
       {(() => {
         // ADR-0032 — flag a malformed edge guard (e.g. `{record.x}` brace-in-CEL)
         // inline, with the same corrective message as build/agent validation.
@@ -390,5 +407,139 @@ export function FlowEdgeInspector({
     >
       {shell}
     </InspectorReadOnlyReason>
+  );
+}
+
+/**
+ * objectstack#34818 item 3 — the edge's condition, as field / operator / value
+ * rows by default (the list toolbar's `FilterBuilder`, imported as it is), with
+ * the formula one click away.
+ *
+ * Which mode a stored guard opens in is {@link celToRows}' answer: rows only
+ * when the guard is exactly what the rows write, else the formula input with
+ * the guard unchanged. Back from the formula, the rows are offered only for a
+ * guard they can show; any other stays a formula and says why.
+ *
+ * Rows are held here while they are edited, so a row still being built (no
+ * column yet, a value not typed) stays on screen: only finished rows are
+ * written ({@link rowsToCel}). A finished row the bridge cannot spell writes
+ * nothing and is named, so a stored guard is never replaced by one that means
+ * something else.
+ */
+function EdgeConditionEditor({
+  value,
+  onCommit,
+  fields,
+  fieldsReady,
+  scopeGroups,
+  disabled,
+  locale,
+}: {
+  value: string;
+  onCommit: (cel: string) => void;
+  fields: EdgeConditionField[];
+  /** The trigger's columns have loaded (rows are not offered before). */
+  fieldsReady: boolean;
+  scopeGroups: ScopeGroup[];
+  disabled?: boolean;
+  locale?: string;
+}) {
+  const rowsOffered = fieldsReady && fields.length > 0;
+  const read = React.useMemo(() => (rowsOffered ? celToRows(value, fields) : null), [rowsOffered, value, fields]);
+  const [mode, setMode] = React.useState<'rows' | 'formula' | null>(null);
+  // The rows being edited, and the guard they last wrote: a value that is not
+  // that guard came from elsewhere (an undo, the formula), and is re-read.
+  const [edited, setEdited] = React.useState<{ group: EdgeConditionGroup; wrote: string } | null>(null);
+  const [refused, setRefused] = React.useState<string[]>([]);
+  const [tooComplex, setTooComplex] = React.useState(false);
+  const group = edited && edited.wrote === value ? edited.group : read;
+  const showRows = rowsOffered && mode !== 'formula' && group !== null;
+
+  const commitRows = (next: EdgeConditionGroup) => {
+    const out = rowsToCel(next, fields);
+    if (!out.ok) {
+      setEdited({ group: next, wrote: value });
+      setRefused(out.refused);
+      return;
+    }
+    setRefused([]);
+    setEdited({ group: next, wrote: out.cel });
+    if (out.cel !== value) onCommit(out.cel);
+  };
+  const toRows = () => {
+    if (read) {
+      setTooComplex(false);
+      setEdited(null);
+      setMode('rows');
+    } else setTooComplex(true);
+  };
+  const count = group ? group.conditions.filter((c) => c.field).length : 0;
+
+  return (
+    <div className="space-y-1" data-testid="flow-edge-condition">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs text-muted-foreground">{t('engine.inspector.flowEdge.condition', locale)}</Label>
+        {rowsOffered && !disabled && (
+          showRows ? (
+            <button type="button" onClick={() => setMode('formula')} data-testid="flow-edge-condition-to-formula"
+              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground">
+              <Code2 className="h-3 w-3" /> {t('engine.inspector.flowEdge.conditionFormula', locale)}
+            </button>
+          ) : (
+            <button type="button" onClick={toRows} data-testid="flow-edge-condition-to-rows"
+              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground">
+              <ListFilter className="h-3 w-3" /> {t('engine.inspector.flowEdge.conditionRows', locale)}
+            </button>
+          )
+        )}
+      </div>
+      {showRows && group ? (
+        <>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="outline" size="sm" disabled={disabled} data-testid="flow-edge-condition-rows"
+                className="h-8 w-full justify-between text-xs font-normal">
+                <span className="truncate text-left">
+                  {count
+                    ? tFormat(count === 1 ? 'engine.inspector.dataset.filterConditionsOne' : 'engine.inspector.dataset.filterConditionsOther', locale, { count })
+                    : <span className="text-muted-foreground">{t('engine.inspector.flowEdge.conditionAdd', locale)}</span>}
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+            {/* `end`: the panel sits at the window's right edge, so the
+                builder opens leftward over the canvas. */}
+            <PopoverContent align="end" className="w-[440px] max-w-[90vw] p-3">
+              <FilterBuilder fields={fields as never} value={group as never} onChange={(g) => commitRows(g as EdgeConditionGroup)} />
+            </PopoverContent>
+          </Popover>
+          {refused.length > 0 && (
+            <p className="text-[11px] leading-snug text-destructive" role="alert" data-testid="flow-edge-condition-refused">
+              {t('engine.inspector.flowEdge.conditionRowRefused', locale)}
+            </p>
+          )}
+          {value && (
+            <div className="break-all rounded bg-muted/40 px-2 py-1 font-mono text-[10px] text-muted-foreground">{value}</div>
+          )}
+        </>
+      ) : (
+        <>
+          <VariableTextInput
+            mode="expression"
+            mono
+            value={value}
+            onValueChange={(v) => { setTooComplex(false); onCommit(v); }}
+            groups={scopeGroups}
+            placeholder={t('engine.inspector.flowEdge.conditionHint', locale)}
+            disabled={disabled}
+          />
+          {tooComplex && (
+            <p className="text-[11px] leading-snug text-muted-foreground" role="note" data-testid="flow-edge-condition-too-complex">
+              {t('engine.inspector.flowEdge.conditionTooComplex', locale)}
+            </p>
+          )}
+        </>
+      )}
+    </div>
   );
 }

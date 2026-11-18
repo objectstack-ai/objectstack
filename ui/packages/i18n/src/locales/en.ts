@@ -816,6 +816,7 @@ const en = {
         'This view is grouped, but its data source does not implement queryGroupHeaders, so the groups cannot be counted. Remove the grouping to show the records.',
       needsWholeRows:
         'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
+      draftOnly: 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
     },
     // Column-footer aggregate prefixes, keyed by the spec's `ColumnSummary`
     // vocabulary (objectui#4024). The footer already formatted its NUMBER
@@ -1223,6 +1224,8 @@ const en = {
     removeGroup: 'Remove',
     groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
     groupingUnstoredRemove: 'Remove from grouping',
+    draftOnlyQueryDropped: 'Not filtered or sorted by {{fields}}: it exists only in the draft until you publish.',
+    withheldFieldsLeftOut: 'Not shown, filtered, sorted or grouped by {{fields}}: the package that adds it is disabled. It comes back when the package is enabled.',
     inlineEditShort: 'Edit inline',
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
   },
@@ -1513,6 +1516,8 @@ const en = {
     writeStrippedUnknownReason: 'Not applied by the server: {{fields}}',
     approvalPendingEditable: 'In approval · editable',
     approvalPendingTooltip: 'This record has a pending approval request; this step still allows editing',
+    approvalPending: 'In approval',
+    approvalPendingNotEditableTooltip: 'This record has a pending approval request',
     approvalProgress: 'Approvals — {{got}} of {{need}}',
     approvalProgressGroups: 'Sign-off — {{got}} of {{need}} groups',
     approvalProgressLabel: 'Approval progress',
@@ -1952,6 +1957,9 @@ const en = {
   dashboard: {
     total: 'Total',
     noDataSourceFor: 'No data source available for',
+    drillTooMany: 'Too many records are related to this value to list them here. Narrow the dashboard filters and try again.',
+    drillUnavailable: 'The records behind this value can’t be listed from here.',
+    drillFailed: 'The records behind this value couldn’t be loaded. Try again later.',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
@@ -2499,6 +2507,8 @@ const en = {
       view: 'View',
       confirm: 'Confirm',
       cancel: 'Cancel',
+      // The folded card's way back in, on a phone (objectstack#34596).
+      continue: 'Continue',
       prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
       organizationName: {
         title: 'Name your organization',
@@ -2628,6 +2638,16 @@ const en = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+        publishFromBar_one: '{{count}} unpublished change. Publish it from the draft bar at the top.',
+        publishFromBar_other: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
+        showDraftToPublish: '{{count}} unpublished changes. Show the draft to review and publish them.',
+        showDraftToPublish_one: '{{count}} unpublished change. Show the draft to review and publish it.',
+        showDraftToPublish_other: '{{count}} unpublished changes. Show the draft to review and publish them.',
+        showDraft: 'Show draft',
+        receipt: 'Published. Your changes are live.',
+        dismissReceipt: 'Dismiss',
         count: '{{count}} change(s) are not published yet — users cannot see them.',
         publish: 'Publish',
         published: 'All pending changes are live.',
@@ -2869,7 +2889,7 @@ const en = {
       changesApplied: 'Applied',
       changesDrafted: 'Saved as draft',
       changesFailed: 'Not applied',
-      discussing: 'Discussing: {{target}}',
+      discussing: 'Viewing: {{target}}',
       // Wording is load-bearing: this is SENT to the agent and must satisfy the
       // cloud confirm gate's English clause `apply (this|the) change`
       // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
@@ -2977,7 +2997,7 @@ const en = {
       unavailableRetry: 'Try again',
       unavailableHome: 'Back to home',
       dock: {
-        title: 'Assistant',
+        title: 'AI Assistant',
         description: 'AI assistant chat',
         resize: 'Resize chat',
         collapse: 'Collapse chat',
@@ -3100,7 +3120,7 @@ const en = {
         unauthorizedHint: 'Holds no permission set beyond the baseline every signed-in member has. Give them a permission set or a position.',
       },
       objectNotFound: 'Object Not Found',
-      objectNotFoundDescription: 'The object "{{objectName}}" does not exist in the current configuration.',
+      objectNotFoundDescription: 'The object "{{objectName}}" does not exist, or you do not have access to it.',
       objectNotFoundHint: 'Check your app navigation settings or select a different object from the sidebar.',
       objectPackageDisabled: 'The object "{{objectName}}" belongs to a package that is disabled, so it is not being served.',
       filterOrGroupNotEditable: 'This filter has an OR group beside other conditions, which the filter editor cannot show, so it is read-only here. The view still applies it.',
@@ -3181,8 +3201,16 @@ const en = {
       viewTypeChartDesc: 'Aggregated bar / line / pie visualisations.',
       viewTypeTree: 'Tree',
       viewTypeTreeDesc: 'Nest self-referencing records into a hierarchy by a parent field.',
+      viewTypeTimesheet: 'Timesheet',
+      viewTypeTimesheetDesc: 'Enter a number per row and weekday; each filled cell is one record.',
       parentField: 'Parent field',
       parentFieldHelp: 'The field pointing to the parent record (same object) that defines the hierarchy. Only self-referencing fields qualify.',
+      timesheetRowField: 'Row field',
+      timesheetRowFieldHelp: 'Each row of the grid is one value of this field, such as a project.',
+      timesheetDateField: 'Date field',
+      timesheetDateFieldHelp: 'Records are placed on the weekday matching this date.',
+      timesheetValueField: 'Value field',
+      timesheetValueFieldHelp: 'The number each cell shows and edits, such as hours.',
       newView: 'New View',
       viewName: 'Name',
       viewNameHelp: 'Machine key (snake_case). Auto-filled from the title — edit if you like.',
@@ -3551,6 +3579,10 @@ const en = {
       missingToken: 'Verification link is missing a token.',
       emailMissing: 'Email address is missing',
       resendButton: 'Resend verification email',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        'Your email address has not been verified yet. Send a verification link to {{email}}, then click the link to verify your account.',
+      sendButton: 'Send verification email',
       resending: 'Sending…',
       resent: 'Email sent! Check your inbox',
       resentSuccess: 'Verification email sent!',
@@ -3861,7 +3893,7 @@ const en = {
     aiAssistant: 'AI Assistant',
     designInStudio: 'Design in Studio',
     editApp: 'Edit app',
-    openAppInStudio: 'Open app in Studio',
+    openAppInStudio: 'Open {{app}} in Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4084,7 +4116,6 @@ const en = {
   },
   empty: {
     objectNotFound: 'Object Not Found',
-    objectNotFoundDescription: 'Object "{{name}}" definition missing. Check your configuration or navigate back to select a valid object.',
     interfacePageSourceMissing: 'This interface page references "{{name}}", which is not available.',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
@@ -4154,6 +4185,10 @@ const en = {
       pendingHere: 'Draft preview · {{count}} unpublished changes on this page',
       pendingHere_one: 'Draft preview · {{count}} unpublished change on this page',
       pendingHere_other: 'Draft preview · {{count}} unpublished changes on this page',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
+      pendingInApp_one: 'Draft preview · {{count}} unpublished change in this app. Nothing here is live until you publish.',
+      pendingInApp_other: 'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
       // Magic-moment hint: a freshly-built draft renders empty (dashboards at 0,
       // lists "Nothing here yet") because seed/sample rows only load on publish.
       // Say so plainly so an empty preview never reads as a broken build.
@@ -4180,7 +4215,7 @@ const en = {
       detailNone: 'No differences detected — the draft matches the published version.',
       fieldOrderChanged: 'Field order changed',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Includes changes drafted by the AI copilot',
+      draftedByCopilot: 'Includes changes drafted by the AI assistant',
       draftedByMcpClient: 'Includes changes drafted by the MCP client “{{client}}”',
       draftedByMcp: 'Includes changes drafted by an MCP client',
       detailChangedKeys: 'Also changed:',
@@ -4293,7 +4328,8 @@ const en = {
       securityBlockTitle: 'Publishing will be refused — {{count}} item(s) need a decision first',
       securityBlockTitle_one: 'Publishing will be refused — {{count}} item needs a decision first',
       securityBlockTitle_other: 'Publishing will be refused — {{count}} items need a decision first',
-      securityBlockWhere: 'Fix it on the object under Settings → Record sharing, then publish again.',
+      securityBlockWhere: 'Fix it on the object under Settings → Who can see which records, then publish again.',
+      flowChecksTitle: 'Before you publish — the publish check will report these',
       // The pre-publish security rows, by the rule id of the finding (DraftChangesPanel `SECURITY_RULE_TEXT`).
       securityRule: {
         owdUnset: 'No record-sharing baseline (sharingModel) is declared. The runtime falls back to private, but the baseline must be an authored decision.',
@@ -4305,6 +4341,8 @@ const en = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'This app is not published yet. It works, but only builders can see it. Publish to make it visible to your users.',
       message: 'Unpublished app — fully functional, but only builders can see it. Publish to make it visible to your users.',
       publish: 'Publish',
       publishing: 'Publishing…',

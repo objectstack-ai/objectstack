@@ -31,7 +31,12 @@ ledger (ADR-0126 §7.2). A flow authored in the deployment is not switched
 there. Its switch is its own `status`: `'obsolete'` disarms it and
 `'active'` arms it, published with the complete definition through
 `PUT /api/v1/automation/:name`. The toggle door refuses such a flow with
-409 `RESOURCE_CONFLICT`, names that switch, and changes nothing.
+409 `RESOURCE_CONFLICT`, names that switch, and changes nothing. It refuses
+the same way a switch ON of a packaged flow whose own `status` disables it
+(`'obsolete'` / `'invalid'`): the ledger row alone would leave the flow off
+while the caller read it as on, so it answers 409 `RESOURCE_CONFLICT`,
+names publishing the definition `'active'`, and writes nothing. A switch
+OFF of such a flow is accepted and records the choice.
 
 **Endpoints**
 ```
@@ -174,6 +179,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
+| **defaultActive** | `boolean` | optional | Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator's choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author's switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
 | **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
@@ -303,6 +309,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
+| **defaultActive** | `boolean` | optional | Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator's choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author's switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
 | **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
@@ -417,7 +424,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +368 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
+| **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +369 more>` | ✅ | The inner refusal's code in its WIRE spelling - the ADR-0112 member a record save of the same write answers in `error.code` (e.g. `UNIQUE_VIOLATION`); the closed set `ApiErrorSchema.code` parses against |
 | **message** | `string` | ✅ | The inner refusal's own diagnostic text, verbatim, without the node and operation prefixes the run's failure text adds |
 
 ### Allowed Values: `FlowInnerRefusal.code`
@@ -523,6 +530,7 @@ const result = AutomationApiErrorCode.parse(data);
 * `CREATE_FAILED`
 * `CREDENTIALS_NAME_DIFFERENT_ACCOUNTS`
 * `CUBE_NOT_FOUND`
+* `CYCLIC_ARTIFACT_PACKAGES`
 * `DATASET_INVALID`
 * `DATASOURCE_ADMIN_ERROR`
 * `DEFAULT_RECORD_PAGE_CONFLICT`
@@ -857,6 +865,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
+| **defaultActive** | `boolean` | optional | Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator's choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author's switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
 | **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
@@ -1169,6 +1178,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
+| **defaultActive** | `boolean` | optional | Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator's choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author's switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
 | **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |
@@ -1234,6 +1244,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
+| **defaultActive** | `boolean` | optional | Packaged flows only: `false` ships the flow switched off, so it is not armed on an installation until an administrator turns it on with the packaged-flow switch (the activation ledger); the administrator's choice, once made, wins over this default across restarts and upgrades. Absent or `true`: switched on. `status` stays the author's switch: `obsolete`/`invalid` disarm the flow everywhere. A flow authored in the environment is switched by `status` and may not declare this key. |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
 | **variables** | `{ name: string; type: string; isInput?: boolean; isOutput?: boolean; … }[]` | optional | Flow variables |
 | **nodes** | `{ id: string; type: string; label: string; config?: Record<string, any>; … }[]` | ✅ | Flow nodes |

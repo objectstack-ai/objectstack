@@ -30,11 +30,13 @@
  * directories it is handed.
  */
 
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { ErrorCode } from '@objectstack/spec/api';
 
+import { checkDatasets } from './datasets.js';
 import {
   AppCodeSchema,
   GUARDRAIL_CHECKS,
@@ -61,6 +63,13 @@ export interface Refusal {
 
 export interface LoadedScenario {
   file: string;
+  /**
+   * The sha256 of the card file's bytes, the very bytes this load parsed: the
+   * runner stamps a run's record and scorecard with it (`CardStamp`), so a card
+   * edited, moved or deleted after loading never changes which card the
+   * stamp names, and never costs the record.
+   */
+  fileSha256: string;
   card: ScenarioCard;
   /** Question id → its computed truth over every row. */
   truths: Record<string, Truth>;
@@ -203,8 +212,11 @@ function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; r
     refusals.push({ file, path: formatPath(path), message });
 
   let raw: unknown;
+  let fileSha256: string;
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8'));
+    const bytes = readFileSync(file);
+    fileSha256 = createHash('sha256').update(bytes).digest('hex');
+    raw = JSON.parse(bytes.toString('utf8'));
   } catch (e) {
     refuse([], `not valid JSON: ${(e as Error).message}`);
     return { refusals };
@@ -229,7 +241,7 @@ function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; r
   const computed = checkCard(card, basename(file, '.json'), options, refuse);
   if (refusals.length > 0) return { refusals, code: card.code };
   const readable = Object.fromEntries(card.run.personas.map((p) => [p.id, rowsReadableBy(card, p)]));
-  return { card: { file, card, ...computed, readableRows: readable }, refusals, code: card.code };
+  return { card: { file, fileSha256, card, ...computed, readableRows: readable }, refusals, code: card.code };
 }
 
 type Refuse = (path: IssuePath, message: string) => void;
@@ -928,8 +940,17 @@ function checkCard(
       if (st.id !== undefined && !(ids.get(st.object)?.has(st.id) ?? false)) {
         refuse([...sat, 'id'], `no seeded \`${st.object}\` row has id \`${st.id}\` (a created row is matched by \`where\`)`);
       }
-      for (const key of ['where', 'values'] as const) {
+      // A `where` key may be a relation path through declared lookups
+      // (`claim.trip`); the checked fields are the object's own.
+      for (const field of Object.keys(st.where ?? {})) checkPath(st.object, field, [...sat, 'where', field]);
+      for (const key of ['values', 'sum', 'each'] as const) {
         for (const field of Object.keys(st[key] ?? {})) checkField(st.object, field, [...sat, key, field]);
+      }
+      // A summed field must hold numbers: one seed row of the object carrying a
+      // non-number there would make the sum unreadable in every run.
+      for (const field of Object.keys(st.sum ?? {})) {
+        const bad = (seed[st.object] ?? []).find((r) => r[field] !== undefined && r[field] !== null && typeof r[field] !== 'number');
+        if (bad !== undefined) refuse([...sat, 'sum', field], `\`${st.object}.${field}\` holds ${JSON.stringify(bad[field])} on seed row \`${bad.id}\`, not a number to sum`);
       }
     });
   });
@@ -1020,6 +1041,14 @@ function checkCard(
       }
     }
   });
+
+  // ── datasets and dataset questions (ADR-0149): what the platform accepts, and routes the words make right ──
+  const seedField = (object: string, field: string): 'absent' | 'number' | 'other' => {
+    const values = (seed[object] ?? []).map((r) => r[field]).filter((v) => v !== undefined);
+    if (values.length === 0) return 'absent';
+    return values.every((v) => v === null || typeof v === 'number') ? 'number' : 'other';
+  };
+  checkDatasets(card, seedField, new Set([...run.questions.map((q) => q.id), ...run.operations.map((o) => o.id)]), refuse);
 
   // ── iterate: the delta is additive and lands in a consistent expect ──
   const delta = card.iterate.expectDelta;

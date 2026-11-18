@@ -29,8 +29,9 @@ import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import { publishHealthFromResponse, type PublishHealth } from '@object-ui/plugin-chatbot/core';
 import { useMetadataClient } from '../views/metadata-admin/useMetadata.js';
-import { emitMetadataRefresh } from '../assistant/assistantBus.js';
+import { emitMetadataRefresh, emitPublishReceipt } from '../assistant/assistantBus.js';
 import { lintDraftCapabilityReferences } from './capabilityLint.js';
+import { appDraftPackages } from './usePendingDrafts.js';
 import { refusedItemsText } from './publishRefusal.js';
 import { isNavigationTargetType, useNavigationWrites } from '../hooks/useNavigationSync.js';
 // The one authority for the narrowed `t` (objectui#8261) — imported, not
@@ -44,16 +45,31 @@ export interface PublishAllResult {
   attempted: number;
 }
 
+export interface PublishAllOptions {
+  /**
+   * objectstack#34610 — publish only this app's pending drafts: those in its
+   * package or its paired customization package (`appDraftPackages`), the
+   * draft bar's scope, the one its count and its changes panel read. Absent,
+   * every pending draft in the environment (Home's *Publish all*).
+   */
+  packageId?: string | null;
+}
+
 export function usePublishAllDrafts(t: TranslateFn) {
   const client = useMetadataClient();
   const navigationWrites = useNavigationWrites();
   const [publishing, setPublishing] = useState(false);
 
-  const publishAll = useCallback(async (): Promise<PublishAllResult> => {
+  const publishAll = useCallback(async (opts: PublishAllOptions = {}): Promise<PublishAllResult> => {
+    const scope = opts.packageId ?? null;
     setPublishing(true);
     try {
+      // One app's drafts come off the env-wide list: its customization pair
+      // may not be installed, and a `?package=` read refuses one that is not.
+      const appScope = scope ? appDraftPackages(scope) : null;
       const pending = ((await client.listDrafts?.({})) || [])
         .filter((d) => d && typeof d.type === 'string' && typeof d.name === 'string')
+        .filter((d) => appScope === null || (typeof d.packageId === 'string' && appScope.includes(d.packageId)))
         .map((d) => ({
           type: d.type as string,
           name: d.name as string,
@@ -186,6 +202,9 @@ export function usePublishAllDrafts(t: TranslateFn) {
       // objectui#5801 — announce the publish so every pending-drafts surface
       // (home banner, Studio topbar, chat bar) converges without a reload.
       emitMetadataRefresh();
+      // objectstack#34610 — and tell the chat, which draws no Publish of its
+      // own, so it can show a receipt.
+      emitPublishReceipt({ packageId: scope });
       // objectstack#28680 — each first-published page or dashboard joins app
       // navigation. Each app write reports itself (a toast with Undo).
       for (const c of created) await navigationWrites.created(c.type, c.name);

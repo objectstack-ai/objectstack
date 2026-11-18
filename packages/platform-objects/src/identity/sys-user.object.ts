@@ -548,11 +548,32 @@ export const SysUser = ObjectSchema.create({
       resultDialog: {
         title: 'Import Finished',
         acknowledge: 'Done',
+        // `rows` is the door's per-row report (plugin-auth
+        // `ImportSsoUserRowResult`), drawn as a table: one row per CSV line, a
+        // cell per answer member. A member a row does not carry draws an empty
+        // cell: `alreadyPending` and `host` only on a row that was added,
+        // `error` only on one that was not, `notApplied` only on a re-add that
+        // sent columns, `managerError` only when no manager was linked.
         fields: [
           { path: 'summary.added', label: 'Added', format: 'text' },
           { path: 'summary.alreadyPending', label: 'Already pending, told again', format: 'text' },
           { path: 'summary.failed', label: 'Not added', format: 'text' },
-          { path: 'rows', label: 'Result per row', format: 'json' },
+          {
+            path: 'rows',
+            label: 'Result per row',
+            format: 'table',
+            columns: [
+              { path: 'row', label: 'Row', format: 'json' },
+              { path: 'email', label: 'Email' },
+              { path: 'ok', label: 'Succeeded', format: 'json' },
+              { path: 'alreadyPending', label: 'Already pending, told again', format: 'json' },
+              { path: 'host.notified', label: 'Hosting organization told', format: 'json' },
+              { path: 'host.reason', label: 'Why not told' },
+              { path: 'error.message', label: 'Not added because' },
+              { path: 'notApplied', label: 'Not applied (set these on the record)', format: 'code-list' },
+              { path: 'managerError', label: 'Manager' },
+            ],
+          },
         ],
       },
     },

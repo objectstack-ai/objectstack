@@ -44,8 +44,8 @@
 import { isInjectedColumnDefinition, provisionPrimary, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { TENANT_SCOPE_FIELD_DEF, isCodeArtifactBody } from '@objectstack/metadata-core';
-import { DEFAULT_EXTENDER_PRIORITY, packagedAddedFields, stableStringify, withoutField } from './registry-top-level.js';
-import type { ObjectContributor, ObjectExtensionFoldOptions } from './registry-top-level.js';
+import { DEFAULT_EXTENDER_PRIORITY, applyFieldPatches, ownFieldNamesOf, packagedAddedFields, stableStringify, withoutField } from './registry-top-level.js';
+import type { ObjectContributor, ObjectExtensionBody, ObjectExtensionFoldOptions } from './registry-top-level.js';
 import { TENANT_SCOPE_INDEX, extendContributionRefusal, provisionTenantScopeIndex } from './registry.js';
 import type { SchemaRegistry } from './registry.js';
 
@@ -66,6 +66,7 @@ export interface PlatformGlobalHost {
   readonly extensionSpellingWarned: SchemaRegistry['extensionSpellingWarned'];
   foldExtenders: SchemaRegistry['foldExtenders'];
   getObjectOwner: SchemaRegistry['getObjectOwner'];
+  getPackagedObjectBase: SchemaRegistry['getPackagedObjectBase'];
   getPackagedObjectOwner: SchemaRegistry['getPackagedObjectOwner'];
   invalidateAll: SchemaRegistry['invalidateAll'];
   isPackageDisabled: SchemaRegistry['isPackageDisabled'];
@@ -542,6 +543,34 @@ export class PlatformGlobalFacet {
         ? { fields: { ...owner.definition.fields, ...addedFields } as ServiceObject['fields'] }
         : {}),
     };
+  }
+
+  /** The body of `SchemaRegistry#getPackagedFieldPatchBases`; the method's docblock there is its contract. */
+  static getPackagedFieldPatchBases(this: Pick<PlatformGlobalHost, 'getPackagedObjectBase' | 'getPackagedObjectOwner' | 'isPackageDisabled' | 'objectContributors' | 'resolveObjectKey'>, name: string): Array<{ packageId: string; base: ServiceObject }> {
+    const owner = this.getPackagedObjectOwner(name);
+    if (!owner) return [];
+    const base = this.getPackagedObjectBase(name);
+    const fqn = this.resolveObjectKey(name);
+    const contributors = (fqn === undefined ? undefined : this.objectContributors.get(fqn)) ?? [];
+    if (!base || contributors.length === 0) return [];
+    // The patches reach the owner's own fields only, as the fold applies them.
+    const ownFields = ownFieldNamesOf(owner.definition);
+    const out: Array<{ packageId: string; base: ServiceObject }> = [];
+    // Highest precedence first: the fold applies contributors in ascending
+    // order, so the last one's patch is the one a slot two packages patch carries.
+    for (let index = contributors.length - 1; index >= 0; index -= 1) {
+      const contrib = contributors[index];
+      const packageId = contrib.packageId;
+      if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition) || !packageId) continue;
+      // A disabled package's extension is withheld from the served fold.
+      if (this.isPackageDisabled(packageId)) continue;
+      const patches = (contrib.definition as ObjectExtensionBody).fieldPatches;
+      if (!patches || typeof patches !== 'object') continue;
+      const fields = applyFieldPatches(base.fields, patches, undefined, ownFields);
+      if (fields === base.fields) continue;
+      out.push({ packageId, base: { ...base, fields } });
+    }
+    return out;
   }
 
   /** The body of `SchemaRegistry#extendContributionRefusal`; the method's docblock there is its contract. */

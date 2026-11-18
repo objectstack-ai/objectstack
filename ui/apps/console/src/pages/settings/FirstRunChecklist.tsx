@@ -10,12 +10,22 @@
  *
  * ## Where it is drawn
  *
- * Home (`/home`), above the page's own sections. Home is the environment's own
- * home (ObjectUI ADR-0075): every deployment that declares no landing app opens
+ * Home (`/home`), in the slot Home's page gives its host's checklist
+ * (app-shell's `HomePage`, `checklist`). Home is the environment's own home
+ * (ObjectUI ADR-0075): every deployment that declares no landing app opens
  * there after sign-in, the Setup-only one included (`RootLandingRedirect`).
  * Mounted by the console's Home route (`App.tsx`), inside the
  * `ConsolePermissionsScope` that route already sits under: that provider is
  * what answers which capabilities this session holds.
+ *
+ * Home names the placement (`placement`). `top`, above the page's sections
+ * (a desktop, or a page with no app yet), draws the card as it always was.
+ * `afterApps` is a phone's: the card sits in the content column after the
+ * apps and starts folded to one line, its title, its progress and Continue,
+ * so the first screen keeps the launcher (objectstack#34596). Continue opens
+ * the card in place, and a fold control closes it again; like the done rows'
+ * fold, this is the mount's own state and a fresh visit starts folded.
+ * Folding changes no row and no completion rule.
  *
  * ## Who sees it, and what each row says
  *
@@ -110,7 +120,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Circle, Loader2, X } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import {
   appRouteSegment,
@@ -444,7 +454,13 @@ function SettingsRowEditor({
   );
 }
 
-export function FirstRunChecklist() {
+/**
+ * Where Home draws the checklist: app-shell's `HomeChecklistPlacement`, by
+ * value (see the module doc).
+ */
+export type FirstRunChecklistPlacement = 'top' | 'afterApps';
+
+export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunChecklistPlacement } = {}) {
   const { t, language } = useObjectTranslation();
   const { user, activeOrganization, getMembers, listInvitations, getAuthConfig } = useAuth();
   const { systemPermissions } = usePermissions();
@@ -459,6 +475,9 @@ export function FirstRunChecklist() {
   const [editing, setEditing] = useState<ChecklistSettingsRow['id'] | null>(null);
   // Whether the rows that are done are drawn; folded on every visit.
   const [showDone, setShowDone] = useState(false);
+  // A phone's card starts folded to one line; folded on every visit.
+  const foldable = placement === 'afterApps';
+  const [unfolded, setUnfolded] = useState(false);
   // The browser's answers are read once per mount: what the rows offer does not
   // change under the administrator while they look at it.
   const [browser] = useState(readBrowserAnswers);
@@ -743,7 +762,11 @@ export function FirstRunChecklist() {
             !ai.done
               ? t('console.firstRunChecklist.aiProvider.todo')
               : ai.source === 'environment'
-                ? t('console.firstRunChecklist.aiProvider.doneEnvironment', { provider })
+                ? provider
+                  ? t('console.firstRunChecklist.aiProvider.doneEnvironment', { provider })
+                  : // In use, handed over by the host, and named by no option:
+                    // there is no provider name to put in the sentence.
+                    t('console.settingsView.aiProviderManaged')
                 : t('console.firstRunChecklist.aiProvider.doneSettings', { provider })
           }
           action={
@@ -847,61 +870,114 @@ export function FirstRunChecklist() {
     setHiddenKey(recordKey);
   };
 
-  return (
-    <div className="px-4 pt-4 sm:px-6 lg:px-8">
+  const progress = t('console.firstRunChecklist.progress', { done: completion.done, total: completion.total });
+
+  if (foldable && !unfolded) {
+    return (
       <section
-        className="mx-auto max-w-[1120px] rounded-xl border border-border bg-card px-5 pt-4 pb-1"
+        className="flex items-center justify-between gap-2 rounded-xl border border-border bg-card py-2 pl-4 pr-1.5"
         data-testid="first-run-checklist"
+        data-folded="true"
         aria-labelledby="first-run-checklist-title"
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h2 id="first-run-checklist-title" className="text-base font-semibold tracking-tight">
-              {t('console.firstRunChecklist.title')}
-            </h2>
-            <p className="mt-1 text-[13px] text-muted-foreground">{t('console.firstRunChecklist.description')}</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
-              {t('console.firstRunChecklist.progress', { done: completion.done, total: completion.total })}
-            </span>
-            <button
-              type="button"
-              onClick={hide}
-              aria-label={t('console.firstRunChecklist.dismiss')}
-              title={t('console.firstRunChecklist.dismiss')}
-              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              data-testid="first-run-checklist-dismiss"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-        <ol className="mt-2 divide-y divide-border" id="first-run-checklist-rows">
-          {drawn.filter((row) => showDone || !row.done).map((row) => row.node)}
-        </ol>
-        {doneCount > 0 ? (
-          <div className="border-t border-border py-2">
-            <button
-              type="button"
-              onClick={() => setShowDone((shown) => !shown)}
-              aria-expanded={showDone}
-              aria-controls="first-run-checklist-rows"
-              className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-              data-testid="first-run-checklist-toggle-done"
-            >
-              {showDone ? (
-                <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-              ) : (
-                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-              )}
-              {showDone
-                ? t('console.firstRunChecklist.hideDone')
-                : t('console.firstRunChecklist.showDone', { done: doneCount })}
-            </button>
-          </div>
-        ) : null}
+        <p className="flex min-w-0 items-baseline gap-2">
+          <span id="first-run-checklist-title" className="truncate text-[13px] font-semibold tracking-tight">
+            {t('console.firstRunChecklist.title')}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
+            {progress}
+          </span>
+        </p>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="shrink-0 gap-0.5 px-1.5 text-primary"
+          onClick={() => setUnfolded(true)}
+          aria-expanded={false}
+          data-testid="first-run-checklist-continue"
+        >
+          {t('console.firstRunChecklist.continue')}
+          <ChevronRight className="h-4 w-4" aria-hidden />
+        </Button>
       </section>
-    </div>
+    );
+  }
+
+  const card = (
+    <section
+      className={cn(
+        'rounded-xl border border-border bg-card px-5 pt-4 pb-1',
+        !foldable && 'mx-auto max-w-[1120px]',
+      )}
+      data-testid="first-run-checklist"
+      data-folded={foldable ? 'false' : undefined}
+      aria-labelledby="first-run-checklist-title"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 id="first-run-checklist-title" className="text-base font-semibold tracking-tight">
+            {t('console.firstRunChecklist.title')}
+          </h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">{t('console.firstRunChecklist.description')}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
+            {progress}
+          </span>
+          {foldable ? (
+            <button
+              type="button"
+              onClick={() => setUnfolded(false)}
+              aria-expanded
+              aria-controls="first-run-checklist-rows"
+              aria-label={t('common.collapse')}
+              title={t('common.collapse')}
+              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              data-testid="first-run-checklist-fold"
+            >
+              <ChevronUp className="h-4 w-4" aria-hidden />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={hide}
+            aria-label={t('console.firstRunChecklist.dismiss')}
+            title={t('console.firstRunChecklist.dismiss')}
+            className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            data-testid="first-run-checklist-dismiss"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+      <ol className="mt-2 divide-y divide-border" id="first-run-checklist-rows">
+        {drawn.filter((row) => showDone || !row.done).map((row) => row.node)}
+      </ol>
+      {doneCount > 0 ? (
+        <div className="border-t border-border py-2">
+          <button
+            type="button"
+            onClick={() => setShowDone((shown) => !shown)}
+            aria-expanded={showDone}
+            aria-controls="first-run-checklist-rows"
+            className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            data-testid="first-run-checklist-toggle-done"
+          >
+            {showDone ? (
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {showDone
+              ? t('console.firstRunChecklist.hideDone')
+              : t('console.firstRunChecklist.showDone', { done: doneCount })}
+          </button>
+        </div>
+      ) : null}
+    </section>
   );
+
+  // In the content column (a phone's placement) the column gives the width
+  // and the gutters; above the page the card brings its own.
+  return foldable ? card : <div className="px-4 pt-4 sm:px-6 lg:px-8">{card}</div>;
 }

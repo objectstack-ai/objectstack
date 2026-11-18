@@ -72,6 +72,7 @@ vi.mock('./MetadataInspector', () => ({
 }));
 
 import { RecordDetailView } from './RecordDetailView';
+import { __resetRecordApprovalsStore } from '../hooks/useRecordApprovals';
 import { recordPagePushState } from './recordPagePush';
 
 const APP = 'demo';
@@ -423,5 +424,129 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(within(toolbar).getByRole('button', { name: 'Edit' })).toBeTruthy();
     expect(document.querySelector('[data-page-header-subtitle="host"]')).toBeNull();
     expect(screen.getByTestId('record-page-crumb')).toBeTruthy();
+  });
+});
+
+/**
+ * objectstack#35016 — one `⋯` per screen on a record pending the reader's
+ * approval, and no unpressable action in the phone bar's first slot.
+ *
+ *  - desktop: the header row keeps the page's one `⋯`; the approval band's
+ *    other levers sit behind a NAMED entry (text and a chevron, no `⋯`);
+ *  - phone, approval-locked: the bar's first button is pressable — the
+ *    locked Edit moved into the bar's `⋯`, still drawn and still off;
+ *  - control: the same page with no request keeps [Edit][Convert Lead][⋯].
+ */
+const APPROVAL_OBJECT = 'sys_approval_request';
+const REQUEST_ID = 'req-35016';
+const APPROVAL_DEF = {
+  name: APPROVAL_OBJECT,
+  label: 'Approval Request',
+  fields: { id: { type: 'text', label: 'Id' }, status: { type: 'text', label: 'Status' } },
+  actions: [
+    { name: 'approval_approve', label: 'Approve', variant: 'primary', type: 'api', method: 'POST', target: '/api/v1/approvals/requests/{id}/approve', visible: 'record.viewer.can_act', locations: ['record_section'] },
+    { name: 'approval_reject', label: 'Reject', variant: 'danger', type: 'api', method: 'POST', target: '/api/v1/approvals/requests/{id}/reject', visible: 'record.viewer.can_act', locations: ['record_section'] },
+    { name: 'approval_reassign', label: 'Reassign', type: 'api', method: 'POST', target: '/api/v1/approvals/requests/{id}/reassign', visible: 'record.viewer.can_act', locations: ['record_section'] },
+    { name: 'approval_send_back', label: 'Send back', type: 'api', method: 'POST', target: '/api/v1/approvals/requests/{id}/revise', visible: 'record.viewer.can_act', locations: ['record_section'] },
+    { name: 'approval_request_info', label: 'Request info', type: 'api', method: 'POST', target: '/api/v1/approvals/requests/{id}/request-info', visible: 'record.viewer.can_act', locations: ['record_section'] },
+  ],
+};
+const PENDING_REQUEST = {
+  id: REQUEST_ID,
+  process_name: 'flow:lead_review',
+  object_name: LEAD,
+  record_id: 'r-1',
+  status: 'pending',
+  submitter_id: 'u2',
+  current_step: 'review',
+  pending_approvers: ['u1'],
+  lock_record: true,
+  viewer: { can_act: true, is_submitter: false, can_override: false },
+};
+
+function stubApprovals(request: Record<string, unknown> | null) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      const u = String(url);
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (request && u.includes(`/approvals/requests/${REQUEST_ID}/actions`)) return json({ data: [] });
+      if (request && u.endsWith(`/approvals/requests/${REQUEST_ID}`)) return json(request);
+      if (u.includes('/approvals/requests?object=')) return json({ data: request ? [request] : [] });
+      if (u.includes('/lock')) return json({ locked: !!request });
+      return json({ data: [] });
+    }),
+  );
+}
+
+function mountApprovalPage() {
+  const objects = [...objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign')]), APPROVAL_DEF];
+  const metadata = {
+    ...(metadataFor(objects) as object),
+    getItem: async (type: string, name: string) => (type === 'object' && name === APPROVAL_OBJECT ? APPROVAL_DEF : null),
+  } as never;
+  render(
+    <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}/record/r-1`]}>
+      <MetadataCtx.Provider value={metadata}>
+        <Routes>
+          <Route
+            path="/apps/:appName/:objectName/record/:recordId"
+            element={<RecordDetailView dataSource={makeDataSource() as never} objects={objects} onEdit={() => {}} />}
+          />
+        </Routes>
+      </MetadataCtx.Provider>
+    </MemoryRouter>,
+  );
+}
+
+/** Every drawn control whose face is the `⋯` glyph. */
+const ellipsisTriggers = () =>
+  Array.from(document.querySelectorAll('button')).filter((b) => b.querySelector('svg.lucide-ellipsis, svg.lucide-more-horizontal'));
+
+describe('one ⋯ per screen on a record pending approval (objectstack#35016)', () => {
+  beforeEach(() => {
+    __resetRecordApprovalsStore();
+  });
+
+  it('desktop: exactly one ⋯ (the header row), and the band\'s other levers behind a named entry', async () => {
+    setWidth(1440);
+    stubApprovals(PENDING_REQUEST);
+    mountApprovalPage();
+    const entry = await screen.findByTestId('declared-actions-decision-menu', undefined, { timeout: 5000 });
+    expect(entry.textContent).toBe('More approval actions');
+    expect(entry.querySelector('svg.lucide-chevron-down')).toBeTruthy();
+    const header = document.querySelector('[data-record-page-root] header') as HTMLElement;
+    const row = await waitFor(() => within(header).getByRole('toolbar'));
+    const more = within(row).getByRole('button', { name: 'More actions' });
+    expect(ellipsisTriggers()).toEqual([more]);
+    fireEvent.pointerDown(entry, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.trim())).toEqual(['Reassign', 'Send back', 'Request info']);
+  });
+
+  it('phone, approval-locked: the bar\'s first button is pressable, and the locked Edit is in its ⋯', async () => {
+    stubApprovals(PENDING_REQUEST);
+    mountApprovalPage();
+    await screen.findByTestId('declared-actions-decision-menu', undefined, { timeout: 5000 });
+    await barDrawn();
+    await waitFor(() => expect(barButtons()).toEqual(['Convert Lead', 'Assign', 'More actions']));
+    const first = actionBar()!.querySelector('[role="toolbar"] button') as HTMLButtonElement;
+    expect(first.disabled).toBe(false);
+    expect(ellipsisTriggers()).toHaveLength(1);
+    fireEvent.pointerDown(within(actionBar()!).getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const menu = await screen.findByRole('menu');
+    const edit = within(menu).getAllByRole('menuitem').find((i) => i.textContent?.trim() === 'Edit');
+    expect(edit).toBeTruthy();
+    expect(edit!.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('control: no request, the bar keeps [Edit][Convert Lead][⋯] with Edit pressable', async () => {
+    stubApprovals(null);
+    mountApprovalPage();
+    await barDrawn();
+    expect(barButtons()).toEqual(['Edit', 'Convert Lead', 'More actions']);
+    const first = actionBar()!.querySelector('[role="toolbar"] button') as HTMLButtonElement;
+    expect(first.disabled).toBe(false);
+    expect(screen.queryByTestId('declared-actions-decision-menu')).toBeNull();
   });
 });

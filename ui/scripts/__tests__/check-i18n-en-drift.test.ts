@@ -533,6 +533,7 @@ describe('a language is its pack plus its namespace partial packs', () => {
     expect(namespacePackPaths('zh-Hans')).toEqual([
       'packages/i18n/src/namespaces/marketplace/zh-Hans.ts',
       'packages/i18n/src/namespaces/developer/zh-Hans.ts',
+      'packages/i18n/src/namespaces/timesheet/zh-Hans.ts',
     ]);
   });
 
@@ -724,8 +725,12 @@ describe('the waiver ledger', () => {
  * "manifest ID" jargon in `en` and eight packs; zh had already dropped it in
  * objectui#10900 (标识, identifier), so zh had nothing to follow — the same
  * one-pack-already-right shape as `search.placeholder` above.
+ *
+ * 6 -> 7 (objectstack#34725). `preview.changes.draftedByCopilot` follows the
+ * panel's new name, "AI assistant", in `en` and nine packs; ar already said
+ * مساعد الذكاء الاصطناعي (AI assistant), so it had nothing to follow.
  */
-const WAIVER_CEILING = 6;
+const WAIVER_CEILING = 7;
 
 describe('the shipped ledger', () => {
   const ledger = readLedger(repoRoot);

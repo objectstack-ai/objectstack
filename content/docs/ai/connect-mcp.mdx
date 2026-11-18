@@ -261,8 +261,9 @@ decision.
 
 ## What the agent gets
 
-Thirteen tools, generated from your metadata, and two more for files where the
-storage service is installed:
+Thirteen tools, generated from your metadata, two more for files where the
+storage service is installed, and two for governed metrics where the analytics
+service is installed:
 
 | Tool | What it does |
 |:---|:---|
@@ -276,6 +277,40 @@ storage service is installed:
 | `resume_run` | Finish a flow action that paused on a screen, by submitting the screen's values |
 | `read_file` | Read a file a record carries: its text (text files, PDF, Word `.docx`) or the image itself, with its size, the byte cap and a short-lived download link |
 | `create_upload_link` | Hand the user a single-use link that uploads a file onto a record's file field or its attachments (up to 10 files, sent together, for a multi-file field) |
+| `list_datasets` | List the governed datasets (business metrics) you may query: their measures and dimensions with business labels, descriptions and synonyms, and which of the question's words each one matches exactly |
+| `query_dataset` | Compute a governed metric by the names `list_datasets` gives; the answer carries its provenance (the dataset and measures used) |
+
+### Governed metrics and the `initialize` instructions
+
+`list_datasets` and `query_dataset` are registered with the `data:read` scope,
+and only where the analytics service is installed. Over HTTP, the server's
+`initialize` answer (`result.instructions`) tells the client how to choose
+between a governed metric and an object query, because a client reads a tool's
+description only after it has chosen that tool. Where both dataset tools are
+registered for the connection, the instructions say: look for a governed metric
+first by calling `list_datasets` with the question's business words; a word
+matches only when it equals a name, label or synonym; each word with exactly one
+measure match is answered with `query_dataset`, and two such words are two
+metrics computed both; several matches are a question for the user; a word with
+no match but with `candidates` in the answer (members offered as possible
+readings) is the same question, listing each candidate's label, dataset label
+and description, and is never treated as a match; no match and no candidates
+falls back to `query_records` / `aggregate_records`, saying the answer is not
+from a governed metric. A token without `data:read` gets neither tool and no
+such sentence.
+
+The instructions also name the published skills package and the version to
+install, which is the server's own version
+(`Published skills: @objectstack/skills <version>`), with the command that
+installs it into your agent's skills directory, with or without a project:
+`os skills install --version <version>`, or
+`npx -p @objectstack/cli@<version> os skills install --version <version>` where
+the CLI is not installed. If you only connected an MCP client and have no
+project, run it in the directory your agent works in; it writes
+`.claude/skills/` there (`--dir` names another). See
+[Skills](/docs/ai/skills#installing-skills) for updating and checking it. A deployment that sets
+the MCP plugin's `instructions` option serves that text as written instead, and
+the local stdio server's instructions carry neither part.
 
 ### Files: `read_file` and `create_upload_link`
 
@@ -690,7 +725,8 @@ call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 # → {"result":{"serverInfo":{"name":"objectstack",...},"capabilities":{"tools":{...},"prompts":{}}},...}
 
 call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | grep -o '"name":"[a-z_]*"'
-# → the thirteen tools, list_objects … resume_run (fifteen with read_file and create_upload_link where storage is installed)
+# → the thirteen tools, list_objects … resume_run (plus read_file and create_upload_link where storage is installed,
+#   and list_datasets and query_dataset where the analytics service is installed)
 
 call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query_records","arguments":{"objectName":"crm_opportunity","limit":3}}}'
 # → {"result":{"content":[{"type":"text","text":"{ \"object\": \"crm_opportunity\", \"records\": [ ... ], \"total\": 23, \"hasMore\": true }"}]}}

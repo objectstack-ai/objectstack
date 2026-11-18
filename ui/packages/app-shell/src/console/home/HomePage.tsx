@@ -12,6 +12,12 @@
  * - Responsive grid layout
  * - i18n support
  *
+ * The host's checklist slot (`checklist`, objectstack#34596): on a desktop it
+ * is drawn above the page's sections; on a phone (`usePhoneViewport`, below
+ * 768 px) it is drawn after the apps, so the first screen keeps the launcher.
+ * With no app yet it is drawn above the empty state at every width, and while
+ * the page is loading it is not drawn, so it mounts once, where it stays.
+ *
  * @module
  */
 
@@ -41,6 +47,7 @@ import { HomeActionCenter, HomeContinue, HomeActivity, HomePendingDraftsRow, typ
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import { useHomeInbox } from '../../hooks/useHomeInbox.js';
 import { useLauncherApps } from '../../hooks/useLauncherApps.js';
+import { usePhoneViewport } from '../../hooks/usePhoneViewport.js';
 import { useNavigationContext } from '../../context/NavigationContext.js';
 import {
   appRouteSegment,
@@ -347,10 +354,25 @@ function usePendingDraftsRow(t: (key: string, opts?: any) => string, language: s
   );
 }
 
+/**
+ * Where Home draws its host's checklist: `top`, above the page's sections (a
+ * desktop, or a page with no app yet), or `afterApps`, in the content column
+ * right after the apps (a phone).
+ */
+export type HomeChecklistPlacement = 'top' | 'afterApps';
+
+export interface HomePageProps {
+  /**
+   * The host's checklist, drawn where Home places it (see the module doc).
+   * Called on each render with the placement; it may draw nothing.
+   */
+  checklist?: (placement: HomeChecklistPlacement) => React.ReactNode;
+}
+
 /** Home's labels read each object they name by name (objectstack#29121). */
 const BY_NAME: NavTargetLabelOptions = { byName: true };
 
-export function HomePage() {
+export function HomePage({ checklist }: HomePageProps = {}) {
   const navigate = useNavigate();
   // objectstack#34608 — the Home AI buttons open the same right-side drawer
   // every console page has (in place, no navigation).
@@ -360,6 +382,8 @@ export function HomePage() {
   const metadata = useMetadata();
   const { apps, loading } = metadata;
   const { recentItems } = useRecentItems();
+  // Phone or desktop decides where the checklist is mounted (module doc).
+  const phone = usePhoneViewport();
   // A recent entry stores identity; the rail labels it with this, on the
   // render, in the current language (objectui#11678).
   const recentLabel = useRecentItemLabel();
@@ -580,9 +604,9 @@ export function HomePage() {
         {/* objectstack#30120 — administrators, production only: what this
             server keeps on its own disk. Above the recovery nudge, which is
             one person's; this is the deployment's. */}
+        {checklist?.('top')}
         <DeploymentNotice placement="home" />
         <RecoveryPasswordReminder t={t} />
-        <ConnectAssistantCard />
         <div className="flex flex-1 items-center justify-center p-6">
         {/*
           Role-aware empty state. ADMINS get the AI-first magic moment as the
@@ -661,17 +685,23 @@ export function HomePage() {
           </Empty>
         )}
         </div>
+        {/* objectstack#30895 — connect an AI assistant: after the page's own
+            content, never above it (objectstack#35017). The frame collapses
+            (`empty:hidden`) when the card draws nothing. */}
+        <div className="px-4 pb-6 sm:px-6 lg:px-8 empty:hidden">
+          <ConnectAssistantCard className="mx-auto max-w-[1120px]" />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="relative min-h-full bg-background">
+      {/* The host's checklist, above the page on a desktop (module doc). */}
+      {!phone && checklist?.('top')}
       {/* objectstack#30120 — see the empty-state branch above. */}
       <DeploymentNotice placement="home" />
       <RecoveryPasswordReminder t={t} />
-      {/* objectstack#30895 — every person: connect an AI assistant, until they have or hide it. */}
-      <ConnectAssistantCard />
 
       {/* The content column (objectui#12601): 1120 px, centred, 28 px above the
           first section and 28 px between sections. No bordered card around the
@@ -843,6 +873,10 @@ export function HomePage() {
             marketplaceEnabled={marketplaceEnabled}
           />
 
+          {/* On a phone the host's checklist comes after the apps, so the
+              first screen keeps them (objectstack#34596). */}
+          {phone && checklist?.('afterApps')}
+
           {/* My work (objectui#12602) — approvals, then unread notifications,
               with the pending-drafts row under its heading. */}
           <HomeActionCenter
@@ -887,6 +921,12 @@ export function HomePage() {
             }
             t={t}
           />
+
+          {/* objectstack#30895 — every person: connect an AI assistant, until
+              they have or hide it. After the greeting, My apps and My work, so
+              a first screen opens on the person's own things (objectstack#35017);
+              with no My work it follows the apps. */}
+          <ConnectAssistantCard />
 
           {/* Continue where you left off + ambient activity. The activity column
               exists only for a caller who may read `sys_activity`

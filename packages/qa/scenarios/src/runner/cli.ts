@@ -50,6 +50,13 @@
  *   --ask-model M        the model for question and operation turns, in place
  *                        of --model; the record and the scorecard state the
  *                        model each turn was served, and mark a mismatch
+ *   --ask-skills DIR     give every question and operation turn the Claude Code
+ *                        skills in DIR (one skill directory holding SKILL.md,
+ *                        or a directory of them): each turn's directory gets
+ *                        them under .claude/skills/ and the turn may use the
+ *                        Skill tool. Off by default; the record states each
+ *                        skill's name, version and sha256 (`ask-skills.ts`).
+ *                        The live `claude` driver only
  *   --effort LEVEL       the effort level every live turn asks for, as
  *                        `claude --effort` takes it (Claude Code 2.1.325: low,
  *                        medium, high, xhigh, max); a level the CLI's own
@@ -104,8 +111,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '../loader.js';
+import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../loader.js';
 import { HttpApp } from './app.js';
+import { askSkillsText } from './ask-skills.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
 import { CodexDriver } from './drivers/codex.js';
 import { ExternalDriver } from './drivers/external.js';
@@ -115,7 +123,7 @@ import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleW
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { PROMPT_LANGS, PROMPT_LENGTHS, promptChoiceText, promptLanguageRefusal, statedPromptChoice, type PromptChoice, type PromptLang, type PromptLength } from './prompts.js';
 import { rebaseScenario } from './run-date.js';
-import { cardScorecard, renderScorecard, runRecord } from './scorecard.js';
+import { cardScorecard, renderScorecard, runRecord, type CardStamp } from './scorecard.js';
 import { SUPPLIED_TEMPLATE_SOURCE, summaryMain, suppliedTemplateOf, type SuppliedTemplate } from './summary.js';
 
 /** The `summary` command, re-exported so the published bin reaches it through this built entry (`src/bin.ts`). */
@@ -162,6 +170,8 @@ export interface CliArgs {
   authorEffort?: string;
   /** The effort level a question or operation turn asks for (`--ask-effort`), in place of `effort`. */
   askEffort?: string;
+  /** The skills directory every question and operation turn is given (`--ask-skills`); none when absent. */
+  askSkills?: string;
   out?: string;
   work?: string;
   createVersion?: string;
@@ -228,6 +238,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (flag === '--effort') a.effort = effort();
     else if (flag === '--author-effort') a.authorEffort = effort();
     else if (flag === '--ask-effort') a.askEffort = effort();
+    else if (flag === '--ask-skills') {
+      const raw = val();
+      if (raw.trim() === '' || raw.startsWith('-')) throw new Error(`--ask-skills takes a skills directory, not \`${raw}\``);
+      a.askSkills = raw;
+    }
     else if (flag === '--lang') {
       const l = val();
       if (!(PROMPT_LANGS as readonly string[]).includes(l)) throw new Error(`unknown --lang \`${l}\` (${PROMPT_LANGS.join(', ')})`);
@@ -268,7 +283,10 @@ export type DriverModels = Pick<CliArgs, 'model' | 'authorModel' | 'askModel'>;
 /** The effort levels a run may ask the live driver for: `--effort`, `--author-effort`, `--ask-effort`. */
 export type DriverEfforts = Pick<CliArgs, 'effort' | 'authorEffort' | 'askEffort'>;
 
-const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & DriverEfforts), string]> = [
+/** The skills a run may give the live `claude` driver's question and operation turns: `--ask-skills`. */
+export type DriverSkills = Pick<CliArgs, 'askSkills'>;
+
+const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & DriverEfforts & DriverSkills), string]> = [
   ['authorTimeoutMin', '--author-timeout'],
   ['authorMaxTurns', '--author-max-turns'],
   ['askMaxTurns', '--ask-max-turns'],
@@ -278,13 +296,14 @@ const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & D
   ['effort', '--effort'],
   ['authorEffort', '--author-effort'],
   ['askEffort', '--ask-effort'],
+  ['askSkills', '--ask-skills'],
 ];
 
 /** The live flags of `keys` that `opts` sets, as typed (`--effort`), in {@link LIVE_FLAGS} order. */
-const givenFlags = (opts: DriverLimits & DriverModels & DriverEfforts, keys?: ReadonlyArray<keyof (DriverLimits & DriverModels & DriverEfforts)>): string[] =>
+const givenFlags = (opts: DriverLimits & DriverModels & DriverEfforts & DriverSkills, keys?: ReadonlyArray<keyof (DriverLimits & DriverModels & DriverEfforts & DriverSkills)>): string[] =>
   LIVE_FLAGS.filter(([key]) => (keys === undefined || keys.includes(key)) && opts[key] !== undefined).map(([, flag]) => flag);
 
-export function makeDriver(spec: string, opts: DriverLimits & DriverModels & DriverEfforts = {}): AgentDriver {
+export function makeDriver(spec: string, opts: DriverLimits & DriverModels & DriverEfforts & DriverSkills = {}): AgentDriver {
   if (spec === 'claude') {
     return new ClaudeCodeDriver({
       ...(opts.authorTimeoutMin !== undefined ? { authorTimeoutMs: opts.authorTimeoutMin * 60_000 } : {}),
@@ -296,7 +315,13 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       ...(opts.authorEffort !== undefined ? { authorEffort: opts.authorEffort } : {}),
       ...(opts.askEffort !== undefined ? { askEffort: opts.askEffort } : {}),
+      ...(opts.askSkills !== undefined ? { askSkillsDir: opts.askSkills } : {}),
     });
+  }
+  // Only the `claude` CLI loads a project skill through its `Skill` tool; no other driver is given one.
+  const skills = givenFlags(opts, ['askSkills']);
+  if (skills.length && spec !== 'claude' && !spec.startsWith('recorded:')) {
+    throw new Error(`--ask-skills applies to the live \`claude\` driver only: it places Claude Code skills where a \`claude\` session discovers them and allows its \`Skill\` tool, and \`${spec}\` has neither`);
   }
   if (spec.startsWith('recorded:')) {
     const given = givenFlags(opts);
@@ -344,6 +369,16 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
 export function withSuppliedTemplate(record: Record<string, unknown>, cardRun: CardRun, supplied: SuppliedTemplate | undefined): Record<string, unknown> {
   const installed = cardRun.modes.some((m) => m.template?.source === SUPPLIED_TEMPLATE_SOURCE);
   return supplied && installed ? { ...record, template: supplied } : record;
+}
+
+/**
+ * The {@link CardStamp} of a loaded card: its id and the sha256 of the bytes
+ * the loader parsed (`LoadedScenario.fileSha256`), never a second read of the
+ * file. A card edited while its run went on is still stamped with the card
+ * that ran, and one moved or deleted meanwhile still gets its record written.
+ */
+export function loadedCardStamp(loaded: Pick<LoadedScenario, 'fileSha256' | 'card'>): CardStamp {
+  return { id: loaded.card.id, sha256: loaded.fileSha256 };
 }
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -399,7 +434,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       (info.authorModel ? ` · author model: ${info.authorModel}` : '') +
       (info.askModel ? ` · ask model: ${info.askModel}` : '') +
       (info.authorEffort ? ` · author effort: ${info.authorEffort}` : '') +
-      (info.askEffort ? ` · ask effort: ${info.askEffort}` : ''),
+      (info.askEffort ? ` · ask effort: ${info.askEffort}` : '') +
+      (info.askSkills ? ` · ask skills: ${askSkillsText(info.askSkills)}` : ''),
   );
   if (args.askRepeats !== undefined && args.askRepeats > 1) console.log(`ask repeats: each question turn asked ${args.askRepeats} times, operations once`);
   if (promptChoice) console.log(`prompts: ${promptChoiceText(promptChoice)}`);
@@ -455,10 +491,12 @@ export async function main(argv: readonly string[]): Promise<number> {
     publishedVersions = new Set();
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
-    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work }, cardRun), cardRun, supplied);
+    // The card file the run graded, as it was loaded (`CardStamp`): the record and the scorecard name its hash.
+    const card = loadedCardStamp(loaded);
+    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work, card }, cardRun), cardRun, supplied);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));
-    console.log(renderScorecard(cardScorecard(cardRun, packages)));
+    console.log(renderScorecard(cardScorecard(cardRun, packages, card)));
     console.log(`record: ${file}`);
     if (driver instanceof RecordingDriver && args.record) driver.save(args.record);
   }

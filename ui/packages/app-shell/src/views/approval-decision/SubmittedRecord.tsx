@@ -50,6 +50,15 @@
  * declared collapsed is not folded here, and a group's `visibleWhen` is not
  * evaluated (it judges the live record's state, not the submitted one).
  *
+ * Each titled section is headed the way the default record page heads it
+ * (objectstack#34707): the frameless face of plugin-detail's `DetailSection`
+ * (a semibold foreground title with the group's icon over a hairline), which
+ * that package does not export apart from the field rendering it owns, so
+ * {@link SectionHeading} repeats its classes. The heading wraps instead of
+ * truncating: an approver on a phone reads the whole group name. With two or
+ * more titled sections a strip of section links (the form section navigation's
+ * face, objectstack#34605) jumps to each heading.
+ *
  * ## Which fields are drawn
  *
  * A field is drawn when the object declares it, it is not `hidden: true`, it
@@ -82,7 +91,7 @@
  */
 
 import * as React from 'react';
-import { Badge, EmptyValue, cn } from '@object-ui/components';
+import { Badge, EmptyValue, LazyIcon, cn, type FormSectionNavItem } from '@object-ui/components';
 import { isDeadlineSettled, withoutDeniedFields } from '@object-ui/core';
 import { getCellRenderer, resolveCellRendererType } from '@object-ui/fields';
 import { useSafeFieldLabel } from '@object-ui/i18n';
@@ -247,6 +256,7 @@ function resolveSections(
       return {
         key: `group:${section.group}`,
         label: sectionLabel(objectDef.name, section.group, fallback),
+        ...(typeof group?.icon === 'string' && group.icon !== '' ? { icon: group.icon } : {}),
         columns: columnsOf(section.columns ?? group?.columns),
         fields: names(group?.fields),
       };
@@ -354,6 +364,73 @@ function gridColumns(columns: number | undefined): string {
 }
 
 /**
+ * A section's heading icon: a declared Lucide name as the icon, anything else
+ * (an emoji, a word) as text, the way the record page's section header draws it.
+ */
+function SectionIcon({ name }: { name: string }) {
+  if (!/^[a-z0-9][a-z0-9-]*$/i.test(name)) return <span className="text-muted-foreground" aria-hidden>{name}</span>;
+  return <LazyIcon name={name} className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />;
+}
+
+/**
+ * A titled section's heading, in the record page's frameless section face
+ * (see "The layout is the object's default record page" above). A level below
+ * the card's own "As submitted" heading. Never a disclosure: every section is
+ * drawn open.
+ */
+function SectionHeading({ id, label, icon }: { id: string; label: string; icon?: string }) {
+  return (
+    <div className="border-b border-border" data-submitted-section-heading>
+      <h4
+        id={id}
+        className="flex min-h-11 sm:min-h-9 w-full scroll-mt-3 items-center gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground"
+      >
+        {icon && <SectionIcon name={icon} />}
+        <span className="min-w-0 break-words">{label}</span>
+      </h4>
+    </div>
+  );
+}
+
+/**
+ * The section links over a record with two or more titled sections: one
+ * entry per heading, in page order; a click scrolls its heading into view.
+ * The form section navigation's strip (objectstack#34605), named by the
+ * card's own heading. Nothing to unfold and no error counts here, so an entry
+ * carries the item's key, label and anchor only. It sits at the top of the
+ * card and does not stick: the page's scroller pads its content, so a sticky
+ * strip would let the scrolled fields show through above it.
+ */
+function SectionNav({ items, labelledBy }: {
+  items: ReadonlyArray<Pick<FormSectionNavItem, 'key' | 'label' | 'anchorId'>>;
+  labelledBy: string;
+}) {
+  if (items.length < 2) return null;
+  return (
+    <nav
+      aria-labelledby={labelledBy}
+      data-testid="submitted-record-section-nav"
+      className="flex gap-1 overflow-x-auto border-b border-border px-2 sm:px-4"
+    >
+      {items.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          onClick={() => document.getElementById(item.anchorId)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })}
+          data-testid={`submitted-record-section-nav:${item.key}`}
+          className={cn(
+            '-mb-px inline-flex shrink-0 items-center gap-1 whitespace-nowrap border-b-2 border-transparent px-2 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/**
  * The record as submitted, in its default record page's sections, headed "As
  * submitted" with the object's label, and a link to the record when it read.
  */
@@ -367,6 +444,7 @@ export function SubmittedRecordCard({ model, className }: { model: SubmittedReco
   const headingId = React.useId();
   const { plan, current } = model;
   if (plan.sections.length === 0) return null;
+  const anchorOf = (index: number) => `${headingId}-section-${index}`;
 
   const objectName = servedObjectLabel(model.objectDef, language, objectLabel, model.objectName);
   const href =
@@ -413,13 +491,17 @@ export function SubmittedRecordCard({ model, className }: { model: SubmittedReco
           }))}
         </p>
       )}
-      <div className="space-y-4 px-4 py-3">
-        {plan.sections.map((section) => (
+      <SectionNav
+        labelledBy={headingId}
+        items={plan.sections.flatMap((section, i) =>
+          section.label ? [{ key: section.key, label: section.label, anchorId: anchorOf(i) }] : [],
+        )}
+      />
+      <div className="space-y-6 px-4 py-3">
+        {plan.sections.map((section, i) => (
           <div key={section.key} data-submitted-section={section.key}>
-            {section.label && (
-              <div className="mb-2 text-xs font-medium text-muted-foreground">{section.label}</div>
-            )}
-            <dl className={cn('grid gap-x-6 gap-y-3 text-sm', gridColumns(section.columns))}>
+            {section.label && <SectionHeading id={anchorOf(i)} label={section.label} icon={section.icon} />}
+            <dl className={cn('grid gap-x-6 gap-y-3 text-sm', section.label && 'pt-2.5', gridColumns(section.columns))}>
               {section.fields.map((field) => {
                 const type = model.objectDef.fields[field.key]?.type;
                 return (

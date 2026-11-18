@@ -1,0 +1,47 @@
+{
+  "skill_name": "objectstack-automation",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Through MCP on our ObjectStack environment: when an opportunity is closed won, notify its owner in their inbox.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "We build our ObjectStack app over MCP with no repository. Every night at 1:00, mark unpaid invoices whose due date has passed as `overdue`.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Expense reports over 5,000 need their manager's approval in our ObjectStack app, and the submitter must never approve their own.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Build a wizard in ObjectStack that walks a rep through onboarding a new client: company details, then an optional credit check, then it creates the account.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "在 ObjectStack 里，当工单的优先级变成「紧急」时，自动给负责人发一条站内通知。",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "In our ObjectStack app, a `contract` must not save when its end date is before its start date.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "Write a GitHub Actions workflow that runs our test suite on every pull request and caches the pnpm store.",
+      "should_trigger": false,
+      "files": []
+    }
+  ]
+}

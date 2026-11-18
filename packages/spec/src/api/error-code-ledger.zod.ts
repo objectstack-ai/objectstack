@@ -1196,6 +1196,16 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_ARTIFACT_PACKAGES',
     'INVALID_ARTIFACT_PACKAGE_ENTRY',
     'DUPLICATE_ARTIFACT_PACKAGE',
+    // ADR-0130 D5 — `resolveArtifactPackageEntries` refuses an artifact two or
+    // more of whose packages depend on each other through
+    // `manifest.dependencies`, a cycle `resolvePluginOrder` cannot order (the
+    // sorter's typed `PluginOrderCycleError`, answered in this envelope).
+    // `refuse()` stamps `code` + `status: 422` like its siblings, and
+    // `details.cycle` lists the package ids along the cycle, each depending on
+    // the next, the first repeated last. Door reading as the siblings:
+    // `POST /api/v1/marketplace/install-local` answers it through
+    // `declaredRefusalAnswer`, `details` included.
+    'CYCLIC_ARTIFACT_PACKAGES',
     // ADR-0119 D2 — the migration-journal runner's four refusals
     // (`MigrationJournalRefusal`, `utils/migration-journal.ts`: a
     // `(code, message)` constructor, `code` only, no `status`). Raised by

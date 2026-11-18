@@ -14,24 +14,24 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 95 |
+| Write call sites | 98 |
 | Object name statically decidable | 58 |
-| Object name chosen at run time | 37 |
+| Object name chosen at run time | 40 |
 | Object name spelled inline | 47 |
 | Object name spelled through a `const` | 11 |
 | Object name is an `object: string` parameter | 2 |
-| Object name is some other run-time expression | 35 |
+| Object name is some other run-time expression | 38 |
 | Against a tenancy-enabled object | 56 |
 | Against an object declaring tenancy off | 2 |
 | Threading a tenant context | 55 |
-| Provably carrying none (options read, no context key) | 12 |
+| Provably carrying none (options read, no context key) | 15 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 28 |
 | …and decidably tenancy-enabled | 16 |
 | Threading a decidably elevated (`isSystem`) context | 38 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 45 |
-| Receiver carried a readable engine type | 69 |
+| Receiver carried a readable engine type | 72 |
 | Receiver erased, placed by the object NAME | 24 |
 | Receiver erased, placed by an `object: string` PARAMETER | 1 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 1 |
@@ -69,6 +69,7 @@ a row or a number here — fix the code, or the census, and regenerate.
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-auth/src/credential-change-ends-reset-tokens.ts` | `delete` | `VERIFICATION` | undecidable | PROVABLY NONE | 3 |
 | `packages/plugins/plugin-auth/src/default-organization-invariant.ts` | `insert` | `sys_organization` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |

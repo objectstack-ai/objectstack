@@ -690,7 +690,9 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // paper it could cross. What rules it out is the UNIVERSE it resolves into.
   // `collectToolUniverse` unions `PLATFORM_PROVIDED_TOOL_NAMES` ∪
   // `stack.tools` ∪ the materialised action family from `stack.actions` and
-  // every object's `actions`. A per-write snapshot carries `objects` — so an
+  // every object's `actions`, and a skill offered over MCP (`mcpPrompt` not
+  // `false`) also resolves `MCP_FILE_TOOL_NAMES`, the door's file tools. A
+  // per-write snapshot carries `objects` — so an
   // object-level `action_<name>` resolves — but NEITHER `tools` NOR `actions`,
   // and no snapshot can carry a tool a runtime plugin registers. So at this
   // door the member has no truthful `unresolved` verdict at all: only its

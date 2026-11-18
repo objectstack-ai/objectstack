@@ -475,33 +475,55 @@ function isDeclaredRegisterRefusal(err: unknown): boolean {
 }
 
 /**
- * [#34407, #34432] The answer to a package body the artifact resolver refuses
- * before any write (`resolveStackCollection` → `resolveArtifactPackageEntries`:
+ * [#34407, #34432, #34574] The answer to a package body the artifact resolver
+ * refuses before any write (`resolveArtifactPackageEntries`, reached through
+ * `resolveStackCollection` or the runtime binder's judgements:
  * `INVALID_ARTIFACT_PACKAGES`, `INVALID_ARTIFACT_PACKAGE_ENTRY`,
- * `DUPLICATE_ARTIFACT_PACKAGE`, each an ADR-0112 envelope with its declared
- * `status: 422`): that refusal's own declared status and code, the resolver's
- * sentence, and that nothing was written. The one reader of such a refusal on
- * this door's pre-write steps — the D5e gate (2b) and the declared renames
- * (2c″) both read the bodies through the resolver, so the same bytes are
- * answered the same way whichever step reads them first.
+ * `DUPLICATE_ARTIFACT_PACKAGE`, `CYCLIC_ARTIFACT_PACKAGES`, each an ADR-0112
+ * envelope with its declared `status: 422`): that refusal's own declared
+ * status and code, the resolver's sentence, its `details` when it states any
+ * (a cycle's `details.cycle`), and that nothing was written. The one reader of
+ * such a refusal on this door's pre-write steps — the unrunnable-code
+ * judgements (1c), the datasource holder (2a), the D5e gate (2b) and the
+ * declared renames (2c″) all read the bodies through the resolver, so the same
+ * bytes are answered the same way whichever step reads them first.
  *
  * `undefined` for a throw that declares no status below 500 — an undeclared
- * throw (the resolver's own dependency-cycle error among them) or a declared
- * 5xx: the caller rethrows it, never relabels it.
+ * throw or a declared 5xx: the caller rethrows it, never relabels it.
+ *
+ * [#34583] `side` says whose body was refused. `'incoming'` (every step's
+ * default) is the package this request installs. `'installed'` is the copy
+ * this system stored at the last install, which a re-install reads to compare
+ * against (2c″): the same status, code and `details`, but the sentence names
+ * the stored copy and the way out (uninstall it, then install), never the
+ * incoming package, whose author would otherwise go fixing an artifact that
+ * was never judged.
  */
 function declaredRefusalAnswer(
     manifestId: string,
     err: unknown,
-): { status: number; body: { success: false; error: { code: string; message: string } } } | undefined {
+    side: 'incoming' | 'installed' = 'incoming',
+): { status: number; body: { success: false; error: { code: string; message: string; details?: Record<string, unknown> } } } | undefined {
     const refusal = resolveThrownHttpError(err);
     if (refusal.declaredStatus === undefined || refusal.status >= 500) return undefined;
+    const stated = (err as { details?: unknown } | null | undefined)?.details;
+    const details = stated !== null && typeof stated === 'object' && !Array.isArray(stated)
+        ? stated as Record<string, unknown>
+        : undefined;
+    const reason = String((err as any)?.message ?? err);
     return {
         status: refusal.status,
         body: {
             success: false,
             error: {
                 code: refusal.code,
-                message: `Package '${manifestId}' cannot be installed: ${String((err as any)?.message ?? err)} Nothing was installed or written.`,
+                message: side === 'installed'
+                    ? `The installed copy of package '${manifestId}', stored here by its last install, is refused by this `
+                        + `runtime: ${reason} A re-install compares the incoming version with that stored copy, so it cannot `
+                        + 'go ahead; the incoming version was not judged. Remove the stored copy first (uninstall '
+                        + `'${manifestId}'), then install this version. Nothing was installed or written.`
+                    : `Package '${manifestId}' cannot be installed: ${reason} Nothing was installed or written.`,
+                ...(details !== undefined ? { details } : {}),
             },
         },
     };
@@ -2956,7 +2978,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     unbindable `pull` is warned by the binder and NOT scheduled), and
         //     its hook with no `body` is warned and NOT bound
         //     ({@link bindArtifactHandlers}).
-        const unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
+        //     [#34574] The binder's judgements read every package body of a
+        //     composed bundle through the artifact resolver, so over a runtime
+        //     that carries them THIS is the first step to resolve the
+        //     packages. A `packages` the resolver refuses — not a list, a
+        //     malformed entry, a duplicate id, packages that depend on each
+        //     other in a cycle — is answered here with that refusal
+        //     ({@link declaredRefusalAnswer}), as 2a, 2b and 2c″ answer it.
+        //     Before, the refusal left the door as a throw, and the transport,
+        //     which renders no `422`, answered `500 INTERNAL_ERROR`. An
+        //     undeclared throw stays a throw.
+        let unrunnable: UnrunnableCode;
+        try {
+            unrunnable = await this.unrunnableCode(ctx, manifest, manifestId);
+        } catch (err: unknown) {
+            const refused = declaredRefusalAnswer(manifestId, err);
+            if (!refused) throw err;
+            return c.json(refused.body, refused.status);
+        }
         if (unrunnable.jobs.length > 0 || unrunnable.sharedJobNames.length > 0 || unrunnable.hooks.length > 0) {
             return c.json({
                 success: false,
@@ -4630,7 +4669,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   refuses): that refusal's own declared status and code
      *   ({@link declaredRefusalAnswer}, step 2b's reader), before any table is
      *   read. An undeclared throw out of the resolver is rethrown, never
-     *   relabelled.
+     *   relabelled. [#34583] When the refused body is the installed copy,
+     *   the same status and code, with a sentence naming that stored copy
+     *   and the way out, never the incoming package.
      * - **A reading that failed** (the table could not be read): `503
      *   SERVICE_UNAVAILABLE`, never taken for "nothing to carry".
      * - Otherwise the tables to carry, which step 2f carries.
@@ -4650,13 +4691,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // throws is answered as the table read's. Without this, the
         // resolver's 422 was answered as the 503 below and its author was told
         // to retry once the database answers.
+        // [#34583] Each side in its own `try`, the incoming body first: a
+        // refusal of the installed copy (stored by an earlier install, read
+        // here to compare against) is answered naming that copy, never as
+        // "Package 'X' cannot be installed", which blames the incoming one.
         try {
             packageUpgradeSideOf(converted);
-            if (installed !== null && installed !== undefined) packageUpgradeSideOf(installed);
         } catch (err: unknown) {
-            const refused = declaredRefusalAnswer(manifestId, err);
+            const refused = declaredRefusalAnswer(manifestId, err, 'incoming');
             if (!refused) throw err;
             return { tables: [], refusal: refused };
+        }
+        if (installed !== null && installed !== undefined) {
+            try {
+                packageUpgradeSideOf(installed);
+            } catch (err: unknown) {
+                const refused = declaredRefusalAnswer(manifestId, err, 'installed');
+                if (!refused) throw err;
+                return { tables: [], refusal: refused };
+            }
         }
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
@@ -4781,7 +4834,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // step 3) the body the registry serves. With neither — a ledger file
         // that will not parse, an entry or a registry row carrying no body —
         // the verdict is the one finding that says so, confirmable like any
-        // other, never "no finding".
+        // other, never "no finding". [#34583] The fold below meets no resolver
+        // refusal: step 2c″, asked first over the same two bodies, answered
+        // either side's refusal and returned.
         const installed = this.installedPackageSide(ctx, manifestId, previous);
         const verdict = installed === undefined
             ? ledgerRecordUnavailableVerdict(manifestId, previous.failure)

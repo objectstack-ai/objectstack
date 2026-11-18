@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Create `src/objects/vendor.object.ts` for our vendors: company name, contact email, a status (Active / Inactive), the API key we use to call their system, and the password for their supplier portal.",
+      "prompt": "Create `src/objects/vendor.object.ts` for our vendors: company name, contact email, a status (Active / Inactive), the API key we use to call their system, and the password for their supplier portal. None of the project's files are in this directory: write the file in your answer.",
       "expected_output": "Emits `ObjectSchema.create({...})` with a snake_case `name`, an authored `sharingModel` (a publish with none is refused), `label` / `pluralLabel` / `icon`, `nameField`, and fields with snake_case keys and camelCase config properties: `text` (required), `email`, a `select` whose `options` carry lowercase `value`s (`active`, `inactive`), and BOTH credentials as `type: 'secret'` (encrypted at rest) — never `type: 'password'`, which is plaintext at rest on a generic object. No `namespace` or `tableName` key.",
       "files": [],
       "assertions": {
@@ -158,7 +158,7 @@
     },
     {
       "id": 9,
-      "prompt": "Our app runs multi-tenant. Add an index on `ticket` for the list every agent opens: their organization's open tickets, newest first.",
+      "prompt": "Our app runs multi-tenant. Add an index on `ticket` for the list every agent opens: their organization's open tickets, newest first. None of the project's files are in this directory: write the change in your answer.",
       "expected_output": "`indexes: [{ fields: ['organization_id', 'status', 'created_at'] }]` — the tenant column is `organization_id`, injected by `systemFields.tenant`, so it is indexed but not declared as a field; an index naming an undeclared `tenant_id` is refused. The platform already adds the single-column `organization_id` index on a multi-tenant host.",
       "files": [],
       "assertions": {
@@ -181,7 +181,7 @@
           "label: '是否完成'"
         ],
         "must_not_contain": [
-          "required: true",
+          "required: true,", "required: true }",
           "label: 'Is Done'"
         ]
       }
@@ -214,7 +214,7 @@
         "must_contain": [
           "type: 'summary'",
           "function: 'count'",
-          "filter: { status: 'completed' }",
+          "filter:",
           "type: 'formula'"
         ],
         "must_not_contain": [
@@ -249,7 +249,7 @@
         "must_contain": [
           "label: '供应商'",
           "label: '公司名称'",
-          "value: 'active'",
+          "value: '",
           "sharingModel"
         ],
         "must_not_contain": [
@@ -360,6 +360,26 @@
         ],
         "must_not_contain": [
           "defaultCurrency: 'USD'"
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "prompt": "Our package `acme_billing` depends on HotCRM and already relabels its `crm_account` fields with `fieldPatches`: `industry` reads \"Sector\" and the `type` option `customer` reads \"Client\". Our zh-CN users still see that English text. Where do the Chinese strings go?",
+      "expected_output": "In `acme_billing`'s own translation bundle, registered on its `defineStack({ translations: [...] })`, under the same keys HotCRM translates its own text under: `'zh-CN': { objects: { crm_account: { fields: { industry: { label: '板块' }, type: { options: { customer: '委托方' } } } } } }` (a patched help text or description goes under the field's `help`). The package that ships the patch translates it: never edit HotCRM's translation files, and never redeclare the field in `fields` to carry a label. HotCRM's zh-CN translation of the text the patch replaced (\"Industry\") never applies to the patched label. A translation of the same key in the paired `hotcrm.custom` package still comes first on the `/meta` reads, and a locale `acme_billing` does not translate serves the patch text (`Sector`) as written.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "translations",
+          "acme_billing",
+          "zh-CN",
+          "objects",
+          "crm_account",
+          "industry",
+          "customer"
+        ],
+        "must_not_contain": [
+          "overrides:"
         ]
       }
     }

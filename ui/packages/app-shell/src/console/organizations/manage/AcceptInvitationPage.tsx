@@ -18,7 +18,11 @@ import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { Loader2, Building2, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { resolveOrgRoleLabel } from '../orgRoleLabel.js';
-import { resolveInvitationLookupMessage, resolveOrgErrorMessage } from '../orgErrorMessage.js';
+import {
+  isAcceptNeedsVerifiedEmail,
+  resolveInvitationLookupMessage,
+  resolveOrgErrorMessage,
+} from '../orgErrorMessage.js';
 import { resolveRootUrl } from '../resolveHomeUrl.js';
 
 type InvitationWithOrg = AuthInvitation & {
@@ -90,6 +94,7 @@ export function AcceptInvitationPage() {
   const location = useLocation();
   const { invitationId } = useParams<{ invitationId: string }>();
   const {
+    user,
     isAuthenticated,
     isLoading: isAuthLoading,
     getInvitation,
@@ -212,6 +217,15 @@ export function AcceptInvitationPage() {
     };
   }, [invitationId, isAuthenticated, getInvitation, t]);
 
+  // The verification-mail screen for this account's address, whose link
+  // brings the person back to this page to answer the invitation.
+  const toVerifyEmailPrompt = () => {
+    const sp = new URLSearchParams();
+    if (user?.email) sp.set('email', user.email);
+    sp.set('redirect', location.pathname + location.search);
+    navigate(`/verify-email-prompt?${sp.toString()}`);
+  };
+
   const handleAccept = async () => {
     if (!invitation || !invitationId) return;
     setIsAccepting(true);
@@ -220,6 +234,12 @@ export function AcceptInvitationPage() {
       await switchOrganization(invitation.organizationId).catch(() => null);
       setJoined(true);
     } catch (err) {
+      // An address that was never verified may not accept. The next step is
+      // to verify it, so the page hands over to the verification-mail screen.
+      if (isAcceptNeedsVerifiedEmail(err)) {
+        toVerifyEmailPrompt();
+        return;
+      }
       // objectui#4474 — the card's site 5: a wrong recipient produced better-auth's
       // English sentence under the translated title. Mapped by `code` now.
       toast.error(
@@ -277,6 +297,11 @@ export function AcceptInvitationPage() {
       toast.success(t('organization.accept.declined', { defaultValue: 'Invitation declined' }));
       navigate('/organizations');
     } catch (err) {
+      // Declining needs a verified address too: the same hand-over as accept.
+      if (isAcceptNeedsVerifiedEmail(err)) {
+        toVerifyEmailPrompt();
+        return;
+      }
       toast.error(
         resolveOrgErrorMessage(err, t, {
           key: 'organization.accept.declineFailed',

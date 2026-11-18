@@ -10,7 +10,8 @@
 
 Dashboards are a grid of widgets (`columns` × `rowHeight`) sharing a
 `dateRange` scrubber and `globalFilters`. Each widget binds a `dataset`
-(below), picks a chart `type`, and sets a `layout: {x,y,w,h}`.
+(below), picks a chart `type`, and sets a `layout: {x,y,w,h}` (omitted, the
+widget auto-flows; `position` is not a widget key).
 
 ### Widget Types
 
@@ -36,8 +37,9 @@ dashboard widget, a report, and a list `type:'chart'` view all **bind a `dataset
 and select named `dimensions` + `values`**; the dataset owns the base object,
 allowed joins, intrinsic filter, dimensions, and certified measures. A widget
 **requires `dataset` + `values`**; the closed schema rejects `object` /
-`categoryField` / `valueField` / `aggregate` by name, and one lacking `dataset`
-fails `os validate`.
+`categoryField` / `valueField` / `aggregate` by name, and one lacking `dataset`,
+or naming a `dataset` / `dimensions` / `values` that resolves to nothing
+declared (an empty chart), fails `os validate`.
 
 A widget's presentation-scope `filter` flows into the query as the runtime
 filter; keep `filter` on the widget when binding a dataset.
@@ -293,14 +295,15 @@ import { defineDataset, type DashboardWidget } from '@objectstack/spec/ui';
 // In the dataset (Guides → Analytics Datasets):
 defineDataset({
   name: 'crm_contract_metrics', label: 'Contract Metrics', object: 'contract',
-  dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month' }],
+  dimensions: [{ name: 'signed_date', field: 'signed_date', type: 'date', dateGranularity: 'month',
+    synonyms: ['签约月'] }],
   measures: [{ name: 'signed_count', aggregate: 'count', synonyms: ['签约数', 'deals signed'],
     description: 'Contracts signed in the period, drafts excluded.' }],
 });
-// Member `synonyms` (ADR-0149 D1): the words a question uses for it, every
-// language in one list; matched, never translated; none may equal another
-// member's name, label or synonym. `description`: a business definition,
-// never a prompt; translated like `label`.
+// Every member: `synonyms`, the words a person types, in the brief's
+// language (matched, never translated; one word names one member), and a
+// one-sentence business `description`, never a prompt. Neither warns:
+// `dataset-member-no-vocabulary`.
 // A money measure may set `currency` (ISO 4217, e.g. `'USD'`). Chain:
 // measure `currency` → the field's `defaultCurrency` (`fixed` only) →
 // tenant `localization.currency`; omit it for counts. A

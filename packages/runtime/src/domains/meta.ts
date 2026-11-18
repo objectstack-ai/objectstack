@@ -83,6 +83,7 @@ import {
     createMetaItemReadGate,
     createMetaLayeredAnswer,
     createMetaListAnswer,
+    gateHolderNamingRefusal,
     isPublicAudienceRead,
     metaDraftsQueryRefusal,
     metaItemLayersDeprecationHeaders,
@@ -104,6 +105,7 @@ import {
     translateMetaEnvelope,
     translateMetaList,
     wantsMetaItemLayers,
+    type MetaHolderItemReader,
     type MetaItemAnswer,
     type MetaItemAnswerSources,
     type MetaItemReadGateSources,
@@ -895,6 +897,11 @@ async function readPendingDraft(
             // [#23072] The member the item read's `?member=` named: its own
             // draft row, as `RestServer`'s draft read asks for it.
             ...item.memberSelector,
+            // [#34818] The languages the folded publish advisories' user
+            // sentences are composed in: the request's locale, then the
+            // workspace default, off the execution context, as `RestServer`'s
+            // draft read states them.
+            userTextLocales: userTextLocalesOf(context.executionContext),
         });
     } catch (e: any) {
         return { handled: true, response: deps.errorFromThrown(e, 404) };
@@ -946,6 +953,30 @@ type LayeredReadWithDraft = (
     request: Parameters<MetaLayeredProtocol['getMetaItemLayered']>[0],
     opts: { withDraft?: boolean },
 ) => ReturnType<MetaLayeredProtocol['getMetaItemLayered']>;
+
+/**
+ * [#34247] A holder's item, read at its own address (`?package=<holder>` for a
+ * package, the address naming no package for the environment's own item), for
+ * {@link gateHolderNamingRefusal}. A protocol with no by-name read cannot
+ * answer it, so the read REJECTS: the gate fails closed and the transport
+ * answers that fault, never the refusal naming holders.
+ */
+function holderItemReader(
+    protocol: MetaDomainProtocol,
+    type: string,
+    name: string,
+    memberSelector: { member?: string },
+): MetaHolderItemReader {
+    return async (holder) => {
+        if (typeof protocol.getMetaItem !== 'function') {
+            throw new Error(`The protocol serves no by-name read, so a holder of the ${type} "${name}" cannot be read to judge its read gate.`);
+        }
+        const envelope = await protocol.getMetaItem({
+            type, name, ...(holder.kind === 'package' ? { packageId: holder.packageId } : {}), ...memberSelector,
+        });
+        return (envelope as { item?: unknown } | undefined)?.item;
+    };
+}
 
 /**
  * [#20478] Answer the layered view — `GET /meta/:type/:name/layers`, and the
@@ -1018,6 +1049,20 @@ async function answerMetaLayered(
             { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), ...memberSelector, maskPosture },
         )(layered);
     } catch (e: any) {
+        // [ruling 6917064203 on #34398] The read gate answers before the
+        // `not-held-by-qualifier` refusal names any holder, as `RestServer`'s
+        // layered read asks it.
+        let gated: Awaited<ReturnType<typeof gateHolderNamingRefusal>>;
+        try {
+            gated = await gateHolderNamingRefusal(
+                metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+                pluralToSingular(type), name, STORED_VERSION_DOOR_POLICY, e,
+                holderItemReader(protocol, type, name, memberSelector),
+            );
+        } catch (fault: any) {
+            return withHeaders(deps.errorFromThrown(fault, 500), headers);
+        }
+        if (gated) return withHeaders(deps.error(gated.message, gated.status, { code: gated.code }), headers);
         return withHeaders(deps.errorFromThrown(e, 500), headers);
     }
     switch (answer.kind) {
@@ -1676,7 +1721,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         let publishedCode: unknown;
         const notAnotherHoldersCopy = (copy: unknown): unknown => {
             const stamp = (copy as { _packageId?: unknown } | null | undefined)?._packageId;
-            return mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)
+            if (mixedOwner !== undefined && typeof stamp === 'string' && stamp !== mixedOwner && mixedHolders.includes(stamp)) return publishedCode;
+            // [#34248, ruling 6893582352] …and a bare doc's package copy where
+            // the layered read's code layer is the environment's own
+            // package-less entry (two enabled holders beside it): that entry
+            // answers first, never the holder registered last.
+            const codeStamp = (publishedCode as { _packageId?: unknown } | null | undefined)?._packageId;
+            return publishedType === 'doc' && publishedCode != null && (typeof codeStamp !== 'string' || codeStamp === '' || codeStamp === 'sys_metadata')
+                && typeof stamp === 'string' && stamp !== '' && stamp !== 'sys_metadata'
                 ? publishedCode
                 : copy;
         };
@@ -2407,7 +2459,27 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // rule's refusal: `409` naming every holder, never a miss
                     // for the by-name service read below to answer with
                     // whichever item it finds first.
-                    if (isPackageScopedRefusal(e)) throw e;
+                    if (isPackageScopedRefusal(e)) {
+                        // [ruling 6917064203 on #34398] …answered only after
+                        // the read gate admits the caller: the read gate
+                        // answers before the `not-held-by-qualifier` refusal
+                        // names any holder (`gateHolderNamingRefusal`,
+                        // `RestServer`'s question).
+                        let gated: Awaited<ReturnType<typeof gateHolderNamingRefusal>>;
+                        try {
+                            gated = await gateHolderNamingRefusal(
+                                metaItemReadGateSources(deps, _context, protocol), singularType, name, RENDERED_DOCUMENT_POLICY, e,
+                                holderItemReader(protocol, singularType, name, memberSelector),
+                            );
+                        } catch (fault: any) {
+                            // A gate input that cannot be read is a fault, answered
+                            // as the layered read answers it: never this handler's
+                            // outer absence, and never the refusal naming holders.
+                            return { handled: true, response: deps.errorFromThrown(fault, 500) };
+                        }
+                        if (gated) return { handled: true, response: deps.error(gated.message, gated.status, { code: gated.code }) };
+                        throw e;
+                    }
                     // [ADR-0150 D3/D5, epic #31527] …and so is any refusal the
                     // protocol DECLARED (`refusal: true`): the read's answer,
                     // such as a by-name read an engine with no package-scoped

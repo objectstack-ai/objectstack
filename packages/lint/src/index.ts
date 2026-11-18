@@ -73,6 +73,16 @@ export {
 } from './validate-dataset-measure-aggregates.js';
 export type { DatasetMeasureAggregateFinding, GroupKeyClass } from './validate-dataset-measure-aggregates.js';
 
+// ADR-0149 D1 — a dataset measure or dimension that declares neither
+// `synonyms` nor a `description` is advised: a question asked in a user's own
+// words will not find it. The rule id is published for `--json` consumers
+// (`rule-id-barrel-exports.test.ts`).
+export {
+  validateDatasetMemberVocabulary,
+  DATASET_MEMBER_NO_VOCABULARY,
+} from './validate-dataset-member-vocabulary.js';
+export type { DatasetMemberVocabularyFinding } from './validate-dataset-member-vocabulary.js';
+
 export { validateStackExpressions, fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 // [#32872] The gate's verdict on one validation rule, formula field or
@@ -1009,6 +1019,17 @@ export type {
   ActionBodyWriteSeverity,
   ActionBodyWriteExclusion,
 } from './validate-action-body-writes.js';
+
+// An action body must compile in the wrapper the runtime runs it in, which the
+// runtime builds from `actionBodyFunctionExpression` — the same function the
+// rule compiles inside, so the two cannot disagree about the wrapper.
+export {
+  validateActionBodyCompiles,
+  hostCompileFailure,
+  ACTION_BODY_DOES_NOT_COMPILE,
+} from './validate-action-body-compiles.js';
+export type { ActionBodyCompileFinding, HostCompileFailure } from './validate-action-body-compiles.js';
+export { ACTION_BODY_PARAMETERS, actionBodyFunctionExpression } from './action-body-wrapper.js';
 
 // The same write-set question on the third surface — a flow `update_record`
 // node's structural `config.fields`. Shares the hook rule's field index and

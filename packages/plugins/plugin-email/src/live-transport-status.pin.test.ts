@@ -101,6 +101,15 @@ describe('describeLiveMailTransport — the reading of isConfigured()', () => {
     expect(s.label).toBe('Mail is delivered through SMTP (smtp.example.test:2525)');
   });
 
+  it("a transport no option names is stated only as 'environment': 'settings' always names an option", () => {
+    const own: IEmailTransport = { send: async () => ({ messageId: 'host-own-0' }) } as never;
+    const svc = { isConfigured: () => true, options: { transport: own } };
+    expect(describeLiveMailTransport(svc, 'en', 'environment').values)
+      .toEqual({ provider: { value: null, source: 'environment' } });
+    expect(describeLiveMailTransport(svc, 'en', 'settings').values).toBeUndefined();
+    expect(describeLiveMailTransport(svc, 'en').values).toBeUndefined();
+  });
+
   it('the branch is isConfigured(), not the transport class', () => {
     const smtp = new SmtpTransport({ host: 'smtp.example.test' });
     expect(describeLiveMailTransport({ isConfigured: () => false, options: { transport: smtp } }).label)
@@ -342,16 +351,27 @@ describe('GET /api/settings/mail — live.provider states the provider in use', 
     expect(banner(data)).toEqual({ label: 'No mail leaves this machine', bannerSeverity: 'warning' });
   });
 
-  it("states nothing for a transport no option names, or one this plugin did not install: unknown is not 'none'", async () => {
+  it("environment: the host's own transport, which no option names, reads { value: null, source: 'environment' }", async () => {
+    // A hosted platform's mail channel reaches the plugin this way: a plain
+    // IEmailTransport handed over as the constructor default, no stock class.
     const own: IEmailTransport = { send: async () => ({ messageId: 'host-own-1' }) } as never;
     const hosted = await serve({}, { transport: own });
     const data = await hosted.read();
-    expect('live' in data).toBe(false);
-    // The banner still names the host's transport.
-    expect(banner(data).bannerSeverity).toBe('info');
+    expect(data.live).toEqual({ provider: { value: null, source: 'environment' } });
+    // In use, so it is not 'none'; the banner still names the host's transport.
+    expect(banner(data)).toEqual({
+      label: 'Mail is delivered through a transport supplied by the host application', bannerSeverity: 'info',
+    });
+  });
 
+  it("states nothing for a transport this plugin did not install: unknown is not 'none'", async () => {
     const swapped = await serve({}, { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' } });
     swapped.service.setTransport(new SmtpTransport({ host: 'smtp.elsewhere.test' }));
     expect('live' in (await swapped.read())).toBe(false);
+
+    const own: IEmailTransport = { send: async () => ({ messageId: 'host-own-2' }) } as never;
+    const hostedSwapped = await serve({}, { transport: own });
+    hostedSwapped.service.setTransport({ send: async () => ({ messageId: 'other-1' }) } as never);
+    expect('live' in (await hostedSwapped.read())).toBe(false);
   });
 });

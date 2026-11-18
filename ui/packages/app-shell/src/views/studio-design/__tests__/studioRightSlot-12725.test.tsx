@@ -3,7 +3,7 @@
  * Copyright (c) 2024-present ObjectStack Inc.
  *
  * objectui#12725 — the right slot's own rules, without mounting the surface:
- * its width (300 px, 360 px from 1280), its `⌘.` chord, which Escape keydowns
+ * its width (objectstack#34725: the console drawer's 420 px, resizable), its `⌘.` chord, which Escape keydowns
  * are not the canvas's, and the chrome's three shapes (a switch when both
  * halves exist, a title when one does, nothing when none does). The surface's
  * wiring is pinned in `StudioDesignSurface.rightSlot-12725.test.tsx`.
@@ -13,14 +13,18 @@ import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { StudioRightSlot } from '../StudioRightSlot';
-import { STUDIO_SLOT_WIDTH, isSlotEscapeExempt, matchStudioSlotShortcut } from '../studioRightSlotState';
+import { STUDIO_SLOT_WIDTH_STORAGE_KEY, isSlotEscapeExempt, matchStudioSlotShortcut } from '../studioRightSlotState';
+import { DOCK_DEFAULT_WIDTH, DOCK_KEYBOARD_STEP, DOCK_WIDTH_STORAGE_KEY } from '../../../layout/chatDockState';
 import { t } from '../../metadata-admin/i18n';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 
 // The zh studio catalogue loads on demand; the zh case below reads it.
 await loadStudioCatalogue('zh');
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+});
 
 const key = { key: '.', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
 
@@ -72,10 +76,33 @@ function renderSlot(props: Partial<React.ComponentProps<typeof StudioRightSlot>>
 }
 
 describe('StudioRightSlot', () => {
-  it('is 300 px wide, 360 px from 1280', () => {
-    expect(STUDIO_SLOT_WIDTH).toBe('w-[300px] xl:w-[360px]');
+  // objectstack#34725 — the console drawer's default width, dragged or keyed
+  // wider from its left edge, remembered under the slot's own key.
+  it('is 420 px wide by default and resizes from its left edge, under its own key', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1600 });
     const { slot } = renderSlot();
-    expect(slot).toHaveClass('w-[300px]', 'xl:w-[360px]');
+    expect(DOCK_DEFAULT_WIDTH).toBe(420);
+    expect(slot).toHaveStyle({ width: '420px' });
+    const handle = screen.getByTestId('studio-slot-resize');
+    expect(handle).toHaveAttribute('role', 'separator');
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+    expect(slot).toHaveStyle({ width: `${420 + DOCK_KEYBOARD_STEP}px` });
+    expect(window.localStorage.getItem(STUDIO_SLOT_WIDTH_STORAGE_KEY)).toBe(String(420 + DOCK_KEYBOARD_STEP));
+    expect(window.localStorage.getItem(DOCK_WIDTH_STORAGE_KEY)).toBeNull();
+    fireEvent.pointerDown(handle, { clientX: 1000 });
+    fireEvent.pointerMove(window, { clientX: 900 });
+    fireEvent.pointerUp(window, { clientX: 900 });
+    expect(slot).toHaveStyle({ width: `${420 + DOCK_KEYBOARD_STEP + 100}px` });
+    cleanup();
+
+    // Read back on the next mount; never so wide the canvas drops under 520 px.
+    renderSlot();
+    expect(screen.getByTestId('studio-right-slot')).toHaveStyle({ width: `${420 + DOCK_KEYBOARD_STEP + 100}px` });
+    cleanup();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1163 });
+    window.localStorage.setItem(STUDIO_SLOT_WIDTH_STORAGE_KEY, '2000');
+    renderSlot();
+    expect(screen.getByTestId('studio-right-slot')).toHaveStyle({ width: `${1163 - 520}px` });
   });
 
   it('switches with its segmented header when both halves exist', () => {
@@ -86,13 +113,16 @@ describe('StudioRightSlot', () => {
     expect(onModeChange).toHaveBeenLastCalledWith('props');
   });
 
-  it('folds the copilot into a strip while the properties show; the strip leads back', () => {
+  it('hides the copilot while the properties show; the header switch leads back, with no strip at the foot', () => {
     const { onModeChange } = renderSlot({ mode: 'props' });
     expect(screen.getByTestId('studio-slot-props')).toBeVisible();
     expect(screen.getByTestId('studio-slot-copilot')).not.toBeVisible();
     // Still mounted: a turn in flight survives a look at the properties.
     expect(screen.getByTestId('copilot-body')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('studio-slot-copilot-strip'));
+    // objectstack#35018 — the 「AI 助手 / 回到对话 →」 strip repeated the switch; it is gone.
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
+    expect(screen.queryByText(t('engine.studio.slot.backToChat', 'en'))).toBeNull();
+    fireEvent.click(screen.getByTestId('studio-slot-tab-copilot'));
     expect(onModeChange).toHaveBeenLastCalledWith('copilot');
   });
 
@@ -120,20 +150,71 @@ describe('StudioRightSlot', () => {
   it('on a phone it overlays the page, and a tap beside it dismisses it', () => {
     const onOverlayDismiss = vi.fn();
     const { slot } = renderSlot({ overlay: true, onOverlayDismiss });
-    expect(slot).toHaveClass('fixed');
-    expect(slot).not.toHaveClass('w-[300px]');
+    expect(slot).toHaveClass('fixed', 'w-[min(420px,100vw)]');
+    expect(screen.queryByTestId('studio-slot-resize')).toBeNull();
     fireEvent.click(slot.previousElementSibling as HTMLElement);
     expect(onOverlayDismiss).toHaveBeenCalledTimes(1);
   });
 
-  // objectstack#25943 — the StudioRailProps strip, 「AI 副驾 · N 项待确认 · 回到对话 →」.
-  it('zh: the folded strip reads 「AI 副驾 · 3 项待确认」 and the copilot tab carries the 3', () => {
+  // objectstack#25943 — 「N 项待确认」 on the copilot tab (objectstack#34725 named
+  // the panel 「AI 助手」; objectstack#35018 dropped the strip that repeated it).
+  it('zh: while the properties show, the copilot tab carries the 3 and no strip repeats it', () => {
     renderSlot({ mode: 'props', planPendingCount: 3, locale: 'zh-CN' });
-    const strip = screen.getByTestId('studio-slot-copilot-strip');
-    expect(strip).toHaveTextContent('AI 副驾 · 3 项待确认');
-    expect(strip).toHaveTextContent(t('engine.studio.slot.backToChat', 'zh-CN'));
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
     const copilotTab = screen.getAllByRole('tab')[1];
     expect(within(copilotTab).getByTestId('studio-slot-plan-pending')).toHaveTextContent('3');
     expect(copilotTab).toHaveAccessibleDescription('3 项待确认');
+  });
+});
+
+// objectstack#34725 — one header row, the console drawer's: the switch on the
+// left; History, widen and Close on the right while the AI assistant shows.
+describe('StudioRightSlot header (objectstack#34725)', () => {
+  it('zh: one row — 属性 | AI 助手, then 历史, widen and close', () => {
+    const onHistoryOpenChange = vi.fn();
+    const onWideChange = vi.fn();
+    const onClose = vi.fn();
+    renderSlot({ locale: 'zh-CN', onHistoryOpenChange, onWideChange, onClose });
+    const header = screen.getByTestId('studio-slot-header');
+    const [props, chat] = within(header).getAllByRole('tab');
+    expect(props).toHaveTextContent('属性');
+    expect(chat).toHaveTextContent('AI 助手');
+    const history = within(header).getByTestId('studio-slot-history');
+    expect(history).toHaveTextContent('历史');
+    expect(history).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(history);
+    expect(onHistoryOpenChange).toHaveBeenLastCalledWith(true);
+    fireEvent.click(within(header).getByTestId('studio-copilot-maximize'));
+    expect(onWideChange).toHaveBeenLastCalledWith(true);
+    const close = within(header).getByTestId('studio-slot-close');
+    expect(close).toHaveAccessibleName(t('engine.studio.slot.collapse', 'zh-CN'));
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('an open history reads as pressed and leads back to the chat', () => {
+    renderSlot({ historyOpen: true, onHistoryOpenChange: vi.fn() });
+    const history = screen.getByTestId('studio-slot-history');
+    expect(history).toHaveAttribute('aria-pressed', 'true');
+    expect(history).toHaveAccessibleName(t('engine.studio.slot.backToChat', 'en'));
+  });
+
+  it('while the properties show, only Close; on a phone, no widen', () => {
+    renderSlot({ mode: 'props', onHistoryOpenChange: vi.fn(), onWideChange: vi.fn(), onClose: vi.fn() });
+    expect(screen.queryByTestId('studio-slot-history')).toBeNull();
+    expect(screen.queryByTestId('studio-copilot-maximize')).toBeNull();
+    expect(screen.getByTestId('studio-slot-close')).toBeInTheDocument();
+    cleanup();
+
+    renderSlot({ overlay: true, onHistoryOpenChange: vi.fn(), onWideChange: vi.fn() });
+    expect(screen.getByTestId('studio-slot-history')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-copilot-maximize')).toBeNull();
+  });
+
+  it('widened, it takes the wide width and drops the resize handle', () => {
+    const { slot } = renderSlot({ wide: true, wideWidth: 900, onWideChange: vi.fn() });
+    expect(slot).toHaveStyle({ width: '900px' });
+    expect(screen.queryByTestId('studio-slot-resize')).toBeNull();
+    expect(screen.getByTestId('studio-copilot-maximize')).toHaveAttribute('aria-pressed', 'true');
   });
 });

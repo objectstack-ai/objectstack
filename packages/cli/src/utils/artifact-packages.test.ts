@@ -41,7 +41,7 @@
 import { describe, expect, it } from 'vitest';
 import { validateObjectReferences } from '@objectstack/lint';
 
-import { artifactPackages, packageBodyAsStack } from './artifact-packages.js';
+import { artifactPackages, packageBodyAsStack, runPerPackageAuthoringRules } from './artifact-packages.js';
 
 /**
  * A two-package artifact in the shape `composeStacks(…, { manifest: 'preserve' })`
@@ -142,5 +142,51 @@ describe('packageBodyAsStack — the per-package leg resolves a sibling package 
     const stack = perPackageStack(0, ARTIFACT.packages) as { packages?: unknown; manifest?: unknown };
     expect(stack.packages).toBe(ARTIFACT.packages);
     expect(stack.manifest).toBe(artifactPackages(ARTIFACT)[0].body);
+  });
+});
+
+/**
+ * [#34616] The per-package pass judges a flow in package B on an object B's
+ * declared dependency A owns. The runtime publish gate judges that write
+ * against B's closure, which holds A's objects, and accepts it, so the
+ * author-time door must not advise against it either: under `os lint --strict`
+ * the advisory failed the build.
+ */
+describe('runPerPackageAuthoringRules — a flow on a declared dependency\'s object (#34616)', () => {
+  const EXPENSE_BODY = {
+    id: 'com.example.expense',
+    objects: [{ name: 'exp_report', label: 'Expense report', fields: { name: { type: 'text' } } }],
+  };
+  const psaBody = (dependencies?: Record<string, string>) => ({
+    id: 'com.example.psa',
+    ...(dependencies ? { dependencies } : {}),
+    flows: [
+      {
+        name: 'report_submitted',
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'exp_report', triggerType: 'record-after-create' } },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      },
+    ],
+  });
+  const triggerFindings = (dependencies?: Record<string, string>) =>
+    runPerPackageAuthoringRules({
+      command: 'lint',
+      parsed: { packages: [{ manifest: EXPENSE_BODY }, { manifest: psaBody(dependencies) }] },
+      unionFindings: [],
+    }).findings.filter((f) => f.rule === 'flow-trigger-unknown-object');
+
+  it('CONTROL — without the dependency the pass advises, at the dependent package', () => {
+    expect(triggerFindings().map((f) => [f.severity, f.where])).toEqual([
+      ['warning', "package 'com.example.psa' — flow \"report_submitted\" › start node"],
+    ]);
+  });
+
+  it('with the dependency declared the pass has nothing to say about the trigger object', () => {
+    expect(triggerFindings({ 'com.example.expense': '^1.0.0' })).toEqual([]);
   });
 });

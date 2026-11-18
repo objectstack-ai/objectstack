@@ -293,3 +293,45 @@ describe('features.cloudManaged hides every other action whose door writes or de
     expect(offeredOn(SysInvitation, 'reject_invitation', INVITATION_ROW, { ...MULTI, cloudManaged: true })).toBe(true);
   });
 });
+
+/**
+ * objectstack#33187: the import door answers one report row per CSV line
+ * (plugin-auth `ImportSsoUserRowResult`: `row`, `email`, `ok`,
+ * `alreadyPending`, `host`, `error`, `notApplied`, `managerError`), and the
+ * result dialog draws that report as a `table`, one cell per member a reader
+ * needs, instead of a block of JSON. The columns are the contract's
+ * (`resultDialog.fields[].columns`), so the declaration parses as the
+ * console's `ResultField` reads it.
+ */
+describe('import_sso_users draws the per-row report as a table', () => {
+  const rowsField = () => {
+    const dialog = declared('import_sso_users').resultDialog as { fields?: Array<Record<string, unknown>> };
+    return (dialog.fields ?? []).find((field) => field.path === 'rows');
+  };
+
+  it('declares `rows` as a `table` whose columns read the door row members, in reading order', () => {
+    const field = rowsField();
+    expect(field?.format).toBe('table');
+    expect((field?.columns as Array<{ path: string }>).map((column) => column.path)).toEqual([
+      'row',
+      'email',
+      'ok',
+      'alreadyPending',
+      'host.notified',
+      'host.reason',
+      'error.message',
+      'notApplied',
+      'managerError',
+    ]);
+  });
+
+  it('CONTROL: the summary counts stay fields of their own, ahead of the table', () => {
+    const dialog = declared('import_sso_users').resultDialog as { fields?: Array<{ path: string; format?: string }> };
+    expect(dialog.fields?.map((field) => [field.path, field.format])).toEqual([
+      ['summary.added', 'text'],
+      ['summary.alreadyPending', 'text'],
+      ['summary.failed', 'text'],
+      ['rows', 'table'],
+    ]);
+  });
+});

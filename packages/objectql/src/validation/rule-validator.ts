@@ -976,6 +976,56 @@ interface ReadonlyWhenStripOptions {
    * that locks.
    */
   only?: string;
+  /**
+   * The `set_null` delete walk's clear of a reference, which this strip does
+   * not judge ({@link ReferentialClearExemption}). Omit on every other write.
+   */
+  referentialClear?: ReferentialClearExemption;
+}
+
+/**
+ * The one key an UPDATE's read-only strips leave to the engine's referential
+ * integrity: the lookup the `set_null` delete walk is clearing on this row, at
+ * the value the walk wrote — `null`, or on a `multiple: true` lookup the member
+ * list without the deleted id — or the lookup the recycle-bin restore re-links
+ * (ADR-0148 D2), at the value it writes back, and that re-link's undo.
+ *
+ * Deleting a record makes the engine clear every optional lookup pointing at
+ * it. That UPDATE runs under the CALLER's context (never `isSystem`, whose
+ * exemption is total), so a `readonly` or `readonlyWhen`-locked lookup — the
+ * normal shape for a stamp a system writes — was stripped as if the caller had
+ * forged it: the delete answered 200, the strip logged that the value was
+ * DROPPED, and every holder kept the deleted row's id.
+ *
+ * Without the restore half, a readonly reference the delete cleared stayed
+ * null after a restore — the re-link runs under the caller's context too —
+ * while the restore counted it as re-linked.
+ *
+ * Narrow on three sides, each pinned in `engine-set-null-readonly-lookup-clear.test.ts`:
+ *  - only `update()` builds it, and only from the engine's module-private option
+ *    (`REFERENTIAL_CLEAR_OPTION` in `engine-top-level.ts`) on the by-id write
+ *    of the row the delete walk or the restore named — never from the context, so a caller carrying
+ *    the operation-private `__referentialFieldClear` marker gains nothing;
+ *  - only `field`: every other read-only key in the same payload is stripped,
+ *    logged, reported and refused under `strictReadonlyWrites` as before;
+ *  - only while the key still holds `value` (by `Object.is`, the value the
+ *    write received): the same key holding anything else is judged as before.
+ */
+export interface ReferentialClearExemption {
+  readonly field: string;
+  readonly value: unknown;
+}
+
+/** Is `name` the walk's referential clear, still at the value the walk wrote? */
+function isReferentialClear(
+  data: Readonly<Record<string, unknown>>,
+  name: string,
+  exemption: ReferentialClearExemption | undefined,
+): boolean {
+  return exemption !== undefined
+    && name === exemption.field
+    && Object.prototype.hasOwnProperty.call(data, name)
+    && Object.is(data[name], exemption.value);
 }
 
 /**
@@ -1089,7 +1139,7 @@ export function stripReadonlyWhenFields(
   if (!fields || !data) return data;
   const supplied = options?.supplied ?? data;
   const stored = options?.stored ?? data;
-  const judged = judgedReadonlyWhenKeys(fields, data, supplied);
+  const judged = judgedReadonlyWhenKeys(fields, data, supplied, options?.referentialClear);
   if (judged.length === 0 || !judgesOnly(judged, options?.only)) return data;
   const settled = settleOrRefuse(logger, () => settleReadonlyWhenDrops(
     readonlyWhenLockGroups(fields, judged),
@@ -1111,10 +1161,16 @@ function judgedReadonlyWhenKeys(
   fields: Record<string, ConditionalFieldDef>,
   data: Record<string, unknown>,
   supplied: Readonly<Record<string, unknown>>,
+  referentialClear?: ReferentialClearExemption,
 ): string[] {
   const judged: string[] = [];
   for (const [name, def] of Object.entries(fields)) {
     if (!def?.readonlyWhen || !(name in data)) continue;
+    // The delete walk's clear of a reference to a row that no longer exists is
+    // not a change a state lock guards: keeping it locked keeps a dangling id
+    // (see ReferentialClearExemption). Not judged, so not taken and not warned
+    // about; every other locked key is judged as before.
+    if (isReferentialClear(data, name, referentialClear)) continue;
     // [#9107] Asked BEFORE any predicate runs, not after: a hook-written value
     // is not this strip's business at all, so there is nothing to evaluate and
     // nothing to warn about — including the unbound-root LOCKED branch, whose
@@ -1877,26 +1933,36 @@ export function stripReadonlyWhenFieldsMulti(
  * clauses a naive membership rule would use — persisted AND runtime-issued —
  * and is STILL excluded. Persistence and runtime ownership do not decide it.
  *
- * What decides it is the third clause: a runtime-owned type must have NO
- * legitimate caller-supplied value. `autonumber` qualifies — a client-chosen
- * record number bypasses the sequence and forges a business identifier nothing
- * later corrects. `summary` does not qualify: the value is a derived cache of
- * the child aggregate, self-healing on the next child write, and supplying an
- * initial value is a SUPPORTED authoring path — `initializeSummaryFields`
- * deliberately keeps a caller-supplied one ("author supplied a value"), so
- * historical imports and seed data may carry pre-computed totals.
+ * What decides it is HOW a caller's value is taken, not WHETHER it is.
+ * [#34672] A person's or an import's value for a roll-up IS taken, on create
+ * and on update: the spec lists `summary` among the computed types that are
+ * "never client-written" (`COMPUTED_VALUE_TYPES`), and a typed total stood,
+ * and was read downstream, until the next child write recomputed it. It is
+ * taken by the static-`readonly` strip, which reads every roll-up as
+ * `readonly: true` (`summaryFieldsLockedOnWrite` in `engine-top-level.ts`,
+ * read by both of that strip's schema views), and NOT by this set's strip,
+ * for two reasons:
  *
- * DO NOT "fix the code to match this comment" by adding `summary` here. The
- * insert-side strip ({@link stripRuntimeOwnedFields}) judges against the RAW
- * caller payload (its keys AND their values, #6339) and runs in
- * `engine.insert` AFTER the seed pass, so a plain
- * (non-`isSystem`, non-`preserveAudit`) import of a parent carrying
- * `task_count: 42` would lose the 42 to the strip and get no 0 from the seed
- * either — the seed already skipped that field precisely BECAUSE the caller
- * supplied it. The column lands `null`, the exact state #6013 was written to
- * eliminate, and the write still reports success. Only `isSystem: true` (whole
- * pass skipped) or `preserveAudit: true` (kept by {@link isPreservableUnderAudit},
- * since a summary field is not `system: true`) would survive it.
+ *  - The exemption. {@link stripRuntimeOwnedFields} keeps a value under
+ *    `preserveAudit` as well as `isSystem`. The create-side static strip
+ *    honours `isSystem` alone (the `preserveAudit` ruling below), and that is
+ *    the boundary a roll-up needs: seed loads, package installs and
+ *    historical imports (`treatAsHistorical` is system-only) write as the
+ *    system principal and keep a pre-computed total; an in-process caller
+ *    that merely sets `preserveAudit` does not.
+ *  - The seed. The runtime-owned strip judges the RAW caller payload (#6339)
+ *    and runs AFTER the seed pass, which skipped the field BECAUSE the caller
+ *    supplied it, so taking `task_count: 42` there would land the column
+ *    `null`: the #5749 state #6013 was written to eliminate, behind a write
+ *    that still reports success. The static strip's create pass re-seeds
+ *    every roll-up it takes (`staticReadonlyCreateStrip` in
+ *    `engine-insert.ts`), so the column starts at `0` for `count` / `sum`,
+ *    exactly as a create that never named it.
+ *
+ * So DO NOT add `summary` here: that would trade the seed and the boundary
+ * above for the `null` this note was first written to prevent (#6014). An
+ * initial value from an ordinary caller is no longer an authoring path; one
+ * from the system principal still is.
  *
  * Keep this set to types whose value is (a) persisted, (b) issued by the
  * runtime, and (c) never legitimately supplied by a caller.
@@ -2145,6 +2211,13 @@ export function stripReadonlyFields(
      * remedy, which is UPDATE-only.
      */
     verb?: 'update' | 'insert';
+    /**
+     * The `set_null` delete walk's clear of a reference: that key, at that
+     * value, is engine-owned referential integrity, kept and not logged —
+     * {@link ReferentialClearExemption}. Only `update()` passes it, and only
+     * for the walk's own write; omit everywhere else.
+     */
+    referentialClear?: ReferentialClearExemption;
   },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
@@ -2177,6 +2250,9 @@ export function stripReadonlyFields(
     // a `null` bug — `0`, `''`, `false` and a shared object reference collide
     // identically, which is why the fix is provenance and not a sentinel.
     if (hookWrittenKeys?.has(name)) continue; // the hook wrote this value — keep
+    // The delete walk's clear of this reference, still at the value it wrote:
+    // the engine's write, not the caller's — keep, and say nothing about it.
+    if (isReferentialClear(result as Record<string, unknown>, name, options?.referentialClear)) continue;
     // [#5591] ...and it must still BE the caller's value. A hook that
     // overwrote this key wrote a PLATFORM value; deleting that is what put
     // `status = published` rows in the database with `published_at = null`.

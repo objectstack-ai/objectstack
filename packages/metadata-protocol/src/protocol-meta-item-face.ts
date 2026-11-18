@@ -429,6 +429,11 @@ const STORED_ROW_HOLDERS_REFUSAL: unique symbol = Symbol.for('objectstack.metada
  * them, as `/layers` refuses the same rows (`packagelessLayeredReadRefusal`),
  * where it served a row by store order; beside one holder or none it leaves
  * the read as it was.
+ *
+ * [#34441 cell 2] Not refused, of a bundled type: two or more holders at the
+ * member where one is the base the others' rows are bundle additions to
+ * ({@link rowHeldBaseAddressOf}), with no package-less row beside them. The
+ * read is that base's, as a shipped base's own member is served.
  */
 async function storedRowHoldersRefusal(
     host: ServedRowHost,
@@ -463,6 +468,16 @@ async function storedRowHoldersRefusal(
         return ownAndPair ? { kind: 'served', packageId: holder } : undefined;
     }
     if (holding.candidates.length < 2) return undefined;
+    // [#34441 cell 2, ADR-0146] Two or more packages holding the member as
+    // rows, where one is the base and every other one's row is a bundle
+    // addition to it ({@link rowHeldBaseAddressOf}): no ambiguity, as the
+    // registry names the base the one holder. The read is the base's, as a
+    // shipped base's own member is. Beside a package-less row the refusal
+    // above stands (#33210).
+    if (!holding.unbound) {
+        const rowHeldBase = await rowHeldBaseAddressOf(host, type, name, member, activeRows);
+        if (rowHeldBase !== undefined && holding.candidates.includes(rowHeldBase)) return { kind: 'served', packageId: rowHeldBase };
+    }
     const base = {
         status: 'refused' as const,
         reason: 'ambiguous-in-environment' as const,
@@ -630,46 +645,102 @@ export async function declaredMemberOverrideAddressOf(
  * hold only as stored rows never clashes. A dependent that also stores a
  * member the base stores (D's `en-US` and `fr-FR` over A's `en-US`) stays an
  * addition, as the registry names A the one holder there; the read at the
- * shared member is left to the rows' own judgment (A holds a row there). The
+ * shared member is A's (below, #34441 cell 2). The
  * base is the one row-holding package that is no addition;
- * the read is moved only when there is exactly one, it holds no row at the
- * member, and no package at the member is a customization pair of another
- * row-holding package (`pairsOf`: a pair's added member is served on its
- * base's address already, #28802 ruling A). So a second dependent adding a
+ * the read is moved only when there is exactly one and no package at the
+ * member is a customization pair of another row-holding package (`pairsOf`:
+ * a pair's added member is served on its base's address already, #28802
+ * ruling A). Where the base holds no row at the member, the read moves at a
+ * named non-canonical member only (the S1 guard); where it holds one, see
+ * the #34441 cell 2 paragraph below. So a second dependent adding a
  * member of its own (D1 `fr-FR`, D2 `de-DE` over A's `en-US`) leaves A the
  * base at each dependent's member, as the registry names A the one holder
  * whichever packages are installed, and a dependent of a dependent is an
- * addition to it. The arm applies only to a bundled type the registry reads
- * by package, for a name no package ships (a shipped name is the shipper's
- * already), at a named member other than the canonical one, with no
- * environment item at the member and no disabled package among the
- * row-holding packages (the served-holder judgment above reads those).
+ * addition to it. Both arms apply only to a bundled type the registry reads
+ * by package (a type with no members has no additions: its row holders stay
+ * holders, #34441 contract review M1), for a name no package ships (a shipped
+ * name is the shipper's already), with no environment item at the member and
+ * no disabled package among the row-holding packages (the served-holder
+ * judgment above reads those).
+ *
+ * [#34441 cell 2] …and, at ANY member the base itself holds as a row (the
+ * canonical one included), beside one or more dependents' rows of the same
+ * member: that base, as the registry names it the one holder there and as a
+ * shipped base's own member is served. The dependents' rows of it are
+ * additions, served at their own addresses. The item face's refusal of two
+ * row holders ({@link storedRowHoldersRefusal}) and the layered door's
+ * (`packagelessLayeredReadRefusal`) ask this first, so the plain read,
+ * `/layers` and the execution face serve the base's row where they refused
+ * naming both; beside a package-less row they still refuse (#33210). The
+ * writes naming no package do not ask it: the save, delete, publish, draft
+ * and history doors still refuse these rows naming base and dependent
+ * (`packagelessAddress`), so the read serves the base's stack where the
+ * write it would send is refused (#34441 contract review S1).
+ * `preread` is the item's active rows when the caller read them already.
  */
 export async function rowHeldBaseAddressOf(
     host: ServedRowHost,
     type: string, name: string, member: string | undefined,
+    preread?: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>,
 ): Promise<string | undefined> {
+    const judged = await rowHeldBaseJudgment(host, type, name, member, preread);
+    if (judged === undefined || judged.pairAmongHolders) return undefined;
+    const { base, atMember } = judged;
+    // [#34441 cell 2] A member the base holds as a row beside a dependent's
+    // addition of the same member (D's `en-US` over A's `en-US`, the canonical
+    // member included) is the base's, as the registry names A the one holder
+    // there and as a shipped base's own member is served: the dependent's row
+    // is an addition, never a second holder. FROM (`main` 31096af83d): two
+    // holders, refused `409` naming A and D, where a shipped base served A's.
+    if (atMember.has(base)) return atMember.size >= 2 ? base : undefined;
+    // [#33210 contract review S1] A member only additions hold moves for a
+    // NAMED non-canonical member only. `overlayMemberValue` answers null for
+    // the canonical member, named or not, and the read naming no member
+    // addresses it (reachable without `?member=` and from `/published`). That
+    // mirror is left as it was: a dependent's canonical row over a base that
+    // holds only another member is served naming no package (the S1 pin).
+    return typeof overlayMemberValue(PLURAL_TO_SINGULAR[type] ?? type, member) === 'string' ? base : undefined;
+}
+
+/**
+ * The row-grain judgment {@link rowHeldBaseAddressOf} answers from: over a
+ * name no package ships, of a bundled type the registry reads by package, the
+ * one row-holding package that is no addition to another (the base), the
+ * packages holding a row at `member`, and whether one of those is a
+ * customization pair of a holder. `undefined` when the shape does not apply
+ * (see that function's docblock for each exclusion). `preread` is the item's
+ * active rows when the caller read them already (#24371: one read).
+ */
+async function rowHeldBaseJudgment(
+    host: ServedRowHost,
+    type: string, name: string, member: string | undefined,
+    preread?: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>,
+): Promise<{ base: string; atMember: ReadonlySet<string>; pairAmongHolders: boolean } | undefined> {
     const registry: any = host.engine?.registry;
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    // [#33210 contract review S1] A NAMED non-canonical member only.
-    // `overlayMemberValue` answers null for the canonical member, named or
-    // not, and the read naming no member addresses it (reachable without
-    // `?member=` and from `/published`). That mirror is left as it was: with
-    // a shipped base holding only another member, its answers move across a
-    // reboot and the read naming no member serves the base's other member,
-    // so there is no one shipped answer to align it with.
-    if (typeof overlayMemberValue(singular, member) !== 'string') return undefined;
+    // [#34441 contract review M1] A bundled type only. For a type with no
+    // members every row of the name is at the member, and the registry names
+    // every holder (`packageScopedHoldersOf` with no discriminator: a bundle
+    // addition exists only for a bundled type), so two packages holding such
+    // a name as rows stay two holders, refused naming both (#32607), whatever
+    // their dependencies. Judged before the rows are read: such a read reads
+    // nothing more than it did.
+    if (overlayMemberValue(singular, member) === undefined) return undefined;
     if (shippingPackageIds(host.shippedArtifactsOf(type, name)).size > 0) return undefined;
     if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
         return undefined;
     }
     let activeRows: Awaited<ReturnType<ServedRowHost['readItemActiveRows']>>;
-    try {
-        activeRows = await host.readItemActiveRows(type, name);
-    } catch (error) {
-        host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
-        activeRows = [];
+    if (preread !== undefined) {
+        activeRows = preread;
+    } else {
+        try {
+            activeRows = await host.readItemActiveRows(type, name);
+        } catch (error) {
+            host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            activeRows = [];
+        }
     }
     const rows = activeRows.filter((row) => rowMatchesOverlayWhere(row, { type: singular, name, state: 'active' }));
     const memberWhere = { type: singular, name, state: 'active', ...overlayMemberWhere(singular, member) };
@@ -698,11 +769,46 @@ export async function rowHeldBaseAddressOf(
     const bases = holders.filter((id) => !holders.some((other) => isAdditionTo(id, other)));
     if (bases.length !== 1) return undefined;
     const [base] = bases;
-    const additions = new Set(atMember.map((row) => packageOf(row)!));
-    if (additions.has(base)) return undefined;
+    const atMemberPackages = new Set(atMember.map((row) => packageOf(row)!));
     const installed = installedManifestsOfEngine(host.engine);
     const isPairOfAHolder = (id: string): boolean => holders.some((other) => other !== id && pairsOf(other, installed).includes(id));
-    return [...additions].some(isPairOfAHolder) ? undefined : base;
+    return { base, atMember: atMemberPackages, pairAmongHolders: [...atMemberPackages].some(isPairOfAHolder) };
+}
+
+/**
+ * [#34901] `item`, a SERVED object body, with the `_withheldFields` read
+ * decoration: each field a disabled package's `extend` contribution adds and
+ * the served fold therefore withholds, with that package
+ * (`SchemaRegistry.getWithheldExtensionFields`), less any name the body itself
+ * declares. `item` itself when nothing is withheld, or when the registry
+ * cannot answer.
+ *
+ * Why it is served: an owner's view keeps naming such a field on purpose (the
+ * column returns when the package is re-enabled, with no write), while the
+ * data door refuses the name as unknown on every query axis. The console reads
+ * this map to leave exactly those names out of a request — a name nothing
+ * declares is still sent, and still refused, so a typo stays loud.
+ *
+ * A read decoration (`METADATA_READ_DECORATIONS`, `@objectstack/spec`): derived
+ * on every read, stripped on every write and before any re-parse, never
+ * authorable. Stamped on the served faces only (this by-name read and the
+ * served list); never on the layered/editor read, the execution face, a
+ * pending draft's authoring read or a registry fold.
+ */
+export function withWithheldFieldsDecoration(registry: unknown, item: unknown, name?: string): unknown {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return item;
+    const body = item as Record<string, unknown>;
+    const objectName = typeof name === 'string' && name !== '' ? name : body.name;
+    const r = registry as { getWithheldExtensionFields?: (name: string) => Record<string, { packageId: string }> } | null | undefined;
+    if (typeof objectName !== 'string' || typeof r?.getWithheldExtensionFields !== 'function') return item;
+    const withheld = r.getWithheldExtensionFields(objectName);
+    const declared = body.fields !== null && typeof body.fields === 'object' && !Array.isArray(body.fields)
+        ? body.fields as Record<string, unknown>
+        : undefined;
+    const entries = Object.entries(withheld)
+        .filter(([field]) => !(declared && Object.prototype.hasOwnProperty.call(declared, field)));
+    if (entries.length === 0) return item;
+    return { ...body, _withheldFields: Object.fromEntries(entries.map(([field, at]) => [field, { packageId: at.packageId }])) };
 }
 
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
@@ -711,6 +817,8 @@ export async function readMetaItemFace(
     request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     },
     face: 'served' | 'execution',
 ) {
@@ -727,7 +835,9 @@ export async function readMetaItemFace(
     // [#32607] …and refuses two enabled row holders of a name nobody ships.
     // The rows that judgment reads are read on the face's key and handed to
     // the read below, which takes them instead of reading them again
-    // (#24371: the item's active rows, one read).
+    // (#24371: the item's active rows, one read). [#34441 cell 2] Every
+    // judgment below that reads them takes the rows read already, so the
+    // served-holder and row-held-base judgments together are still one read.
     let activeRows: PrereadActiveRows | undefined;
     const host = this;
     const judgeHost: ServedRowHost = {
@@ -737,6 +847,7 @@ export async function readMetaItemFace(
         declinesStoredRow: (...a) => this.declinesStoredRow(...a),
         rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
         readItemActiveRows: async (type, name) => {
+            if (activeRows !== undefined && activeRows.type === type && activeRows.name === name) return [...activeRows.rows];
             const rows = await this.readItemActiveRows(type, name, true);
             activeRows = { type, name, rows };
             return rows;
@@ -800,6 +911,13 @@ export async function readMetaItemFace(
                         ? activeRows.rows : undefined));
     if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'
         || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
+        // [#34901] The served object read names the fields a disabled
+        // package withholds ({@link withWithheldFieldsDecoration}); the
+        // execution face and a pending draft's authoring read never do.
+        if (request.type === 'object' && face === 'served' && request.state !== 'draft' && answer?.item != null) {
+            const item = withWithheldFieldsDecoration(this.engine?.registry, answer.item, request.name);
+            return item === answer.item ? answer : { ...answer, item };
+        }
         return answer;
     }
     if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);

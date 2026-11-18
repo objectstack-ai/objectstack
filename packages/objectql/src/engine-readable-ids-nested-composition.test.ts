@@ -49,10 +49,10 @@ function wire(engine: ObjectQL, source: unknown): void {
   (engine as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT] = source;
 }
 
-function makeRecordingDriver(name = 'recording') {
+function makeRecordingDriver(name = 'recording', supports: Record<string, unknown> = {}) {
   const calls: SeenCall[] = [];
   const driver: any = {
-    name, version: '0.0.0', supports: {},
+    name, version: '0.0.0', supports,
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) { calls.push({ verb: 'find', object, ast }); return []; },
     async findOne(object: string, ast: any) { calls.push({ verb: 'findOne', object, ast }); return null; },
@@ -533,9 +533,10 @@ describe('[#33696 ruling 6893666857] the required master\'s leaf over an unrestr
   });
 
   it('a condition the caller writes on the required master, in the same read, is never dropped with the master\'s own leaf', async () => {
-    // A driver the nested-relation lowering plans a subquery for: the
-    // caller's `{ opp: { name: 'x' } }` becomes a leaf over the same master.
-    const rec = makeRecordingDriver('com.objectstack.driver.sql');
+    // A driver the nested-relation lowering plans a subquery for (it declares
+    // the `readableIdsLeaf` bit, [#33876]): the caller's `{ opp: { name: 'x' } }`
+    // becomes a leaf over the same master.
+    const rec = makeRecordingDriver('com.objectstack.driver.sql', { readableIdsLeaf: true });
     const planned = new ObjectQL();
     planned.registerDriver(rec.driver, true);
     await planned.init();

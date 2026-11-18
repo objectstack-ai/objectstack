@@ -193,9 +193,12 @@ describe('install-local parses the inline manifest\'s `namespace` through its de
 
     it('UNMOVED — an artifact MEMBER\'s refused namespace keeps the artifact-entry parse\'s refusal, nothing written', async () => {
         // Each `packages[]` entry is parsed whole through `ArtifactPackageSchema`
-        // before any write; this door adds no second judge of it.
+        // before any write; this door adds no second judge of it. [#34574] The
+        // refusal is ANSWERED with its own 422 and code (step 1c reads the
+        // packages first over this real runtime), where it used to leave the
+        // door as a throw the transport answered `500`.
         const h = await mount(dir);
-        const thrown = await h.install({
+        const res = await h.install({
             manifest: {
                 id: 'com.qa.suite',
                 version: '1.0.0',
@@ -204,10 +207,12 @@ describe('install-local parses the inline manifest\'s `namespace` through its de
                     { manifest: { id: 'com.qa.two', name: 'qa_two', version: '1.0.0', type: 'module', namespace: 'QA_N', objects: [] } },
                 ],
             },
-        }).then(() => undefined, (e: unknown) => e as { code?: string; status?: number; message?: string });
-        expect(thrown?.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
-        expect(thrown?.status).toBe(422);
-        expect(thrown?.message).toContain(declaredSentence('QA_N'));
+        });
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(envelopeViolations(res.payload)).toEqual([]);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+        expect(res.payload.error.message).toContain(declaredSentence('QA_N'));
         expectNothingWritten(h);
     });
 

@@ -9,8 +9,7 @@
  * operator opts in, none of this renders and the FAB stays the canonical entry.
  *
  * It reuses the shared {@link ChatPane} engine over the P1 `(user, app, product)`
- * conversation, so the dock is a VIEW, not a new conversation. P3c auto-maximizes
- * the rail while the ADR-0037 Live Canvas is open. (P3c also reused the panel
+ * conversation, so the dock is a VIEW, not a new conversation. (P3c also reused the panel
  * under Studio; objectui#12725 moved the Studio copilot into that surface's own
  * right slot, `StudioRightSlot`, so the console is this panel's one host.)
  *
@@ -20,6 +19,10 @@
  * page stays mounted under it and the address does not change) and the same
  * button restores the rail; the conversation history sits beside the chat in
  * the full window and behind a History button in the rail.
+ *
+ * objectstack#34610 — there is no Live Canvas pane any more (the build's app
+ * shows in the main area beside the drawer), so P3c's auto-maximize latch
+ * (`maximize` / `restore`, the rail widened while the canvas was open) is gone.
  */
 import * as React from 'react';
 import {
@@ -45,7 +48,6 @@ import {
 } from './chatDockTarget.js';
 import {
   clampDockWidth,
-  maximizedDockWidth,
   readStoredDockExpanded,
   writeStoredDockExpanded,
   DOCK_DEFAULT_WIDTH,
@@ -95,22 +97,11 @@ export interface ChatDockState {
   expanded: boolean;
   width: number;
   dragging: boolean;
-  /** ADR-0037/P3c — true while the rail is canvas-maximized (see `maximize`). */
-  maximized: boolean;
   toggle: () => void;
   expand: () => void;
   collapse: () => void;
   /**
-   * Grow the rail to its widest legal width (Live Canvas needs room for the
-   * chat + preview split). Transient: the pre-maximize width is remembered and
-   * NEVER persisted over the user's chosen width.
-   */
-  maximize: () => void;
-  /** Undo `maximize` — a no-op unless currently maximized (see doc below). */
-  restore: () => void;
-  /**
-   * objectstack#34608 — true while the drawer fills the window in place. Not
-   * the canvas latch above: that one widens the rail beside the page, this one
+   * objectstack#34608 — true while the drawer fills the window in place. It
    * covers the page, which stays mounted under it.
    */
   fullWindow: boolean;
@@ -126,19 +117,10 @@ export interface ChatDockState {
  * data grids). Width persists to localStorage; the drag anchors the rail's LEFT
  * edge (dragging left widens it). All DOM reads happen in handlers, never render.
  *
- * P3c adds two orthogonal behaviors, both opt-in and both preserving the bare
- * `useChatDockState()` call unchanged:
- *  - `persistExpandedKey` round-trips expanded/collapsed through sessionStorage
- *    so the console rail survives in-tab navigation and the `/ai` page can arm
- *    it before navigating back ({@link armChatDockExpanded}).
- *  - `maximize`/`restore` implement the Live-Canvas "auto-maximize on canvas
- *    open, tuck on close" (ADR-0037 beside-the-chat preview needs width the
- *    rail doesn't have). `restore` is a NO-OP unless a maximize is actually
- *    latched: ChatPane reports `onCanvasOpenChange(false)` on mount (twice
- *    under StrictMode), and an unguarded restore would clobber the width on
- *    every dock open. A manual resize drag clears the latch — the user taking
- *    the handle wins over the automation, so the later canvas-close restore
- *    does nothing.
+ * P3c's `persistExpandedKey` (opt-in, the bare `useChatDockState()` call is
+ * unchanged) round-trips expanded/collapsed through sessionStorage so the
+ * console rail survives in-tab navigation and the `/ai` addresses can arm it
+ * ({@link armChatDockExpanded}).
  */
 export function useChatDockState(options?: ChatDockOptions): ChatDockState {
   const {
@@ -152,24 +134,9 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
   );
   const [width, setWidth] = React.useState<number>(() => readStoredWidth(persistWidthKey));
   const [dragging, setDragging] = React.useState(false);
-  const [maximized, setMaximized] = React.useState(false);
   const [fullWindow, setFullWindowState] = React.useState<boolean>(() =>
     persistFullWindow ? readStoredDockFullWindow() : false,
   );
-  // The latch and the width to return to when the canvas closes. Refs, not
-  // state: they are only read inside handlers (never rendered), and the latch
-  // must be checkable synchronously so a double-fired maximize/restore (React
-  // StrictMode re-runs effects) can bail before touching the width.
-  const maximizedRef = React.useRef(false);
-  const prevWidthRef = React.useRef<number | null>(null);
-  // Latest width, readable from the IDENTITY-STABLE maximize below. If
-  // `maximize` closed over `width` (a [width] dep) its identity would change on
-  // every drag move — and consumers key their canvas-open effect on the handler
-  // identity, so each change would re-fire maximize mid-drag and snap the width
-  // back to max, fighting the user. Render-phase ref sync keeps it current.
-  const widthRef = React.useRef(width);
-  widthRef.current = width;
-
   const setExpanded = React.useCallback(
     (update: (prev: boolean) => boolean) => {
       setExpandedState((prev) => {
@@ -184,12 +151,6 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
   const onResizePointerDown = React.useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
-      // Grabbing the handle is the user taking control of the width — drop the
-      // canvas-maximize latch so the eventual canvas-close restore won't fight
-      // them (their drag result stays, and gets persisted below as usual).
-      maximizedRef.current = false;
-      prevWidthRef.current = null;
-      setMaximized(false);
       const startX = e.clientX;
       const startWidth = width;
       setDragging(true);
@@ -216,25 +177,6 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
     [width],
   );
 
-  const maximize = React.useCallback(() => {
-    if (maximizedRef.current) return; // already maximized — keep the original return width
-    maximizedRef.current = true;
-    prevWidthRef.current = widthRef.current;
-    setWidth(maximizedDockWidth(window.innerWidth));
-    setMaximized(true);
-  }, []);
-
-  const restore = React.useCallback(() => {
-    // Not latched → nothing to undo. This guard is what makes ChatPane's
-    // mount-time onCanvasOpenChange(false) (and StrictMode's double fire, and
-    // a restore after a manual drag took the width over) harmless.
-    if (!maximizedRef.current) return;
-    maximizedRef.current = false;
-    setWidth(prevWidthRef.current ?? readStoredWidth(persistWidthKey));
-    prevWidthRef.current = null;
-    setMaximized(false);
-  }, [persistWidthKey]);
-
   const setFullWindow = React.useCallback(
     (next: boolean) => {
       setFullWindowState(next);
@@ -260,12 +202,9 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
     expanded,
     width,
     dragging,
-    maximized,
     toggle,
     expand,
     collapse,
-    maximize,
-    restore,
     fullWindow,
     setFullWindow,
     onResizePointerDown,
@@ -354,13 +293,6 @@ export function ChatDockPanel({
   const apiBase = React.useMemo(() => resolveApiBase(apiBaseProp), [apiBaseProp]);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const full = dock.fullWindow;
-  // ADR-0037/P3c — the default body auto-maximizes the rail while the Live
-  // Canvas is open and tucks back when it closes (restore self-guards against
-  // the mount-time false, StrictMode, and user-drag takeover).
-  const handleCanvasOpenChange = React.useCallback(
-    (open: boolean) => (open ? dock.maximize() : dock.restore()),
-    [dock.maximize, dock.restore],
-  );
   const expandLabel = full
     ? t('console.ai.dock.restore', { defaultValue: 'Restore side panel' })
     : t('console.ai.dock.expand', { defaultValue: 'Expand' });
@@ -373,9 +305,7 @@ export function ChatDockPanel({
         full
           ? 'fixed inset-0 z-40 flex flex-col bg-background'
           : 'relative hidden h-full shrink-0 flex-col border-l bg-background md:flex',
-        // ADR-0037/P3c — animate the canvas auto-maximize / tuck so the rail
-        // eases to its new width instead of snapping (issue #2477 item 4).
-        // NOT while dragging: the width must track the pointer 1:1, so the
+        // Ease width changes (issue #2477 item 4). NOT while dragging: the width must track the pointer 1:1, so the
         // transition is suppressed for the duration of a resize drag.
         !full && !dock.dragging && 'transition-[width] duration-200 ease-out',
       )}
@@ -396,7 +326,7 @@ export function ChatDockPanel({
       <div className="flex h-11 shrink-0 items-center justify-between border-b px-3">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground/80">
           <MessagesSquare className="size-3.5" />
-          {title ?? t('console.ai.dock.title', { defaultValue: 'Assistant' })}
+          {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
         </span>
         <span className="flex items-center gap-0.5">
           {/* ADR-0057 #8 — proactive AI usage indicator (hides itself when the
@@ -462,7 +392,6 @@ export function ChatDockPanel({
               appPackageId={appPackageId}
               surfaceContext={surfaceContext}
               surfaceArtifactLabel={surfaceArtifactLabel}
-              onCanvasOpenChange={handleCanvasOpenChange}
               target={target}
               onTargetChange={onTargetChange}
               handoff={handoff}
@@ -541,7 +470,7 @@ export function ChatDockMobileSheet({
           <div className="flex items-center gap-1 pr-8">
             <SheetTitle className="inline-flex items-center gap-1.5 text-sm font-semibold">
               <MessagesSquare className="size-4" />
-              {title ?? t('console.ai.dock.title', { defaultValue: 'Assistant' })}
+              {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
             </SheetTitle>
             {/* ADR-0057 #8 — usage indicator, mirrored on the mobile sheet header. */}
             <AiUsageIndicator apiBase={apiBase} />

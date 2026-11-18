@@ -19,7 +19,7 @@ import { assertResolvedTemporalTokensInRange, assertTemporalComparandsInterpreta
 import type { ResolvedTokenJudge } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 import { mapRelationConditions, narrowNumberComparands } from './number-comparand-declared-type-door.js';
-import { lowerRelationSite } from './relation-filter-lowering.js';
+import { lowerRelationSite, relationReadDriverRefusal } from './relation-filter-lowering.js';
 import type { RelationFilterSite } from './relation-filter-lowering.js';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { judgeCollectionItemOwnerStamp } from '@objectstack/spec/kernel';
@@ -44,7 +44,7 @@ import { ValidationError } from './validation/record-validator.js';
 import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
-import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import type { ReferentialClearExemption, RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { declaredColumnSet } from './declared-read-columns.js';
 
 /**
@@ -1236,6 +1236,16 @@ function admissionRefusalOf(
  * stops there: which ids the read finds, the cap and the caller's permissions
  * on the related object need data and a caller, and are execution's alone.
  *
+ * [#33876] One driver verdict IS the engine's own admission, so the judge
+ * answers it too: on a read verb, a single-valued nested-relation condition
+ * is refused before any related read when the object's driver does not
+ * declare `DriverCapabilities.readableIdsLeaf` (`relationReadDriverRefusal`,
+ * the one function execution calls). The judge reads the driver's DECLARED
+ * capabilities through `driverOf` and calls nothing on it. A host that
+ * resolves no driver for the object (`driverOf` absent or answering `null`:
+ * the authoring-time judge, whose engine holds no datasource) does not judge
+ * this verdict; execution, which must resolve a driver, still raises it.
+ *
  * What differs by verb sits BETWEEN or AROUND those stages and judges
  * something other than `where`: option-key folding and refusal, the driver
  * lookup (`getDriver`, before stage 1 on the writes and between the stages on
@@ -1247,9 +1257,10 @@ function admissionRefusalOf(
  * ## What it reads
  *
  * The `where` value, the object's declared field map (`schema`, the
- * registry's), and the execution context (for stage 2). No driver, no data,
- * no hook, no middleware. Execution's own stages read nothing more, measured
- * door by door on #20157.
+ * registry's), the execution context (for stage 2), and [#33876] the
+ * declared capabilities of the object's driver (above). No driver call, no
+ * data, no hook, no middleware. Execution's own stages read nothing more,
+ * measured door by door on #20157.
  *
  * A thrown door diagnostic becomes the returned refusal, with the same `code`,
  * `status` and `message` execution raises. Anything else is re-thrown
@@ -1262,6 +1273,7 @@ function judgeWhereAdmission(
   schema: unknown,
   context: Parameters<typeof filterTokenContextFrom>[0],
   schemaOf?: (name: string) => unknown,
+  driverOf?: (name: string) => { readonly name?: unknown; readonly supports?: unknown } | null,
 ): EngineFilterJudgement {
   try {
     const admitted = lowerWhereFilterArray(object, operation, { where }, schema, schemaOf);
@@ -1277,8 +1289,15 @@ function judgeWhereAdmission(
     // of the filter is lowered with each condition standing for the empty id
     // set, which the shared lowering treats as it treats any `$in` / `$or`.
     const sites = relationSitesOf(object, operation, resolved, schema, schemaOf);
+    // [#33876] Execution's up-front driver verdict, at the point execution
+    // raises it: after admission, before any related read.
+    const driver = sites.length === 0 || driverOf === undefined ? null : driverOf(object);
+    if (driver !== null) {
+      const driverRefusal = relationReadDriverRefusal(object, operation, sites, () => driver);
+      if (driverRefusal !== undefined) throw driverRefusal;
+    }
     for (const site of sites) {
-      const inner = judgeWhereAdmission(site.target, 'find', site.condition, schemaOf?.(site.target), context, schemaOf);
+      const inner = judgeWhereAdmission(site.target, 'find', site.condition, schemaOf?.(site.target), context, schemaOf, driverOf);
       if (!inner.ok) return inner;
     }
     const related = sites.length === 0
@@ -2221,7 +2240,11 @@ export function undeclaredWriteFieldErrors(
  * ⛔ Keyed on `type === 'formula'` literally — the test the read path's
  * projection and `driver-sql`'s `fieldHasColumn` use. `summary` is NOT here: a
  * roll-up HAS a column, and a caller-supplied value is persisted (measured on
- * #20805, SQLite and memory) — a separate question, not this door's.
+ * #20805, SQLite and memory) — a separate question, not this door's. [#34672]
+ * Its answer is the static-`readonly` strip on both verbs
+ * ({@link summaryFieldsLockedOnWrite}), which exempts the `isSystem` write
+ * the roll-up recompute makes; this door, which runs in every context, would
+ * take that write too.
  *
  * Pure: the caller's objects are never mutated. A row keeps its reference when
  * nothing was taken, else it is a shallow copy without the keys.
@@ -2409,12 +2432,23 @@ function staticReadonlySparesOrganization(schema: unknown, wallJudgesOrganizatio
  * ONE function for both passes that read the subject, the pre-hook withhold
  * and the post-hook strip, so the hook view and the stored row cannot
  * disagree about the column. [#25062] The write preview's strip reads it too.
+ *
+ * [#34672] ...and with every roll-up `summary` field read as `readonly: true`
+ * ({@link summaryFieldsLockedOnWrite}), as {@link updateStaticReadonlySubject}
+ * reads it on update: a person's or an import's starting value for a roll-up
+ * is taken and reported as `readonly`, and the create strip re-seeds the
+ * column with the empty-child-list value (`staticReadonlyCreateStrip`). The
+ * flag is added BEFORE {@link staticReadonlyInsertSubject} judges the schema,
+ * so its exclusions hold for the roll-ups too: a `sys_` object and a
+ * platform-internal `managedBy` bucket stay outside the subject. `isSystem`
+ * (seed loads, package installs, historical imports, the recompute) runs none
+ * of these passes and keeps the value it sends.
  */
 export function insertStaticReadonlySubject(
   schema: unknown,
   wallJudgesOrganization: boolean,
 ): ReturnType<typeof staticReadonlyInsertSubject> {
-  const subject = staticReadonlyInsertSubject(schema as any);
+  const subject = staticReadonlyInsertSubject(withSummaryRollUpsReadonly(schema) as any);
   if (!subject || !staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return subject;
   const fields = { ...subject.fields };
   delete fields[SystemFieldName.ORGANIZATION_ID];
@@ -2436,13 +2470,74 @@ export function insertStaticReadonlySubject(
  * reads the wall's flag once and hands that one value to all of them, so the
  * hook view and the stored row cannot disagree about the column. [#25062] The
  * `update`-mode preview's strip reads it too.
+ *
+ * [#34672] ...and with every roll-up `summary` field read as `readonly: true`
+ * ({@link summaryFieldsLockedOnWrite}): the engine owns that value on
+ * update, so a person's or an import's write to it is taken and reported as
+ * `readonly`, exactly as if the author had declared the flag. The roll-up's
+ * own write is `isSystem` and skips these passes. Because the lock lives in
+ * this one view, every pass named above takes the same keys.
  */
 export function updateStaticReadonlySubject(schema: unknown, wallJudgesOrganization: boolean): unknown {
-  if (!staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return schema;
-  const { name, fields } = schema as { name?: string; fields: Record<string, unknown> };
+  const sparesOrganization = staticReadonlySparesOrganization(schema, wallJudgesOrganization);
+  const locked = withSummaryRollUpsReadonly(schema);
+  if (!sparesOrganization) return locked;
+  const { name, fields } = locked as { name?: string; fields: Record<string, unknown> };
   const kept = { ...fields };
   delete kept[SystemFieldName.ORGANIZATION_ID];
   return { name, fields: kept };
+}
+
+/**
+ * [#34672] `schema` with every field {@link summaryFieldsLockedOnWrite} names
+ * read as `readonly: true`, or `schema` itself when it names none. The one
+ * spelling of the roll-up lock that both static-`readonly` views read
+ * ({@link insertStaticReadonlySubject}, {@link updateStaticReadonlySubject}).
+ * The schema's other members are carried over, so the insert subject's
+ * `name` and `managedBy` exclusions judge the locked view as they judge the
+ * registered one.
+ */
+function withSummaryRollUpsReadonly(schema: unknown): unknown {
+  const rollUps = summaryFieldsLockedOnWrite(schema);
+  if (rollUps.length === 0) return schema;
+  const fields = { ...(schema as { fields: Record<string, unknown> }).fields };
+  for (const field of rollUps) fields[field] = { ...(fields[field] as Record<string, unknown>), readonly: true };
+  return { ...(schema as Record<string, unknown>), fields };
+}
+
+/**
+ * [#34672] The roll-up `summary` fields a person's or an import's write
+ * judges read-only although the author did not declare `readonly: true`, on
+ * create and on update alike. The engine computes a roll-up from its child
+ * rows and writes it through `update()` under an `isSystem` context
+ * (`recomputeSummaries`, the backfill, the enable refresh), which the static
+ * strip exempts. So the only writes this lock takes are a caller's: a REST
+ * `POST` or `PATCH`, an import in any `writeMode`, an MCP create, a
+ * predicate update. Before it, such a write was stored and read downstream
+ * until the next child write recomputed the roll-up.
+ *
+ * On create the taken value is replaced by the empty-child-list seed
+ * (`initializeSummaryFields`, re-run by `staticReadonlyCreateStrip`): `0`
+ * for `count` / `sum`, nothing for `min` / `max` / `avg`. Seed loads,
+ * package installs and historical imports write as the system principal and
+ * keep a pre-computed total. The `summary` note on
+ * `RUNTIME_OWNED_FIELD_TYPES` in `validation/rule-validator.ts` says why the
+ * type rides this strip and not the runtime-owned one.
+ *
+ * Keyed on `type === 'summary'` literally, like the roll-up readers
+ * (`getSummaryDescriptors`, `summary-enable-refresh.ts`). A field already
+ * declared `readonly: true` is left as it is.
+ */
+export function summaryFieldsLockedOnWrite(schema: unknown): string[] {
+  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  const locked: string[] = [];
+  for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+    if (!def || typeof def !== 'object') continue;
+    const d = def as { type?: unknown; readonly?: unknown };
+    if (d.type === 'summary' && d.readonly !== true) locked.push(name);
+  }
+  return locked;
 }
 
 /**
@@ -4412,12 +4507,14 @@ export function staticReadonlyStoredView(
     preserveAudit: boolean;
     hookWrittenKeys: ReadonlySet<string> | undefined;
     wallJudgesOrganization?: boolean;
+    /** The walk's referential clear, which the strip keeps — so the view keeps it too. */
+    referentialClear?: ReferentialClearExemption;
   },
 ): Record<string, unknown> {
   if (!strip.runs) return data;
   return stripReadonlyFields(
     updateStaticReadonlySubject(schema, strip.wallJudgesOrganization === true) as any, data, supplied, undefined,
-    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
+    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys, referentialClear: strip.referentialClear },
   ) ?? data;
 }
 
@@ -5206,13 +5303,39 @@ export const SECURITY_SERVICE_SOURCE_SLOT: unique symbol = Symbol.for('objectsta
  */
 const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondition');
 
+/**
+ * The engine's own channel for a referential write to one lookup on one row,
+ * on the `update` it issues: `{ object, id, field }` of the holder row and
+ * lookup. Two writers, both engine-owned referential integrity and never a
+ * caller write: the `set_null` delete walk's clear (`cascadeDeleteRelations`)
+ * and the recycle-bin restore's re-link of that clear and its undo (ADR-0148
+ * D2, `recycle-bin/restore.ts`). `update()` hands the read-only strips that one
+ * key, at the value the write received ({@link ReferentialClearOption}).
+ *
+ * A module-private symbol, the shape of {@link WRITE_PRECONDITION_OPTION}, and
+ * for the same reason: no options object a door builds, no hook's `ctx.api`
+ * write and nothing outside this package can carry it. ⛔ Not the
+ * operation-private `__referentialFieldClear` context key, which a write a
+ * hook issues through `ctx.api` during the cleanup dispatch INHERITS
+ * (`buildReferentialFieldClear`); and ⛔ not `isSystem`, whose exemption is
+ * total. ⛔ Not re-exported by `index.ts` or `core.ts`.
+ */
+const REFERENTIAL_CLEAR_OPTION: unique symbol = Symbol('objectql.referentialClear');
+
+/** What the delete walk or the restore puts under {@link REFERENTIAL_CLEAR_OPTION}: the holder row and the lookup it writes. */
+interface ReferentialClearOption {
+  readonly object: string;
+  readonly id: string;
+  readonly field: string;
+}
+
 // [#29986 codemod] Declared above without `export`, and read by `engine.ts` or a section module.
 export {
   AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, AutonumberReaders, CascadeBatchNarrowed,
   CascadeIssuedDelete, DISPATCHABLE_HOOK_EVENTS, cascadeBatchIdsOf, ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
   ENGINE_QUERY_SLOTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WIRE_ONLY_SLOTS, FormulaFaultSink, FormulaRelated,
   IssuedAutonumber, METADATA_ARRAY_KEYS, ReadableIdsSecurityResolution, StoredExpressionServing, TransactionScope,
-  WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
+  REFERENTIAL_CLEAR_OPTION, ReferentialClearOption, WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
   assertDispatchableHookEvent, assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable,
   assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects, assertValidHookObject,
   assertValidUnscopedMultiWriteFlag, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,

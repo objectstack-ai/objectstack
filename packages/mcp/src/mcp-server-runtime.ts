@@ -24,7 +24,7 @@ import {
   type McpCallerExecutionContext,
 } from './tool-call-interceptor.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
+import { wireBridgeTools, datasetToolsServed, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
 import { isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
@@ -36,7 +36,7 @@ import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
 } from './metadata-completeness.js';
-import { DEFAULT_SERVER_VERSION } from './package-version.js';
+import { DEFAULT_SERVER_VERSION, PACKAGE_VERSION } from './package-version.js';
 import { createPlatformMcpServer } from './request-params.js';
 import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
@@ -92,6 +92,7 @@ interface ObjectDef {
 export interface ServedObjectDef {
   name: string;
   label?: string;
+  description?: string;
   fields?: Record<string, ServedFieldDef>;
   validations?: unknown[];
   enable?: Record<string, unknown>;
@@ -101,6 +102,7 @@ export interface ServedObjectDef {
 interface ServedFieldDef {
   type?: string;
   label?: string;
+  description?: string;
   required?: boolean;
   readonly?: boolean;
   system?: boolean;
@@ -120,7 +122,11 @@ interface ServedFieldDef {
  * where a write never sets the value, {@link writeNeverSetsField}), the allowed
  * `options` as value + label for a field that declares them (a picklist-bound
  * field carries its list's resolved options on the served object,
- * {@link declaresOptions}), and the `defaultValue` an INSERT applies. Per active validation rule: its name,
+ * {@link declaresOptions}), and the `defaultValue` an INSERT applies.
+ * [#34721] The object's and each field's authored `description`, where one is
+ * authored ({@link authoredDescription}): the text a client reads to pick an
+ * object and its fields, read off the same served object, so a field the
+ * caller cannot read takes its description with it. Per active validation rule: its name,
  * kind, message, severity, the write events it runs on, and the fields it names
  * — ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
@@ -148,10 +154,12 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
   return {
     name: def.name,
     label: def.label ?? def.name,
+    ...authoredDescription(def),
     fields: Object.entries(def.fields ?? {}).filter(([key]) => key !== SEARCH_COMPANION_FIELD).map(([key, f]) => ({
       name: key,
       type: f?.type,
       label: f?.label ?? key,
+      ...authoredDescription(f),
       required: f?.required ?? false,
       // Judged on the DECLARED field, never the served one: the caller's mask
       // deletes a readable field's `expression` when it names a field they
@@ -166,6 +174,23 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
     validations: describedRules(def.validations),
     enableFeatures: def.enable ?? {},
   };
+}
+
+/**
+ * [#34721] An object's or a field's `description` as `list_objects` and
+ * `describe_object` serve it: `{ description }` when the definition, as the
+ * caller is served it, carries a non-blank string there, and nothing
+ * otherwise, so an answer for a definition that authors none keeps the shape
+ * it always had. The existing key only: the spec declares it on the object
+ * and on the field (`ObjectSchema`, `FieldSchema`), and the ADR-0106
+ * projection keeps it as prose on everything the caller may read, which is
+ * what the `/meta` object door serves the same caller.
+ *
+ * The HTTP twin is `authoredDescription` in `packages/runtime/src/domains/mcp.ts`.
+ */
+export function authoredDescription(def: { description?: unknown } | undefined): { description?: string } {
+  const text = def?.description;
+  return typeof text === 'string' && text.trim() !== '' ? { description: text } : {};
 }
 
 /**
@@ -1773,6 +1798,76 @@ const DEFAULT_HTTP_INSTRUCTIONS =
   'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
 
 /**
+ * [#34686] The selection rule between a governed metric and an object query
+ * (ADR-0149 D3), in the few lines `initialize` carries. It rides the
+ * instructions because a client reads a tool's description only after it has
+ * chosen that tool (#34659 ruling D5 = A); the full procedure stays in the
+ * tools' own descriptions and in the served skill's data loop
+ * (`ASK_SKILL_DATA_LOOP`, generated from `skills/objectstack-ask/SKILL.md` and
+ * rendered by `skill-md.ts`). All three hold an exact name, label or synonym as
+ * the only match, one measure match as the answer (two words with one measure
+ * match each are two metrics, both computed), and several matches on one word
+ * as a question for the user. [#34763] A word with no match may come back with
+ * `list_datasets` `candidates` (the ADR-0149 D3 amendment note): the rule makes
+ * that the same question, listing each candidate's label, dataset label and
+ * description, never a pick and never a match, even for a single candidate;
+ * only a word with no match and no candidate falls back to the object tools,
+ * with the answer labelled. [#34919] The answer itself then states the
+ * case (`list_datasets` `nextStep`, composed by the service-analytics
+ * executor, `dataset-next-step.ts`) and the source to cite
+ * (`query_dataset` `sourceLine`); the rule says to follow the one and cite
+ * the other, and names the precedence the executor reports mixed cases by.
+ * Sent only where both dataset tools register ({@link datasetToolsServed}).
+ */
+const DATASET_SELECTION_RULE =
+  'For a question about a business number, look for a governed metric first: call list_datasets with the '
+  + 'question\'s business words. A word matches only when it equals a measure\'s or dimension\'s name, label or '
+  + 'synonym, never a similar word. Each word that matches exactly one measure: answer with query_dataset; two '
+  + 'such words are two metrics, so compute both. One word matching several measures: ask the user which one '
+  + 'they mean; do not pick. A word with no match but with candidates in the answer: ask the same way, listing '
+  + 'each candidate\'s label, dataset label and description; do not pick one or treat it as a match. No match '
+  + 'and no candidates: fall back to query_records / aggregate_records and say the answer is not from a governed '
+  + 'metric. The list_datasets answer states which of these cases your words are in as nextStep: follow its note, '
+  + 'which reports the first of several_measures, one_measure, candidates_only, no_measure when words differ. Cite '
+  + 'query_dataset\'s sourceLine as the answer\'s source.';
+
+/**
+ * [#34686] The published skills package an open server points a client to
+ * (#34659 ruling D5 = A), at the version to install: this package's own
+ * version, which `@objectstack/skills` shares (both are in one `fixed` group
+ * of `.changeset/config.json`, so every release publishes both at one
+ * version). Not `config.version`: that is the operator's `serverInfo.version`
+ * override, not a package version. No line when the manifest cannot be read
+ * (`PACKAGE_VERSION` undefined), since an unversioned install takes the
+ * registry's `latest`, which may be another major's catalog.
+ * [#34773] The install is `os skills install --version`, the CLI's command
+ * that needs no project, so a client that only connected over MCP can follow
+ * it in an empty directory; the `npx -p @objectstack/cli@VERSION` form is for
+ * a machine without the CLI. The CLI is in the same `fixed` group.
+ */
+function skillsInstallLine(version: string | undefined): string | undefined {
+  if (!version) return undefined;
+  return `Published skills: @objectstack/skills ${version}. To give a coding agent the ObjectStack procedures, `
+    + `install that version into the agent's skills directory with the ObjectStack CLI, with or without a project: `
+    + `os skills install --version ${version} (where the CLI is not installed: `
+    + `npx -p @objectstack/cli@${version} os skills install --version ${version}).`;
+}
+
+/**
+ * [#34686] The open server's own `initialize` text for one HTTP request: the
+ * default sentence, the selection rule when this request's grant registers
+ * both dataset tools, and the skills install line. Read only when neither the
+ * host (`hostInstructions`) nor the runtime's configured `instructions`
+ * answers: both are whole texts their author owns, and the configured one is
+ * the same string for every grant, so nothing is appended to either.
+ */
+function openServerInstructions(datasetRule: boolean): string {
+  return [DEFAULT_HTTP_INSTRUCTIONS, datasetRule ? DATASET_SELECTION_RULE : undefined, skillsInstallLine(PACKAGE_VERSION)]
+    .filter((part): part is string => part !== undefined)
+    .join('\n\n');
+}
+
+/**
  * [#31605] Who an HTTP request was admitted as, as the HOST resolved it — the
  * input `handleHttpRequest` projects every tool call's interceptor principal
  * from. Only the members {@link McpCallerExecutionContext} names are read.
@@ -2076,7 +2171,10 @@ export class MCPServerRuntime {
    *
    * [#25245] The two object resources read the view this runtime's host gave
    * (`setRuntimeObjectView`, package-internal), at each read; without one they
-   * read `metadataService`, as before.
+   * read `metadataService`, as before. [#34995] Labels are served as that view
+   * serves them: the stdio host's view is localized as the object tools are
+   * (`servedLocaleObjectView`, `stdio-data-bridge.ts`), so the two builders
+   * below translate nothing themselves.
    */
   bridgeResources(
     metadataService: IMetadataService,
@@ -2711,10 +2809,13 @@ export class MCPServerRuntime {
         // [#32766] Such a request reads the injection's
         // `dataOnlyInstructions` instead; without one, it gets the configured
         // or default text.
+        // [#34686] The default carries the selection rule where this request
+        // registers both dataset tools (the gate `registerDatasetTools` reads)
+        // and the skills install line; host and configured texts are unchanged.
         instructions:
           hostInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
           this.config.instructions ??
-          DEFAULT_HTTP_INSTRUCTIONS,
+          openServerInstructions(datasetToolsServed(opts.bridge, opts.toolOptions)),
       },
     );
 

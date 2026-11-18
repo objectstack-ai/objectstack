@@ -37,6 +37,11 @@
  *    derived from the document, so neither belongs inside it.
  *  - `_draft` — the preview badge added by draft reads. Draft-ness lives in the
  *    row's `state` column and the `mode` parameter, never in the body.
+ *  - `_withheldFields` — on a served `object` read, the fields a disabled
+ *    package's extension adds and the served fold withholds, each with that
+ *    package (`{ FIELD: { packageId } }`). Derived from which packages are
+ *    disabled at read time, so a copy saved into a body would be a stale
+ *    verdict the next enable or disable contradicts.
  *
  * Deliberately NOT members, though they share the underscore spelling: the
  * ADR-0010 protection envelope (`_lock`, `_lockReason`, `_lockSource`,
@@ -45,7 +50,7 @@
  * legitimately carries and merges, and the closed metadata schemas allowlist
  * them precisely so a served document keeps its provenance on re-parse.
  */
-export const METADATA_READ_DECORATIONS = ['_diagnostics', '_draft'] as const;
+export const METADATA_READ_DECORATIONS = ['_diagnostics', '_draft', '_withheldFields'] as const;
 
 /** Union of the keys in {@link METADATA_READ_DECORATIONS}. */
 export type MetadataReadDecoration = (typeof METADATA_READ_DECORATIONS)[number];

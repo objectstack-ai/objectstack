@@ -38,7 +38,6 @@ export const zhHant: TranslationData = {
       navigation: {
         group_overview: { label: '總覽' },
         group_apps: { label: '應用程式' },
-        nav_packaged_actions: { label: '打包動作' },
         nav_marketplace_browse: { label: '瀏覽應用程式市場' },
         nav_marketplace_installed: { label: '已安裝應用程式' },
         nav_cloud_connection: { label: '雲端連線' },
@@ -188,13 +187,55 @@ export const zhHant: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: '使用者' } } },
-    sys_organization_metrics: { measures: { org_count: { label: '組織' } } },
-    sys_session_metrics: { measures: { session_count: { label: '工作階段' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: '安裝' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: '使用者',
+          description: '系統中記錄的使用者帳號數，無論是否處於啟用狀態。',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: '組織',
+          description: '系統中記錄的組織數；每個組織擁有各自的成員、資料和設定。',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: '工作階段',
+          description: '系統中記錄的登入工作階段數，每次從瀏覽器或裝置登入產生一個工作階段。',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: '安裝',
+          description: '系統中記錄的套件安裝數，每安裝一個套件記一次。',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: '操作' }, user_id: { label: '使用者' } },
-      measures: { event_count: { label: '事件' } },
+      dimensions: {
+        action: {
+          label: '操作',
+          description: '稽核記錄項目所記錄的操作類型，例如建立、更新、刪除、登入或設定變更。',
+        },
+        user_id: {
+          label: '使用者',
+          description: '執行該稽核操作的使用者；平台自身寫入的項目歸入「系統」。',
+        },
+      },
+      measures: {
+        event_count: {
+          label: '事件',
+          description: '稽核記錄項目數；每個項目記錄系統中的一次操作，由使用者或平台自身執行。',
+        },
+      },
     },
   },
 

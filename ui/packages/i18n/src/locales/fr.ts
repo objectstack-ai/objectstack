@@ -593,6 +593,7 @@ const fr = {
         "Cette vue est groupée, mais sa source de données n'implémente pas queryGroupHeaders : les groupes ne peuvent donc pas être comptés. Supprimez le regroupement pour afficher les enregistrements.",
       needsWholeRows:
         "Le regroupement a besoin de tous les enregistrements, mais cette grille n'en a reçu qu'une page : les groupes ne peuvent donc pas être comptés. Fournissez tous les enregistrements, ou laissez la grille les charger depuis une source de données qui implémente queryGroupHeaders.",
+      draftOnly: "Non regroupé par {{fields}} : ce champ n'existe que dans le brouillon jusqu'à la publication.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -959,6 +960,8 @@ const fr = {
     removeGroup: "Supprimer",
     groupingUnstoredNotice: "Cette liste ne peut pas être regroupée par {{fields}} : sa valeur est calculée à l’affichage et n’est pas stockée. La liste est affichée sans ce regroupement.",
     groupingUnstoredRemove: "Retirer du regroupement",
+    draftOnlyQueryDropped: "Non filtré ni trié par {{fields}} : ce champ n’existe que dans le brouillon jusqu’à la publication.",
+    withheldFieldsLeftOut: "Non affiché, filtré, trié ni groupé par {{fields}} : le paquet qui ajoute ce champ est désactivé. Il revient lorsque le paquet est réactivé.",
     inlineEditShort: "Édition en ligne",
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
   },
@@ -1418,6 +1421,8 @@ const fr = {
     writeStrippedUnknownReason: "Non appliqué par le serveur : {{fields}}",
     approvalPendingEditable: "En approbation · modifiable",
     approvalPendingTooltip: "Cet enregistrement a une demande d'approbation en attente ; cette étape autorise encore la modification",
+    approvalPending: "En approbation",
+    approvalPendingNotEditableTooltip: "Cet enregistrement a une demande d'approbation en attente",
     approvalProgress: "Approbations — {{got}} sur {{need}}",
     approvalProgressGroups: "Validation — {{got}} sur {{need}} groupes",
     approvalProgressLabel: "Progression de l'approbation",
@@ -1638,6 +1643,9 @@ const fr = {
     },
     total: "Total",
     noDataSourceFor: "Aucune source de données pour",
+    drillTooMany: 'Trop d’enregistrements sont liés à cette valeur pour les lister ici. Affinez les filtres du tableau de bord et réessayez.',
+    drillUnavailable: 'Les enregistrements correspondant à cette valeur ne peuvent pas être listés ici.',
+    drillFailed: 'Les enregistrements correspondant à cette valeur n’ont pas pu être chargés. Réessayez plus tard.',
     config: {
       breadcrumb: {
         dashboard: "Tableau de bord",
@@ -1977,6 +1985,18 @@ const fr = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} modifications non publiées. Publiez-les depuis la barre du brouillon en haut.',
+        publishFromBar_one: '{{count}} modification non publiée. Publiez-la depuis la barre du brouillon en haut.',
+        publishFromBar_many: '{{count}} de modifications non publiées. Publiez-les depuis la barre du brouillon en haut.',
+        publishFromBar_other: '{{count}} modifications non publiées. Publiez-les depuis la barre du brouillon en haut.',
+        showDraftToPublish: '{{count}} modifications non publiées. Affichez le brouillon pour les vérifier et les publier.',
+        showDraftToPublish_one: '{{count}} modification non publiée. Affichez le brouillon pour la vérifier et la publier.',
+        showDraftToPublish_many: '{{count}} de modifications non publiées. Affichez le brouillon pour les vérifier et les publier.',
+        showDraftToPublish_other: '{{count}} modifications non publiées. Affichez le brouillon pour les vérifier et les publier.',
+        showDraft: 'Afficher le brouillon',
+        receipt: 'Publié. Vos modifications sont en ligne.',
+        dismissReceipt: 'Fermer',
         count: "{{count}} modification(s) ne sont pas encore publiée(s) — les utilisateurs ne peuvent pas les voir.",
         publish: "Publier",
         published: "Toutes les modifications en attente sont actives.",
@@ -2222,7 +2242,7 @@ const fr = {
       changesApplied: "Appliqué",
       changesDrafted: "Enregistré comme brouillon",
       changesFailed: "Non appliqué",
-      discussing: "Sujet : {{target}}",
+      discussing: "Affiché : {{target}}",
       changeVerb: {
         createObject: "Créer un objet",
         addField: "Ajouter un champ",
@@ -2270,7 +2290,7 @@ const fr = {
       unavailableRetry: "Réessayer",
       unavailableHome: "Retour à l'accueil",
       dock: {
-        title: "Assistant",
+        title: "Assistant IA",
         description: "Discussion avec l'assistant IA",
         resize: "Redimensionner la discussion",
         collapse: "Réduire la discussion",
@@ -2383,6 +2403,7 @@ const fr = {
       view: "Voir",
       confirm: "Confirmer",
       cancel: "Annuler",
+      continue: "Continuer",
       prefilled: "Les valeurs non encore définies sont suggérées d’après votre navigateur. Rien n’est enregistré avant votre confirmation.",
       organizationName: {
         title: "Nommez votre organisation",
@@ -2569,8 +2590,16 @@ const fr = {
       },
       viewTypeTree: "Arborescence",
       viewTypeTreeDesc: "Imbriquer les enregistrements auto-référencés en hiérarchie via un champ parent.",
+      viewTypeTimesheet: "Feuille de temps",
+      viewTypeTimesheetDesc: "Saisissez un nombre par ligne et par jour ; chaque cellule remplie est un enregistrement.",
       parentField: "Champ parent",
       parentFieldHelp: "Le champ pointant vers l'enregistrement parent (même objet) qui définit la hiérarchie. Seuls les champs auto-référencés conviennent.",
+      timesheetRowField: "Champ de ligne",
+      timesheetRowFieldHelp: "Chaque ligne de la grille est une valeur de ce champ, par exemple un projet.",
+      timesheetDateField: "Champ de date",
+      timesheetDateFieldHelp: "Les enregistrements sont placés sur le jour correspondant à cette date.",
+      timesheetValueField: "Champ de valeur",
+      timesheetValueFieldHelp: "Le nombre que chaque cellule affiche et modifie, par exemple des heures.",
       viewName: "Nom",
       viewNameHelp: "Clé technique (snake_case). Remplie automatiquement à partir du titre — modifiable si vous le souhaitez.",
       viewNameRequired: "Saisissez une clé (minuscules, chiffres, tiret bas). Non remplie automatiquement pour les titres non latins.",
@@ -2599,7 +2628,7 @@ const fr = {
       expandToPage: "Ouvrir en pleine page",
       openAsPage: "Ouvrir en pleine page",
       objectNotFound: "Objet introuvable",
-      objectNotFoundDescription: "L'objet « {{objectName}} » n'existe pas dans la configuration actuelle.",
+      objectNotFoundDescription: "L'objet « {{objectName}} » n'existe pas, ou vous n'y avez pas accès.",
       objectNotFoundHint: "Vérifiez les paramètres de navigation de votre application ou sélectionnez un autre objet dans la barre latérale.",
       objectPackageDisabled: "L'objet « {{objectName}} » appartient à un package désactivé et n'est donc pas servi.",
       filterOrGroupNotEditable: "Ce filtre comporte un groupe OU à côté d'autres conditions, que l'éditeur de filtres ne peut pas afficher, il est donc en lecture seule ici. La vue l'applique toujours.",
@@ -3002,6 +3031,10 @@ const fr = {
       missingToken: "Il manque un token dans le lien de vérification.",
       emailMissing: "Adresse e-mail manquante",
       resendButton: "Renvoyer l'e-mail de vérification",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Votre adresse e-mail n'est pas encore vérifiée. Envoyez un lien de vérification à {{email}}, puis cliquez sur le lien pour vérifier votre compte.",
+      sendButton: "Envoyer l'e-mail de vérification",
       resending: "Envoi…",
       resent: "E-mail envoyé ! Vérifiez votre boîte de réception",
       resentSuccess: "E-mail de vérification envoyé !",
@@ -3276,7 +3309,7 @@ const fr = {
     aiAssistant: "Assistant IA",
     designInStudio: "Concevoir dans Studio",
     editApp: "Modifier l'application",
-    openAppInStudio: "Voir l'application dans Studio",
+    openAppInStudio: "Voir {{app}} dans Studio",
   },
   home: {
     build: {
@@ -3471,7 +3504,6 @@ const fr = {
   },
   empty: {
     objectNotFound: "Objet introuvable",
-    objectNotFoundDescription: "La définition de l'objet \"{{name}}\" est manquante. Vérifiez votre configuration ou revenez en arrière.",
     interfacePageSourceMissing: "Cette page d'interface référence \"{{name}}\", qui n'est pas disponible.",
     pageNotFound: "Page introuvable",
     pageNotFoundDescription: "La page \"{{name}}\" est introuvable. Elle a peut-être été supprimée ou renommée.",
@@ -4680,6 +4712,11 @@ const fr = {
       pendingHere_one: 'Aperçu du brouillon · {{count}} modification non publiée sur cette page',
       pendingHere_many: 'Aperçu du brouillon · {{count}} de modifications non publiées sur cette page',
       pendingHere_other: 'Aperçu du brouillon · {{count}} modifications non publiées sur cette page',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Aperçu du brouillon · {{count}} modifications non publiées dans cette app. Rien ici n’est en ligne avant la publication.',
+      pendingInApp_one: 'Aperçu du brouillon · {{count}} modification non publiée dans cette app. Rien ici n’est en ligne avant la publication.',
+      pendingInApp_many: 'Aperçu du brouillon · {{count}} de modifications non publiées dans cette app. Rien ici n’est en ligne avant la publication.',
+      pendingInApp_other: 'Aperçu du brouillon · {{count}} modifications non publiées dans cette app. Rien ici n’est en ligne avant la publication.',
     },
     changes: {
       title: 'Modifications en attente',
@@ -4696,7 +4733,7 @@ const fr = {
       detailNone: 'Aucune différence détectée — le brouillon correspond à la version publiée.',
       fieldOrderChanged: 'Ordre des champs modifié',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclut des modifications rédigées par le copilote IA',
+      draftedByCopilot: 'Inclut des modifications rédigées par l’assistant IA',
       draftedByMcpClient: 'Inclut des modifications rédigées par le client MCP « {{client}} »',
       draftedByMcp: 'Inclut des modifications rédigées par un client MCP',
       detailChangedKeys: 'Également modifié :',
@@ -4833,7 +4870,8 @@ const fr = {
       securityBlockTitle_one: 'La publication sera refusée — {{count}} élément nécessite d’abord une décision',
       securityBlockTitle_many: 'La publication sera refusée — {{count}} d’éléments nécessitent d’abord une décision',
       securityBlockTitle_other: 'La publication sera refusée — {{count}} éléments nécessitent d’abord une décision',
-      securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Partage d’enregistrements, puis publiez à nouveau.',
+      securityBlockWhere: 'Corrigez-le sur l’objet dans Paramètres → Qui peut voir quels enregistrements, puis publiez à nouveau.',
+      flowChecksTitle: 'Avant de publier : la vérification de publication signalera ceci',
       securityRule: {
         owdUnset: 'Aucune base de partage des enregistrements (sharingModel) n’est déclarée. L’exécution se rabat sur private, mais la base doit être une décision explicite.',
         owdAlias: 'La base de partage des enregistrements (sharingModel) n’est pas une valeur canonique : l’exécution traite donc l’objet comme private.',
@@ -4844,6 +4882,8 @@ const fr = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Cette app n’est pas encore publiée. Elle fonctionne, mais seuls les créateurs la voient. Publiez-la pour que vos utilisateurs la voient.',
       message: 'Application non publiée — entièrement fonctionnelle, mais visible seulement par les créateurs. Publiez-la pour la rendre visible à vos utilisateurs.',
       publish: 'Publier',
       publishing: 'Publication…',

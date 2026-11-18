@@ -221,6 +221,10 @@ export * from './utils/metadata-activation-store.js';
 // with. `@objectstack/metadata-protocol` re-exports it from its original home.
 export * from './utils/record-not-found.js';
 
+// [#34699] A catalog sentence in the caller's language, for the `userMessage` a
+// producer that holds no `i18n` service marks beside its developer `message`.
+export * from './utils/operation-user-message.js';
+
 // The one `OBJECT_NOT_FOUND` envelope: the data door's object-existence gate
 // and the engine's in-process verbs refuse a name the registry does not
 // resolve with it (one name space for both doors).

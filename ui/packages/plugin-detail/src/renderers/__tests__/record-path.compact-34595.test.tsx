@@ -67,11 +67,11 @@ const tokens = (el: Element): string[] => el.className.split(/\s+/).filter(Boole
 const textOf = (el: Element): string => (el.textContent ?? '').replace(/[✓✗]/g, '').trim();
 
 describe('record:path below `sm` is the compact path (objectstack#34595)', () => {
-  it('is drawn only below `sm`, beside the desktop rail', () => {
+  it('is drawn below `sm` (and in a path narrower than `@sm`, objectstack#34696), beside the desktop rail', () => {
     const r = mount('negotiation');
-    expect(tokens(compactOf(r))).toContain('sm:hidden');
+    expect(tokens(compactOf(r))).toContain('sm:@sm:hidden');
     const desktop = r.container.querySelector('[role="list"]') as HTMLElement;
-    expect(tokens(desktop)).toEqual(expect.arrayContaining(['hidden', 'sm:flex']));
+    expect(tokens(desktop)).toEqual(expect.arrayContaining(['hidden', 'sm:@sm:flex']));
     expect(compactOf(r).contains(desktop)).toBe(false);
   });
 
@@ -152,5 +152,33 @@ describe('record:path below `sm` is the compact path (objectstack#34595)', () =>
     const negotiation = items[4].querySelector(':scope > span:not([data-stage-rail])') as HTMLElement;
     expect(tokens(negotiation)).toContain('truncate');
     expect(within(desktop).queryByRole('button')).toBeNull();
+  });
+});
+
+describe('record:path picks its row by the viewport AND its own width (objectstack#34696)', () => {
+  // A 380 px record drawer at a desktop viewport drew the desktop row, whose
+  // seven equal shares cut each stage to a letter. The path's root is now a
+  // container, and each row's switch stacks `sm` on the container's `@sm`.
+  it('the root is the container both rows query, with no container between', () => {
+    const r = mount('negotiation');
+    const compact = compactOf(r);
+    const desktop = r.container.querySelector('[role="list"]') as HTMLElement;
+    const root = compact.parentElement as HTMLElement;
+    expect(desktop.parentElement).toBe(root);
+    expect(tokens(root)).toEqual(expect.arrayContaining(['@container', 'w-full']));
+    for (const row of [compact, desktop]) {
+      expect(row.closest('[class~="@container"]')).toBe(root);
+    }
+  });
+
+  it('neither row switches on the viewport alone any more', () => {
+    const r = mount('negotiation');
+    const compact = tokens(compactOf(r));
+    const desktop = tokens(r.container.querySelector('[role="list"]') as HTMLElement);
+    expect(compact).toContain('sm:@sm:hidden');
+    expect(compact).not.toContain('sm:hidden');
+    expect(compact).not.toContain('hidden');
+    expect(desktop).toEqual(expect.arrayContaining(['hidden', 'sm:@sm:flex']));
+    expect(desktop).not.toContain('sm:flex');
   });
 });

@@ -566,6 +566,7 @@ const zhHant = {
         '此檢視已分組，但其資料來源未實現 queryGroupHeaders，因此無法統計分組。移除分組即可顯示記錄。',
       needsWholeRows:
         '分組需要全部記錄，但此表格只收到其中一頁，因此無法統計分組。請傳入全部記錄，或讓表格從實現了 queryGroupHeaders 的資料來源獲取記錄。',
+      draftOnly: '未按 {{fields}} 分組：它僅存在於草稿中，釋出後才生效。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -961,6 +962,8 @@ const zhHant = {
     removeGroup: '刪除',
     groupingUnstoredNotice: '無法按 {{fields}} 分組：它的值在顯示時計算，並未儲存。列表已暫不按它分組顯示。',
     groupingUnstoredRemove: '從分組中移除',
+    draftOnlyQueryDropped: '未按 {{fields}} 篩選或排序：它僅存在於草稿中，釋出後才生效。',
+    withheldFieldsLeftOut: '未顯示 {{fields}}，也未按其篩選、排序或分組：新增該欄位的軟體包已停用，啟用後即恢復。',
     inlineEditShort: '行內編輯',
     inlineEditLabel: '行內編輯記錄(點選單元格進行編輯)',
   },
@@ -1245,6 +1248,8 @@ const zhHant = {
     writeStrippedUnknownReason: '以下欄位未被服務端寫入：{{fields}}',
     approvalPendingEditable: '審批中 · 可編輯',
     approvalPendingTooltip: '該記錄有待審批的請求，但當前審批節點仍允許編輯',
+    approvalPending: '審批中',
+    approvalPendingNotEditableTooltip: '該記錄有待審批的請求',
     approvalProgress: '審批 — 已通過 {{got}} / 共需 {{need}}',
     approvalProgressGroups: '會籤 — 已完成 {{got}} / 共 {{need}} 個組',
     approvalProgressLabel: '審批進度',
@@ -1604,6 +1609,9 @@ const zhHant = {
   dashboard: {
     total: '總計',
     noDataSourceFor: '沒有可用的資料來源：',
+    drillTooMany: '與該值關聯的記錄過多，無法在此列出。請縮小儀表盤篩選範圍後重試。',
+    drillUnavailable: '無法在此列出該值對應的記錄。',
+    drillFailed: '無法載入該值對應的記錄，請稍後重試。',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
@@ -2071,6 +2079,7 @@ const zhHant = {
       view: '檢視',
       confirm: '確認',
       cancel: '取消',
+      continue: '繼續',
       prefilled: '尚未設定的項已按你的瀏覽器給出建議。確認之前不會儲存任何內容。',
       organizationName: {
         title: '為組織命名',
@@ -2194,6 +2203,16 @@ const zhHant = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
+        publishFromBar_one: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
+        publishFromBar_other: '有 {{count}} 項未釋出的改動，請在頂部的草稿欄釋出。',
+        showDraftToPublish: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
+        showDraftToPublish_one: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
+        showDraftToPublish_other: '有 {{count}} 項未釋出的改動，開啟草稿檢視並發布。',
+        showDraft: '檢視草稿',
+        receipt: '已釋出，改動已生效。',
+        dismissReceipt: '關閉',
         count: '有 {{count}} 項改動尚未釋出——使用者還看不到。',
         publish: '釋出',
         published: '全部待發布改動已生效。',
@@ -2390,7 +2409,7 @@ const zhHant = {
       changesApplied: '已生效',
       changesDrafted: '已暫存為草稿',
       changesFailed: '未生效',
-      discussing: '正在討論：{{target}}',
+      discussing: '正在看：{{target}}',
       // changesConfirmMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
       changeVerb: {
         createObject: '新建物件',
@@ -2493,7 +2512,7 @@ const zhHant = {
       unavailableRetry: '重試',
       unavailableHome: '返回首頁',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手對話',
         resize: '調整對話寬度',
         collapse: '收起對話',
@@ -2630,7 +2649,7 @@ const zhHant = {
       expandToPage: '整頁開啟',
       openAsPage: '整頁開啟',
       objectNotFound: '未找到物件',
-      objectNotFoundDescription: '物件"{{objectName}}"在當前配置中不存在。',
+      objectNotFoundDescription: '物件"{{objectName}}"不存在，或者您無權訪問它。',
       objectNotFoundHint: '請檢查您的應用導航設定或從側邊欄選擇其他物件。',
       objectPackageDisabled: '物件“{{objectName}}”所屬的軟體包已被停用，因此當前不提供該物件。',
       filterOrGroupNotEditable: '該篩選條件在其他條件之外還含有一個「或」分組，篩選編輯器無法顯示這種結構，因此此處只讀。檢視仍會應用它。',
@@ -2685,8 +2704,16 @@ const zhHant = {
       viewTypeChartDesc: '聚合的柱狀/折線/餅狀圖。',
       viewTypeTree: '樹形',
       viewTypeTreeDesc: '按父級欄位把自引用記錄巢狀成層級樹。',
+      viewTypeTimesheet: '工時表',
+      viewTypeTimesheetDesc: '按行和星期逐格填寫數值，每個已填格子對應一條記錄。',
       parentField: '父級欄位',
       parentFieldHelp: '指向同一物件的父級欄位，決定樹的層級（僅自引用欄位可選）。',
+      timesheetRowField: '行欄位',
+      timesheetRowFieldHelp: '表格的每一行對應該欄位的一個取值，例如專案。',
+      timesheetDateField: '日期欄位',
+      timesheetDateFieldHelp: '記錄按該日期落在對應的星期列。',
+      timesheetValueField: '數值欄位',
+      timesheetValueFieldHelp: '每個格子顯示和編輯的數值，例如工時。',
       newView: '新檢視',
       viewName: '名稱',
       viewNameHelp: '機器標識（snake_case），根據標題自動生成，可自行修改。',
@@ -3018,6 +3045,10 @@ const zhHant = {
       missingToken: '驗證連結缺少令牌。',
       emailMissing: '缺少郵箱地址',
       resendButton: '重新發送驗證郵件',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        '您的郵箱地址尚未驗證。請向 {{email}} 傳送一封驗證郵件，然後點選郵件中的連結以驗證您的賬戶。',
+      sendButton: '傳送驗證郵件',
       resending: '傳送中…',
       resent: '郵件已傳送！請檢視收件箱',
       resentSuccess: '驗證郵件已傳送！',
@@ -3276,7 +3307,7 @@ const zhHant = {
     aiAssistant: 'AI 助手',
     designInStudio: '在 Studio 中設計',
     editApp: '編輯應用',
-    openAppInStudio: '在 Studio 中檢視應用',
+    openAppInStudio: '在 Studio 中檢視 {{app}}',
     openAssistant: '開啟{{name}}助手',
     offline: '離線',
     usersOnline: '當前線上使用者',
@@ -3482,7 +3513,6 @@ const zhHant = {
   },
   empty: {
     objectNotFound: '未找到物件',
-    objectNotFoundDescription: '物件 “{{name}}” 的定義不存在。請檢查配置或返回選擇有效的物件。',
     interfacePageSourceMissing: '此介面頁引用了 “{{name}}”，但該來源不可用。',
     recordNotFound: '未找到記錄',
     recordNotFoundDescription: '您查詢的記錄不存在、已被刪除，或您沒有訪問權限。',
@@ -3549,6 +3579,10 @@ const zhHant = {
       pendingHere: '草稿預覽 · 本頁 {{count}} 項未釋出',
       pendingHere_one: '草稿預覽 · 本頁 {{count}} 項未釋出',
       pendingHere_other: '草稿預覽 · 本頁 {{count}} 項未釋出',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: '草稿預覽 · 這個應用有 {{count}} 項未釋出的改動，釋出前都不會生效。',
+      pendingInApp_one: '草稿預覽 · 這個應用有 {{count}} 項未釋出的改動，釋出前都不會生效。',
+      pendingInApp_other: '草稿預覽 · 這個應用有 {{count}} 項未釋出的改動，釋出前都不會生效。',
       // 魔法時刻提示：剛搭好的草稿因為種子/示例資料要釋出後才載入，預覽裡
       // 儀表盤顯示 0、列表顯示“暫無內容”。直接說明，避免把空預覽誤當成搭壞了。
       sampleDataTitle: '示例資料將在釋出後出現',
@@ -3570,7 +3604,7 @@ const zhHant = {
       detailNone: '未檢測到差異 —— 草稿與已釋出版本一致。',
       fieldOrderChanged: '欄位順序已變更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: '包含由 AI 副駕起草的更改',
+      draftedByCopilot: '包含由 AI 助手起草的更改',
       draftedByMcpClient: '包含由 MCP 客戶端「{{client}}」起草的更改',
       draftedByMcp: '包含由 MCP 客戶端起草的更改',
       detailChangedKeys: '其他變更：',
@@ -3678,7 +3712,8 @@ const zhHant = {
       securityBlockTitle: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
       securityBlockTitle_one: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
       securityBlockTitle_other: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
-      securityBlockWhere: '請在物件的“設定 → 記錄共享模型”中修改後重新發布。',
+      securityBlockWhere: '請在物件的“設定 → 誰能看到哪些記錄”中修改後重新發布。',
+      flowChecksTitle: '釋出前請先看 —— 釋出檢查會提出以下幾點',
       securityRule: {
         owdUnset: '未宣告記錄共享模型（sharingModel）。執行環境會按 private 處理，但這個基線必須是明確做出的決定。',
         owdAlias: '記錄共享模型（sharingModel）不是規範取值，執行環境會按 private 處理此物件。',
@@ -3689,6 +3724,8 @@ const zhHant = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「這個應用還沒釋出過」.
+      notPublishedYet: '這個應用還沒釋出過。它可以正常使用，但只有搭建者能看到。釋出後你的使用者才能看到它。',
       message: '未釋出的應用 —— 功能完整，但只有構建者能看到。釋出後即可讓您的使用者看到。',
       publish: '釋出',
       publishing: '釋出中…',

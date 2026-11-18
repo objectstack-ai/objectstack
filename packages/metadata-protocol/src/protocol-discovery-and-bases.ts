@@ -15,7 +15,9 @@
  * dataset, app and book packaged bases (`getPackagedPageBase`,
  * `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`), the
  * served-override reading of a served document (`servedOverrideBaseOf`) and the
- * pair's own translations (`getPairTranslationBundle`). [#30504] The app base
+ * pair's own translations (`getPairTranslationBundle`). The import-mapping base
+ * (`getPackagedMappingBase`) joins them, the label `translateMapping` judges an
+ * override against. [#30504] The app base
  * carries the code layer's navigation contributions, folded once.
  *
  * A MOVE, not a redesign. `ProtocolDiscoveryAndBasesFacet` is a stateless facet over the host
@@ -37,7 +39,7 @@
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import type { TranslationBundle } from '@objectstack/spec/system';
-import { engineCanRollBack, readAuthoredTranslationLayer } from '@objectstack/core';
+import { deepMerge, engineCanRollBack, isPackageScopedType, readAuthoredTranslationLayer } from '@objectstack/core';
 import { restoreTranslatedEchoes } from './protocol-translated-echo.js';
 import type { RestoredTranslatedSlot } from './protocol-translated-echo.js';
 import {
@@ -49,6 +51,7 @@ import {
 import { pairsOf } from '@objectstack/metadata-core';
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { storedBodyForCarryForward } from './protocol-credential-carry-forward.js';
+import { registryAnswerAtAddress, serviceCopyOfAnotherPackage } from './protocol-meta-item-reads.js';
 import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
 import {
     HAND_CRAFTED_SCHEMAS,
@@ -82,7 +85,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
  * answers: the artifact item IS the packaged declaration for each (none has an
  * extension fold, unlike the object).
  */
-export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book';
+export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book' | 'mapping';
 
 export class ProtocolDiscoveryAndBasesFacet {
     /** The body of `ObjectStackProtocolImplementation#getProjectId`; the method's docblock there is its contract. */
@@ -919,6 +922,11 @@ export class ProtocolDiscoveryAndBasesFacet {
         return host.packagedArtifactBase('book', name);
     }
 
+    /** The body of `ObjectStackProtocolImplementation#getPackagedMappingBase`; the method's docblock there is its contract. */
+    static getPackagedMappingBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
+        return host.packagedArtifactBase('mapping', name);
+    }
+
     /** The body of `ObjectStackProtocolImplementation#servedOverrideBaseOf`; the method's docblock there is its contract. */
     static servedOverrideBaseOf(type: string, document: unknown): string | undefined {
         return servedOverrideBaseOf(type, document);
@@ -957,10 +965,106 @@ export class ProtocolDiscoveryAndBasesFacet {
     }
 
     /**
+     * The body of `ObjectStackProtocolImplementation#getPackagedFieldPatchBases`.
+     *
+     * [#33952, ADR-0146 D10] For each CODE package that patches the fields of
+     * object `name` (`objectExtensions[].fieldPatches`), the packaged base
+     * (`getPackagedObjectBase`) with THAT package's patches applied and
+     * no other's, beside its package id; highest precedence first. The
+     * registry's `getPackagedFieldPatchBases`, whose docblock carries the
+     * rule. The serving layer pairs each entry with
+     * {@link getPackageTranslationBundle} for the translators' `patchBundles`
+     * (`@objectstack/spec/system`): a slot a code package's patch wrote reads
+     * that package's own translations, below the pair's (ruling 6942920667).
+     *
+     * `[]` — "no patching package known", which the translators read as
+     * before the option existed — for an object no code package owns, an
+     * unknown name, a registry without the read (a partial double) and a read
+     * that throws.
+     */
+    static getPackagedFieldPatchBases(host: Pick<ProtocolHost, 'engine'>, name: string): Array<{ packageId: string; base: unknown }> {
+        if (typeof name !== 'string' || name === '') return [];
+        const registry = (host.engine as any)?.registry;
+        if (typeof registry?.getPackagedFieldPatchBases !== 'function') return [];
+        try {
+            const entries: unknown = registry.getPackagedFieldPatchBases(name);
+            return Array.isArray(entries) ? entries : [];
+        } catch {
+            // A read over in-memory contributors; a failure here must never
+            // turn a served schema into a 5xx. No entry is "no patching
+            // package known": a patched slot keeps its own text, as before.
+            return [];
+        }
+    }
+
+    /**
+     * The body of `ObjectStackProtocolImplementation#getPackageTranslationBundle`.
+     *
+     * [#33952] The translations package `packageId` ships itself,
+     * locale-keyed (`{ [locale]: data }`), for the translators' `patchBundles`
+     * (`@objectstack/spec/system`), paired with {@link getPackagedFieldPatchBases}.
+     *
+     * Needed for {@link getPairTranslationBundle}'s reason: the catalog the
+     * deployment serves deep-merges every package's translations with the
+     * package ids dropped, so a dependent package's translation of its own
+     * patch and the owner's translation of the text it replaced are one key,
+     * and which one the catalog holds is load order. This reads that one
+     * package's share: the `translations` its installed package record
+     * carries, then its own active `translation` rows over them.
+     *
+     * `undefined` when the package carries neither, and for an empty id.
+     *
+     * Two halves, laid on locale by locale in the order the i18n service lays
+     * the deployment catalog (`FileI18nAdapter.getTranslations`: the shipped
+     * bundles, then the authored layer over them), so the bundle is that
+     * package's share of the catalog with its package kept: the `translations`
+     * its installed package record carries (`registry.getPackage(id).manifest`,
+     * what `registerApp` installs, the body `AppPlugin.loadTranslations` hands
+     * the i18n service), then the environment's active `translation` rows
+     * bound to it, read as {@link getPairTranslationBundle} reads the pair's.
+     */
+    static async getPackageTranslationBundle(host: Pick<ProtocolHost, 'engine' | 'findEnvironmentRows'>, packageId: string): Promise<TranslationBundle | undefined> {
+        if (typeof packageId !== 'string' || packageId === '') return undefined;
+        let byLocale: Record<string, Record<string, unknown>> = {};
+        const lay = (locale: string, data: unknown): void => {
+            if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+            byLocale = { ...byLocale, [locale]: deepMerge(byLocale[locale] ?? {}, data as Record<string, unknown>) };
+        };
+        let shipped: unknown;
+        try {
+            shipped = (host.engine as any)?.registry?.getPackage?.(packageId)?.manifest?.translations;
+        } catch {
+            // An in-memory read; a failure leaves the shipped half empty.
+            shipped = undefined;
+        }
+        if (Array.isArray(shipped)) {
+            for (const bundle of shipped) {
+                if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) continue;
+                for (const [locale, data] of Object.entries(bundle as Record<string, unknown>)) lay(locale, data);
+            }
+        }
+        let authored: Record<string, Record<string, unknown>> | null = null;
+        try {
+            authored = await readAuthoredTranslationLayer({
+                find: (table: string, opts: { where?: Record<string, unknown>; [key: string]: unknown } = {}) =>
+                    host.findEnvironmentRows(table, { ...opts, where: { ...opts.where, package_id: packageId } }),
+            });
+        } catch {
+            // `null` is the layer's own "read failed": the shipped half stands.
+            authored = null;
+        }
+        if (authored !== null) {
+            for (const [locale, data] of Object.entries(authored)) lay(locale, data);
+        }
+        return Object.keys(byLocale).length > 0 ? (byLocale as TranslationBundle) : undefined;
+    }
+
+    /**
      * The one body behind {@link getPackagedDashboardBase},
      * {@link getPackagedViewBase}, {@link getPackagedReportBase} and
      * [#30062] {@link getPackagedPageBase}, {@link getPackagedDatasetBase},
-     * {@link getPackagedAppBase} and {@link getPackagedBookBase}:
+     * {@link getPackagedAppBase}, {@link getPackagedBookBase} and
+     * {@link getPackagedMappingBase}:
      * {@link lookupArtifactItem}, and nothing wider, so only an item whose
      * `_packageId` marks a genuine code package answers, and an overlay
      * hydrated under the plain registry key never does.
@@ -1035,7 +1139,7 @@ export class ProtocolDiscoveryAndBasesFacet {
      * the packaged base is a registry lookup, so a degraded MetadataService
      * fails nothing here.
      */
-    static async restoreTranslatedObjectEchoes(host: Pick<ProtocolHost, 'getPackagedObjectBase' | 'registeredTranslationBundle'>, request: SaveMetaItemRequest,
+    static async restoreTranslatedObjectEchoes(host: Pick<ProtocolHost, 'getPackageTranslationBundle' | 'getPackagedFieldPatchBases' | 'getPackagedObjectBase' | 'registeredTranslationBundle'>, request: SaveMetaItemRequest,
             repo: SysMetadataRepository,
             ref: Parameters<SysMetadataRepository['get']>[0],
             mode: 'draft' | 'publish',): Promise<{ item: SaveMetaItemRequest['item']; restored: RestoredTranslatedSlot[] }> {
@@ -1060,10 +1164,21 @@ export class ProtocolDiscoveryAndBasesFacet {
                 packageId: request.packageId ?? null,
             },
         );
+        // [#33952] The read's `patchBundles` too: a slot a code package's
+        // `fieldPatches` wrote is served in that package's own translation, so
+        // the inverse translates with the same entries, read the way the REST
+        // exits read them (`patchTranslationBundlesOf`): one per patching
+        // package that carries a translation, highest precedence first.
+        const patchBundles: Array<{ patchedBase: unknown; bundle: TranslationBundle }> = [];
+        for (const entry of host.getPackagedFieldPatchBases(request.name)) {
+            const own = await host.getPackageTranslationBundle(entry.packageId);
+            if (own !== undefined) patchBundles.push({ patchedBase: entry.base, bundle: own });
+        }
         return restoreTranslatedEchoes(request.item, {
             source,
             bundle: host.registeredTranslationBundle(),
             packagedBase: packagedBase ?? undefined,
+            ...(patchBundles.length > 0 ? { patchBundles } : {}),
         });
     }
 
@@ -1121,13 +1236,24 @@ export class ProtocolDiscoveryAndBasesFacet {
             name: string,
             packageId: string | null,): Promise<unknown> {
         const pkg = packageId ?? undefined;
+        // [ADR-0150 D3/D5, red line 2] At a package address of a type the
+        // exact qualifier does not judge, the code layer is that package's
+        // own item or none, as the by-name read's code steps answer there
+        // ({@link serviceCopyOfAnotherPackage}, {@link registryAnswerAtAddress}):
+        // the service keeps such a type by name alone, and a package holding
+        // no item of the name read another package's first composite, so the
+        // save carried that package's credential forward.
+        const address = { type, name, ...(pkg !== undefined ? { packageId: pkg } : {}) };
+        const atAddress = pkg !== undefined && !isPackageScopedType(type);
         const fromService = await host.readItemFromMetadataService(type, name, pkg);
-        if (fromService.data !== undefined && fromService.data !== null) return fromService.data;
+        if (fromService.data !== undefined && fromService.data !== null
+            && !(atAddress && serviceCopyOfAnotherPackage(host, address, fromService.data))) return fromService.data;
         let item: unknown = host.lookupArtifactItem(type, name, pkg) ?? host.engine.registry.getItem(type, name, pkg);
         if (item === undefined) {
             const alt = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
             if (alt) item = host.engine.registry.getItem(alt, name, pkg);
         }
+        if (atAddress) item = registryAnswerAtAddress(host, address, item, undefined, () => true);
         if (item !== undefined && item !== null) return item;
         if (fromService.degraded) host.throwMetadataServiceUnavailable(fromService.errors);
         return undefined;

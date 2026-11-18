@@ -507,7 +507,10 @@ export function InboxPopover({
             <span
               key={totalBadge}
               data-testid="inbox-bell-badge"
-              className="absolute -top-0.5 -right-0.5 h-4 min-w-[16px] rounded-full bg-red-500 text-[10px] leading-4 text-white text-center px-1 motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:fade-in-0 motion-safe:duration-200"
+              // Below `md` the trigger is a 44 px target that fills the 48 px
+              // bar, so the badge sits inside it, on the glyph's corner, where
+              // the bar's edge cannot cut it (objectstack#34596).
+              className="absolute -top-0.5 -right-0.5 max-md:top-1 max-md:right-1 h-4 min-w-[16px] rounded-full bg-red-500 text-[10px] leading-4 text-white text-center px-1 motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:fade-in-0 motion-safe:duration-200"
             >
               {totalBadge > 9 ? '9+' : totalBadge}
             </span>

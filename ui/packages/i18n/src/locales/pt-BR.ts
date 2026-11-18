@@ -593,6 +593,7 @@ const pt = {
         "Esta visão está agrupada, mas sua fonte de dados não implementa queryGroupHeaders, portanto os grupos não podem ser contados. Remova o agrupamento para mostrar os registros.",
       needsWholeRows:
         "O agrupamento precisa de todos os registros, mas esta grade recebeu apenas uma página deles, portanto os grupos não podem ser contados. Entregue todos os registros ou deixe a grade buscá-los em uma fonte de dados que implemente queryGroupHeaders.",
+      draftOnly: "Não agrupado por {{fields}}: existe apenas no rascunho até você publicar.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -959,6 +960,8 @@ const pt = {
     removeGroup: "Remover",
     groupingUnstoredNotice: "Esta lista não pode ser agrupada por {{fields}}: o valor é calculado ao ser exibido e não é armazenado. A lista é exibida sem esse agrupamento.",
     groupingUnstoredRemove: "Remover do agrupamento",
+    draftOnlyQueryDropped: "Sem filtrar nem ordenar por {{fields}}: existe apenas no rascunho até você publicar.",
+    withheldFieldsLeftOut: "Sem exibir, filtrar, ordenar nem agrupar por {{fields}}: o pacote que o adiciona está desativado. Ele volta quando o pacote for ativado.",
     inlineEditShort: "Edição em linha",
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
   },
@@ -1418,6 +1421,8 @@ const pt = {
     writeStrippedUnknownReason: "Não aplicado pelo servidor: {{fields}}",
     approvalPendingEditable: "Em aprovação · editável",
     approvalPendingTooltip: "Este registro tem uma solicitação de aprovação pendente; esta etapa ainda permite a edição",
+    approvalPending: "Em aprovação",
+    approvalPendingNotEditableTooltip: "Este registro tem uma solicitação de aprovação pendente",
     approvalProgress: "Aprovações — {{got}} de {{need}}",
     approvalProgressGroups: "Assinaturas — {{got}} de {{need}} grupos",
     approvalProgressLabel: "Progresso da aprovação",
@@ -1637,6 +1642,9 @@ const pt = {
     },
     total: "Total",
     noDataSourceFor: "Sem fonte de dados para",
+    drillTooMany: 'Há registros demais relacionados a este valor para listá-los aqui. Restrinja os filtros do painel e tente novamente.',
+    drillUnavailable: 'Os registros deste valor não podem ser listados aqui.',
+    drillFailed: 'Não foi possível carregar os registros deste valor. Tente novamente mais tarde.',
     config: {
       breadcrumb: {
         dashboard: "Painel",
@@ -1976,6 +1984,18 @@ const pt = {
     },
     ai: {
       pendingDrafts: {
+        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
+        publishFromBar: '{{count}} alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        publishFromBar_one: '{{count}} alteração não publicada. Publique-a na barra do rascunho no topo.',
+        publishFromBar_many: '{{count}} de alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        publishFromBar_other: '{{count}} alterações não publicadas. Publique-as na barra do rascunho no topo.',
+        showDraftToPublish: '{{count}} alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraftToPublish_one: '{{count}} alteração não publicada. Mostre o rascunho para revisá-la e publicá-la.',
+        showDraftToPublish_many: '{{count}} de alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraftToPublish_other: '{{count}} alterações não publicadas. Mostre o rascunho para revisá-las e publicá-las.',
+        showDraft: 'Mostrar rascunho',
+        receipt: 'Publicado. Suas alterações estão no ar.',
+        dismissReceipt: 'Fechar',
         count: "{{count}} alteração(ões) ainda não publicada(s) — os usuários não conseguem vê-las.",
         publish: "Publicar",
         published: "Todas as alterações pendentes estão ativas.",
@@ -2221,7 +2241,7 @@ const pt = {
       changesApplied: "Aplicado",
       changesDrafted: "Salvo como rascunho",
       changesFailed: "Não aplicado",
-      discussing: "Discutindo: {{target}}",
+      discussing: "Vendo: {{target}}",
       changeVerb: {
         createObject: "Criar objeto",
         addField: "Adicionar campo",
@@ -2269,7 +2289,7 @@ const pt = {
       unavailableRetry: "Tentar novamente",
       unavailableHome: "Voltar ao início",
       dock: {
-        title: "Assistente",
+        title: "Assistente de IA",
         description: "Conversa com o assistente de IA",
         resize: "Redimensionar a conversa",
         collapse: "Recolher a conversa",
@@ -2382,6 +2402,7 @@ const pt = {
       view: "Ver",
       confirm: "Confirmar",
       cancel: "Cancelar",
+      continue: "Continuar",
       prefilled: "Os valores ainda não definidos foram sugeridos com base no seu navegador. Nada é salvo até você confirmar.",
       organizationName: {
         title: "Dê um nome à sua organização",
@@ -2568,8 +2589,16 @@ const pt = {
       },
       viewTypeTree: "Árvore",
       viewTypeTreeDesc: "Aninha registros autorreferenciados em uma hierarquia por um campo pai.",
+      viewTypeTimesheet: "Folha de horas",
+      viewTypeTimesheetDesc: "Informe um número por linha e dia da semana; cada célula preenchida é um registro.",
       parentField: "Campo pai",
       parentFieldHelp: "O campo que aponta para o registro pai (mesmo objeto) e define a hierarquia. Apenas campos autorreferenciados são válidos.",
+      timesheetRowField: "Campo de linha",
+      timesheetRowFieldHelp: "Cada linha da grade é um valor deste campo, como um projeto.",
+      timesheetDateField: "Campo de data",
+      timesheetDateFieldHelp: "Os registros são colocados no dia da semana desta data.",
+      timesheetValueField: "Campo de valor",
+      timesheetValueFieldHelp: "O número que cada célula mostra e edita, como horas.",
       viewName: "Nome",
       viewNameHelp: "Chave técnica (snake_case). Preenchida automaticamente a partir do título — edite se quiser.",
       viewNameRequired: "Informe uma chave (letras minúsculas, números, sublinhado). Não é preenchida automaticamente para títulos não latinos.",
@@ -2598,7 +2627,7 @@ const pt = {
       expandToPage: "Abrir como página inteira",
       openAsPage: "Abrir como página inteira",
       objectNotFound: "Objeto não encontrado",
-      objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe na configuração atual.",
+      objectNotFoundDescription: "O objeto \"{{objectName}}\" não existe ou você não tem acesso a ele.",
       objectNotFoundHint: "Verifique as configurações de navegação do seu aplicativo ou selecione um objeto diferente na barra lateral.",
       objectPackageDisabled: "O objeto \"{{objectName}}\" pertence a um pacote desativado e, por isso, não está sendo servido.",
       filterOrGroupNotEditable: "Este filtro tem um grupo OU ao lado de outras condições, que o editor de filtros não consegue exibir, por isso aqui é somente leitura. A visão continua aplicando o filtro.",
@@ -3001,6 +3030,10 @@ const pt = {
       missingToken: "Falta um token no link de verificação.",
       emailMissing: "Endereço de e-mail ausente",
       resendButton: "Reenviar e-mail de verificação",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "Seu endereço de e-mail ainda não foi verificado. Envie um link de verificação para {{email}} e depois clique no link para verificar sua conta.",
+      sendButton: "Enviar e-mail de verificação",
       resending: "Enviando…",
       resent: "E-mail enviado! Verifique sua caixa de entrada",
       resentSuccess: "E-mail de verificação enviado!",
@@ -3275,7 +3308,7 @@ const pt = {
     aiAssistant: "Assistente de IA",
     designInStudio: "Projetar no Studio",
     editApp: "Editar aplicativo",
-    openAppInStudio: "Ver aplicativo no Studio",
+    openAppInStudio: "Ver {{app}} no Studio",
   },
   home: {
     build: {
@@ -3470,7 +3503,6 @@ const pt = {
   },
   empty: {
     objectNotFound: "Objeto não encontrado",
-    objectNotFoundDescription: "A definição do objeto \"{{name}}\" está ausente. Verifique sua configuração ou navegue de volta.",
     interfacePageSourceMissing: "Esta página de interface faz referência a \"{{name}}\", que não está disponível.",
     pageNotFound: "Página não encontrada",
     pageNotFoundDescription: "A página \"{{name}}\" não foi encontrada. Ela pode ter sido removida ou renomeada.",
@@ -4679,6 +4711,11 @@ const pt = {
       pendingHere_one: 'Pré-visualização do rascunho · {{count}} alteração não publicada nesta página',
       pendingHere_many: 'Pré-visualização do rascunho · {{count}} de alterações não publicadas nesta página',
       pendingHere_other: 'Pré-visualização do rascunho · {{count}} alterações não publicadas nesta página',
+      // objectstack#34610 — the bar's count is the current app's (package's).
+      pendingInApp: 'Pré-visualização do rascunho · {{count}} alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_one: 'Pré-visualização do rascunho · {{count}} alteração não publicada neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_many: 'Pré-visualização do rascunho · {{count}} de alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
+      pendingInApp_other: 'Pré-visualização do rascunho · {{count}} alterações não publicadas neste app. Nada aqui está no ar até você publicar.',
     },
     changes: {
       title: 'Alterações pendentes',
@@ -4695,7 +4732,7 @@ const pt = {
       detailNone: 'Nenhuma diferença detectada — o rascunho corresponde à versão publicada.',
       fieldOrderChanged: 'Ordem dos campos alterada',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'Inclui alterações rascunhadas pelo copiloto de IA',
+      draftedByCopilot: 'Inclui alterações rascunhadas pelo assistente de IA',
       draftedByMcpClient: 'Inclui alterações rascunhadas pelo cliente MCP “{{client}}”',
       draftedByMcp: 'Inclui alterações rascunhadas por um cliente MCP',
       detailChangedKeys: 'Também alterado:',
@@ -4832,7 +4869,8 @@ const pt = {
       securityBlockTitle_one: 'A publicação será recusada — {{count}} item precisa de uma decisão primeiro',
       securityBlockTitle_many: 'A publicação será recusada — {{count}} de itens precisam de uma decisão primeiro',
       securityBlockTitle_other: 'A publicação será recusada — {{count}} itens precisam de uma decisão primeiro',
-      securityBlockWhere: 'Corrija no objeto em Configurações → Compartilhamento de registros e publique novamente.',
+      securityBlockWhere: 'Corrija no objeto em Configurações → Quem pode ver quais registros e publique novamente.',
+      flowChecksTitle: 'Antes de publicar: a verificação de publicação vai apontar o seguinte',
       securityRule: {
         owdUnset: 'Nenhuma base de compartilhamento de registros (sharingModel) foi declarada. O runtime usa private, mas a base precisa ser uma decisão explícita.',
         owdAlias: 'A base de compartilhamento de registros (sharingModel) não é um valor canônico, então o runtime trata o objeto como private.',
@@ -4843,6 +4881,8 @@ const pt = {
     // ADR-0045 — the materialized-but-unlisted app banner
     // (UnpublishedAppBar.tsx), sibling of draftBar above.
     unpublishedBar: {
+      // objectstack#34610 — the card's 「这个应用还没发布过」.
+      notPublishedYet: 'Este app ainda não foi publicado. Ele funciona, mas só os criadores podem vê-lo. Publique para que seus usuários o vejam.',
       message: 'App não publicado — totalmente funcional, mas somente os criadores o veem. Publique-o para que seus usuários o vejam.',
       publish: 'Publicar',
       publishing: 'Publicando…',

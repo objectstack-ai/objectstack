@@ -463,3 +463,65 @@ describe('[#22661] the related object\'s API exposure: the joined path answers i
     });
   }
 });
+
+describe('[#33876] a driver that compiles no semi-join (no readableIdsLeaf bit: MongoDB, OData) refuses the dimension up front', () => {
+  /** The driver's own capability record, re-declared on this instance only. */
+  const redeclare = (driver: SqliteWasmDriver, over: { name?: string; supports: Record<string, unknown> }) => {
+    Object.defineProperty(driver, 'supports', { value: over.supports, configurable: true });
+    if (over.name !== undefined) Object.defineProperty(driver, 'name', { value: over.name, configurable: true });
+  };
+  /** Every driver read, by verb and object. */
+  const recordReads = (driver: SqliteWasmDriver): string[] => {
+    const seen: string[] = [];
+    for (const verb of ['find', 'findOne', 'count', 'aggregate'] as const) {
+      const own = (driver as unknown as Record<string, (...a: unknown[]) => unknown>)[verb]!.bind(driver);
+      Object.defineProperty(driver, verb, {
+        value: (object: string, ...rest: unknown[]) => { seen.push(`${verb}:${object}`); return own(object, ...rest); },
+        configurable: true,
+      });
+    }
+    return seen;
+  };
+  const QUERY = { cube: dataset.name, dimensions: ['stage'], measures: ['line_count'] } as AnalyticsQuery;
+
+  it('without the bit: INVALID_QUERY / 400 naming the driver, the outcome is refused, and the driver is never asked — no FK-expand', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const { engine, driver } = await seeded();
+    try {
+      const { readableIdsLeaf: _dropped, ...rest } = driver.supports as Record<string, unknown>;
+      redeclare(driver, { name: 'com.objectstack.driver.mongodb', supports: rest });
+      const reads = recordReads(driver);
+      const outcomes: unknown[] = [];
+      const service = await pluginService(engine, true, outcomes);
+      const err = await service.query(QUERY, ADMIN_A).then(() => null, (e: Error & { code?: string; status?: number }) => e);
+      expect(envelopeOf(err)).toEqual({ code: 'INVALID_QUERY', status: 400 });
+      expect(err?.message).toContain("'com.objectstack.driver.mongodb'");
+      expect(outcomes).toHaveLength(1);
+      expect((outcomes[0] as { kind?: unknown }).kind).toBe('refused');
+      expect(reads, 'nothing was read: not the base aggregate, not the related object').toEqual([]);
+    } finally {
+      await driver.disconnect?.();
+      if (OLD_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = OLD_POSTURE;
+    }
+  });
+
+  it('CONTROL a driver that declares the bit but compiles no join (the Turso and in-memory shape) is declined, and the FK-expand serves the dimension', async () => {
+    process.env.OS_TENANCY_POSTURE = 'isolated';
+    const { engine, driver } = await seeded();
+    try {
+      redeclare(driver, { name: 'com.objectstack.driver.turso', supports: { ...(driver.supports as Record<string, unknown>), readableIdsLeaf: true } });
+      const outcomes: unknown[] = [];
+      const service = await pluginService(engine, true, outcomes);
+      const { rows } = await service.query(QUERY, ADMIN_A);
+      expect((outcomes[0] as { kind?: unknown }).kind).toBe('declined');
+      const reference = await (await pluginService(engine, false)).query(QUERY, ADMIN_A);
+      expect(sorted(rows)).toEqual(sorted(reference.rows));
+      expect(rows.length).toBeGreaterThan(0);
+    } finally {
+      await driver.disconnect?.();
+      if (OLD_POSTURE === undefined) delete process.env.OS_TENANCY_POSTURE;
+      else process.env.OS_TENANCY_POSTURE = OLD_POSTURE;
+    }
+  });
+});

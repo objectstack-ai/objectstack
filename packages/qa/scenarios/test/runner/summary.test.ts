@@ -95,6 +95,8 @@ interface RecordOpts {
   template?: { file: string; sha256: string };
   /** `ModeRun.template.source` of each template or ask mode. */
   source?: string;
+  /** The card file's sha256 the record stamps (`card`); absent: a record from before the stamp. */
+  cardSha256?: string;
 }
 
 function record(o: RecordOpts = {}) {
@@ -125,6 +127,7 @@ function record(o: RecordOpts = {}) {
       modes: modes.map((m) => ({ mode: m.mode, findings: [], ...(m.mode !== 'scratch' ? { template: { source: o.source ?? 'supplied template', install: { ok: true, status: 200 }, installModesSupplied: true } } : {}) })),
     },
     ...(o.template ? { template: o.template } : {}),
+    ...(o.cardSha256 ? { card: { id: card, sha256: o.cardSha256 } } : {}),
   };
 }
 
@@ -320,6 +323,47 @@ describe('summary — ⛔ never summed silently: runs a table does not tell apar
       'crm_account_with_contacts · ask · shown',
       'invoice_with_line_items · scratch · shown',
     ]);
+  });
+});
+
+describe('summary — the card file a run graded (`card`, its sha256) is a dimension: a changed card is never summed with the old one', () => {
+  const before = createHash('sha256').update('card before').digest('hex');
+  const after = createHash('sha256').update('card after').digest('hex');
+
+  it('two hashes refuse the table, naming each hash and the records that hold it', () => {
+    const dir = tmp();
+    const [a1, a2, b] = writeAll(dir, {
+      'a1.json': record({ cardSha256: before }),
+      'a2.json': record({ cardSha256: before }),
+      'b.json': record({ cardSha256: after }),
+    });
+    const c = capture();
+    expect(summaryMain([dir], c.io)).toBe(1);
+    const md = c.out.join('\n');
+    expect(md).toContain('## `crm_account_with_contacts` · scratch\n\nRefused:');
+    expect(md).toContain(
+      `- the runs differ in card: \`card: crm_account_with_contacts (sha256 ${before.slice(0, 12)})\` (\`${a1}\`, \`${a2}\`) vs \`card: crm_account_with_contacts (sha256 ${after.slice(0, 12)})\` (\`${b}\`)`,
+    );
+  });
+
+  it('a stamped record and one from before the stamp are refused too: nothing says they graded one card', () => {
+    const tables = summaryTables(readSummaryRecords(writeAll(tmp(), { 'old.json': record(), 'new.json': record({ cardSha256: after }) })).records);
+    expect(tables[0]!.refused).toEqual([
+      expect.stringMatching(new RegExp(`^the runs differ in card: \`card: not recorded\` \\(\`.*old\\.json\`\\) vs \`card: crm_account_with_contacts \\(sha256 ${after.slice(0, 12)}\\)\` \\(\`.*new\\.json\`\\)$`)),
+    ]);
+  });
+
+  it('one hash sums, and the dimensions line names it; unstamped records keep their line as before', () => {
+    const dir = tmp();
+    writeAll(dir, { 'a.json': record({ cardSha256: before }), 'b.json': record({ cardSha256: before }) });
+    const c = capture();
+    expect(summaryMain([dir], c.io)).toBe(0);
+    expect(c.out.join('\n')).toContain(` · card: crm_account_with_contacts (sha256 ${before.slice(0, 12)})\n`);
+    const old = capture();
+    const dir2 = tmp();
+    writeAll(dir2, { 'a.json': record(), 'b.json': record() });
+    expect(summaryMain([dir2], old.io)).toBe(0);
+    expect(old.out.join('\n')).not.toContain('card:');
   });
 });
 

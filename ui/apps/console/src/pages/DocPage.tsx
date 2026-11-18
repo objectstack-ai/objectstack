@@ -13,6 +13,7 @@ import { useAdapter } from '@object-ui/app-shell';
 import { MarkdownRenderer, extractToc } from '@object-ui/plugin-markdown';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { rewriteDocLinks } from './doc-links';
+import { conflictCandidates, readsByNameAfter } from './doc-address';
 import { DocShell } from './DocShell';
 import { BookSidebar } from './BookSidebar';
 import { DocRefusal } from './BookPage';
@@ -30,24 +31,6 @@ function scrollHeadingIntoView(id: string): boolean {
   const target = document.getElementById(id);
   target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   return target !== null;
-}
-
-/**
- * The packages a `409 RESOURCE_CONFLICT` doc read names as holders of the
- * name: `@objectstack/client` carries the refusal's `details.candidates` on the
- * rejection (`{ kind: 'package', packageId }` per package). Null for any other
- * failure, and for a refusal that names no package, so those keep their state.
- */
-function conflictCandidates(err: unknown): string[] | null {
-  const e = err as { httpStatus?: unknown; code?: unknown; details?: { candidates?: unknown } } | null;
-  if (e?.httpStatus !== 409 || e.code !== 'RESOURCE_CONFLICT') return null;
-  const candidates = e.details?.candidates;
-  if (!Array.isArray(candidates)) return null;
-  const packageIds = candidates
-    .filter((c): c is { kind: 'package'; packageId: string } =>
-      c?.kind === 'package' && typeof c.packageId === 'string' && c.packageId !== '')
-    .map((c) => c.packageId);
-  return packageIds.length > 0 ? packageIds : null;
 }
 
 /**
@@ -109,7 +92,24 @@ export default function DocPage() {
         // ADR-0048 — pass the route's package so the single-doc fetch is
         // package-scoped (prefer-local) on the server. With this, doc names
         // need not be globally namespace-prefixed; the prefix becomes optional.
-        const raw: any = await adapter.getClient().meta.getItem('doc', name, appName ? { packageId: appName } : undefined);
+        //
+        // An exact package address answers only that package's own doc
+        // (ADR-0150 D3/D5): where the route's package ships none of the name,
+        // a `409` whose candidates name the packages that do, the route's not
+        // among them (ruling 6917064203 on objectstack#34398), or `404` when
+        // none does. The route's segment is prefer-local context, never an
+        // exact address, so either answer falls back to the read by name, as
+        // the portal reads it: a cross-reference to another package's doc, and
+        // the app-name segment of a package that ships several apps (no
+        // package id at all), read the one holder, or list the holders below.
+        const client = adapter.getClient();
+        let raw: any;
+        try {
+          raw = await client.meta.getItem('doc', name, appName ? { packageId: appName } : undefined);
+        } catch (localErr) {
+          if (!appName || !readsByNameAfter(localErr, appName)) throw localErr;
+          raw = await client.meta.getItem('doc', name);
+        }
         const item = raw?.item ?? raw?.data ?? raw;
         if (cancelled) return;
         if (item && typeof item.content === 'string') {

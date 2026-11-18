@@ -215,6 +215,19 @@ function isAssociationName(name: string): boolean {
   return ASSOCIATION_TOKENS.some((t) => lc === t || lc.endsWith(`_${t}`) || lc.endsWith(`_${t}s`));
 }
 
+/**
+ * Is this relationship edited inline within its parent's form at all?
+ * `FieldSchema.inlineEdit` accepts `true` (auto-pick by child shape), `'grid'`
+ * and `'form'`, and every reader — the console's inline subforms, the spec's
+ * `isBodyTableRelationship` — treats all three as inline-edited; `false` and
+ * absent are not. The one copy of that question in this file, so no rule can
+ * read a single literal of the three.
+ */
+function isInlineEdited(def: { inlineEdit?: unknown } | null | undefined): boolean {
+  const inlineEdit = def?.inlineEdit;
+  return inlineEdit === true || inlineEdit === 'grid' || inlineEdit === 'form';
+}
+
 interface FieldEntry {
   name: string;
   def: any;
@@ -300,7 +313,7 @@ export function lintInlineEditBulk(objects: any[]): LocatedLintIssue[] {
     if (!child?.name) continue;
     for (const { name: fieldName, def } of fieldEntries(child.fields)) {
       if (!RELATIONSHIP_TYPES.has(def?.type)) continue;
-      if (def.inlineEdit !== true && def.inlineEdit !== 'grid' && def.inlineEdit !== 'form') continue;
+      if (!isInlineEdited(def)) continue;
       const parent = refOf(def);
       if (!parent) continue;
       for (const target of [parent, child.name]) {
@@ -1146,7 +1159,9 @@ export function lintDataModel(objects: any[]): LintIssue[] {
           });
         }
         // R5 — line-item children are usually entered inline with the parent.
-        if (isLineItemName(obj.name) && def.inlineEdit !== true) {
+        // Any inline-edit mode the author already chose (`true`, 'grid' or
+        // 'form') satisfies it; only an absent or `false` inlineEdit is nudged.
+        if (isLineItemName(obj.name) && !isInlineEdited(def)) {
           issues.push({
             severity: 'suggestion',
             rule: 'relationship/line-items-inline-edit',
@@ -1168,8 +1183,9 @@ export function lintDataModel(objects: any[]): LintIssue[] {
         });
       }
 
-      // R6 — associations should NOT be inlined into the parent's entry form.
-      if (def.inlineEdit === true && isAssociationName(obj.name)) {
+      // R6 — associations should NOT be inlined into the parent's entry form,
+      // in any inline-edit mode ('grid' and 'form' clutter it as `true` does).
+      if (isInlineEdited(def) && isAssociationName(obj.name)) {
         issues.push({
           severity: 'warning',
           rule: 'relationship/association-inline-edit',

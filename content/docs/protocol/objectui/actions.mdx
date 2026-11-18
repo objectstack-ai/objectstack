@@ -229,6 +229,7 @@ interface Action {
   operation?: 'update';         // Declarative single-record field write (rides the default script route)
   patch?: Record<string, unknown>; // Static field values for operation: 'update', merged under params
   body?: HookBody;              // Inline logic for type: 'script'
+  refusals?: Record<string, ActionRefusal>; // Codes the js body may throw, answered with a declared sentence in the caller's locale
   params?: ActionParam[];       // Inputs collected before execution
   submitText?: I18nLabel;       // The param dialog's submit button verb (default "Confirm")
   cancelText?: I18nLabel;       // The confirm or param dialog's dismiss button label (default "Cancel")
@@ -480,7 +481,7 @@ resultDialog:
     - { path: client.client_secret, label: Client Secret, format: secret }
 ```
 
-Each `fields[].path` is a dot path into `result.data`. The per-field `format` (`qrcode`, `code-list`, `secret`, `text`, `json`) controls rendering.
+Each `fields[].path` is a dot path into `result.data`. The per-field `format` (`qrcode`, `code-list`, `secret`, `text`, `json`, `table`) controls rendering. `table` draws an array as rows and requires `columns: [{ path, label?, format? }]`, one entry per cell, with `path` read in one element of the array; `columns` is refused beside any other format, and a cell takes any format but `table`.
 
 #### ⚠️ That `target` is not interchangeable with the SDK's registration door
 

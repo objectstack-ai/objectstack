@@ -67,6 +67,7 @@ import {
   GalleryConfigSchema as SpecGalleryConfigSchema,
   TimelineConfigSchema as SpecTimelineConfigSchema,
   TreeConfigSchema as SpecTreeConfigSchema,
+  TimesheetConfigSchema as SpecTimesheetConfigSchema,
   HttpMethodSubsetSchema as SpecHttpMethodSubsetSchema,
   HttpRequestSchema as SpecHttpRequestSchema,
   ViewDataSchema as SpecViewDataSchema,
@@ -140,6 +141,7 @@ import {
   navItemVisibleDataNeedsDataSource,
   checkListViewCalendarVisualization,
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
   checkPageSourceCompleteness,
   checkDashboardWidgetStageOrder,
   checkDashboardWidgetMetricMeasureArity,
@@ -258,6 +260,7 @@ const IMPORTED: Array<readonly [string, z.ZodType]> = [
   // objectui#11168 slice 3: `ObjectTreeSchema.tree` is the spec's tree block,
   // crossed through this boundary like the other view-config blocks above.
   ['TreeConfigSchema', SpecTreeConfigSchema],
+  ['TimesheetConfigSchema', SpecTimesheetConfigSchema],
   ['HttpMethodSubsetSchema', SpecHttpMethodSubsetSchema],
   ['HttpRequestSchema', SpecHttpRequestSchema],
   ['ViewDataSchema', SpecViewDataSchema],
@@ -755,6 +758,8 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // `ListViewSchema`, attached on the authored page `list-view` node's bag
       // (`ListViewPropsBag`), whose `type` is the spec's view kind.
       ['checkListViewChartBinding', checkListViewChartBinding],
+      // objectstack#34382: the timesheet-binding check, attached beside it on the same bag.
+      ['checkListViewTimesheetBinding', checkListViewTimesheetBinding],
       // objectstack#28450: the spec's `AppSchema.landing` check, re-attached on
       // `AppComponentSchema` under the objectui#7715 ruling.
       ['checkAppLandingItems', checkAppLandingItems],

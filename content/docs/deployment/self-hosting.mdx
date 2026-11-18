@@ -755,10 +755,50 @@ presents.** The sign-up sends the invitation's `id`, the last segment of its
 `/accept-invitation/` link, as `invitationId` beside the email: the Console's
 register page does this for an invitee who arrived from the link, and
 `os register --invitation` does it from a terminal. An address alone gets the
-same `403 SELF_REGISTRATION_CLOSED` as an address nobody invited. The link
-reaches the invitee in the invitation mail; on a deployment with no mail
-transport, an administrator hands it over with the invitation's **Copy Invite
-Link** action. The first account of a new deployment needs no invitation.
+same `403 SELF_REGISTRATION_CLOSED` as an address nobody invited. The first
+account of a new deployment needs no invitation. Admission is all the
+invitation's `id` grants: the account it admits joins no organization until it
+accepts the invitation, and accepting needs a verified address.
+
+**Under `email_domain`, an invitation admits an address off the allowlist, and
+grants nothing more.** A pending invitation addressed to an address outside
+the list admits that address's sign-up. Verification is forced on under this
+posture, and while the account's address is unverified it joins no
+organization: it joins by accepting the invitation once the address is
+verified, and the acceptance writes the membership the invitation names. Verifying the address binds nothing by itself.
+An address on the list is admitted by its domain, invitation or not, and the
+membership policy binds it at creation as before.
+
+**Accepting, declining and listing an invitation need a verified email
+address, on every deployment.** The invitation's `id`, which its link carries,
+proves nothing about the mailbox. From a session whose address is not
+verified, `POST /api/v1/auth/organization/accept-invitation` and
+`POST /api/v1/auth/organization/reject-invitation` answer `403
+EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION` and write
+nothing, and `GET /api/v1/auth/organization/list-user-invitations` answers `403
+EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION`. Reading one invitation by its id
+(`get-invitation`) stays open, so the accept page can show it. A password
+account verifies through the verification mail; an account a social or SSO
+sign-in made counts only when its provider verified the address. The Console's
+accept page sends an unverified person to the verification-mail screen, and
+the link in that mail brings them back to accept. A visitor who is not signed
+in and opens the link from the invitation mail itself needs no separate step:
+the accept page offers the one-step form, which verifies the address as it
+accepts. No setting relaxes this rule.
+
+**A deployment without a live mail transport cannot onboard a password
+account by invitation link.** With no transport configured, or the log
+transport, no verification mail and no invitation mail reaches anyone, so an
+invitee who signs up with a password cannot verify the address or accept; a
+link handed over with the invitation's **Copy Invite Link** action admits the
+sign-up and nothing more. The one exception is an invitee who signs in through
+a social or SSO provider that verifies the address: that account counts as
+verified, so it can accept a copied link without any mail. To bring anyone
+else in there, a platform administrator creates the account
+(`POST /api/v1/auth/admin/create-user`), or attaches an account that already
+exists with the member list's **Add Member** action. Add Member is open to
+platform administrators only, and it attaches existing accounts only: it
+creates no account and sends no invitation.
 
 **What decides it on `open` and `email_domain`.** A sign-up for an address that
 already has an account gets the same answer as a successful new sign-up, and
@@ -815,7 +855,7 @@ has a cost:
   `/api/v1/auth/config` reports `requireEmailVerification: false` — the value
   actually wired.
 - Anyone can register an address they do not control. An organization
-  invitation sent to that address can then be accepted by that account.
+  invitation sent to that address still waits for the address to be verified.
 - It is the deployment's to declare. A `false` stored only through the
   settings console is refused under `open`, and verification stays on.
 
