@@ -365,7 +365,9 @@ export interface DetailViewSection {
    * draws, in read-only mode, its heading plus ONE fold row that counts the
    * empty fields and reveals them on request — the same fold a partly-filled
    * section uses (ruling C on objectui#13386); in edit mode it draws every
-   * field as an editable row.
+   * field as an editable row. A `record:details` body first names every such
+   * section in the one line that closes it, and expanding that line draws them
+   * so (objectstack#35019); a `detail-view` body draws them in place.
    *
    * ## ⚠️ Omitting it does NOT mean the same thing on both consumers
    *

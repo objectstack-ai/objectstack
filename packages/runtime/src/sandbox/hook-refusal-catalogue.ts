@@ -36,7 +36,10 @@
  * refusal of a `ctx.api` write, a nested hook's refusal), the engine's own
  * error the runner relays as itself, a crash (`TypeError: …`) and the
  * sandbox's own faults (budget, capability) all pass through as before: they
- * are the platform speaking, or a bug, never a refusal the body chose.
+ * are the platform speaking, or a bug, never a refusal the body chose. An
+ * action's timeout and an action body that does not compile carry a caller
+ * sentence, so they pass by identity ({@link isRunnerOwnFault}), not by the
+ * missing `innerMessage` the other faults pass on.
  *
  * **Reasons and params (#33214, ruling 6879477573: S1 and params).** A code
  * may hold further declared sentences under `reasons`; a throw that names a
@@ -82,6 +85,7 @@ import {
   SandboxError,
   isHostRelayedSandboxError,
   isRelayedSandboxRefusal,
+  isRunnerOwnFault,
   sandboxRefusalAddressOf,
   type SandboxRefusalAddress,
 } from './quickjs-runner.js';
@@ -453,8 +457,12 @@ function resolveSandboxedRefusal(
   locale: unknown,
   opts: { i18n?: HookRefusalI18nSource; logger?: { warn?: (...args: any[]) => void } },
 ): unknown {
-  // Not the body's own throw: the engine's error relayed as itself, the
-  // sandbox's own fault, a host error re-thrown unchanged, a nested refusal.
+  // Not the body's own throw: the runner's own fault that carries a caller
+  // sentence (an action's timeout, an action body that does not compile; by
+  // identity, before any field is read, since a body can throw the same
+  // fields), the engine's error relayed as itself, the sandbox's own fault, a
+  // host error re-thrown unchanged, a nested refusal.
+  if (isRunnerOwnFault(err)) return err;
   if (!(err instanceof SandboxError) || err.innerMessage === undefined) return err;
   if (isHostRelayedSandboxError(err) || isRelayedSandboxRefusal(err)) return err;
   // A crash (`TypeError: …`) is a bug, not a refusal: it stays the fault it is.

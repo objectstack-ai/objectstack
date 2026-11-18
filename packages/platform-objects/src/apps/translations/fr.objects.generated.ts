@@ -240,6 +240,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Terminé",
           fields: {
             email: "E-mail",
+            pendingAgain: "Déjà en attente",
             notApplied: "Déjà en attente, donc non appliqué (à définir sur l'enregistrement)",
             managerError: "Responsable",
             "host.reason": "Invitation non envoyée"

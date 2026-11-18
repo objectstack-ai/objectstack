@@ -20,7 +20,9 @@ import * as React from 'react';
  * line naming the owner and the record id. A block drawn anywhere else — an
  * authored page, a dashboard, a standalone `DetailView` — keeps its own face,
  * because no metadata key says "v3": the face is the default page's, never an
- * author's choice (ADR-0085).
+ * author's choice (ADR-0085). The one exception is the empty-sections line:
+ * every `record:details` body draws it, authored page included
+ * (`EmptySectionsLineContext`, objectstack#35019).
  */
 export const DefaultRecordPageContext = React.createContext(false);
 
@@ -28,6 +30,22 @@ export const DefaultRecordPageContext = React.createContext(false);
 export function useDefaultRecordPage(): boolean {
   return React.useContext(DefaultRecordPageContext);
 }
+
+/**
+ * `true` around the `DetailView` a `record:details` node mounts: that body
+ * folds its entirely empty sections into one closing line
+ * (`EmptySectionsLine`), on an authored record page as on the synthesized
+ * default one (objectstack#35019).
+ *
+ * Module-internal on purpose, the way `RecordPageProvenanceContext` is: not
+ * re-exported from the package barrel, and neither a `DetailView` prop nor a
+ * `DetailViewSchema` key. How a details body folds its empty sections is the
+ * renderer's face, not something a page authors (ADR-0085). Everything else
+ * reads the default, `false` — the `detail-view` node, the record drawer and
+ * overlay panel, a direct React caller — and keeps the whole-body fold
+ * (`EmptySectionsFold`).
+ */
+export const EmptySectionsLineContext = React.createContext(false);
 
 /**
  * The most columns a frameless detail section may take on the page being

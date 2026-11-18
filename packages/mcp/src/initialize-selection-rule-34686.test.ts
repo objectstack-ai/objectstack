@@ -26,7 +26,7 @@ import {
   MCP_OAUTH_SCOPE_METADATA_WRITE,
   QUERY_DATASET_TOOL_NAME,
 } from '@objectstack/spec/ai';
-import { DATASET_NEXT_STEP_PRECEDENCE } from '@objectstack/service-analytics';
+import { DATASET_NEXT_STEP_PRECEDENCE, getDatasetToolDefinitions } from '@objectstack/service-analytics';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import type { McpAuthoringInjection } from './types.js';
@@ -244,5 +244,30 @@ describe('[#34919] initialize instructions — follow nextStep, cite sourceLine'
     expect(text).toContain('nextStep');
     expect(text).toContain('sourceLine');
     expect(text).toContain(DATASET_NEXT_STEP_PRECEDENCE.join(', '));
+  });
+});
+
+/**
+ * [#35005] The ask-back is owed only for a word with a measure among its
+ * candidates; a word whose candidates are all dimensions is at most a possible
+ * grouping. The rule states it in the same words as `list_datasets`' own
+ * description (the real one, read from the executor's package), so the two
+ * doors cannot drift apart.
+ */
+describe('[#35005] initialize instructions — the ask-back is scoped in the same words as list_datasets', () => {
+  const SCOPED =
+    'A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never '
+    + 'stops a matched measure.';
+
+  it('both doors carry the scoped sentence, and the question names a measure among the candidates', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge());
+    const list = getDatasetToolDefinitions().find((d) => d.name === LIST_DATASETS_TOOL_NAME)!;
+    expect(text).toContain(SCOPED);
+    expect(list.description).toContain(SCOPED);
+    expect(text).toContain('A word with no match and a measure among its candidates in the answer: ask the same way');
+    // The unscoped form is gone from both doors.
+    expect(text).not.toContain('A word with no match but with candidates in the answer');
+    expect(list.description).not.toContain('possible readings: ask the same way');
   });
 });

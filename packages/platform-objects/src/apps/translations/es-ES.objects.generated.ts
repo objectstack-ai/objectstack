@@ -240,6 +240,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Hecho",
           fields: {
             email: "Correo electrónico",
+            pendingAgain: "Ya pendiente",
             notApplied: "Ya estaba pendiente, así que no se aplicó (configúralo en el registro)",
             managerError: "Responsable",
             "host.reason": "Invitación no enviada"

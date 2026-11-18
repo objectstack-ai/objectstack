@@ -246,6 +246,7 @@ import { stripReadonlyFields, staticReadonlyInsertSubject } from './validation/r
 // and points at `ctx.previous` — the module owns the measurement and the
 // reason the explanation cannot be composed any further downstream.
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
+import { PLATFORM_SYSTEM_API } from './platform-system-api.js';
 import { DETACHED_HOOK_RUN, type UNIT_ROLLED_BACK, type UnitCommitQueue } from './unit-detach.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
@@ -5475,6 +5476,7 @@ export class ObjectQL implements IObjectQLEngine {
     objectName: string,
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
+    explicitTransaction?: unknown,
   ): void {
     // [#25522 cut 7] The body moved to `engine-execute-transactions.ts`, its docblock with it (see `ExecuteTransactionsHost`).
     const readTxStore = () => this.txStore;
@@ -5483,9 +5485,10 @@ export class ObjectQL implements IObjectQLEngine {
       get txStore() { return readTxStore(); },
       datasourceNameOf: (...a) => this.datasourceNameOf(...a),
       isSystemLedgerObject: (...a) => this.isSystemLedgerObject(...a),
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
       get logger() { return readLogger(); },
     };
-    return enforceTransactionOrigin.call(host, objectName, driver, operation);
+    return enforceTransactionOrigin.call(host, objectName, driver, operation, explicitTransaction);
   }
 
   // ============================================
@@ -6485,14 +6488,24 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   /**
    * Create an elevated (system) context.
    *
-   * [#25653] Platform code's `sudo()` carries no app-automation mark, so its
-   * writes to the four identity-assignment objects land. An app-authored
-   * hook's in-process `ctx.api.sudo()` is the hook's elevation: it carries
-   * the `'hook'` mark (unless the context already carries one).
+   * [#25653] Platform code's `sudo()` adds no app-automation mark but keeps
+   * one its context carries (a platform hook fired by an action body's write);
+   * the platform's own record of such a write uses {@link PLATFORM_SYSTEM_API}.
+   * An app-authored hook's in-process `ctx.api.sudo()` is the hook's
+   * elevation: it carries the `'hook'` mark unless the context carries one.
    */
   sudo(): ScopedContext {
     // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
     return ScopedContextFacet.sudo.call(scopedContextHost.of(this));
+  }
+
+  /**
+   * The platform's own system api; its contract, and where its guard stops, is
+   * `platform-system-api.ts`. Keyed on an unexported symbol: reached only
+   * through `platformSystemApi`.
+   */
+  [PLATFORM_SYSTEM_API](): ScopedContext {
+    return ScopedContextFacet.platformSystemApi.call(scopedContextHost.of(this));
   }
 
   /**
