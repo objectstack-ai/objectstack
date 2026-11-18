@@ -183,6 +183,20 @@ function renderShell(width: number) {
   );
 }
 
+/**
+ * Resize the window under a mounted shell. happy-dom's `MediaQueryList`
+ * starts tracking a query's changes at "no match", whatever the width, so a
+ * query that matches when the shell mounts (a narrow window's) reports no
+ * change on its first resize; a resize at the current width first sets it
+ * right.
+ */
+function resizeTo(width: number) {
+  act(() => {
+    window.dispatchEvent(new Event('resize'));
+    setViewportWidth(width);
+  });
+}
+
 /** A page load: the console layout primes the provider before it mounts. */
 function reload(width: number) {
   cleanup();
@@ -390,6 +404,34 @@ describe('the left edge floats the full menu over the content (objectstack#35062
 
     reload(1600);
     expectHidden();
+  });
+
+  it('a window that turns wide or narrow ends a float over a sidebar collapsed by hand, and it stays collapsed', () => {
+    writeWorkspacePreference(CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE, 'user', 'on');
+    renderShell(1280);
+    fireEvent.click(trigger());
+    fireEvent.click(edge()!);
+    expectFloat();
+    // Wide, with no wide-window choice kept yet: the float is not one.
+    resizeTo(1600);
+    expectHidden();
+    expect(readWideWindowOpen()).toBe(false);
+
+    fireEvent.click(edge()!);
+    expectFloat();
+    // Narrow and kept open: the fold stays off, and so does the float.
+    resizeTo(1280);
+    expectHidden();
+  });
+
+  it('a window that narrows past the fold width under a float folds the sidebar, hidden', () => {
+    renderShell(1600);
+    fireEvent.click(trigger());
+    fireEvent.click(edge()!);
+    expectFloat();
+    resizeTo(1280);
+    expectHidden();
+    expect(readWideWindowOpen()).toBe(false);
   });
 });
 

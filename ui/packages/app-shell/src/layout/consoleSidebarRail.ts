@@ -130,6 +130,10 @@ const WIDE_OPEN_KEY = 'os:console-sidebar:wide-open';
  */
 let floatHoldsWideWindowChoice = false;
 
+function holdWideWindowChoice(hold: boolean): void {
+  floatHoldsWideWindowChoice = hold;
+}
+
 /** The reader's wide-window choice, or `undefined` when none is kept. */
 export function readWideWindowOpen(): boolean | undefined {
   const storage = workspacePreferenceStorage();
@@ -340,13 +344,14 @@ type FloatOpener = 'hover' | 'press' | 'command';
  */
 type FloatCloser = 'outside' | 'escape' | 'navigate' | 'pointer' | 'away';
 
+/** The window a float over a collapsed sidebar floated on: at or past the fold width, or below it. */
+type FloatWidth = 'wide' | 'narrow';
+
 export interface ConsoleSidebarRailPanel {
   /** The primitive's collapse: hidden when the console's collapse is on, its icon rail otherwise. */
   collapsible: 'offcanvas' | 'icon';
   /** The menu floats over the content. */
   overlayOpen: boolean;
-  /** The sidebar's root (the primitive's `data-collapsible` element). */
-  sidebarRef: RefObject<HTMLDivElement | null>;
   /** The class of the `display: contents` frame around the sidebar. */
   frameClassName: string;
   /** Classes added to the sidebar panel. */
@@ -380,25 +385,32 @@ export interface ConsoleSidebarRailPanel {
  * been away from it for {@link SIDEBAR_FLOAT_CLOSE_DELAY_MS} (not while a menu
  * or dialog is open over the page); a navigation choice, a press outside it or
  * Esc folds any float. Focus inside a sidebar that hides goes back where it
- * came from, or to the trigger, unless a pointer folded it. Inside the sidebar
- * provider and a router.
+ * came from, or to the trigger, unless a pointer folded it. `sidebarRef` is
+ * the sidebar's root (the primitive's `data-collapsible` element). Inside the
+ * sidebar provider and a router.
  */
-export function useConsoleSidebarRailPanel(rail: ConsoleSidebarRail): ConsoleSidebarRailPanel {
+export function useConsoleSidebarRailPanel(
+  rail: ConsoleSidebarRail,
+  sidebarRef: RefObject<HTMLDivElement | null>,
+): ConsoleSidebarRailPanel {
   const { open, setOpen } = useSidebar();
   const { enabled, desktop, railMode, wide } = rail;
   const location = useLocation();
-  const sidebarRef = useRef<HTMLDivElement | null>(null);
 
-  // A float over a sidebar the reader collapsed; while folded, every open is one.
-  const [float, setFloat] = useState(false);
-  if (float && (!open || !desktop)) setFloat(false);
-  const overlayOpen = desktop && open && (railMode || float);
+  // A float over a sidebar the reader collapsed, by the window it floated on;
+  // while folded, every open is one. A window that turns wide or narrow ends
+  // it (below).
+  const width: FloatWidth = wide ? 'wide' : 'narrow';
+  const [floatOn, setFloatOn] = useState<FloatWidth | null>(null);
+  if (floatOn !== null && (!open || !desktop || floatOn !== width)) setFloatOn(null);
+  const overlayOpen = desktop && open && (railMode || floatOn === width);
   const hidden = desktop && !open;
 
   const setOpenRef = useRef(setOpen);
   const overlayOpenRef = useRef(overlayOpen);
   const hiddenRef = useRef(hidden);
   const railModeRef = useRef(railMode);
+  const widthRef = useRef(width);
   const openedBy = useRef<FloatOpener | null>(null);
   const closedBy = useRef<FloatCloser | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -415,6 +427,7 @@ export function useConsoleSidebarRailPanel(rail: ConsoleSidebarRail): ConsoleSid
     overlayOpenRef.current = overlayOpen;
     hiddenRef.current = hidden;
     railModeRef.current = railMode;
+    widthRef.current = width;
   });
 
   const close = useCallback((by: FloatCloser) => {
@@ -429,8 +442,8 @@ export function useConsoleSidebarRailPanel(rail: ConsoleSidebarRail): ConsoleSid
     openedBy.current = by;
     if (!railModeRef.current) {
       // The reader collapsed it: the open state is the float's, not the reader's.
-      floatHoldsWideWindowChoice = true;
-      setFloat(true);
+      holdWideWindowChoice(true);
+      setFloatOn(widthRef.current);
     }
     setOpenRef.current(true);
     // The provider's setter wrote its cookie open; the reader's state is still collapsed.
@@ -446,17 +459,18 @@ export function useConsoleSidebarRailPanel(rail: ConsoleSidebarRail): ConsoleSid
     close('navigate');
   }, [routeKey, close]);
 
-  // A window that turns wide or narrow under a float over a collapsed sidebar
-  // ends the float: a wide window gets the reader's wide-window choice
-  // (`useResponsiveSidebar`), a narrow one kept open stays collapsed.
-  const lastWide = useRef(wide);
+  // A float over a collapsed sidebar ended by the window, not by folding: it
+  // turned wide or narrow, or phone-sized. The sidebar is what the reader
+  // chose there: the wide-window choice on a wide window
+  // (`useResponsiveSidebar` reads it too), collapsed otherwise ("keep open"
+  // leaves the fold off on a narrow one).
+  const floatedOn = useRef<FloatWidth | null>(null);
   useLayoutEffect(() => {
-    if (lastWide.current === wide) return;
-    lastWide.current = wide;
-    if (!float) return;
-    setFloat(false);
-    if (!wide) setOpenRef.current(false);
-  }, [wide, float]);
+    const ended = floatedOn.current !== null && floatOn === null;
+    floatedOn.current = floatOn;
+    if (!ended || !open) return;
+    setOpenRef.current(width === 'wide' ? (readWideWindowOpen() ?? false) : false);
+  }, [floatOn, width, open]);
 
   // Focus: into a float the trigger or ⌘B opened; out of a sidebar that hides.
   const last = useRef({ open, overlayOpen, hidden });
@@ -495,18 +509,18 @@ export function useConsoleSidebarRailPanel(rail: ConsoleSidebarRail): ConsoleSid
     const byPointer = closer === 'pointer' || closer === 'away' || (closer === null && (by === 'hover' || by === 'press'));
     if (byPointer) active.blur();
     else (back?.isConnected ? back : sidebarTrigger())?.focus({ preventScroll: true });
-  }, [open, overlayOpen, hidden]);
+  }, [open, overlayOpen, hidden, sidebarRef]);
 
   // The float has folded: the reader's wide-window choice is kept again.
   useEffect(() => {
-    if (!overlayOpen) floatHoldsWideWindowChoice = false;
+    if (!overlayOpen) holdWideWindowChoice(false);
   }, [overlayOpen]);
 
   useEffect(
     () => () => {
       clearTimeout(openTimer.current);
       clearTimeout(closeTimer.current);
-      floatHoldsWideWindowChoice = false;
+      holdWideWindowChoice(false);
     },
     [],
   );
@@ -595,7 +609,6 @@ export function useConsoleSidebarRailPanel(rail: ConsoleSidebarRail): ConsoleSid
   return {
     collapsible: enabled ? 'offcanvas' : 'icon',
     overlayOpen,
-    sidebarRef,
     frameClassName: cn('contents', overlayOpen && RAIL_OVERLAY_FRAME_NO_GAP),
     panelClassName: overlayOpen ? RAIL_OVERLAY_PANEL : undefined,
     panelProps,

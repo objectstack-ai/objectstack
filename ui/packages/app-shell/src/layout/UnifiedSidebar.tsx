@@ -199,7 +199,8 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   // content (objectstack#35062); below the fold width it collapses on its own
   // (objectstack#27593), and `useResponsiveSidebar` folds and unfolds it.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
-  const railPanel = useConsoleSidebarRailPanel(rail);
+  const sidebarRef = React.useRef<HTMLDivElement | null>(null);
+  const railPanel = useConsoleSidebarRailPanel(rail, sidebarRef);
   const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
 
   // Swipe-from-left-edge gesture to open sidebar on mobile
@@ -620,7 +621,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   return (
     <div data-testid="console-sidebar-frame" className={railPanel.frameClassName}>
     <Sidebar
-      ref={railPanel.sidebarRef}
+      ref={sidebarRef}
       collapsible={railPanel.collapsible}
       className={cn(CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
       {...railPanel.panelProps}
