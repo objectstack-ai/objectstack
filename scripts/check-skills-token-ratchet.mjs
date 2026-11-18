@@ -1737,7 +1737,25 @@ export const CEILINGS = new Map([
   // read it. 6105 -> 5981 bytes (-124), less the 20-byte stamp line:
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(5961 / 4)
   // = 1491 (-31). Pinned AT the measurement, zero headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1491],
+  // 1491 -> 1740, the ask-skill iteration loop's first kept change set
+  // (Part of #34996), measured on the travel_expense ask round before it was
+  // kept: the description triggers on every question answered from the app's
+  // records ("so far", 「一共」); a term is the user's noun phrase kept whole; an
+  // asked-back reply states no figure of its own, quotes each description as
+  // written and asks only about the user's own words; step 4 declines a record kind no listed object shows instead of
+  // answering from a linked one. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST — two restatements cut from step 2's `candidates` row, each keeping
+  // its other home: ", and never treat a candidate as a match" (step 1's "A
+  // candidate is not a match.") and "Compute nothing yet." (the paragraph under
+  // the table: "no figure, and no tool call until the user answers"). Text
+  // +1057 bytes, cuts -61, the reviewed narrowing of the ask-back sentence +2
+  // (re-measured before it was kept): 5981 -> 6979 bytes, less the 20-byte
+  // stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6959 / 4)
+  // = 1740 (+249), the measured remainder only. Pinned AT the measurement, zero
+  // headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1740],
 ]);
 
 /**
