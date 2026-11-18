@@ -472,7 +472,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     },
     behavior: {
       label: '审批方式',
-      help: '多个审批人如何组合。任何一个拒绝在所有模式下都是否决。',
+      help: '多个审批人如何组合。任何一个驳回在所有模式下都是否决。',
       opts: {
         first_response: '首个响应生效',
         unanimous: '全员通过',
@@ -484,7 +484,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     lockRecord: { label: '锁定记录', help: '此节点待处理期间锁定触发记录,禁止编辑。' },
     approvalStatusField: {
       label: '状态字段',
-      help: '将请求状态(待审 / 通过 / 拒绝)镜像到的业务对象字段。应为只读。',
+      help: '将请求状态(待审 / 通过 / 驳回)镜像到的业务对象字段。应为只读。',
     },
     'escalation.enabled': { label: 'SLA 升级', help: '在超时内未做决策时升级。' },
     'escalation.timeoutHours': {
@@ -493,8 +493,8 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     },
     'escalation.action': {
       label: '超时动作',
-      help: '超过期限后怎么办:改派给其他人、自动通过、自动拒绝,或通知某人(默认)。',
-      opts: { notify: '通知', reassign: '改派', auto_approve: '自动通过', auto_reject: '自动拒绝' },
+      help: '超过期限后怎么办:改派给其他人、自动通过、自动驳回,或通知某人(默认)。',
+      opts: { notify: '通知', reassign: '改派', auto_approve: '自动通过', auto_reject: '自动驳回' },
     },
     'escalation.escalateTo': {
       label: '升级至',
@@ -504,7 +504,7 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     'escalation.notifySubmitter': { label: '通知提交人', help: '升级时通知提交请求的人。' },
     maxRevisions: {
       label: '最多退回次数',
-      help: '请求自动拒绝前的最多退回修订次数(0 表示禁用退回)。需要一条审批分支为「退回修改」的出边才生效。',
+      help: '请求自动驳回前的最多退回修订次数(0 表示禁用退回)。需要一条审批分支为「退回修改」的出边才生效。',
     },
     // objectstack#34818 — was English in the zh panel.
     onEmptyApprovers: {
