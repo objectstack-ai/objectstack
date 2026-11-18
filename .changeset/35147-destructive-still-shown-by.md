@@ -1,12 +1,13 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/metadata-protocol': patch
 ---
 
 feat(metadata-protocol): a refused field removal or type change names the views, forms and dashboard cards that still show the field
 
 Clause-②: yes (widening: the DESTRUCTIVE_CHANGE answer gains stillShownBy; a new exported operator-fit table)
-Metadata-protocol: none
+Metadata-protocol: added
+Skills-docs: none — no skill in `skills/**` teaches the `409 DESTRUCTIVE_CHANGE` save refusal or its `issues[]`. The finding's own message now names the items, so a client relaying it says them without being taught.
 
 The `409 DESTRUCTIVE_CHANGE` refusal of an `object` save said what data the change loses. It now also says what breaks on screen. Each `field_removed` finding carries `stillShownBy`: the views, forms, datasets, dashboards, pages, flows, reports and objects that still reference the field, at the positions that name it (`columns[1]`, `sections[0].fields[1]`, `widgets[3]` through a dataset). Each `field_type_change` finding carries the list-view filter rules whose operator the new type no longer fits, for example a `contains` filter on a field changed to `number`. The finding's message names the same items, so a door that relays only the message says it too. The save edits none of them.
 
