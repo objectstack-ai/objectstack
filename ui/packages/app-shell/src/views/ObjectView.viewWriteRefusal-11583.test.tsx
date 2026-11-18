@@ -197,6 +197,11 @@ function wire() {
       puts.push(path);
       return putAnswer();
     }
+    // objectstack#35054 — the panel edits the view as stored: its layered
+    // read answers the saved row (no translation in play), with no draft.
+    if (path.endsWith(`/meta/view/${SAVED_ID}/layers`)) {
+      return json({ code: null, overlay: SAVED_ROW, overlayScope: 'env', effective: SAVED_ROW, draft: null }, 200);
+    }
     // No draft is pending on any view: the bar's draft read answers 404.
     if (path.includes('/meta/view/')) return json({ success: false }, 404);
     if (path.endsWith('/meta/dataset')) return json([], 200);

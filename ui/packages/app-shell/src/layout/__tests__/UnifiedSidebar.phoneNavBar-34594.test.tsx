@@ -252,6 +252,66 @@ describe('the phone bottom menu bar (objectstack#34594)', () => {
   });
 });
 
+describe('the bar shows where the page in view lives: its cell, else More (objectstack#35020)', () => {
+  /** The bar's lit cells (entries, then More), as their labels read. */
+  function litCells(): string[] {
+    const bar = screen.getByTestId('phone-app-nav-bar');
+    return [
+      ...within(bar).queryAllByTestId('phone-app-nav-cell'),
+      within(bar).getByTestId('phone-app-nav-more'),
+    ]
+      .filter((cell) => cell.classList.contains('text-primary'))
+      .map((cell) => cell.textContent ?? '');
+  }
+
+  /** Opens the full menu and answers the labels of its selected rows. */
+  async function openMenuSelectedRows(): Promise<string[]> {
+    fireEvent.click(screen.getByTestId('phone-app-nav-more'));
+    const menu = await screen.findByRole('dialog');
+    return Array.from(menu.querySelectorAll('[data-sidebar="menu-button"][data-active="true"]')).map(
+      (row) => row.textContent ?? '',
+    );
+  }
+
+  it.each([
+    { setup: 'pins put the page\'s entry off the bar', pins: ['n_tasks', 'n_perf'], path: '/apps/sales/opportunity', row: 'Opportunities' },
+    { setup: 'nothing pinned, the page is the fifth entry', pins: [], path: '/apps/sales/task', row: 'My tasks' },
+  ])('a page whose entry is not one of the four lights More; the full menu selects its row ($setup)', async ({ pins, path, row }) => {
+    renderSidebar({ path, pins });
+    expect(barCells()).not.toContain(row);
+    expect(litCells()).toEqual(['More']);
+    const more = screen.getByTestId('phone-app-nav-more');
+    expect(more).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('phone-app-nav-bar').querySelector('[aria-current="page"]')).toBeNull();
+
+    expect(await openMenuSelectedRows()).toEqual([row]);
+    // Open, More is lit for the open menu, and it is still the one lit cell.
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(litCells()).toEqual(['More']);
+  });
+
+  it('a page whose entry is one of the four lights that cell, not More', async () => {
+    renderSidebar({ path: '/apps/sales/lead' });
+    expect(litCells()).toEqual(['Leads']);
+    const bar = screen.getByTestId('phone-app-nav-bar');
+    expect(within(bar).getByRole('link', { name: 'Leads' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('phone-app-nav-more')).not.toHaveAttribute('aria-current');
+
+    // Open, More is the one lit cell, and the full menu selects the same row.
+    expect(await openMenuSelectedRows()).toEqual(['Leads']);
+    expect(litCells()).toEqual(['More']);
+  });
+
+  it.each([
+    { setup: 'an entry the menu does not draw', path: '/apps/sales/secret' },
+    { setup: 'no entry at all', path: '/apps/sales/product' },
+  ])('CONTROL — a page that addresses $setup lights no cell, More included', ({ path }) => {
+    renderSidebar({ path });
+    expect(litCells()).toEqual([]);
+    expect(screen.getByTestId('phone-app-nav-bar').querySelector('[aria-current]')).toBeNull();
+  });
+});
+
 describe('phoneNavBarEntries (objectstack#34594)', () => {
   const always = () => true;
   const entries = (pins: string[], items: NavigationItem[] = NAV) =>

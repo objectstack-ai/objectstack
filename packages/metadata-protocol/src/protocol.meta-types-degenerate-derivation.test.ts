@@ -274,10 +274,13 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // shows before submit) joined the accepted set, and the sample names it.
         // [#34273] 53 → 54: `refusals` (the action body's declared refusal
         // catalogue) joined the accepted set, and the sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(54);
+        // [#34374, action half] 54 → 55: `texts` (the sentences the action's
+        // body writes into records, in the organization's language) joined
+        // the accepted set, and the sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(55);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides', 'preflight', 'refusals']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides', 'preflight', 'refusals', 'texts']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });

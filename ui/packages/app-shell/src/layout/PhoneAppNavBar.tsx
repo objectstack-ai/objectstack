@@ -17,7 +17,10 @@
  * sidebar's own (already pruned of entries the member may not read), walked by
  * `drawnNavigationEntries`, the sidebar's guard statement and order rule.
  * A cell opens what its drawer row opens (`resolveHref`), and lights when
- * that row lights (`resolveActiveNavItem`).
+ * that row lights (`resolveActiveNavItem`). When the row that lights is drawn
+ * in the full menu but holds no cell, 「More」 lights in its place
+ * (objectstack#35020): one cell at most is lit, and it is the way back to the
+ * page in view.
  *
  * The console layout decides where the bar is mounted: on a phone, inside an
  * app, never on a record page or a record form, whose bottom edge belongs to
@@ -129,9 +132,18 @@ export function PhoneAppNavBar({
   const entries = phoneNavBarEntries(items, pinnedIds, guards, hasAddress);
   // The row the drawer lights, elected over the whole tree as the drawer
   // elects it, so at most one cell lights and it is that row.
-  const activeId = menuOpen
-    ? null
-    : resolveActiveNavItem(items, location.pathname, location.search, basePath, templateContext)?.id ?? null;
+  const currentId =
+    resolveActiveNavItem(items, location.pathname, location.search, basePath, templateContext)?.id ?? null;
+  const activeId = menuOpen ? null : currentId;
+  // A row the full menu draws but no cell holds lights 「More」, the cell that
+  // opens it. A page no drawn row addresses lights nothing: 「More」 lit says
+  // the menu behind it has the page's row selected. While the menu is open,
+  // 「More」 is lit for the open menu and the bar marks no page.
+  const currentBehindMore =
+    currentId !== null &&
+    !entries.some((entry) => entry.id === currentId) &&
+    drawnNavigationEntries(items, guards).some((entry) => entry.id === currentId);
+  const moreMarksPage = !menuOpen && currentBehindMore;
   const moreLabel = t('common.more', { defaultValue: 'More' });
 
   return (
@@ -179,8 +191,11 @@ export function PhoneAppNavBar({
             onClick={onOpenMenu}
             aria-haspopup="dialog"
             aria-expanded={menuOpen}
+            // `true`, not `page`: the button is where the page in view lives,
+            // not a link to it.
+            aria-current={moreMarksPage ? 'true' : undefined}
             data-testid="phone-app-nav-more"
-            className={cn(CELL_CLASS, menuOpen ? 'text-primary' : 'text-muted-foreground')}
+            className={cn(CELL_CLASS, menuOpen || moreMarksPage ? 'text-primary' : 'text-muted-foreground')}
           >
             <MoreHorizontal className="h-5 w-5 shrink-0" aria-hidden />
             <span className="max-w-full truncate">{moreLabel}</span>
