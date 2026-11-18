@@ -1,0 +1,47 @@
+{
+  "skill_name": "objectstack-formula",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "In ObjectStack, write the CEL expression for a formula field that shows the days remaining until `close_date`.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Translate this Salesforce validation formula to ObjectStack: AND(ISPICKVAL(Stage, 'Closed Won'), ISBLANK(Contract_Signed_Date__c)).",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "How do I express \"the status has just changed to escalated\" as a condition in ObjectStack, so it holds once per change, on single and bulk updates alike?",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "An ObjectStack seed should set `due_date` to 14 days after the package is installed. What value do I write for it?",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "ObjectStack 里，`discount_reason` 字段只有在填了折扣金额时才显示，这个条件表达式怎么写？",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "Write an ObjectQL filter for tasks whose `due_at` is before now and whose status is not done, newest first.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "In Excel, write a formula that returns the number of working days between the dates in A2 and B2, skipping the holidays listed in H2:H20.",
+      "should_trigger": false,
+      "files": []
+    }
+  ]
+}
