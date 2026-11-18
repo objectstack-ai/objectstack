@@ -10,7 +10,7 @@ ObjectStack is measured by one road: a new AI developer, with a human accepting,
 from `npm create objectstack`, writes metadata, runs it locally, has verification reject
 what is wrong, publishes and installs it into an environment, connects an agent over MCP
 to complete one real business operation, and iterates once on a customer request. The
-road is walked every week; the first step that breaks is the current P0. Security and
+road is walked every week; the first step that breaks goes ahead of other work. Security and
 data integrity come first and do not wait for the road.
 
 ## Now
@@ -42,8 +42,8 @@ The first three steps of the road, where an application is written, run and chec
   restarts, bringing the customer's existing data in, and structural changes that a dev
   boot heals safely while production takes no liberties.
 
-The order above follows the table. Which step is P0 at any moment is decided by the
-weekly walk, not by this page.
+The grouping above follows the steps of the road, not an order of work. Which step is
+broken at any moment is decided by the weekly walk, not by this page.
 
 ## Commercial editions
 
@@ -53,7 +53,7 @@ framework. Their roadmap is published at [objectos.ai](https://objectos.ai), not
 ## Where the details live
 
 - **Open work:** [issues](https://github.com/objectstack-ai/objectstack/issues), filtered
-  by the `area:*` labels for one feature axis and by `priority:*` for order.
+  by the `area:*` labels for one product area and by `priority:*` for what jumps the queue.
 - **Release targets:** [milestones](https://github.com/objectstack-ai/objectstack/milestones)
   and the `target:*` labels.
 - **What has shipped:** each package's own `CHANGELOG.md`; for the view layer under `ui/`,
