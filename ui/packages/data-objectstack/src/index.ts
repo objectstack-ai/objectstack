@@ -94,6 +94,7 @@ import {
 import { MetadataCache } from './cache/MetadataCache';
 import { AppBundleStore, indexAppBundle, type AppBundleAnswer, type AppBundlePeek } from './app-bundle';
 import { MetadataClient } from './metadata-client';
+import { authoredPublished, type AuthoredLayers } from './authored-layers';
 import { formatMetadataError } from './metadata-error';
 import { getSharedDiscovery } from './sharedDiscovery';
 import {
@@ -6671,6 +6672,37 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       fetch: this.fetchImpl,
       ...(this.token ? { headers: { Authorization: `Bearer ${this.token}` } } : {}),
     });
+  }
+
+  /**
+   * The published item of `type`/`name` as its author stored it, or `null`
+   * when no layer holds one (objectstack#35054, route D).
+   *
+   * A writer that sends a whole document back through the metadata door must
+   * start from this, never from the served read (`meta.getItem`, the metadata
+   * list): the served read of a translatable type is translated for the
+   * console's locale, and the door stores a body verbatim, so a zh-CN round
+   * trip stored the translations as the item's source text. This reads the
+   * untranslated `/layers` and answers the published layer as authored
+   * ({@link authoredPublished}: an object's `overlay ?? code`, every other
+   * type's `effective ?? code`), the base every writer of the LIVE row edits.
+   * A draft writer starts from the layers' `draft` through `authoredBuffer`.
+   *
+   * `packageId` reads at that package (`?package=`), the address the write
+   * names. A refused read throws; nothing is guessed.
+   */
+  async getAuthoredItem(
+    type: string,
+    name: string,
+    options: { packageId?: string } = {},
+  ): Promise<Record<string, unknown> | null> {
+    const layers = await this.metadataClient().layered<Record<string, unknown>>(
+      type,
+      name,
+      options.packageId ? { packageId: options.packageId } : {},
+    );
+    const body = authoredPublished(type, layers as AuthoredLayers);
+    return Object.keys(body).length > 0 ? body : null;
   }
 
   /**
