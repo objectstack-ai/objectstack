@@ -66,7 +66,13 @@ import type { EffectivePreferences, EffectiveTopic } from './preference-resolver
  *
  * A source that cannot be read (the event table, the flow list, the
  * preference rows) is a fault: `500` / `INTERNAL_ERROR` with this door's
- * sentence, never a partial or "everything on" answer.
+ * sentence, never a partial or "everything on" answer. So is a preference
+ * read that answers more rows than `EFFECTIVE_PREFERENCES_READ_CAP`.
+ *
+ * A caller with no organization is answered from no row at all (the
+ * built-in defaults). There `emit`, which reads without the organization term
+ * when it has none, can decide otherwise: this door never reads across
+ * organizations (ADR-0131 D1).
  */
 
 /** The route the door is mounted at. */

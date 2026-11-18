@@ -80,6 +80,23 @@ export type DigestCadence = 'daily' | 'weekly';
  */
 export const EFFECTIVE_PREFERENCES_SYSTEM_CONTEXT = { isSystem: true } as const;
 
+/**
+ * The most rows one of {@link PreferenceResolver.effectiveFor}'s reads may
+ * answer. Each read is one person's rows, or the organization's default rows,
+ * so a real answer is far below it. A read that comes back with MORE is a
+ * fault, never a page: the rows past the cap could be the very rows that
+ * decide a cell (or the row id the page edits), and a short answer would be
+ * drawn as `default` / `builtin` and invite a duplicate row.
+ */
+export const EFFECTIVE_PREFERENCES_READ_CAP = 10000;
+
+/**
+ * The stored spellings of the admin-global default's empty `user_id` that an
+ * equality read can name — `null` and `''` (see {@link isGlobalDefaultUser};
+ * `undefined` is never stored).
+ */
+const GLOBAL_DEFAULT_USER_SPELLINGS: readonly (string | null)[] = [null, ''];
+
 /** The topic / channel wildcard. ⛔ Not a user: see {@link GLOBAL_USER}. */
 const WILDCARD = '*';
 
@@ -280,13 +297,18 @@ export class PreferenceResolver {
      * person's general ones: the channel-wildcard lookup {@link filter} runs,
      * for the `*` topic.
      *
-     * ⚠️ The rows are read under the fan-out's system opt-in, as
-     * {@link filter} reads them: they include other people's rows, which are
-     * dropped here and never leave this method. What leaves is the computed
-     * answer for `userId`, plus the ids of `userId`'s OWN rows (`ownRowId`,
-     * the rows the person edits). No organization ⇒ no row is read: every
-     * stored row carries one (ADR-0131 D1), and a read without the term would
-     * cross organizations.
+     * ⚠️ The rows are read under the system opt-in, and only the rows the
+     * answer needs: the person's own and the organization's default, each by
+     * equality on `user_id` under the `organization_id` term (one read for
+     * `userId`, one per stored spelling of the empty default reference — the
+     * equality shape {@link loadRows} uses, so no driver needs IN). No other
+     * person's row is read. What leaves is the computed answer for `userId`,
+     * plus the ids of `userId`'s OWN rows (`ownRowId`, the rows the person
+     * edits). A read that answers more than
+     * {@link EFFECTIVE_PREFERENCES_READ_CAP} rows rejects (a fault, never a
+     * partial answer). No organization ⇒ no row is read: every stored row
+     * carries one (ADR-0131 D1), and a read without the term would cross
+     * organizations.
      *
      * Unlike {@link filter} this does not fail open: a read that fails
      * rejects, and the door answers the fault — a page must never draw
@@ -299,13 +321,28 @@ export class PreferenceResolver {
         channels: readonly string[],
     ): Promise<EffectivePreferences> {
         const data = this.opts.getData();
-        const rows = data && organizationId
-            ? ((await data.find(
-                this.objectName,
-                { where: { organization_id: organizationId }, limit: 10000 },
-                { context: EFFECTIVE_PREFERENCES_SYSTEM_CONTEXT },
-            )) ?? [])
-            : [];
+        const rows: Record<string, unknown>[] = [];
+        if (data && organizationId) {
+            const reads = await Promise.all(
+                [userId, ...GLOBAL_DEFAULT_USER_SPELLINGS].map((user) =>
+                    data.find(
+                        this.objectName,
+                        { where: { organization_id: organizationId, user_id: user }, limit: EFFECTIVE_PREFERENCES_READ_CAP + 1 },
+                        { context: EFFECTIVE_PREFERENCES_SYSTEM_CONTEXT },
+                    ),
+                ),
+            );
+            for (const read of reads) {
+                const found = (read ?? []) as Record<string, unknown>[];
+                if (found.length > EFFECTIVE_PREFERENCES_READ_CAP) {
+                    throw new Error(
+                        `${this.objectName} answered more than ${EFFECTIVE_PREFERENCES_READ_CAP} rows for one person or for the default; ` +
+                            'refusing to compute a partial answer.',
+                    );
+                }
+                rows.push(...found);
+            }
+        }
         const index = indexRows(rows, new Set([userId]));
         // The person's own rows name topics and channels too: a topic only
         // they ever muted, a channel id a plugin no longer registers. Each is

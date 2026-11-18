@@ -28,6 +28,7 @@ import { ApiErrorSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { MY_PREFERENCES_ROUTE, registerMyPreferencesRoutes } from './my-preferences-routes.js';
 import { MessagingService } from './messaging-service.js';
+import { EFFECTIVE_PREFERENCES_READ_CAP } from './preference-resolver.js';
 import { NotificationPreference } from './objects/notification-preference.object.js';
 import type { MessagingChannel } from './channel.js';
 
@@ -78,6 +79,12 @@ async function boot(): Promise<ObjectQL> {
 /** A preference row stored in `organization`, as the Setup grid or the person writes it. */
 async function pref(ql: ObjectQL, organization: string, row: Record<string, unknown>): Promise<string> {
     return String((await ql.insert('sys_notification_preference', row, sys(organization))).id);
+}
+
+/** `count` rows of `user`'s in `organization`, one per topic `bulk.N`, written in chunks the driver can bind. */
+async function bulk(ql: ObjectQL, organization: string, user: string, count: number): Promise<void> {
+    const rows = Array.from({ length: count }, (_, i) => ({ user_id: user, topic: `bulk.${i}`, channel: 'inbox', enabled: false }));
+    for (let i = 0; i < rows.length; i += 500) await ql.insert('sys_notification_preference', rows.slice(i, i + 500), sys(organization));
 }
 
 function channel(id: string): MessagingChannel {
@@ -282,11 +289,30 @@ describe('the caller\'s own preferences door — the effective matrix', () => {
         expect(cellOf(data, 'approval.requested', 'inbox')).toEqual({ channel: 'inbox', enabled: true, source: 'builtin' });
         expect(cellOf(data, 'approval.requested', 'email')).toEqual({ channel: 'email', enabled: true, source: 'builtin' });
         expect(data.general.digest).toEqual({ value: 'none', source: 'builtin' });
-        // The read was the caller's organization's, by its term.
+        // Only what the answer needs is read, by equality under the caller's
+        // organization term: her own rows and the default's (both stored
+        // spellings of the empty reference). No other person's row is read.
         const prefReads = d.find.mock.calls.filter((c) => c[0] === 'sys_notification_preference');
-        expect(prefReads.length).toBe(1);
-        expect((prefReads[0][1] as any).where).toEqual({ organization_id: 'org_a' });
+        expect(prefReads.map((c) => (c[1] as any).where)).toEqual([
+            { organization_id: 'org_a', user_id: ALICE },
+            { organization_id: 'org_a', user_id: null },
+            { organization_id: 'org_a', user_id: '' },
+        ]);
     });
+
+    it("an organization with more rows than one read's cap still answers the caller's own row, with its id", async () => {
+        const ql = await boot();
+        // Bob alone holds more rows than a read may answer; Alice's row is written last.
+        await bulk(ql, 'org_a', BOB, EFFECTIVE_PREFERENCES_READ_CAP + 1);
+        await pref(ql, 'org_a', { topic: 'approval.requested', channel: 'email', enabled: false });
+        const alices = await pref(ql, 'org_a', { user_id: ALICE, topic: 'approval.requested', channel: 'inbox', enabled: false });
+        const answer = await door(ql).call({ bearer: 'alice' });
+        expect(answer.status).toBe(200);
+        const data = answer.body.data;
+        expect(cellOf(data, 'approval.requested', 'inbox')).toEqual({ channel: 'inbox', enabled: false, source: 'own', ownRowId: alices });
+        expect(cellOf(data, 'approval.requested', 'email')).toEqual({ channel: 'email', enabled: false, source: 'default' });
+        expect(JSON.stringify(data)).not.toContain('bulk.');
+    }, 120_000);
 
     it('a caller with no organization reads no preference row, and is answered the built-in defaults', async () => {
         const ql = await boot();
@@ -329,6 +355,16 @@ describe('the caller\'s own preferences door — refusals, before anything is re
         expect(answer.body.data).toBeUndefined();
         error.mockRestore();
     });
+
+    it("answers a read past the cap 500 INTERNAL_ERROR, never a partial matrix: the caller's own rows exceed it", async () => {
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+        const ql = await boot();
+        await bulk(ql, 'org_a', ALICE, EFFECTIVE_PREFERENCES_READ_CAP + 1);
+        const answer = await door(ql).call({ bearer: 'alice' });
+        expect(envelope(answer)).toEqual(['INTERNAL_ERROR', 500]);
+        expect(answer.body.data).toBeUndefined();
+        error.mockRestore();
+    }, 120_000);
 
     it('answers a preference read that fails 500 INTERNAL_ERROR: the matrix never fails open', async () => {
         const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);

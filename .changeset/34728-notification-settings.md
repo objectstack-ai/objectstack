@@ -18,8 +18,10 @@ The Account app has a new **Notification Settings** page, under Inbox and only w
   - a held sign-in gets `403`;
   - a source it cannot read is `500` / `INTERNAL_ERROR`, never a partial or "everything on" answer.
 
+  The door reads only what the answer needs: the caller's own rows and the organization's default rows, each by equality on `user_id` within the caller's organization. A read that comes back with more rows than its cap is a fault (`500`), never a page.
+
   The organization's defaults appear only as `source: 'default'` on the caller's own cells. No other person's row, and no row id except the caller's own, is ever answered.
-- **The writes: your own `sys_notification_preference` rows, through the data door, as you.** `member_default` now grants ordinary members (`positions: ['org_member']`) read, create and edit on the object, with no delete. The policy has two parts:
+- **The writes: your own `sys_notification_preference` rows, through the data door, as you.** `member_default` now carries a grant of read, create and edit on the object, with no delete, and a row policy for ordinary members (`positions: ['org_member']`) with two parts:
   - the row scope is `user_id == current_user.id`;
   - the write check is the same expression, so the row as written must still be your own.
 
