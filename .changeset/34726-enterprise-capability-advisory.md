@@ -4,7 +4,7 @@
 
 feat(cli): `os validate`, `os verify` and `os serve` name a declared enterprise or cloud capability that no provider enforces
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 A stack that declares `requires: ['hierarchy-security']` and runs without the enterprise provider wired into `plugins[]` gets owner-only hierarchy scopes (`own_and_reports`, `unit`, `unit_and_below`), and before this nothing said so past `os validate`'s install hint.
