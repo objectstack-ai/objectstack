@@ -443,12 +443,15 @@ export interface EvaluateRulesOptions {
    * while the user edits (a create form has none), so a write that changes a
    * formula's inputs can be judged on a value the form never showed.
    * `unservable` names, with the reason, each formula whose read value the
-   * write path cannot know (a hop, `label()`, `can` with no map, or a formula
-   * reading one); a formula that faults for a reason a read shares is `null`
-   * in the record, as a read serves it. Absent: a predicate that reads a
-   * formula field cannot be evaluated, and counts as shown.
+   * write path cannot know (a hop, `label()`, `can` with no map, a read of the
+   * acting user on a write with none, or a formula reading one);
+   * `noActingUser` names those unservable for the missing acting user alone,
+   * which the verdict logs as `no-acting-user`. A formula that faults for a
+   * reason a read shares is `null` in the record, as a read serves it. Absent:
+   * a predicate that reads a formula field cannot be evaluated, and counts as
+   * shown.
    */
-  formulaValues?: (record: Record<string, unknown>) => { record: Record<string, unknown>; unservable: ReadonlyMap<string, string> };
+  formulaValues?: (record: Record<string, unknown>) => { record: Record<string, unknown>; unservable: ReadonlyMap<string, string>; noActingUser?: ReadonlySet<string> };
   /**
    * [#4977] The master-detail header this write's field `requiredWhen`
    * predicates read as `parent` — the SAME binding, resolved by the SAME engine
@@ -3120,7 +3123,7 @@ const userRootCache = new Map<string, boolean>();
  * anything this reader cannot see is a predicate the evaluator could not have
  * run either, on any write, and it should be said loudly.
  */
-function readsUserRoot(cond: string | Expression): boolean {
+export function readsUserRoot(cond: string | Expression): boolean {
   const expr = toExpression(cond);
   if (expr.dialect !== 'cel') return false;
   const source = typeof expr.source === 'string' ? expr.source : '';
@@ -3601,13 +3604,15 @@ function formulaReadsOf(pred: string | Expression, fields: Record<string, Condit
  *   through a reference, a root this write does not bind, a system write with
  *   no acting user under a `current_user` predicate, a `formula` field whose
  *   read value the write path cannot know, itself or through the formulas it
- *   reads): it COUNTS AS SHOWN, and
+ *   reads — a formula reading the acting user on a system write among them):
+ *   it COUNTS AS SHOWN, and
  *   the field falls back to exactly the unconditional `required` it carried
  *   before this amendment — an insert must provide it, an update may not clear
  *   it. Never the `requiredWhen` fault arm (ADR-0137 D2 refuses the write):
  *   a fault here costs the waiver, not the write. Logged at `warn`, naming the
  *   field and the fault, so the operator sees the waiver that did not happen
- *   (ADR-0137 D4).
+ *   (ADR-0137 D4); a system write, directly or through a formula, is logged
+ *   with `reason: 'no-acting-user'`.
  *
  * The scope is the one the client's form binds for a field predicate, as far as
  * the server can bind it: `record` (the merged record), `previous`, the acting
@@ -3648,7 +3653,7 @@ function evaluateRequiredWhenShown(
     record: Record<string, unknown>,
     prior: PreviousBinding,
     extra: Record<string, unknown> | undefined,
-  ): { verdict: ShownVerdict; error?: { kind: string; message: string } } => {
+  ): { verdict: ShownVerdict; error?: { kind: string; message: string }; noActingUser?: boolean } => {
     // A `formula` field is not on the write path: judge the predicate on the
     // computed value. A formula whose read value this path cannot know, itself
     // or through the formulas it reads, is a fault; one that faults for a
@@ -3661,7 +3666,13 @@ function evaluateRequiredWhenShown(
       const now = opts.formulaValues(record);
       const blocked = formulas.filter((f) => now.unservable.has(f));
       if (blocked.length > 0) {
-        return { verdict: 'fault', error: { kind: 'formula', message: `reads the formula field ${blocked.map((f) => `'${f}', which ${now.unservable.get(f)}`).join('; and ')}` } };
+        return {
+          verdict: 'fault',
+          error: { kind: 'formula', message: `reads the formula field ${blocked.map((f) => `'${f}', which ${now.unservable.get(f)}`).join('; and ')}` },
+          // Every blocked formula is so for the missing acting user alone: the
+          // `no-acting-user` arm, as for the direct `current_user` spelling.
+          noActingUser: blocked.every((f) => now.noActingUser?.has(f) === true),
+        };
       }
       record = now.record;
       prior = prior ? opts.formulaValues(prior).record as PreviousBinding : prior;
@@ -3683,10 +3694,11 @@ function evaluateRequiredWhenShown(
     const now = verdictOn(pred, merged, previous, parentExtra);
     if (now.verdict === 'hidden') continue;
     if (now.verdict === 'fault') {
-      const noActingUser = user === undefined && readsUserRoot(pred);
+      const viaFormula = now.noActingUser === true;
+      const noActingUser = viaFormula || (user === undefined && readsUserRoot(pred));
       opts.logger?.warn?.(
         `visibleWhen of required field '${name}' could not be evaluated `
-          + `(${noActingUser ? 'no acting user to bind current_user (system write)' : `${now.error!.kind}: ${String(now.error!.message).split('\n')[0]}`})`
+          + `(${noActingUser && !viaFormula ? 'no acting user to bind current_user (system write)' : `${now.error!.kind}: ${String(now.error!.message).split('\n')[0]}`})`
           + ' — counted as shown, so the field stays required on this write',
         { field: name, reason: noActingUser ? 'no-acting-user' : 'predicate-fault', error: now.error },
       );

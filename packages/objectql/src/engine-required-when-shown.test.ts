@@ -24,6 +24,9 @@
 //      judged per writer, and a system write with no user counts as shown;
 //  (e) the dry run agrees, and a plain `required` with no `visibleWhen` is
 //      untouched (no prior read, D1's over-approximation kept).
+//  (i) a `formula` the predicate reads that reads the acting user is computed
+//      per writer, and on a write with no acting user it counts as shown and
+//      is logged `no-acting-user`, as the direct spelling is.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
@@ -238,6 +241,17 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
         // computes it for the reader; a write with no acting user cannot.
         is_admin: { type: 'formula', expression: "'org_admin' in current_user.positions", returnType: 'boolean' },
         admin_note: { type: 'text', required: true, visibleWhen: 'record.is_admin' },
+      },
+    } as any, 'test-package');
+    engine.registry.registerObject({
+      name: 'rws_formula_user_chain',
+      fields: {
+        title: { type: 'text' },
+        is_admin: { type: 'formula', expression: "'org_admin' in current_user.positions", returnType: 'boolean' },
+        // A formula over that formula: it computes cleanly over the null the
+        // missing user leaves, so it alone looks computable.
+        needs_audit: { type: 'formula', expression: 'record.is_admin == true', returnType: 'boolean' },
+        audit_note: { type: 'text', required: true, visibleWhen: 'record.needs_audit' },
       },
     } as any, 'test-package');
     engine.registry.registerObject({
@@ -503,6 +517,16 @@ describe('ADR-0113 D1 (amended) — `required` + `visibleWhen` is required when 
       const err = await refusalOf(() => engine.insert('rws_formula_user', { title: 'Q3' }, ADMIN));
       expectRequired(err, 'admin_note');
       expect(rows('rws_formula_user')).toHaveLength(0);
+    });
+
+    it('…through a formula that reads it, at any depth: refused, and logged as `no-acting-user` naming the chain', async () => {
+      const err = await refusalOf(() => engine.insert('rws_formula_user_chain', { title: 'Q3' }));
+      expectRequired(err, 'audit_note');
+      expect(rows('rws_formula_user_chain')).toHaveLength(0);
+      const warn = logger.lines.find((l: any) => l.level === 'warn' && /audit_note/.test(l.msg) && /counted as shown/.test(l.msg));
+      expect(warn?.msg).toMatch(/'needs_audit'/);
+      expect(warn?.msg).toMatch(/'is_admin'/);
+      expect(warn?.meta).toMatchObject({ field: 'audit_note', reason: 'no-acting-user' });
     });
 
     it('the writer it is hidden from saves without it, nothing logged', async () => {
