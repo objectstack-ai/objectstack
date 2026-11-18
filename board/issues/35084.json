@@ -13,18 +13,18 @@
   "labels": [
     "domain:server",
     "finding",
-    "pm:queue",
-    "priority:p2"
+    "pm:blocked",
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T02:04:12Z",
-  "updated_at": "2026-11-18T02:05:25Z",
+  "updated_at": "2026-11-18T06:26:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35084",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-A, mailbox #32588, 6966778124), from #34973 / PR #35076.\n\n## What happens\nPR #35076 converges legacy `'true'` / `'false'` text in SQLite boolean columns inside driver-sql's `initObjects`. In remote mode, `TursoDriver` runs `initObjects` itself (`turso-driver.ts:1106`), so the new step **never runs there**. Remote boolean columns are `INTEGER` (`remote-transport.ts:2944`), and `INTEGER` affinity can also hold that text.\n\nThe temporal and JSON backfills each needed a remote twin; nobody has measured whether this one does.\n\n## Done when\nA reading on a remote Turso database shows whether legacy boolean text exists and is mis-filtered (`= false` missing rows). If it is, add the remote twin of the backfill, with a pin. If not, record the evidence and close.\n\nGrade: **p2 · domain:server**, reading first. Theme: install, upgrade and uninstall reliability (an upgrade backfill), in the #34973 family (p1). Raise it to **p1** if a real remote tenant shows mis-filtered rows. That matters for hosted, which runs remote Turso."

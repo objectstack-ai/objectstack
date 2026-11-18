@@ -13,7 +13,7 @@
   "labels": [
     "domain:server",
     "pm:dispatched",
-    "priority:p1",
+    "priority:p2",
     "security"
   ],
   "assignees": [
@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T07:13:52Z",
-  "updated_at": "2026-11-17T16:02:42Z",
+  "updated_at": "2026-11-18T05:16:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34700",
   "body": "## What (18.5.0, app project with the three-officer split: system admin, security admin, auditor)\n\n1. **The auditor cannot search the audit log.** The auditor opens 诊断 → 审计日志 and the list loads. Typing in the list's search box turns the whole list into 「无权访问」. Column filters still work, so the read grant is fine: the search path asks for something the auditor does not hold, probably a full-text search over fields or a related object.\n2. **The security admin is shown controls they may not use.** The security admin's permission-set page lists all 22 sets, including `admin_full_access` and the officer sets, and offers 添加用户 / 移除 on each. Adding a user to an officer set is correctly refused server-side, but with the English `Outside your delegated scope…` (see the companion i18n card). We did not measure whether 移除 on such a set is refused too. That needs checking: a security admin removing the system administrator's or the auditor's set would break the separation of duties.\n\n## Expected\n\n- The auditor's list search works within the auditor's grant, or the search box is hidden for them, rather than replacing the list with 「无权访问」.\n- Sets outside the security admin's delegated scope are hidden, or shown read-only without 添加用户 / 移除.\n- 移除 on an out-of-scope set is refused server-side, and a test pins it."

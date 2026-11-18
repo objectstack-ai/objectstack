@@ -1,0 +1,33 @@
+{
+  "number": 35142,
+  "kind": "issue",
+  "title": "18.6.0 regression: the loser of two concurrent updates on SQLite gets 404 RECORD_NOT_FOUND instead of 409 CONCURRENT_UPDATE",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "domain:server",
+    "lease:o1-A",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T07:18:55Z",
+  "updated_at": "2026-11-18T08:03:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35142",
+  "body": "Found while upgrading a downstream app (steedos-labs/os-project-blackcat-crm) from 18.5.0 to 18.6.0.\n\n## What\n\nTwo members of an ownership queue claim the same parked record at the same moment. Each one writes `owner_id = self` on a `crm_case` whose `owner_id` is empty.\n\n- **18.5.0:** exactly one claim wins, and the loser gets `409 CONCURRENT_UPDATE`.\n- **18.6.0 (SQLite driver):** exactly one claim still wins, and the stored owner is correct. But the loser gets `404 RECORD_NOT_FOUND`: \"This record does not exist, or you do not have access to it.\"\n\nThe data stays correct. The answer to the loser is wrong: it tells a person who can read the record that the record does not exist, so the console cannot say \"someone else just claimed this\".\n\n## Repro (18.6.0, SQLite)\n\n- Engine level: `objectql.update('crm_case', { id, owner_id: <member> }, { where: { id }, context })`, run concurrently for two members with `Promise.allSettled`.\n  - 18.5.0: one fulfilled; the rejected one has `{ code: 'CONCURRENT_UPDATE', status: 409 }`.\n  - 18.6.0: one fulfilled; the rejected one has `RECORD_NOT_FOUND` / 404. Reproduced in 3 of 3 rounds.\n- REST: two concurrent `PATCH /api/v1/data/crm_case/:id` give `200` and `404 RECORD_NOT_FOUND`, reproduced 3 of 3.\n- Downstream test: `test/ownership-queues.test.ts` › \"concurrent claims leave exactly one owner, and every loser gets 409\". It is green on 18.5.0 and red on 18.6.0. Nothing changed app-side.\n\n## Suspected producer\n\nobjectstack#34412 / #34503 (`a8e09bbc fix(objectql)!`): the engine re-enters its own write door, adding an `inAfterAbortUnit` / side-writing term. On SQLite this appears to serialise the claim. The losing write then re-reads the row under the winner's committed state, matches nothing for its `where`, and is classed as not-found instead of as a concurrent-update conflict. This is an inference from the timing of the change; the stack was not traced to the exact line.\n\n## Expected\n\nPer ADR-0142 D4, the loser of a concurrent update gets `409 CONCURRENT_UPDATE`. A record the caller can read should never be reported as non-existent because of a lost race.\n\n## Downstream impact\n\nThe app is holding its 18.6.0 upgrade PR on this one red test. It will not weaken the assertion to the new code while the platform contract says 409.\n\nDedupe words: CONCURRENT_UPDATE, RECORD_NOT_FOUND, concurrent claim, ownership queue, inAfterAbortUnit, ADR-0142 D4, 18.6.0 regression."
+}

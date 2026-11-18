@@ -1,0 +1,31 @@
+{
+  "number": 35107,
+  "kind": "issue",
+  "title": "plugin-auth: an invitation mail sent outside a better-auth endpoint still carries the mailbox proof (mint from the manager's own auth context; blocks cloud#4470)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T03:44:52Z",
+  "updated_at": "2026-11-18T03:48:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35107",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\n**Follow-up to objectstack#34257 / PR #34333** (one-step invitation acceptance). It was found by the cloud#4470 build thread at objectstack `b1da9f55db`.\n\n## What happens\n\nPR #34333 mints the mailbox proof that an invitation mail carries (deliver-only, never stored) inside the plugin's send path. It mints only when the send runs inside a better-auth endpoint context. A host that calls the plugin's `sendInvitationEmail` from its own code, outside any endpoint, gets no proof, so that mail carries the plain link and the one-step door cannot be used from it.\n\nOn the hosted control plane this is the invitation an environment sends on a member's behalf (cloud `member-requests.ts`, cloud#4467). Invitations sent from the console are not affected: they run inside the endpoint and carry the proof today.\n\nThe host cannot fix this cleanly from outside:\n- `runWithEndpointContext` lives in `@better-auth/core/context`, and `plugin-auth` exports neither that runner nor its proof minting;\n- a host-side direct `@better-auth/core` dependency would be a second copy that the host's pin bump does not keep in step.\n\n## Ask\n\nWhen `mintProofForSend` (or its equivalent) finds no endpoint context, it falls back to the auth manager's own context (`getAuthContext().internalAdapter`) and mints the proof the same way. That way every caller of the plugin's `sendInvitationEmail` gets a mail with the proof. Nothing else changes: the proof is still deliver-only and never stored, and the closing rule (`oneStepSignInState`) still decides what the door does.\n\n## Done when\n\n- A test calls `sendInvitationEmail` outside any endpoint context. The delivered mail carries a proof that the one-step door redeems, and no stored mail row holds the proof.\n- The existing in-endpoint path is unchanged (CONTROL).\n\n## Then\n\ncloud#4470 needs no cloud wiring for environment-originated invitations once a release the cloud pins carries this. Its PR ships the console-invite path now, with `Part of #4470`, and names this card as what remains.\n\n## Related\n\nobjectstack#34257, PR #34333, cloud#4470, cloud#4467, cloud#4465."
+}

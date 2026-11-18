@@ -1,0 +1,29 @@
+{
+  "number": 35152,
+  "kind": "issue",
+  "title": "[Epic line 2] MCP build: the open draft door, and the checks and probes its verdict rests on",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T08:17:19Z",
+  "updated_at": "2026-11-18T08:17:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35152",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a coordination node under the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「现在就改结构」. The lines are the maintainer's: 「我们有代码搭建，mcp搭建，云端搭建，，mcp问数，云端问数」; so is their order: 「代码搭建已经可用，只是优化，mcp问数优先，其次是mcp搭建」; and the cloud lines are linked, not held here: 「云端子专题和卡片开在云项目，你只是链接，而且暂时不启动」. A parent may hold 100 children; #34659 had 72 after two days, which is why it is split.\n\n## What this line is\n\nA person's own AI client authors app metadata on a self-hosted runtime through MCP: it saves drafts, reads what a publish would refuse, and a person publishes in Studio. This line is the door, and everything that makes its verdict worth trusting.\n\n**Order: second**, after line 1. Cards already in a dev's hands are finished; no further card of this line is dispatched ahead of a queued line 1 card.\n\n## What belongs here\n\n- The draft door, its version statement and restriction profile, the thin build skill, the build-over-the-door eval mode.\n- Publish-time checks for metadata that saves and does not work (two batches), the build probes, what a refused change names.\n- What an MCP client needs from the published skills: descriptions that trigger on the task, a JSON form in the served sections, a way to install the skills.\n\n## Acceptance reading\n\nThe build-over-the-draft-door mode (#34780), which does not exist yet.\n\n## Not here\n\nThe hosted build door and the in-product builder: the hosted line, linked from #34659."
+}

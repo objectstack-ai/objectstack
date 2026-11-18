@@ -2,8 +2,8 @@
   "number": 35008,
   "kind": "issue",
   "title": "reading first: Studio's edit-and-save round trip in a non-source locale may store the served translation as the source label for book, page, dashboard, report, app, dataset and mapping (the translated-echo restore covers object only)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:spec",
     "finding",
-    "lease:o3-I",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T22:56:36Z",
-  "updated_at": "2026-11-18T02:02:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T02:45:14Z",
+  "closed_at": "2026-11-18T02:42:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35008",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6963190753), from the seat's L2 on PR #34976 (#34939 part 1, PASS). This is an unmeasured question outside that diff.\n\n## The question\nThe save door's translated-echo restore (`packages/metadata-protocol/src/protocol-translated-echo.ts`) covers **`object` bodies only**.\n\nAny other translated type edited in Studio by GET → edit → PUT of the whole body, in a non-source locale, might store the served **translation as its source label**. The types are book, page, dashboard, report, app and dataset, and with #34976 also `mapping`.\n\nThe review did not establish whether Studio's generic editor reads the translated document for these types. This is a question, not a shown defect.\n\n## Done when\nA live reading in a non-source locale (zh-CN over an en-source package) shows, for each type, whether the round trip stores the translation as the source text. If it does, the card names the fix route: widen the restore, or have the editor read the source document.\n\nGrade: **p2 · domain:spec**, reading first. Theme: zh-CN customers. Raise it to p1 if the reading confirms it: a zh-CN admin's ordinary edit would silently overwrite source text."

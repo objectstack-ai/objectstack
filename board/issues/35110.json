@@ -1,0 +1,34 @@
+{
+  "number": 35110,
+  "kind": "issue",
+  "title": "ci: skill-evals --regrade command test times out at the 5 s default when its shard runs beside plugin-security (ejects #34709 from the queue)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1",
+    "queue-flake-anchor"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T04:03:11Z",
+  "updated_at": "2026-11-18T07:11:24Z",
+  "closed_at": "2026-11-18T06:21:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35110",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbaX2qDxUq9sF93EqqL\n\n**What fails.** `packages/qa/scenarios/test/skill-evals/skill-evals.test.ts:362`, \"the command: a reworded case keeps its record bytes and leaves the pass rates; the summary names it and the unhashed records\", runs on vitest's default 5 000 ms test timeout. It was added by #35022 (merged 2026-11-18 01:05 UTC).\n\n**Readings (merge-queue CI, `Test Core` shards).**\n\n| Queue group | Shard | Packages on the shard | This test | File total | Result |\n|:--|:--|:--|--:|--:|:--|\n| `pr-34709` run 44213369286, job 134498092500 | 7/10 | plugin-security, service-messaging, http-conformance, verify, connector-rest, scenarios, connector-openapi | 6 218 ms | — | timed out |\n| `pr-34709` run 44229490752, job 134551614597 | 7/10 | the same seven packages | > 5 000 ms | 10 526 ms | timed out |\n| `pr-35089` run 44231314011, job 134557796904 | 8/10 | cli, service-settings, plugin-approvals, scenarios, types, connector-app-stripe | 2 356 ms | 3 149 ms | passed |\n\nIn the failing shard `plugin-security` alone reports `Duration 589.12s` (import 1121 s) running concurrently with `scenarios` (`Duration 208.82s`).\n\n**Why it is deterministic for some PRs.** The shard plan is a function of the affected set, so a PR whose affected set yields the first plan puts `scenarios` beside `plugin-security` on every queue run. #34709 was ejected twice on this one signature with an unchanged head (queue-triage comments 6966216777 and 6968300648); a third queue run with the same plan would meet the same load. The test's own work is pure filesystem and in-process code: `src/skill-evals/**` imports no `@objectstack/objectql`, and the first error is the timeout, not an assertion.\n\n**Done when.** The test passes under that shard's load with margin: give it an explicit per-test timeout sized from the measured unloaded time (or make the round it builds cheaper), keeping every assertion. No skip, no retry wrapper, no quarantine. Any sibling test in the same file built on the same full `executeRound` + `regradeRound` path gets the same treatment if it measures within 2× of 5 s.\n\n**Reach.** Every queue group whose shard plan pairs `scenarios` with `plugin-security`; today it blocks the landing of #34709 (#34465)."
+}

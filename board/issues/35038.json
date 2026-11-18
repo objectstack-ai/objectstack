@@ -2,7 +2,7 @@
   "number": 35038,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-ask iteration 2: trigger on every records question, ask back with no figure of its own, whole terms, hidden record kinds declined",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T23:48:06Z",
-  "updated_at": "2026-11-18T02:00:22Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-18T02:23:24Z",
+  "closed_at": "2026-11-18T02:23:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-18T02:23:22Z",
   "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/35038",

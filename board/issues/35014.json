@@ -2,8 +2,8 @@
   "number": 35014,
   "kind": "issue",
   "title": "AI 助手抽屉：对话跟着应用走——切到另一个应用时自动换成那个应用的对话，不再停在上一个应用的对话里",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:ui",
     "enhancement",
     "lease:o3-B",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T23:09:49Z",
-  "updated_at": "2026-11-18T01:51:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T03:15:10Z",
+  "closed_at": "2026-11-18T03:14:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35014",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「AI 对话不跟应用走。我觉得跟着应用是必要的，但是是否建议开新会话？」；看过「不提示、自动切换」的方案后：「新会话同意你的意见」。\n\n## 现状（界面实测：本地 cloud 环境，控制台是 objectstack `origin/main` 4443014630 的构建，视口 1280×800，zh-CN，2026-11-17）\n\n- 环境里有两个自建应用「CRM客户管理」「会议纪要」。在「CRM客户管理」里用 AI 助手搭建过，然后切到「会议纪要」。\n- 在「会议纪要」的列表页打开 AI 助手抽屉：抽屉上方的范围写「构建 · 会议纪要」，对话内容却是「CRM客户管理」那一段（客户、销售商机、跟进记录）。Studio 里「会议纪要」的 AI 面板关闭动画期间露出的也是同一段。\n- 这时输入「加一个字段」，用户分不清会改哪个应用。\n\n源码上的原因（`origin/main` 4443014630）：\n- 对话本来就是按 `(用户, 应用, product)` 分的：`ui/packages/app-shell/src/hooks/chatScope.ts:70` `chatConversationScope` 返回 `app:<包>:build`，没有应用时退成 `build` / `ask`（ADR-0057）。\n- 抽屉在 `ui/packages/app-shell/src/layout/ChatDockConversation.tsx:197–201` 取包：`editPackageId = product === 'build' ? (target ? target.packageId : ambientPackageId) : undefined`。抽屉一旦有了 `target`（打开过或新建过一段对话），就一直用 `target.packageId`，切到别的应用后 `ambientPackageId` 变了也不再生效。\n- `ask` 这一侧不带应用，所有应用共用一段。\n\n## 要做的\n\n维护者已同意的规则：不弹「建议开新会话」的提示，直接自动切换。\n\n1. **进入另一个应用时，抽屉换成那个应用的对话。** 当前应用（`ambientPackageId`）变了，就按新应用的 scope 重新解析：有对话就接着最近那一段，没有就是空白的开始页。上一个应用的 `target` 不带过来。\n2. **一段对话只属于一个应用。** 标题栏显示的范围就是这段对话绑定的应用，不会出现范围和内容对不上的情况。范围选择器保留；选了另一个应用等于切到那个应用的对话，而不是把当前这段改绑过去。\n3. **不在任何应用里的位置**（首页、平台自带的设置应用）用不绑定应用的那一段，行为同现在。\n4. **历史列表默认只列当前应用的对话**，可以切到「全部」；从「全部」里点开别的应用的对话时，先跳到那个应用再打开。\n5. **切走时留下的未发布方案或草稿**留在原应用的对话里，回去还在；不在新应用里提醒。\n6. `ask`（问数）是否也按应用分，由实现者按 ADR-0057 / ADR-0063 判断后在 PR 里说明；最低要求是第 1、2 条对 `build` 成立。\n\n## 不做的\n\n- 不加「是否开新会话」的提示或确认。\n- 不做「隔了很久再打开时建议开新对话」。\n- 不改对话的服务端存储结构，除非第 4 条的筛选确实需要；需要的话在 PR 里说明并另立 cloud 卡。\n- 不动整页 `/ai` 的行为（它靠 `?package=` 取应用）。\n\n## 验收\n\n- 在应用 A 里搭建过一段，切到应用 B 打开抽屉：看到的是 B 的对话或空白开始页，不是 A 的内容；范围与内容一致。\n- 回到应用 A：A 的那一段还在，未发布的方案卡还在。\n- 在 B 里发「加一个字段」，改动落在 B。\n- 历史列表在 B 里默认只有 B 的对话。\n- Studio 里对应应用的 AI 面板与应用里的抽屉是同一段（现有行为，不能退化）。\n\nReader: `domain:ui` 车道，`ChatDockConversation.tsx` 的 `target` / `ambientPackageId` 取值与 `useChatConversation` 的 scope 解析；先读 ADR-0057、ADR-0063。\n\nDedupe: `repo:objectstack-ai/objectstack is:open AI 助手 对话 应用 切换`、`conversation scope app drawer` → 0；`repo:objectstack-ai/cloud is:open 对话 应用 切换 抽屉` → 0。"

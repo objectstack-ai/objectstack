@@ -13,8 +13,6 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "lease:o3-D",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,7 +21,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T08:30:48Z",
-  "updated_at": "2026-11-17T22:25:53Z",
+  "updated_at": "2026-11-18T03:21:22Z",
   "closed_at": "2026-11-17T22:25:53Z",
   "closed_by": {
     "login": "os-zhuang",
@@ -31,7 +29,7 @@
     "type": "User"
   },
   "merged_at": null,
-  "comments": 11,
+  "comments": 12,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34724",
   "body": "coordinator#1 · hotlong · session_85eb0287cb754f0f9c2bed54cab9abff\n\n立卡门类别：④ 协调节点的子单，承父单 objectstack-ai/objectstack#34571（控制台核心业务操作体验专题，维护者直派，「都是p1」）。⛔ 不是认领。\n维护者 2026-11-17 原话：「打包动作不是应该在 studio 对应的软件包中自定义吗」；对「平台自己的动作不给启停开关」的答复：「同意，立卡」。\n\n本卡改的是 ADR-0146 D4 明确留下的一项：「The action ledger switch is out of this epic … `action` keeps ADR-0126 §8's disable leg where it is」。维护者 11-17 的话把它定了方向，与 10-30 对流程的那条裁决一致（「正常的操作我应该是在studio中进入 hotcrm app，选中一个流程，点禁用或者复制更符合逻辑吧？」）。ADR-0146 的 D4 需要随本卡加一条带日期的修订说明。\n\n## 现状（读码，objectstack `origin/main` a34eb0716a；界面实测在本地 HotCRM 实例）\n\n- 流程的启停开关已在 Studio 的流程条目上（`ui/packages/app-shell/src/views/studio-design/FlowLedgerSwitch.tsx`，由 `StudioDesignSurface.tsx` 约 :8812 渲染），设置里的打包流程页已退休。\n- 动作的启停开关还在设置：导航项 `nav_packaged_actions`（`packages/platform-objects/src/apps/setup-nav.contributions.ts:79–85`，注释 :55–59 写明 D4 把它留在这里），页面 `ui/packages/app-shell/src/views/setup/PackagedActionsPage.tsx`，数据层 `setup/packagedActions.ts` 与 `PackagedActionsSection.tsx`。\n- 实测：这页是一张 40 多行的平铺表，已安装应用的动作（安排会议、打印报价）和平台自己的动作（编辑 OIDC 设置、撤销 API 密钥、封禁用户、创建用户）混在一起，每行一个开关；zh-CN 下菜单名是「打包动作」。\n- 动作在 Studio 里已有位置：数据栏里对象的「动作」视图 `studio-design/ObjectActionsPanel.tsx`，列出厂商的动作以及配对 `.custom` 包里自己写的动作（`pairObjectActions.ts`）。独立的 `action` 元数据条目在「全部元数据」区。\n- 开关的读写门不用变：读 `sys_metadata_activation`（`metadata_type: 'action'`），写走 objectstack#12348 的翻转门；`packagedActions.ts` 里的读取与合并规则可以原样复用。\n\n## 要做的\n\n1. Studio 里，只读应用的对象「动作」视图上，每个厂商动作带「本环境启用 / 停用」开关，读写与设置页现在用的是同一套门；措辞与流程的开关一致（「本部署已停用」），拒绝时原样显示服务端的话。\n2. 独立的 `action` 条目在它的条目页上带同一个开关。\n3. 平台自己的动作（内核包提供的，如 `sys_user`、`sys_api_key`、`sys_sso_provider` 上的动作）不提供开关，界面上任何地方都不出现它们的启停。\n4. 设置里的 `nav_packaged_actions` 导航项与 `PackagedActionsPage` 退休，原地址跳转到 Studio（跳转在第 1、2 项落地之后才生效，中间不留空档）。\n5. Studio 着陆页上每个应用的「已停用 N 项」已经包含动作；点进去能找到被停用的动作。\n6. ADR-0146 D4 加修订说明；`setup-nav.contributions.ts` 的注释与钉住该导航项的测试（`setup-packaged-actions-nav.test.ts`、`setup-landing-audience.pin.test.ts`）随之更新。\n\n## 不做的\n\n- 不给动作开覆盖通道：ADR-0146 D6 规定代码类类型没有覆盖，改不了厂商动作的行为，只能停用，或在自己的包里另写一个。\n- 不改账本与写门的权限（围墙部署下仍只有平台管理员能翻转）。\n- 已经被停用的平台动作如何处理不在本卡内：实现前先查线上账本里有没有这样的行，有的话在卡上报数，由维护者定。\n\n## 验收\n\n1. 在 Studio 打开 HotCRM 的商机对象「动作」视图，停用「克隆商机」：记录页上该按钮按现有规则不再可用；设置里不再有「打包动作」菜单。\n2. 访问旧地址跳到 Studio。\n3. Studio 里找不到「封禁用户」「撤销 API 密钥」这类平台动作的开关。\n4. 无权翻转的用户看到的是禁用态和服务端的原话，不是一个点了就 403 的开关。\n\nReader: `domain:ui` 车道为主（`ObjectActionsPanel.tsx`、`setup/PackagedActions*`），`platform-objects` 的导航项与 ADR 修订需要 `domain:server` / 文档配合。\n\nDedupe: `repo:objectstack-ai/objectstack packaged actions switch Studio ObjectActionsPanel ledger retire Setup page` → 0 条命中，没有把动作开关搬到 Studio 的卡（含已关）；#27842、#27504 是开关本身的行为，均已关。"

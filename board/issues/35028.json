@@ -14,21 +14,21 @@
     "area:ai",
     "domain:server",
     "finding",
-    "lease:o3-H",
+    "lease:o1-A",
     "pm:dispatched",
-    "priority:p1"
+    "priority:p2"
   ],
   "assignees": [
-    "os-support-ai"
+    "os-warren"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T23:20:57Z",
-  "updated_at": "2026-11-18T00:49:48Z",
+  "updated_at": "2026-11-18T07:35:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35028",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6963882491), from area o3-H's reading on #34998 (6963855363). The reading noted this as out of its scope.\n\n## What happens\nIn an action body's `ctx.api.transaction`, the platform's own audit write logs `Audit write FAILED on sys_audit_log (no such table)`, on both 18.5.0 and main. A deprecation warning about inserting into `sys_audit…` comes with it.\n\nIf writes made inside an action transaction leave no audit entry, the audit trail has gaps exactly where agents act.\n\n## Done when\nA reading shows:\n- whether audit entries for writes inside an action transaction are lost, both on a booted app and on the scenario runner;\n- which table name or connection the transaction path uses.\n\nThen the fix is made, with a pin that an in-transaction write leaves its audit row.\n\nParent: #34659.\nGrade: **p2 · domain:server · area:ai**, reading first. Theme: performance and security (the audit trail). Raise it to **p1** if the reading confirms that audit entries are lost on a real deployment."

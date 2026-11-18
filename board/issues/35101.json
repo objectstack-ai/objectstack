@@ -1,0 +1,31 @@
+{
+  "number": 35101,
+  "kind": "issue",
+  "title": "[Decision] App create/edit stores a generated nav entry's served (translated) pluralLabel — read the authored definition instead? (changes objectui#11201 ruling B; residual of #35054)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "needs-user-decision",
+    "pm:awaiting-maintainer",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T03:11:52Z",
+  "updated_at": "2026-11-18T03:11:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35101",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-I, mailbox #32588, 6967855191), a residual from the #35054 audit.\n\n## 维护者速读\n- 现象：在中文界面里新建或编辑应用时，自动生成的导航项会把对象的**翻译后**复数名称存进应用定义，等于把翻译当原文存下来。#35054 处理的是同一类问题，覆盖了另外 7 处，这里没包括进去。\n- 为什么要你定：这里的做法来自 objectui#11201 的「裁定 B」（复数名称和名称不同时，存复数名称）。要改成读原文定义，就会改变那条裁定的行为。\n- 需要你定：\n  - **A**：改成读对象的原文定义（authored），只在原文的复数名称和名称不同时才存；\n  - **B**：维持裁定 B 现状。\n\n## Context\n`generatedEntryLabel` in CreateAppPage / EditAppPage stores an object's **served** `pluralLabel` when it differs from the served `label`. In a zh-CN session, that stores translated text in authored app metadata.\n\nRelated: #35054, #35008.\nGrade: **p2 · domain:ui**. Theme: zh-CN customers. It waits for the maintainer because it changes a ruled behaviour."
+}

@@ -1,0 +1,36 @@
+{
+  "number": 35092,
+  "kind": "issue",
+  "title": "分组表单弹窗：点导航里最后一个较短的分组，标题和导航被滚出弹窗，按钮栏下方留出大片空白",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T02:40:43Z",
+  "updated_at": "2026-11-18T07:55:41Z",
+  "closed_at": "2026-11-18T07:54:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35092",
+  "body": "承 #34605（分组导航）/ 专题 #34571。hotcrm 使用中遇到，hotcrm 侧元数据无误（见文末），不在应用侧绕过。\n\n## 现状\n\n环境：hotcrm 托管环境（ObjectOS Cloud staging 上的项目，控制台构建已含 #34642 / #34848），桌面 Chrome，zh-CN。\n\n1. 打开 市场 › 线索 › 新建（`crm_lead?form=new`）。弹窗里有六个分组，导航为 联系信息 / 线索分类 / 公司信息 / 地址 / 附加信息 / 隐私；后四个默认折叠。\n2. 点导航最后一项「隐私」（该分组只有两个复选框：禁止致电、拒收邮件）。\n\n结果：\n- 弹窗标题「新建线索」和整条分组导航消失；\n- 「隐私」分组顶到弹窗最上沿，「取消 / 创建」紧贴在它下面；\n- 按钮栏下方到弹窗下沿是一大片空白（截图里约占弹窗高度的四分之三）；\n- 弹窗内没有任何办法滚回去（外层是 `overflow-hidden`，没有滚动条，滚轮只作用于表单区），只能关掉重开。\n\n期望：点「隐私」后只有表单区滚动；标题、导航、按钮栏原地不动，导航高亮落在「隐私」。\n\n## 原因\n\n`ui/packages/plugin-form/src/FormSectionNav.tsx:167`（`origin/main` b85dff0f43）：\n\n```ts\nconst reveal = () =>\n  document.getElementById(item.anchorId)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });\n```\n\n元素级 `scrollIntoView` 会滚动**每一层**可滚动祖先，包括 `overflow: hidden` 但内容溢出的盒子。最后一个分组很短，表单区（`ModalForm.tsx` 里的 `flex-1 overflow-y-auto`）滚到底时分组标题还到不了顶，浏览器就把剩下的距离交给上一层——弹窗内容盒（`flex flex-col overflow-hidden p-0` + `sm:h-auto sm:max-h-[90vh]`）。弹窗盒被程序滚动后，标题和导航移出可视区，页脚下方露出空白。\n\n同一个文件第 142–144 行的注释已经为导航条自身写明了这个顾虑（\"an element `scrollIntoView` here would also move the form and cut a jump short\"），跳转本身却仍在用元素级 `scrollIntoView`。\n\n### 已实测的部分（最小复现）\n\n照 `ModalForm` 的结构写的独立页面（`position: fixed` + translate 居中、`flex-col`、`overflow: hidden`、`max-height: 90vh`；标题 / 导航 / `flex: 1; overflow-y: auto` 表单区 / 页脚；六个分组，最后一个很短），视口高 844，点最后一项后量到：\n\n| | 弹窗 `scrollHeight` / `clientHeight` | 点击后弹窗 `scrollTop` | 标题相对弹窗上沿 |\n|---|---|---|---|\n| 表单区内没有绝对定位元素 | 758 / 758 | 0 | 1（不动） |\n| 最后一个分组里放一个 Radix Checkbox 的隐藏 input（`position:absolute; opacity:0; transform:translateX(-100%)`） | **2517** / 758 | **582.5** | **-581**（滚出视野） |\n\n第二种情况的画面与线上截图一致：分组顶到最上、页脚紧随其后、下方空白。\n\n机制是：表单区滚动盒是 `position: static`，它里面的绝对定位元素以外层 `fixed` 的弹窗为包含块，不受表单区裁剪、也不随它滚动，于是把弹窗盒的可滚动高度撑到了「表单全文」的高度。表单里这类元素很常见：Radix Checkbox 的 `BubbleInput`、Radix Select 的隐藏原生 `select`、`sr-only`。\n\n### 未实测的部分\n\n- ~~没有在真实控制台 DOM 上量过。~~ 已在真实控制台上实测并确认，撑出溢出的是「隐私」分组里两个 Radix Checkbox 的隐藏 input，数据见下方评论。\n- 整页表单（`ObjectForm.tsx` 里 `sticky top-0` 的那处导航）是否有对应问题没有验证。\n- 只在 Chromium 上看过。\n\n## 要做的\n\n1. 跳转只滚表单自己的滚动容器：用文件里已有的 `scrollParentOf(heading)` 找到容器后 `scroller.scrollTo({ top, behavior: 'smooth' })`（容器为 `null` 时滚窗口），不再用元素级 `scrollIntoView`。\n2. （可选，防御）弹窗内容盒不应该能被滚动：表单区滚动盒加 `relative`，让其中的绝对定位元素被它裁剪并随它滚动；或弹窗盒用 `overflow: clip`。这一项单独也能消掉本现象，但第 1 项才是对因。\n\n## 不做的\n\n- 不改滚动监听的高亮规则（`atBottom` / `jumpedTo` 那段，#34848 刚调过）。\n- 不改分组折叠 / 展开和必填计数。\n\n## 验收\n\n- 新建线索弹窗点「隐私」：标题、导航、按钮栏位置不变，`[role=dialog]` 的 `scrollTop` 始终为 0，导航高亮在「隐私」。\n- 依次点每一个导航项（含默认折叠的分组）都满足上一条；放大后同样。\n- 加一条覆盖「最后一个分组比表单区矮」的用例（jsdom 没有布局，建议放 `ui/e2e`）。\n\n## hotcrm 侧\n\n`src/sales/views/lead.view.ts` 的表单 `sections` 末项是普通的折叠分组，没有特殊配置：\n\n```ts\n{ name: 'privacy', label: 'Privacy', collapsible: true, collapsed: true, columns: 2,\n  fields: ['do_not_call', 'email_opt_out'] }\n```\n\n任何「最后一个分组较短」的分组表单弹窗都会遇到，不限于线索。\n\nDedupe：`FormSectionNav`、`scrollIntoView dialog`、`section nav dialog title disappears`、`表单分节导航` → 无同题未关 / 已关单（相关：#34605、#34819）。\n\n"
+}

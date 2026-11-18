@@ -1,0 +1,31 @@
+{
+  "number": 35138,
+  "kind": "issue",
+  "title": "mcp: the result members the hosted ask tools add over the framework tools are either moved into the framework or stated as hosted-only, one by one",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T07:04:46Z",
+  "updated_at": "2026-11-18T07:23:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35138",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「开源项目能做的尽量在开源项目做，云端等开源项目完全优化好再开工」.\n\n## Why\n\nThe hosted product learned, by measuring its own agent, that a model follows what a tool result hands it and often does not assemble the same thing from parts. Each lesson became a member its ask tools add to a framework tool's result. Those members live in a hosted wrapper, so a client on the open MCP door, and the open eval that reads that door, never get them. Two are already moving (`nextStep` and `sourceLine`, #34918 and #34919) and one has its card (`withheldFields`, #35137). This card is the rest, read once and decided one by one, so the hosted side has nothing left to carry when it resumes.\n\nWho acts: the server lane (`packages/mcp`, `packages/services/service-analytics`, `packages/runtime/src/domains/mcp.ts`). Reader: every MCP client; the daily ask round (#34869).\n\n## Evidence (hosted `packages/service-ai/src/tools`, read on cloud main `0aabf9a`, 2026-11-18; the open repository's agents cannot read that tree, so the inventory is given here)\n\n| Member the hosted tools add | On which tools | What it is for | In the framework today |\n|:---|:---|:---|:---|\n| `nextStep` | `list_datasets` | the decision the selection rule gives for the words sent | in flight: #34918, #34919 |\n| `sourceLine` | `query_dataset` | the citation, composed from `provenance` | in flight: #34918, #34919 |\n| `withheldFields` and its note | record tools | a field withheld by field security is said to be not visible, not blank | #35137 |\n| `source` | record and aggregate tools | one finished line naming the object, filter, measure and grouping a figure came from, for the answer to quote; without it an aggregate answer came back as a bare number | absent |\n| `notRecorded`, `ifNotRecorded` | record tools | a read of an object or field no metadata knows runs nothing and says the data is not recorded, in place of a bare not-found the model answers around | absent |\n| `capped` | record and aggregate tools | a page that hit the row cap says so, so it is not summed or ranked as if whole | to read: the open tools have `truncated` on some results |\n| a ready-made link on each row | record tools | the answer links a record it names | hosted console route; likely hosted-only |\n\nNot members of a result and not in scope: the hosted query planner, the chart tool, and the agent's prompt.\n\n## Scope\n\n- For `source`, `notRecorded` and `capped`: read what the open tools return today, then either return the member from the framework tool itself, to the same meaning, or record on this card why it stays hosted-only. One PR per member.\n- The sentence a member carries is written by the executor in the caller's locale, as #34919 does; no guidance text enters the spec (ADR-0149 M1).\n- Each member that moves gets a pin and, where it changes an answer, a question in the open ask cards (#35113).\n- The row link is expected to stay hosted; say so in one line if the reading agrees.\n\n## Done when\n\n- Every row of the table reads \"in the framework\" with its PR, or \"hosted-only\" with its reason.\n\n## Relations\n\n- Parent: #34659. Related: #34918, #34919, #35137, #34869, #35113.\n- Sequenced after #34919, so the members share one way of writing a sentence into a result.\n- Dedup, open and closed: `list_datasets nextStep` and `dataset tools sourceLine` found only this epic's cards; no card found for `notRecorded` or a result `source` line on the open door."
+}

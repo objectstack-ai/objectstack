@@ -1,0 +1,30 @@
+{
+  "number": 35114,
+  "kind": "issue",
+  "title": "Roll-up readonly drop follow-ups from #35089: stdio MCP bridge droppedFields, changeset door list, readonly-flow lint and security.mdx",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T04:25:50Z",
+  "updated_at": "2026-11-18T04:27:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35114",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzfr1xZSFZzCR8HnqXX\n\nFollow-up of #34672 (insert half, PR #35089, merged as `cc5472eb85`; update half, PR #34752). These are the three nits from the seat's narrowing L2 6967339515 at `b2f55b4e`. They have a user-visible effect and were not folded before landing. Each one predates or sits outside the merged diff.\n\n## N1 — stdio MCP bridge does not report `droppedFields`\n\nThe changeset's migration line and `content/docs/data-modeling/fields.mdx` say an MCP create reports the drop in `droppedFields`. The stdio bridge (`packages/mcp/src/stdio-data-bridge.ts`, `create`) calls `engine.insert` with no `onFieldsDropped` and answers `{ ...data, ...written }`. So on that transport the caller is not told about the drop. Where the write result omits the key, the answer can echo the caller's value. That happens for a `min` / `max` / `avg` roll-up on a driver that returns the row it was handed. This predates #35089, and it is the same for every `readonly` column and for the update half. #35089 makes it more common.\n\nFix: pass `onFieldsDropped` in the bridge and answer `droppedFields` as the HTTP transport does. Alternatively, narrow the prose to \"on the HTTP transport\".\n\n## N2 — changeset door list misses two narrowed doors\n\nThe insert-half changeset's door list leaves out two doors that are narrowed along with the rest:\n\n- the public form submit (`packages/rest/src/form-routes.ts`). It is anonymous and the answer is the id only, so the submitter is not shown the drop.\n- a caller's `overrides` on clone (`packages/metadata-protocol/src/protocol-data-crud.ts`), which reports the drop through the same listener as a create.\n\nBoth end in the engine's insert. This is a prose-only fix, made in a changeset or docs follow-up before the release that ships #35089.\n\n## N3 — readonly-flow lint and `security.mdx` do not know the implicit roll-up lock\n\n`packages/lint/src/validate-readonly-flow-writes.ts` only knows a declared `readonly: true`. So a user-run flow whose `create_record` or `update_record` sets a roll-up gets no lint finding, even though the engine now drops the value on both verbs. The static `readonly` section of `content/docs/protocol/objectql/security.mdx` does not name the implicit roll-up lock either. Both gaps date from the update half.\n\n## Done when\n\n- The bridge reports the drop (or the prose is narrowed), with a pin.\n- The changeset or docs name both doors.\n- The lint rule treats a `Field.summary` roll-up as readonly for flow writes, with a pin, and `security.mdx` names the lock."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 35111,
+  "kind": "issue",
+  "title": "Flaky: plugin-security org-admin-assignment-boundary posture test times out at 5000 ms on a loaded CI runner",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T04:15:22Z",
+  "updated_at": "2026-11-18T04:46:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35111",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\n`@objectstack/plugin-security` `src/org-admin-assignment-boundary.posture.test.ts`, test \"[ADR-0090 D12, amended 2026-10-17] the three-officer split: an auditor set carrying a platform-scoped capability is outside the organization boundary\", failed on a PR head with `Error: Test timed out in 5000ms.` and passed on the re-run of the same head.\n\n- PR #35085, head `1878e86b9dece34ce9f934b7de5217d46977ecc0`, `Test Core (8/10)`, run 44229929988 attempt 1 (job 134552934766): timeout. Attempt 2 of the same run: green (71 check-runs, 62 success, 9 expected skips).\n- The PR's changed files are outside the test's import closure (`core`, `metadata-protocol`, `objectql`, `spec/security`, `driver-sql`, `types`, `platform-objects`, local plugin-security files). The five latest `ci.yml` push runs on `main` at the time had green Test Core.\n- The log also carries an `Acquire connection error: Error: aborted` warning from the same shard, consistent with a loaded runner. The test boots a kernel with the SQL driver under the default 5000 ms per-test timeout.\n- Seat read on the PR: comment 6968590259.\n\n## Expected\n\nThe test passes deterministically: either its setup moves out of the per-test budget (a `beforeAll` boot) or it carries an explicit timeout sized to the kernel boot, decided by whoever fixes it from a measured boot time.\n\n## Re-check\n\n`grep -n \"three-officer split\" packages/plugins/plugin-security/src/org-admin-assignment-boundary.posture.test.ts` (positive control in the same file: `describe(`)."
+}

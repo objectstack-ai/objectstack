@@ -2,8 +2,8 @@
   "number": 34465,
   "kind": "issue",
   "title": "objectql: a predicate update (multi: true) resolves the parent once for the matched set, so a rule reading a parent roll-up does not answer as it does one by one",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "lease:o3-J",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T20:50:44Z",
-  "updated_at": "2026-11-17T22:52:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T06:53:09Z",
+  "closed_at": "2026-11-18T06:52:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 12,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34465",
   "body": "repo:objectstack#1 · os-project-manager · session_01FEkQ5pmEYLVFDcQ1Z1CS8H\n\nFiling gate: ① code reading, named location. Found by the #33795 decision thread (ruling record 6928862195, B 「被规则读到的合计不延后」), outside that card's scope. ⛔ Not a claim. Not measured live.\n\n## 维护者速读\n\n- **是什么：** 按条件批量更新(`multi: true`)时，规则读到的父记录只为整批解析一次，所以读父记录汇总字段的规则，在批量里的答案可能和逐条更新时不同。#25579 的「批量等于逐条」裁决没有覆盖这条路径。\n- **影响：** 少见：只有规则读父记录的汇总字段、而一次批量又改动同一父记录的多行时才会出现。今天的应用里没找到这样的规则(hotcrm 和 objectstack 示例为 0)。\n- **建议：** p2,和 #33795 的路线 B 一起看。\n\n## Where (origin/main)\n\n- `packages/objectql/src/engine-update.ts` around lines 2036-2042: the predicate-update branch resolves `resolvePredicateRelated` once for the whole matched set, using the pre-write rows merged with the shared patch (#18682 batching). A rule that reads `parent.<roll-up>` sees the parent as it was before the batch, for every row.\n- Compare: one-by-one updates recompute the parent between rows, so the second row's rule sees the first row's effect.\n\n## Done when\n\n- Either a predicate update evaluates a rule that reads a parent roll-up the same way as one-by-one updates do (pinned with a two-row case under one parent, plus a CONTROL rule that reads no roll-up and keeps the batched resolution), or the limit is written down in the validation-rules docs with this card as the record and a ruling cited.\n\nDedupe words: predicate update parent roll-up rule, multi true resolvePredicateRelated batch, batch equals one by one parent summary."

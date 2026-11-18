@@ -2,8 +2,8 @@
   "number": 35058,
   "kind": "issue",
   "title": "scenarios grader: asked-back:asks false-fails a Chinese ask-back whose request phrase (请确认) follows a comma and that has no question mark",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:ai",
     "domain:devx",
     "finding",
-    "lease:o3-F",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T00:39:49Z",
-  "updated_at": "2026-11-18T01:07:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T03:13:08Z",
+  "closed_at": "2026-11-18T03:11:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35058",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-F, mailbox #32588, 6965351956). Follow-up to #34997.\n\n## What happens\n`packages/qa/scenarios/src/score/scenario-dataset-grade.ts`, `const ASKS` (line 93 on main): the pattern passes on a question mark of either width, or on a request phrase (`请确认`, `请说明`, `please confirm`, …) **only** when the phrase opens the text or follows `[.。!！\\n]`.\n\n**Repro:** ask-loop iteration 6, `dq_travel_spend` rep 3 (template `b7ab31a7`, haiku medium, workspace `090a48eb`). The recording key is `travel_expense/ask/run/dq_travel_spend/-/repeat-3`.\n- The reply opens 「“差旅花费总额”有两个口径都能对上，我不替你选，请确认你要哪一个：」, then lists both measures with no figure.\n- `names-candidates` and `no-figure` pass, but `asks` fails (\"the reply asks the person nothing\"), because `请确认` follows a full-width comma `，` and there is no `？`.\n\n**Effect:** a correct ask-back is graded as a miss. Iteration 6 reads asked-back 9/10 and datasets 24/25 instead of 10/10 and 25/25. The loop's done rule reads off this check.\n\n## Done when\n- A clause boundary (`，,；;：:`) is accepted before the request phrase.\n- A positive pin covers this reply, and a negative pin shows a figure-bearing reply with a mid-sentence `请确认` still failing `no-figure`.\n- The loop's recordings are regraded (`--driver recorded:`), and the scorecard notes the grader change.\n\nParent: #34659. Blocks: #34996.\nGrade: **p1 · domain:devx · area:ai**. A grader false-fail on Chinese replies directly moves the maintainer-requested loop's target."

@@ -1,0 +1,32 @@
+{
+  "number": 35136,
+  "kind": "issue",
+  "title": "messaging: PreferenceResolver.loadRows reads an org's preferences with an unordered 10,000-row cap, so a large org can miss a recipient's own row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T06:57:44Z",
+  "updated_at": "2026-11-18T07:45:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35136",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbabAdcWyApSTGBYJNY\n\nFiling category: out-of-scope finding (L1-a note N1 on PR #35122, comment 6971481347), filed by the seat. ⛔ Not a claim.\n\n## What is wrong\n\n`PreferenceResolver.loadRows` (`packages/services/service-messaging/src/preference-resolver.ts:207-218`) reads an organisation's `sys_notification_preference` rows for the event's topic and for the `*` topic, each with `limit: 10000` and no order, then filters by recipient in memory. In an organisation with more than 10,000 rows for one topic (or for `*`), the read is silently partial: which rows drop is undefined, so a recipient's own opt-out, digest or quiet hours can be missed and the event is delivered as if the row did not exist. `preference-user-conversion.ts:63` reads with the same ceiling (`PASS_LIMIT`).\n\nPR #35122 fixes the same shape on its own new read (`effectiveFor`) by reading the caller's and the default rows by equality; this older read is outside that PR's surface.\n\n## Done when\n\n- `loadRows` reads only the rows that can decide the delivery (the recipients' rows plus the admin-global default), by equality on the recipient set, in bounded pages, or it fails loudly instead of returning a partial set.\n- A pin with more rows than one page proves a recipient's own row is always found."
+}

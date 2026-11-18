@@ -1,0 +1,36 @@
+{
+  "number": 35139,
+  "kind": "pull_request",
+  "title": "fix(console): the publish-all probe warning shows a finding's userMessage, never its agent message",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T07:08:56Z",
+  "updated_at": "2026-11-18T07:52:25Z",
+  "closed_at": "2026-11-18T07:52:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T07:52:23Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35139",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8AJJJRiYjshMUNgyMZSqBsr)_\n\nFixes #34553\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：首页「全部发布」和草稿预览条的「发布」在运行检查发现错误时，提示「已发布，但校验发现问题」下方的说明不再原样打印写给 AI 的英文 `message`。错误带有客户句（`userMessage`）时显示这句话；都没带时，显示 AI 对话发布健康行在同样情况下显示的通用句（`chatbot.build.issuesSummary`，来自语言包）。`message` 和 `fix` 不再进入提示。\n- 为什么改：#32984 Q1 裁决：面向用户的文字显示 `userMessage`，永不显示开发者的 `message`。对话里的健康行已按此改好（#34539），这个提示还没改。\n- 风险与回滚：只改提示说明的取值，标题、成功提示、示例数据提示和失败提示都不变；不新增语言包键、不改导出。回滚就是 revert 本 PR。卡片点名的第二处 `PendingDraftsBar` 在当前 main 上已经不再发布、也没有任何提示（见 Acceptance notes），本 PR 不改它。\n- 先看：`ui/packages/app-shell/src/preview/usePublishAllDrafts.ts` 里 `probeProblems` 的取值和 `toast.warning` 的 `description`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/preview/__tests__/usePublishAllDrafts.userMessage-34553.test.tsx`，预期 6 个用例全部通过（en 与 zh-Hans 各 3 个）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`usePublishAllDrafts` (shared by Home's *Publish all* and the draft-preview bar) collected the error-severity probe findings as their `message` strings and printed the first as the detail of the \"Published, but verification found problems.\" warning. It now keeps the findings themselves and gives the toast:\n\n- the `userMessage` of the first error that carries one: the producer's sentence for the person who published, already in the request's language; else\n- `t('chatbot.build.issuesSummary')`, the generic sentence the chat's `PublishHealthLine` shows for an error set whose findings carry no `userMessage`.\n\n`message` and `fix` reach no user-facing text. The findings are read through the existing `publishHealthFromResponse` reader from `@object-ui/plugin-chatbot/core`, which already reads `userMessage`. No second reader is written, and no locale key is added.\n\nChangeset: `@object-ui/app-shell` patch.\n\n## Tests\n\nNew file `usePublishAllDrafts.userMessage-34553.test.tsx`: the real hook, the real client and health reader, and `I18nProvider` with the shipped packs. Three cases, each run in `en` and `zh-Hans`:\n\n1. An error with a `userMessage`: the detail is that sentence, and contains neither `message` nor `fix`.\n2. An error with no `userMessage`: the detail is the pack's `chatbot.build.issuesSummary`, read from the shipped `en` / `zh` pack objects, and not `message`.\n3. An unvoiced error ahead of a voiced one: the voiced sentence is shown.\n\nIt is its own file because `I18nProvider` installs a module-level i18next global, which would leak into the key-echo `t` the other `usePublishAllDrafts` pins use.\n\n## Acceptance notes\n\n- **Premise, half held.** The hook's toast printed `issues[].message`, as the card says. `PendingDraftsBar` (`ui/packages/app-shell/src/console/ai/PendingDraftsBar.tsx`) no longer publishes on `origin/main`: since the one-Publish change of #34610 it only counts drafts and points to the shell's bar, and it imports no `toast` and reads no publish health. Its publish now goes through this hook, so this change covers it.\n- The toast holds one detail line. It shows the first voiced error, the first row the health line shows for the same set; it does not list several findings.\n- The generic sentence ends \"Reply \\\"fix the problems\\\" and the assistant will repair them.\" In the chat that is an instruction the user can follow; on Home's *Publish all* there is no assistant thread next to the toast. The card's ruling says to use #34539's choice for an issue with no `userMessage`, so this PR uses it unchanged. Whether the Home toast should get its own sentence is a question for the seat.\n- Out of scope, unchanged: the seed-failure detail still prints the producer's `seedError` text when one is sent, and the package-less by-reference loop still builds `NAME: sample data failed to load` in English. The chat's health line shows only the localized sentence there. The issue is reported to the seat, not handled here.\n\n## Verification\n\n<details><summary>Readings (head 386fb89f, session_01JQwxbYRqkDAGuse5Wqbohi)</summary>\n\n- Build closure `pnpm --workspace-concurrency=2 --filter '@object-ui/app-shell^...' build` under os-verify-lock: VERDICT command-exit 0.\n- `vitest run` the new pin plus the four sibling `usePublishAllDrafts.*` test files: Test Files 5 passed (5), Tests 22 passed (22). VERDICT command-exit 0.\n- `pnpm --filter @object-ui/app-shell run type-check` (both tsc programs, the test layer included): VERDICT command-exit 0.\n- Ablation (`scripts/ablation-replace.mjs`): the description read changed back to `probeProblems[0]?.message`. Anchor 1 to 0, blob 6ab7b9cc5f2d to c69f90a21991. The pin went red, Tests 6 failed (6): every case in both locales. Restored: blob equals HEAD (6ab7b9cc5f2d) and `git diff HEAD` is empty. The test imports the hook by relative path from `src`, so no `dist` is in the resolution path.\n- Derived gates (`dispatch-gates --commands`, 38): 38 derived, 38 run, each exit 0 captured before any pipe; `--ran` reconciliation: 0 NOT-MEASURED, a derived zero. `check:type-check-debt` first answered exit 3 (PREREQUISITE NOT MET: its closure build timed out on the shared lock queue), and a rerun answered exit 0. `vitest run scripts/` (ui): Test Files 171 passed, 2 skipped (173); Tests 5092 passed, 2 skipped.\n- `overlap-check.mjs`: origin/main merges cleanly, 0 open PR heads share a file. VERDICT clean exit 0.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbYRqkDAGuse5Wqbohi\n"
+}

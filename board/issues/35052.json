@@ -13,18 +13,21 @@
   "labels": [
     "domain:server",
     "finding",
-    "pm:queue",
-    "priority:p1"
+    "lease:o1-A",
+    "pm:dispatched",
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-18T00:22:26Z",
-  "updated_at": "2026-11-18T00:22:26Z",
+  "updated_at": "2026-11-18T07:37:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35052",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6965016327, item 3), from area o3-H's reading on #35028.\n\n## What happens\nPlatform `sudo()` keeps the action body's `action` mark. plugin-security therefore treats the **platform's own** `sys_audit_log` and `sys_activity` inserts as **app** inserts. That runs against `flow-system-identity-write-refusal.ts:63-66`.\n\nEvery action-body write triggers it. Once the announced refusal ships, those rows would be refused on every layout, so the audit trail for action writes would disappear everywhere, not just on the #35028 layouts.\n\nThis is an **over-refusal of platform writes, not an exposure**.\n\n## Done when\n- `sudo()`, or the platform's audit and activity writers, clears or overrides the `action` mark for platform-owned writes.\n- A pin shows an action-body write leaving its audit and activity rows with the refusal enabled.\n\nRelated: #35028.\nGrade: **p1 · domain:server**. Theme: performance and security (the audit trail). Without a fix, the announced refusal turns into total audit loss for action writes. Route it to the lane that owns plugin-security."

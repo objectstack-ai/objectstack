@@ -14,17 +14,17 @@
     "documentation",
     "domain:server",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T00:51:35Z",
-  "updated_at": "2026-11-17T05:48:21Z",
+  "updated_at": "2026-11-18T05:49:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34563",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate: L1/L2 follow-ups, one card per PR. Source: review#2 PASS 6934090371 on PR #34503 (card #34412), S1 (the live measurement part) and N3, passed on by area `o2-E`. Dedupe: `25P02 before hook savepoint`, `review follow-ups of PR #34503`.\n\nSuggested-grade: p2 · `domain:server` · `pm:blocked`, Blocked-by #34412\n\n## 维护者速读\n\n- 现象:#34412 让 before* 钩子里经 `ctx.api` 写的语句和外层写入同属一个事务单元。在 PostgreSQL 上，钩子里的语句如果失败、又被钩子吞掉(或走 onError 的 log/retry),因为没有 savepoint,整个单元会进入 25P02 状态，外层写入随之被拒。这个规则 PR #34503 只写进了文档，没在真实 PG 上测过。MongoDB standalone 也没测。\n- 为什么要修：文档写的是推断。实测能确认用户看到的报错是什么，以及要不要给钩子作者更明确的指引。\n- 需要你做的：无。\n\n## Items\n\n- [ ] S1: on a live PostgreSQL, a before* hook issues a failing `ctx.api` statement and swallows the error (also the onError `log` and `retry` paths). Record what the outer write answers (expected: refused, 25P02), and make the changeset and `hooks.mdx` wording match the measurement.\n- [ ] N3: the same flow on a MongoDB standalone (no replica set), recorded as measured.\n\n## Done when\n\nBoth cells are measured and linked here, and the docs say exactly what was measured.\n\nBlocked-by: #34412\n"

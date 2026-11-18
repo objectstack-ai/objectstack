@@ -1,0 +1,31 @@
+{
+  "number": 35106,
+  "kind": "issue",
+  "title": "Auth direct sign-in: an afterSignOut option so hosted sign-out returns through the identity provider (objectstack#34168 item 3, not shipped; blocks cloud#4471)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p1",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T03:43:53Z",
+  "updated_at": "2026-11-18T03:48:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35106",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\n**Carry-over from objectstack#34168, item 3.** It was added to that card's scope in comment 6902780898. objectstack#34168 closed as completed after PR #34265, which shipped items 1 and 2, the refusal reason and the client name. Item 3 did not ship. At `main` `b1da9f55db` there is no `afterSignOut` in `plugin-auth`, the spec or the Console; the cloud#4471 build thread checked this. cloud#4471 (p1) is held open on this card for its sign-out step.\n\n## Ask\n\nAdd a direct sign-in option `afterSignOut: 'hold' | 'identity-provider'`.\n- The default is `'hold'`, today's behaviour under the objectstack#33183 sign-out ruling 6879236460.\n- Under `'identity-provider'`, the Console's sign-out `callbackURL` is the direct door `/api/v1/auth/sign-in/direct` instead of `/login`. The post-logout return then goes back through the identity provider's sign-in page.\n- There is no loop: the provider's session has already ended, so the provider shows its own sign-in page.\n\n## Done when\n\nA test pins both values:\n- under `'hold'`, sign-out lands on the held sign-in page, as today;\n- under `'identity-provider'`, the sign-out callback is the direct door.\n\n## Why\n\ncloud#4465 rulings 8 and 10: on a hosted environment, after sign-out the person lands on the cloud sign-in page, and no environment sign-in page is kept. Once this ships in a release the cloud pins, cloud sets `'identity-provider'` and registers the direct door as a post-logout redirect URI. No cloud response rewrite is built in the meantime.\n\n## Related\n\nobjectstack#34168 (closed; items 1 and 2 shipped in PR #34265), cloud#4471, cloud#4465."
+}

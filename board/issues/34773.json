@@ -2,8 +2,8 @@
   "number": 34773,
   "kind": "issue",
   "title": "cli: install, update and report the published skills at the server's version, with or without a project",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "lease:o3-G",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T10:11:30Z",
-  "updated_at": "2026-11-18T01:40:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T03:12:05Z",
+  "closed_at": "2026-11-18T03:11:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34773",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this seat's chat, 2026-11-17, verbatim: 「三点都同意，按最终计划把后续里程碑的卡全部立出来」, and, on the list of thirteen cards the seat then showed: 「同意」. The ruling records are #34659 comment 6940528935 and #34691 comment 6943107981. Readings: objectstack `a0326b06`, cloud `53a5844`, 2026-11-17.\n\n## Why\n\nA person who only connected an MCP client has no way to install the skills. A person with a project has no command to refresh them after an upgrade, so the local knowledge quietly falls behind the server.\n\nWho acts: the server lane (`packages/cli`, `packages/skills`). Reader: every user of the skills.\n\n## Evidence\n\n- The only install path is `create-objectstack`, which runs a third-party sync at scaffold time. No `os` command refreshes `.claude/skills/`.\n- `os validate --target` warns when the local skills version differs from the target's (`packages/cli/src/commands/validate.ts:235`); nothing repairs it.\n- Nothing documents an install for a user with no project (`content/docs/ai/connect-mcp.mdx`).\n- Vendors solve version skew with a command: `npx convex ai-files install|update|status`, `stripe agent setup`, `nb init`, and the Next.js rules block refreshed on upgrade.\n\n## Scope\n\n- `os skills install`, `os skills update`, `os skills status`: copy the catalog at a named version, default the active target's version, into the agent's skills directory; report installed versus target.\n- Works in an empty directory and in a project.\n- The open server's instructions and `/mcp/skill` name this command (sibling card #34686).\n\n## Done when\n\n- In an empty directory, the command installs the catalog matching a running server's version, and `status` reports a mismatch after the server is upgraded.\n\n## Relations\n\n- Parent: #34659. Decision record: #34691 S3 = A; #34659 D4 = A. Related: #34686.\n- Dedup, open and closed: none found for `os skills install`."

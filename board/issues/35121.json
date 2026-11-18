@@ -1,0 +1,36 @@
+{
+  "number": 35121,
+  "kind": "pull_request",
+  "title": "test(scenarios): measured 30 s budget for the two skill-evals --regrade command tests",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T05:21:10Z",
+  "updated_at": "2026-11-18T06:21:49Z",
+  "closed_at": "2026-11-18T06:21:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T06:21:47Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35121",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8LvPEHAQYchQkNdLqwBqea3)_\n\nFixes #35110\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:skill-evals 测试文件里两条跑完整 `executeRound` + `regradeRound` 的 `--regrade` 命令测试,改用具名的 30 秒超时(`REGRADE_COMMAND_TEST_TIMEOUT_MS`),不再吃 vitest 默认 5 秒;断言一条未动。\n- 为什么改:merge queue 把 scenarios 和 plugin-security 排在同一个 Test Core 分片时,这条测试实测 6.2 秒、9.7 秒,超时把 #34709 两次踢出队列;本地只要 36–168 毫秒。\n- 风险与回滚:只动测试文件,不发布任何东西;真挂死时最多多等 25 秒才报红。回滚即 revert 这一个 commit。\n- 先看:`packages/qa/scenarios/test/skill-evals/skill-evals.test.ts` 顶部新增常量及其注释(测量来源与取值理由),以及两处 `}, REGRADE_COMMAND_TEST_TIMEOUT_MS);`。\n- 两分钟验证:`pnpm --filter @objectstack/scenarios exec vitest run test/skill-evals/skill-evals.test.ts`,预期 36/36 通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`packages/qa/scenarios/test/skill-evals/skill-evals.test.ts` only:\n\n- A named constant `REGRADE_COMMAND_TEST_TIMEOUT_MS = 30_000` near the top of the file, with a comment citing the queue measurements it is sized from. This follows the package's existing convention (`STAND_IN_TEST_TIMEOUT_MS = 30_000` in `test/runner/units.test.ts`, the measured `30_000` budgets in `test/runner/external-driver.test.ts`).\n- It is passed as the per-test timeout of the two tests that run a full `executeRound` and then `regradeRound`:\n  - line 362 of the old file, \"the command: a reworded case keeps its record bytes ...\" (the test the card names);\n  - \"--regrade keeps a recorded trigger case planned and regrades it from its record\" (the sibling on the same path).\n- Every assertion is kept. No skip, no retry, no quarantine, no package-wide `testTimeout`.\n\n## Tests\n\nTimings, per test (ms):\n\n| Where | reworded-case test (card) | trigger-case `--regrade` sibling | file |\n|:--|--:|--:|--:|\n| CI, merge-queue job 134498092500 (shard 7/10, beside plugin-security) | 6218 (timed out) | not reported | 7134 |\n| CI, merge-queue job 134551614597 (same plan) | 9728 (timed out) | 141 | 10526 |\n| CI, merge-queue job 134557796904 (shard 8/10, light) | 2356 | under the reporter's threshold | 3149 |\n| local, unloaded, 3 runs before the change | 168 / 35 / 36 | 40 / 47 / 35 | tests 239–380 |\n| local, 12 CPU burners on 4 cores | 79 | 107 | tests 564 |\n| local, 24 CPU burners on 4 cores | 102 | 106 | tests 848 |\n| local, after the change | 40 | 52 | 36/36 pass |\n\nHow the timeout is sized: the slowest observed reading is 9728 ms; the unloaded CI reading is 2356 ms. 30 s is about 3x the slowest observed and about 13x the unloaded CI reading, and it is the budget this package's other measured suites already use.\n\nWhere the cost sits: in the same CI job the reworded-case test took 9728 ms while the sibling on the identical `executeRound` + `regradeRound` path took 141 ms, and the `executeRound`-only tests took tens of ms. So the cost lands on the first `regradeRound` call in the file, not on the round the test builds; the one thing that call does that the later one does not is a cold first run of `runnerSha` (two `git` spawns over the checkout). CPU oversubscription locally (up to 6x) did not reproduce it, and a fresh worktree's first `git status` over the same pathspec took 141 ms here, so the mechanism is not established. Because the cost follows whichever of the two runs first (a `-t` filter or a reorder moves it to the sibling), both tests get the budget, although the sibling does not measure within 2x of 5 s locally. The product code is unchanged: the measurement does not show a product-side cost that a behaviour-preserving change in `src/skill-evals/**` would remove.\n\n<details><summary>Package suite and typecheck at 91523c8b4f</summary>\n\n```\npnpm --filter @objectstack/scenarios build && pnpm --filter @objectstack/scenarios typecheck && pnpm --filter @objectstack/scenarios test\n Test Files  39 passed (39)\n      Tests  1144 passed (1144)\nos-verify-lock: VERDICT command-exit 0\n```\n\n`tsc --noEmit --listFiles` includes `test/skill-evals/skill-evals.test.ts` (count 1).\n</details>\n\n## Acceptance notes\n\n- The CI cost of the first `regradeRound` call is located (first call against second, same job) but its mechanism is not reproduced locally. If a later reading shows the cost growing past this budget, `runnerSha` (the `git rev-parse` + `git status` pair in `src/skill-evals/cli.ts`) is the place to measure first.\n- No changeset: the diff touches a test file only, which is not in the package's `files[]` (`dist`, `README.md`, `CHANGELOG.md`), so nothing publishes; `skip-changeset` rides this create.\n- No ablation: the diff changes a test timeout, not a tested behaviour.\n\n## Verification\n\n<details><summary>Derived gates at 91523c8b4f (dispatch-gates --commands, 49 families)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran FILE` with exit codes recorded: `49 derived famil(ies) accounted for — 48 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)`.\n\n- 48 commands exit 0.\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads`, reason: PREREQUISITE NOT MET (it reads every package's dist, and this worktree built only the scenarios closure). CI runs it in `Lint & Repo Gates`.\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbaX2qDxUq9sF93EqqL)_\n"
+}

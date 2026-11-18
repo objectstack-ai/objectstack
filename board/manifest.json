@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-18T02:23:11.775Z",
+  "generated_at": "2026-11-18T08:22:33.156Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -11,8 +11,8 @@
     },
     "delta": {
       "complete": true,
-      "cursor": "2026-11-18T02:07:31.147Z",
-      "since": "2026-11-17T20:03:15.062Z",
+      "cursor": "2026-11-18T08:07:22.898Z",
+      "since": "2026-11-18T02:07:31.147Z",
       "slice": 300
     },
     "history": {
@@ -20,28 +20,28 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-17T20:03:15.062Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-17T20:03:15.062Z)",
-  "next_since": "2026-11-18T02:07:31.147Z",
+  "since": "2026-11-18T02:07:31.147Z",
+  "since_reason": "incremental from the previous run's next_since (2026-11-18T02:07:31.147Z)",
+  "next_since": "2026-11-18T08:07:22.898Z",
   "resume": null,
   "counts": {
-    "issues_open": 461,
-    "issues_closed": 15437,
-    "issues_transferred": 10,
-    "pulls_open": 61,
-    "pulls_closed": 17007,
-    "records": 32976
+    "issues_open": 469,
+    "issues_closed": 15468,
+    "issues_transferred": 11,
+    "pulls_open": 52,
+    "pulls_closed": 17042,
+    "records": 33042
   },
   "board": {
-    "open_issues_count": 455,
-    "open_pull_requests": 56,
-    "read_at": "2026-11-18T02:23:05.129Z"
+    "open_issues_count": 454,
+    "open_pull_requests": 47,
+    "read_at": "2026-11-18T08:22:32.124Z"
   },
   "count_check": {
     "verdict": "ok",
     "reason": null,
-    "expected": 399,
-    "archived": 461,
+    "expected": 407,
+    "archived": 469,
     "shortfall": 0,
     "surplus": 0,
     "gone_ledger": 62,
@@ -52,10 +52,10 @@
     "pending_since": null,
     "reason": null
   },
-  "requests": 447,
+  "requests": 357,
   "run": {
-    "numbers_read": 248,
-    "files_written": 451,
+    "numbers_read": 200,
+    "files_written": 364,
     "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
@@ -64,17 +64,22 @@
     "blank_pages_reasked": 0,
     "reconcile": {
       "first": {
-        "verdict": "ok",
-        "expected": 399,
-        "archived": 461,
+        "verdict": "surplus",
+        "expected": 407,
+        "archived": 470,
         "shortfall": 0,
-        "surplus": 0
+        "surplus": 1
       },
-      "listed": 455,
-      "candidates": 5,
+      "listed": 454,
+      "candidates": 6,
       "left": 0,
       "reread": [],
-      "transferred": [],
+      "transferred": [
+        {
+          "number": 34690,
+          "to": "a repository this token cannot read"
+        }
+      ],
       "destroyed": [
         {
           "number": 19374,
@@ -100,7 +105,7 @@
       "unreadable": [],
       "blank_pages_reasked": 0,
       "reason": null,
-      "wrote": 0,
+      "wrote": 1,
       "cut_short": false
     }
   }

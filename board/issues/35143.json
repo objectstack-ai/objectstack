@@ -1,0 +1,31 @@
+{
+  "number": 35143,
+  "kind": "issue",
+  "title": "lint: a second batch of publish-time checks for metadata that saves and does not work — the ones only the hosted build check makes today",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:devx",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T07:19:16Z",
+  "updated_at": "2026-11-18T07:25:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35143",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「你要评估，云端哪些要迁移到开源项目，相关卡片要么关闭要么等待」, after 「开源项目能做的尽量在开源项目做，云端等开源项目完全优化好再开工」. Source of the inventory: a reading of the hosted tree at cloud main `0aabf9aa` against this repository's main `b1eb500d`, 2026-11-18. The open repository's agents cannot read the hosted tree, so what each item does is written here.\n\n## Why\n\nThe hosted product checks a build for some two dozen mistakes that the open framework lets through to publish. An author on the open side, human or AI, ships them and finds out at run time. E1 on #34659 rules that such a mistake is caught by a check in the framework first. #34776 carries the first six; this card is the rest of what the reading found with no open rule of the same meaning.\n\nWho acts: the spec lane (`packages/lint`, `packages/spec/src/kernel`). Reader: every author at publish time; the hosted side then deletes its copies.\n\n## The checks, by family (each: what is wrong · why it does not work)\n\n**Flows**\n- A condition or a field value compares or writes a select option's **label** instead of its value · the condition matches no row and the flow never fires; the write fails.\n- A record-change start node with no object · it binds to nothing.\n- A flow that re-triggers itself and is guarded only by a boolean it writes · it loops or never runs.\n- A time-relative trigger that is shadowed by another, has its filter in the wrong place, names an unknown object, or names a field that is not a date · the sweep is discarded or matches nothing.\n- A schedule with no timezone · it fires at a time nobody chose (advisory).\n- A subflow step naming a flow that does not exist.\n- A date helper written inside a plain string, and a CEL expression that faults on a date-only value · the run fails on every row.\n- Two flows, one after create and one after update, doing the same thing · one rule written twice (advisory).\n\n**Data model**\n- A field named like a count or a total and typed as a lookup (advisory).\n- A formula that reads a summary field that has no configuration · it is stuck at zero.\n- A summary whose child object has no reference back to the parent.\n- `reference` set on a field type that reads none.\n- A field of an approval detail that stays editable while the approval is pending (advisory).\n\n**Views, dashboards, app shell**\n- A board grouped by a field that is not a select (advisory). A dashboard with no widgets.\n- A view filter on a formula field the store cannot filter by.\n- An object no app's navigation reaches; an app with no navigation; an object with no view (advisory).\n\n**Seeds and actions**\n- A seed key that is not a field of its object, caught before load, not at it.\n- A seed, a flow node or an action bound to an object that does not exist (the open rule covers datasets, views and flow triggers only).\n- An action body that calls a write API without declaring the write capability.\n\n## Scope\n\n- One PR per family. Each rule: runtime publish gate and CLI, a positive and a negative pin, a finding that names the fix. Severity as marked; the lane may raise an advisory after reading the engine.\n- Where an open rule already covers part of a case, extend it; do not add a second rule beside it.\n- When a family lands, the matching trap leaves the published skills where it is taught as prose.\n\n## Done when\n\n- Each line above is either a rule with its pins, or a line on this card saying which existing rule already covers it.\n\n## Relations\n\n- Parent: #34659. Ruling: E1 = A. First batch: #34776. These are product rules an author sees at publish, not repository gates.\n- The hosted card on `reference` on a non-reference type is closed in favour of this card.\n- Dedup, open and closed: `NO_EXECUTOR lint flow node type` and `approval edge label` found only #34776; no card found for the families above."
+}

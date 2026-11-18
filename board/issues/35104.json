@@ -1,0 +1,37 @@
+{
+  "number": 35104,
+  "kind": "pull_request",
+  "title": "fix(app-shell, plugin-designer, console): app writes send the stored app, not the translated served one",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T03:23:47Z",
+  "updated_at": "2026-11-18T06:26:26Z",
+  "closed_at": "2026-11-18T06:26:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-18T06:26:24Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/35104",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBLW6dHPW6sSheA32XPKZzPV)_\n\nPart of #35054 (the app family of route D; the view family, the action-pair writer and the ReportView served-draft follow-up remain, see Acceptance notes)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:四个\"整份写回应用\"的入口(编辑应用向导、应用管理的启用/停用/设为默认与批量开关、导航同步、未发布应用的\"发布\"按钮)不再拿界面上已翻译的应用去保存,而是先读出作者存储的原文,只改自己负责的那个字段。\n- **为什么改**:界面读到的应用按当前语言翻译过,保存口原样存储;中文会话里点一下开关,应用名和全部导航名就被存成中文,英文用户随后看到的也是中文(已在线实测复现)。\n- **风险与回滚**:读原文失败时改为报错不保存(以前会照存翻译稿);回滚即还原本 PR,无数据迁移。\n- **先看**:`ui/apps/console/src/pages/system/AppManagementPage.tsx` 的 `saveApp`;`ui/packages/app-shell/src/hooks/useNavigationSync.ts` 的 `storedApp`;`ui/packages/data-objectstack/src/index.ts` 的 `getAuthoredItem`。\n- **两分钟验证**:中文界面打开 系统 → 应用,停用一个有中文翻译的应用,再用英文读取它:标签仍是英文原文,`active` 为 false。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- New `ObjectStackAdapter.getAuthoredItem(type, name, { packageId })` in `@object-ui/data-objectstack`: reads the untranslated `/layers` and answers the published layer (`authoredPublished`: effective over code, an object's overlay over code), `null` when no layer holds the item, and throws on a refused read.\n- `EditAppPage` seeds the wizard from the stored app at the package the served app came from; the served list only finds the app. New states: loading, and a read-failure message instead of opening the wizard.\n- App management: `saveApp` reads the stored app at the owning package and saves `{ ...stored, ...patch }`, where the patch is only the key the control owns (`active` or `isDefault`). A null read refuses with a toast.\n- `useNavigationSync`: all six navigation writers start from `storedApp(name)` (stored body) instead of the served app; a failed read refuses with the existing failure toast.\n- `UnpublishedAppBar` Publish: sends `{ ...stored, _unpublished: false }`.\n\nPattern note: these four writers write the live app row, not a draft, so they read the published layer (`authoredPublished`) rather than `authoredBuffer` with the served draft. The draft writers in the remaining families (list-view config, report quick edit) take `authoredBuffer` with the served draft, as Studio's editors do.\n\n## Tests\n\n- New pins, one per surface, each a zh-CN edit then save where the body must carry the en source label and navigation labels, with the edited key as the control, plus a refused-read case: `EditAppPage.authoredApp-35054`, `AppManagementPage.authoredApp-35054`, `useNavigationSync.authoredApp-35054`, `UnpublishedAppBar.authoredApp-35054`, and `getAuthoredItem-35054` for the adapter (address, layer choice, null, refusal).\n- Existing doubles in the touched suites gained `getAuthoredItem`; no assertion was removed or loosened.\n\n<details><summary>Runs at c8820cf23f</summary>\n\n- 86 test files naming a changed module (`git grep` for the four modules and `getAuthoredItem`): Test Files 86 passed, Tests 791 passed, lock VERDICT command-exit 0.\n- `pnpm --filter @object-ui/data-objectstack test`: Test Files 123 passed, Tests 1397 passed, VERDICT command-exit 0.\n- `type-check` for data-objectstack, plugin-designer, app-shell and console (after a data-objectstack build, so plugin-designer reads the new `dist` types): all four scripts echoed, VERDICT command-exit 0.\n- `node scripts/check-test-source-alias.mjs`: exit 0.\n\n</details>\n\n<details><summary>Ablations (fix committed first; each leg via scripts/ablation-replace.mjs, restore proven blob == HEAD and git diff HEAD empty)</summary>\n\nExpected direction written before each run: the source-label assertion goes red, the control stays green.\n\n- EditAppPage, `authored.app ? authored.app : undefined` to `authored.app ? servedApp : undefined`: RED, expected 'QA Translate App', received '翻译测试应用'; 1 failed, 1 passed.\n- AppManagementPage, `{ ...stored, ...patch }` to `{ ...app, ...patch }`: RED, same assertion; 1 failed, 1 passed.\n- useNavigationSync, `return stored` to `return served`: RED, same assertion; 1 failed, 1 passed.\n- UnpublishedAppBar, `{ ...stored, _unpublished: false }` to `{ ...app, _unpublished: false }`: RED, expected 'QA Hidden App', received '隐藏测试应用'; 1 failed, 1 passed.\n\n</details>\n\n## Acceptance notes\n\n- Live zh-CN before/after on the showcase app (fixture app `qatr_app` in `com.qa.tr` with a zh-CN translation; `qatr_hidden` unpublished). Before (audit comment on the card): each writer stored Chinese label and navigation labels and an en reader was served Chinese. After, on this branch:\n  - App management Disable: PUT body label 'QA Translate App', nav 'My Work' / 'Workspace' / 'Chart Gallery', `active: false`; stored and en reads source, zh read still translated.\n  - Edit app wizard, description edited: body source labels, description 'After-leg description'; stored source.\n  - Navigation sync from publishing a new package-less page on Home: both apps' PUT bodies source, new entry appended; no served `_` decorations in the body.\n  - Publish on `qatr_hidden`: body source, `_unpublished: false`; stored source.\n- Remaining for #35054 (not in this PR): the list-view config save and its draft-bar resume, the adapter `updateView` paths, the public form editor, the action-pair writer, the ReportView quick edit passing the served draft to `authoredBuffer` (review nit on #35080), and the save-door guard decision.\n- Noted, not fixed here: `EditAppPage` and navigation sync write without a package scope, as before this change; `CreateAppPage` copies served object plural labels into generated navigation entries.\n\n## Verification\n\n- Gate families derived by `dispatch-gates.mjs --commands` (40) were NOT run locally before this push: the work was wound down. CI runs them on this PR.\n- overlap-check: VERDICT clean exit 0 against origin/main dcbb36334e.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01WGufzi6WQ71HhZSLSvHhdF\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzi6WQ71HhZSLSvHhdF -->\n"
+}

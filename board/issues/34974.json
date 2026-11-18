@@ -14,17 +14,17 @@
     "domain:server",
     "finding",
     "pm:queue",
-    "priority:p3"
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T20:21:12Z",
-  "updated_at": "2026-11-17T20:21:12Z",
+  "updated_at": "2026-11-18T02:22:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34974",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3: a follow-up of p1 #34916 (PR #34965), ruled out of that PR's scope (seat ruling 6957305509; L1-d 6959775843). It is pre-existing, and #34965 does not widen it.\n\n## What happens\n\n`presentReadValue` in driver-sql maps read values by field kind, but has no boolean kind. `distinct` and aggregate results over a boolean column therefore come back as raw `1` / `0` (and legacy `'true'` / `'false'`) on SQLite, where record reads show booleans.\n\nA group-by or distinct over a yes/no field shows 1/0 buckets.\n\n## Done when\n\n- A boolean kind in `presentReadValue` covers distinct and aggregate outputs.\n- A pin on SQLite: distinct over a boolean column returns `true` / `false`.\n\nGrade: **p3 · domain:server** (out of focus). It is a visible but cosmetic bucket label on one driver. Alone that would be p2, so one grade lower out of focus gives p3."

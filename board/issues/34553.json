@@ -2,8 +2,8 @@
   "number": 34553,
   "kind": "issue",
   "title": "console: publish-all-drafts and PendingDraftsBar toasts print `issues[].message` verbatim instead of the user's sentence",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
-    "priority:p2"
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T00:30:47Z",
-  "updated_at": "2026-11-17T04:47:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T07:53:01Z",
+  "closed_at": "2026-11-18T07:52:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34553",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ①: class a, a user-visible defect in the same class as #32984 Q1 (cards that speak in agent/API terms). Named by seat repo:objectstack#1 in its hand-off to this seat (mailbox comment 6933723686) as not filed. Dedupe: `usePublishAllDrafts toast`, `PendingDraftsBar issues message`; no open card.\n\nreach: a named producer. The console's publish-all-drafts flow shows toasts built from `issues[].message`; re-check with `grep -rn \"issues\\[.*\\]\\.message\\|issue.message\" ui/packages/app-shell/src` near `usePublishAllDrafts` and `PendingDraftsBar`.\n\nSuggested-grade: p2 · `domain:ui` · `pm:blocked`, Blocked-by #32984 (it consumes the `userMessage` field PR #34513 adds)\n\n## 维护者速读\n\n- 现象：控制台「全部发布草稿」(`usePublishAllDrafts`)和待发布草稿条(`PendingDraftsBar`)弹出的提示，把服务端返回的 `issues[].message` 原样打出来。用户看到的是面向开发者的英文报错。\n- 为什么要修：和 #32984 Q1 是同一类问题(卡片说 agent/API 的话);Q1 修了构建聊天，这两处提示还没修。\n- 需要你做的：无。\n\n## Change\n\nAfter PR #34513 merges, show each issue's `userMessage` and keep `message` out of user-facing text, the same way the #32984 console-read PR (#34539) does. Reuse its helper; do not write a second one. Pin it with a test that a publish failure shows the localized sentence.\n\n## Done when\n\nNeither toast can print `issues[].message`, and the pin test passes in two locales.\n\nBlocked-by: #32984\n"

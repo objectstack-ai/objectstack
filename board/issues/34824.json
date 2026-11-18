@@ -14,21 +14,21 @@
     "documentation",
     "domain:skills",
     "finding",
-    "lease:o3-B",
+    "lease:o1-C",
     "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "os-support-ai"
+    "os-warren"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T11:53:59Z",
-  "updated_at": "2026-11-18T00:01:52Z",
+  "updated_at": "2026-11-18T07:50:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34824",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmQ2SN4K183oqAvUajA\n\nFiling gate ②: the `Skills-docs: follow-up` owed by PR #34719 (Fixes #34273), contract review comment 6947246959 (and nit N4). Dedupe: `action refusals skill`; no open card.\n\nSuggested-grade: p2 (inherits #34273) · domain:skills · Blocked-by #34273\n\n## What is owed\n\n- No skill teaches an action's `refusals` catalogue. `skills/objectstack-i18n/SKILL.md` lists the hook refusal key only. Teach the action declaration, the translation pack keys (`objects.OBJ._actions.ACT.refusals.CODE.message`, `.reasons.REASON.message`, and the same under `globalActions.ACT`) and the localized answer, matching `content/docs/ui/actions.mdx` and `content/docs/ui/translations.mdx`; add or adjust the skill's eval so it exercises the rule.\n- N4 — the generated `action.zod.ts` row in `skills/objectstack-data/references/_index.md` and `skills/objectstack-ui/references/_index.md` no longer names `ActionSchema`; a module doc block on `packages/spec/src/ui/action.zod.ts` gives the generator a description to print.\n"

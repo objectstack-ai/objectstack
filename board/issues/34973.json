@@ -2,8 +2,8 @@
   "number": 34973,
   "kind": "issue",
   "title": "data: normalise boolean fields already stored as the text 'true'/'false' (SQL driver), so equality filters find rows written before #34965",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:server",
     "finding",
     "lease:o3-A",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T20:20:44Z",
-  "updated_at": "2026-11-18T01:49:42Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T03:11:53Z",
+  "closed_at": "2026-11-18T03:11:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34973",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3: a follow-up of p1 #34916 (PR #34965), ruled out of that PR's scope (seat ruling 6957305509; L1-d 6959775843).\n\n## What happens\n\nBefore #34965, inline grid edit on the SQL driver stored boolean fields as the text `'true'` / `'false'`. #34965 fixes the write, and the read of a stored `'false'` / `'0'`.\n\nRows already written that way still hold text. An equality filter such as `won = false` (and `requiredWhen` over such rows in queries) keeps missing them until each row is re-saved.\n\n## Done when\n\n- A one-off normalisation (migration or upgrade step) rewrites text-stored booleans to the driver's boolean form, idempotently and per object.\n- Or, if the dev finds a read-side fix that makes filters match both forms cheaply, that instead, with the reason recorded.\n- A pin: a row seeded with `'false'` text is found by `= false` after the step.\n\nGrade: **p1 · domain:server**. The theme is install, upgrade and uninstall reliability (an upgrade step), plus epic #34571's console data. The named effect is the same one #34916 was graded p1 for, filters silently miss rows, and it stays live for existing data until this lands.\n\nBlocked-by: #34916 (land PR #34965 first, so new writes stop adding text rows)"

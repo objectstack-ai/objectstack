@@ -13,17 +13,17 @@
   "labels": [
     "domain:server",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-15T14:46:36Z",
-  "updated_at": "2026-11-16T13:49:18Z",
+  "updated_at": "2026-11-18T05:53:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/33949",
   "body": "domain:server#5 · zhuangjianguo · session_01QsR2jRsWwTRkuRCyQwvpAG\n\nFiling gate ③: maintainer-directed. On 2026-11-15 the maintainer chose 「今天改规则,并立全部 6 张卡」 on the hot-file serialization decision card (consequence as shown: 取消 protocol.ts 独占、关闭 #25467 和 #24586;卡 A 到 F 交各车道立卡,大 PR 和上限门禁仍逐个等您批准). Measurements: the hot-file analysis report (project artifact), re-runnable on request. Cross-lane rule (2026-11-15): no live seat in the owning lane, so `domain:server` seat 5 files and builds it; the owning lane is notified.\n\n## Card F: decision for the maintainer\n\nWhich large files get the next codemod splits (the protocol.ts codemod precedent: #29998, #30687, #30954, #31177), in this proposed order:\n1. `packages/objectql/src/registry.ts`\n2. `metadata-manager.ts`\n3. `mcp-http-tools.ts`\n4. `auth-manager.ts` + `auth-plugin.ts`\n5. service-automation `engine.ts` + `plugin.ts`\n6. `action-execution.ts`\n7. `marketplace-install-local-plugin.ts`\n8. spec `stack.zod.ts`\n\nAnd whether the maintainer names a shrink-only line ceiling for these files (a new gate needs the maintainer's naming).\n\nThe seat batches this with other maintainer questions behind one independent review, then puts a card in Chinese. No dev before the ruling."

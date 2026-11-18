@@ -11,7 +11,7 @@
     "type": "Bot"
   },
   "labels": [
-    "domain:devx",
+    "domain:skills",
     "finding",
     "pm:queue",
     "priority:p2"
@@ -20,11 +20,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T22:14:15Z",
-  "updated_at": "2026-11-17T22:14:15Z",
+  "updated_at": "2026-11-18T06:01:22Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34986",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #34585, 6960581130 as corrected by 6961491663). Scenario finding from epic #34659's ask rounds.\n\n## What happens\nIn order_to_cash **build 1**, 66 `demoorder_payment` seed rows were refused by **an authored validation rule in that build**: \"payment may not exceed the invoice's open balance\". Build 2 refused 0.\n\nArea o3-J's #34895 reading (6961464499) places the cause in the build's own rule, not in the runner's seed path. #34897's route A (rows loaded under seedReplay) would **not** lift them, so this card is not linked as a duplicate of #34897.\n\n## Question to answer\nHow should a build's own validation rule interact with its seed data?\n- Should the authoring guidance teach that seed rows must satisfy the build's rules, in insert order, given that rollups lag inserts?\n- Or should seed load be exempt from such rules?\n- What did build 2 do differently?\n\nDone when the answer is recorded and the matching change (skills text, runner or platform) is filed or made.\n\nParent: #34659. Related: #34895, #34897.\nGrade: **p2 · domain:devx** (theme: MCP / 问数 eval). Card truth depends on seed rows that load, but no customer is named."

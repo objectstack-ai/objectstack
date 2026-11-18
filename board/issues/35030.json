@@ -14,17 +14,17 @@
     "domain:devx",
     "finding",
     "pm:queue",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T23:23:05Z",
-  "updated_at": "2026-11-17T23:23:05Z",
+  "updated_at": "2026-11-18T05:21:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35030",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-I, mailbox #32588, 6963938020). This is an out-of-scope finding from #34834 (PR #35024).\n\n## What happens\n`runAuthoringRules('build')` in `@objectstack/lint` re-reads and re-parses the spec liveness ledgers from disk on **every call** (`lintLivenessProperties` → `loadWarnMap` → `readFileSync`).\n\nThe os-dev CPU profile measured about 3.4 ms of a 6.3 ms call, or 308 ms of the 588 ms build side across 90 calls in one test case.\n\nA real `os build` calls it once, so only suites that call it many times pay. That cost is what pushed the `flow-null-guards` LIT case over the 5 s cap under full-run load (#34834, the 4-hourly full run).\n\n## Done when\n- The warn maps are cached per ledger directory, and invalidated where a test rewrites a ledger.\n- The LIT suite's time for that case is measured before and after.\n\nGrade: **p2 · domain:devx**. Addendum 7, fleet-efficiency tooling: it removes a load-timed red from the full run and cuts test time. It is not the largest bottleneck (that is #34994), so p2."

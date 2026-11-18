@@ -2,8 +2,8 @@
   "number": 35025,
   "kind": "issue",
   "title": "scenarios travel_expense: file_and_submit_from_text pins the claim lines' quantity shape (2 x 430, 3 x 115) — check the per-type amounts instead, so per-unit lines also pass",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:ai",
     "domain:devx",
     "finding",
-    "lease:o3-F",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T23:19:55Z",
-  "updated_at": "2026-11-18T01:42:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T03:28:59Z",
+  "closed_at": "2026-11-18T03:27:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/35025",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (mailbox #32588, 6963882491), from area o3-H's reading on #34998 (6963855363).\n\n## What happens\n`docs/qa/scenarios/travel_expense.json`, operation `file_and_submit_from_text`, pins the line shape `claim_line quantity 2 × 430` and `quantity 3 × 115`.\n\nOn main, the agent filed per-night and per-day lines at quantity 1. That is an equally faithful reading, with `total_amount` = 1205, matching the card. It is graded as a fail.\n\n## Done when\n- The operation checks the per-type amounts (hotel 860, meals 345), or accepts either line shape.\n- The scorecard notes the card change.\n\nParent: #34659. Blocks: #34996 (\"operations 100%\").\nGrade: **p1 · domain:devx · area:ai**. It falsely fails a correct answer and caps the maintainer-requested loop."

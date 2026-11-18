@@ -1,0 +1,31 @@
+{
+  "number": 35149,
+  "kind": "issue",
+  "title": "objectql: a committed trio handle reverts to unattributed instead of closed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T07:42:37Z",
+  "updated_at": "2026-11-18T07:44:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35149",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbXGvw43spR79ztEvWt\n\n## What\n\nAfter a `ScopedContext` trio transaction commits or rolls back, the engine drops the handle's owner record, so the handle reverts to \"unattributed\" instead of \"closed\". A late write that still carries that handle to another datasource is handed the dead foreign handle again.\n\nA closed `transaction()` unit's handle is treated differently: `isClosedUnitHandle` answers true, the handle is treated as absent, and the late work runs unenrolled (#22855). The two kinds of handle should agree.\n\n## Where\n\n- `packages/objectql` trio owner record (the WeakMap keyed by handle that PR #35102 adds for route A of #35028), and the release on commit/rollback.\n- `packages/objectql/src/engine-driver-options.ts` (`isClosedUnitHandle`, ~303-306) and `engine-execute-transactions.ts` (`enforceTransactionOrigin`).\n- The PR #35102 test \"forgets the owner once the trio commits\" pins today's delivery.\n\n## Origin\n\nNit N2 of contract review 6969574094 on PR #35102 (card #35028). It is the pre-PR behaviour for trio handles, unchanged by that PR and outside its card. The ADR-0119 note's \"a handle the engine never opened\" does not quite cover it.\n\n## Suggested direction (unverified)\n\nMark the trio handle closed on commit/rollback (so `isClosedUnitHandle` answers true for it) instead of forgetting it, and pin that a late cross-datasource write carrying a committed trio handle runs unenrolled, as a closed `transaction()` unit's late work does.\n\nRe-check: `git grep -n \"isClosedUnitHandle\" origin/main -- packages/objectql/src` and read the trio release path once #35102 has merged."
+}

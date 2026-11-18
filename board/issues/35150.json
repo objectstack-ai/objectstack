@@ -1,0 +1,29 @@
+{
+  "number": 35150,
+  "kind": "issue",
+  "title": "[Epic line 1] MCP ask-data (问数): a client with its own AI gets the governed answer over the open MCP door",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T08:16:44Z",
+  "updated_at": "2026-11-18T08:16:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35150",
+  "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a coordination node under the cross-lane parent #34659 (the 「MCP 二期与问数」 epic), filed on the maintainer's word in this session's chat, 2026-11-18, verbatim: 「现在就改结构」. The lines are the maintainer's: 「我们有代码搭建，mcp搭建，云端搭建，，mcp问数，云端问数」; so is their order: 「代码搭建已经可用，只是优化，mcp问数优先，其次是mcp搭建」; and the cloud lines are linked, not held here: 「云端子专题和卡片开在云项目，你只是链接，而且暂时不启动」. A parent may hold 100 children; #34659 had 72 after two days, which is why it is split.\n\n## What this line is\n\nA person connects their own AI client to a self-hosted app and asks for a number. This line is everything that decides whether the answer comes from a governed metric, says where it came from, asks back when the word is unclear, and says so when it had to fall back or may not see a field.\n\n**Order: first.** New dev slots go here until its queue is empty.\n\n## What belongs here\n\n- The ask-data skill and the text the server sends a client.\n- What the dataset and record tools return: matches, candidates, the next step, the citation line, labels in the caller's language, withheld fields, and the other result members.\n- Read abilities a question needs: ordering and cutting groups, latest per group.\n- Dataset vocabulary: synonyms and descriptions, and the advisory for a member that has neither.\n\n## Acceptance reading\n\nThe daily MCP ask round on the open runner (#34869), over the ten question kinds (#35113). Both live under the measurement parent.\n\n## Not here\n\nThe product's own ask agent: that is the hosted line, linked from #34659."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 35141,
+  "kind": "issue",
+  "title": "console: publish-all seed warning toast prints the seed loader's engine text and an English 'NAME: sample data failed to load' instead of the pack sentence",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T07:13:40Z",
+  "updated_at": "2026-11-18T07:46:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35141",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbYRqkDAGuse5Wqbohi\n\nFiling gate ① (product defect, named producer). Out-of-scope finding from the os-dev report on #34553 (PR #35139), sibling of that card's `issues[].message` fix. Dedupe: `is:issue usePublishAllDrafts seedError` → 2 hits (#34553 open, #32984 closed; neither covers the seed detail); `is:issue seedError` → same 2; `is:issue \"publish all\" seed toast` → 60 hits, none on this toast's description.\n\n## Defect\n\n`ui/packages/app-shell/src/preview/usePublishAllDrafts.ts` (Home's *Publish all* and the draft-preview bar) shows the `home.pendingDrafts.seedWarn` warning with `description: seedProblems[0]`, and `seedProblems` is filled from two places that are not user sentences:\n\n- `recordHealth` pushes `health.seedError` first, which is the seed loader's engine text (for example \"seed apply stopped at the seed for object X\"), and uses the pack sentence `chatbot.build.health.seedFailed` only when the producer sent none.\n- The package-less loop pushes `seedApplied.error ?? \\`${d.name}: sample data failed to load\\``: engine text again, else a hard-coded English sentence in every locale.\n\nFor the same publish answer, the chat's `PublishHealthLine` (`ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx`, objectstack#32984) never voices `seedError`: it says the pack sentence and folds the engine text under \"Technical details\". The toast should follow the same rule: the pack sentence `chatbot.build.health.seedFailed` (or a producer customer sentence if one is ever added), never the engine text, never literal English.\n\nreach: named real producer (the two call sites above, read from code on origin/main 958ee035). A live reading (a seed that fails on Publish all, in `zh-Hans`) is the first step of the fix.\n\n## Why it matters\n\nA builder who publishes from Home in Chinese sees English loader internals under the warning, which the #32984 Q1 ruling says user-facing text must not show (`userMessage`, never the developer's text). The chat already follows it; this door does not.\n\n## Reader\n\nConsole UI lane (`domain:ui`), the area holding `ui/packages/app-shell/src/preview/`; on repo:objectstack#1 that is area o1-B. Fix after PR #35139 lands (same file).\n\nGrading: p2 · who: any builder whose seed fails on Publish all / the draft bar · door: the seedWarn toast · frequency: every failed seed · read from code. User-visible wrong-language text with the warning title still correct (北极星 p2: user-visible defect, not data loss)."
+}

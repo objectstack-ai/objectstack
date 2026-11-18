@@ -1,0 +1,31 @@
+{
+  "number": 35097,
+  "kind": "issue",
+  "title": "skills: teach declaring an action's texts (ActionSchema.texts) and translating them under the action node — objectstack-ui rules/actions.md and objectstack-i18n SKILL.md",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-18T03:01:44Z",
+  "updated_at": "2026-11-18T07:48:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/35097",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiled by triage at the request of repo:objectstack#3 (area o3-G, mailbox #32588, 6967686326, item 2). It is a follow-up owed before PR #35085 closes #34374.\n\n`skills/objectstack-ui/rules/actions.md` and `skills/objectstack-i18n/SKILL.md` should teach declaring `texts` on an action, and translating them under the action node in a bundle. This is not covered elsewhere:\n- #35087 (#34824) teaches action **refusals**, not texts;\n- #34546 covers only the hook half.\n\nDone when both skill texts carry it, plus one eval case. `skills/**` is governed (Tier H, L2).\n\nGrade: **p2 · domain:skills**. Theme: MCP and zh-CN (skills teach external agents to author). Routed to seat 4; seat 3 is winding down.\n\nBlocked-by: #35085"
+}

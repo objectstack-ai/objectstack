@@ -2,8 +2,8 @@
   "number": 34896,
   "kind": "issue",
   "title": "scenarios: travel_expense pins its dataset names, so a build cannot collide with the ambiguous word the card measures",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "area:ai",
     "domain:devx",
-    "lease:o3-F",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-17T15:20:01Z",
-  "updated_at": "2026-11-17T21:14:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-18T03:02:10Z",
+  "closed_at": "2026-11-18T03:00:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34896",
   "body": "epic:#34659#1 · hotlong · session_01Q4EjjMnXJdSZifpEN5i7aU\n\nFiling gate: ④ a child of the cross-lane parent #34659 (the 「MCP 二期与问数」 epic); the maintainer set who files this epic's cards, verbatim: 「你应该负责立卡，对方只是派发处理」. The gap was reported by the dispatching seat `repo:objectstack#3` on #34659 (comment 6951773597), from area o3-F's five-repetition ask round on #34687; the filer did not re-read the records behind it.\n\n## Why\n\nThe card asks an ambiguous word on purpose. A build that names its own dataset with that word changes what the word matches, so the question no longer measures what it was written to measure.\n\n## Evidence\n\n- Per the report: a build added its own `travel_spend` dataset, which collides with the ambiguous `dq_travel_spend` word of the card.\n\n## Scope\n\n- The card states the dataset names a build must use (under `expect.datasets`), or the ambiguous word is chosen so no natural dataset name equals it.\n- File surface: `docs/qa/scenarios/travel_expense.json`.\n\n## Done when\n\n- Two builds of the card give the ambiguous question the same set of matches.\n\n## Relations\n\n- Parent: #34659. Related: #34687 (PR #34808)."
