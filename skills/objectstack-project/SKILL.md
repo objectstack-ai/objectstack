@@ -96,8 +96,8 @@ the author-time rules it can explain, and `npx os explain <rule-id>` explains on
 
 What the app tests, with `bootStack` from `@objectstack/verify` on the real
 engine (the scaffold's `note.test.ts` is the shape): the numbers in its rules,
-who approves which amount, what a flow writes, what an action does, and which
-role sees which records **as this business intends** (`--rls` proves
+who approves which amount, what a flow writes, what an action does, and who sees
+which records **as this business intends** (`--rls` proves
 consistency, not intent).
 
 ```ts
