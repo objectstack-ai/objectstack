@@ -245,7 +245,8 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # only: a p0 card still obeys the same-file serial queue and the claim
   # protocol (SKILL.md state model, 「优先是排序,不是豁免」). Set by the triage
   # seat when it grades a card; removed by triage when the grade changes. Named
-  # consumers: the lane pull order (p0 > pm:blocking > 功能点位次 > p1 > p2 > p3;
+  # consumers: the lane pull order (p0, then p1 from any area, then the next
+  # card of the area or sub-epic the maintainer named, p2 before p3 inside it;
   # references/execution-duties.md 取卡全序) — which is also where a release
   # blocker sits, as p0 inside the release window — and the half-state sweep's
   # H10 (stale unclaimed p0) and H11 (important card parked) in
@@ -284,10 +285,13 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # pm:blocking is a derived CACHE, never hand state (maintainer opinion
   # 2026-08-13, superseding the earlier derived-only-no-stored-label ruling):
   # the triage sweep writes/removes it from the Blocked-by: reverse index, and
-  # it comes off when every dependent closes. Named consumers: the lane queue
-  # pull order (p0 > blocking > 功能点位次 > p1 > p2 > p3; execution-duties.md 取卡全序)
-  # and list-page scans. A hand-set instance is mislabeling — the sweep
-  # corrects it against the index.
+  # it comes off when every dependent closes. Since 2026-11-18 it is NOT a rank
+  # of the pull order and raises no grade (「有人在等」 is not a grading
+  # criterion): a card carries it only when the card it blocks is in an area
+  # being dispatched. Named consumers: the seat pulling inside that area, which
+  # reads it as "this card unblocks dispatched work" (execution-duties.md
+  # 取卡全序 orders by `Blocked-by:`), and list-page scans. A hand-set instance
+  # is mislabeling — the sweep corrects it against the index.
   gh label create pm:blocking         -R "$R" -c 8250df -d "Derived cache from the Blocked-by reverse index: open card with open dependents — never hand-set" 2>/dev/null || true
   # pm:retriage is a QUESTION put to the triage seat (a re-grade, a lane for a
   # cross-domain PR, a re-route, a split, a disposition fork a dev report left
@@ -631,57 +635,72 @@ gh label create status:parked -R objectstack-ai/objectui    -c cfd3d7 -d "Parked
 # file-path evidence — not this script's.
 gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui lane: all objectui code — library, apps, packages/types, .github/, scripts/, docs" 2>/dev/null || true
 
-# The FEATURE AXIS — `area:*`, one per card, eleven values. It is the PLANNING
-# axis: priority is judged on it, and `domain:*` beside it decides only which
-# seat may claim which files. The eleven values are the North Star definition
-# line ("What gets built") plus the road it measures, so the axis and the
-# product definition cannot drift apart without one of them being edited.
-# The eleven were put to the maintainer on the charter card and confirmed there
-# (2026-09-21) with ONE amendment: the API/integration value was shortened to
-# `area:api`, its customer capability (可对外的 API 与集成) unchanged. ⛔ The
-# longer spelling this replaced is deliberately NOT written here — the retired
-# name must not survive a `git grep` as though it were still a value. The
-# maintainer's sentence is quoted verbatim on that card's ruling comment.
+# The PRODUCT AREA — `area:*`, one per public card, eight values. It is the
+# PLANNING axis: an area is chosen by what the user feels is broken, never by
+# file or layer, and `domain:*` beside it decides only which seat may edit
+# which files. Six values are the standing product areas (ai, build, data,
+# workflow, ux, package); two are not product (fleet: the fleet's own tooling;
+# cloud: work done in this repository for the hosted product, paused with the
+# cloud lane). What each area covers, its core-feature list and the boundaries
+# between areas live in docs/NORTH-STAR.md ("Product areas") and are ⛔ not
+# copied here: the -d strings below are a label hover, not the definition.
+# Maintainer ruling 2026-11-18, verbatim: 「立一张专题卡，开始执行」, given on
+# the plan that named this set; the rollout epic's body quotes the exchange.
 #
-# Triage applies it at FIRST GRADING, in the same label write as `domain:*` and
-# `priority:*`; a filer may pre-apply it; a tooling card carries the area it
-# PROTECTS (a card that protects no area is not filed at all). ⛔ No backfill of
-# the existing backlog — a card gets its area when it is next touched.
+# ⛔ Two values that deliberately do not exist. Security: a security card lives
+# only in the private security channel and carries no `area:*`. Performance:
+# slowness goes to the area of what is slow — a slow query is data, a slow page
+# load is ux.
+#
+# Triage applies it at FIRST TOUCH — step one of grading, in the same label
+# write as `domain:*`, together with the card's GitHub issue type (Bug /
+# Feature / Task: a native type, not a label, so this file creates nothing for
+# it); a filer may pre-apply both. The repository is judged before the area: a
+# platform root cause is fixed here, wherever it showed up. A card that fits no
+# area is said so on the card and reported to the maintainer — ⛔ never a new
+# row here. The existing backlog is backfilled only under an epic the
+# maintainer authorised.
 #
 # Four named consumers (SKILL.md 状态模型, 「一个标签存在当且仅当有具名读者」):
-# the maintainer's board view by area; triage grading, where the card's priority
-# is inherited from the checklist item in that area; the parent-card grouping
-# for a cross-layer feature point; and the execution seat's candidate order.
-# The checklist end of that inheritance is machine-readable: every
-# docs/qa/platform-checklist/areas/*.json carries a top-level `axis` naming one
-# of these eleven values.
+# the maintainer's board view by area; triage grading, which reads that area's
+# core-feature list in the North Star to tell a broken core feature from an
+# impeded one; the parent-card grouping; and the execution seat's pull order,
+# where the area or sub-epic the maintainer named decides what is dispatched
+# after p0 and p1 (references/execution-duties.md 取卡全序). The checklist end
+# is machine-readable: every docs/qa/platform-checklist/areas/*.json carries a
+# top-level `axis` naming the product area most of its items serve.
 #
-# TWO repos, deliberately, and not the per-repo loop above: a feature point
-# spans 协议 → 运行时 → 前端, which is objectstack plus objectui. cloud is
-# parked (North Star "Not now"), objectos is the docs/site repo, and hotcrm is the
-# exemplar APP — its cards are app cards, and a platform gap found there is
-# filed in the platform repo, where it gets its area. Widening the loop is a
+# ⛔ RETIRED 2026-11-18, on the header's terms — row absent, label OBJECT left
+# exactly as it is: area:records, area:access, area:reports, area:identity,
+# area:api, area:files, area:i18n, area:studio and area:devpath, the
+# feature-axis values this set replaces. The objects area:auth, area:automation
+# and area:formula never had a row here and are left alone the same way. Open
+# cards carry these until the backfill moves each one to its new area; deleting
+# the objects afterwards is the maintainer's call, never a side effect of this
+# file. area:ai and area:workflow keep their names under new meanings, and
+# area:data gains its first row, so on those three `--reconcile` is what
+# rewrites the live description (default mode leaves an existing object alone).
+#
+# ONE repo, and not the per-repo loop above. The objectui repository no longer
+# exists — its code is this repository's ui/ tree — so the two-repo loop this
+# block used to be is gone. objectos is the docs/site repo, and hotcrm is the
+# exemplar APP: its cards are app cards, and a platform gap found there is
+# filed here, where it gets its area. Widening this to another repository is a
 # vocabulary decision, not a maintenance edit.
 #
 # ⚠️ Every -d below is ≤100 characters (`check:pm-label-desc-cap`), and each
-# names the CUSTOMER capability rather than the packages that implement it —
-# the axis is read by the maintainer planning product, not by a seat routing
-# files. One colour family (`c2e0c6` … `0e8a16` are taken; the axis uses one
-# shade of its own, `d2dae2`, so an area label is recognisable at a glance in a
-# label list that already carries `domain:*` in `bfd4f2`).
-for R in objectstack-ai/objectstack objectstack-ai/objectui; do
-  gh label create area:records  -R "$R" -c d2dae2 -d "Business objects, records, the views that show data, usable forms, search" 2>/dev/null || true
-  gh label create area:access   -R "$R" -c d2dae2 -d "Permissions that actually hold — RLS/FLS, sharing model, write-path guards" 2>/dev/null || true
-  gh label create area:workflow -R "$R" -c d2dae2 -d "Approvals and automation — the work that runs without a person driving it" 2>/dev/null || true
-  gh label create area:reports  -R "$R" -c d2dae2 -d "Business reporting — dashboards, reports, the numbers a manager reads" 2>/dev/null || true
-  gh label create area:identity -R "$R" -c d2dae2 -d "Login and identity — sign-up, sessions, organization membership, SSO" 2>/dev/null || true
-  gh label create area:api      -R "$R" -c d2dae2 -d "The API a customer can call, and integrations — REST, connectors, webhooks, jobs" 2>/dev/null || true
-  gh label create area:files    -R "$R" -c d2dae2 -d "Files — upload, download, signed URLs, access derived from the parent record" 2>/dev/null || true
-  gh label create area:i18n     -R "$R" -c d2dae2 -d "The customer's own language, across UI, metadata and notifications" 2>/dev/null || true
-  gh label create area:studio   -R "$R" -c d2dae2 -d "Changing a running app without code — authoring, publish, docs and the portal" 2>/dev/null || true
-  gh label create area:ai       -R "$R" -c d2dae2 -d "AI-native — agent / tool / skill metadata, and the MCP surface an agent drives" 2>/dev/null || true
-  gh label create area:devpath  -R "$R" -c d2dae2 -d "The road — create, dev, verify, publish/install, connect an agent, iterate" 2>/dev/null || true
-done
+# names what the CUSTOMER gets rather than the packages that implement it — the
+# area is read by the maintainer planning product, not by a seat routing files.
+# One shade of its own, `d2dae2`, so an area label is recognisable at a glance
+# in a label list that already carries `domain:*` in `bfd4f2`.
+gh label create area:ai       -R objectstack-ai/objectstack -c d2dae2 -d "AI: asking for data, writing data, MCP, AI chat, product skills, evals and scenario cards" 2>/dev/null || true
+gh label create area:build    -R objectstack-ai/objectstack -c d2dae2 -d "Building apps: starting a project, writing and verifying metadata, Studio, the CLI" 2>/dev/null || true
+gh label create area:data     -R objectstack-ai/objectstack -c d2dae2 -d "Data and permissions: records, search, query and report numbers, files, sign-in, orgs, audit" 2>/dev/null || true
+gh label create area:workflow -R objectstack-ai/objectstack -c d2dae2 -d "Flows and integration: flows, approvals, notifications, print, schedules, the API, connectors" 2>/dev/null || true
+gh label create area:ux       -R objectstack-ai/objectstack -c d2dae2 -d "Experience: looks right, easy to use, gives feedback; i18n, mobile, navigation, page load" 2>/dev/null || true
+gh label create area:package  -R objectstack-ai/objectstack -c d2dae2 -d "Packages and install: install, enable, disable, uninstall, seed data, upgrades, release notes" 2>/dev/null || true
+gh label create area:fleet    -R objectstack-ai/objectstack -c d2dae2 -d "Not product — the fleet's own tooling: CI, tests, lint, PM tools, internal skills, governance" 2>/dev/null || true
+gh label create area:cloud    -R objectstack-ai/objectstack -c d2dae2 -d "Not product — work here for the hosted product, hosted-only problems; paused with the cloud lane" 2>/dev/null || true
 
 # No `target:<major>` family. A release blocker is `priority:p0` inside the
 # release window and nothing else (pm-dispatch references/filing-gate.md

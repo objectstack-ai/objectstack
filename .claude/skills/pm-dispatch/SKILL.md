@@ -114,10 +114,10 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | assignee 已设 | 已认领/在飞,不是你的就永不碰;离手恒走释放 —— 三因 = 改路由(限未派发)、前提证伪、弃飞无接管,去向 = 新标签态或车道;在飞卡跟到 MERGED,⛔ 不静默摘 assignee;入停放态(queue/blocked/hold)同笔摘 |
 | `pm:dispatched` | 已派发(派发评论记轮次),恒带 assignee;与摘 `pm:queue` 同一次标签写入成对落地 |
 | `needs-user-decision` | 决定待做:永不派发、永不代答;维护者的决策收件箱,只挂决策卡(issue)、⛔ 永不挂 PR,只由人工裁 |
-| `pm:on-hold` | 决定已做且答案是暂不做:不派发不催;仅当带机器可读 `Restart-when:` 行才合法;入态同笔降 `priority:p3`,原级记 `Restart-grade:` |
+| `pm:on-hold` | 决定已做且答案是暂不做:不派发不催;仅当带机器可读 `Restart-when:` 行才合法;入态 ⛔ 不降级,级只反映严重度 |
 | `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:选择期跳过,#N 关单(PR 则合并,关而未合并不放)时由解锁扫描或 `scheduled-full-run-card.yml` 放回;工已完而被门禁卡住的同用本态;双通道行首 `Blocked-by:` 指向无 `Ruled:` 的 open `needs-user-decision` 卡 ⇒ ⛔ 不派发,直至其 `Ruled:` |
 | `pm:awaiting-maintainer` | 决定已做,只剩一次 GitHub 之外的人工动作:不派发不催;与其它 pm 状态标签互斥;入态恒带行首 `Maintainer-action:` 行(细则见 `references/state-machine.md`),无行即半态 |
-| `pm:blocking` | 有 open 下游依赖者(自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择全序 |
+| `pm:blocking` | 挡着在派 area 里的 open 卡(自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);⛔ 不抬级、不插队 |
 | `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉;既裁冲突砍项与整树席改标归执行席 ⛔ 不问),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
 | `finding` | 立卡三类内待首次定级,定级即离标;三类外关 not planned;不占队列不进收件箱 |
 | `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;三具名读者 = 候选查询排除、首触即关、普查半态行 |
@@ -125,7 +125,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
 | `priority:p0` | 插队:同轮立即派发,越过 `batch`、深度等待(`LOCK_DEPTH_HOLD`)与一切并发上限;无槽即暂停低级在飞 dev 腾位(机制 `references/execution-duties.md`);⛔ 不豁免重叠检查(`references/area-lease.md`)与认领协议 |
-| `area:*` | 功能轴:每卡恰一个;分诊首触打,与 `domain:*` 同笔;工具卡打它所护的轴;⛔ 不回填存量。四读者:维护者按轴看板;定级继承该轴清单项;父单分组;候选顺序,即「功能点位次」= 父单在「Features on the road」上的次序;同轴可多卡在飞,排队照重叠检查 |
+| `area:*` | 产品大专题:每张公开卡恰一个,安全卡不打;分诊首触打,与 `domain:*` 同笔;存量回填只在维护者授权的专题下。四读者:维护者按专题看板;定级读北极星「Product areas」里该专题的核心功能清单;父单分组;取卡次序 = 维护者点名的专题 |
 | open PR 引用该单 | 已实现,L1 审核中 |
 | merged PR 带 `Fixes #n` | 完成(GitHub 关单) |
 

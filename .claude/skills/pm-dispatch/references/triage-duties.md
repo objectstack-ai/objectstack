@@ -43,7 +43,7 @@
 - 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢 L1/L2 轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - 入 `pm:queue` 前读最新转换评论(dispatch-runbook 状态提取):hold/冻结/裁决 ⇒ 分诊自补半状态。
-- 自补 = 同笔 `pm:on-hold`+原文 `Restart-when:`+降 p3;写不出可执行判据才挂 `pm:retriage` 问车道。
+- 自补 = 同笔 `pm:on-hold`+原文 `Restart-when:`;写不出可执行判据才挂 `pm:retriage` 问车道。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序;只挂 issue。
 - 先例已定新键/值/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
@@ -56,24 +56,24 @@
 - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储的视图配置是。
 - 三类同欠 `reach:`,分诊只把关不测;观察、休眠、零拉动 ⛔ 不立卡、不进收口卡、无配额。
 - 缺 `reach:` 且非例外 ⇒ 定 `priority:p3`,并入收口卡或清扫卡,⛔ 不单独派发、不因此关卡。
-- p3 首触标准:仅对已定 p3;`filing-gate.md` 定级第 2、3 条胜之,⛔ 不及其〈读数判据〉半径外。
+- p3 首触标准:仅对已定 p3;`filing-gate.md` 定级判据胜之,⛔ 不及其〈读数判据〉半径外。
   关条中且留条不中 ⇒ 关 not_planned、写理由,胜本文与该文诸不关条;余皆留。关条:无客户/
   用户影响(仅 pin、ADR/jsdoc 措辞、内部重构、测试标题改写);读数过时、已取代或已交付;
   按 `reach:` 两形无一可测的边角(如双持有者边缘、路径段内换行)。留条:用户可见缺陷、
   已发布文档/技能、安全项、维护者直派、open PR 承载或席位已接、不可逆或有硬时限。
 - 先修复:正文被 sanitizer 截断的卡不可派发,评论修复指令后跳过。
 - 停摆指令判据必须比其它分类更硬(双读取),事后证伪同处公开作废。
-- `type`(Bug/Feature/Task)立单者可预填、分诊校正;新卡即时打,存量卡 ⛔ 不回填、下次碰到补。
-- 判据:违背已声明契约 ⇒ `Bug`,扩大接受集/公开面越出已声明 ⇒ `Feature`,其余 ⇒ `Task`。
-- 定级按北极星「Priority」1–3 条;首行 `Path: <定义项> | <清单项 id/缺项> | P<路步> | none`。
+- 首触复核每张新卡的 area、type 与级(与 `domain:*` 同笔),错即改并留一行理由与原值。
+- 维护者或外部人立的卡首触补齐(照 `filing-gate.md`);日对账 fire 扫无 `area:*` 的公开卡补齐。
+- 判据照 `filing-gate.md` 两步;首行 `Path: <定义项> | <清单项 id/缺项> | P<路步> | none`。
 - 定义项取北极星「What gets built」或仪器卡的车队决定;无则关;`none` 非分诊缺口。
 - 「无则关」= 首触即关 not_planned,带理由与入队三门,⛔ 不定 p3、不 hold;下行同此。
-- 所入车道队列 P0/P1 未派时,三门皆无的 p2/p3 `tooling` 卡同样关;「Priority」第 3 条豁免除外。
+- 所入车道队列 P0/P1 未派时,三门皆无的 p2/p3 `tooling` 卡同样关;挡住在派工作的 p2 除外。
 - 路由属分诊技术判断,⛔ 不升级哪个仓的问题;父单永不派发,`pm:epic` 卡 `pm:retriage` 即答。
 - 算涉 cloud:亦含托管面(objectos-runtime)、修复待其改动的 `Blocked-by:` cloud 卡、病因在 cloud。
 - 不算涉 cloud:修复与验收全在本仓,只在 cloud 测得或只缺其事实读数;仅引 cloud 卡作历史。
 - 父单已有子结构的:父单挂 `tracking`,分诊逐个展开子卡路由、补 `Blocked-by:` 排序。
-- 跨层功能点(≥2 层)立父单带 `area:*`+`tracking`+清单项级,逐层子单按 `Blocked-by:` 排。
+- 跨层功能点(≥2 层)立父单带 `area:*`+`tracking`,逐层子单各自定级、按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
 - ADR/技能文本携带注记 ⛔ 不挂实施卡,每实施 PR 一 `domain:skills` 卡;ADR 由落地席合并后立。
