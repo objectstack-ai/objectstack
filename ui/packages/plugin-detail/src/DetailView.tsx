@@ -36,8 +36,8 @@ import {
   X,
 } from 'lucide-react';
 import { DetailSection } from './DetailSection';
-import { EmptySectionsFold, EmptySectionsLine, EmptySectionsLineContext } from './EmptySectionsFold';
-import { useDefaultRecordPage } from './defaultRecordPage';
+import { EmptySectionsFold, EmptySectionsLine } from './EmptySectionsFold';
+import { EmptySectionsLineContext, useDefaultRecordPage } from './defaultRecordPage';
 import { DetailTabs } from './DetailTabs';
 import { SectionGroup } from './SectionGroup';
 import { HeaderHighlight } from './HeaderHighlight';

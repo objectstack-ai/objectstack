@@ -34,7 +34,7 @@ import {
 } from '@object-ui/core';
 import { DetailView } from '../DetailView';
 import { hasCellValue } from '../emptiness';
-import { EmptySectionsLineContext } from '../EmptySectionsFold';
+import { EmptySectionsLineContext } from '../defaultRecordPage';
 import { RecordPageProvenanceContext } from '../recordPageProvenance';
 import { RecordFieldAccessForRecord } from '../recordFieldAccess';
 import { deriveFieldGroupDetailEntries, type FieldGroupDetailEntry } from '../synth/buildDefaultPageSchema';

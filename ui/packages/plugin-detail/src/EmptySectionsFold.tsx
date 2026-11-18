@@ -148,21 +148,6 @@ export interface EmptySectionsLineProps {
 }
 
 /**
- * `true` around the `DetailView` a `record:details` node mounts: that body
- * folds its entirely empty sections into {@link EmptySectionsLine}, on an
- * authored record page as on the synthesized default one (objectstack#35019).
- *
- * Module-internal on purpose, the way `RecordPageProvenanceContext` is: not
- * re-exported from the package barrel, and neither a `DetailView` prop nor a
- * `DetailViewSchema` key. How a details body folds its empty sections is the
- * renderer's face, not something a page authors (ADR-0085). Everything else
- * reads the default, `false` — the `detail-view` node, the record drawer and
- * overlay panel, a direct React caller — and keeps the whole-body fold
- * ({@link EmptySectionsFold}).
- */
-export const EmptySectionsLineContext = React.createContext(false);
-
-/**
  * The record page fold of empty sections (objectstack#27055, Target 2):
  * every section that is ENTIRELY empty leaves its place and the body ends in
  * ONE quiet line naming them — 「地址 · 转化 · 附加信息 · 3 个空分区 · 展开」.
@@ -170,7 +155,7 @@ export const EmptySectionsLineContext = React.createContext(false);
  * draws every section in its own place and turns the line into a 「收起」.
  *
  * Drawn by a record page's details body: every `record:details` body
- * ({@link EmptySectionsLineContext}, objectstack#35019) and anything the
+ * (`EmptySectionsLineContext`, objectstack#35019) and anything the
  * synthesized default page draws (`useDefaultRecordPage`). Elsewhere the
  * whole-body fold ({@link EmptySectionsFold}) keeps its own rule. Where every
  * section is empty the line names them all, so it takes that fold's place on

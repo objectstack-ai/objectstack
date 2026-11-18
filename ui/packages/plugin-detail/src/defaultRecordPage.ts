@@ -32,6 +32,22 @@ export function useDefaultRecordPage(): boolean {
 }
 
 /**
+ * `true` around the `DetailView` a `record:details` node mounts: that body
+ * folds its entirely empty sections into one closing line
+ * (`EmptySectionsLine`), on an authored record page as on the synthesized
+ * default one (objectstack#35019).
+ *
+ * Module-internal on purpose, the way `RecordPageProvenanceContext` is: not
+ * re-exported from the package barrel, and neither a `DetailView` prop nor a
+ * `DetailViewSchema` key. How a details body folds its empty sections is the
+ * renderer's face, not something a page authors (ADR-0085). Everything else
+ * reads the default, `false` — the `detail-view` node, the record drawer and
+ * overlay panel, a direct React caller — and keeps the whole-body fold
+ * (`EmptySectionsFold`).
+ */
+export const EmptySectionsLineContext = React.createContext(false);
+
+/**
  * The most columns a frameless detail section may take on the page being
  * drawn (objectstack#27524, Target 6): the record page's layout sets 2 in its
  * two-column tier, where the details share the row with the 320 px right
