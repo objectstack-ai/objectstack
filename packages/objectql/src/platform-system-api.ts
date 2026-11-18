@@ -40,6 +40,23 @@
  * `'hook'` mark when the context carries none, the mark it carries otherwise,
  * `flowRunId` kept — so a hook handing its own api here gains nothing.
  *
+ * The line stops there: it guards app-authored hook apis and every api derived
+ * from one, and nothing else. An app author's in-process action handler,
+ * registered with `engine.registerAction` (as `examples/app-todo` does from
+ * `onEnable(ctx.ql)`), is handed runtime's `buildActionApi` api — an engine
+ * `createContext` carrying the `'action'` mark, and not app-authored. On that
+ * api this sheds the mark and any `flowRunId`, and the engine cannot tell it
+ * from the api the audit writer holds (`buildHookApi`, a fresh `ScopedContext`
+ * over the write's context: not app-authored either, and carrying the same
+ * mark when an action's write fired the hook). It adds no reach: the handler's
+ * package registered through the engine it holds, whose
+ * `createContext({ isSystem: true })` already builds a system api with
+ * neither. And what it returns is outside runtime's `deriveThroughSeam`
+ * wrappers on that `ctx.api` (the stored-metadata read seam and the
+ * landed-write answer): the walk wraps `object`, `sudo`, `withRunAs`,
+ * `transaction` and `beginTransaction`, and its default arm binds this symbol
+ * member to the unwrapped api, so the derived api comes back unwrapped.
+ *
  * A symbol, and ⛔ not re-exported from either package entry, for the reason
  * `SEED_USER_GRANTS` gives (`hook-run-as.ts`): the method is no nameable member
  * of `ScopedContext`'s published face, reached only through

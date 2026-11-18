@@ -90,7 +90,7 @@ export function appAutomationElevationOf(context: unknown): AppAutomationElevati
 
 /**
  * `context` without the mark: the same object when it carries none, else a
- * fresh copy with every other own property. For the platform's own rows (see
+ * fresh copy with every other own enumerable property. For the platform's own rows (see
  * the module header); ⛔ never for a write the automation itself makes.
  */
 export function withoutAppAutomationElevation<T>(context: T): T {
