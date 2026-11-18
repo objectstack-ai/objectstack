@@ -547,6 +547,7 @@ export default defineConfig({
       '@object-ui/plugin-map': path.resolve(__dirname, './packages/plugin-map/src'),
       '@object-ui/plugin-markdown': path.resolve(__dirname, './packages/plugin-markdown/src'),
       '@object-ui/plugin-timeline': path.resolve(__dirname, './packages/plugin-timeline/src'),
+      '@object-ui/plugin-timesheet': path.resolve(__dirname, './packages/plugin-timesheet/src'),
       '@object-ui/plugin-view/core': path.resolve(__dirname, './packages/plugin-view/src/core.ts'),
       '@object-ui/plugin-view': path.resolve(__dirname, './packages/plugin-view/src'),
       '@object-ui/plugin-report': path.resolve(__dirname, './packages/plugin-report/src'),

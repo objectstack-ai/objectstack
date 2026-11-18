@@ -2161,7 +2161,10 @@ export class MCPServerRuntime {
    *
    * [#25245] The two object resources read the view this runtime's host gave
    * (`setRuntimeObjectView`, package-internal), at each read; without one they
-   * read `metadataService`, as before.
+   * read `metadataService`, as before. [#34995] Labels are served as that view
+   * serves them: the stdio host's view is localized as the object tools are
+   * (`servedLocaleObjectView`, `stdio-data-bridge.ts`), so the two builders
+   * below translate nothing themselves.
    */
   bridgeResources(
     metadataService: IMetadataService,
