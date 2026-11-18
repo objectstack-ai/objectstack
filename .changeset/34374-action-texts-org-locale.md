@@ -7,7 +7,7 @@
 
 feat(actions): an action writes the sentences it declares in the organization's language
 
-Clause-②: yes (widening) — an action may now declare `texts` (`ActionTextSchema`) and its `js` body may call `ctx.text`; translation bundles accept `objects.<object>._actions.<action>.texts.<key>.message` and `globalActions.<action>.texts.<key>.message`; `@objectstack/spec` exports `ActionTextSchema` and the `ActionText` type (`ui`), `actionTextMessageKey` (`system`), and `ACTION_TEXT_MESSAGE_HOLE_REFUSED`, `actionTextsWithoutRunnableCode`, `undeclaredActionTextKeyAtSave` and `undeclaredActionTextAtRun` (`data`); `@objectstack/runtime` adds no export. Nothing that was accepted before is refused
+Clause-②: yes (widening: a new optional authorable key `ActionSchema.texts`, and new translation keys)
 Metadata-protocol: added
 Skills-docs: follow-up owed — skills/objectstack-ui/rules/actions.md, skills/objectstack-i18n/SKILL.md
 
@@ -21,3 +21,5 @@ A `script` action's `js` body can now write a sentence into a record in the orga
 - Text is picked when it is written. Records already written are not changed. An action without `texts` runs exactly as before.
 
 `@object-ui/core` lists `texts` among the spec's declared action keys, so an action carrying them is not reported as having an unknown key; the console reads nothing new, because the body stores the sentence already picked.
+
+New exports: `@objectstack/spec` adds `ActionTextSchema` and the `ActionText` type (`ui`), `actionTextMessageKey` (`system`), and `ACTION_TEXT_MESSAGE_HOLE_REFUSED`, `actionTextsWithoutRunnableCode`, `undeclaredActionTextKeyAtSave` and `undeclaredActionTextAtRun` (`data`); `@objectstack/runtime` adds none. Nothing that was accepted before is refused.
