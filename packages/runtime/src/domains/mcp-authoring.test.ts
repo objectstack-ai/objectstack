@@ -31,6 +31,7 @@ import {
   resolveOpenAuthoringInjection,
   type OpenAuthoringInjection,
   type OpenAuthoringProtocol,
+  type OpenAuthoringReadGateSources,
 } from './mcp-authoring.js';
 import { resolveExecutionContext } from '../security/resolve-execution-context.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
@@ -79,16 +80,22 @@ async function oauthEnvelope(scopes: string[], systemPermissions: string[]) {
 const ADMIN = ['manage_metadata', 'manage_users'];
 const NOT_AN_AUTHOR = ['manage_users'];
 
-function fakeProtocol() {
+/**
+ * `store` serves the gated types' items by type (a list read, and a by-name
+ * read of one of them); every other type answers the flow fixtures.
+ */
+function fakeProtocol(store: Record<string, any[]> = {}, opts: { listThrows?: string } = {}) {
   const calls: unknown[] = [];
   const protocol: OpenAuthoringProtocol = {
     // The live type set the unknown-type refusal reads: without it the refusal
     // cannot disprove a type and lets it through.
     async getMetaTypes() {
-      return { types: ['object', 'flow', 'view'] } as any;
+      return { types: ['object', 'flow', 'view', 'dashboard', 'book', 'doc'] } as any;
     },
     async getMetaItems(request: any) {
       calls.push(['getMetaItems', request]);
+      if (opts.listThrows === request.type) throw new Error(`the ${request.type} list read failed`);
+      if (store[request.type]) return { type: request.type, items: store[request.type] };
       return {
         type: request.type,
         items: [
@@ -99,6 +106,10 @@ function fakeProtocol() {
     },
     async getMetaItem(request: any) {
       calls.push(['getMetaItem', request]);
+      if (store[request.type]) {
+        const item = store[request.type].find((it) => it.name === request.name);
+        return { type: request.type, name: request.name, item };
+      }
       if (request.name === 'missing') return { type: request.type, name: request.name, item: undefined };
       return { type: request.type, name: request.name, version: 'v7', item: { name: request.name, label: 'Lead intake', _draft: true } };
     },
@@ -124,9 +135,15 @@ interface Served {
  * One `/mcp` request through the real domain. `qlThrows` makes the grant
  * resolution's data-engine lookup throw.
  */
-async function serve(executionContext: unknown, opts: { systemPermissions?: string[]; qlThrows?: boolean } = {}): Promise<Served> {
+async function serve(
+  executionContext: unknown,
+  opts: { systemPermissions?: string[]; qlThrows?: boolean; store?: Record<string, any[]>; listThrows?: string } = {},
+): Promise<Served> {
   const { ql, reads } = userQl(opts.systemPermissions ?? ADMIN);
-  const { protocol, calls } = fakeProtocol();
+  const { protocol, calls } = fakeProtocol(opts.store, { listThrows: opts.listThrows });
+  // The holdings the docs audience reads: the permission sets on the caller the
+  // gate is handed, so a set the human does not hold is not held.
+  const security = { resolvePermissionSetNames: async (ctx: any) => (Array.isArray(ctx?.permissions) ? ctx.permissions : []) };
   const warnings: unknown[][] = [];
   let handed: any;
   const mcp = {
@@ -136,7 +153,7 @@ async function serve(executionContext: unknown, opts: { systemPermissions?: stri
     },
   };
   const deps = {
-    resolveService: async (_ctx: unknown, name: string) => (name === 'mcp' ? mcp : name === 'protocol' ? protocol : undefined),
+    resolveService: async (_ctx: unknown, name: string) => (name === 'mcp' ? mcp : name === 'protocol' ? protocol : name === 'security' ? security : undefined),
     resolveServiceOrLoud: async () => undefined,
     getObjectQL: async () => {
       if (opts.qlThrows) throw new Error('engine lookup failed');
@@ -165,6 +182,19 @@ async function serve(executionContext: unknown, opts: { systemPermissions?: stri
 }
 
 const CONTEXT = { door: 'mcp' as const, principal: { userId: 'u1' }, environmentId: 'env_1' };
+
+/**
+ * The read gates' ports for a registry built by hand: an author caller, no
+ * security service, the protocol's own list read. The door builds its own from
+ * the human's grants (pinned below, through the real domain).
+ */
+const AUTHOR_READ_GATE: OpenAuthoringReadGateSources = (protocol) => ({
+  resolveCaller: async () => ({ userId: 'u1', systemPermissions: ADMIN, mayWriteItem: true }),
+  resolveSecurityService: async () => undefined,
+  listMetaItems: (type) => protocol.getMetaItems?.({ type }),
+  serviceProbe: () => null,
+  navPruneLogged: new Set<string>(),
+});
 
 async function call(authoring: OpenAuthoringInjection, toolName: string, input: unknown, context: any = CONTEXT) {
   const result = await authoring.registry.execute({ toolCallId: `t-${toolName}`, toolName, input }, context);
@@ -284,7 +314,7 @@ describe('the read tools answer from the metadata protocol\'s public reads', () 
   const admitted = () => {
     const { protocol, calls } = fakeProtocol();
     const authoring: OpenAuthoringInjection = {
-      registry: createOpenAuthoringRegistry({ admitted: true, userId: 'u1', getProtocol: async () => protocol }),
+      registry: createOpenAuthoringRegistry({ admitted: true, userId: 'u1', getProtocol: async () => protocol, readGate: AUTHOR_READ_GATE }),
       principal: { userId: 'u1', scopes: ['metadata:write'] },
     };
     return { authoring, calls };
@@ -344,6 +374,7 @@ describe('the read tools answer from the metadata protocol\'s public reads', () 
       admitted: true,
       userId: 'u1',
       getProtocol: async () => ({ getMetaItem: async () => { throw thrown; } }),
+      readGate: AUTHOR_READ_GATE,
       logger: { warn: () => {} },
     });
     const run = async (thrown: unknown) => JSON.parse((await registry(thrown).execute(
@@ -352,6 +383,83 @@ describe('the read tools answer from the metadata protocol\'s public reads', () 
     )).output.value).error;
     expect(await run(coded)).toEqual({ code: 'RESOURCE_NOT_FOUND', status: 404, message: 'No pending draft for flow lead_intake.' });
     expect(await run(new Error('connection reset by peer'))).toEqual({ code: 'INTERNAL_ERROR', status: 500, message: 'Reading the metadata failed.' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The /meta read gates, with the human as the caller
+// ---------------------------------------------------------------------------
+
+describe('the read tools withhold what every /meta door withholds from this human (not whole-for-author)', () => {
+  // The human holds `manage_metadata` and `manage_users` through the set
+  // `admin_full_access`, and not `crm_admin` nor `finance.access`.
+  const STORE = {
+    dashboard: [
+      { name: 'finance_board', label: 'Finance', requiredPermissions: ['finance.access'], widgets: [] },
+      // Held by the human and by no envelope: served only if the gate read the human.
+      { name: 'people_board', label: 'People', requiredPermissions: ['manage_users'], widgets: [] },
+    ],
+    book: [
+      { name: 'admin_guide', label: 'Admin Guide', audience: { permissionSet: 'crm_admin' }, groups: [{ key: 'admin', label: 'Admin', include: 'crm_admin_*' }] },
+      { name: 'help_center', label: 'Help Centre', audience: 'org', groups: [{ key: 'start', label: 'Start', include: 'crm_intro' }] },
+    ],
+    doc: [
+      { name: 'crm_intro', label: 'Getting started', content: 'Welcome aboard.' },
+      { name: 'crm_admin_runbook', label: 'Admin runbook', content: 'Rotate the signing keys.' },
+    ],
+  };
+  const author = async (opts: { listThrows?: string } = {}) => {
+    const ec = await oauthEnvelope(['metadata:write'], ADMIN);
+    expect(ec.systemPermissions).toEqual([]);
+    const served = await serve(ec, { store: STORE, ...opts });
+    return served.authoring!;
+  };
+
+  it('a dashboard whose requiredPermissions the human lacks is refused 403 and not listed; one they hold is served', async () => {
+    const authoring = await author();
+    const refused = await call(authoring, 'get_metadata_item', { type: 'dashboard', name: 'finance_board' });
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(JSON.stringify(refused.body)).not.toContain('finance.access');
+
+    const allowed = await call(authoring, 'get_metadata_item', { type: 'dashboard', name: 'people_board' });
+    expect(allowed.isError).toBe(false);
+    expect(allowed.body.item).toMatchObject({ name: 'people_board' });
+
+    const listed = await call(authoring, 'list_metadata_items', { type: 'dashboard' });
+    expect(listed.body.items.map((i: any) => i.name)).toEqual(['people_board']);
+  });
+
+  it('a doc outside the human\'s audience is refused 403 and not listed; an org doc is served', async () => {
+    const authoring = await author();
+    const refused = await call(authoring, 'get_metadata_item', { type: 'doc', name: 'crm_admin_runbook' });
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(JSON.stringify(refused.body)).not.toContain('Rotate the signing keys.');
+
+    const allowed = await call(authoring, 'get_metadata_item', { type: 'doc', name: 'crm_intro' });
+    expect(allowed.isError).toBe(false);
+    expect(allowed.body.item).toMatchObject({ name: 'crm_intro', content: 'Welcome aboard.' });
+
+    const listed = await call(authoring, 'list_metadata_items', { type: 'doc' });
+    expect(listed.body.items.map((i: any) => i.name)).toEqual(['crm_intro']);
+  });
+
+  it('a gate that cannot evaluate refuses: a books read that throws serves no doc', async () => {
+    const authoring = await author({ listThrows: 'book' });
+    const refused = await call(authoring, 'get_metadata_item', { type: 'doc', name: 'crm_intro' });
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
+    expect(JSON.stringify(refused.body)).not.toContain('Welcome aboard.');
+  });
+
+  it('a registry handed no read gate reads nothing', async () => {
+    const { protocol, calls } = fakeProtocol();
+    const registry = createOpenAuthoringRegistry({ admitted: true, userId: 'u1', getProtocol: async () => protocol });
+    const result = await registry.execute({ toolCallId: 't', toolName: 'get_metadata_item', input: { type: 'flow', name: 'lead_intake' } }, CONTEXT);
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.output.value).error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(calls).toEqual([]);
   });
 });
 
