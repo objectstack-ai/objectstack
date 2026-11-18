@@ -3606,6 +3606,12 @@ export function registerObjectTools(
               || aggregations.some((a) => AMOUNT_AGGREGATE_FUNCTIONS.has(a.function) && typeof a.field === 'string')
               ? servedFieldsOf(bridge, objectName)
               : Promise.resolve(undefined);
+            // [#35138] Each lookup key's record named beside it, read as the
+            // caller, for the groups served only: one rule for both paths,
+            // applied after the cap or the cut.
+            const labelServed = async (served: unknown[], fields: Record<string, unknown> | undefined) => fields
+              ? withLookupGroupLabels(bridge, served, groupBy, fields, async (name) => (await readGuard(name)) === undefined)
+              : served;
             if (orderBy !== undefined || limit !== undefined) {
               // [aggregate order and cut] Ordered, cut and counted by the
               // driver's own statement, through the bridge's member for it;
@@ -3639,7 +3645,7 @@ export function registerObjectTools(
               const cut = groups.length > cap;
               const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
               return textResult({
-                rows: cut ? groups.slice(0, cap) : groups,
+                rows: await labelServed(cut ? groups.slice(0, cap) : groups, fields),
                 totalGroups: answer.totalGroups,
                 ...(cut ? { truncated: true } : {}),
                 ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
@@ -3658,13 +3664,8 @@ export function registerObjectTools(
             // thousands of rows) — cap the tool output like query_records does.
             const truncated = groups.length > maxLimit;
             const served = truncated ? groups.slice(0, maxLimit) : groups;
-            // [#35138] Each lookup key's record named beside it, read as the
-            // caller, for the groups served only.
-            const labelled = fields
-              ? await withLookupGroupLabels(bridge, served, groupBy, fields, async (name) => (await readGuard(name)) === undefined)
-              : served;
             return textResult({
-              rows: labelled,
+              rows: await labelServed(served, fields),
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
               ...(Object.keys(currencies).length > 0 ? { currencies } : {}),

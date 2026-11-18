@@ -773,6 +773,27 @@ describe('aggregate_records — a lookup group names its record beside the id, r
     expect(out.rows[1]).toEqual({ account: 'x1', parent: 'a2', parent__label: 'Globex', n: 1 });
   });
 
+  it('the order-and-cut path labels the groups it serves the same way, read after the cut', async () => {
+    const bridge = lookupBridge([]) as LookupBridge & { cuts: any[] };
+    bridge.cuts = [];
+    // The database's answer to the cut: one group past the cap, ordered by n.
+    bridge.aggregateGroups = async (object: string, o: any) => {
+      bridge.cuts.push([object, o]);
+      return { rows: [{ account: 'a2', n: 9 }, { account: 'a1', n: 5 }, { account: 'a4', n: 2 }], totalGroups: 3 };
+    };
+    const out = await answer(bridge, { aggregations: COUNT, groupBy: ['account'], orderBy: [{ field: 'n', order: 'desc' }], limit: 2 });
+    expect(bridge.cuts[0]![1]).toMatchObject({ orderBy: [{ field: 'n', order: 'desc' }], limit: 3 });
+    expect(out).toEqual({
+      rows: [{ account: 'a2', account__label: 'Globex', n: 9 }, { account: 'a1', account__label: 'Acme', n: 5 }],
+      totalGroups: 3,
+      truncated: true,
+    });
+    // One read of the referenced object, for the served groups only: never the probe row past the cut.
+    expect(bridge.reads).toHaveLength(1);
+    expect([...bridge.reads[0]![1].where.id.$in].sort()).toEqual(['a1', 'a2']);
+    expect(bridge.calls).toEqual([]);
+  });
+
   it('the stdio door: the name is read through the stdio bridge under the caller\'s own context', async () => {
     const principal = { userId: 'u1', isSystem: false } as unknown as ExecutionContext;
     const engine = {
