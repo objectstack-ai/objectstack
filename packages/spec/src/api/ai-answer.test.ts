@@ -199,12 +199,14 @@ describe('answer feedback', () => {
 });
 
 describe('the framework door\'s refusals parse against each route error', () => {
-  // The door answers ahead of the route handler. `packages/runtime/src/domains/ai.ts:63-67`:
-  // `deps.error(ANONYMOUS_DENY_MESSAGE, 401, { code: 'UNAUTHENTICATED' })`, written by
-  // `error-envelope.ts` `buildApiError` as `{ code, message, httpStatus }` (the `details.code`
-  // is promoted, so no `details` remains). `dispatcher-plugin.ts:290-301` answers the same
-  // code on a route mounted on the HTTP server. 501 (`domains/unavailable.ts`) and 503
-  // (`domains/ai.ts`) carry the status-derived code (`HttpStatusErrorCodeMap`).
+  // The door answers ahead of the route handler. `packages/runtime/src/domains/ai.ts`
+  // refuses a caller with no session through `deps.error(ANONYMOUS_DENY_MESSAGE, 401,
+  // { code: ANONYMOUS_DENY_CODE })` (`packages/core/src/security/anonymous-deny.ts#ANONYMOUS_DENY_CODE`),
+  // written by `packages/runtime/src/error-envelope.ts#buildApiError` as
+  // `{ code, message, httpStatus }`: the `details.code` is promoted, so no `details` remains.
+  // `packages/runtime/src/dispatcher-plugin.ts` answers the same code on a route mounted on
+  // the HTTP server. The 501 (`packages/runtime/src/domains/unavailable.ts#capabilityUnavailable`)
+  // and the 503 carry the status-derived code (`packages/spec/src/api/errors.zod.ts#HttpStatusErrorCodeMap`).
   const DOOR = [
     { code: 'UNAUTHENTICATED', message: 'Authentication is required to access this endpoint.', httpStatus: 401 },
     { code: 'NOT_IMPLEMENTED', message: serviceUnavailableMessage('ai'), httpStatus: 501 },
