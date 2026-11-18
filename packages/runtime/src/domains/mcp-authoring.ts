@@ -70,6 +70,12 @@
  *    The caller the gates read is built from the grants the admission
  *    resolved (`resolveUserAuthzGrants`), never from the agent's envelope,
  *    whose system permissions and permission sets are the token's ceiling.
+ *  - Before either gate and before any protocol read, both reads ask the
+ *    `/meta` type-level read admission (`metaTypeReadRefusal`, over
+ *    `META_TYPE_READ_CAPABILITIES`) of the folded type, with the same human
+ *    caller, on every `state`: a type whose own door requires a capability
+ *    the human does not hold is refused here as every `/meta` read refuses
+ *    it, `manage_metadata` or not.
  *  - The item read runs `STORED_VERSION_DOOR_POLICY`, the policy of the
  *    `/meta` doors that serve a stored version for authoring (the plain read's
  *    `?state=draft` branch among them): only the per-caller gates, and the
@@ -106,6 +112,7 @@ import { metaWriteCapabilityVerdict } from '@objectstack/metadata-core';
 import {
     createMetaItemReadGate,
     createMetaListReadGate,
+    metaTypeReadRefusal,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
     type MetaItemReadGateSources,
@@ -441,6 +448,8 @@ export function createOpenAuthoringRegistry(opts: {
                         if (typeof protocol?.getMetaItems !== 'function') return unavailable();
                         const type = canonicalTypeOf(input.type);
                         if (!type) return refuse(VALIDATION_ERROR, 'Name the metadata type as `type`.', 400);
+                        const typeRefused = await typeReadRefusal(type);
+                        if (typeRefused) return typeRefused;
                         // A type the platform does not declare and this deployment holds
                         // nothing under is refused, as the `/meta` list refuses it, rather
                         // than answered an empty list.
@@ -467,6 +476,8 @@ export function createOpenAuthoringRegistry(opts: {
                         const type = canonicalTypeOf(input.type);
                         const name = requiredString(input.name);
                         if (!type || !name) return refuse(VALIDATION_ERROR, 'Name the item as `type` and `name`.', 400);
+                        const typeRefused = await typeReadRefusal(type);
+                        if (typeRefused) return typeRefused;
                         const read = await protocol.getMetaItem({
                             type,
                             name,
@@ -509,6 +520,18 @@ export function createOpenAuthoringRegistry(opts: {
                 }
             } catch (error) {
                 return refusalFromThrown(error);
+            }
+
+            /**
+             * The `/meta` type-level read admission (`metaTypeReadRefusal`), asked
+             * of the folded type with the human as the caller, before any read
+             * of the protocol, on every `state`: a type whose own door requires
+             * a capability the human lacks is refused here as every `/meta` read
+             * refuses it, whether or not the named item exists.
+             */
+            async function typeReadRefusal(type: string): Promise<OpenAuthoringToolResult | undefined> {
+                const refusal = metaTypeReadRefusal('GET', type, await readGate!(protocol ?? {}).resolveCaller());
+                return refusal ? refuse(refusal.code, refusal.message, refusal.status) : undefined;
             }
 
             function unavailable(): OpenAuthoringToolResult {
