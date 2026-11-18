@@ -6,20 +6,32 @@
  * b6bl_quote_item · line_total · currency」); these resolvers answer the
  * labels.
  *
- * Two worlds answer, in order:
+ * Two worlds answer:
  *
  *  1. the published registry the console already reads, by name;
- *  2. for a name it does not know (an object drafted but never published, or a
- *     field drafted onto a published object), the draft overlay
- *     (`GET /meta/object/:name?preview=draft`), by object name. A build
- *     conversation edits drafts, so before the first publish every object it
- *     made lives only there.
+ *  2. the draft overlay (`GET /meta/object/:name?preview=draft`), by object
+ *     name. A build conversation edits drafts, so before the first publish
+ *     every object it made lives only there, and a published object or field
+ *     it relabelled carries its new label only there (objectstack#34629).
  *
- * The overlay's answer is kept per object. A kept answer that does not name
- * what a card asks for (no object, or not that field) is asked again once the
- * conversation's `revision` has moved since it was asked: a later change in
- * the same conversation may have drafted it. At most one read per object per
- * revision, and none while one is in flight, so a render never refetches.
+ * A name the published registry does not know (an object drafted but never
+ * published, or a field drafted onto a published object) answers from the
+ * overlay alone. A name it does know answers its published label until the
+ * overlay has answered, then the overlay's label: the label the change will
+ * publish, which is the published one when the draft did not change it.
+ *
+ * The overlay's answer is kept per object and asked again once the
+ * conversation's `revision` has moved since it was asked, when the kept answer
+ * cannot be trusted: it does not name what a card asks for (no object, or not
+ * that field), or the name is published, where a later change in the same
+ * conversation may have relabelled it and the kept answer would show the old
+ * label without looking stale. At most one read per object per revision, and
+ * none while one is in flight, so a render never refetches.
+ *
+ * A label the draft changed is shown as written, without the convention
+ * translation lookup: a translation keyed to the object or field was written
+ * for the published label the draft replaces, and would hide the new one. A
+ * label the draft did not change goes through that lookup as before.
  *
  * A name neither world knows (one the change is about to create) answers
  * `undefined`, and the card shows the name as given. Only this card reads the
@@ -75,9 +87,10 @@ export function useChangeCardLabels(
   const askedAt = useRef(new Map<string, string | number>());
   const inFlight = useRef(new Set<string>());
   const findDraft = useCallback(
-    (objectName: string, fieldName?: string): LabelledObject | undefined => {
+    (objectName: string, fieldName?: string, published = false): LabelledObject | undefined => {
       const kept = drafts.get(objectName) ?? undefined;
-      const answers = kept !== undefined && (fieldName === undefined || kept.fields?.[fieldName] !== undefined);
+      const answers =
+        !published && kept !== undefined && (fieldName === undefined || kept.fields?.[fieldName] !== undefined);
       const askable = !askedAt.current.has(objectName) || askedAt.current.get(objectName) !== revision;
       if (!answers && askable && !inFlight.current.has(objectName)) {
         askedAt.current.set(objectName, revision);
@@ -101,16 +114,21 @@ export function useChangeCardLabels(
 
   const resolveObjectLabel = useCallback(
     (objectName: string) => {
-      const object = findPublished(objectName) ?? findDraft(objectName);
-      return object ? i18nObjectLabel({ name: objectName, label: object.label ?? objectName }) : undefined;
+      const published = findPublished(objectName);
+      const drafted = findDraft(objectName, undefined, published !== undefined);
+      const label = drafted?.label ?? published?.label;
+      if (published && drafted?.label !== undefined && drafted.label !== published.label) return drafted.label;
+      return published || drafted ? i18nObjectLabel({ name: objectName, label: label ?? objectName }) : undefined;
     },
     [findPublished, findDraft, i18nObjectLabel],
   );
   const resolveFieldLabel = useCallback(
     (objectName: string, fieldName: string) => {
-      const field =
-        findPublished(objectName)?.fields?.[fieldName] ?? findDraft(objectName, fieldName)?.fields?.[fieldName];
-      return field ? i18nFieldLabel(objectName, fieldName, field.label ?? fieldName) : undefined;
+      const published = findPublished(objectName)?.fields?.[fieldName];
+      const drafted = findDraft(objectName, fieldName, published !== undefined)?.fields?.[fieldName];
+      const label = drafted?.label ?? published?.label;
+      if (published && drafted?.label !== undefined && drafted.label !== published.label) return drafted.label;
+      return published || drafted ? i18nFieldLabel(objectName, fieldName, label ?? fieldName) : undefined;
     },
     [findPublished, findDraft, i18nFieldLabel],
   );

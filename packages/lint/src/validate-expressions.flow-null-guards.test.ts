@@ -454,8 +454,13 @@ describe('a flow or hook condition over an injected system column is judged by w
     }
   });
 
-  it('⭐ LIT — on each ownership tier os build judges exactly the injected columns the tier carries, as the door does', () => {
-    for (const ownership of ['business_unit', 'org', 'none'] as const) {
+  // One case per ownership tier, not one case looping the three: each tier is
+  // 30 build runs and 30 door runs (six columns × five sites), the cost of the
+  // un-tiered build case above. Folded into one case, the three tiers ran
+  // about 0.65 s on an idle box and 5.26 s under a full CI run, over the 5 s
+  // per-case cap. Every tier, column, site and assertion is still checked.
+  for (const ownership of ['business_unit', 'org', 'none'] as const) {
+    it(`⭐ LIT — on the \`${ownership}\` ownership tier os build judges exactly the injected columns the tier carries, as the door does`, () => {
       const tiered = { ...account, ownership };
       const servedTier = applyInjectedSystemColumns(tiered);
       for (const column of NULLABLE_INJECTED) {
@@ -467,8 +472,8 @@ describe('a flow or hook condition over an injected system column is judged by w
           expect(build, `${ownership} · ${label(write, condition)}`).toEqual(atDoor(write, [servedTier]));
         }
       }
-    }
-  });
+    });
+  }
 
   it('⭐ LIT — os build refuses an ordering over `created_at` / `updated_at` at a `beforeInsert` hook, and only there, as the door does', () => {
     for (const condition of [
