@@ -105,7 +105,8 @@ describe('a navigation write sends the authored app (objectstack#35054)', () => 
     const getAuthoredItem = vi.fn(async () => SOURCE);
     const saveItem = await addPage(getAuthoredItem);
 
-    expect(getAuthoredItem).toHaveBeenCalledWith('app', 'qatr_app');
+    // Read at the app's package (objectstack#35115), the address the save names.
+    expect(getAuthoredItem).toHaveBeenCalledWith('app', 'qatr_app', { packageId: 'com.qa.tr' });
     expect(saveItem).toHaveBeenCalledTimes(1);
     const [type, name, body] = saveItem.mock.calls[0] as [string, string, any];
     expect([type, name]).toEqual(['app', 'qatr_app']);
