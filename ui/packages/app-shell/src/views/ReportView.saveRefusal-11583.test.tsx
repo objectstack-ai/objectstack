@@ -101,9 +101,27 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
 }));
 
+// `ReportView` reaches a dynamic `import('@objectstack/lint')` (through the panel's
+// inspector): pay its load at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { ReportView } from './ReportView';
 
 const refresh = vi.fn(async () => {});
+
+/**
+ * The layered read the editor seeds its buffer from (objectstack#35008): the
+ * stored report, which here is the served one (no translation in play).
+ */
+function storedLayers() {
+  return vi.fn(async () => ({
+    code: null,
+    overlay: null,
+    overlayScope: null,
+    effective: { name: 'revenue_by_month', label: 'Revenue by Month', dataSource: { object: 'acct' } },
+    draft: null,
+  }));
+}
 
 function mountReport() {
   meta.value = {
@@ -152,6 +170,7 @@ describe('the report editor\'s Save says a refused save (objectui#11583, ReportV
   it('a refused save raises the refusal, once per Save', async () => {
     client.value = {
       get: vi.fn(async () => null),
+      layered: storedLayers(),
       save: vi.fn(async () => {
         throw Object.assign(new Error('Saving reports requires the Manage Metadata permission'), { status: 403 });
       }),
@@ -175,7 +194,7 @@ describe('the report editor\'s Save says a refused save (objectui#11583, ReportV
   });
 
   it('a save that lands raises nothing and refreshes the read (control)', async () => {
-    client.value = { get: vi.fn(async () => null), save: vi.fn(async () => ({})) };
+    client.value = { get: vi.fn(async () => null), layered: storedLayers(), save: vi.fn(async () => ({})) };
     mountReport();
     await editThriceAndSave();
 

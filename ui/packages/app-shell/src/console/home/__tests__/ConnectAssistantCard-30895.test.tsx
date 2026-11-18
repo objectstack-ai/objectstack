@@ -11,7 +11,11 @@
  *  - §4 the close button hides it for this person on this browser, also in a
  *    later mount (which reads nothing), and not for another person;
  *  - §5 MCP turned off (the Account app carries no page): no card, no read;
- *  - §6 connecting while it is shown (a key minted on this page) takes it away.
+ *  - §6 connecting while it is shown (a key minted on this page) takes it away;
+ *  - §8 its shape (objectstack#35017): one row of icon, title, Connect and
+ *    close, the title on one line and the sentence collapsed below `sm`.
+ *    jsdom applies no stylesheet, so this reads the classes and the order of
+ *    the row's parts; the drawn height at 375 px is the PR's browser reading.
  *
  * Rendered with the real router, the real data bus and the real hook; only
  * the adapter, the person and the served apps are stubbed. `t` echoes the key.
@@ -230,5 +234,30 @@ describe('§7 said once on Home (objectstack#32021 item 3)', () => {
   it('CONTROL: with no row drawn (a member, who gets no checklist), the card is shown', async () => {
     renderHome();
     expect(await screen.findByTestId('home-connect-assistant')).toBeInTheDocument();
+  });
+});
+
+describe('§8 one row on a phone (objectstack#35017)', () => {
+  it('is a single non-wrapping row: icon, title box, Connect, close', async () => {
+    renderHome();
+    const card = await screen.findByTestId('home-connect-assistant');
+    expect(card).toHaveClass('flex', 'items-center');
+    expect(card.className).not.toMatch(/\bflex-(col|wrap)\b/);
+    const parts = Array.from(card.children);
+    expect(parts).toHaveLength(4);
+    expect(parts[0].tagName.toLowerCase()).toBe('svg');
+    expect(parts[1]).toContainElement(screen.getByTestId('home-connect-assistant-title'));
+    expect(parts[2]).toBe(screen.getByTestId('home-connect-assistant-open'));
+    expect(parts[3]).toBe(screen.getByTestId('home-connect-assistant-dismiss'));
+  });
+
+  it('keeps the title to one line and collapses the sentence below sm, still read out', async () => {
+    renderHome();
+    await screen.findByTestId('home-connect-assistant');
+    expect(screen.getByTestId('home-connect-assistant-title')).toHaveClass('truncate');
+    const body = screen.getByTestId('home-connect-assistant-body');
+    // Visually hidden on a phone, back in the flow from `sm` up; never removed.
+    expect(body).toHaveClass('sr-only', 'sm:not-sr-only');
+    expect(body).toHaveTextContent('«home.connectAssistant.body»');
   });
 });

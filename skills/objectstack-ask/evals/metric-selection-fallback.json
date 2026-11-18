@@ -90,6 +90,26 @@
         "must_contain": ["describe_object", "aggregate_records", "非指标口径", "销售分析", "赢单金额"],
         "must_not_contain": ["query_dataset", "provenance"]
       }
+    },
+    {
+      "id": 10,
+      "prompt": "The user asks: \"What has been claimed so far?\" It names no metric. You called `list_datasets({ terms: ['claimed'] })`. The answer lists one dataset, `expense_analysis` (label Expense Analysis), with `matches: []`; its measures are `total_claimed`, labelled Claimed Amount and described as \"Sum of submitted expense claim amounts\", and `claim_count`, labelled Claims. The answer also carries `candidates: [{ term: 'claimed', dataset: 'expense_analysis', member: 'measures.total_claimed' }]`. What is your reply?",
+      "expected_output": "A question about what has been claimed is answered from the app's records, so this skill applies before the first data call even though no metric is named. The word matches nothing and `candidates` lists one member for it, so the reply is a question and nothing else, asking whether that candidate is the one meant, such as \"Do you mean Claimed Amount (in Expense Analysis: sum of submitted expense claim amounts)?\", with the option named by its label in a bullet. It states no figure of its own: no total, no count of claims and no numbered option, and the candidate's description is quoted as written. It makes no tool call until the user answers.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["Claimed Amount", "Expense Analysis", "?"],
+        "must_not_contain": ["query_dataset", "aggregate_records", "total_claimed", "1."]
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "The user asks: \"How many trip requests were approved this month?\" `list_datasets({ terms: ['trip requests'] })` answers one dataset, `expense_analysis` (label Expense Analysis, `object: 'expense_claim'`), with `matches: []` and no `candidates`. `list_objects` shows `expense_claim` and `employee`; `expense_claim` has a lookup field `trip_request`, and no listed object is a trip request. What do you do?",
+      "expected_output": "No listed object or dataset is a trip request, so the records asked about cannot be seen here. The reply says, in the user's language, that it cannot see trip requests in this environment (they may be hidden from it) and stops. It does not count expense claims that link to a trip request through the `trip_request` lookup as an answer, and it gives no figure.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["trip request"],
+        "must_not_contain": ["aggregate_records", "query_records", "query_dataset", "非指标口径"]
+      }
     }
   ]
 }
