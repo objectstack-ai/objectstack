@@ -1847,34 +1847,42 @@ export const RuntimeBuildIssueSchema = lazySchema(() => z.object({
   severity: z.enum(['error', 'warning']).describe(
     '`error`: the published artifact is broken at runtime, or the check that '
     + 'judges it could not run (`object_field_ref_rule_failed`). `warning`: a '
-    + 'dashboard widget was not probed, so nothing is known about it. Neither '
-    + 'fails the publish.',
+    + 'dashboard widget was not probed, so nothing is known about it '
+    + '(`widget_not_probed`, `probes_unavailable`), or what landed reads in a '
+    + 'way the person will notice although it may be the truth (`widget_empty_result`, '
+    + '`rollup_never_computed`, `seed_reference_unresolved`, '
+    + '`flow_connector_action_unresolved`). Neither fails the publish.',
   ),
   artifact: z.object({
-    type: z.string().describe('Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`).'),
+    type: z.string().describe('Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`, `flow`).'),
     name: z.string().describe(
       'Item name of the artifact. On `probes_unavailable` it is the name of '
       + 'every dashboard whose widgets went unprobed, joined by `, `.',
     ),
   }).describe('The published artifact whose runtime behaviour the finding is about.'),
   ref: z.object({
-    type: z.string().describe('Metadata type of what was exercised (`object`, `dataset`).'),
+    type: z.string().describe('Metadata type of what was exercised (`object`, `dataset`, `connector`).'),
     name: z.string().describe('Its item name.'),
     member: z.string().optional().describe(
-      'The dashboard widget the finding is about, when the finding is about '
-      + 'one widget: its `id`, else its `title` as a string, else `?`.',
+      'The part of it the finding is about: the dashboard widget, when the '
+      + 'finding is about one widget (its `id`, else its `title` as a string, '
+      + 'else `?`); the field of an object (a roll-up, a reference column); the '
+      + 'action of a connector.',
     ),
   }).optional().describe(
     'What the probe exercised, when that is not the artifact itself: the '
     + 'object a seed loads into or a view reads, the dataset a widget is bound '
-    + 'to. Absent when the finding is about the artifact as a whole.',
+    + 'to, the connector a flow step dispatches. Absent when the finding is '
+    + 'about the artifact as a whole.',
   ),
   code: z.string().describe(
     'Stable machine id of the finding class, lowercase snake: a diagnostics '
     + 'code carried in a 200, not an ADR-0112 error code. The probes emit '
     + '`seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, '
     + '`object_field_ref_rule_failed`, `empty_query`, `widget_query_failed`, '
-    + '`widget_not_probed` and `probes_unavailable`. The list is the '
+    + '`widget_not_probed`, `probes_unavailable`, `widget_empty_result`, '
+    + '`rollup_never_computed`, `seed_reference_unresolved` and '
+    + '`flow_connector_action_unresolved`. The list is the '
     + 'producer\'s and may grow: a consumer treats an id it does not know as '
     + 'any other finding.',
   ),

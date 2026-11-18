@@ -2663,6 +2663,7 @@ export class ProtocolHistoryAndPublishFacet {
             try {
                 const { publishedItemReader, runBuildProbes } = await import('./build-probes.js');
                 const analytics = this.getServicesRegistry?.().get('analytics');
+                const automation = this.getServicesRegistry?.().get('automation');
                 probes = await runBuildProbes({
                     engine: this.engine as any,
                     // [ADR-0150 D3, #31700] A widget's dataset is resolved FROM
@@ -2678,6 +2679,11 @@ export class ProtocolHistoryAndPublishFacet {
                     // the ladder the door already states for this publish.
                     ...(request.userTextLocales !== undefined
                         ? { userTextLocales: request.userTextLocales } : {}),
+                    // [#35146] The automation engine's connector lookups: a
+                    // published flow's `connector_action` step is asked of
+                    // them for this package, as its executor will ask.
+                    ...(automation && typeof automation.resolveConnectorAction === 'function' ? { automation } : {}),
+                    packageId: request.packageId ?? null,
                 });
             } catch {
                 probes = undefined;

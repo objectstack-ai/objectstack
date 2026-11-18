@@ -25,6 +25,8 @@
 
 import type { BuildProbeReport, RuntimeBuildIssue, StandardErrorCode } from '@objectstack/spec/api';
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
+import { referenceTargetOf } from '@objectstack/spec/data';
+import { collectFlowGraphs } from '@objectstack/spec/automation';
 import { PackageScopedNameRefusedError, describePackageScopedHolder, type PackageScopedRefusal } from '@objectstack/core';
 import { buildProbeUserMessage, buildProbeUserTextLocale } from './build-probes.user-text.js';
 
@@ -69,7 +71,11 @@ export type RuntimeBuildIssueCode =
     | 'widget_not_probed'
     | 'empty_query'
     | 'widget_query_failed'
-    | 'probes_unavailable';
+    | 'probes_unavailable'
+    | 'widget_empty_result'
+    | 'rollup_never_computed'
+    | 'seed_reference_unresolved'
+    | 'flow_connector_action_unresolved';
 
 /**
  * A finding as this module builds it: the wire shape, with the code closed
@@ -127,6 +133,33 @@ export interface RunBuildProbesOptions {
      * sentence names; `message` and `fix` never read it.
      */
     userTextLocales?: readonly (string | null | undefined)[];
+    /**
+     * The kernel's automation engine, when one is mounted: the connector lookup
+     * a `connector_action` step dispatches through. Absent, or without the
+     * lookup, published flows' connector steps are not probed.
+     */
+    automation?: ProbeAutomation;
+    /**
+     * The package the published artifacts belong to (`null`: authored in the
+     * environment, no package). A `connector_action` step names its connector
+     * from its flow's package, so the probe asks the engine for that package.
+     */
+    packageId?: string | null;
+}
+
+/**
+ * The slice of the automation engine (`AutomationEngine`, service-automation)
+ * the connector probe reads — the same two lookups the `connector_action`
+ * executor makes before it dispatches, and the reason it gives for a degraded
+ * connector. All optional: a host whose engine lacks one is not probed.
+ */
+export interface ProbeAutomation {
+    resolveConnectorInstanceFor?(connectorId: string, callerPackageId: string | null):
+        | { status: 'instance'; packageId: string | null }
+        | { status: 'refused'; refusal: { message: string } }
+        | { status: 'none' };
+    resolveConnectorAction?(connectorId: string, actionId: string, packageId?: string | null): unknown;
+    getConnectorDegradedReason?(connectorId: string, packageId?: string | null): string | undefined;
 }
 
 type Rec = Record<string, unknown>;
@@ -218,6 +251,44 @@ async function hasRows(
         context: readContext,
     });
     return Array.isArray(rows) && rows.length > 0;
+}
+
+/** Rows sampled from an object by the data probes, and distinct values probed per column. */
+const PROBE_SAMPLE_ROWS = 50;
+
+/** The `where` a probe read scopes to the publishing organization, beside its own clause. */
+function scoped(organizationId: string | null | undefined, where: Rec = {}): Rec | undefined {
+    const merged = organizationId ? { ...where, organization_id: organizationId } : where;
+    return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+/** The declared fields of an object body, by name, from either the map or the array shape. */
+function fieldsOf(body: Rec | undefined): Array<[string, Rec]> {
+    const raw = body?.fields;
+    if (Array.isArray(raw)) {
+        return raw.map(asRec).filter((f): f is Rec => !!f && typeof f.name === 'string').map((f) => [f.name as string, f]);
+    }
+    const map = asRec(raw);
+    return map ? Object.entries(map).flatMap(([n, f]) => (asRec(f) ? [[n, asRec(f)!] as [string, Rec]] : [])) : [];
+}
+
+/** The id strings a reference column holds on one row: an expanded `{ id }` and a blank are not ids. */
+function idsIn(value: unknown): string[] {
+    return (Array.isArray(value) ? value : [value]).filter((v): v is string => typeof v === 'string' && v.length > 0);
+}
+
+/** A measure value that renders as an empty card: no value, or zero. */
+const isZeroish = (v: unknown): boolean => v === null || v === undefined || v === 0 || v === '0';
+
+/**
+ * Every measure the result carries reads zero or nothing on every row. Judged
+ * only on the measure columns the rows actually hold: a result that names none
+ * of the asked measures cannot be judged, and answers `false`.
+ */
+function everyMeasureZero(rows: unknown[], measures: readonly string[]): boolean {
+    const recs = rows.map(asRec).filter((r): r is Rec => !!r);
+    const visible = measures.filter((m) => recs.some((r) => m in r));
+    return visible.length > 0 && recs.every((r) => visible.every((m) => isZeroish(r[m])));
 }
 
 /**
@@ -533,6 +604,146 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
         }
     }
 
+    // ── Roll-ups: a summary field must have been computed where it has children ──
+    //
+    // [#35146] A roll-up is recomputed when a CHILD row is written, so a
+    // `summary` whose definition is correct still reads blank on every parent
+    // when it was declared after the children landed, or the children carry
+    // no foreign key back. Every check above reads the definition, which is
+    // fine; this asks the data. Only parents that HAVE children are judged
+    // (a parent with none reads blank truthfully), and only a field left
+    // UNSET on all of them: a computed zero is a value. A roll-up with its
+    // own `filter` is not judged, since which children it counts is the
+    // filter's question.
+    const SYSTEM_READ = { isSystem: true };
+    for (const p of publishedObjects) {
+        const body = asRec(await readItem('object', p.name));
+        for (const [fieldName, def] of fieldsOf(body)) {
+            const ops = asRec(def.summaryOperations);
+            if (def.type !== 'summary' || !ops || ops.filter !== undefined) continue;
+            const childObject = typeof ops.object === 'string' ? ops.object : undefined;
+            if (!childObject) continue;
+            try {
+                const fk = typeof ops.relationshipField === 'string' && ops.relationshipField
+                    ? ops.relationshipField
+                    : childForeignKey(asRec(await readItem('object', childObject)), p.name);
+                if (!fk) continue;
+                const childField = ops.function !== 'count' && typeof ops.field === 'string' ? ops.field : undefined;
+                const children = await engine.find(childObject, {
+                    limit: PROBE_SAMPLE_ROWS,
+                    ...(scoped(organizationId) ? { where: scoped(organizationId) } : {}),
+                    context: SYSTEM_READ,
+                });
+                const parentIds = [...new Set(asArr(children).map(asRec).flatMap((c) =>
+                    c && (!childField || (c[childField] !== null && c[childField] !== undefined)) ? idsIn(c[fk]) : []))];
+                if (parentIds.length === 0) continue;
+                const parents = asArr(await engine.find(p.name, {
+                    where: { id: { $in: parentIds } },
+                    limit: parentIds.length,
+                    context: SYSTEM_READ,
+                })).map(asRec).filter((r): r is Rec => !!r);
+                if (parents.length === 0 || parents.some((r) => r[fieldName] !== null && r[fieldName] !== undefined)) continue;
+                issues.push({
+                    layer: 'runtime',
+                    severity: 'warning',
+                    artifact: { type: 'object', name: p.name },
+                    ref: { type: 'object', name: p.name, member: fieldName },
+                    code: 'rollup_never_computed',
+                    message:
+                        `Roll-up "${p.name}.${fieldName}" is empty on all ${parents.length} parent row(s) that have "${childObject}" ` +
+                        'children — the field is configured, but the engine has never computed it. A roll-up recalculates only ' +
+                        'when a child row is written, so one declared after the children loaded stays blank until a child changes.',
+                    fix:
+                        `Check that "${childObject}" rows carry "${fk}" back to "${p.name}", then write one child row (any change) ` +
+                        'to trigger the recompute. Do not present the figure as working while it reads blank.',
+                    userMessage: say('rollup_never_computed', {
+                        object: labelIn(body, p.name),
+                        field: labelIn(def, fieldName),
+                        child: await labelOf('object', childObject),
+                    }),
+                });
+            } catch {
+                // A read the engine refused is not a roll-up that never ran:
+                // nothing is judged.
+            }
+        }
+    }
+
+    // ── Seed references: a reference column must name rows that exist ──────
+    //
+    // [#35146] The seed loader resolves what it can and reports the rest on
+    // `seedApplied`; this is the backstop over what LANDED. A seed load is a
+    // system write, which the engine does not re-check for references, so a
+    // value naming no row lands unchallenged, and the first one to notice is
+    // the person whose edit form refuses to save the record
+    // (`reference_not_found`). One sample read of the object, then one
+    // `id $in` read per reference column. A blank is not a dangle, and a read
+    // that fails judges nothing.
+    for (const p of published.filter((x) => x.type === 'seed')) {
+        const seed = asRec(await readItem('seed', p.name));
+        const objectName = typeof seed?.object === 'string' ? seed.object : undefined;
+        if (!objectName) continue;
+        const objectBody = asRec(await readItem('object', objectName));
+        const refFields = fieldsOf(objectBody).flatMap(([name, def]) => {
+            let target: string | undefined;
+            try {
+                target = referenceTargetOf(def);
+            } catch {
+                target = undefined;
+            }
+            return target ? [{ name, def, target }] : [];
+        });
+        if (refFields.length === 0) continue;
+        let rows: Rec[];
+        try {
+            rows = asArr(await engine.find(objectName, {
+                limit: PROBE_SAMPLE_ROWS,
+                ...(scoped(organizationId) ? { where: scoped(organizationId) } : {}),
+                context: SYSTEM_READ,
+            })).map(asRec).filter((r): r is Rec => !!r);
+        } catch {
+            continue;
+        }
+        for (const { name: field, def, target } of refFields) {
+            const values = [...new Set(rows.flatMap((r) => idsIn(r[field])))].slice(0, PROBE_SAMPLE_ROWS);
+            if (values.length === 0) continue;
+            let found: Set<string>;
+            try {
+                const existing = asArr(await engine.find(target, {
+                    where: { id: { $in: values } },
+                    limit: values.length,
+                    context: SYSTEM_READ,
+                })).map(asRec);
+                found = new Set(existing.map((r) => String(r?.id ?? r?._id)));
+            } catch {
+                continue;
+            }
+            const missing = values.filter((v) => !found.has(v));
+            if (missing.length === 0) continue;
+            const shown = missing.slice(0, 5).map((v) => `"${v}"`).join(', ');
+            issues.push({
+                layer: 'runtime',
+                severity: 'warning',
+                artifact: { type: 'seed', name: p.name },
+                ref: { type: 'object', name: objectName, member: field },
+                code: 'seed_reference_unresolved',
+                message:
+                    `Reference column "${objectName}.${field}" holds ${missing.length} value(s) that name no "${target}" row: ` +
+                    `${shown}${missing.length > 5 ? ', …' : ''}. The edit form submits the whole record and the engine re-checks ` +
+                    `every reference in it, so those records cannot be saved (\`${field}: reference_not_found\`), whichever field the user changed.`,
+                fix:
+                    `Point "${objectName}.${field}" on those rows at real "${target}" records (in the seed, by a value the loader ` +
+                    'resolves), or clear it, then republish the seed.',
+                userMessage: say('seed_reference_unresolved', {
+                    object: labelIn(objectBody, objectName),
+                    field: labelIn(def, field),
+                    target: await labelOf('object', target),
+                    count: String(missing.length),
+                }),
+            });
+        }
+    }
+
     // ── Dashboard widgets: the real dataset selection must return data ──────
     const dashboards = published.filter((x) => x.type === 'dashboard');
     let widgetsToProbe = 0;
@@ -619,6 +830,29 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
                             object: await labelOf('object', objectName),
                         }),
                     });
+                } else if (everyMeasureZero(rows, selection.measures)) {
+                    // [#35146] The query ran and every measure it answered
+                    // reads zero or nothing (a condition matching nothing,
+                    // rows dated outside the widget's window), so the card
+                    // the person opens is an empty "0" tile. Zero can be the
+                    // truth, so a warning, never an error. No rows at all is
+                    // `empty_query`'s question above, judged over the rows
+                    // this caller sees (#25484): an empty answer to a caller
+                    // who sees no rows is not reported here either.
+                    issues.push({
+                        layer: 'runtime',
+                        severity: 'warning',
+                        artifact: { type: 'dashboard', name: p.name },
+                        ref: { type: 'dataset', name: dsName, member: widgetId },
+                        code: 'widget_empty_result',
+                        message:
+                            `Dashboard "${p.name}" widget "${widgetId}" runs its real query (dataset "${dsName}") and gets ` +
+                            'only zero/null measure values — the card renders as an empty "0" tile.',
+                        fix:
+                            'Fix the data the widget reads (seed rows inside the widget\'s time window, rows its condition matches), ' +
+                            'adjust the widget or its dataset\'s filter, or tell the user why this card reads 0 right now.',
+                        userMessage: say('widget_empty_result', { ...named, dataset: labelIn(dataset, dsName) }),
+                    });
                 }
             } catch (e) {
                 // The query runs as the publishing caller, so read admission
@@ -688,5 +922,100 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
         });
     }
 
+    // ── Flows: a connector step must name a connector and action this kernel has ──
+    //
+    // [#35146] A `connector_action` step dispatches to whatever the engine
+    // resolves for its connector, named from the flow's package, then its
+    // action. The flow publishes whichever connector it names; one this
+    // environment does not serve fails every run that reaches the step. The
+    // probe asks the engine the same questions the step's executor asks, in
+    // the same order, with nothing dispatched. An engine without the lookups
+    // is not probed.
+    const automation = opts.automation;
+    const callerPackageId = opts.packageId ?? null;
+    if (automation && typeof automation.resolveConnectorAction === 'function') {
+        for (const p of published.filter((x) => x.type === 'flow')) {
+            const body = asRec(await readItem('flow', p.name));
+            if (!body) continue;
+            let graphs: ReturnType<typeof collectFlowGraphs>;
+            try {
+                graphs = collectFlowGraphs(body as Parameters<typeof collectFlowGraphs>[0]);
+            } catch {
+                continue;
+            }
+            for (const node of graphs.flatMap((g) => g.nodes as readonly unknown[]).map(asRec)) {
+                if (!node || node.type !== 'connector_action') continue;
+                const cfg = asRec(node.connectorConfig);
+                const connectorId = typeof cfg?.connectorId === 'string' ? cfg.connectorId : undefined;
+                const actionId = typeof cfg?.actionId === 'string' ? cfg.actionId : undefined;
+                if (!connectorId || !actionId) continue; // the schema's refusal, not a probe's
+                const nodeId = typeof node.id === 'string' ? node.id : 'connector_action';
+                let cause: 'refused' | 'no-action' | 'degraded' | undefined;
+                let why = '';
+                try {
+                    const instance = typeof automation.resolveConnectorInstanceFor === 'function'
+                        ? automation.resolveConnectorInstanceFor(connectorId, callerPackageId)
+                        : ({ status: 'instance', packageId: callerPackageId } as const);
+                    if (instance.status === 'refused') {
+                        cause = 'refused';
+                        why = instance.refusal.message;
+                    } else {
+                        const packageId = instance.status === 'instance' ? instance.packageId : undefined;
+                        const handler = packageId === undefined ? undefined : automation.resolveConnectorAction(connectorId, actionId, packageId);
+                        if (!handler) {
+                            const degraded = packageId === undefined ? undefined : automation.getConnectorDegradedReason?.(connectorId, packageId);
+                            cause = degraded ? 'degraded' : 'no-action';
+                            why = degraded
+                                ? `connector "${connectorId}" is degraded — ${degraded.replace(/\.\s*$/, '')}`
+                                : `no connector on this environment serves "${connectorId}.${actionId}"`;
+                        }
+                    }
+                } catch {
+                    continue; // a lookup that threw judges nothing
+                }
+                if (!cause) continue;
+                issues.push({
+                    layer: 'runtime',
+                    severity: 'warning',
+                    artifact: { type: 'flow', name: p.name },
+                    ref: { type: 'connector', name: connectorId, member: actionId },
+                    code: 'flow_connector_action_unresolved',
+                    message:
+                        `Flow "${p.name}" step "${nodeId}" (connector_action) dispatches "${connectorId}.${actionId}", but ${why} — ` +
+                        'every run that reaches the step fails.',
+                    fix: cause === 'degraded'
+                        ? `Resolve what keeps connector "${connectorId}" degraded (its upstream or its credential), then re-run the flow.`
+                        : cause === 'refused'
+                        ? `Make "${connectorId}" name one connector from this flow's package (declare the dependency, or hold the connector in the package), then republish.`
+                        : `Point the step's connectorConfig at a connector and action this environment has, or install the package or plugin that provides "${connectorId}".`,
+                    userMessage: say('flow_connector_action_unresolved', {
+                        flow: labelIn(body, p.name),
+                        step: labelIn(node, nodeId),
+                        connector: connectorId,
+                        cause,
+                    }),
+                });
+            }
+        }
+    }
+
     return { issues, checked };
+}
+
+/**
+ * The one field on a child object that points back at `parent`, the
+ * foreign key a roll-up resolves when it names no `relationshipField`:
+ * a `master_detail` or `lookup` whose target is the parent. Two such fields
+ * leave the engine to refuse, so the probe judges neither.
+ */
+function childForeignKey(child: Rec | undefined, parent: string): string | undefined {
+    const candidates = fieldsOf(child).filter(([, def]) => {
+        if (def.type !== 'master_detail' && def.type !== 'lookup') return false;
+        try {
+            return referenceTargetOf(def) === parent;
+        } catch {
+            return false;
+        }
+    });
+    return candidates.length === 1 ? candidates[0][0] : undefined;
 }
