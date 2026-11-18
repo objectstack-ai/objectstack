@@ -28,6 +28,8 @@ import {
   formatDashboardWindowReport,
   readSeedOutcome,
   formatSeedReport,
+  runFlowProof,
+  formatFlowRunReport,
   type VerifyReport,
   type SeedReport,
   type RlsReport,
@@ -36,6 +38,7 @@ import {
   type UniqueScopeReport,
   type ParentWriteReachReport,
   type DashboardWindowReport,
+  type FlowRunReport,
   type RlsProbeDescriptor,
   type RlsPositionPersonaInput,
 } from '@objectstack/verify';
@@ -59,6 +62,7 @@ import {
   isReportedError,
 } from '../utils/format.js';
 import { reserveStdoutForJson } from '../utils/json-stdout.js';
+import { parseFlowJsonFlag } from '../utils/flow-json-flag.js';
 
 /**
  * Should this `os verify` run boot an org-scoped (multi-tenant) stack?
@@ -138,12 +142,20 @@ export interface VerifyCapabilityAdvisory {
  *          dashboard's `dateRange` binds counts, under each preset of the
  *          picker, the fixture rows that window selects, asked of the dataset
  *          door as the signed-in principal
+ *        - a flow run (--flow NAME): the named flow, run once the way
+ *          production starts it (a record-change flow by a real write of the
+ *          record --flow-record names), reported node by node with the first
+ *          failure and what it wrote; every write outside the ephemeral
+ *          stack is refused before its datasource is called, and the four
+ *          outbound node types (http, connector_action, notify, script)
+ *          are not executed: the run stops there (a plugin's own outbound
+ *          node type is not stood in)
  *
  * Exits non-zero on either stage's failures so it drops straight into CI.
  */
 export default class Verify extends Command {
   static override description =
-    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity, plus the cross-owner RLS invariant, the reference-value shape proofs, the declared delete-behaviour proofs, the declared unique-scope proofs, the parent-derived write reach proofs and the dashboard date-window proofs on request)';
+    'Run the author-time rules os validate runs, then boot the app in-process and verify it through the real HTTP stack (CRUD round-trip fidelity, plus the cross-owner RLS invariant, the reference-value shape proofs, the declared delete-behaviour proofs, the declared unique-scope proofs, the parent-derived write reach proofs, the dashboard date-window proofs and one flow run on request)';
 
   static override examples = [
     '<%= config.bin %> verify',
@@ -154,6 +166,8 @@ export default class Verify extends Command {
     '<%= config.bin %> verify --unique-scopes --multi-tenant',
     '<%= config.bin %> verify --parent-write-reach',
     '<%= config.bin %> verify --dashboard-windows',
+    `<%= config.bin %> verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'`,
+    '<%= config.bin %> verify --flow nightly_cleanup --json',
   ];
 
   static override flags = {
@@ -184,6 +198,19 @@ export default class Verify extends Command {
     'parent-write-reach': Flags.boolean({
       description: "Also prove, for every controlled_by_parent object, that a persona's edit, delete or create of a detail is admitted exactly when it holds that verb on the detail's object and can edit the master, written through the engine as verifier personas and one persona per declared position (ADR-0055 master-detail write reach)",
       default: false,
+    }),
+    flow: Flags.string({
+      description:
+        "Also run this flow once on a fresh boot and report each node's status, the first failure with its code and the node named, and what the run wrote. It starts the way production starts it: a record-change flow by a real write of the record --flow-record names, a flow its own trigger starts with no caller (an API-triggered flow with --flow-input as its record and params, a time-relative flow with --flow-record seeded and handed in as its record (no acting organization), a schedule or runAs: 'system' flow with --flow-input as its params), any other flow through the trigger route as the dev admin. A schedule the deployment's scheduled-work switch keeps unarmed is reported as not armed and still run. Every write outside the in-memory database this run boots is refused before its datasource is called. Four outbound node types (http, connector_action, notify, script) are not executed: a run that reaches one stops there and names it. A plugin's own node type that calls out under another name is not stood in, and runs for real",
+    }),
+    'flow-record': Flags.string({
+      description:
+        'With --flow on a record-change or time-relative flow: the record\'s fields as a JSON object. A create or write leg inserts it; an update leg seeds it and saves it unchanged; a delete leg seeds it and deletes it; a time-relative flow is handed the seeded row as the swept record',
+      dependsOn: ['flow'],
+    }),
+    'flow-input': Flags.string({
+      description: 'With --flow on a flow started directly: its input as a JSON object, handed to the start as its params (and, for an API-triggered flow, as its record, the request body)',
+      dependsOn: ['flow'],
     }),
     'multi-tenant': Flags.boolean({
       description: 'Boot org-scoped (register the @objectstack/organizations plugin) so tenant-isolation RLS policies apply (also honors a walled $OS_TENANCY_POSTURE, and the legacy $OS_MULTI_ORG_ENABLED it falls back to)',
@@ -267,9 +294,17 @@ export default class Verify extends Command {
     'unique-scopes': boolean;
     'parent-write-reach': boolean;
     'dashboard-windows': boolean;
+    flow?: string;
+    'flow-record'?: string;
+    'flow-input'?: string;
     'multi-tenant': boolean;
     json: boolean;
   }): Promise<void> {
+    // The flow run's JSON arguments, judged before anything loads or boots:
+    // a malformed one is the caller's to fix, and no stage should run first.
+    const flowRecord = parseFlowJsonFlag('--flow-record', flags['flow-record']);
+    const flowInput = parseFlowJsonFlag('--flow-input', flags['flow-input']);
+
     // [#32141] The project's `.env*` files, loaded before anything reads the
     // environment — the config module, the tenancy posture below, and every
     // service the boot composes (the settings service reads its `OS_*`
@@ -465,6 +500,23 @@ export default class Verify extends Command {
       }
     }
 
+    // The flow run boots a fresh stack of its own as well: the run writes its
+    // triggering record and whatever its nodes write, and the confinement
+    // middleware it registers stays on that engine for the stack's life.
+    let flowRun: FlowRunReport | undefined;
+    if (flags.flow) {
+      const flowStack = await bootStack(config, { multiTenant, hostRoot });
+      try {
+        flowRun = await runFlowProof(flowStack, config, {
+          flow: flags.flow,
+          ...(flowRecord ? { record: flowRecord } : {}),
+          ...(flowInput ? { input: flowInput } : {}),
+        });
+      } finally {
+        await flowStack.stop();
+      }
+    }
+
     // Failure contract: a "real" runtime break the app's author must see.
     // A degraded RLS probe counts: the run reported verdicts it could not have
     // established, which is worse than no verifier at all.
@@ -506,13 +558,18 @@ export default class Verify extends Command {
       // A bound widget that went blank or counted other rows than its window
       // selects, or a windowed query the door refused or faulted. Inconclusive,
       // unbound and excluded widgets are reported, not counted.
-      (dashboardWindows?.summary.hardFailures ?? 0);
+      (dashboardWindows?.summary.hardFailures ?? 0) +
+      // The flow did not run, failed at a node, has a node no executor runs,
+      // or had a write outside the ephemeral stack refused. A skipped or
+      // paused run, a run stopped at an outbound node, and a schedule left
+      // unarmed by the deployment's switch are reported, not counted.
+      (flowRun?.summary.hardFailures ?? 0);
 
     if (flags.json) {
       // `emitJson`, not `this.log`: stdout is reserved (see `run()`), so the
       // report has to leave through the real stream — and awaiting the write
       // drains a report larger than one pipe buffer before `this.exit` below.
-      await emitJson({ app: crud.app, config: absolutePath, multiTenant, capabilities, seed, crud, rls, referenceShapes, deleteBehaviors, uniqueScopes, parentWriteReach, dashboardWindows, hardFailures });
+      await emitJson({ app: crud.app, config: absolutePath, multiTenant, capabilities, seed, crud, rls, referenceShapes, deleteBehaviors, uniqueScopes, parentWriteReach, dashboardWindows, flowRun, hardFailures });
     } else {
       this.log(formatReport(crud));
       this.log(formatSeedReport(seed));
@@ -522,6 +579,7 @@ export default class Verify extends Command {
       if (uniqueScopes) this.log(formatUniqueScopeReport(uniqueScopes));
       if (parentWriteReach) this.log(formatParentWriteReachReport(parentWriteReach));
       if (dashboardWindows) this.log(formatDashboardWindowReport(dashboardWindows));
+      if (flowRun) this.log(formatFlowRunReport(flowRun));
       this.log('');
       this.log(
         hardFailures > 0
