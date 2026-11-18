@@ -144,10 +144,10 @@ const NON_RECORD_ROOTS: ReadonlySet<string> = new Set(
 );
 
 /** The acting user as the server's formula pass binds it (objectql `applyFormulaPlan`). */
-interface FormulaUser {
+type FormulaUser = {
   id: string;
   positions: string[];
-}
+};
 
 /**
  * The acting user out of a predicate scope's `current_user`, or `undefined`
