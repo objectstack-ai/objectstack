@@ -73,7 +73,8 @@ which automation fires · which screens change · translations ·
 ## 2 · Testing: what the app pins, what the platform checks
 
 The platform checks consistency. The app tests its own business facts. Run all
-four before calling a change done; a scaffolded project's CI runs them too:
+four before calling a change done (a scaffolded project's CI runs the first
+three; add `pnpm test` to its `ci.yml`):
 
 ```bash
 pnpm validate && pnpm lint && pnpm typecheck && pnpm test

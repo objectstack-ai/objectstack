@@ -3,7 +3,7 @@
 'create-objectstack': patch
 ---
 
-feat(skills): a process skill for running a metadata-app project; scaffolded projects run their tests in CI
+feat(skills): a process skill for running a metadata-app project
 
 Clause-②: no
 Metadata-protocol: none
@@ -14,8 +14,7 @@ A project that already syncs its skills gets the new one on its next `npx skills
 
 `npm create objectstack` projects now:
 
-- run `pnpm test` in `.github/workflows/ci.yml`, after `validate`, `lint` and `typecheck`, so the sample test (and every test you add) runs on each push;
 - point `AGENTS.md` at `objectstack-project` in place of its hand-written skill table, which listed nine of the catalog's skills;
 - carry a three-line `.github/pull_request_template.md`: what a user can do now, how it was checked, which docs changed.
 
-Existing projects are not changed. To take the CI step, add `- run: pnpm test` after `- run: pnpm typecheck` in your `ci.yml`.
+Existing projects are not changed.

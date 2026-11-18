@@ -1938,8 +1938,8 @@ export const CEILINGS = new Map([
   // to it, in `objectstack-platform/references/operations.md`, lands inside that
   // row's headroom (3388 -> 3392 of 3394). The PR that adds the row is Tier H and lands only on an authorized
   // approval, which is the pricing act the header reserves to the maintainer.
-  //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11031 / 4)
-  ['skills/objectstack-project/SKILL.md', 2758],
+  //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11072 / 4)
+  ['skills/objectstack-project/SKILL.md', 2768],
 ]);
 
 /**
