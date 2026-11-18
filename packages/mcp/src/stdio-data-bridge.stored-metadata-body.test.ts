@@ -491,10 +491,12 @@ const BRIDGE_MEMBERS: Record<string, string> = {
  * call at all.
  */
 const ENGINE_READ_SITES: Record<string, Record<string, number>> = {
-  // findById (get, and the update / remove existence probes) and query; aggregate.
+  // findById (get, and the update / remove existence probes) and query; the
+  // query's one-row-per-group read (`latestPer`), behind the same stored-body,
+  // hash and sort refusals with its partition and order fields judged; aggregate.
   // [#35138] `count(object)`: `query`'s page total, a number and never a row,
   // counted under the `where` the stored-body and hash refusals already judged.
-  'stdio-data-bridge.ts': { 'find(object)': 2, 'aggregate(object)': 1, 'count(object)': 1 },
+  'stdio-data-bridge.ts': { 'find(object)': 3, 'aggregate(object)': 1, 'count(object)': 1 },
   // The ADR-0101 record resource reader.
   'plugin.ts': { 'find(objectName)': 1 },
   // [#30891] NOT an engine read: `delete_records` counting its selection

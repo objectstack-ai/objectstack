@@ -311,6 +311,13 @@ interface ObjectDef {
  * spelling the existing stdio reader already accepts, kept identical so the two
  * readers on this transport cannot disagree about what a row list is.
  */
+/**
+ * The engine's one-row-per-group read option (`@objectstack/objectql`,
+ * `latest-per.ts`), spelled `Symbol.for` because this package does not depend
+ * on the engine at runtime. A symbol, so no tool argument can carry it.
+ */
+const STDIO_LATEST_PER: unique symbol = Symbol.for('objectstack.objectql.latestPer');
+
 function unwrapRows(res: unknown): Array<Record<string, unknown>> {
   const rows =
     res && typeof res === 'object' && 'value' in (res as Record<string, unknown>)
@@ -1369,17 +1376,26 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       await enforceApiExposure(reads, object, GATED_ACTIONS.query, context);
       // [#22777] …and each nested-relation condition's target, before the engine reads it.
       await enforceRelationTargetExposure(reads, object, opts?.where, context);
+      // [latest per group] The partition and order fields are sort keys to
+      // every sort verdict below, as the engine judges them.
+      const latestPerKeys = opts?.latestPer
+        ? [
+          ...opts.latestPer.by.map((field) => ({ field, order: 'asc' as const })),
+          ...opts.latestPer.orderBy,
+        ]
+        : [];
+      const judgedOrderBy = latestPerKeys.length > 0 ? [...(opts?.orderBy ?? []), ...latestPerKeys] : opts?.orderBy;
       // [#21207] After the exposure gate, before the engine: a filter or sort
       // on a stored metadata body is refused rather than evaluated.
-      const bodyRefusal = storedMetadataBodyRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
+      const bodyRefusal = storedMetadataBodyRefusal(object, { where: opts?.where, orderBy: judgedOrderBy });
       if (bodyRefusal) throw bodyRefusal;
       // [#21207] …and the same for a stored content-hash column.
-      const hashRefusal = storedMetadataHashRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
+      const hashRefusal = storedMetadataHashRefusal(object, { where: opts?.where, orderBy: judgedOrderBy });
       if (hashRefusal) throw hashRefusal;
       // [#29896] …and a sort on a field its author declared `sortable: false`,
       // the list door's fourth sort verdict, judged by the served projection.
-      if (opts?.orderBy && opts.orderBy.length > 0) {
-        const sortRefusal = unofferedSortRefusal(object, await objectView.getObject(object), opts.orderBy);
+      if (judgedOrderBy && judgedOrderBy.length > 0) {
+        const sortRefusal = unofferedSortRefusal(object, await objectView.getObject(object), judgedOrderBy);
         if (sortRefusal) throw sortRefusal;
       }
       // A filter or sort on an `internal: true` field is refused by the engine
@@ -1394,6 +1410,31 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       if (typeof opts?.offset === 'number') query.offset = opts.offset;
       // [#21207] The content-hash columns are served keyed, or not at all.
       const digest = keyedDigest?.();
+      if (opts?.latestPer) {
+        // [latest per group] One row per group, on the engine's own read
+        // option: at most `limit` groups, read with one row more so the answer
+        // says whether more groups exist; no `total`, since a row count is no
+        // group count. The engine sets the outcome when its driver served the
+        // window; a read that comes back without it is no answer.
+        const limit = typeof opts.limit === 'number' ? opts.limit : undefined;
+        if (limit === undefined) throw new Error(`query_records on '${object}' with latestPer needs a limit.`);
+        const latestPer: { by: string[]; orderBy: Array<{ field: string; order: 'asc' | 'desc' }>; outcome?: { kind?: unknown } } = {
+          by: opts.latestPer.by,
+          orderBy: opts.latestPer.orderBy,
+        };
+        const found = unwrapRows(await engine.find(object, { ...query, limit: limit + 1 }, {
+          context,
+          [STDIO_LATEST_PER]: latestPer,
+        } as Parameters<IDataEngine['find']>[2]));
+        if (latestPer.outcome?.kind !== 'served') {
+          throw new Error(`query_records on '${object}' with latestPer: the read was not served as one row per group.`);
+        }
+        const page = found.slice(0, limit);
+        const latestRecords = await Promise.all(
+          serveStoredMetadataRows(object, page, { dropType: read.addedType }).map((row) => serveStoredMetadataHashes(object, row, digest)),
+        );
+        return { object, records: latestRecords, hasMore: found.length > limit };
+      }
       const records = await Promise.all(
         serveStoredMetadataRows(object, unwrapRows(await engine.find(object, query, { context })), {
           dropType: read.addedType,

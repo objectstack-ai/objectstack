@@ -269,6 +269,11 @@ export type { DatasourceDef } from './engine.js';
 // refuses the filter rather than truncate it, and its words name this number.
 // Exported so a caller running the two-step route itself can page by it.
 export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
+// "Each X with its latest Y": the engine-internal read option a door carries
+// to `find` for one row per group, and the request it carries. The carriers
+// that do not import this package spell the key `Symbol.for`, as it does.
+export { LATEST_PER, LATEST_PER_MAX_KEYS } from './latest-per.js';
+export type { LatestPerRequest, LatestPerOrder, LatestPerOutcome } from './latest-per.js';
 // [#16159] `SUMMARY_RECOMPUTE_CODE` joins the class it names. The refusal's own
 // docblock tells a caller to identify it by `code` rather than `instanceof`
 // (the two-realm split #14936 measured: this package declares BOTH realms in
