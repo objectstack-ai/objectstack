@@ -17,6 +17,10 @@
  *    datasource's driver is called: the recording driver below sees no write;
  *  - an outbound node is not executed: the run stops there with the node
  *    named, and the local server below receives no request;
+ *  - a stop the run goes on past (a try region's catch, a parallel branch)
+ *    does not hide a later real failure: that node is the first failure;
+ *  - a stop inside a child flow is named at the child's node, not reported
+ *    as the calling `subflow` node's failure;
  *  - a schedule the deployment's scheduled-work switch keeps unarmed is not a
  *    defect: it is reported as not armed and still run with no caller;
  *  - an API-triggered flow gets its body as `record` as well as `params`, and
@@ -252,6 +256,97 @@ const outbound: Flow = {
   ],
 } as Flow;
 
+/** A Ledger write with no name: the required field refuses it at run time. */
+const failingWrite = (id: string) => ({ id, type: 'create_record', label: id, config: { objectName: LEDGER, fields: {} } });
+const httpCall = (id: string) => ({ id, type: 'http', label: id, config: { url: OUTBOUND_URL, method: 'GET' } });
+
+/** start → a try region around an `http` call, caught → a write that really fails → end. */
+const CAUGHT = 'fr_caught';
+const caught: Flow = {
+  name: CAUGHT,
+  label: CAUGHT,
+  type: 'autolaunched',
+  status: 'active',
+  runAs: 'system',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'guard',
+      type: 'try_catch',
+      label: 'Guard',
+      config: {
+        try: { nodes: [httpCall('caught_call')] },
+        catch: { nodes: [{ id: 'call_failed', type: 'assignment', label: 'Call failed' }] },
+      },
+    },
+    failingWrite('boom'),
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'guard' },
+    { id: 'e2', source: 'guard', target: 'boom' },
+    { id: 'e3', source: 'boom', target: 'end' },
+  ],
+} as Flow;
+
+/** start → one branch calls out, the other branch's write really fails → end. */
+const FORKED = 'fr_forked';
+const forked: Flow = {
+  name: FORKED,
+  label: FORKED,
+  type: 'autolaunched',
+  status: 'active',
+  runAs: 'system',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    {
+      id: 'fan',
+      type: 'parallel',
+      label: 'Fan out',
+      config: { branches: [{ name: 'call', nodes: [httpCall('fork_call')] }, { name: 'write', nodes: [failingWrite('fork_boom')] }] },
+    },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'fan' },
+    { id: 'e2', source: 'fan', target: 'end' },
+  ],
+} as Flow;
+
+/** A child flow that calls out, and a parent that calls it and then writes. */
+const CHILD = 'fr_child';
+const child: Flow = {
+  name: CHILD,
+  label: CHILD,
+  type: 'autolaunched',
+  status: 'active',
+  runAs: 'system',
+  nodes: [{ id: 'start', type: 'start', label: 'Start' }, httpCall('child_call'), { id: 'end', type: 'end', label: 'End' }],
+  edges: [
+    { id: 'e1', source: 'start', target: 'child_call' },
+    { id: 'e2', source: 'child_call', target: 'end' },
+  ],
+} as Flow;
+const PARENT = 'fr_parent';
+const parent: Flow = {
+  name: PARENT,
+  label: PARENT,
+  type: 'autolaunched',
+  status: 'active',
+  runAs: 'system',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'call_child', type: 'subflow', label: 'Call child', config: { flowName: CHILD } },
+    ledgerNode('after_child', "'after the child'"),
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'call_child' },
+    { id: 'e2', source: 'call_child', target: 'after_child' },
+    { id: 'e3', source: 'after_child', target: 'end' },
+  ],
+} as Flow;
+
 /** A nightly schedule that writes one Ledger row. */
 const NIGHTLY = 'fr_nightly';
 const nightly: Flow = {
@@ -370,6 +465,10 @@ const fixtureStack = defineStack({
     noExecutor,
     confined,
     outbound,
+    caught,
+    forked,
+    child,
+    parent,
     nightly,
     hook,
     renewal,
@@ -464,6 +563,7 @@ describe('runFlowProof — the local flow run', () => {
     expect(report.confinement.outbound).toContain('http');
     expect(report.verdict, formatFlowRunReport(report)).toBe('stopped');
     expect(report.firstFailure).toMatchObject({ kind: 'outbound_not_run', nodeId: 'call', nodeType: 'http' });
+    expect(report.outboundStops).toEqual([{ nodeId: 'call', nodeType: 'http' }]);
     // The run log is the engine's own: the start ran, the call is the failing step, nothing after it ran.
     expect(report.steps.map((s) => [s.nodeId, s.status])).toEqual([
       ['start', 'success'],
@@ -471,6 +571,39 @@ describe('runFlowProof — the local flow run', () => {
     ]);
     expect(await stack.rows(LEDGER, { name: 'after the call' })).toEqual([]);
     // Not a defect of the flow: it does not fail `os verify`.
+    expect(report.summary.hardFailures).toBe(0);
+  });
+
+  it('a stop a try region catches does not hide the later node that really fails', async () => {
+    const mark = outboundHits.length;
+    const report = await runFlowProof(stack, fixtureStack, { flow: CAUGHT });
+    expect(outboundHits.slice(mark)).toEqual([]);
+    expect(report.verdict, formatFlowRunReport(report)).toBe('failed');
+    expect(report.firstFailure).toMatchObject({ kind: 'node_failed', nodeId: 'boom', nodeType: 'create_record' });
+    expect(report.outboundStops).toEqual([{ nodeId: 'caught_call', nodeType: 'http' }]);
+    expect(report.notes.some((n) => n.includes("'caught_call' (http)") && n.includes('went on past'))).toBe(true);
+    expect(report.summary.hardFailures).toBe(1);
+  });
+
+  it('a stopped parallel branch does not hide the other branch that really fails', async () => {
+    const mark = outboundHits.length;
+    const report = await runFlowProof(stack, fixtureStack, { flow: FORKED });
+    expect(outboundHits.slice(mark)).toEqual([]);
+    expect(report.verdict, formatFlowRunReport(report)).toBe('failed');
+    expect(report.firstFailure).toMatchObject({ kind: 'node_failed', nodeId: 'fork_boom' });
+    expect(report.outboundStops).toEqual([{ nodeId: 'fork_call', nodeType: 'http' }]);
+    expect(report.summary.hardFailures).toBe(1);
+  });
+
+  it("a stop inside a child flow is named at the child's node, not as the subflow node's failure", async () => {
+    const mark = outboundHits.length;
+    const report = await runFlowProof(stack, fixtureStack, { flow: PARENT });
+    expect(outboundHits.slice(mark)).toEqual([]);
+    expect(report.verdict, formatFlowRunReport(report)).toBe('stopped');
+    expect(report.firstFailure).toMatchObject({ kind: 'outbound_not_run', nodeId: 'child_call', nodeType: 'http' });
+    expect(report.steps.find((s) => s.nodeId === 'call_child')?.status).toBe('failure');
+    expect(report.outboundStops).toEqual([{ nodeId: 'child_call', nodeType: 'http' }]);
+    expect(await stack.rows(LEDGER, { name: 'after the child' })).toEqual([]);
     expect(report.summary.hardFailures).toBe(0);
   });
 

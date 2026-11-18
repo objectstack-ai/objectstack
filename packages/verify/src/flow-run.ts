@@ -67,17 +67,31 @@
 //
 // ## Outbound nodes are not executed
 //
-// A node that calls out of the process (`http`, `connector_action`,
-// `notify`, `script`) would reach real systems with the project's own
-// credentials. Before the run starts, this family replaces each of those
-// executors the boot registered, on this stack's engine only, with a
-// stand-in that executes nothing and fails the node with a guard-class
-// result: the run stops at the first one (a guard result never follows a
-// `fault` edge), and the report names it with kind `outbound_not_run`. The
-// run log stays the engine's own: every node before it ran for real. A
-// `try_catch` region catches a guard result like any other failure, so an
-// outbound node inside one hands the run to the catch region, and the report
-// says so. Running outbound nodes locally is not offered.
+// Four node types call out of the process: `http`, `connector_action` (and
+// every connector a plugin contributes, which runs behind it), `notify` and
+// `script`. Run for real they would reach real systems with the project's own
+// credentials. Before the run starts, this family replaces each of those four
+// executors the boot registered, on this stack's engine only, with a stand-in
+// that executes nothing and fails the node with a guard-class result: a guard
+// result never follows a `fault` edge. A plugin's own node type that calls out
+// under another name is not stood in, and runs for real.
+//
+// How a stop is reported:
+//  - Each step is classified. A stop is the stopped node's own step, or a
+//    step whose failure carries the stand-in's sentence: a container around
+//    it, or a `subflow` / `map` node whose child run was stopped (the child's
+//    error text reaches the parent's step, but not its guard class, so a
+//    `fault` edge on the calling node is still followed).
+//  - The first failure is the first failing step that is not a stop. Only
+//    when no other step failed and the run failed is the stop why it ended:
+//    then the verdict is `stopped` and the first failure is `outbound_not_run`
+//    naming the outbound node (the child's node, for a child flow).
+//  - A stop the run went on past (a `try_catch` region's catch, or a fault
+//    edge on a calling node) is a note: what came after reads a call that
+//    never happened.
+//  - Every stood-in node the run reached is listed in `outboundStops`.
+// The run log stays the engine's own. Running outbound nodes locally is not
+// offered.
 
 import { isServiceNotRegisteredError } from '@objectstack/core';
 import { collectFlowGraphs } from '@objectstack/spec/automation';
@@ -195,6 +209,8 @@ export interface FlowRunReport {
   steps: FlowRunStep[];
   /** Every node whose type no executor runs, reached or not. */
   missingExecutors: Array<{ nodeId: string; nodeType: string; region?: string }>;
+  /** Every outbound node the run reached and did not execute, in a child flow too, in the order reached. */
+  outboundStops: Array<{ nodeId: string; nodeType: string }>;
   firstFailure?: FlowRunFailure;
   /** What the run wrote: every write the engine received while it was open, the triggering write excluded. */
   writes: FlowRunWrite[];
@@ -253,6 +269,13 @@ interface ConfinedRefusal {
   datasource: string;
   operation: ObservedWrite['operation'];
 }
+
+/**
+ * How a failing step's message is recognised as the outbound stand-in's stop:
+ * the node's own step, a container's, or a `subflow` / `map` node's, whose
+ * error text carries the child's. Captures the stopped node's id and type.
+ */
+const OUTBOUND_SENTENCE = /verify --flow does not execute outbound nodes: '([^']+)' \(([^)]+)\)/;
 
 /** How a failing step's message is recognised as the confinement's refusal (the engine wraps the node's code). */
 const CONFINEMENT_SENTENCE = /a flow run writes to the ephemeral stack only/;
@@ -450,6 +473,7 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
     start: 'none',
     steps: [],
     missingExecutors: [],
+    outboundStops: [],
     writes: [],
     confinement: { datasource: '', refused: 0, outbound: [] },
     notes: [],
@@ -691,33 +715,60 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
   ];
   report.confinement.refused = refused.length;
 
+  report.outboundStops = stopped.map((o) => ({ ...o }));
+
   if (run) {
     report.runId = run.id;
     report.steps = (run.steps ?? []).map(stepOf);
     report.verdict = VERDICT_OF_STATUS[run.status] ?? 'failed';
-    const failing = report.steps.find((s) => s.status === 'failure');
+    // A stand-in stop is classified per step: the stopped node's own step, or a
+    // step whose failure carries the stand-in's sentence (a container, or a
+    // `subflow` / `map` node whose child run was stopped). The first failure is
+    // the first failing step that is NOT a stop; a stop is why the run ended
+    // only when no other step failed.
+    const isStop = (step: FlowRunStep): boolean =>
+      stopped.some((o) => o.nodeId === step.nodeId && o.nodeType === step.nodeType) ||
+      OUTBOUND_SENTENCE.test(step.error?.message ?? '');
+    const failingSteps = report.steps.filter((s) => s.status === 'failure');
+    const failing = failingSteps.find((s) => !isStop(s));
+    const stopStep = failingSteps.find(isStop);
     if (failing) {
       const confinedWrite = refused.length > 0 && CONFINEMENT_SENTENCE.test(failing.error?.message ?? '');
       const missing = report.missingExecutors.some((m) => m.nodeId === failing.nodeId);
-      const outbound = stopped.some((o) => o.nodeId === failing.nodeId && o.nodeType === failing.nodeType);
-      if (outbound) {
-        if (report.verdict === 'failed') report.verdict = 'stopped';
-        report.notes.push(
-          `the run reached outbound node '${failing.nodeId}' (${failing.nodeType}), which verify --flow does not execute` +
-            (report.verdict === 'stopped'
-              ? ': it stopped there, and no node after it is proven'
-              : `; a try region caught the stop, so the run went on as it would after a failed call`),
-        );
-      }
       report.firstFailure = {
-        kind: outbound ? 'outbound_not_run' : confinedWrite ? 'confined_write' : missing ? 'no_executor' : 'node_failed',
+        kind: confinedWrite ? 'confined_write' : missing ? 'no_executor' : 'node_failed',
         nodeId: failing.nodeId,
         nodeType: failing.nodeType,
         ...(failing.error?.code ? { code: failing.error.code } : {}),
         message: failing.error?.message ?? `node '${failing.nodeId}' failed`,
       };
+    } else if (stopStep && report.verdict === 'failed') {
+      // The stop itself ended the run: name the outbound node, which for a
+      // child flow's node is the one its sentence names, not the calling node.
+      const named = OUTBOUND_SENTENCE.exec(stopStep.error?.message ?? '');
+      const nodeId = named?.[1] ?? stopStep.nodeId;
+      const nodeType = named?.[2] ?? stopStep.nodeType;
+      report.verdict = 'stopped';
+      report.firstFailure = {
+        kind: 'outbound_not_run',
+        nodeId,
+        nodeType,
+        ...(stopStep.error?.code ? { code: stopStep.error.code } : {}),
+        message: stopStep.error?.message ?? `outbound node '${nodeId}' was not executed`,
+      };
+      report.notes.push(
+        `the run ended at outbound node '${nodeId}' (${nodeType}), which verify --flow does not execute` +
+          (nodeId !== stopStep.nodeId ? `, reached through '${stopStep.nodeId}' (${stopStep.nodeType})` : '') +
+          ': no node after it is proven',
+      );
     } else if (report.verdict === 'failed') {
       report.firstFailure = { kind: 'run_failed', message: run.error ?? `run ${run.id} failed with no failing step in its log` };
+    }
+    if (report.outboundStops.length > 0 && report.verdict !== 'stopped') {
+      const names = report.outboundStops.map((o) => `'${o.nodeId}' (${o.nodeType})`).join(', ');
+      report.notes.push(
+        `outbound node(s) ${names} were not executed; the run went on past the stop (a try region's catch, or a fault edge on a calling subflow or map node, handled it as a failed call), so what came after reads a call that never happened`,
+      );
     }
     if (report.verdict === 'paused') {
       const last = report.steps[report.steps.length - 1];
