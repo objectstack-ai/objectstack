@@ -770,3 +770,106 @@ describe('objectstack#30220 — FormPage judges requiredWhen on an Edit as a tra
     expect(writes()).toHaveLength(0);
   });
 });
+
+/**
+ * objectstack#35033 — this renderer recomputes the object's `formula` fields
+ * from the live values before it judges the field rules, so a required field
+ * whose object-level `visibleWhen` reads a formula is shown (and required)
+ * exactly when the server would require it. A formula it cannot compute (a
+ * read through a reference) leaves the field shown and required, with no
+ * submit refusal for the rule: the server's answer for the same predicate.
+ */
+describe('objectstack#35033 — FormPage judges a visibleWhen that reads a formula on the recomputed value', () => {
+  const ESCALATION = {
+    ...BASE_SCHEMA,
+    fields: {
+      ...BASE_SCHEMA.fields,
+      account: { type: 'lookup', label: 'Account', reference: 'account' },
+      escalated: { type: 'formula', label: 'Escalated', expression: "record.priority == 'urgent'" },
+      long_title: { type: 'formula', label: 'Long title', expression: 'size(record.title) > 3' },
+      tier: { type: 'formula', label: 'Tier', expression: 'record.account.tier' },
+      notes: { type: 'text', label: 'Notes', required: true, visibleWhen: 'record.escalated == true' },
+    } as Record<string, Record<string, unknown>>,
+  };
+  const withNotesWhen = (visibleWhen: string) => ({
+    ...ESCALATION,
+    fields: { ...ESCALATION.fields, notes: { ...ESCALATION.fields.notes, visibleWhen } },
+  });
+  const SECTIONS = [{ label: 'Basics', fields: ['priority', 'title', 'notes'] }];
+  const writes = () => calls.filter((c) => c.method === 'POST' || c.method === 'PATCH');
+  const editRoutes = (stored: Record<string, unknown>) => [
+    { match: '/data/showcase_task/t-1', body: { object: 'showcase_task', id: 't-1', record: { id: 't-1', ...stored } } },
+    { method: 'PATCH', match: '/data/showcase_task/t-1', body: { object: 'showcase_task', id: 't-1', record: { id: 't-1' } } },
+  ];
+  const createRoutes = [{ method: 'POST', match: '/data/showcase_task', body: { object: 'showcase_task', id: 'new-1' } }];
+
+  it('create: hidden until the inputs make the formula satisfy it, then shown and required, and the formula is never written', async () => {
+    const user = userEvent.setup();
+    const { container } = renderInternal(SECTIONS, { objectSchema: ESCALATION, extraRoutes: createRoutes });
+    await awaitForm();
+    expect(screen.queryByLabelText(/^Notes/)).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Priority'));
+    await user.type(screen.getByLabelText('Priority'), 'urgent');
+    await waitFor(() => expect(controlFor(container, 'notes')).toBeRequired());
+
+    await user.click(screen.getByRole('button', { name: /submit/i }));
+    expect(writes()).toHaveLength(0);
+
+    await user.type(screen.getByLabelText(/^Notes/), 'paged on-call');
+    await user.click(screen.getByRole('button', { name: /submit/i }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    const body = writes()[0].body as Record<string, unknown>;
+    expect(body.notes).toBe('paged on-call');
+    expect(body).not.toHaveProperty('escalated');
+  });
+
+  it('edit: a served value outside the condition is recomputed when the inputs cross it, and the reverse edit hides it', async () => {
+    const user = userEvent.setup();
+    const { container } = renderInternal(SECTIONS, {
+      objectSchema: ESCALATION,
+      query: '?recordId=t-1',
+      extraRoutes: editRoutes({ priority: 'low', title: 'Old', escalated: false }),
+    });
+    await awaitForm();
+    expect(screen.queryByLabelText(/^Notes/)).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Priority'));
+    await user.type(screen.getByLabelText('Priority'), 'urgent');
+    await waitFor(() => expect(controlFor(container, 'notes')).toBeRequired());
+
+    await user.clear(screen.getByLabelText('Priority'));
+    await user.type(screen.getByLabelText('Priority'), 'low');
+    await waitFor(() => expect(screen.queryByLabelText(/^Notes/)).not.toBeInTheDocument());
+  });
+
+  it('a formula reading through a reference: shown, required, and the submit goes through once it is filled', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const user = userEvent.setup();
+    const { container } = renderInternal(SECTIONS, {
+      objectSchema: withNotesWhen("record.tier == 'gold'"),
+      extraRoutes: createRoutes,
+    });
+    await awaitForm();
+    expect(controlFor(container, 'notes')).toBeRequired();
+    expect(warn.mock.calls.some(([m]) => /visibleWhen of field 'notes' reads a formula the form cannot compute/.test(String(m)))).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: /submit/i }));
+    expect(writes()).toHaveLength(0);
+    expect(screen.queryByText(/could not be evaluated/)).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/^Notes/), 'gold desk');
+    await user.click(screen.getByRole('button', { name: /submit/i }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+  });
+
+  it('an empty operand reads null, the predicate is judged on it, and the submit is not refused', async () => {
+    const user = userEvent.setup();
+    renderInternal(SECTIONS, { objectSchema: withNotesWhen('record.long_title == true'), extraRoutes: createRoutes });
+    await awaitForm();
+    expect(screen.queryByLabelText(/^Notes/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /submit/i }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+  });
+});

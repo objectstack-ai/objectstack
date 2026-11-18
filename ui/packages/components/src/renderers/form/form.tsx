@@ -47,6 +47,7 @@ import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
 import { usePatchingUpdateActions } from './actionRequirements';
+import { declaresFieldRule, useObjectFormulaPlan, withoutUnservableVisibleWhen } from './objectFormulas';
 import { SuggestedFieldChangesContext, SuggestedFieldsContext } from './suggested-fields-context';
 import { FormSectionNavContext, type FormSectionNavItem, type FormSectionNavSink } from './section-nav-context';
 
@@ -1879,12 +1880,27 @@ ComponentRegistry.register('form',
         ),
       [rawFields],
     );
-    const fields = React.useMemo(
+    const declaredFields = React.useMemo(
       () =>
         specVocabularyFields.length === 0
           ? rawFields
           : (rawFields as any[]).filter((f) => !specVocabularyFields.includes(f)),
       [rawFields, specVocabularyFields],
+    );
+    // The object's `formula` fields, recomputed from the live inputs into
+    // `ruleRecord` below (objectstack#35033): read once per object, and only
+    // when some field declares a rule a formula could feed. A field whose
+    // `visibleWhen` reads a formula the form cannot compute loses that
+    // `visibleWhen` here — shown and still required, as the server judges it,
+    // and never a submit refusal (`objectFormulas.ts`).
+    const formulaPlan = useObjectFormulaPlan(
+      React.useContext(SchemaRendererContext)?.dataSource ?? null,
+      schema.objectName,
+      declaresFieldRule(declaredFields as unknown[]),
+    );
+    const fields = React.useMemo(
+      () => withoutUnservableVisibleWhen(declaredFields, formulaPlan) as typeof declaredFields,
+      [declaredFields, formulaPlan],
     );
     React.useEffect(() => {
       for (const f of specVocabularyFields) {
@@ -2126,9 +2142,13 @@ ComponentRegistry.register('form',
         for (const k of Object.keys(previousRecord)) out[k] = previousRecord[k];
       }
       for (const k of Object.keys(watched)) if (watched[k] !== undefined) out[k] = watched[k];
-      return out;
+      // The object's formulas over that record, each after the formulas it
+      // reads (objectstack#35033): a rule reading one is judged on the value
+      // the written record would serve, not the one last read. Rules only —
+      // the submit payload is built from the form values, never from here.
+      return formulaPlan ? formulaPlan.compute(out) : out;
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [fields, previousRecord, JSON.stringify(watched)]);
+    }, [fields, previousRecord, formulaPlan, JSON.stringify(watched)]);
 
     // Fields this form has resolved to READ-ONLY for the record as it now
     // stands — the exact set an UPDATE must not carry (objectui#3484).
@@ -2586,10 +2606,12 @@ ComponentRegistry.register('form',
         ) {
           continue;
         }
-        out.push({ label: action.label, record: { ...ruleRecord, ...action.patch } });
+        // The patch moves formula inputs too: recompute over the patched record.
+        const patched = { ...ruleRecord, ...action.patch };
+        out.push({ label: action.label, record: formulaPlan ? formulaPlan.compute(patched) : patched });
       }
       return out;
-    }, [isCreateForm, patchingActions, mayInvokeAction, ruleRecord, previousRecord, predicateScope]);
+    }, [isCreateForm, patchingActions, mayInvokeAction, ruleRecord, previousRecord, predicateScope, formulaPlan]);
 
     // Field name → label, for the "select the parent first" gate hint (#2284).
     const fieldLabelByName = React.useMemo(() => {
