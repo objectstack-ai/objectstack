@@ -107,7 +107,8 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'u1', name: 'Ada' }, activeOrganization: null }),
   // The view config panel is admin-only.
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // objectstack#35054: the metadata client's transport (`storedViewFetch`).
+  createAuthenticatedFetch: () => storedViewFetch,
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
@@ -182,6 +183,31 @@ const OBJECT_NAME = 'duly_task';
 
 /** The column identities the grid was last handed. */
 let drawn: string[] | undefined;
+
+/** The views the last mount declared: what `storedViewFetch` serves as stored (objectstack#35054). */
+let storedViews: Record<string, unknown> = {};
+
+/**
+ * objectstack#35054: the view config panel edits the view as stored, read from
+ * its `/layers`, plus its pending draft. A declared view is a stored `view`
+ * item on a real server, so its layers serve the document the object was
+ * mounted with, and no draft is pending (404). Every other metadata read
+ * answers nothing, as this harness's transport always did.
+ */
+async function storedViewFetch(input: RequestInfo | URL): Promise<Response | undefined> {
+  const url = new URL(String(input instanceof Request ? input.url : input), 'http://localhost');
+  const layered = /\/meta\/view\/([^/]+)\/layers$/.exec(url.pathname);
+  if (layered) {
+    const view = storedViews[decodeURIComponent(layered[1])];
+    return view
+      ? Response.json({ code: view, overlay: null, effective: view, draft: null })
+      : Response.json({ success: false }, { status: 404 });
+  }
+  if (/\/meta\/view\/[^/]+$/.test(url.pathname) && url.searchParams.get('state') === 'draft') {
+    return Response.json({ success: false }, { status: 404 });
+  }
+  return undefined;
+}
 /**
  * The `resizable` the grid was last handed: the panel's unrelated edit. (It was
  * `wrapHeaders` until objectui#11013 dropped that key's view rung: a stored view
@@ -238,6 +264,7 @@ function makeDataSource(extra: Record<string, unknown> = {}) {
 /** Mount the object route on `viewId` and wait until the grid is drawn. */
 async function mountRoute(listViews: Record<string, unknown>, viewId: string, dataSource: any): Promise<void> {
   const objects = [{ name: OBJECT_NAME, label: 'Task', fields: FIELDS, listViews }];
+  storedViews = listViews;
   drawn = undefined;
   render(
     <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'user' }}>
@@ -353,6 +380,7 @@ async function expectSessionOnlyToggle(dataSource: any): Promise<void> {
 }
 
 beforeEach(() => {
+  storedViews = {};
   localStorage.clear();
   unreadable.clear();
   vi.stubGlobal(

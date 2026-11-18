@@ -41,6 +41,7 @@ import { isFormFamilyKey } from './metadata-admin/view-variant-model.js';
 import { useMetadataLocale, t as tStudio, tFormat } from './metadata-admin/i18n.js';
 import { authoredBuffer, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
 import { readRuntimeDraft } from './runtime-metadata-persistence.js';
+import { isSameOptionsValue } from './objectViewOptions.js';
 import type { ObjectFieldInfo } from './metadata-admin/previews/useObjectFields.js';
 import {
     runtimeViewToInspectorDraft,
@@ -256,9 +257,12 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // during render (React's "adjust state on prop change" pattern) rather than
     // in an effect, so there's no extra render pass.
     const lastDraftRef = useRef(initialDraft);
+    // The fields an edit has relayed to the host's live list (`handlePatch`).
+    const relayedRef = useRef<Set<string>>(new Set());
     if (lastDraftRef.current !== initialDraft) {
         lastDraftRef.current = initialDraft;
         draftRef.current = initialDraft;
+        relayedRef.current = new Set();
         setDraft(initialDraft);
         setIsDirty(false);
     }
@@ -280,6 +284,14 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // Shallow-merge an inspector patch into the draft, then mirror the
     // flattened runtime view back to the host field-by-field (matching the
     // legacy onViewUpdate(field, value) contract ObjectView expects).
+    //
+    // objectstack#35054: only the fields the admin changed, compared by content
+    // with the buffer the panel opened (and any field relayed before, so a
+    // change back reaches the list too). The buffer is the STORED view while
+    // the host previews the SERVED one, which carries what the stored view
+    // does not: the translation, and the columns the host draws into a view
+    // that declares none (objectui#10694 judges a draft's `columns` against
+    // those). Relaying an untouched stored field would present it as an edit.
     const handlePatch = useCallback((patch: Record<string, unknown>) => {
         const next: InspectorViewDraft = { ...draftRef.current, ...(patch as Partial<InspectorViewDraft>) };
         draftRef.current = next;
@@ -287,8 +299,11 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
         setIsDirty(true);
         if (onViewUpdate) {
             const flat = inspectorDraftToRuntimeView(next);
+            const opened = inspectorDraftToRuntimeView(lastDraftRef.current) as Record<string, unknown>;
             for (const [field, value] of Object.entries(flat)) {
                 if (field === 'id') continue;
+                if (!relayedRef.current.has(field) && isSameOptionsValue(value, opened[field])) continue;
+                relayedRef.current.add(field);
                 onViewUpdate(field, value);
             }
         }
@@ -339,6 +354,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 }
             }
             draftRef.current = initialDraft;
+            relayedRef.current = new Set();
             setDraft(initialDraft);
             setIsDirty(false);
         }
