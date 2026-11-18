@@ -275,9 +275,9 @@ describe("a column header on an object leaf's canvas selects that column (object
     );
     // Selected, not sorted.
     expect(drawnTitles()).toEqual(['Bob', 'Ada', 'Cyd']);
-    // The copilot stays, folded to the strip at the slot's foot.
-    const strip = screen.getByTestId('studio-slot-copilot-strip');
-    expect(slot().lastElementChild).toBe(strip);
+    // The copilot stays, behind the header's switch (objectstack#35018: no strip at the foot).
+    expect(within(slot()).getByTestId('studio-slot-tab-copilot')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
     expect(screen.getByTestId('copilot-body')).not.toBeVisible();
 
     // Another listed header moves the selection; still no sort.

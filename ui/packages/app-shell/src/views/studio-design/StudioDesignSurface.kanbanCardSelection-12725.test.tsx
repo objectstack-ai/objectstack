@@ -363,8 +363,9 @@ describe("a card on a kanban leaf's canvas selects the board's card (objectui#12
     );
     expect(openRecord).not.toHaveBeenCalled();
     expect(press).not.toHaveBeenCalled();
-    // The copilot stays, folded to the strip at the slot's foot.
-    expect(slot().lastElementChild).toBe(screen.getByTestId('studio-slot-copilot-strip'));
+    // The copilot stays, behind the header's switch (objectstack#35018: no strip at the foot).
+    expect(within(slot()).getByTestId('studio-slot-tab-copilot')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
 
     // Another card moves the outline; still nothing opens.
     fireEvent.click(await card('Cyd'));

@@ -123,7 +123,8 @@ describe('Access pillar — the open set is a header and five tabs (objectui#124
     // objectstack#34795 — the api name is the title's tooltip, not a chip.
     expect(header().getByRole('heading', { level: 1 })).toHaveAttribute('title', 'guest_portal');
     expect(header().queryByText('guest_portal')).toBeNull();
-    expect(header().getByTestId('perm-provenance-badge')).toHaveTextContent(en('perm.badge.package'));
+    // objectstack#35018 — the Studio note reads the builder's words, not the package term.
+    expect(header().getByTestId('perm-provenance-badge')).toHaveTextContent(en('engine.studio.access.origin.app'));
     expect(header().getByText('1 object granted · 0 field overrides')).toBeInTheDocument();
     expect(header().getByRole('button', { name: en('engine.studio.access.explain.open') })).toBeInTheDocument();
     expect(header().getByRole('button', { name: en('engine.edit.history') })).toBeInTheDocument();
