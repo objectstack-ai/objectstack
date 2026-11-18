@@ -2566,7 +2566,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [REAL_TRANSPORT_BATTERY]: 5,
   [STATELESS_BATTERY]: 19,
   [LAND_DOGFOOD_BATTERY]: 50,
-  [HAND_SET_BATTERY]: 22,
+  [HAND_SET_BATTERY]: 23,
 });
 const SELF_TEST_BATTERY_FLOOR = 18;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -3158,9 +3158,12 @@ export async function selfTest() {
     t('⭐ the newest event is found on a later page: 101 events before it, two reads, refused', [paged.exit, paged.fake.calls.filter((c) => c.op === 'events-list').length], [EXIT_USAGE, 2]);
     const dead = await driveOffline(REGRADE, { ...CARD, hooks: { 'events-list': [{ status: 502 }] } });
     t('an events read answered 502 is exit 2 with zero writes — never a guess', [dead.exit, writes(dead)], [EXIT_USAGE, 0]);
-    const relayRoute = { requested: 'dispatch', transport: 'dispatch', reason: 'self-test: relay', error: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ01' };
-    const viaRelay = await driveOffline(REGRADE, { ...CARD, events: [HAND] }, { route: relayRoute, relay: 'success' });
-    t('…on the relay transport too: refused before the dispatch, nothing sent', [viaRelay.exit, viaRelay.sent.length], [EXIT_USAGE, 0]);
+    const relayRoute = { requested: 'dispatch', transport: 'dispatch', reason: 'self-test: relay', error: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ' };
+    const RELAY_REGRADE = ['--repo', 'objectstack-ai/objectstack', ...REGRADE.slice(2)];
+    const viaRelay = await driveOffline(RELAY_REGRADE, { ...CARD, events: [HAND] }, { route: relayRoute, relay: 'success' });
+    t('…on the relay transport too: refused by THIS rule before the dispatch, nothing sent', [viaRelay.exit, viaRelay.sent.length, String(viaRelay.res.refusal).includes(HAND_SET_RULE)], [EXIT_USAGE, 0, true]);
+    const relayed = await driveOffline(RELAY_REGRADE, CARD, { route: relayRoute, relay: 'success' });
+    t('…control: the same relay regrade of a fleet-set grade is ONE dispatch, exit 0', [relayed.exit, relayed.sent.length], [EXIT_OK, 1], relayed.text);
     t('structural: the plain write and the fold both pass the one predicate — it sits before the fold in runLabelWrite', String(runLabelWrite).indexOf('refuseHandSetGrade(') > 0 && String(runLabelWrite).indexOf('refuseHandSetGrade(') < String(runLabelWrite).indexOf('foldStroke('));
     t('the quoted rule is a substring of the file it names', readFileSync(new URL(HAND_SET_RULE_PATH, REPO_ROOT), 'utf8').includes(HAND_SET_RULE));
   }
