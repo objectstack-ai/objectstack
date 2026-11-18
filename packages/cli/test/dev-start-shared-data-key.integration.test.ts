@@ -110,11 +110,12 @@ let dir: string;
 let home: string;
 let reading: Reading = {};
 
-// `childEnv`, never a bare `...process.env` — see its header. No env key of
-// any spelling and no home override: the key FILE is the subject, and `HOME`
-// is this test's own empty directory.
-function projectEnv(): Record<string, string | undefined> {
-  return childEnv({
+// Handed to `childEnv`, never a bare `...process.env` — see its header. No env
+// key of any spelling and no home override: the key FILE is the subject, and
+// `HOME` is this test's own empty directory. Each spawn names `NODE_ENV` at
+// the call, so the built entry runs from `dist/`.
+function projectEnvOverrides(): Record<string, string | undefined> {
+  return {
     NO_COLOR: '1',
     HOME: home,
     OS_CLOUD_URL: 'off',
@@ -137,10 +138,9 @@ function projectEnv(): Record<string, string | undefined> {
     OS_AUTH_SECRET: undefined,
     OS_CLUSTER_DRIVER: undefined,
     OS_MODE: undefined,
-    NODE_ENV: undefined,
     OS_PORT: undefined,
     PORT: undefined,
-  });
+  };
 }
 
 /**
@@ -150,7 +150,7 @@ function projectEnv(): Record<string, string | undefined> {
 function setServedPassword(): void {
   const run = spawnSync(process.execPath, [CLI, 'user', 'set-password', EMAIL, '--password-stdin'], {
     cwd: dir,
-    env: projectEnv(),
+    env: childEnv({ ...projectEnvOverrides(), NODE_ENV: undefined }),
     input: SERVED_PASSWORD,
     encoding: 'utf8',
     timeout: BOOT_TIMEOUT_MS,
@@ -164,7 +164,7 @@ function boot(what: string, args: string[]): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: dir,
-      env: projectEnv(),
+      env: childEnv({ ...projectEnvOverrides(), NODE_ENV: undefined }),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
