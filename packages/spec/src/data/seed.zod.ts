@@ -13,6 +13,7 @@ import { LocaleSchema } from '../system/translation.zod';
 import { findClosestMatches, formatSuggestion } from '../shared/suggestions.zod';
 import { resolveInjectedSystemColumns, type InjectedSystemColumnName } from './injected-system-columns';
 import { ColumnApplyOnSchema } from './column-apply-on.zod';
+import { dependentRequired } from '../shared/refinement-projection';
 import { FILE_REFERENCE_TYPES } from './field-value.zod';
 import {
   SeedFileContentSchema,
@@ -313,9 +314,67 @@ export const SeedSchema = lazySchema(() => strictObject({
    *   That is the bound ruled on #17011 (2026-09-10), narrowed to these two
    *   paths when the maintainer ruled that the install paths pick by locale
    *   (2026-11-05).
+   *
+   * A locale no dataset of an object names gets none of that object's
+   * locale-scoped rows — unless one of them is marked
+   * {@link SeedSchema.shape.fallback}.
    */
   locale: z.array(LocaleSchema).min(1).optional()
-    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn'),
+    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn. A locale no dataset of the object names gets none of its locale-scoped rows, unless one is marked `fallback: true`'),
+
+  /**
+   * Fallback Locale Set
+   *
+   * Marks this locale-scoped dataset as its object's fallback: it loads for the
+   * locales it lists, like any other, AND for a locale that no other dataset of
+   * the same object lists. An app that splits a seed by language — a `zh-CN`
+   * set and an `en` set of the standard price book — marks one of them, and an
+   * organization whose language is neither (`ja-JP`, `es-ES`) receives that
+   * set instead of no price book at all.
+   *
+   * ```ts
+   * defineSeed(PriceBook, { locale: ['zh-CN'], records: [{ name: '标准价格表' }] }),
+   * defineSeed(PriceBook, { locale: ['en', 'en-US'], fallback: true, records: [{ name: 'Standard' }] }),
+   * ```
+   *
+   * - **Requires `locale`.** A dataset with no `locale` already loads for every
+   *   locale, so `fallback: true` on it could only mean something it does not
+   *   do; the schema refuses the pair rather than read the marker as redundant.
+   *   The fallback set lists the locales it is written in, the way every
+   *   locale-scoped set does.
+   * - **"Matches" means a locale-scoped dataset of the same object lists the
+   *   resolved locale.** A dataset with no `locale` is locale-neutral: it loads
+   *   beside whichever set is chosen and does not stop the fallback from
+   *   filling in. Matching is the `locale` rule's own: case-insensitive, and
+   *   otherwise exact.
+   * - **Judged after `env`.** A dataset `env` scoped out of the load neither
+   *   matches nor falls back.
+   * - **At most one per object in a load.** Two different datasets of one
+   *   object both marked `fallback: true` leave the loader no single choice,
+   *   so only the fallback choice is refused: no marked set is used as the
+   *   fallback for a locale no set lists, and the load reports the object at
+   *   `warn`. Every marked set still loads for the locales it lists, exactly as
+   *   an unmarked set would, and every other object still seeds. Identical
+   *   copies of one dataset (a package's list merged twice) count once; two
+   *   versions of one package whose marked set changed are two datasets (an
+   *   upgrade keeps the earlier version's on the replay list until restart).
+   * - **A load with no locale** (package apply, draft publish, or a load no rung
+   *   resolved a locale for) loads every dataset, the fallback set included,
+   *   and warns, as for any locale-scoped dataset.
+   *
+   * The one value is `true`; omitted, the dataset loads only for the locales it
+   * lists, as before this key existed.
+   */
+  fallback: z.literal(true).optional()
+    .describe(
+      'Marks this locale-scoped dataset as its object\'s fallback: it also loads for a resolved locale that no ' +
+      'other locale-scoped dataset of the same object lists. Requires `locale`: a dataset with no locale already ' +
+      'loads everywhere, and the pair is refused. At most one dataset per object in a load may be marked; with ' +
+      'two different marked datasets of one object, none is used as the fallback and the load reports the object, ' +
+      'while each still loads for the locales it lists, as an unmarked dataset would (identical copies count once). ' +
+      'A load with no locale loads it like every other dataset. Omitted, the dataset loads only for the locales it ' +
+      'lists.',
+    ),
 
   /**
    * Load-Order Dependencies
@@ -394,6 +453,19 @@ export const SeedSchema = lazySchema(() => strictObject({
   // (#4001 findings log, entry 2). Declared here so closing the shape cannot
   // repeat it.
   ...MetadataProtectionFields,
+}).refine(dependentRequired({ fallback: ['locale'] }), {
+  // [Seed.fallback] Declared through the closed projection list, so the
+  // published JSON Schema carries the rule as `dependentRequired` instead of
+  // accepting what this parse refuses. A dataset with no `locale` already loads
+  // for every locale, so the marker could only promise a behaviour the loader
+  // does not have: refused, with the fix, rather than read as redundant — a
+  // marker that is silently a no-op is the declared-not-enforced shape ADR-0049
+  // forbids.
+  path: ['fallback'],
+  message:
+    '`fallback: true` needs `locale`. A dataset with no locale already loads for every locale, so it cannot ' +
+    'also be the set that loads only when no other set matches. List the locales this dataset is written in ' +
+    '(`locale: [\'en\']`) and keep `fallback: true`, or drop `fallback`.',
 }));
 
 /** Parsed/output type — all defaults are applied (env, mode, externalId always present) */
