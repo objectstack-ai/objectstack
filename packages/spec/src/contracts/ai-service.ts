@@ -1348,7 +1348,7 @@ export interface AIObjectResult<T> {
  */
 export type AIConversationMessage = ModelMessage & {
     /** The turn the message was written under. */
-    turn_id?: string;
+    turnId?: string;
 };
 
 /**

@@ -4404,7 +4404,7 @@ export const AiModelsResponseSchema = lazySchema(() => z.object({
  * return it: {@link AiMessageSchema} plus the turn it belongs to.
  */
 export const AiConversationMessageSchema = lazySchema(() => AiMessageSchema.extend({
-  turn_id: z.string().optional().describe(
+  turnId: z.string().optional().describe(
     'The turn the server stamped on the message: the `turnId` of the chat request that wrote it. '
     + 'Absent on a message stored with no turn',
   ),

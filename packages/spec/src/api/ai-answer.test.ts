@@ -197,7 +197,7 @@ describe('answer feedback', () => {
   });
 });
 
-describe('a conversation message carries its turn_id', () => {
+describe('a conversation message carries its turnId', () => {
   const conversation = {
     id: 'conv_1',
     messages: [{ role: 'user', content: 'Won amount by region' }, { role: 'assistant', content: 'EMEA leads.' }],
@@ -205,17 +205,17 @@ describe('a conversation message carries its turn_id', () => {
     updatedAt: '2026-11-18T10:00:00.000Z',
   };
 
-  it('CONTROL: a stored conversation with no turn_id still parses', () => {
+  it('CONTROL: a stored conversation with no turnId still parses', () => {
     expect(AiConversationSchema.safeParse(conversation).success).toBe(true);
   });
 
-  it('a message with turn_id keeps it, typed', () => {
+  it('a message with turnId keeps it, typed', () => {
     const stamped = {
       ...conversation,
-      messages: conversation.messages.map((m) => ({ ...m, turn_id: 'turn_1' })),
+      messages: conversation.messages.map((m) => ({ ...m, turnId: 'turn_1' })),
     };
     const parsed = AiConversationSchema.parse(stamped);
-    expect(parsed.messages.map((m) => m.turn_id)).toEqual(['turn_1', 'turn_1']);
-    expect(AiConversationSchema.safeParse({ ...conversation, messages: [{ role: 'user', content: 'q', turn_id: 7 }] }).success).toBe(false);
+    expect(parsed.messages.map((m) => m.turnId)).toEqual(['turn_1', 'turn_1']);
+    expect(AiConversationSchema.safeParse({ ...conversation, messages: [{ role: 'user', content: 'q', turnId: 7 }] }).success).toBe(false);
   });
 });

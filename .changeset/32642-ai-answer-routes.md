@@ -2,7 +2,7 @@
 '@objectstack/spec': patch
 ---
 
-feat(spec): declare the AI answer follow-up routes (saved questions, answer artifact, answer feedback) and carry `turn_id` on a conversation's messages
+feat(spec): declare the AI answer follow-up routes (saved questions, answer artifact, answer feedback) and carry `turnId` on a conversation's messages
 
 Clause-②: yes (widening)
 Metadata-protocol: none
@@ -14,4 +14,4 @@ Metadata-protocol: none
 - **Answer feedback.** `GET|POST|DELETE /api/v1/ai/conversations/:id/turns/:turnId/feedback` (`GetAiAnswerFeedbackResponseSchema`, `SetAiAnswerFeedbackRequestSchema` with `rating: 'up' | 'down'` and an optional `note`, `SetAiAnswerFeedbackResponseSchema`; DELETE answers 204).
 - **Errors.** Each family's `error` is `ApiErrorSchema` with its closed `code` vocabulary (`AiSavedQuestionErrorSchema`, `AiAnswerArtifactErrorSchema`, `AiAnswerFeedbackErrorSchema`) and, where the route names one, the refusal in `details.reason` (`AiSavedQuestionRefusalReasonSchema`, `AiAnswerArtifactRefusalReasonSchema`).
 
-A persisted conversation's messages may now carry the turn they were written under: `AiConversationSchema.messages` is `AiConversationMessageSchema` (`AiMessageSchema` plus an optional `turn_id`), and the `AIConversation` contract's `messages` are `AIConversationMessage` (`ModelMessage` plus an optional `turn_id`). Optional: a stored conversation whose messages carry none still parses, and a service that writes none still satisfies the contract.
+A persisted conversation's messages may now carry the turn they were written under: `AiConversationSchema.messages` is `AiConversationMessageSchema` (`AiMessageSchema` plus an optional `turnId`), and the `AIConversation` contract's `messages` are `AIConversationMessage` (`ModelMessage` plus an optional `turnId`). Optional: a stored conversation whose messages carry none still parses, and a service that writes none still satisfies the contract.
