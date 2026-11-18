@@ -30,7 +30,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 // [#34901] Paid at collection, not inside a case's clock: the withheld-field pins boot the real plugin.
 import { SecurityPlugin } from '@objectstack/plugin-security';
 // Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
@@ -462,16 +462,21 @@ describe('[ADR-0106 D1, #34901] the dispatcher: a disabled package\'s withheld f
         // No stored row in this stack: every read is served from the registry.
         const engine: any = {
             registry,
-            findOne: async () => null,
+            findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return null; },
             find: async () => [],
             insert: async () => ({ id: null }),
-            update: async () => ({ id: null }),
-            delete: async () => ({ deleted: 0 }),
+            update: async (_object: string, data: any, options?: any) => { assertEngineUpdateDispatch(data, options); return { id: null }; },
+            delete: async (_object: string, options?: any) => { assertEngineDeleteDispatch(options); return { deleted: 0 }; },
             syncObjectSchema: async () => {},
         };
         const protocol = new ObjectStackProtocolImplementation(engine, undefined, 'env_test');
 
-        const ql = { registerMiddleware: () => {}, getSchema: (n: string) => registry.getObject(n) ?? null, findOne: async () => null, registry };
+        const ql = {
+            registerMiddleware: () => {},
+            getSchema: (n: string) => registry.getObject(n) ?? null,
+            findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return null; },
+            registry,
+        };
         const metadataForPlugin = { get: async (_t: string, n: string) => registry.getObject(n) ?? null, list: async () => SETS };
         const pluginServices: Record<string, unknown> = { manifest: { register: vi.fn() }, objectql: ql, metadata: metadataForPlugin };
         const registerService = vi.fn();

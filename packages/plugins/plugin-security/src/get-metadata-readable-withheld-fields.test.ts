@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { SchemaRegistry, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 
@@ -76,7 +76,7 @@ async function boot(options: { registry?: unknown; sets?: PermissionSet[] } = {}
   const ql: any = {
     registerMiddleware: () => {},
     getSchema: (name: string) => (registry as any)?.getObject?.(name) ?? null,
-    findOne: async () => null,
+    findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return null; },
     registry,
   };
   const metadata: any = {

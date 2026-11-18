@@ -1147,7 +1147,12 @@ describe('[ADR-0106 D1/D3, #34901] RestServer: a disabled package\'s withheld fi
     async function realSecurityService(registry: SchemaRegistry) {
         // Where the plugin's catalog reads the sets once it binds to this registry at start.
         for (const s of SETS) registry.registerItem('permission', s as any, 'name' as any);
-        const ql = { registerMiddleware: () => {}, getSchema: (n: string) => registry.getObject(n) ?? null, findOne: async () => null, registry };
+        const ql = {
+            registerMiddleware: () => {},
+            getSchema: (n: string) => registry.getObject(n) ?? null,
+            findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return null; },
+            registry,
+        };
         const metadata = { get: async (_t: string, n: string) => registry.getObject(n) ?? null, list: async () => SETS };
         const services: Record<string, unknown> = { manifest: { register: vi.fn() }, objectql: ql, metadata };
         const registerService = vi.fn();
