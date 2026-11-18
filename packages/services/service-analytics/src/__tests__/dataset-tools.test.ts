@@ -945,6 +945,29 @@ describe('[#34919] list_datasets nextStep on examples/app-crm — the decision e
     expect(out.nextStep!.note).toContain('"opp_count"');
   });
 
+  it('one_measure beside a near-miss word: the measure is computed and the note names the left-out word with its candidates (ruling B)', async () => {
+    const CANDIDATES = ['Total Amount', 'Avg Deal Size', 'Line Amount'];
+    for (const ctx of [ADMIN, { ...ADMIN, locale: 'zh-CN' }, { ...ADMIN, locale: 'zh-TW' }, { ...ADMIN, locale: 'ja-JP' }] as ExecutionContext[]) {
+      const out = await ask(['商机数', '金额'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+      const note = out.nextStep!.note;
+      expect(note, String(ctx.locale)).toContain('"opp_count"');
+      expect(note, String(ctx.locale)).toContain('金额');
+      for (const label of [...CANDIDATES, 'Line Item Metrics']) expect(note, `${ctx.locale} ⇒ ${label}`).toContain(label);
+    }
+    expect((await ask(['商机数', '金额'])).nextStep!.note).toContain('Total Amount (dataset: Opportunity Metrics)');
+  });
+
+  it('one_measure beside an unknown word and a grouping word: the note keeps the unknown word\'s labelled fallback and names the grouping', async () => {
+    const out = await ask(['商机数', '库存周转', '销售阶段']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机数'] });
+    expect(out.nextStep!.note).toContain('"库存周转"');
+    expect(out.nextStep!.note).toContain('query_records');
+    expect(out.nextStep!.note).toContain('Stage (dataset: Opportunity Metrics)');
+    // The control: alone, the measure word's note sends nobody to the object tools.
+    expect((await ask(['商机数'])).nextStep!.note).not.toContain('query_records');
+  });
+
   it('a word with two matches ⇒ several_measures, the note naming each by its label and its dataset\'s label', async () => {
     const out = await ask(['deal value']);
     expect(out.nextStep).toMatchObject({ decision: 'several_measures', terms: ['deal value'] });

@@ -64,7 +64,15 @@ import { platformLocaleTagOf, type PlatformLocaleTag } from '@objectstack/spec/s
  *  4. `no_measure` — no measure and no reading for any word.
  *
  * The terms of an unreported case keep their entries in `matches` and
- * `candidates`; `nextStep` only names which case comes first.
+ * `candidates`; `decision` and `terms` name only the case that comes first.
+ * When that case is `one_measure`, `note` still names every word it leaves
+ * out (seat ruling B on the L1-c N1 finding): a word with candidates
+ * together with those candidates, each by its label and its dataset's label,
+ * and the instruction to ask before using it; an unknown word with its
+ * labelled fallback to the object query tools; a word that equals only a
+ * dimension as that grouping. `["营收", "churn"]` computes 营收's measure and
+ * asks about churn's candidates in one sentence. (`several_measures` asks
+ * before anything is computed, so its note needs no such tail.)
  *
  * ## An incomplete catalogue
  *
@@ -116,6 +124,10 @@ interface DatasetToolCopy {
   readonly fallbackTail: string;
   readonly groupingTail: string;
   readonly partialTail: string;
+  /** After a `one_measure` note: the left-out words that have candidates are asked about before use. */
+  readonly leftCandidateTail: string;
+  /** After a `one_measure` note: the left-out words with no measure and no reading fall back, labelled. */
+  readonly leftFallbackTail: string;
   readonly source: (measures: readonly string[], dataset: string, dimensions: readonly string[]) => string;
 }
 
@@ -137,6 +149,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     fallbackTail: 'Answer with the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used.',
     groupingTail: 'A grouping alone is no answer: ask the user which number they mean.',
     partialTail: 'The catalogue was incomplete (see warning): a measure missing from this answer may still exist, so repeat the warning in the answer.',
+    leftCandidateTail: 'For each word above with possible readings, ask the user which one is meant before using it; do not pick one.',
+    leftFallbackTail: 'For those words, use the object query tools (query_records, aggregate_records) and say in the answer that no governed metric was used for them.',
     source: (ms, ds, dims) => `${ms.length === 1 ? 'Metric' : 'Metrics'}: ${ms.join(', ')} (dataset: ${ds})${dims.length > 0 ? `; grouped by: ${dims.join(', ')}` : ''}`,
   },
   'zh-Hans': {
@@ -156,6 +170,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     fallbackTail: '改用对象查询工具（query_records、aggregate_records）回答，并在回答中注明未使用治理指标（非指标口径）。',
     groupingTail: '只有分组维度还不能回答：问用户想看哪个数字。',
     partialTail: '数据集目录不完整（见 warning）：这里没有列出的指标仍可能存在，请在回答中转述该警告。',
+    leftCandidateTail: '上面有候选的词，先问用户指的是哪一个再使用；不要替用户选。',
+    leftFallbackTail: '这些词改用对象查询工具（query_records、aggregate_records），并在回答中注明它们未使用治理指标（非指标口径）。',
     source: (ms, ds, dims) => `指标：${ms.join('、')}（数据集：${ds}）${dims.length > 0 ? `；维度：${dims.join('、')}` : ''}`,
   },
   'zh-Hant': {
@@ -175,6 +191,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     fallbackTail: '改用物件查詢工具（query_records、aggregate_records）回答，並在回答中註明未使用治理指標（非指標口徑）。',
     groupingTail: '只有分組維度還不能回答：問使用者想看哪個數字。',
     partialTail: '資料集目錄不完整（見 warning）：這裡沒有列出的指標仍可能存在，請在回答中轉述該警告。',
+    leftCandidateTail: '上面有候選的詞，先問使用者指的是哪一個再使用；不要替使用者選。',
+    leftFallbackTail: '這些詞改用物件查詢工具（query_records、aggregate_records），並在回答中註明它們未使用治理指標（非指標口徑）。',
     source: (ms, ds, dims) => `指標：${ms.join('、')}（資料集：${ds}）${dims.length > 0 ? `；維度：${dims.join('、')}` : ''}`,
   },
   ja: {
@@ -194,6 +212,8 @@ const COPY: Readonly<Record<NextStepLocale, DatasetToolCopy>> = {
     fallbackTail: 'オブジェクトのクエリツール（query_records、aggregate_records）で回答し、管理された指標を使っていないことを回答に明記してください。',
     groupingTail: 'グループ分けだけでは回答になりません：どの数値を知りたいかユーザーに確認してください。',
     partialTail: 'データセットのカタログは不完全です（warning を参照）：ここにない指標が存在する可能性があるため、回答でその警告を伝えてください。',
+    leftCandidateTail: '候補のある上記の語は、使う前にどれを指しているかユーザーに確認してください。代わりに選ばないでください。',
+    leftFallbackTail: 'これらの語にはオブジェクトのクエリツール（query_records、aggregate_records）を使い、管理された指標を使っていないことを回答に明記してください。',
     source: (ms, ds, dims) => `指標：${ms.join('、')}（データセット：${ds}）${dims.length > 0 ? `；ディメンション：${dims.join('、')}` : ''}`,
   },
 };
@@ -333,10 +353,23 @@ export function composeDatasetNextStep(source: DatasetNextStepSource): DatasetNe
 
   const sentences: string[] = [];
   switch (decision) {
-    case 'one_measure':
+    case 'one_measure': {
       for (const r of reported) sentences.push(copy.oneHit(r.term, r.measures[0]));
       sentences.push(copy.oneTail(reported.length));
+      // The words this case leaves out are still named (seat ruling B on
+      // L1-c N1): a word with candidates with those candidates, an unknown
+      // word with its labelled fallback, a grouping word as the grouping.
+      const offered = readings.filter((r) => r.decision === 'candidates_only');
+      for (const r of offered) sentences.push(copy.candidateHit(r.term, members(r.candidates)));
+      if (offered.length > 0) sentences.push(copy.leftCandidateTail);
+      const unknown = readings.filter((r) => r.decision === 'no_measure' && r.dimensions.length === 0);
+      for (const r of unknown) sentences.push(copy.unknownHit(r.term));
+      if (unknown.length > 0) sentences.push(copy.leftFallbackTail);
+      for (const r of readings) {
+        if (r.decision === 'no_measure' && r.dimensions.length > 0) sentences.push(copy.groupingHit(r.term, members(r.dimensions)));
+      }
       break;
+    }
     case 'several_measures':
       for (const r of reported) sentences.push(copy.severalHit(r.term, members(r.measures)));
       sentences.push(copy.severalTail);
