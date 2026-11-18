@@ -125,7 +125,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `pm:epic`(父单或 sub-issue) | 子专题,只由维护者开;已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
 | `priority:p0` | 插队:同轮立即派发,越过 `batch`、深度等待(`LOCK_DEPTH_HOLD`)与一切并发上限;无槽即暂停低级在飞 dev 腾位(机制 `references/execution-duties.md`);⛔ 不豁免重叠检查(`references/area-lease.md`)与认领协议 |
-| `area:*` | 产品大专题:每张公开卡恰一个,本仓安全卡不打;分诊首触打,与 `domain:*` 同笔;存量回填只在维护者授权的专题下。四读者:维护者按专题看板;定级读北极星「Product areas」里该专题的核心功能清单;父单分组;取卡次序 = 维护者点名的专题 |
+| `area:*` | 产品大专题:每张公开卡恰一个,本仓安全卡不打;分诊首触打,与 `domain:*` 同笔;存量回填只在维护者授权的专题下。area 跟产品内容走,要读 cloud 代码不改 area;`area:cloud` 只给在本仓改、只服务托管版的活,改动落 cloud 的卡立在 cloud 仓;读者见词表脚本注 |
 | open PR 引用该单 | 已实现,L1 审核中 |
 | merged PR 带 `Fixes #n` | 完成(GitHub 关单) |
 
@@ -144,7 +144,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 三职责:上游关单放回解锁卡;按解锁扇出排序;在合并后的 ref 上重验回队卡文件面。
 - 一个标签存在当且仅当有具名读者;`pm:blocking` 即其推导缓存,读者以词表脚本注为权威。
 - 跨仓解锁判据是消费方可安装,⛔ 不是上游已合并;探针:装上的包是否接受新键/新行为。
-- 以发布包消费上游的仓,解锁放回前先验修复已进可安装的发行版。
 - 未发版 ⇒ 转 `pm:on-hold`;`Restart-when:` 写安装面判据与唤醒后派发形状,⛔ 不回 `pm:queue`。
 - 状态变更不过夜:标签无评论、assignee 无认领评论、结论只在 chat,都是半状态。
 - 半状态在结束会话(含限流悬挂)前补齐成对或回滚半边;report-only 巡查见守卫索引。
@@ -170,7 +169,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `domain:skills` | 规则文本:`AGENTS.md`+`CLAUDE.md`+`.claude/**`(含本文件)+`skills/**`+`docs/adr/**`+`docs/NORTH-STAR.md`;非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
-| `domain:cloud` | 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席):读或改 cloud 代码、生产方或带 cloud 半边;本仓车道 ⛔ 不认领;只缺事实读数者留车道敲信箱;cloud PM 跟到关卡,余下本仓活写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md`、`references/lanes/cloud.md` |
+| `domain:cloud` | 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席):改 cloud 代码、其生产方或带 cloud 半边;本仓车道 ⛔ 不认领;只读 cloud(带 `Reads-cloud:` 行)或只缺事实读数(敲信箱)者留车道;cloud PM 跟到关卡,余下本仓活写明 cloud 事实后另立卡;判据见 `references/triage-duties.md` |
 | `security` · `l2-review` · `eval`(车道,无 `domain:*` 标签) | 本仓安全公告(私有仓卡归该仓车道,cloud 即上行);席位 `security#N` 见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。L2 席、AI 评测席见 `references/lanes/l2-review.md`、`references/lanes/eval.md` |
 | `repo:objectstack`(全仓调度,无 `domain:*` 标签) | 跨各域按区认领本仓卡,多席以区租约分工;`domain:*` 仍定文件归属;cloud 与安全公告除外;见 `references/lanes/objectstack.md` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统,测试基建见 devx 行)、`docs/audits/**` |
@@ -324,6 +323,7 @@ Metadata-protocol: added | narrowed | semantic | none (the kind of change to wha
 Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)
 Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Premise: holds | corrected <comment id> | inbox (the pre-dispatch premise reading, dispatch-runbook.md 派发前置)
+Reads-cloud: `PATH @ CLOUD_SHA` (only when the card body carries this line: the filer writes it, triage adds it at first touch; claim only when this seat and its dev can read the cloud repo, otherwise `pm:blocked` with the reason, ⛔ nobody guesses; reading cloud does not make the card cloud's, and the cloud lane's pause stops work that changes the cloud repo, not reading it to change this one)
 Serial constraints cleared: `<点名同包的前驱 PR 与在飞认领(同文件照 references/area-lease.md 重叠检查),及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
 Resume-from: `BRANCH@SHA` (only when the card's newest `Release:` carries one; the dev starts from that sha, never from zero)
 ```

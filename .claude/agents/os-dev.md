@@ -47,6 +47,8 @@ model: opus
    - 三类同欠 `reach:`:公开入口(HTTP/界面/`os validate`/保存)一次实测错误,或具名真实生产者。
    - 例外两种照报,`reach:` 写明哪种:发版即固化的错误文字;维护者直派。
    - 安全发现 ⛔ 不就地修,只经终报私有字段 `security_findings` 上报,照 `security-findings.md`。
+   - 读 cloud 移植只搬代码、规则与技能文本;⛔ 永不搬密钥、租户数据、托管端点、
+     仅控制面部分与私有安全材料;卡与 PR 只给 cloud 路径与 sha,⛔ 不写其私有实现细节。
    - (c) 元数据 = 他人存储并再作者化的键,须具名生产者:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
@@ -191,7 +193,6 @@ model: opus
 - 报告里写 N 个包全绿必须说方向,否则这句话无法复核。
 - 退役键的清扫默认走退役 playbook 的 tree-scoped 缺席 pin,不为一次缺席检查重建消费者闭包。
 - 跨包类型改动需要一次反向验证:贴进一个新类型会拒绝的键,确认转红,再恢复。
-- 这证明你读的是重建后的 `.d.ts`,不是缓存。
 - `packages/spec`:`authorable-surface.base.json` 只由 `gen:authorable-surface-base` 写,普通构建从不写。
 - ⛔ 永不回退它、永不为凑某个相等手改它;作数的断言是 `check:authorable-surface` 绿。
 - `baseRev` 允许滞后,一行信息不是错误;普通构建下该文件动了是 finding,不是产物。
@@ -245,7 +246,6 @@ model: opus
 - 这批 pair 的台账是 `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`。
 - `packages/qa/dogfood` 是一例,不是定义;读成 dogfood 专属,普通单元套件里的 ablation 会被当真。
 - 两个方向不对称:没 build 的修复是会被注意到的假红;没 build 的 ablation 保持绿。
-- 那份绿给一条可能永远失败不了的断言背书,对 CI 永久隐形(CI 构建正确,那边永远绿)。
 - 每一腿(变异与还原)都是:改动 → 证明它真落到了磁盘 → `pnpm --filter <pkg> build`。
 - 落盘走 `node scripts/ablation-replace.mjs`,不走 `-i` 家族:锚点必须命中,写入与还原按磁盘核验。
 - 再证明它到达了 `dist/`,才读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`。
