@@ -60,6 +60,21 @@ const SOURCE = `
   });
   return { claim: claim.id };`;
 
+/**
+ * The live Postgres cell runs only where a server is provisioned (the same
+ * variable `driver-sql`'s live dialect matrix reads); elsewhere it is skipped,
+ * by name.
+ */
+const PG_URL = process.env.OS_TEST_POSTGRES_URL;
+
+/** One insert inside the body's transaction: what COMMIT does with it is the question. */
+const ONE_LINE_SOURCE = `
+  const claim = await ctx.api.object('rux_claim').insert({ name: 'C-2' });
+  await ctx.api.transaction(async () => {
+    await ctx.api.object('rux_line').insert({ claim: claim.id, amount: 430 });
+  });
+  return { claim: claim.id };`;
+
 /** Far below the sandbox's 30 s wall clock: a stall cannot pass for a slow run. */
 const WALL_CLOCK_BOUND_MS = 10_000;
 
@@ -71,12 +86,26 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
     try { await engine?.destroy(); } catch { /* noop */ }
     engine = null;
     if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
+    if (pgSchema) {
+      const admin = new SqlDriver({ client: 'pg', connection: PG_URL } as any);
+      try { await admin.getKnex().raw('drop schema if exists ?? cascade', [pgSchema]); } finally { await admin.disconnect(); }
+      pgSchema = null;
+    }
   });
 
-  async function boot(split: boolean) {
+  /** A Postgres primary in a schema of its own, dropped after the case. */
+  let pgSchema: string | null = null;
+  async function livePgPrimary(): Promise<SqlDriver> {
+    pgSchema = `rux_35028_${process.pid}_${Date.now()}`;
+    const admin = new SqlDriver({ client: 'pg', connection: PG_URL } as any);
+    try { await admin.getKnex().raw('create schema ??', [pgSchema]); } finally { await admin.disconnect(); }
+    return new SqlDriver({ client: 'pg', connection: PG_URL, searchPath: [pgSchema] } as any);
+  }
+
+  async function boot(split: boolean, primaryOn: 'sqlite' | 'pg' = 'sqlite') {
     dir = mkdtempSync(join(tmpdir(), 'os-rux-35028-'));
     const sqlite = (file: string) => new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir!, file) }, useNullAsDefault: true });
-    const primary = sqlite('data.sqlite');
+    const primary = primaryOn === 'pg' ? await livePgPrimary() : sqlite('data.sqlite');
     const e = new ObjectQL();
     engine = e;
     let telemetry: SqlDriver | undefined;
@@ -107,8 +136,8 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
     return { e, ledger, primary, telemetry, begins };
   }
 
-  async function throughActionsDoor(e: ObjectQL) {
-    const action = { name: 'rux_file', objectName: 'rux_claim', type: 'script', body: { language: 'js', source: SOURCE, capabilities: ['api.write', 'api.transaction'] } };
+  async function throughActionsDoor(e: ObjectQL, source = SOURCE) {
+    const action = { name: 'rux_file', objectName: 'rux_claim', type: 'script', body: { language: 'js', source, capabilities: ['api.write', 'api.transaction'] } };
     const handler = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql: e, appId: 'rux' })(action as any);
     expect(handler, 'the action body must bind').toBeTypeOf('function');
     const objectDef = { name: 'rux_claim', actions: [action] };
@@ -156,4 +185,34 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
       expect(audit.map((a) => a.record_id).sort()).toEqual([claimId, ...lines.map((l) => String(l.id))].sort());
     }, 30_000);
   }
+
+  // [#35028] The Postgres face of the same defect, measured in-process by the
+  // reading: the ledger statement the trio's handle carried onto the primary
+  // connection failed there (42P01), which aborts a Postgres transaction — so
+  // a second insert failed (25P02), and a lone insert's COMMIT resolved as a
+  // ROLLBACK, with the action answering success. With the owner recorded, the
+  // ledger write runs on telemetry's own connection and touches neither.
+  describe.skipIf(!PG_URL)('a live Postgres primary beside a telemetry datasource (OS_TEST_POSTGRES_URL)', () => {
+    it('two inserts: the body answers 200, both lines and the roll-up are on disk, every ledger write succeeds', async () => {
+      const { e, ledger, begins } = await boot(true, 'pg');
+      const { response } = await throughActionsDoor(e);
+      expect(begins.count).toBe(1);
+      expect(response.status, JSON.stringify(response.body)).toBe(200);
+      const claimId = String(response.body?.data?.claim ?? response.body?.claim);
+      const lines = (await e.find('rux_line', { where: { claim: claimId }, context: { isSystem: true } } as any)) as any[];
+      expect(lines.map((l) => Number(l.amount)).sort((a, b) => a - b)).toEqual([345, 860]);
+      expect(Number(((await e.findOne('rux_claim', { where: { id: claimId }, context: { isSystem: true } } as any)) as any)?.total_amount)).toBe(1205);
+      expect(ledger).toEqual(['ok', 'ok', 'ok']);
+    }, 30_000);
+
+    it('one insert: COMMIT keeps it — the line is on disk after the action answers 200', async () => {
+      const { e, ledger } = await boot(true, 'pg');
+      const { response } = await throughActionsDoor(e, ONE_LINE_SOURCE);
+      expect(response.status, JSON.stringify(response.body)).toBe(200);
+      const claimId = String(response.body?.data?.claim ?? response.body?.claim);
+      const lines = (await e.find('rux_line', { where: { claim: claimId }, context: { isSystem: true } } as any)) as any[];
+      expect(lines.map((l) => Number(l.amount))).toEqual([430]);
+      expect(ledger).toEqual(['ok', 'ok']);
+    }, 30_000);
+  });
 });
