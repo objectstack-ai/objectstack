@@ -20,6 +20,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The `/mcp` domain reaches the dispatcher, which loads this package lazily;
+// paid here, during collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 import { handleMcpRequest } from './mcp.js';
 import {
