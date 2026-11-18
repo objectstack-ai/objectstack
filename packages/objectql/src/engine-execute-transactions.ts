@@ -114,6 +114,7 @@ export interface ExecuteTransactionsHost {
   getDriver: ObjectQL['getDriver'];
   datasourceNameOf: ObjectQL['datasourceNameOf'];
   isSystemLedgerObject: ObjectQL['isSystemLedgerObject'];
+  isClosedUnitHandle: ObjectQL['isClosedUnitHandle'];
 }
 
 /** The body of `ObjectQL#execute`; the method's docblock there is its contract. */
@@ -290,7 +291,7 @@ export function warnTransactionUnsupported(
  * rolled-back write; the durable answer lives in ADR-0067/ADR-0119.
  */
 export function enforceTransactionOrigin(
-  this: Pick<ExecuteTransactionsHost, 'txStore' | 'datasourceNameOf' | 'isSystemLedgerObject' | 'logger'>,
+  this: Pick<ExecuteTransactionsHost, 'txStore' | 'datasourceNameOf' | 'isSystemLedgerObject' | 'isClosedUnitHandle' | 'logger'>,
   objectName: string,
   driver: IDataDriver,
   operation: 'insert' | 'update' | 'delete',
@@ -298,8 +299,14 @@ export function enforceTransactionOrigin(
 ): void {
   // [#35028] The store holds no scope for a handle the `ScopedContext` trio
   // opened (it threads the handle explicitly, across turns the store does not
-  // survive), so the trio's own record of the owner answers for it.
-  const scope = this.txStore.getStore()?.scope ?? trioTransactionScopeOf(explicitTransaction);
+  // survive), so the trio's own record of the owner answers for it. A handle
+  // the current run was detached from (an `async` hook's run, `unit-detach.ts`)
+  // is no handle, exactly as `buildDriverOptions` reads it: the write runs
+  // outside any transaction, on its own connection, and is not judged.
+  const explicit = explicitTransaction !== undefined && !this.isClosedUnitHandle(explicitTransaction)
+    ? explicitTransaction
+    : undefined;
+  const scope = this.txStore.getStore()?.scope ?? trioTransactionScopeOf(explicit);
   // No engine-owned transaction in scope (or a handle the engine never opened
   // and cannot attribute) — nothing to be outside of. See
   // `transactionCoversDriverFor` for why that limit is declared.

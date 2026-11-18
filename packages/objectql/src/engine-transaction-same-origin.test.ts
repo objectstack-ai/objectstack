@@ -33,7 +33,9 @@
 // row is lost exactly as before — only now with a different log line.
 
 import { describe, it, expect } from 'vitest';
+import type { Hook } from '@objectstack/spec/data';
 import { ObjectQL, ScopedContext } from './engine.js';
+import { bindHooksToEngine } from './hook-binder.js';
 import { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
 
 interface Recorded {
@@ -702,6 +704,39 @@ describe('a handle the ScopedContext trio opened is attributed to its owner (#35
 
     await engine.insert('ledger', { name: 'after rollback' }, { context: { transaction: handle } } as any);
     expect(ledgerDb.writes).toHaveLength(1);
+  });
+
+  it('lets an async afterFind run, detached from the open trio handle, write a business object on another datasource', async () => {
+    const { engine, ledgerDb } = await splitEngine();
+    // An `async: true` `afterFind` run starts at dispatch, outside every unit
+    // open then (`unit-detach.ts`): its `ctx.api` still carries the trio
+    // handle, and the engine treats that handle as closed for the run
+    // (`isClosedUnitHandle`). So its write is outside any transaction, as
+    // under `transaction(cb)`: it lands, on its own connection, and the gate
+    // does not judge it against the trio record.
+    let report!: (outcome: string) => void;
+    const outcome = new Promise<string>((r) => { report = r; });
+    bindHooksToEngine(engine, [{
+      name: 'mirror_read', object: 'thing', events: ['afterFind'], async: true, onError: 'log',
+      handler: async (ctx: any) => {
+        try {
+          await ctx.api.object('ledger').insert({ name: 'from a detached read hook' });
+          report('stored');
+        } catch (e) {
+          report(`FAILED ${(e as Error)?.name}: ${(e as Error)?.message}`);
+        }
+      },
+    } as unknown as Hook], { packageId: 'app:t' });
+    const { scoped, ctx, handle } = await openTrio(engine);
+
+    await ctx.object('thing').find({});
+    // The trio is still open while the detached run writes.
+    expect(await outcome).toBe('stored');
+    await scoped.commitTransaction(handle);
+
+    expect(ledgerDb.writes).toHaveLength(1);
+    expect(ledgerDb.writes[0]).toMatchObject({ object: 'ledger', op: 'create' });
+    expect(ledgerDb.writes[0].transaction).toBeUndefined();
   });
 
   describe('single datasource: the trio still rides one handle (#35028 regression guard)', () => {

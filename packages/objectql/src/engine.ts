@@ -5479,6 +5479,7 @@ export class ObjectQL implements IObjectQLEngine {
       get txStore() { return readTxStore(); },
       datasourceNameOf: (...a) => this.datasourceNameOf(...a),
       isSystemLedgerObject: (...a) => this.isSystemLedgerObject(...a),
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
       get logger() { return readLogger(); },
     };
     return enforceTransactionOrigin.call(host, objectName, driver, operation, explicitTransaction);
