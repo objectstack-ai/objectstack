@@ -136,13 +136,13 @@ Area boundaries, one `area:*` per card:
 
 **Priority**:
 1. Security and data integrity always come first and do not wait for the road.
-2. Grading is two steps, and a card enters the queue only once both are done. **Step one, repository, area and type**: judge the repository first (a platform root cause is fixed in this repository, wherever it shows up), then give the card its `area:*` (above) and its GitHub issue type. Bug = a capability already shipped is broken, and a wrong sentence in a shipped skill or document is a Bug too; Feature = a new capability or an extension; Task = teaching new content, tooling, CI, evals. A record card or an anchor card takes no type and no grade. A card hangs under a sub-epic only when the maintainer has opened one; otherwise its `area:*` is enough to enter the queue. **Step two, the grade**: only Bug cards and security cards are graded by the two tables below. A Feature never enters p1 (unless it blocks another repository's p1, below) and is done in its area's order; a Feature in `area:ux` defaults to p2; a Task defaults to p3, and only rises to p2 when it blocks work being dispatched. Severity has four levels:
+2. Grading is two steps, and a card enters the queue only once both are done. **Step one, repository, area and type**: judge the repository first (a platform root cause is fixed in this repository, wherever it shows up), then give the card its `area:*` (above) and its GitHub issue type. Bug = a capability already shipped is broken, and a wrong sentence in a shipped skill or document is a Bug too; Feature = a new capability or an extension; Task = teaching new content, tooling, CI, evals. A record card or an anchor card takes no type and no grade. A card hangs under a sub-epic only when the maintainer has opened one; otherwise its `area:*` is enough to enter the queue. **Step two, the grade**: only Bug cards and security cards are graded by the two tables below, and UX problems by the UX rule below. A Feature that improves UX defaults to p2; any other Feature never enters p1 (unless it blocks another repository's p1, below) and is done in its area's order; a Task defaults to p3, and only rises to p2 when it blocks work being dispatched. Severity has four levels:
    - **Severe**: a security overreach, or data silently wrong, lost or leaked across tenants. "Data wrong" means only that a stored value is wrong or lost; a value read back and shown wrongly is Impeded.
    - **Broken**: a core feature of the area table cannot be done, and there is no workaround.
    - **Impeded**: there is a workaround (same role, same entry point, named by the error or the documentation); a feature that is not core cannot be done; an error that cannot be understood.
    - **Cosmetic**: looks wrong, wording, consistency, small experience.
 
-   Severity is crossed with how often the broken thing is hit (reach). Experience counts as much as function: a UX problem on a shipped core path that every user hits every time is a Bug graded through this table by what it does to that path, at the reach "end users, daily", and can be p1.
+   Severity is crossed with how often the broken thing is hit (reach); a UX problem takes the UX rule below instead:
 
    | Severity | End users, daily | Builders, often (on the build, install and upgrade path) | Administrators, often | Rare configuration or developers only |
    |:--|:--|:--|:--|:--|
@@ -160,6 +160,7 @@ Area boundaries, one `area:*` per card:
    | An administrator or the host developer | p2 (still p1 when escalating to platform administrator or crossing tenants) | p3 |
 
    Also:
+   - The UX rule, for `area:ux` and for an experience problem in any other area: a UX problem on a core feature that every user hits every time is p1; every other UX problem is p2. UX has no p3.
    - A wrong sentence in a shipped skill or document is a Bug, with the reach "builders, often", because AI copies it into what it writes.
    - "Someone is waiting" raises no grade. A card that blocks another carries `pm:blocking` only when the blocked card is in an area being dispatched, and the grade is not inherited up the chain — except that a card blocking another repository's p1 takes that card's grade, a Feature included.
    - A p3 with no effect on users (review nits, internal comments, wording) is closed at first touch and never queued.
