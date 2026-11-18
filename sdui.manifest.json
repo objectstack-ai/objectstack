@@ -224,6 +224,10 @@
             {
               "label": "Tree",
               "value": "tree"
+            },
+            {
+              "label": "Timesheet",
+              "value": "timesheet"
             }
           ],
           "description": "The list kind, the spec's list view `type`. Absent, a bound saved view's kind applies, else a grid. On a metadata page it is written `properties.type`; the node's own `type` stays `list-view`."
@@ -438,6 +442,11 @@
           "name": "chart",
           "type": "object",
           "description": "The chart a `type: \"chart\"` list draws, bound to an ADR-0021 dataset: `{ dataset, values, dimensions, chartType }`. There is no default binding."
+        },
+        {
+          "name": "timesheet",
+          "type": "object",
+          "description": "The editable row × weekday grid a `type: \"timesheet\"` list draws: `{ rowFields, dateField, valueField }`. All three are required; each typed cell creates, updates or deletes one record."
         },
         {
           "name": "dataSource",

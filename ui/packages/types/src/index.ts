@@ -531,6 +531,7 @@ export type {
   ObjectMapSchema,
   ObjectMapConfig,
   ObjectTreeSchema,
+  ObjectTimesheetSchema,
   ObjectGanttSchema,
   ObjectCalendarSchema,
   ObjectKanbanSchema,

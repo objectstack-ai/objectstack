@@ -640,8 +640,8 @@ describe('objectui#11572 — every member `ListView` reads is relayed or answere
     ).toEqual([]);
   });
 
-  it("objectui#11572 — the view's declared `tree` and `chart` blocks are relayed", () => {
-    for (const member of ['tree', 'chart']) {
+  it("objectui#11572 — the view's declared `tree` and `chart` blocks are relayed (and #34382's `timesheet`)", () => {
+    for (const member of ['tree', 'chart', 'timesheet']) {
       expect(
         readsView(member),
         `The \`${member}\` relay is gone. A whitelisted ${member} reaches \`ListView\` with no block, so its\n`

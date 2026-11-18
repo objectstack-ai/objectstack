@@ -224,6 +224,7 @@ const LIST_VIEW_KINDS: Record<ListViewVisualization, true> = {
   map: true,
   chart: true,
   tree: true,
+  timesheet: true,
 };
 
 /**
