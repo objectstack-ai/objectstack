@@ -491,7 +491,7 @@ describe('the drawer follows the app (objectstack#35014)', () => {
     await sendFirst();
     const notesThread = await settledConversationId();
     expect(notesThread).not.toBe(crmThread);
-    expect(state.chat?.body?.context?.packageId).toBe('app.notes');
+    await waitFor(() => expect(state.chat?.body?.context?.packageId).toBe('app.notes'));
     expect(window.localStorage.getItem(cacheKey('app:app.notes:build'))).toBe(notesThread);
   });
 
