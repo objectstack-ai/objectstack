@@ -38,7 +38,8 @@
  *   ③ a `domain:*` with no pm state (`PM_EXCLUSIVE_STATE_LABELS`, `needs-user-decision` included);
  *   ④ `pm:queue` + `domain:*` with no `priority:*`;
  *   ⑤ created inside the window (`--since`) and carrying `pm:queue` or a `priority:*` that was applied in the same
- *      minute the card was created — first-touch as untriaged, ⛔ never judged by who applied it.
+ *      minute the card was created — listed whoever applied it; the touch it is owed adds area and type, and a
+ *      grade a person set stays (`references/filing-gate.md`: the hand-set grade).
  *
  * ②③④ take only cards whose `updated_at` is older than `SETTLE_MS` (~2 min): a card being labelled right now is
  * mid-write, not owed. ⑤ needs a window; without `--since` it is NOT RUN, the verdict is PARTIAL and the exit 4 —
@@ -121,7 +122,7 @@ export const DISJUNCTIONS = Object.freeze({
   2: 'pm:queue with no domain:* (multi-lane board)',
   3: 'domain:* with no pm state',
   4: 'pm:queue + domain:* with no priority:*',
-  5: 'created in the window with pm:queue / priority:* applied in the creation minute',
+  5: 'created in the window with pm:queue / priority:* applied in the creation minute (the touch adds area and type; a grade a person set stays)',
 });
 
 // ---------------------------------------------------------------------------
@@ -402,7 +403,7 @@ function rearmThroughProxy(args) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the rule text: every phrase this file is built from is in the file that writes it': 3,
   'the classifier: ①–④ exactly as written — ① is not "no labels", ③ is asked, exclusions first, ②③④ settle': 16,
-  'the fifth: created in the window, pm:queue or priority:* applied in the creation minute, never by actor': 7,
+  'the fifth: created in the window, pm:queue or priority:* applied in the creation minute, whoever applied it — the touch it is owed adds area and type and keeps a grade a person set': 8,
   'the walk: every page, pull requests dropped, the count checked — INCOMPLETE on any gap, never clean': 10,
   'the CLI: what a typo must never mean, and the exits a patrol reads': 9,
   'the area backstop: an open card with no area:* is listed daily, and never moves the first-touch verdict': 9,
@@ -458,7 +459,7 @@ export async function selfTest() {
   t('exclusions come first: tracking, status:parked, pm:seat, qa-run', ['tracking', 'status:parked', 'pm:seat', 'qa-run'].map((x) => c([x]).length), [0, 0, 0, 0]);
   t('labels compare case-insensitively', c(['Domain:Skills', 'PM:Queue']), [4]);
 
-  battery('the fifth: created in the window, pm:queue or priority:* applied in the creation minute, never by actor');
+  battery('the fifth: created in the window, pm:queue or priority:* applied in the creation minute, whoever applied it — the touch it is owed adds area and type and keeps a grade a person set');
   {
     const SINCE = Date.parse('2026-11-14T20:00:00Z');
     const born = card(9, ['pm:queue', 'domain:ui', 'priority:p2'], { created_at: '2026-11-14T21:10:07Z' });
@@ -467,6 +468,7 @@ export async function selfTest() {
     t('…no window, no candidate', fifthCandidate(born, { sinceMs: NaN }), false);
     t('…an excluded card is not', fifthCandidate(card(9, ['pm:queue', 'pm:seat'], { created_at: born.created_at }), { sinceMs: SINCE }), false);
     t('⭐ pm:queue applied in the creation minute is ⑤, whoever applied it', sameMinuteLabelled(born, [{ event: 'labeled', label: { name: 'pm:queue' }, created_at: '2026-11-14T21:10:59Z', actor: { login: 'objectstack-fleet[bot]' } }]));
+    t('⭐ …a person\'s hand in the creation minute is ⑤ as well: the card is listed for area and type, and the sweep says the grade stays', [sameMinuteLabelled(born, [{ event: 'labeled', label: { name: 'priority:p2' }, created_at: '2026-11-14T21:10:30Z', actor: { login: 'os-warren', type: 'User' }, performed_via_github_app: null }]), DISJUNCTIONS[5].includes('a grade a person set stays')], [true, true]);
     t('…a priority applied a minute later is a touch, not ⑤', sameMinuteLabelled(born, [{ event: 'labeled', label: { name: 'priority:p2' }, created_at: '2026-11-14T21:11:00Z' }]), false);
     t('…another label in the minute is not ⑤', sameMinuteLabelled(born, [{ event: 'labeled', label: { name: 'domain:ui' }, created_at: '2026-11-14T21:10:08Z' }]), false);
   }

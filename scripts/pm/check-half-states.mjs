@@ -8358,7 +8358,7 @@ export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
     'and none of the older `Triage:` record openings. The card is invisible to both sides: every triage sweep ' +
     'disjunct keys on a MISSING label and this card has them all, while the lane side reads 「无分诊审计评论 ⛔ ' +
     '不得认领」 and stops — each waits for the other and nothing rings. Remedy, triage side: audit it in THIS ' +
-    'round exactly as an ungraded card (first touch: domain, grade, type, `Path:`), and count it in the round ' +
+    'round exactly as an ungraded card (first touch: domain, area, type, grade), and count it in the round ' +
     'record. Lane side: a seat that would otherwise pull this card rings `Request: triage · #n · first-touch ' +
     'audit` on the triage mailbox in the same round (`record-recognisers.mjs --mailbox-keys` prints the shape) ' +
     '— ⛔ never a silent wait, and never a report to the maintainer in the mailbox\'s place. Report-only: ⛔ ' +
