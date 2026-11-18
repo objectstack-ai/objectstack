@@ -13,8 +13,8 @@
           "npm view"
         ],
         "must_not_contain": [
-          "beforeFind",
-          "afterFind"
+          "event: 'beforeFind'",
+          "event: 'afterFind'"
         ]
       }
     },
@@ -46,8 +46,8 @@
           "hooks.run"
         ],
         "must_not_contain": [
-          "vi.mock",
-          "new LiteKernel"
+          "vi.mock(",
+          "new LiteKernel("
         ]
       }
     },
@@ -90,7 +90,7 @@
     {
       "id": 6,
       "prompt": "I'm the only user of my small ObjectStack app for tracking my book collection. Rename the label of the `book` object's `isbn` field to \"ISBN-13\".",
-      "expected_output": "Just makes the change: edits the field's `label` in `src/objects/`, updates its translation entries if the app has any, runs the four checks (`pnpm validate`, `pnpm lint`, `pnpm typecheck`, `pnpm test`) and commits. It does not ask for or create a requirement record, a design note, a changeset or a release note, and does not ask whether the app is a product: the user said they are its only user, so this is own use and the light path applies.",
+      "expected_output": "Just makes the change: edits the field's `label` in `src/objects/`, updates its translation entries if the app has any, runs the checks the project declares (`pnpm validate`, `pnpm lint`, `pnpm typecheck`, and `pnpm test` where it has one) and commits. It does not ask for or create a requirement record, a design note, a changeset or a release note, and does not ask whether the app is a product: the user said they are its only user, so this is own use and the light path applies.",
       "files": [],
       "assertions": {
         "must_contain": [

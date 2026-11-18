@@ -4,8 +4,9 @@ description: >
   Run an ObjectStack metadata-app project: decide whether a change belongs in
   the app or the platform, what to write before building, what the app tests
   and what the platform already checks, how a change is described for
-  customers, released and upgraded. Use when starting a feature or fix, filing
-  an issue, writing a test, opening a PR, releasing, or bumping
+  customers, released and upgraded. Use when deciding where a change belongs
+  or what to write before building, filing an issue, writing a test, opening a
+  PR, releasing, or bumping
   `@objectstack/*`. Not for writing metadata (the domain skills) or crossing a
   protocol major (objectstack-upgrade).
 license: Apache-2.0
@@ -74,7 +75,11 @@ which automation fires · which screens change · translations ·
 
 The platform checks consistency. The app tests its own business facts. Run all
 four before calling a change done (a scaffolded project's CI runs the first
-three; add `pnpm test` to its `ci.yml`):
+three; add `pnpm test` to its `ci.yml`). A project from `os init` has no `test`
+script: add vitest, `@objectstack/verify` and the script first.
+Only errors fail `validate` and `lint`; a warning, such as label case or an
+unresolved navigation target, passes. `--strict` on either makes warnings fail:
+use it instead of re-checking them in a test.
 
 ```bash
 pnpm validate && pnpm lint && pnpm typecheck && pnpm test
@@ -92,8 +97,9 @@ What the platform checks at 18.x, so the app never hand-writes it:
 ⛔ `os verify` is not one of the four and not in the scaffold's CI. Nothing in
 its row is checked until someone runs it: `npx os verify --rls` before a
 release, or as a CI step.
-The installed version's own list wins over this table: `npx os explain` lists
-the author-time rules it can explain, and `npx os explain <rule-id>` explains one.
+`npx os explain` lists only the rules that carry an explanation, not every
+check. Unsure whether a check exists? Inject the defect and run the command: if
+it fails, the platform checks it.
 
 What the app tests, with `bootStack` from `@objectstack/verify` on the real
 engine (the scaffold's `note.test.ts` is the shape): the numbers in its rules,
@@ -110,7 +116,8 @@ await expect(
 await stack.stop();
 ```
 
-The handle also has `stack.flows.run`, `stack.actions.run`, `stack.seed` and
+The handle also has `stack.flows.run` (boot with `{ automation: true }` unless
+the app requires `automation`), `stack.actions.run`, `stack.seed` and
 `stack.rows` (read as a user); the README in `node_modules/@objectstack/verify`
 documents each. A plugin's own tests use `LiteKernel` (objectstack-platform).
 
@@ -178,7 +185,8 @@ Data already installed:
   - REST API only, no import from `src/`, so it works on any installed metadata;
   - report by default, write only with `--apply`;
   - touch only the rows that need it; a second run reports zero;
-  - sign in as an administrator named on the command line.
+  - sign in as an administrator named on the command line; the password or
+    token comes from the environment or a prompt, never an argument.
 - ★ The release note names the script and when to run it.
 
 ## 6 · Where each kind of change is taught

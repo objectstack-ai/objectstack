@@ -1934,12 +1934,14 @@ export const CEILINGS = new Map([
   // and, on its decision card, 「p1，放进专题现在派」 (2026-11-18). The row is an
   // INITIAL measurement of the new file on the PR that adds it, pinned AT it —
   // zero headroom, on the same terms as the objectstack-ask row above. Its
-  // evals are unpriced (population 1b). No existing row moves: the one pointer
+  // evals are unpriced (population 1b). No existing row moves: the pointer
   // to it, in `objectstack-platform/references/operations.md`, lands inside that
-  // row's headroom (3388 -> 3392 of 3394). The PR that adds the row is Tier H and lands only on an authorized
+  // row's headroom (3388 -> 3389 of 3394), and the one in
+  // `objectstack-data/references/data-hooks.md` inside its own (9996 -> 10001 of
+  // 10011). The PR that adds the row is Tier H and lands only on an authorized
   // approval, which is the pricing act the header reserves to the maintainer.
-  //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11072 / 4)
-  ['skills/objectstack-project/SKILL.md', 2768],
+  //   ceil(($(wc -c < skills/objectstack-project/SKILL.md) - 20) / 4) == ceil(11603 / 4)
+  ['skills/objectstack-project/SKILL.md', 2901],
 ]);
 
 /**

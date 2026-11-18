@@ -130,8 +130,9 @@ directories at once, and all of them then land in your next commit.
 ## How this project runs
 
 Read the **objectstack-project** skill (`.claude/skills/objectstack-project/SKILL.md`,
-or the same path under the runtime you synced to) before you start a feature or
-a fix, write a test, open a PR, cut a release or bump `@objectstack/*`. It says
+or the same path under the runtime you synced to) before you decide where a
+change belongs or what to write first, write a test, open a PR, cut a release or
+bump `@objectstack/*`. It says
 whether a change belongs in this app or in the platform, what the app tests and
 what `validate`, `lint` and `verify` already check, and how a change reaches
 customers. Its last section names the skill for each kind of metadata.
