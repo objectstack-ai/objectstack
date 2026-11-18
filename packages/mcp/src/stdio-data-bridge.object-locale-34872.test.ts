@@ -241,7 +241,6 @@ describe('[#34995] the stdio object resources serve labels in the locale the obj
         if (object === 'sys_user') return query?.where?.id === 'usr_stdio' ? [{ id: 'usr_stdio' }] : [];
         return [];
       }),
-      update: vi.fn(async () => ({})),
       getSchema: vi.fn(() => undefined),
     };
     const answer = async () => [...opts.readable];
