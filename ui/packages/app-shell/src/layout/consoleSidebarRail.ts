@@ -432,6 +432,7 @@ export function useConsoleSidebarRailPanel(
   const openedBy = useRef<FloatOpener | null>(null);
   const closedBy = useRef<FloatCloser | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  const undocked = useRef(false);
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // The press and the pointer move that last landed in the sidebar's React
@@ -515,7 +516,10 @@ export function useConsoleSidebarRailPanel(
     setOpenRef.current(true);
     if (widthRef.current === 'wide') writeWideWindowOpen(true);
   }, [setKeepOpen]);
-  const undock = useCallback(() => setKeepOpen(false), [setKeepOpen]);
+  const undock = useCallback(() => {
+    undocked.current = true;
+    setKeepOpen(false);
+  }, [setKeepOpen]);
 
   // Any navigation folds the float: an entry chosen in it, the command palette, Back.
   const routeKey = `${location.pathname}${location.search}`;
@@ -564,22 +568,28 @@ export function useConsoleSidebarRailPanel(
     const by = openedBy.current;
     const closer = closedBy.current;
     const back = returnFocus.current;
+    const undid = undocked.current;
     openedBy.current = null;
     closedBy.current = null;
     returnFocus.current = null;
+    undocked.current = false;
     clearTimeout(closeTimer.current);
     closeTimer.current = undefined;
-    // Docked from the float ("Keep sidebar open"): nothing to give back, but on
-    // a wide window the control goes with the float, so the focus it held stays
-    // in the menu.
+    // "Keep sidebar open" goes away under the focus it held: with the float it
+    // docks on a wide window, with the sidebar it folds when turned off.
+    const active = document.activeElement;
+    const lost = !(active instanceof HTMLElement) || active === document.body || !active.isConnected;
+    // Docked from the float: nothing to give back, and focus stays in the menu.
     if (!becameHidden) {
-      const active = document.activeElement;
-      const lost = !(active instanceof HTMLElement) || active === document.body || !active.isConnected;
       if (closer === 'dock' && lost) floatFocusTarget(root)?.focus({ preventScroll: true });
       return;
     }
+    // Turned off: the fold hides the sidebar, and focus goes to the trigger.
+    if (undid && lost) {
+      sidebarTrigger()?.focus({ preventScroll: true });
+      return;
+    }
     // Focus stranded in the hidden, inert sidebar. A press outside moves it where it lands.
-    const active = document.activeElement;
     if (closer === 'outside' || !(active instanceof HTMLElement) || !root?.contains(active)) return;
     const byPointer = closer === 'pointer' || closer === 'away' || (closer === null && (by === 'hover' || by === 'press'));
     if (byPointer) active.blur();
