@@ -8,6 +8,7 @@
  * every catalog is a fixture written here.
  */
 
+import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -399,5 +400,187 @@ describe('--regrade grades an old answer only against the case that ran', () => 
     expect(md).toContain('1 case(s) changed since the round, set apart: not regraded and out of every pass rate below: `alpha-skill/cases#2`');
     expect(md).toContain('2 record(s) carry no case hash');
     expect(md).not.toContain('| alpha-skill/cases#2 |');
+  });
+});
+
+describe('trigger cases: graded on whether the with-skill turn loaded the bundle, reported beside the behaviour cases', () => {
+  const view = { bundles: ['alpha-skill', 'beta-skill'], unlisted: [] };
+  const pos: SkillEvalCase = { bundle: 'alpha-skill', file: 'triggers.json', id: 1, key: 'alpha-skill/triggers#1', prompt: 'design an object', mustContain: [], mustNotContain: [], shouldTrigger: true };
+  const neg: SkillEvalCase = { ...pos, id: 2, key: 'alpha-skill/triggers#2', prompt: 'a near miss', shouldTrigger: false };
+  /** A stream whose turn launched `invoked` with the Skill tool and/or read `read`. */
+  const turn = (o: { invoked?: string; read?: string; subtype?: string }) => {
+    const [init, ...rest] = stream({ skills: ['alpha-skill'], answer: 'an answer', ...(o.subtype ? { subtype: o.subtype } : {}) }).split('\n');
+    const calls = [
+      ...(o.invoked ? [{ type: 'tool_use', id: 's', name: 'Skill', input: { skill: o.invoked } }] : []),
+      ...(o.read ? [{ type: 'tool_use', id: 'r', name: 'Read', input: { file_path: o.read } }] : []),
+    ];
+    return exited([init, ...(calls.length ? [JSON.stringify({ type: 'assistant', message: { content: calls } })] : []), ...rest].join('\n'));
+  };
+  const judgeT = (c: SkillEvalCase, run: TurnProcessRun, arm: 'with-skill' | 'no-skill' = 'with-skill') => judgeTurn(c, arm, 1, run, view, 't');
+
+  it('the reader takes `should_trigger` in place of `assertions`, and refuses a trigger case carrying both or a non-boolean kind', () => {
+    const r = parseEvalFile('alpha-skill', 'triggers.json', JSON.stringify({ evals: [
+      { id: 1, prompt: 'p', should_trigger: true, files: [] },
+      { id: 2, prompt: 'q', should_trigger: false },
+      { id: 3, prompt: 'r', should_trigger: true, assertions: { must_contain: ['x'] } },
+      { id: 4, prompt: 's', should_trigger: 1 },
+    ] }));
+    expect(r.cases.map((c) => [c.id, c.shouldTrigger, c.mustContain.length, c.mustNotContain.length])).toEqual([[1, true, 0, 0], [2, false, 0, 0]]);
+    expect(r.refusals.map((x) => x.path)).toEqual(['alpha-skill/evals/triggers.json: evals[2]', 'alpha-skill/evals/triggers.json: evals[3]']);
+    expect(r.refusals[0]!.message).toMatch(/graded on whether the skill was loaded/);
+  });
+
+  it('the catalog refuses a bundle whose trigger cases are all of one kind', () => {
+    const root = writeCatalog();
+    const write = (evals: unknown[]) => writeFileSync(join(root, 'alpha-skill', 'evals', 'triggers.json'), JSON.stringify({ evals }));
+    write([{ id: 1, prompt: 'p', should_trigger: true }, { id: 2, prompt: 'q', should_trigger: true }]);
+    expect(loadSkillEvalCatalog(root).refusals).toEqual([{ path: 'alpha-skill/evals', message: expect.stringMatching(/every trigger case is positive/) }]);
+    write([{ id: 1, prompt: 'p', should_trigger: false }]);
+    expect(loadSkillEvalCatalog(root).refusals[0]?.message).toMatch(/every trigger case is negative/);
+    write([{ id: 1, prompt: 'p', should_trigger: true }, { id: 2, prompt: 'q', should_trigger: false }]);
+    const cat = loadSkillEvalCatalog(root);
+    expect(cat.refusals).toEqual([]);
+    expect(cat.cases.filter((c) => c.shouldTrigger !== undefined).map((c) => c.key)).toEqual(['alpha-skill/triggers#1', 'alpha-skill/triggers#2']);
+  });
+
+  it('loaded = a Skill launch of the bundle or a Read under its .claude/skills/ directory; pass = loaded as should_trigger says', () => {
+    expect(judgeT(pos, turn({ invoked: 'alpha-skill' }))).toMatchObject({ verdict: 'pass', trigger: { shouldTrigger: true, loadedBy: ['skill-tool'] }, missing: [], forbidden: [] });
+    expect(judgeT(pos, turn({ read: '/tmp/skill-eval-x/project/.claude/skills/alpha-skill/rules/a.md' }))).toMatchObject({ verdict: 'pass', trigger: { loadedBy: ['read'] }, skillFilesRead: ['alpha-skill/rules/a.md'] });
+    expect(judgeT(pos, turn({ invoked: 'alpha-skill', read: 'C:\\t\\project\\.claude\\skills\\alpha-skill\\SKILL.md' })).trigger?.loadedBy).toEqual(['skill-tool', 'read']);
+    // Another skill launched, or a file of a same-prefix bundle read, is not this bundle loaded.
+    expect(judgeT(pos, turn({ invoked: 'debug', read: '/t/project/.claude/skills/alpha-skill-two/SKILL.md' }))).toMatchObject({ verdict: 'fail', trigger: { loadedBy: [] } });
+    expect(judgeT(neg, turn({}))).toMatchObject({ verdict: 'pass', trigger: { shouldTrigger: false, loadedBy: [] } });
+    expect(judgeT(neg, turn({ invoked: 'alpha-skill' })).verdict).toBe('fail');
+  });
+
+  it('a loaded turn is judged however it ended; an unloaded one cut short is an error; the no-skill arm is invalid', () => {
+    expect(judgeT(neg, turn({ invoked: 'alpha-skill', subtype: 'error_max_turns' })).verdict).toBe('fail');
+    expect(judgeT(pos, turn({ read: '/t/project/.claude/skills/alpha-skill/SKILL.md', subtype: 'error_max_turns' })).verdict).toBe('pass');
+    expect(judgeT(pos, turn({ subtype: 'error_max_turns' }))).toMatchObject({ verdict: 'error', reason: expect.stringMatching(/without loading the bundle/) });
+    expect(judgeT(pos, exited(stream({ skills: [], answer: 'x' })), 'no-skill')).toMatchObject({ verdict: 'invalid', reason: 'a trigger case runs on the with-skill arm only' });
+    expect(judgeT(pos, exited(stream({ skills: ['debug'], answer: 'x' }))).verdict).toBe('invalid');
+  });
+
+  it('a behaviour case hashes as before; a trigger case and a case with files hash their extra fields', () => {
+    const b: SkillEvalCase = { bundle: 'alpha-skill', file: 'cases.json', id: 1, key: 'alpha-skill/cases#1', prompt: 'p', mustContain: ['x'], mustNotContain: [] };
+    expect(hashCase(b)).toBe(`sha256:${createHash('sha256').update(JSON.stringify(['p', ['x'], []])).digest('hex')}`);
+    expect(hashCase({ ...b, files: [] })).toBe(hashCase(b));
+    expect(hashCase({ ...b, files: ['evals/files/a.ts'] })).not.toBe(hashCase(b));
+    expect(hashCase(pos)).not.toBe(hashCase(neg));
+    expect(hashCase(pos)).not.toBe(hashCase({ ...neg, prompt: pos.prompt }));
+  });
+
+  it('a round runs a trigger case on the with-skill arm only; the summary tallies it apart from the behaviour rates', async () => {
+    const root = writeCatalog();
+    writeFileSync(join(root, 'alpha-skill', 'evals', 'triggers.json'), JSON.stringify({ evals: [{ id: 1, prompt: 'load me', should_trigger: true }, { id: 2, prompt: 'leave me', should_trigger: false }] }));
+    const cat = loadSkillEvalCatalog(root);
+    const cases = selectBundles(cat, ['alpha-skill']);
+    const seen: string[] = [];
+    const exec = await executeRound(planRound(cases, 1), {
+      bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: mkdtempSync(join(scratch, 'out-')), maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
+      runTurn: async (_bin, _args, o) => {
+        const skillsDir = join(o.cwd, '.claude', 'skills');
+        const skills = existsSync(skillsDir) ? readdirSync(skillsDir) : [];
+        seen.push(`${o.input}|${skills.join()}`);
+        // The model launches the skill on every prompt: right for `load me`, a false load for `leave me`.
+        const [init, ...rest] = stream({ skills, answer: '$icontains orderBy' }).split('\n');
+        const launch = skills.length ? [JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 's', name: 'Skill', input: { skill: 'alpha-skill' } }] } })] : [];
+        return exited([init, ...launch, ...rest].join('\n'));
+      },
+    });
+    expect(seen).toEqual(['prompt 1|alpha-skill', 'prompt 1|', 'prompt 2|alpha-skill', 'prompt 2|', 'load me|alpha-skill', 'leave me|alpha-skill']);
+    const s = summariseRound(cases, exec.records, exec.notRun);
+    expect(s.cases.map((c) => c.key)).toEqual(['alpha-skill/cases#1', 'alpha-skill/cases#2']);
+    expect(s.totals.withSkill).toMatchObject({ pass: 2, fail: 0 });
+    expect(s.triggers.bundles).toEqual([expect.objectContaining({ bundle: 'alpha-skill', cases: 2, missedLoads: [], falseLoads: ['alpha-skill/triggers#2'] })]);
+    expect(s.triggers.totals.shouldTrigger).toMatchObject({ pass: 1, fail: 0, rate: 1 });
+    expect(s.triggers.totals.shouldNotTrigger).toMatchObject({ pass: 0, fail: 1, rate: 0 });
+    expect(s.triggers.cases.map((t) => [t.key, t.loadedBySkillTool, t.loadedByReadOnly])).toEqual([['alpha-skill/triggers#1', 1, 0], ['alpha-skill/triggers#2', 1, 0]]);
+    const md = renderSummaryMarkdown(s, { title: 'T', lines: [] });
+    expect(md).toContain('## Trigger cases');
+    expect(md).toContain('| alpha-skill | 2 | 1/1 (100%) | 0/1 (0%) | 0 | 1 | 0 |');
+    expect(md).toContain('| alpha-skill/triggers#2 | no | 0/1 (0%) | 1 / 0 |');
+    // A round with no trigger case renders no trigger section.
+    expect(renderSummaryMarkdown(summariseRound([], [], []), { title: 'T', lines: [] })).not.toContain('## Trigger cases');
+  });
+
+  it('--regrade keeps a recorded trigger case planned and regrades it from its record', async () => {
+    const root = writeCatalog();
+    writeFileSync(join(root, 'beta-skill', 'evals', 'triggers.json'), JSON.stringify({ evals: [{ id: 1, prompt: 'load me', should_trigger: true }, { id: 2, prompt: 'leave me', should_trigger: false }] }));
+    const cat = loadSkillEvalCatalog(root);
+    const dir = mkdtempSync(join(scratch, 'round-'));
+    const exec = await executeRound(planRound(cat.cases, 1), {
+      bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: dir, maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
+      runTurn: async (_bin, _args, o) => {
+        const skillsDir = join(o.cwd, '.claude', 'skills');
+        return exited(stream({ skills: existsSync(skillsDir) ? readdirSync(skillsDir) : [], answer: 'orderBy defineView $icontains' }));
+      },
+    });
+    const summary = summariseRound(cat.cases, exec.records, []);
+    writeFileSync(join(dir, 'round.json'), JSON.stringify({ schema: ROUND_RECORD_SCHEMA, round: 'r', runner: { repo: 'x', sha: 'y' }, startedAt: 't', finishedAt: 't', wallMs: 1, skills: { source: 'workspace skills/', bundles: cat.bundles, allBundles: true }, driver: { driver: 'claude-code-cli', version: 'v', authMethod: 'oauth_token', apiBilled: false, servedModels: [], maxTurns: 5, caseTimeoutMs: 1, concurrency: 1, maxUtilization: 0.9 }, scope: { cases: 5, arms: ['with-skill', 'no-skill'], repeats: 1, plannedTurns: 8, ranTurns: 8, notRunTurns: 0 }, summary }));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(regradeRound(dir, loadSkillEvalCatalog(root), 'workspace skills/')).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+    const round = JSON.parse(readFileSync(join(dir, 'round.json'), 'utf8')) as { regraded: { added: string[] }; summary: { triggers: { cases: Array<{ key: string; tally: { pass: number; fail: number } }> } } };
+    expect(round.regraded.added).toEqual([]);
+    expect(round.summary.triggers.cases.map((t) => [t.key, t.tally.pass, t.tally.fail])).toEqual([['beta-skill/triggers#1', 0, 1], ['beta-skill/triggers#2', 1, 0]]);
+  });
+});
+
+describe('`files`: what a case needs on disk, placed in the turn\'s project on both arms', () => {
+  it('the reader takes paths under evals/files/ only', () => {
+    const read = (files: unknown) => parseEvalFile('alpha-skill', 'f.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', files, assertions: { must_contain: ['x'] } }] }));
+    expect(read(['evals/files/src/objects/task.object.ts', 'evals/files/crm']).cases[0]?.files).toEqual(['evals/files/src/objects/task.object.ts', 'evals/files/crm']);
+    expect(read([]).cases[0]?.files).toBeUndefined();
+    for (const bad of [['src/a.ts'], ['evals/files/'], ['evals/files/../SKILL.md'], ['evals/files/./a.ts'], ['evals\\files\\a.ts'], ['/evals/files/a.ts'], 'evals/files/a.ts', [1]]) {
+      expect(read(bad).cases, JSON.stringify(bad)).toEqual([]);
+    }
+  });
+
+  it('the reader refuses a path that would land under the project\'s .claude/, where only the runner puts a skill', () => {
+    const read = (files: string[]) => parseEvalFile('alpha-skill', 'f.json', JSON.stringify({ evals: [{ id: 1, prompt: 'p', files, assertions: { must_contain: ['x'] } }] }));
+    for (const bad of ['evals/files/.claude/skills/alpha-skill/SKILL.md', 'evals/files/.claude', 'evals/files/.claude/settings.json', 'evals/files/.CLAUDE/skills/x/SKILL.md', 'evals/files/app/.claude/skills/x/SKILL.md']) {
+      const r = read([bad]);
+      expect(r.cases, bad).toEqual([]);
+      expect(r.refusals, bad).toEqual([{ path: 'alpha-skill/evals/f.json: evals[0]', message: expect.stringContaining('`.claude/`') }]);
+    }
+    for (const good of ['evals/files/.claude-notes.md', 'evals/files/claude/a.md', 'evals/files/.mcp.json']) {
+      expect(read([good]).cases[0]?.files, good).toEqual([good]);
+    }
+  });
+
+  it('the catalog refuses a case naming a file the bundle lacks; a round places each file below evals/files/ in both arms\' projects', async () => {
+    const root = writeCatalog();
+    const evalsFile = join(root, 'alpha-skill', 'evals', 'cases.json');
+    const doc = JSON.parse(readFileSync(evalsFile, 'utf8')) as { evals: Array<{ files: string[] }> };
+    doc.evals[0]!.files = ['evals/files/src/objects/task.object.ts', 'evals/files/docs'];
+    writeFileSync(evalsFile, JSON.stringify(doc));
+    expect(loadSkillEvalCatalog(root).refusals).toEqual([{ path: 'alpha-skill/evals/cases.json: alpha-skill/cases#1', message: expect.stringMatching(/`evals\/files\/src\/objects\/task.object.ts`, which is not in the bundle/) }]);
+    mkdirSync(join(root, 'alpha-skill', 'evals', 'files', 'src', 'objects'), { recursive: true });
+    mkdirSync(join(root, 'alpha-skill', 'evals', 'files', 'docs'), { recursive: true });
+    writeFileSync(join(root, 'alpha-skill', 'evals', 'files', 'src', 'objects', 'task.object.ts'), 'export const task = 1;\n');
+    writeFileSync(join(root, 'alpha-skill', 'evals', 'files', 'docs', 'guide.md'), '# guide\n');
+    const cat = loadSkillEvalCatalog(root);
+    expect(cat.refusals).toEqual([]);
+    const placed: string[][] = [];
+    await executeRound(planRound(selectBundles(cat, ['alpha-skill']).slice(0, 1), 1), {
+      bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: mkdtempSync(join(scratch, 'out-')), maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
+      runTurn: async (_bin, _args, o) => {
+        placed.push([
+          readFileSync(join(o.cwd, 'src', 'objects', 'task.object.ts'), 'utf8'),
+          readFileSync(join(o.cwd, 'docs', 'guide.md'), 'utf8'),
+          String(existsSync(join(o.cwd, 'evals'))),
+          String(existsSync(join(o.cwd, '.claude'))),
+        ]);
+        return exited(stream({ skills: existsSync(join(o.cwd, '.claude')) ? ['alpha-skill'] : [], answer: '$icontains' }));
+      },
+    });
+    expect(placed).toEqual([
+      ['export const task = 1;\n', '# guide\n', 'false', 'true'],
+      ['export const task = 1;\n', '# guide\n', 'false', 'false'],
+    ]);
   });
 });

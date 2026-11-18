@@ -1,0 +1,47 @@
+{
+  "skill_name": "objectstack-query",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Using ObjectQL, find accounts in the US or Canada whose name contains 'tech', case-insensitively, highest annual revenue first.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Our ObjectStack app has millions of `audit_event` rows. Which pagination should the activity feed use to scroll back through them newest first, and how is the query written?",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I'm connected to an ObjectStack environment over MCP. In one call, how many deals were won per sales region this quarter, and what is the average amount per region?",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Search ObjectStack `knowledge_article` records by keyword across the title and the body, and return each article's author name with it.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "用 ObjectQL 查出本月到期、还没付款的发票，按到期日升序，每页 50 条。",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "Add a `priority` select field (Low / Medium / High) to the `ticket` object in our ObjectStack app, defaulting to Medium.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "In our ObjectStack app, add a list view on `ticket` that shows only the signed-in user's open tickets.",
+      "should_trigger": false,
+      "files": []
+    }
+  ]
+}
