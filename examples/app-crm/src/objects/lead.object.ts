@@ -112,6 +112,9 @@ export const Lead = ObjectSchema.create({
       description: 'Enforces valid status progression for leads.',
       field: 'status',
       message: 'Invalid lead status transition.',
+      // A lead is created `new` (the field's default and the machine's only
+      // root); every later status is reached through `transitions`.
+      initialStates: ['new'],
       transitions: {
         new:          ['contacted', 'qualifying', 'disqualified'],
         contacted:    ['qualifying', 'disqualified'],

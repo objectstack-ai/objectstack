@@ -11,6 +11,8 @@ Clause-②: no (narrowing: six publish-time refusals of metadata the schema acce
 Metadata-protocol: narrowed
 Skills-docs: follow-up owed — skills/** traps for the six rules
 
+<!-- adr-0087: registered publish-refuses-metadata-the-runtime-ignores -->
+
 Six authoring rules join the registry the runtime publish gate and `objectstack validate` / `lint` / `compile` run. Each finding names its fix.
 
 - `flow-node-type-no-executor` (error): a flow node whose `type` no executor in this deployment runs fails every run with `NO_EXECUTOR`. Judged only against the automation engine's SEALED node-type vocabulary, which the publish gate reads from the new `AutomationEngine.getSealedNodeTypeVocabulary()` (it answers `undefined` until `sealNodeTypeVocabulary()` ran at `kernel:bootstrapped`). The CLI does not know which plugins a deployment loads, so it judges nothing here.
