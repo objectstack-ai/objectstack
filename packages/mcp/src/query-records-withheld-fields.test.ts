@@ -282,7 +282,7 @@ describe('stdio bridge — withheldFields from the served schema and the readabl
     const unsecured = await stdioSession(AUTHOR, undefined);
     try {
       const a = await unrestricted.query();
-      expect(a.payload).toEqual({ object: OBJECT, records: [SERVED_ROW], total: 1 });
+      expect(a.payload).toEqual({ object: OBJECT, records: [SERVED_ROW], hasMore: false });
       expect(security.getReadableFields).toHaveBeenCalledWith(OBJECT, expect.objectContaining({ userId: AUTHOR.userId }));
       expect((await unsecured.query()).text).toBe(a.text);
       expect((await unsecured.get()).payload).toEqual(SERVED_ROW);
