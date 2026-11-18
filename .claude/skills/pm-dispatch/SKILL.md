@@ -170,7 +170,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `domain:skills` | 规则文本:`AGENTS.md`+`CLAUDE.md`+`.claude/**`(含本文件)+`skills/**`+`docs/adr/**`+`docs/NORTH-STAR.md`;非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
 | `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
-| `domain:cloud` | 涉 cloud 即整卡归 cloud PM(`repo:cloud` 席):读或改 cloud 代码、生产方或带 cloud 半边;本仓车道 ⛔ 不认领;只缺事实读数者留车道敲信箱;cloud PM 跟到关卡,余下本仓活写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md`、`references/lanes/cloud.md` |
+| `domain:cloud` | 涉 cloud(专题打 `area:cloud`)即整卡归 cloud PM(`repo:cloud` 席):读或改 cloud 代码、生产方或带 cloud 半边;本仓车道 ⛔ 不认领;只缺事实读数者留车道敲信箱;cloud PM 跟到关卡,余下本仓活写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md` |
 | `security` · `l2-review` · `eval`(车道,无 `domain:*` 标签) | 本仓安全公告(私有仓卡归该仓车道,cloud 即上行);席位 `security#N` 见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。L2 席、AI 评测席见 `references/lanes/l2-review.md`、`references/lanes/eval.md` |
 | `repo:objectstack`(全仓调度,无 `domain:*` 标签) | 跨各域按区认领本仓卡,多席以区租约分工;`domain:*` 仍定文件归属;cloud 与安全公告除外;见 `references/lanes/objectstack.md` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统,测试基建见 devx 行)、`docs/audits/**` |
@@ -241,7 +241,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - ②:决策默认锚在所属 issue(分析发评论,中文;挂 `needs-user-decision`、退出活动队列)。
 - 无自然锚才单开 `[Decision] <一句话>` 卡;分析模板见 `references/decision-analysis.md`。
 - 落卡与呈报必带 `Governing text:`(AGENTS.md/ADR/spec docblock/lint 规则);选项与之冲突者非决策卡。
-- 协议为基准:spec 与代码不一致默认改代码对齐;改协议单独立卡,⛔ 不作缺陷卡的选项。
+- 协议为基准:spec 与代码不一致默认改代码;改协议、新增公开面另立卡,⛔ 不作 `Bug` 选项。
 - ③:人工答复到手,四件同笔:鲜度门/状态转换同笔/`Blocked-by:` 活性现验/条件已判即判。
 - 鲜度门 = 录前重读晚于正文最后编辑的评论;案例与机械两旗见 `references/dispatch-runbook.md`。
 - 一条裁决已记录的权威载体 = 总监席每场收工的摘要台账(卡、权威、方向、状态转移)。
@@ -272,7 +272,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 交维护者拍板。
 - 分歧推荐序按拉动定向:有实测拉动 ⇒ 荐长远形态一次付清;零拉动 ⇒ 荐不扩散。
 - 防错轴破余下平局向响亮/结构性;安全/权限边界与破坏性难逆动作恒在人工地板。
-- ⛔ 此序只排推荐:分歧块照旧升级,四棱同向 ⛔ 不构成代裁许可。
+- ⛔ 此序只排推荐、不扩修复范围:分歧块照旧升级,四棱同向 ⛔ 不构成代裁许可。
 - 长远合理性权重恒 ≥50%:推荐以长远的读数领起,四轴冲突时其余各轴合起来投不翻它。
 - 权重只排推荐不授权:读缩小特例与契约增生,⛔ 不背书投机扩张、不放行人工地板事。
 - 四维分析从业务角度写;四棱是四轴的卡面序列化,一一对应,是人工裁决的输入。
