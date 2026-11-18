@@ -266,7 +266,9 @@ files only: no model, no network, and no score of its own — every figure is th
   When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
 - **The card stamp**: every record names the card file it graded at its top level, `card: { id, sha256 }` (the sha256
-  of the card file's bytes as the runner loaded them, before it moved the dates or prefixed the names), and the
+  of the card file's bytes as the runner loaded them: the bytes the loader parsed, `LoadedScenario.fileSha256`, never
+  a later read, so a card edited, moved or deleted during the run neither changes the stamp nor costs the record;
+  taken before the run moved the dates or prefixed the names), and the
   scorecard prints it under the packages line: `card: travel_expense (sha256 3f2a9c01b7de)`. A change to a card's
   questions, outcomes or seed moves the hash, so a round graded before it is told from one graded after it; a
   replay grades on the card as it is now, and stamps that card. Two hashes in one table refuse it as above, the line

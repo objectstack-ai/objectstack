@@ -30,6 +30,7 @@
  * directories it is handed.
  */
 
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
@@ -62,6 +63,13 @@ export interface Refusal {
 
 export interface LoadedScenario {
   file: string;
+  /**
+   * The sha256 of the card file's bytes, the very bytes this load parsed: the
+   * runner stamps a run's record and scorecard with it (`CardStamp`), so a card
+   * edited, moved or deleted after loading never changes which card the
+   * stamp names, and never costs the record.
+   */
+  fileSha256: string;
   card: ScenarioCard;
   /** Question id → its computed truth over every row. */
   truths: Record<string, Truth>;
@@ -204,8 +212,11 @@ function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; r
     refusals.push({ file, path: formatPath(path), message });
 
   let raw: unknown;
+  let fileSha256: string;
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8'));
+    const bytes = readFileSync(file);
+    fileSha256 = createHash('sha256').update(bytes).digest('hex');
+    raw = JSON.parse(bytes.toString('utf8'));
   } catch (e) {
     refuse([], `not valid JSON: ${(e as Error).message}`);
     return { refusals };
@@ -230,7 +241,7 @@ function loadOne(file: string, options: LoadOptions): { card?: LoadedScenario; r
   const computed = checkCard(card, basename(file, '.json'), options, refuse);
   if (refusals.length > 0) return { refusals, code: card.code };
   const readable = Object.fromEntries(card.run.personas.map((p) => [p.id, rowsReadableBy(card, p)]));
-  return { card: { file, card, ...computed, readableRows: readable }, refusals, code: card.code };
+  return { card: { file, fileSha256, card, ...computed, readableRows: readable }, refusals, code: card.code };
 }
 
 type Refuse = (path: IssuePath, message: string) => void;

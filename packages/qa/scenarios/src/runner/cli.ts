@@ -111,7 +111,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas } from '../loader.js';
+import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../loader.js';
 import { HttpApp } from './app.js';
 import { askSkillsText } from './ask-skills.js';
 import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver } from './driver.js';
@@ -123,7 +123,7 @@ import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleW
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { PROMPT_LANGS, PROMPT_LENGTHS, promptChoiceText, promptLanguageRefusal, statedPromptChoice, type PromptChoice, type PromptLang, type PromptLength } from './prompts.js';
 import { rebaseScenario } from './run-date.js';
-import { cardScorecard, cardStampOf, renderScorecard, runRecord } from './scorecard.js';
+import { cardScorecard, renderScorecard, runRecord, type CardStamp } from './scorecard.js';
 import { SUPPLIED_TEMPLATE_SOURCE, summaryMain, suppliedTemplateOf, type SuppliedTemplate } from './summary.js';
 
 /** The `summary` command, re-exported so the published bin reaches it through this built entry (`src/bin.ts`). */
@@ -371,6 +371,16 @@ export function withSuppliedTemplate(record: Record<string, unknown>, cardRun: C
   return supplied && installed ? { ...record, template: supplied } : record;
 }
 
+/**
+ * The {@link CardStamp} of a loaded card: its id and the sha256 of the bytes
+ * the loader parsed (`LoadedScenario.fileSha256`), never a second read of the
+ * file. A card edited while its run went on is still stamped with the card
+ * that ran, and one moved or deleted meanwhile still gets its record written.
+ */
+export function loadedCardStamp(loaded: Pick<LoadedScenario, 'fileSha256' | 'card'>): CardStamp {
+  return { id: loaded.card.id, sha256: loaded.fileSha256 };
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   // `summary` reads records back; it runs nothing (`summary.ts`).
   if (argv[0] === 'summary') return summaryMain(argv.slice(1));
@@ -482,7 +492,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}) });
     const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
     // The card file the run graded, as it was loaded (`CardStamp`): the record and the scorecard name its hash.
-    const card = cardStampOf(loaded.card.id, readFileSync(loaded.file));
+    const card = loadedCardStamp(loaded);
     const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work, card }, cardRun), cardRun, supplied);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));

@@ -28,7 +28,7 @@ import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { seedDoorAnswer } from './seed-door.js';
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
-import { main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
+import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
 import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
@@ -3854,6 +3854,41 @@ describe('the card stamp: the record and the scorecard name the card file a run 
     expect(record.card).toEqual(card);
     expect((record.scorecard as { cardStamp?: unknown }).cardStamp).toEqual(card);
     expect(renderScorecard(cardScorecard(run, PUBLISHED, card)).split('\n')).toContain(`card: travel_expense (sha256 ${card.sha256.slice(0, 12)})`);
+  });
+
+  // The runner stamps from the bytes the loader parsed (`loadedCardStamp`, `LoadedScenario.fileSha256`), never a
+  // second read after the run: a card edited, or deleted, between load and record write keeps its load-time hash,
+  // and its record is still written.
+  const loadCopy = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-card-stamp-'));
+    const file = join(dir, 'travel_expense.json');
+    writeFileSync(file, bytes);
+    const { card: loaded, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    expect(refusals).toEqual([]);
+    return { dir, file, loaded: loaded! };
+  };
+  const writeRecord = (loaded: LoadedScenario, out: string) => {
+    const record = runRecord({ run: 'r', date: '2026-11-18', packages: PUBLISHED, driver: driverInfo, runner: 'test', evidenceDir: '/tmp', card: loadedCardStamp(loaded) }, run);
+    writeFileSync(out, JSON.stringify(record));
+    return JSON.parse(readFileSync(out, 'utf8')) as { card: { id: string; sha256: string } };
+  };
+
+  it('a card file edited between load and record write is stamped with the hash of the card that was loaded', () => {
+    const { dir, file, loaded } = loadCopy();
+    const atLoad = cardStampOf('travel_expense', bytes).sha256;
+    expect(loaded.fileSha256).toBe(atLoad);
+    writeFileSync(file, bytes.toString('utf8').replace('"sum": {"amount": 860}', '"sum": {"amount": 861}'));
+    expect(cardStampOf('travel_expense', readFileSync(file)).sha256).not.toBe(atLoad);
+    expect(writeRecord(loaded, join(dir, 'record.json')).card).toEqual({ id: 'travel_expense', sha256: atLoad });
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a card file deleted between load and record write still gets its record, stamped with the load-time hash', () => {
+    const { dir, file, loaded } = loadCopy();
+    rmSync(file);
+    expect(existsSync(file)).toBe(false);
+    expect(writeRecord(loaded, join(dir, 'record.json')).card).toEqual({ id: 'travel_expense', sha256: cardStampOf('travel_expense', bytes).sha256 });
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('a changed card moves the hash, so the scorecard line differs; a record without a stamp keeps its bytes and prints no line', () => {

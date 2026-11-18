@@ -284,7 +284,8 @@ export interface ModeScorecard {
 /**
  * The card a run graded, as the record stamps it at its top level (`card`)
  * and the scorecard prints it: the card's id and the sha256 of the card file's
- * bytes as the runner loaded them, before the run moved its dates or prefixed
+ * bytes as the runner loaded them (the bytes the loader parsed,
+ * `LoadedScenario.fileSha256`, never a later read of the file), before the run moved its dates or prefixed
  * its names. A change to a card's questions, outcomes or seed moves the hash,
  * so a round graded before the change is told from one graded after it, on
  * the scorecard and in `summary` (which never sums two hashes into one cell).
