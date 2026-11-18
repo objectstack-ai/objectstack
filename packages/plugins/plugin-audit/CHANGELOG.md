@@ -1,5 +1,301 @@
 # @objectstack/plugin-audit
 
+## 18.6.0
+
+### Minor Changes
+
+- 9e6fee1: feat(spec, plugin-audit): a sealed object names its chain column with `lifecycle.seal.chainField`
+  
+  Clause-②: yes (widening). A sealed object may name its chain column with `lifecycle.seal.chainField`; the default stays `tenant_id`, and an object that seals today is byte-identical.
+  Metadata-protocol: added
+  Skills-docs: follow-up #33773
+  
+  An audit-class object that declares `lifecycle.seal` was sealed only when it had a `tenant_id` column, because the sealer read each row's organization from that column alone. An object whose organization lives in the tenant column the platform injects, `organization_id`, was reported at `error` every hour and never sealed.
+  
+  - **The key.** `lifecycle.seal.chainField` names the column whose value is the organization chain a sealed row joins, for example `seal: { valueFields: ['payload'], chainField: 'organization_id' }`. It is optional. An object that names none chains by `tenant_id`, as before.
+  - **Refused at authoring.** A named column the object does not have is refused at `lifecycle.seal.chainField`, with the reason. Declared fields count, and so do the columns the platform injects: `organization_id` counts unless the object opts out of the tenant column (`systemFields: false`, `systemFields.tenant: false`, `tenancy.enabled: false`).
+  - **Also refused there: a column that cannot name an organization.** A column whose value is not one text on every store (a number, currency, percent, rating, slider, progress, summary, boolean, toggle, date, datetime, JSON-shaped or multi-value column, the injected `updated_at` included), which would put rows into the deployment chain with no report; `id` and `created_at`, which order the sealed rows; and a column `valueFields` also lists, whose value the chain would carry in clear. Name a text or lookup column that holds the organization id.
+  - **Fixed once sealed.** Changing `chainField` on an object that already has checkpoints seals the last sealed hour's rows again under the new column, which `os audit verify` reports as `listed_twice`, and `--org` then reads the earlier rows as `late`. Both fail the check.
+  - **One reader.** The sealer, `os audit verify`'s live check and the proof bundle it writes read a row's chain value through one function. `os audit verify --org X` reports the rows of organization `X` whichever column holds it.
+  - **Bytes unchanged.** The checkpoint's signed `tenant_id` member keeps its name and carries the chain column's value. For an object chained by `tenant_id`, the leaf input, the signed body and the root are byte for byte what they were.
+  - **Still reported, not refused.** Authoring judges only a named `chainField`; the default `tenant_id` is not judged. An object that names no chain column and has no `tenant_id` still parses: the sealer reports it at `error` and does not seal it, as before. It does the same for a definition that reached the registry without the parse and names a column it lacks, and for an object chained by `organization_id` that its deployment declares platform-global, which withholds that column. Refusing the default case at authoring is a narrowing, and #34352 carries it.
+  
+  ADR-0154 gains a note recording the key under D10, and how D5's "its `tenant_id` names" reads with it.
+
+### Patch Changes
+
+- 35c9a30: feat(plugin-audit, cli)!: an `os migrate audit-* --apply` run holds the audit seal lock for its whole run, each sealer pass skips while it is held, and where the database offers no session lock a run on a sealed object needs `--sealer-stopped`
+  
+  Clause-②: yes (narrowing) — narrowed: `os migrate audit-key-material`, `os migrate audit-mail-bodies` and `os migrate audit-metadata-bodies` with `--apply` now refuse a run that rewrites an object declaring `lifecycle.seal` when that object's database offers no session lock (SQLite, Turso) unless `--sealer-stopped` is passed, and on Postgres or MySQL refuse when a sealer pass or another run still holds the audit seal lock after ten minutes; 18.4.0 ran both. `os migrate audit-side-copies`, new in this release, holds the lock and takes the flag from its first release. Widened: the `--sealer-stopped` flag, and new exports — `@objectstack/objectql` `acquireDatabaseSessionLock`, `tryDatabaseSessionLock`, `databaseSessionLockPgKey` and the types `DatabaseSessionLock`, `DatabaseSessionLockRunOptions`, `DatabaseSessionLockWait`; `@objectstack/plugin-audit` `holdAuditSealLock`, `AUDIT_SEAL_LOCK_NAME`, `AUDIT_SEAL_LOCK_WAIT_MS`, `STORED_METADATA_BODY_REWRITTEN_OBJECTS` and the types `AuditSealLockEngine`, `AuditSealLockFinish`, `AuditSealLockHold`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answer is whether an os migrate audit-* --apply run may proceed while a sealer could be sealing the rows it rewrites. The one-line fix for a refused run is in the body: stop the servers that seal the database and pass --sealer-stopped, or let the sealer pass finish. -->
+  
+  **BREAKING** for an `os migrate audit-* --apply` run on a deployment where an app declared `lifecycle.seal`. On SQLite or Turso the run now stops before writing anything and names the flag: stop every server that seals the database, then re-run with `--sealer-stopped`. On Postgres or MySQL the run waits up to ten minutes for a sealer pass in flight, then refuses, having changed nothing: run it again once that pass has finished. A run that rewrites no sealed object is unchanged on every database, and so is every dry run. No object declares `lifecycle.seal` by default, so a deployment that did not opt in sees no change.
+  
+  **The audit seal lock (ADR-0154 D3, as amended 2026-11-14).** A sealer pass and an `os migrate audit-*` rewrite no longer work on a sealed object at the same time. That race let a pass seal a row's old value while the rewrite redacted it, and `os audit verify` then reported the sanctioned redaction as a modified row. The lock is a database session lock named `objectstack:audit-seal`, a Postgres advisory lock or a MySQL `GET_LOCK` on a connection of its own, taken on the database that holds each sealed object's rows (its hot store, where that differs from the primary database).
+  
+  - Each sealer pass takes it beside the cluster lock `audit.sealer`. While another session holds it, the pass seals nothing and says so at `info`, once an hour while it lasts; the next pass tries again. A checkpoint is written only while both locks still stand: a lock whose database session ended fails the object's pass, and the seed it had sealed is dropped.
+  - An `--apply` rewrite (`os migrate audit-key-material`, `audit-mail-bodies`, `audit-metadata-bodies` and `audit-side-copies`) holds it from before its first write to after its last, archive runs included. A run whose lock's database session ended before it finished says so, names `os audit verify`, and exits non-zero.
+  - Two replicas with no cluster service now also keep their passes apart through this lock on Postgres and MySQL.
+  - Two datasources that reach one lock namespace — one Postgres database, or two schemas of one MySQL server — share one lock: a pass or a run takes it once there and never waits on itself.
+  - On MySQL, lock names are server-wide: a rewrite on one database of a server makes the sealer of another database on that server skip its passes while it runs.
+  
+  **`@objectstack/objectql`.** The schema-migration lock and the audit seal lock share one implementation of a named database session lock, now exported: `acquireDatabaseSessionLock` (wait, then refuse), `tryDatabaseSessionLock` (once, never waiting: the lock, `'held'`, or `null` where the database offers none) and `databaseSessionLockPgKey`. A held lock's `isHeld()` asks its own session whether it still stands. With `ownLocks` (`DatabaseSessionLockRunOptions`), a run that locks several datasources marks each session it opens, and a lock it finds held by one of its own sessions in the same database answers that lock instead of `'held'` or a wait. `acquireSchemaMigrationLock` takes the same statements, prints the same lines and refuses with the same message as before.
+- bb3c163: feat(plugin-audit): a record write the in-product AI made for a person is marked on its `sys_audit_log` row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Before this change, a record the in-product AI changed for a signed-in person produced a `sys_audit_log` row identical to one that person typed. The write context already carried the AI's identity (`ExecutionContext.performedBy.agentId`, `conversationId` and `confirmationId`, surfaced to hooks as `provenance.performedByAgentId` and its siblings), but the record-write audit writer read only the OAuth client (`performedByClientId`).
+  
+  The writer now records the in-product AI the way it records an MCP OAuth client, in the row's `metadata`:
+  
+  - `performed_by`: the agent that ran, beside `on_behalf_of`, the person (the existing pair; no new actor vocabulary);
+  - `conversation_id`: the AI conversation the write was made in;
+  - `confirmation_id`: the pending item the person's approval decided, present only when the write needed a confirmation.
+  
+  `user_id` and `actor` still name the person, so ownership, joins to `sys_user` and existing readers are unchanged. A write the person made themselves still carries none of these keys. The action-invocation, data-export and dataset-query rows still record the OAuth client only.
+  
+  The `@objectstack/spec` descriptions of `ExecutionContext.performedBy` and `HookContext.provenance` no longer say these keys are not recorded; they name the metadata keys above. No schema shape changes.
+- d6d0090: fix(i18n): Setup no longer shows five audit actions, or the AI settings help for conversation titles and two provider models, in English under a translated locale
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The audit actions `package_unmanaged_import`, `credential_use`, `scim_refused`, `audit_signing_key_change` and `dataset_query` were still the English extract fill in all ten translated locales, so the audit log, its detail and the System Overview "Audit Events by Action" chart and table named them in English (for example "Credential Use" under zh-CN). They are now translated in zh-CN, zh-Hant, ja-JP, ko, es-ES, fr, de, pt-BR, ru and ar.
+  
+  On the AI settings page, the help under the conversation-title toggle ("When on, the LLM is asked to produce a short title …") had no translation in any locale, and neither had the model help of the DashScope and Cloudflare AI Gateway providers; zh-CN also lacked the OpenRouter API key hint. All of them are now translated. Only translation values change: no setting, key or audit action is added or removed.
+- 18194fb: feat(plugin-audit)!: `sys_audit_log` records a SCIM user write whose Enterprise `manager` reference names no user, as one bounded `scim_manager_unresolved` row
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) This package adds one ledger action and its writer: no key of any authorable schema is added, removed, renamed or re-shaped and no stored row changes shape, so there is nothing for `objectstack migrate meta` to rewrite. The narrowing the PR declares is plugin-auth's SCIM answer, described in that package's note. -->
+  
+  **BREAKING** in the SCIM behaviour this row belongs to, not in this package: plugin-auth now refuses with SCIM `400 invalidValue` a manager link the admin endpoint would refuse (self, cycle, depth cap, cross-organization); plugin-auth's note has the details. Nothing this package already wrote or read changes.
+  
+  **The new row.** `sys_audit_log.action` gains `scim_manager_unresolved` (label "SCIM Manager Unresolved"), written by the SCIM writer on the `audit` slot (`recordScimManagerUnresolved`, beside `recordScimRefusal`, through the same insert). plugin-auth hands it one event when a SCIM user write it served named an Enterprise User `manager` whose reference resolves to no user that connection provisioned: the write is saved, `manager_id` is left as it was, and the event is recorded with one operator warning and this row.
+  
+  - **Bounded rate.** The row and the warning share one admission: one per SCIM connection per 10-minute window. The next row carries the number held back in between as `metadata.suppressed`. The admission happens inside the SCIM transaction, before the answer is known: a request refused after its reference was admitted still logs the warning and spends the window, so the next served unresolvable reference in that window is counted only in `suppressed`.
+  - **Bounded content.** `actor` is the connection's service principal (`svc:scim:CONNECTION_ID`), `object_name` / `record_id` the `sys_user` the write was about, `tenant_id` the connection's organization, and `metadata` holds `scim_connection_id`, `reference_kind` (`id` or `unreadable`) and `manager_reference`, the reference as the directory sent it, cut to 256 characters (`manager_reference_truncated: true` when it was longer). Nothing else from the request or the user is recorded.
+  - **Only served writes.** A refused request writes no such row (its `scim_refused` row is unchanged), and the row is written after the response, outside the SCIM transaction.
+  
+  Find them in the Audit Log under the "SCIM Manager Unresolved" action, or on the user's own audit history.
+- 52ec26f: feat(plugin-audit): an audit checkpoint signer can sign ES256 beside Ed25519, and a host signer that takes over pins the local keys
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A host `audit.checkpointSigner` whose KMS cannot sign Ed25519 (Azure Key Vault signs EC and RSA keys only) can now sign **ES256** (ECDSA on P-256 with SHA-256). The live check of `os audit verify`, the redaction amendment writer and the offline check of a proof bundle (`--bundle --trusted-key`) all verify it (ADR-0154 D4 and D6, amended).
+  
+  - **The trusted key's type decides the algorithm.** A record carries no algorithm field. The public key a signer's `trustedPublicKey` answers is either an Ed25519 key's raw 32 bytes (unchanged) or an ES256 key's DER SubjectPublicKeyInfo, P-256, point uncompressed. The key id is the lowercase hex SHA-256 of exactly those bytes.
+  - **An ES256 signature is `r || s`, 64 bytes** (IEEE P1363, the JWS form). A signer whose KMS returns DER (AWS KMS, Vault transit by default) converts it before returning. A DER signature does not verify.
+  - **Fails closed.** Any other key type, curve or encoding is untrusted: P-384, RSA, a compressed point, an Ed25519 key in SPKI form. So is a key whose bytes do not hash to the id it was asked under. What such a key signed reads `untrusted_key`. The id check applies to every anchor. The local signer already answers only keys that hash to their id, so no Ed25519 chain changes.
+  - **Unchanged:** Ed25519 key ids, the local signer (Ed25519) and the proof bundle format (`objectstack.audit.proof-bundle.v1`). Every chain sealed before this release verifies as before. An older CLI reads an ES256 key in a bundle as untrusted.
+  
+  **Switching to a host signer.** A registered host signer is the only trust anchor: the local key's derivation is not asked. Before the switch, run `os audit verify --out FILE`. The bundle's `keys` lists each trusted fingerprint with its public key. The host signer's `trustedPublicKey` must answer for exactly those fingerprints beside its own key. If it does, every checkpoint the local key signed stays trusted. If it does not, they all read `untrusted_key`. The `IAuditCheckpointSigner` docblocks in `@objectstack/spec/contracts` state both rules.
+- 23a07c8: fix(plugin-audit): a host checkpoint signer, sink or cluster service that is registered but fails to resolve stops the sealer instead of falling back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The audit sealer (ADR-0154) resolves three host seams on each pass: `audit.checkpointSigner`, `audit.checkpointSink` and `cluster`. It turned every resolution error into "not registered". A host signer whose factory threw (a KMS client that cannot start, a missing credential) was therefore replaced by the local signing key, a failing sink dropped the off-host export, and a failing cluster service let the pass run on the in-process lock. Nothing was logged. A seam registered as a factory was never built at all, because the sealer used the synchronous accessor, so a factory-registered host signer was silently ignored.
+  
+  Now only an absent seam falls back: no host signer signs with the local key, no sink exports nothing, no cluster service takes the in-process lock, all as before. A seam that is registered and resolves is used, including one registered as a factory. A seam that is registered and fails to resolve stops the pass: no checkpoint is signed, and the sealer reports it at `error`, naming the slot, once while it lasts. Each pass retries.
+  
+  A host whose signer, sink or cluster registration was failing used to seal silently with the local key or without its lock; it now seals nothing until the registration is fixed. A working host sees no change.
+- a1082f3: Clause-②: no
+  Metadata-protocol: none
+  
+  The action-invocation, data-export and dataset-query rows in `sys_audit_log` now mark an in-product AI call the way the record-write row does. When the in-product AI performed the call for a person, `metadata` carries `performed_by` (the agent) beside `on_behalf_of` (the person), plus `conversation_id` and, when the person confirmed the call, `confirmation_id`. Before, these three rows read only an OAuth client from `performedBy` and recorded an in-product AI call as the person's own. An OAuth client stays the recorded performer, also when an envelope names both, and its rows never carry the two marks. A person's own call is unchanged. All four row kinds now apply one shared rule inside the package.
+  
+  In `@objectstack/spec`, the `ExecutionContext.performedBy` describe no longer says these three rows record `clientId` only. It now says they record the performer and the two marks by the same rule. The reader rule there and in the `HookContext.provenance.performedByAgentId` describe now also says which tell decides when both apply. The change is describe text only, with no change to schema shape.
+- 9cf74ae: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four refusals the platform writes now carry a `userMessage` in the caller's language (the request locale, else the workspace default), beside a code, status and `message` that do not change. Before this a zh-CN user read each of them in English.
+  
+  - `404 RECORD_NOT_FOUND`: "This record does not exist, or you do not have access to it." (`record_not_found`). It names no id and no API name, and it says both causes because the by-id doors answer an unreadable id exactly as a missing one.
+  - `403 PERMISSION_DENIED` for a query that filters, sorts or groups by a field the caller may not read (`query_field_not_readable`), from all four producers of that refusal: plugin-security, the approval snapshot guard, the audit parent-field guard and analytics. It names no field. The aggregate refusal is unchanged.
+  - `403 DELEGATION_SCOPE_VIOLATION`, a delegated administrator's write outside their own scope (`delegation_scope_violation`). The gate's reason stays in `message`.
+  - `409 RECORD_LOCKED` from an approval's record lock: the localized sentence is now also the `userMessage`, without the `RECORD_LOCKED: ` prefix. The bound refusals that name an API name for the developer mark none.
+  
+  The three sentences are new keys of the shared operation-message catalog (`BUILTIN_OPERATION_MESSAGES`, in `en`, `zh-CN`, `ja-JP` and `es-ES`), so a deployment can override them under `errors.<key>` where the producer holds an i18n service. The widening: `@objectstack/spec` adds the catalog keys `record_not_found`, `query_field_not_readable` and `delegation_scope_violation`; `@objectstack/core` exports `operationUserMessage(messageKey, caller)` and its caller type `UserMessageCaller` for producers that hold no i18n service, and `recordNotFoundError` takes the caller as an optional third argument. Every door that holds the caller's execution context passes it, the action door's subject load, the flow-start door's row admission and the bulk update faces' existence check included, so the same miss reads in the same language at the data, action and flow-start doors.
+- 4c8e853: feat(plugin-audit): an @mention reaches the mentioned person by e-mail as well as the inbox, one e-mail per person per 10-minute window
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Before, a `collab.mention` notification named no channel, so messaging delivered it to the in-app inbox alone. A person who was mentioned while away from the Console never heard of it.
+  
+  - **The mention now also goes by e-mail, on by default.** The mention writer keeps its inbox notice unchanged (one per comment and person). It then sends a second `collab.mention` emit with `channels: ['email']`. Both go through `messaging.emit` (ADR-0030 single ingress). Delivery preferences filter the e-mail like any channel: a person's `sys_notification_preference` row `(collab.mention, email, enabled: false)` mutes the e-mail and keeps the inbox notice. Approvals and every other notification are unchanged.
+  - **One e-mail per person per 10-minute window.** The e-mail emit is deduplicated per organization, person and clock-aligned 10-minute window (`:00`, `:10`, …). The first mention of a person in a window sends the e-mail, and later mentions in that window go to the inbox only. A person gets at most one mention e-mail per window: at most two in any ten minutes when a burst crosses a window edge, and at most 144 a day. Hosted deployments cap platform-sent mail per day, and this is what keeps mentions inside that cap.
+  - **What the e-mail says.** The subject is the notification title ("Alice mentioned you"), in the reader's language. The body is the comment preview, then one line that opens the record the comment is on. That line ships in every locale the plugin-audit catalog carries. The templates are code-declared through `MessagingService.registerBuiltinTemplates`, so an organization's own `sys_notification_template` row for `(collab.mention, email)` overrides them. The link is the inbox notice's `/{object}/{id}`, made absolute by the auth service's `getConsoleUrl`. It carries no token. Without an auth service the link stays relative. A comment whose thread names no record sends no e-mail.
+- 3db857b: fix(plugin-audit): an activity row names a record whose `nameField` is a lookup by the target record's title, and a tracked yes/no change reads as words in the reader's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Lookup `nameField` labels.** An object titled by a lookup or `user` field (a project member with `nameField: 'person'`, a lookup to `sys_user`) was named in its activity rows by the stored foreign key: `Created Project Member "gCX6SR…"` in `record_label` and in every created, updated and deleted sentence, while the record page header showed the person's name. The CRUD mirror now follows such a title field to the target record's own title (ADR-0079's title field of the target), through the same resolver that already titles a referenced record inside a field-change summary: the target's declared API exposure must serve `get`, a credential or `internal` title column is never read, and the read is one `id: { $in }` query per write, projected to the id and the title column. An object titled by any other field pays no read for its label. A multi-value lookup names every title it holds. The label still declares the lookup field as its source, so a reader not served that field is still served the row without it.
+  
+  The title is read as the writer, not as the system. A writer the security layer refuses the target, or serves the target row without its title column, gets the stored value in the label, as before, and never a title the writer could not have read. An id the target has no row for also keeps the stored value. Rows written before this release keep the label they were written with.
+  
+  **Yes/no changes.** A tracked `boolean` or `toggle` field change read as the literals `false → true`, beside select changes that already read through their option labels (`Status: New → Converted; Converted: false → true`). The value is now stored in the summary code as a boolean and worded by two new message keys in the plugin's bundles, `messages.activityValueTrue` and `messages.activityValueFalse`, in all eleven platform languages. The stored sentence uses the write locale, and a read with a locale re-composes it in the reader's locale, as the verb templates are (`Converted: No → Yes`, zh-CN `已转化: 否 → 是`). A boolean field that declares its own options keeps reading through them. A fired milestone's sentence is the author's and still interpolates a boolean token as stored.
+- 1ee3bb8: fix(plugin-audit): an activity text that names a referenced record by its title is served only to a reader served that title field and admitted to its object
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **The rule.** An activity row names a referenced record by its title in three places: the record label of an object whose `nameField` is a lookup or `user` field, a tracked reference field's change, and a fired milestone's reference token. Each such text is served to a reader only when both of these hold for the object every such reference points at, the two answers `$expand` judges a target's title by at that level:
+  
+  - the reader is served the target object's title field (its ADR-0079 `nameField`) unmasked, by the security service's field answer, which also withholds a formula title computed from a field the reader may not read; and
+  - the security service admits the reader to the target object. A reference field that declares `referenceNameVisible` lifts this object-level admission and never the field-level rule, as it does on `$expand`.
+  
+  Otherwise the text is served the way any activity text composed from a field the reader is not served already is: the row keeps its `record_id`, and the label or summary is left out of the row. A reader served each referenced title field and admitted to each referenced object, and every system read, are served the row as before.
+  
+  A target's declared API exposure (ADR-0049) is decided where its title is read: the mirror titles a reference only when the target's exposure serves `get`, and names every other referenced record by its stored id, so one sentence can title one reference and name another by its id. Such a sentence is judged by the two answers above for every reference it names, whatever the target's exposure.
+  
+  The judgement is made at read time from the security service's answers, once per referenced object per read; no row is read for it, and rows already written are judged the same way.
+- 047f37b: fix(plugin-audit): an activity summary names a referenced record by a title the writer may read, else by its id
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An activity row's summary can name a record another field points at: a tracked lookup change (`Account: Acme → Globex`) or a fired milestone's `{token}` (`Deal won by {owner}`). That title is now read in the writer's scope, the scope the row's own record label is already read in. When the writer may not read the referenced record, or may read it without its title column, the summary names it by its stored id, as it does for a record that no longer exists. The rule holds per id, so one change can title the side the writer may read and keep the id of the side it may not.
+  
+  A writer who may read the referenced record, and every system write, gets the same summary as before. Rows already written keep the summary they were written with.
+- Updated dependencies [e53e02e]
+- Updated dependencies [35c9a30]
+- Updated dependencies [1f923d7]
+- Updated dependencies [a00b422]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [5af956f]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [b109659]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [9a7f8c1]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [8f052e9]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [54f8e16]
+- Updated dependencies [bb3c163]
+- Updated dependencies [3c2fb32]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [4176c95]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [568d416]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [6844e6b]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [6080387]
+- Updated dependencies [8fd5004]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [803f909]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [a8e09bb]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [b91cefa]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [cc5472e]
+- Updated dependencies [a825152]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [0465f4a]
+- Updated dependencies [2487242]
+- Updated dependencies [3a78b89]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [6880b04]
+- Updated dependencies [d18d54b]
+- Updated dependencies [1354d2a]
+- Updated dependencies [0593356]
+- Updated dependencies [a2bb7d5]
+- Updated dependencies [6aeb665]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/objectql@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

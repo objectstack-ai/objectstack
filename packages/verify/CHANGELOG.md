@@ -1,5 +1,272 @@
 # @objectstack/verify
 
+## 18.6.0
+
+### Patch Changes
+
+- 8b7c5d5: fix(plugin-auth)!: accepting, declining and listing an organization invitation need a verified email address on every deployment, and an invitation sign-up joins by accepting once verified
+  
+  Clause-②: no (narrowing) — narrowed: from a session whose email address is not verified, `POST /api/v1/auth/organization/accept-invitation` and `POST /api/v1/auth/organization/reject-invitation` answer `403 EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION` and `GET /api/v1/auth/organization/list-user-invitations` answers `403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION`, on every deployment, whatever the state of its mail transport; nothing is accepted or declined and no membership is written. Under the `invite_only` posture with `membershipPolicy: 'auto'`, a sign-up admitted by the invitation it presents is not bound to the Default Organization while its address is unverified; it joins by accepting the invitation. The codes are better-auth's own. The `sys_invitation` actions **Accept Invitation** and **Decline Invitation** post to those routes and answer the same.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches accepting an organization invitation or invitation sign-up; `content/docs/deployment/self-hosting.mdx` gains the rules in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answers are runtime refusals at three organization invitation routes and a membership the sign-up seam does not write for an unverified invitation sign-up, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment whose people answer invitations with an address that is not verified: email verification off (the default under `invite_only`, or declared off under `open`), no live mail transport, or a social or SSO provider that does not verify the address.
+  
+  - Accepting, declining and listing an organization invitation require a verified email address, on every deployment. A password account verifies by the verification mail; an account a social or SSO provider made counts only when the provider verified the address. The invitation's id, which its accept link and a copied link carry, is no proof of the mailbox, and no setting relaxes the rule.
+  - Reading one invitation by its id (`GET /api/v1/auth/organization/get-invitation`) stays open, so the accept page can show it.
+  - Under `invite_only` with `membershipPolicy: 'auto'`, an account a sign-up admitted by the invitation it presents is not bound to the Default Organization while its address is unverified. Its membership comes from accepting the invitation once the address is verified, with the role the invitation carries, or from a platform administrator.
+  - A deployment without a live mail transport cannot onboard a password account by invitation link; an invitee whose social or SSO provider verifies the address can still accept a copied link there.
+  
+  Unchanged: the invitation mail's own link, which carries a proof of the mailbox and accepts in one step (`POST /api/v1/auth/organization/accept-invitation-one-step`); a verified account, which accepts, declines and lists its invitations as before; the first account of a deployment, accounts an administrator creates and accounts a boot command provisions, which are bound as before; sending, resending and cancelling invitations.
+  
+  The Console's accept-invitation page answers a refused decline with the verification-mail screen for the account's address, as it answers a refused accept, and that screen's link brings the person back to answer the invitation.
+  
+  `@objectstack/verify`: a booted stack's `signUp` mints its fixture member through the operator door (the ticket the stack's own auth manager stages for that address), so the account is bound at creation as before; a stack whose auth service offers no such door falls back to the invitation lane.
+  
+  What to do: an invitee completes the verification mail (`POST /api/v1/auth/send-verification-email`, then the link it carries) before answering, or opens the invitation mail's own link. On a deployment with no live mail transport, a platform administrator creates the account (`POST /api/v1/auth/admin/create-user`) or attaches an account that already exists with the member list's **Add Member** action, which is open to platform administrators only and attaches existing accounts only.
+- Updated dependencies [e53e02e]
+- Updated dependencies [35c9a30]
+- Updated dependencies [661ede2]
+- Updated dependencies [1f923d7]
+- Updated dependencies [4f20614]
+- Updated dependencies [a00b422]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [afba96e]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [99a6ec0]
+- Updated dependencies [69783b7]
+- Updated dependencies [329f2f7]
+- Updated dependencies [5af956f]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [66f6638]
+- Updated dependencies [a061708]
+- Updated dependencies [b820e16]
+- Updated dependencies [b109659]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [9a7f8c1]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [8f052e9]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [54f8e16]
+- Updated dependencies [1381f08]
+- Updated dependencies [60fca0f]
+- Updated dependencies [64807a9]
+- Updated dependencies [bb3c163]
+- Updated dependencies [3c2fb32]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [4176c95]
+- Updated dependencies [d6b1c2e]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [b4ce310]
+- Updated dependencies [7d42ba0]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [568d416]
+- Updated dependencies [d01f399]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [d6d0090]
+- Updated dependencies [ee90935]
+- Updated dependencies [6091b64]
+- Updated dependencies [f53bcce]
+- Updated dependencies [6844e6b]
+- Updated dependencies [021abd4]
+- Updated dependencies [44fc2fc]
+- Updated dependencies [61ded62]
+- Updated dependencies [0d1443d]
+- Updated dependencies [0d1443d]
+- Updated dependencies [d3bea96]
+- Updated dependencies [44fc2fc]
+- Updated dependencies [888c3e1]
+- Updated dependencies [18194fb]
+- Updated dependencies [18194fb]
+- Updated dependencies [c47e4ea]
+- Updated dependencies [5c0b6f6]
+- Updated dependencies [75ab117]
+- Updated dependencies [6080387]
+- Updated dependencies [8fd5004]
+- Updated dependencies [071323e]
+- Updated dependencies [898655a]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [6cc3f97]
+- Updated dependencies [183a89e]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [803f909]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [162fe54]
+- Updated dependencies [c9ef653]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [43dd565]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [80cdbd4]
+- Updated dependencies [89d5a41]
+- Updated dependencies [842637a]
+- Updated dependencies [c4c0794]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [23a07c8]
+- Updated dependencies [b6a22b1]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [e3ef29f]
+- Updated dependencies [c77f8ca]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [1a30a17]
+- Updated dependencies [a8e09bb]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [d0348cf]
+- Updated dependencies [b91cefa]
+- Updated dependencies [4fb8790]
+- Updated dependencies [36af6b0]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e95210d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [583bbf3]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [cc5472e]
+- Updated dependencies [a825152]
+- Updated dependencies [c513d62]
+- Updated dependencies [c6ecd1f]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [4771d66]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [4c8e853]
+- Updated dependencies [b633afe]
+- Updated dependencies [44c7a4a]
+- Updated dependencies [0c60897]
+- Updated dependencies [6320abb]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [e556e3a]
+- Updated dependencies [46991d0]
+- Updated dependencies [a841e26]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [0465f4a]
+- Updated dependencies [2487242]
+- Updated dependencies [c0665c0]
+- Updated dependencies [3a78b89]
+- Updated dependencies [92a5cac]
+- Updated dependencies [6932cb8]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [bcfc8e4]
+- Updated dependencies [80d474b]
+- Updated dependencies [3b4ffb2]
+- Updated dependencies [0ad377c]
+- Updated dependencies [3db857b]
+- Updated dependencies [1ee3bb8]
+- Updated dependencies [047f37b]
+- Updated dependencies [348fbc0]
+- Updated dependencies [ea1edf9]
+- Updated dependencies [0ff3b14]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [f84dc19]
+- Updated dependencies [6dd5716]
+- Updated dependencies [5d01679]
+- Updated dependencies [c37e47a]
+- Updated dependencies [3f5ffe7]
+- Updated dependencies [8319820]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [8b7c5d5]
+- Updated dependencies [6880b04]
+- Updated dependencies [d18d54b]
+- Updated dependencies [1354d2a]
+- Updated dependencies [0593356]
+- Updated dependencies [e735892]
+- Updated dependencies [a2bb7d5]
+- Updated dependencies [6aeb665]
+- Updated dependencies [6eceb46]
+- Updated dependencies [6feea4e]
+- Updated dependencies [a8261ce]
+- Updated dependencies [c1ec627]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/plugin-auth@18.6.0
+  - @objectstack/plugin-audit@18.6.0
+  - @objectstack/objectql@18.6.0
+  - @objectstack/rest@18.6.0
+  - @objectstack/runtime@18.6.0
+  - @objectstack/plugin-security@18.6.0
+  - @objectstack/service-settings@18.6.0
+  - @objectstack/plugin-email@18.6.0
+  - @objectstack/service-automation@18.6.0
+  - @objectstack/service-analytics@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/service-storage@18.6.0
+  - @objectstack/plugin-sharing@18.6.0
+  - @objectstack/mcp@18.6.0
+  - @objectstack/service-messaging@18.6.0
+  - @objectstack/service-job@18.6.0
+  - @objectstack/plugin-approvals@18.6.0
+  - @objectstack/plugin-webhooks@18.6.0
+  - @objectstack/metadata@18.6.0
+  - @objectstack/plugin-hono-server@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/plugin-pinyin-search@18.6.0
+  - @objectstack/service-datasource@18.6.0
+  - @objectstack/service-mailbox@18.6.0
+  - @objectstack/service-queue@18.6.0
+  - @objectstack/service-realtime@18.6.0
+  - @objectstack/service-cache@18.6.0
+  - @objectstack/service-package@18.6.0
+  - @objectstack/service-push@18.6.0
+  - @objectstack/service-sms@18.6.0
+  - @objectstack/trigger-api@18.6.0
+  - @objectstack/trigger-record-change@18.6.0
+  - @objectstack/trigger-schedule@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes
