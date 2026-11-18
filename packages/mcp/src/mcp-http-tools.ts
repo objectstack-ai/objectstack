@@ -344,6 +344,38 @@ export interface McpDataBridge {
     },
   ): Promise<unknown[]>;
   /**
+   * `aggregate_records` with an `orderBy` or a `limit`: the groups ORDERED by
+   * an aggregated column (an aggregation alias or a group key's projected
+   * name), CUT to at most `limit`, and `totalGroups`, how many groups existed
+   * before the cut — all three computed by the driver's own statement
+   * (`@objectstack/objectql` `aggregate-order-cut.ts`, which the bridge
+   * reaches through `engine.aggregate`'s read option). The bridge runs it
+   * through every gate {@link aggregate} runs. A driver that cannot order and
+   * cut groups in its own statement refuses (`INVALID_QUERY` / 400), and the
+   * bridge throws that refusal; it never orders or cuts the groups itself.
+   *
+   * OPTIONAL, separately from {@link aggregate}: a bridge without it registers
+   * `aggregate_records` as before, and the tool refuses an `orderBy` / `limit`
+   * rather than cut an unordered list (`NOT_IMPLEMENTED` / 501).
+   */
+  aggregateGroups?(
+    object: string,
+    opts: {
+      where?: Record<string, unknown>;
+      groupBy?: NonNullable<EngineAggregateOptions['groupBy']>;
+      aggregations: NonNullable<EngineAggregateOptions['aggregations']>;
+      timezone?: string;
+      /**
+       * A key's `rank` orders a group key by its values' positions in the list
+       * (a declared option order read off the served schema), any value it
+       * does not list after every listed one — the tool's own, never a caller
+       * argument.
+       */
+      orderBy: Array<{ field: string; order: 'asc' | 'desc'; rank?: ReadonlyArray<string | number> }>;
+      limit?: number;
+    },
+  ): Promise<{ rows: unknown[]; totalGroups: number }>;
+  /**
    * [#35138] The caller's locale ladder for a sentence the tools compose into
    * a result (`ifNotRecorded`): the codes in order, the shared picker
    * (`pickSentenceLocale`, `@objectstack/core`) choosing the first language
@@ -883,6 +915,62 @@ function declaredOptionRank(def: Record<string, unknown> | undefined): Map<unkno
 }
 
 /**
+ * [#35138] The leading group keys whose groups follow a declared option order,
+ * each with its {@link declaredOptionRank}: read in `groupBy` order while each
+ * key is a single-option field ({@link OPTION_ORDERED_GROUP_TYPES}) the served
+ * schema declares options for; the first key that is not one ends the reading.
+ * Both paths of `aggregate_records` take the rule from here: the uncut path
+ * sorts by it ({@link inDeclaredOptionOrder}), the order-and-cut path hands it
+ * to the database ({@link declaredOptionOrderBy}).
+ */
+function declaredOptionOrderKeys(
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): Array<{ column: string; rank: Map<unknown, number> }> {
+  const keys: Array<{ column: string; rank: Map<unknown, number> }> = [];
+  for (const entry of groupBy ?? []) {
+    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
+    // A bucketed key is a period, not a declared option.
+    if (item.dateGranularity !== undefined) break;
+    const rank = declaredOptionRank(servedFieldOf(fields, item.field));
+    if (!rank) break;
+    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
+    keys.push({ column, rank });
+  }
+  return keys;
+}
+
+/**
+ * The most values one order key's `rank` may list: `@objectstack/objectql`'s
+ * `AGGREGATE_ORDER_RANK_MAX` (a declared option list, not a data set), which
+ * this package does not import at runtime. A longer declared list ends the
+ * reading at its key rather than send a rank the engine refuses.
+ */
+const ORDER_RANK_MAX = 500;
+
+/**
+ * [aggregate order and cut] The declared option order of
+ * {@link declaredOptionOrderKeys} as the order-and-cut path's `orderBy`, for a
+ * call with a `limit` and no `orderBy` of its own: each leading option-ordered
+ * key ascending by its `rank`, so the database orders the groups, and a value
+ * no option declares (a NULL among them) after every declared one, before the
+ * cut. The engine orders the group keys after these ascending. Empty when no
+ * leading key has a declared order.
+ */
+function declaredOptionOrderBy(
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): Array<{ field: string; order: 'asc'; rank: Array<string | number> }> {
+  const orderBy: Array<{ field: string; order: 'asc'; rank: Array<string | number> }> = [];
+  for (const { column, rank } of declaredOptionOrderKeys(groupBy, fields)) {
+    const values = [...rank.keys()];
+    if (values.length > ORDER_RANK_MAX || !values.every((v) => typeof v === 'string' || typeof v === 'number')) break;
+    orderBy.push({ field: column, order: 'asc', rank: values as Array<string | number> });
+  }
+  return orderBy;
+}
+
+/**
  * [#35138] `aggregate_records`' groups in the option order the caller's
  * served schema declares, for a call that states no order of its own.
  *
@@ -904,16 +992,7 @@ function inDeclaredOptionOrder(
   groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
   fields: Record<string, unknown>,
 ): unknown[] {
-  const keys: Array<{ column: string; rank: Map<unknown, number> }> = [];
-  for (const entry of groupBy ?? []) {
-    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
-    // A bucketed key is a period, not a declared option.
-    if (item.dateGranularity !== undefined) break;
-    const rank = declaredOptionRank(servedFieldOf(fields, item.field));
-    if (!rank) break;
-    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
-    keys.push({ column, rank });
-  }
+  const keys = declaredOptionOrderKeys(groupBy, fields);
   if (keys.length === 0) return rows;
   const position = (row: unknown, key: { column: string; rank: Map<unknown, number> }): number => {
     const value = row !== null && typeof row === 'object' ? (row as Record<string, unknown>)[key.column] : undefined;
@@ -3768,6 +3847,17 @@ export function registerObjectTools(
             'read with the caller\'s own permissions. Name such a group by its __label, never by the id; ' +
             'where a group has no __label, its record cannot be named, so say that rather than quoting the id. ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
+            // [aggregate order and cut] A ranking question ("the top five
+            // customers by revenue") is answered by the database: ordered,
+            // cut, and the number of groups before the cut stated.
+            'For a ranking (top or bottom N), set orderBy to an aggregation alias or a group key and limit to N: ' +
+            'the database orders and cuts the groups, and totalGroups says how many groups existed before the cut. ' +
+            // The database ranks a per-record-currency amount by its bare
+            // numbers, whatever each group's currency; the caller keeps the
+            // ranking to one currency.
+            'Ranking an amount whose records each carry their own currency compares bare numbers across currencies: ' +
+            'rank it inside one currency by filtering where on its currency code field. ' +
+            `At most ${maxLimit} groups come back; truncated: true says more existed. ` +
             'Runs under the caller\'s permissions, row-level security and field-level security.',
           inputSchema: strictToolInput(
             {
@@ -3783,6 +3873,13 @@ export function registerObjectTools(
                 aggs: 'aggregations',
                 tz: 'timezone',
                 timeZone: 'timezone',
+                sort: 'orderBy',
+                sortBy: 'orderBy',
+                order: 'orderBy',
+                order_by: 'orderBy',
+                top: 'limit',
+                take: 'limit',
+                pageSize: 'limit',
               },
             },
             {
@@ -3826,41 +3923,97 @@ export function registerObjectTools(
               .string()
               .optional()
               .describe('IANA timezone for date bucketing (defaults to UTC)'),
+            orderBy: z
+              .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
+              .max(8)
+              .optional()
+              .describe(
+                'Order of the groups, by an aggregation alias or a group key (its alias when it has one), '
+                  + 'e.g. [{"field":"total","order":"desc"}]; computed by the database',
+              ),
+            limit: z
+              .number()
+              .int()
+              .positive()
+              .max(maxLimit)
+              .optional()
+              .describe(`Most groups to return (≤ ${maxLimit}); the cut is taken by the database, after orderBy`),
             },
           ),
           annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         },
-        async ({ objectName, aggregations, groupBy, where, timezone }) => {
+        async ({ objectName, aggregations, groupBy, where, timezone, orderBy, limit }) => {
           const bad = await readGuard(objectName);
           if (bad) return errorResult(bad);
           try {
+            // [#35138] Read off the object as the caller is served it: the
+            // declared option order of a select group key, and the one
+            // currency of a fixed-currency amount. Only when the call has a
+            // group key or an amount column to read it for.
+            const readServedFields = () => (groupBy?.length ?? 0) > 0
+              || aggregations.some((a) => AMOUNT_AGGREGATE_FUNCTIONS.has(a.function) && typeof a.field === 'string')
+              ? servedFieldsOf(bridge, objectName)
+              : Promise.resolve(undefined);
+            // [#35138] Each lookup key's record named beside it, read as the
+            // caller, for the groups served only: one rule for both paths,
+            // applied after the cap or the cut.
+            const labelServed = async (served: unknown[], fields: Record<string, unknown> | undefined) => fields
+              ? withLookupGroupLabels(bridge, served, groupBy, fields, async (name) => (await readGuard(name)) === undefined)
+              : served;
+            if (orderBy !== undefined || limit !== undefined) {
+              // [aggregate order and cut] Ordered, cut and counted by the
+              // driver's own statement, through the bridge's member for it;
+              // one group past the cap is asked for, so `truncated` is a fact
+              // (the capped-list key every read tool shares), and `totalGroups`
+              // is the statement's own count of the groups before the cut.
+              // ⛔ Never sorted or sliced from an uncut list here.
+              if (typeof bridge.aggregateGroups !== 'function') {
+                return codedErrorResult({
+                  code: StandardErrorCode.enum.NOT_IMPLEMENTED,
+                  status: 501,
+                  message:
+                    `aggregate_records on '${objectName}': this server cannot order or cut groups in the database, `
+                    + 'and never orders or cuts them in the application instead. Ask without orderBy and limit.',
+                });
+              }
+              const cap = Math.min(limit ?? maxLimit, maxLimit);
+              const fields = await readServedFields();
+              const answer = await bridge.aggregateGroups(objectName, {
+                where,
+                groupBy,
+                aggregations,
+                timezone,
+                // [#35138] A call that states no order of its own gets the
+                // declared option order, taken by the database before the cut.
+                // ⛔ An `orderBy` the caller sent is never changed.
+                orderBy: orderBy ?? (fields ? declaredOptionOrderBy(groupBy, fields) : []),
+                limit: cap + 1,
+              });
+              const groups = Array.isArray(answer?.rows) ? answer.rows : [];
+              const cut = groups.length > cap;
+              const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
+              return textResult({
+                rows: await labelServed(cut ? groups.slice(0, cap) : groups, fields),
+                totalGroups: answer.totalGroups,
+                ...(cut ? { truncated: true } : {}),
+                ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
+              });
+            }
             const rows = (await aggregateFn(objectName, {
               where,
               groupBy,
               aggregations,
               timezone,
             })) ?? [];
-            // [#35138] Read off the object as the caller is served it: the
-            // declared option order of a select group key, and the one
-            // currency of a fixed-currency amount. Only when the call has a
-            // group key or an amount column to read it for.
-            const fields = (groupBy?.length ?? 0) > 0
-              || aggregations.some((a) => AMOUNT_AGGREGATE_FUNCTIONS.has(a.function) && typeof a.field === 'string')
-              ? await servedFieldsOf(bridge, objectName)
-              : undefined;
+            const fields = await readServedFields();
             const groups = fields ? inDeclaredOptionOrder(rows, groupBy, fields) : rows;
             const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
             // Group count is unbounded (a high-cardinality groupBy can return
             // thousands of rows) — cap the tool output like query_records does.
             const truncated = groups.length > maxLimit;
             const served = truncated ? groups.slice(0, maxLimit) : groups;
-            // [#35138] Each lookup key's record named beside it, read as the
-            // caller, for the groups served only.
-            const labelled = fields
-              ? await withLookupGroupLabels(bridge, served, groupBy, fields, async (name) => (await readGuard(name)) === undefined)
-              : served;
             return textResult({
-              rows: labelled,
+              rows: await labelServed(served, fields),
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
               ...(Object.keys(currencies).length > 0 ? { currencies } : {}),

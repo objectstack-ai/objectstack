@@ -269,6 +269,12 @@ export type { DatasourceDef } from './engine.js';
 // refuses the filter rather than truncate it, and its words name this number.
 // Exported so a caller running the two-step route itself can page by it.
 export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
+// Groups ordered by an aggregated column, cut and counted in the driver's own
+// statement: the engine-internal read option a door carries to `aggregate`,
+// and the request it carries. Carriers that do not import this package spell
+// the key `Symbol.for`, as it does.
+export { AGGREGATE_ORDER_CUT } from './aggregate-order-cut.js';
+export type { AggregateOrderCutRequest, AggregateOrderKey, AggregateOrderCutOutcome } from './aggregate-order-cut.js';
 // "Each X with its latest Y": the engine-internal read option a door carries
 // to `find` for one row per group, and the request it carries. The carriers
 // that do not import this package spell the key `Symbol.for`, as it does.
