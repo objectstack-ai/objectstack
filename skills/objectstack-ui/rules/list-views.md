@@ -9,12 +9,6 @@
 
 ## Configuring a List View
 
-A list view's `type`: `grid` (the default table), `kanban` (a board by status),
-`gallery` (cards over an image, avatar or file field), `calendar`, `timeline`
-(a chronological stream), `gantt` (start/end bars with dependencies), `map`
-(`location` fields), `chart` (an aggregate over the object), `tree` (a
-self-referencing hierarchy).
-
 ### The `defineView` container (`*.view.ts` file shape)
 
 Views ship **inside a `defineView` container** — one per object, aggregating

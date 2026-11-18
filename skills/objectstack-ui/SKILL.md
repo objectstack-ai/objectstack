@@ -25,8 +25,6 @@ metadata:
 
 # UI Design — ObjectStack UI Protocol
 
-This page routes; keys and option lists live in the contract (first check 3).
-
 ## First checks
 
 1. **Version.** This skill targets the `@objectstack/spec` major in its
@@ -38,65 +36,47 @@ This page routes; keys and option lists live in the contract (first check 3).
    go). Add beside what is there; reuse a declared dataset, field group or view.
 3. **Read the type's contract.** [references/_index.md](./references/_index.md)
    points at each type's Zod source in `node_modules/@objectstack/spec/src/`.
-   `Read` it for exact keys, enum members and refusals; do not rely on memory
-   of property names. A running environment serves the same contract as JSON
-   Schema: `GET /api/v1/meta/types`, `entries[].schema`.
+   `Read` it for exact keys, enum members and refusals, never from memory: it
+   decides what to write. A running environment serves the parsed shape as
+   JSON Schema (`GET /api/v1/meta/types`, `entries[].schema`): a defaulted
+   key reads as required and a bare-string predicate as `{}`.
 4. **Verify before reporting done.** `os validate` (`npm run validate` in a
-   scaffolded project; `os build` runs the same gates). It catches a bare field
-   ref in a predicate (`done` for `record.done`) and a widget `dataset` /
-   `dimensions` / `values` that resolves to nothing declared (an empty chart).
-   The traps below pass it.
+   scaffolded project; `os build` runs the same gates). The traps below pass
+   it.
 
 ## Traps — each parses, then fails at run time
 
-1. **Keep the view kind the request names.** A photo wall, card wall or
-   catalogue of covers is `gallery` (an image, avatar or file field as
-   `gallery.coverField`), a schedule or timeline over a start/end date pair is
-   `gantt`, a board is `kanban`; never downgrade a named kind to `grid`: the
-   file parses and the user opens a table. "Add a board" is a NEW `listViews`
-   entry, never `list` retyped, and a board over a field added in the same
-   change opens empty:
-   [List Views](./rules/list-views.md#adding-a-board-calendar-gallery-or-gantt-beside-the-list).
-2. **A long form stays `simple`**: collapse what is rarely filled and size it
+Two more: [List Views](#list-views), [Actions](#actions).
+
+1. **A long form stays `simple`**: collapse what is rarely filled and size it
    with `columns` and `modalSize`. `tabbed` flags a required field only on its
    own tab and overflows on a phone
    ([Form Views](./rules/list-views.md#form-views)).
-3. **A record entered with its line items is `inlineEdit` on the child's
+2. **A record entered with its line items is `inlineEdit` on the child's
    `master_detail` field**, before any custom page, and its grid needs no "Add
    line" button. A parent or child declaring `enable.apiMethods` must list
    `'bulk'`, or the save is refused `405`
    ([Master-Detail Forms](./rules/list-views.md#master-detail-forms-parent--child-line-items)).
-4. **An operation is an `action`, never a view, and a write button must
-   write.** "Mark as done", "approve", "set status to X" is `defineAction` with
-   `objectName` and `locations`; with neither `locations` nor a view naming it,
-   it renders nowhere. `ctx.record` is a read-only snapshot and the body's
-   return value is applied to nothing: a body that returns or assigns the new
-   values reports success and changes nothing. Call the API:
-   `type: 'script'`,
-   `body: { language: 'js', source: "await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });", capabilities: ['api.write'] }`,
-   with the option `value`, never its label ([Actions](./rules/actions.md)).
-5. **A persisted chart binds a declared dataset.** A widget or report names a
+3. **A persisted chart binds a declared dataset.** A widget or report names a
    `defineDataset` and selects its `dimensions` / `values` by name; an object
    without one has no analytics face. A dataset is narrow: a window, a to-many
    rollup or a computed dimension is a stored field or app code, never forced
    into one; an ad-hoc chart in a `kind: 'react'` page needs none. Read
    [Dashboards](./rules/dashboards.md#dataset-bound-widgets) before writing any
    widget, dataset or chart.
-6. **A filter token is presentation scope, not security.** `{current_user_id}`,
+4. **A filter token is presentation scope, not security.** `{current_user_id}`,
    `{today}` and the rest (vocabulary: objectstack-query → `rules/filters.md`,
    load it before writing one; an unrecognised token is a build error) decide
    what a surface *shows*; RLS decides what a caller may *read*. Such a filter
    must never be what keeps a user from someone else's data.
-7. **The object declares its record page.** Related lists, their order and
+5. **The object declares its record page.** Related lists, their order and
    filter are flags on the object and its fields, not a page file; how a record
    opens is one list-view key, and the reader's own display choices are never
    metadata ([Record Page](./rules/record-page.md)).
 
 ## Where to go
 
-Open the file before writing: the rules and examples are there.
-
-| Authoring | In | Open |
+| Authoring | In | Open first |
 |:--|:--|:--|
 | A list, board, calendar, gallery or gantt: columns, `filter`, quick filters, toolbar search, sorting, grouping | `src/views/*.view.ts` | [List Views](./rules/list-views.md) |
 | A form (`simple` / `tabbed` / `wizard`), master-detail (a parent with line items), a public form, field conditional rules | `src/views/*.view.ts` | [Form Views](./rules/list-views.md#form-views) |
@@ -106,6 +86,24 @@ Open the file before writing: the rules and examples are there.
 | A number, chart, KPI or report over records: datasets, widgets, dashboard filters, `compareTo`, date bucketing, drilldown, cubes | `src/datasets/*.dataset.ts`, `src/dashboards/*.dashboard.ts`, `src/reports/*.report.ts` | [Dashboards](./rules/dashboards.md) |
 | A page (regions, components, print, `kind: 'html'` / `'react'` source, styling) or package docs | `*.page.ts`, `src/docs/*.md` | [Pages & Docs](./rules/pages.md) |
 | The props of a block in a `kind: 'react'` page | | [react-blocks.md](./references/react-blocks.md) |
+
+## View Types
+
+### List Views
+
+A list view's `type`: `grid` (the default table), `kanban` (a board by status),
+`gallery` (cards over an image, avatar or file field), `calendar`, `timeline`
+(a chronological stream), `gantt` (start/end bars with dependencies), `map`
+(`location` fields), `chart` (an aggregate over the object), `tree` (a
+self-referencing hierarchy).
+
+**Keep the kind the request names.** A photo wall, card wall or catalogue of
+covers is `gallery` (an image, avatar or file field as `gallery.coverField`),
+a schedule or timeline over a start/end date pair is `gantt`, a board is
+`kanban`; never downgrade a named kind to `grid`: the file parses and the user
+opens a table. "Add a board" is a NEW `listViews` entry, never `list` retyped,
+and a board over a field added in the same change opens empty:
+[List Views](./rules/list-views.md#adding-a-board-calendar-gallery-or-gantt-beside-the-list).
 
 ## App Navigation
 
@@ -121,15 +119,24 @@ type's keys: [Navigation](./rules/navigation.md).
 | `group` | Collapsible group of items |
 | `object` | An object list, a named view, a record deep-link, or a `filters` slice |
 | `dashboard` | A dashboard |
-| `report` | A report; no `reportName` = the app's report index |
+| `report` | A report |
 | `page` | A custom Page |
 | `url` | External or custom URL |
 | `action` | Run an action instead of navigating |
-| `component` | Built-in platform component; `componentRef` is a colon-joined registry key (`metadata:resource`) |
-| `doc` | Package docs; inherits the docs audience |
+| `component` | Built-in platform component |
+| `doc` | Package docs |
 | `separator` | Visual separator |
 
 ## Actions
+
+**An operation is an `action`, never a view, and a write button must write.**
+"Mark as done", "approve", "set status to X" is `defineAction` with
+`objectName` and `locations`; with neither `locations` nor a view naming it,
+it renders nowhere. `ctx.record` is a read-only snapshot and the body's return
+value is applied to nothing: a body that returns or assigns the new values
+reports success and changes nothing. Call the API: `type: 'script'`,
+`body: { language: 'js', source: "await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });", capabilities: ['api.write'] }`,
+with the option `value`, never its label ([Actions](./rules/actions.md)).
 
 ### Action Types
 

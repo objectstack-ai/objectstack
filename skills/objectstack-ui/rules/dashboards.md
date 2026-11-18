@@ -37,8 +37,9 @@ dashboard widget, a report, and a list `type:'chart'` view all **bind a `dataset
 and select named `dimensions` + `values`**; the dataset owns the base object,
 allowed joins, intrinsic filter, dimensions, and certified measures. A widget
 **requires `dataset` + `values`**; the closed schema rejects `object` /
-`categoryField` / `valueField` / `aggregate` by name, and one lacking `dataset`
-fails `os validate`.
+`categoryField` / `valueField` / `aggregate` by name, and one lacking `dataset`,
+or naming a `dataset` / `dimensions` / `values` that resolves to nothing
+declared (an empty chart), fails `os validate`.
 
 A widget's presentation-scope `filter` flows into the query as the runtime
 filter; keep `filter` on the widget when binding a dataset.
