@@ -181,8 +181,12 @@ const REFUSED_AT_TYPE = 0;
  * refused at `type` for the same reason: the bare `row-table` is the one
  * authorable key, and its arm landed with it. A named stopgap raise of that
  * one key; any other rise is still a regression.
+ * objectstack#34382: plus `plugin-timesheet:object-timesheet`, the namespaced
+ * twin of the timesheet list view's renderer, registered the way every view
+ * plugin is; the bare `object-timesheet` is the one authorable key, and its arm
+ * landed with it. A named stopgap raise of that one key, on #31856's terms.
  */
-const NAMESPACED_REFUSED_AT_TYPE = 307;
+const NAMESPACED_REFUSED_AT_TYPE = 308;
 
 /** The bare registry keys — the population the card measured. */
 const BARE_KEYS = KNOWN_SCHEMA_TYPES.filter((key) => !key.includes(':'));

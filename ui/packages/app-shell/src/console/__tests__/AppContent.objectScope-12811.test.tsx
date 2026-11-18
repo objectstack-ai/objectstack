@@ -300,7 +300,13 @@ describe('an object outside the package is read by name, behind the skeleton (ob
     server.holdByName = true;
     boot('/apps/crm/crm_account');
     await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact'));
-    expect(server.calls).toContain('object/sys_user');
+    // The lookup target's by-name read goes out once its `?names=` presence
+    // read has answered it served (objectstack#34188), a render after the
+    // package list let the route draw: wait for that read, never assume it
+    // went out in the same render as the list's first paint. It is held, so
+    // the list drawn without it is still the route not waiting for it.
+    await waitFor(() => expect(server.calls).toContain('object/sys_user'));
+    expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact');
     expect(screen.getByTestId('object-view')).not.toHaveTextContent('sys_user');
 
     act(() => server.release());
