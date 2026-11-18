@@ -58,11 +58,14 @@ wrote its business definition) outranks a number you work out yourself.
 | One word matches several measures, in one dataset or in two | Ask the user which one they mean. List each candidate's label, its dataset's label and its description. Do not pick one. |
 | Only a dimension matches | That is a grouping ("by stage"), not a number. You still need a measure match; without one, ask which number is meant. |
 | A word matches nothing, and `candidates` lists members for it, one or several | Ask the user which one they mean, listing each candidate's label, its dataset's label and its description; with one candidate, ask whether it is the one meant. Do not pick one. |
-| No match and no candidates for the word for a thing measured | Step 4, and say in the answer that no governed metric was used. |
+| No match and no candidates for the word for a thing measured | Step 4. |
 | `membersWithheld: true` on a dataset | Say that it has members (measures or groupings) you may not read; the metric asked for may be among them. Do not say the metric does not exist. |
 
-When you ask, the reply is the question alone: no figure, and no tool call
-until the user answers. State no figure of your own in it (no count, total
+When the answer has `nextStep`, follow its `decision` and `note`; cite a
+`query_dataset` answer's `sourceLine` as given.
+
+When you ask, the reply is the question alone: no tool call until the user
+answers. State no figure of your own in it (no count, total
 or option number): name each option by its label in a bullet, and quote its
 description as written. Ask only about matches or candidates for words the user
 wrote; when their word matched nothing and has no candidates, go to step 4
