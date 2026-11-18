@@ -878,17 +878,22 @@ What one run does:
 
 - **The password never goes on the command line.** It is asked for on a terminal, or read
   from standard input.
-- **It refuses a password a server would refuse:** a development seed password, or one
-  shorter than 8 or longer than 128 characters. An address no account holds, and an
-  account with no password sign-in, are refused too. A refusal writes nothing.
+- **It checks two things about the new password:** it is not a development seed password,
+  and it is 8 to 128 characters long. The deployment's own password policy and password
+  history are not applied. An address no account holds, and an account with no password
+  sign-in, are refused too. A refusal writes nothing.
 - **It sets the password with the hash every server verifies**, clears the account's
   development seed mark and a sign-in lock, and records the change time.
 - **It deletes the account's outstanding password-reset links and codes from the project
-  database** before the new password lands. A server's secondary storage (a host cache) is
-  out of its reach.
+  database** before the new password lands.
 - **It ends every session and revokes every API key of the account**, as an
   administrator's forced reset does: the sessions and keys issued under the old password do
   not outlive it. It asks for no password change at the next sign-in.
+- **It writes the project database only.** A secondary storage the host configures for the
+  auth service (a cache that can hold reset links and sessions) is out of its reach, for the
+  reset links and the sessions alike. With one configured, run the command with the server
+  stopped, or restart the server afterwards; a secondary storage kept outside the server
+  process outlives a restart and is cleared of the account's entries by hand.
 
 ### Build & Validate
 

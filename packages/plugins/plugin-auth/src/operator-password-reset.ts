@@ -11,8 +11,9 @@
  *
  * ## What one reset does
  *
- * - **Refuses a password a server would refuse.** A development seed password
- *   is never set, and the length is held to better-auth's bounds (8 to 128).
+ * - **Checks two things about the new password:** it is not a development
+ *   seed password, and its length is within better-auth's default bounds (8
+ *   to 128). The deployment's own password policy and history are not applied.
  * - **Writes the account's password credential** (`sys_account`, provider
  *   `credential`) with better-auth's own hash, the one every server verifies.
  *   An account with no password credential is refused: this sets a password,

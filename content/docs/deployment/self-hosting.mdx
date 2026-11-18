@@ -625,6 +625,12 @@ serve a database `os dev` wrote, set each seeded account's password on the
 server with [`os user set-password`](/docs/deployment/cli#os-user-set-password)
 first; the refusal names that command.
 
+What this release refuses is the seed password and every new session for a
+seeded account still on it. Sessions and API keys a seeded account was issued
+before the server left development mode are ended by `os user set-password`, so
+run it on each seeded account before serving the database; ending them at boot
+is follow-up #35184.
+
 ### A seeded directory opens no bootstrap window
 
 Both paths above assume the deployment's **first login** is still ahead of it.

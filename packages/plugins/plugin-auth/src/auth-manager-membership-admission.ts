@@ -235,7 +235,8 @@ export async function validateAudienceAdmission(
     const provisioningTicket = (ctx as { body?: Record<string, unknown> } | undefined)?.body?.[
       AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD
     ];
-    const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email, provisioningTicket)
+    const seedTicketProven = this.isOperatorProvisioning(email, provisioningTicket);
+    const creationClass: AudienceCreationClass = seedTicketProven
       ? 'operator'
       : classifyCreationMethod(data?.source, {
           enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
@@ -320,12 +321,14 @@ export async function validateAudienceAdmission(
     ) {
       this.stageOwnerVerifiedStamp(email);
     }
-    // An operator-class creation is the development seed's own (`os dev`'s
-    // admin, a stack's `demoStaff`): only its provisioning ticket earns the
-    // class. Its seed stamp is staged here, where the ticket is proven, and
-    // written when the creation's password credential lands
-    // (`dev-seed-credential.ts`).
-    if (email && creationClass === 'operator') await stageDevSeedCredential(email);
+    // The development seed's own creation (`os dev`'s admin, a stack's
+    // `demoStaff`) is the one that proved the boot's provisioning ticket for
+    // this address. The operator CLASS is wider (an administrator's
+    // create-user, a bulk import, directory provisioning all earn it from
+    // `classifyCreationMethod`), so the mark is staged on the proven ticket
+    // alone, never on the class. It is written when the creation's password
+    // credential lands (`dev-seed-credential.ts`).
+    if (email && seedTicketProven) await stageDevSeedCredential(email);
     // Admitted by its invitation alone (`isAdmittedByInvitationAlone`): the
     // membership settle does not bind this sign-up while its address is
     // unverified (`settleMembership`).

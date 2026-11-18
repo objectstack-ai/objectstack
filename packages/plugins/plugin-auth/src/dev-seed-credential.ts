@@ -56,9 +56,11 @@
  * through any door, writes a new salted hash and the stamp stops matching.
  *
  * It is written once, when the seed creates the account, in development: the
- * audience gate (`validateAudienceAdmission`) stages it for an operator-class
- * creation, the class only the seed's own provisioning ticket earns
- * ({@link stageDevSeedCredential}), and `account.create.after` writes it when
+ * audience gate (`validateAudienceAdmission`) stages it for a creation that
+ * proved the seed's own provisioning ticket for its address, and no other
+ * (an administrator's create-user, a bulk import and directory provisioning
+ * share the operator class, never the ticket; {@link stageDevSeedCredential}),
+ * and `account.create.after` writes it when
  * that creation's password credential lands ({@link stampDevSeedCredential}).
  *
  * ## What it does not detect
@@ -228,6 +230,10 @@ export function withDevSeedPasswordRefusal(
         );
         return false;
       } catch {
+        // Fail closed, on purpose: when the mark cannot be read, a correct
+        // password is answered as a wrong one rather than accepted unchecked.
+        // That answer is a failed sign-in like any other, so it counts toward
+        // the account's sign-in lock.
         return false;
       }
     },
@@ -306,8 +312,8 @@ const stagedSeedCreation = defineRequestState<{ email: string } | undefined>(() 
 
 /**
  * Stage the stamp for the creation running in this request: called by the
- * audience gate for an operator-class creation, the class only the
- * development seed's provisioning ticket earns. Nothing is staged outside
+ * audience gate for a creation that proved the development seed's own
+ * provisioning ticket (`os dev`'s admin, a stack's `demoStaff`). Nothing is staged outside
  * development mode. Never throws.
  */
 export async function stageDevSeedCredential(email: string): Promise<void> {

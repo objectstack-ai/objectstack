@@ -42,6 +42,8 @@ import 'better-auth/plugins/bearer';
 import 'better-auth/plugins/custom-session';
 import 'better-auth/plugins/organization';
 import 'better-auth/plugins/magic-link';
+import 'better-auth/plugins/admin';
+import 'better-auth/plugins/phone-number';
 import '@better-auth/core/context';
 import '@better-auth/core/error';
 
@@ -54,6 +56,8 @@ const SEED_PASSWORD = 'admin123';
 const CUSTOM_SEED_PASSWORD = 'Custom!Seed-Passw0rd-42';
 const NEW_PASSWORD = 'Operator!Chosen-Passw0rd-7';
 const STAFF_EMAIL = 'staff1@demo.example';
+const ADMIN_CREATED_EMAIL = 'colleague@company.example';
+const ADMIN_CHOSEN_PASSWORD = 'Admin-Chosen-Pass-29';
 const RESET_COMMAND = 'os user set-password';
 
 const ENV_KEYS = [
@@ -150,14 +154,19 @@ function doorsOf(manager: AuthManager) {
  * The development boot: `os dev` seeding the admin and one demo account into a
  * fresh database. `adminPassword` is `os dev --admin-password`.
  */
-async function bootDevelopment(options: { adminPassword?: string } = {}) {
+async function bootDevelopment(options: { adminPassword?: string; adminPlugin?: boolean } = {}) {
   process.env.NODE_ENV = 'development';
   if (options.adminPassword) process.env.OS_SEED_ADMIN_PASSWORD = options.adminPassword;
   kernel = new ObjectKernel({ logger: { level: 'silent' } });
   await kernel.use(sqliteDriverPlugin());
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(
-    new AuthPlugin({ secret: SECRET, baseUrl: ORIGIN, demoStaff: [{ name: 'Demo Staff 1', email: STAFF_EMAIL }] as never }),
+    new AuthPlugin({
+      secret: SECRET,
+      baseUrl: ORIGIN,
+      demoStaff: [{ name: 'Demo Staff 1', email: STAFF_EMAIL }] as never,
+      ...(options.adminPlugin ? { plugins: { admin: true } } : {}),
+    } as never),
   );
   await kernel.use(new SecurityPlugin());
   await kernel.bootstrap();
@@ -175,13 +184,14 @@ type Seeded = Awaited<ReturnType<typeof bootDevelopment>>;
  * Leave development: the server that serves the database next. The seed's env
  * is not passed on, as `os start` does not pass it.
  */
-function productionServer(seeded: Seeded, options: { mails?: any[] } = {}) {
+function productionServer(seeded: Seeded, options: { mails?: any[]; phoneNumber?: boolean } = {}) {
   process.env.NODE_ENV = 'production';
   delete process.env.OS_SEED_ADMIN_PASSWORD;
   const manager = new AuthManager({
     secret: SECRET,
     baseUrl: ORIGIN,
     dataEngine: seeded.ql as never,
+    ...(options.phoneNumber ? { plugins: { phoneNumber: true } } : {}),
     ...(options.mails
       ? {
           plugins: { magicLink: true },
@@ -258,6 +268,25 @@ describe('a server outside development mode refuses a development seed credentia
     expect(DEV_SEED_CREDENTIAL_FIELD in row).toBe(false);
   });
 
+  it('an account an administrator creates in development carries no seed stamp, and signs in outside development mode', async () => {
+    const seeded = await bootDevelopment({ adminPlugin: true });
+    const api: any = await seeded.manager.getApi();
+    expect(typeof api.createUser, 'the admin plugin serves create-user on this boot').toBe('function');
+    // The administrator's create-user, as the `/admin/create-user` route drives it.
+    await api.createUser({ body: { email: ADMIN_CREATED_EMAIL, name: 'Admin Created', password: ADMIN_CHOSEN_PASSWORD } });
+    const createdId = await seeded.userId(ADMIN_CREATED_EMAIL);
+    expect(createdId, 'the administrator-created account exists').toBeTypeOf('string');
+    expect(await isStamped(seeded, createdId)).toBe(false);
+    // The seed's own accounts on the same boot stay marked.
+    expect(await isStamped(seeded, await seeded.userId(SEED_EMAIL))).toBe(true);
+    expect(await isStamped(seeded, await seeded.userId(STAFF_EMAIL))).toBe(true);
+
+    const server = productionServer(seeded);
+    const res = await server.doors.signIn(ADMIN_CREATED_EMAIL, ADMIN_CHOSEN_PASSWORD);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await server.doors.sessionUser(cookieHeader(res))).toBe(createdId);
+  });
+
   it('refuses a sign-in that submits the seed password to the seed admin, naming the operator reset command, and opens no session', async () => {
     const seeded = await bootDevelopment();
     const adminId = await seeded.userId(SEED_EMAIL);
@@ -282,6 +311,13 @@ describe('a server outside development mode refuses a development seed credentia
     const known = await answerOf(await server.doors.signIn(SEED_EMAIL, SEED_PASSWORD));
     const unknown = await answerOf(await server.doors.signIn('nobody@nowhere.example', SEED_PASSWORD));
     expect(unknown).toEqual(known);
+  });
+
+  it('refuses the seed password on the phone-number password sign-in, naming the operator reset command', async () => {
+    const seeded = await bootDevelopment();
+    const server = productionServer(seeded, { phoneNumber: true });
+    const answer = await answerOf(await server.doors.post('/sign-in/phone-number', { phoneNumber: '+15555550123', password: SEED_PASSWORD }));
+    expectSeedPasswordRefusal(answer);
   });
 
   it('refuses the seed password on an account that carries no seed stamp, as a database seeded before the stamp does', async () => {
