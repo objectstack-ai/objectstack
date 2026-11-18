@@ -566,6 +566,7 @@ const zhHant = {
         '此檢視已分組，但其資料來源未實現 queryGroupHeaders，因此無法統計分組。移除分組即可顯示記錄。',
       needsWholeRows:
         '分組需要全部記錄，但此表格只收到其中一頁，因此無法統計分組。請傳入全部記錄，或讓表格從實現了 queryGroupHeaders 的資料來源獲取記錄。',
+      draftOnly: '未按 {{fields}} 分組：它僅存在於草稿中，釋出後才生效。',
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -961,6 +962,7 @@ const zhHant = {
     removeGroup: '刪除',
     groupingUnstoredNotice: '無法按 {{fields}} 分組：它的值在顯示時計算，並未儲存。列表已暫不按它分組顯示。',
     groupingUnstoredRemove: '從分組中移除',
+    draftOnlyQueryDropped: '未按 {{fields}} 篩選或排序：它僅存在於草稿中，釋出後才生效。',
     inlineEditShort: '行內編輯',
     inlineEditLabel: '行內編輯記錄(點選單元格進行編輯)',
   },
@@ -1606,6 +1608,9 @@ const zhHant = {
   dashboard: {
     total: '總計',
     noDataSourceFor: '沒有可用的資料來源：',
+    drillTooMany: '與該值關聯的記錄過多，無法在此列出。請縮小儀表盤篩選範圍後重試。',
+    drillUnavailable: '無法在此列出該值對應的記錄。',
+    drillFailed: '無法載入該值對應的記錄，請稍後重試。',
     // objectui#7063 — the DEFAULT empty state every dashboard widget renders
     // when its query SUCCEEDED and returned nothing. It replaced the terse
     // per-widget `noRows` / `noDataAvailable` fragments at the render site;
@@ -2403,7 +2408,7 @@ const zhHant = {
       changesApplied: '已生效',
       changesDrafted: '已暫存為草稿',
       changesFailed: '未生效',
-      discussing: '正在討論：{{target}}',
+      discussing: '正在看：{{target}}',
       // changesConfirmMessage: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).
       changeVerb: {
         createObject: '新建物件',
@@ -2506,7 +2511,7 @@ const zhHant = {
       unavailableRetry: '重試',
       unavailableHome: '返回首頁',
       dock: {
-        title: '助手',
+        title: 'AI 助手',
         description: 'AI 助手對話',
         resize: '調整對話寬度',
         collapse: '收起對話',
@@ -2643,7 +2648,7 @@ const zhHant = {
       expandToPage: '整頁開啟',
       openAsPage: '整頁開啟',
       objectNotFound: '未找到物件',
-      objectNotFoundDescription: '物件"{{objectName}}"在當前配置中不存在。',
+      objectNotFoundDescription: '物件"{{objectName}}"不存在，或者您無權訪問它。',
       objectNotFoundHint: '請檢查您的應用導航設定或從側邊欄選擇其他物件。',
       objectPackageDisabled: '物件“{{objectName}}”所屬的軟體包已被停用，因此當前不提供該物件。',
       filterOrGroupNotEditable: '該篩選條件在其他條件之外還含有一個「或」分組，篩選編輯器無法顯示這種結構，因此此處只讀。檢視仍會應用它。',
@@ -3031,6 +3036,10 @@ const zhHant = {
       missingToken: '驗證連結缺少令牌。',
       emailMissing: '缺少郵箱地址',
       resendButton: '重新發送驗證郵件',
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        '您的郵箱地址尚未驗證。請向 {{email}} 傳送一封驗證郵件，然後點選郵件中的連結以驗證您的賬戶。',
+      sendButton: '傳送驗證郵件',
       resending: '傳送中…',
       resent: '郵件已傳送！請檢視收件箱',
       resentSuccess: '驗證郵件已傳送！',
@@ -3495,7 +3504,6 @@ const zhHant = {
   },
   empty: {
     objectNotFound: '未找到物件',
-    objectNotFoundDescription: '物件 “{{name}}” 的定義不存在。請檢查配置或返回選擇有效的物件。',
     interfacePageSourceMissing: '此介面頁引用了 “{{name}}”，但該來源不可用。',
     recordNotFound: '未找到記錄',
     recordNotFoundDescription: '您查詢的記錄不存在、已被刪除，或您沒有訪問權限。',
@@ -3587,7 +3595,7 @@ const zhHant = {
       detailNone: '未檢測到差異 —— 草稿與已釋出版本一致。',
       fieldOrderChanged: '欄位順序已變更',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: '包含由 AI 副駕起草的更改',
+      draftedByCopilot: '包含由 AI 助手起草的更改',
       draftedByMcpClient: '包含由 MCP 客戶端「{{client}}」起草的更改',
       draftedByMcp: '包含由 MCP 客戶端起草的更改',
       detailChangedKeys: '其他變更：',
@@ -3695,7 +3703,8 @@ const zhHant = {
       securityBlockTitle: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
       securityBlockTitle_one: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
       securityBlockTitle_other: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
-      securityBlockWhere: '請在物件的“設定 → 記錄共享模型”中修改後重新發布。',
+      securityBlockWhere: '請在物件的“設定 → 誰能看到哪些記錄”中修改後重新發布。',
+      flowChecksTitle: '釋出前請先看 —— 釋出檢查會提出以下幾點',
       securityRule: {
         owdUnset: '未宣告記錄共享模型（sharingModel）。執行環境會按 private 處理，但這個基線必須是明確做出的決定。',
         owdAlias: '記錄共享模型（sharingModel）不是規範取值，執行環境會按 private 處理此物件。',

@@ -1,11 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#34272 — while the deployment delivers mail, the server refuses an
- * accept from a session whose address is not verified, with better-auth's own
+ * Accepting or declining an invitation needs a verified email address: the
+ * server refuses either from a session whose address is not verified, with
+ * better-auth's own
  * `403 EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`.
  * The page answers that refusal with the verification-mail screen for this
- * account's address, whose link returns here, instead of a toast.
+ * account's address, whose link returns here, instead of a toast. Reading the
+ * invitation stays open, so the page still names it.
  *
  * The auth client is the REAL `createAuthClient` over a stubbed `fetch` that
  * answers with the server's body, as `invitationVendorRefusals-33650.test.tsx`
@@ -115,7 +117,7 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe('#34272 — an accept refused for an unverified address goes to the verification mail', () => {
+describe('an accept or a decline refused for an unverified address goes to the verification mail', () => {
   it('hands over to /verify-email-prompt for this account’s address, returning here, with no toast', async () => {
     answers.set('/organization/get-invitation', { status: 200, body: PENDING });
     answers.set('/organization/accept-invitation', NEEDS_VERIFIED_EMAIL);
@@ -136,6 +138,27 @@ describe('#34272 — an accept refused for an unverified address goes to the ver
     // The refusal really came over the wire from the accept route.
     expect(
       fetchFn.mock.calls.some(([u]) => String(u instanceof Request ? u.url : u).includes('/organization/accept-invitation')),
+    ).toBe(true);
+  });
+
+  it('a refused decline hands over to /verify-email-prompt alike, with no toast', async () => {
+    answers.set('/organization/get-invitation', { status: 200, body: PENDING });
+    answers.set('/organization/reject-invitation', NEEDS_VERIFIED_EMAIL);
+    renderPage();
+
+    await screen.findByTestId('accept-invitation-role');
+    fireEvent.click(screen.getByText(en.organization.accept.decline));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    const target = String(navigate.mock.calls.at(-1)?.[0]);
+    const [path, query] = target.split('?');
+    expect(path).toBe('/verify-email-prompt');
+    const sp = new URLSearchParams(query);
+    expect(sp.get('email')).toBe('zhang.wei@example.com');
+    expect(sp.get('redirect')).toBe('/accept-invitation/inv-1');
+    expect(toastError).not.toHaveBeenCalled();
+    expect(
+      fetchFn.mock.calls.some(([u]) => String(u instanceof Request ? u.url : u).includes('/organization/reject-invitation')),
     ).toBe(true);
   });
 

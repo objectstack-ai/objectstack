@@ -27,6 +27,7 @@ import { runCard, type CardRun, type ProjectOps } from '../../src/runner/orchest
 import type { PackageSource } from '../../src/runner/packages.js';
 import { runRecord } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
+import { seedDoorAnswer } from '../runner/seed-door.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const CARDS_DIR = resolve(HERE, '../../../../../docs/qa/scenarios');
@@ -183,6 +184,14 @@ export class FakeApp implements AppHarness {
   async installUnmanaged(manifest: Record<string, unknown>) {
     this.installed = manifest;
     return { ok: true, status: 200, body: {} };
+  }
+  /** The managed door, which the seed loads through: a data-only package's `data[]` ({@link seedDoorAnswer}). */
+  async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+    if (!Array.isArray(manifest.data)) {
+      this.installed = manifest;
+      return { ok: true, status: 200, body: {} };
+    }
+    return seedDoorAnswer((object, row) => this.insertRow(object, row), manifest);
   }
   async metadataAsArtifact(collections: readonly string[]) {
     const src = (this.installed ?? {}) as Record<string, unknown[]>;

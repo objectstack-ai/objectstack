@@ -255,10 +255,25 @@ export function undeclaredHookRefusalCodeAtSave(
   declared: readonly string[],
   at: 'body.source' | 'handler' = 'body.source',
 ): string {
+  return undeclaredRefusalCodeAtSave('hook', code, declared, at);
+}
+
+/** [#34273] Which declaration a refusal catalogue sits on, as the sentences name it. */
+type RefusalSubject = 'hook' | 'action';
+
+/** The subject with its sentence-initial article: `A hook` / `An action`. */
+const capArticle = (subject: RefusalSubject): string => (subject === 'action' ? 'An action' : 'A hook');
+
+function undeclaredRefusalCodeAtSave(
+  subject: RefusalSubject,
+  code: string,
+  declared: readonly string[],
+  at: string,
+): string {
   return (
-    `\`${at}\` throws code '${code}', and this hook's \`refusals\` declares no such code `
-    + `(declared: ${declaredList(declared)}). A hook that declares \`refusals\` refuses by code only, so the `
-    + `throw is refused when the hook runs. Declare it under \`refusals.${code}\` with the message the user `
+    `\`${at}\` throws code '${code}', and this ${subject}'s \`refusals\` declares no such code `
+    + `(declared: ${declaredList(declared)}). ${capArticle(subject)} that declares \`refusals\` refuses by code only, so the `
+    + `throw is refused when the ${subject} runs. Declare it under \`refusals.${code}\` with the message the user `
     + 'reads, or throw one of the declared codes.'
   );
 }
@@ -273,10 +288,18 @@ export function undeclaredHookRefusalCodeAtSave(
 export const HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE = /^(?![\s\S]*\{\{[^{}]*\}\})[\s\S]*$/;
 
 /** The save-time refusal for a `{{ … }}` hole in a refusal message whose entry declares no `params`. */
-export const HOOK_REFUSAL_MESSAGE_HOLE_REFUSED =
-  'A hook refusal `message` whose entry declares no `params` is plain text, and nothing fills a `{{ }}` hole: the '
-  + 'caller would read the braces as written. Declare the name under the entry\'s `params` (`params: [\'state\']`) '
-  + 'and throw it in the error\'s `params` (`{ code, params: { state } }`), or write the sentence without the hole.';
+export const HOOK_REFUSAL_MESSAGE_HOLE_REFUSED = refusalMessageHoleRefused('hook');
+
+/** [#34273] The action twin of {@link HOOK_REFUSAL_MESSAGE_HOLE_REFUSED}. */
+export const ACTION_REFUSAL_MESSAGE_HOLE_REFUSED = refusalMessageHoleRefused('action');
+
+function refusalMessageHoleRefused(subject: RefusalSubject): string {
+  return (
+    `${capArticle(subject)} refusal \`message\` whose entry declares no \`params\` is plain text, and nothing fills a \`{{ }}\` hole: the `
+    + 'caller would read the braces as written. Declare the name under the entry\'s `params` (`params: [\'state\']`) '
+    + 'and throw it in the error\'s `params` (`{ code, params: { state } }`), or write the sentence without the hole.'
+  );
+}
 
 /** How a hook carrying `refusals` names the code that would answer it, for the sentence below. */
 function refusalCarrier(language: string | undefined): string {
@@ -306,10 +329,19 @@ export function undeclaredHookRefusalAtRun(
   code: string | undefined,
   declared: readonly string[],
 ): string {
+  return undeclaredRefusalAtRun('hook', hookName, code, declared);
+}
+
+function undeclaredRefusalAtRun(
+  subject: RefusalSubject,
+  name: string,
+  code: string | undefined,
+  declared: readonly string[],
+): string {
   const thrown = code === undefined ? 'threw no `code`' : `threw code '${code}'`;
   return (
-    `hook '${hookName}' ${thrown}, and its \`refusals\` declares no such code (declared: ${declaredList(declared)}). `
-    + 'A hook that declares `refusals` refuses by code only: throw an error whose `code` is one of the declared '
+    `${subject} '${name}' ${thrown}, and its \`refusals\` declares no such code (declared: ${declaredList(declared)}). `
+    + `${capArticle(subject)} that declares \`refusals\` refuses by code only: throw an error whose \`code\` is one of the declared `
     + 'codes, or declare this one with the message the user reads.'
   );
 }
@@ -329,10 +361,20 @@ export function undeclaredHookRefusalReasonAtSave(
   declared: readonly string[],
   at: 'body.source' | 'handler',
 ): string {
+  return undeclaredRefusalReasonAtSave('hook', code, reason, declared, at);
+}
+
+function undeclaredRefusalReasonAtSave(
+  subject: RefusalSubject,
+  code: string,
+  reason: string,
+  declared: readonly string[],
+  at: string,
+): string {
   return (
     `\`${at}\` throws code '${code}' with reason '${reason}', and \`refusals.${code}.reasons\` declares no such `
     + `reason (declared: ${reasonList(declared)}). A reason picks one of the code's declared sentences, so the `
-    + `throw is refused when the hook runs. Declare it under \`refusals.${code}.reasons.${reason}\` with the `
+    + `throw is refused when the ${subject} runs. Declare it under \`refusals.${code}.reasons.${reason}\` with the `
     + 'message the user reads, or throw one of the declared reasons.'
   );
 }
@@ -348,8 +390,18 @@ export function undeclaredHookRefusalReasonAtRun(
   reason: string,
   declared: readonly string[],
 ): string {
+  return undeclaredRefusalReasonAtRun('hook', hookName, code, reason, declared);
+}
+
+function undeclaredRefusalReasonAtRun(
+  subject: RefusalSubject,
+  name: string,
+  code: string,
+  reason: string,
+  declared: readonly string[],
+): string {
   return (
-    `hook '${hookName}' threw code '${code}' with reason '${reason}', and \`refusals.${code}.reasons\` declares `
+    `${subject} '${name}' threw code '${code}' with reason '${reason}', and \`refusals.${code}.reasons\` declares `
     + `no such reason (declared: ${reasonList(declared)}). A reason picks one of the code's declared sentences: `
     + 'throw one of the declared reasons, or declare this one with the message the user reads.'
   );
@@ -441,5 +493,70 @@ export function undeclaredHookTextAtRun(hookName: string, key: string, declared:
     `hook '${hookName}' asked for text '${key}' (ctx.text), and its \`texts\` declares no such key `
     + `(declared: ${declaredList(declared)}). Only a declared text is written in the organization's language: `
     + 'declare it under `texts` with the sentence the record keeps, or ask for one of the declared keys.'
+  );
+}
+
+/*
+ * ── An action's refusal catalogue (#34273) ─────────────────────────────────
+ *
+ * `ActionSchema.refusals` is the hook catalogue's twin on an action: the same
+ * entry shape, the same literal reading of the code's throws at save, and the
+ * same run-time answer — the sentences below are the hook ones with the
+ * action named, built by the one subject-parameterised core above, so the two
+ * cannot drift. Where they differ is what an action runs: a sandboxed `js`
+ * `body` on a `script` action, or an inline `target` function `os build`
+ * lowers to one; and where its translation lives — beside the action's other
+ * copy, `objects.<object>._actions.<action>.refusals.…` or, for an object-less
+ * action, `globalActions.<action>.refusals.…` (`actionRefusalMessageKey`).
+ */
+
+/** The save-time refusal for a code an action's source throws literally that its `refusals` does not declare. */
+export function undeclaredActionRefusalCodeAtSave(code: string, declared: readonly string[]): string {
+  return undeclaredRefusalCodeAtSave('action', code, declared, 'body.source');
+}
+
+/** The save-time refusal for a reason an action's source throws literally under a code that does not declare it. */
+export function undeclaredActionRefusalReasonAtSave(code: string, reason: string, declared: readonly string[]): string {
+  return undeclaredRefusalReasonAtSave('action', code, reason, declared, 'body.source');
+}
+
+/** The run-time fault for an action's throw its catalogue cannot answer: an undeclared code, or none. */
+export function undeclaredActionRefusalAtRun(
+  actionName: string,
+  code: string | undefined,
+  declared: readonly string[],
+): string {
+  return undeclaredRefusalAtRun('action', actionName, code, declared);
+}
+
+/** The run-time fault for a declared code an action threw with a reason the code does not declare. */
+export function undeclaredActionRefusalReasonAtRun(
+  actionName: string,
+  code: string,
+  reason: string,
+  declared: readonly string[],
+): string {
+  return undeclaredRefusalReasonAtRun('action', actionName, code, reason, declared);
+}
+
+/**
+ * The save-time refusal for a catalogue on an action whose code cannot throw a
+ * code: a type other than `script` (its `target` is a URL, page, flow or
+ * endpoint — a refused flow answers through its own `end` refusal), an
+ * `expression` body, or a `script` action with neither a body nor an inline
+ * `target` function. `os i18n` would demand its translations and nothing would
+ * serve them.
+ */
+export function actionRefusalsWithoutSandboxedBody(type: string, language: string | undefined): string {
+  const has = type !== 'script'
+    ? `\`type: '${type}'\`, which runs no code of the action's own`
+    : language !== undefined
+      ? `a \`${language}\` body`
+      : 'no `body` (an inline `target` function `os build` could not lower leaves none)';
+  return (
+    "`refusals` is answered for a `type: 'script'` action's sandboxed `body` (`language: 'js'`) and for its inline "
+    + `\`target\` function (which \`os build\` lowers to a \`js\` body), and this action has ${has}: nothing it runs `
+    + 'can throw a declared code, while `os i18n` still demanded its translations. Give the action a `js` body that '
+    + 'throws the declared codes, or drop `refusals`.'
   );
 }

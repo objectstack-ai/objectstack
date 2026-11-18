@@ -700,6 +700,37 @@ const DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
 
 // ── Security posture (`validate-security-posture.ts`) ──────────────────────
 
+const DATASET_MEMBER_NO_VOCABULARY_EXPLANATION: RuleExplanation = {
+  rule: 'dataset-member-no-vocabulary',
+  covers: 'what a member with no synonyms and no description loses',
+  paragraphs: [
+    'A dataset member (a measure or a dimension) carries its business vocabulary in two optional keys: ' +
+      '`synonyms`, the words a person types for it in a question, and `description`, one or two sentences ' +
+      'saying what it is in business terms. When an assistant is asked a business question it matches the ' +
+      'words of the question against each member\'s `name`, `label` and `synonyms`, and reads the ' +
+      '`description` to choose between members and to explain the number it returns.',
+    'A member that declares neither answers only to its own name and label. A person who asks for ' +
+      '"revenue" where the measure is labelled "Total Amount", or who asks in another language, matches ' +
+      'nothing, and the assistant falls back to a plain object query: a number no dataset governs, for a ' +
+      'metric this dataset does govern. Every check stays green and every dashboard still draws, so nothing ' +
+      'else reports the loss.',
+    'Reported once per member that has neither key. A `synonyms` list with at least one non-blank word, or a ' +
+      'non-blank `description` (a string, or an inline locale map with one non-blank value), is enough to ' +
+      'silence it; writing both is the complete form.',
+    'To fix it, write the words a person types, in the language your users ask in. Synonyms are matched and ' +
+      'never translated, so every language goes in the one list (`synonyms: [\'revenue\', \'sales\', \'营收\']`), ' +
+      'and a list is not keyed by locale. Write the `description` as a plain business definition, what the ' +
+      'number counts and what it leaves out, never as an instruction to a model; it is display text and is ' +
+      'translated like `label`.',
+    'One word names one member: within a dataset a synonym may not equal another member\'s name, label or ' +
+      'synonym, compared with case, width, spacing, `_` and `-` folded, and the dataset schema refuses one ' +
+      'that does. Give the shared word to the member people most often mean by it.',
+    'The rule is advisory and stays a warning, at `os validate`, `os build`, `os lint` and on the save ' +
+      'response of the metadata publish door. A dataset that only feeds charts, and that nobody asks ' +
+      'questions of, loses nothing by leaving both keys out.',
+  ],
+};
+
 const SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION: RuleExplanation = {
   rule: 'security-controlled-by-parent-ambiguous-relation',
   covers: 'why a controlled_by_parent object takes exactly one master',
@@ -1424,6 +1455,27 @@ const ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION: RuleExplanation = {
     'The readonly rule on the same body (`action-api-update-readonly-when-field`) skips an unparseable ' +
       'body rather than guess at what the unread part wrote, so this finding is the one that describes ' +
       'the problem.',
+  ],
+};
+
+const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
+  rule: 'action-body-does-not-compile',
+  covers: 'the wrapper an action body is compiled in',
+  paragraphs: [
+    'An action body is not a script of its own. The runtime pastes `body.source` into the body of ' +
+      '`(async (input, ctx) => { … })` and calls it with the action\'s params and its context, so the ' +
+      'statements share a scope with two parameters the author never wrote. A source that is valid on its ' +
+      'own can fail to compile there, and then every run of the action fails, on every door, before any ' +
+      'statement runs.',
+    'The common case is declaring a parameter again: `const input = ctx.input || {}` or `let ctx = …` is a ' +
+      'redeclaration, a SyntaxError. Read the params as `input` (they are also `ctx.input`), or give the ' +
+      'local another name. `var input = …` is not a redeclaration and compiles.',
+    'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
+      'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
+      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ on regular ' +
+      'expressions, so a regular-expression literal the host refuses is reported as a warning rather than ' +
+      'refused. Syntax the host accepts and QuickJS does not is not caught here; at run time such an ' +
+      'action answers a 500 that names the action and the compile error.',
   ],
 };
 
@@ -4301,7 +4353,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'set\'s `name` that a package of this stack declares. `reports.NAME` a report\'s `name` that ' +
       'a package of this stack declares. `books.BOOK` a doc book\'s `name` that a package of this ' +
       'stack declares, or a package id (its implicit book), and `.groups.KEY` a group `key` that ' +
-      'book declares, not its label.',
+      'book declares, not its label. `mappings.MAPPING` an import mapping\'s `name` that a ' +
+      'package of this stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
@@ -4314,7 +4367,9 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'outcome the action\'s own `outcomeMessages` declares; `resultDialog.title`, `.description` ' +
       'and `.acknowledge` an action that declares a `resultDialog` at all; ' +
       '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included; ' +
-      '`preflight.fields.PATH` the literal `path` of a declared preflight field, dots included. A ' +
+      '`preflight.fields.PATH` the literal `path` of a declared preflight field, dots included; ' +
+      '`resultDialog.columns.PATH.COLUMN` and `preflight.columns.PATH.COLUMN` a `format: \'table\'` ' +
+      'field\'s literal `path`, then the literal `path` of one of its `columns`. A ' +
       'bundle translates what the action declares and cannot add an outcome or a dialog.',
     'Not judged: a platform object in the registry, an object this stack only extends through ' +
       '`objectExtensions[]`, and a picklist it only extends through `picklistExtensions[]` — the ' +
@@ -6237,6 +6292,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [DATASET_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FIELD_UNKNOWN_EXPLANATION,
   [DATASET_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DATASET_FIELD_NOT_INCLUDED_EXPLANATION,
   [DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FILTER_FIELD_UNKNOWN_EXPLANATION,
+  [DATASET_MEMBER_NO_VOCABULARY_EXPLANATION.rule]: DATASET_MEMBER_NO_VOCABULARY_EXPLANATION,
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,
@@ -6266,6 +6322,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: ACTION_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [ACTION_RECORD_WRITE_DISCARDED_EXPLANATION.rule]: ACTION_RECORD_WRITE_DISCARDED_EXPLANATION,
   [ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION.rule]: ACTION_BODY_SOURCE_UNPARSEABLE_EXPLANATION,
+  [ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION.rule]: ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION,
   [ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: ACTION_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
   [FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,

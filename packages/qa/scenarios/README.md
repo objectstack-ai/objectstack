@@ -139,10 +139,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   never its figure (`gradeDatasetQuestion`; card-level `gradeCardDatasetQuestion`), by the grader its expected route
   names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
   arguments the model sent decide nothing), `asked-back` (the reply asks, names every candidate by a word other than
-  the asked one, and states no figure; an option list's numbering is no figure) and `fallback-labelled` (an object
-  query on the expected object answered, no dataset did, and the reply says the figure is not a governed metric: a
-  closed word list, English and Chinese, in `labelsFallback`). Its notes say what the turn did on the way, ungraded: a
-  loaded skill, no `list_datasets` call, the `candidates` a `list_datasets` answer offered.
+  the asked one, and states no figure; an option list's numbering, an option named by its place — `option 2`, `the
+  3rd one`, 「第 1 个」 — a count of the options it offers — `2 metrics`, 「2 个指标」 — a date, and a year a time word
+  or 年 marks are no figure, unless a counted noun follows it: `for 2031 orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
+  says the figure is not a governed metric: a closed word list, English and Chinese, in `labelsFallback`). Its notes
+  say what the turn did on the way, ungraded: a loaded skill, no `list_datasets` call, the `candidates` a
+  `list_datasets` answer offered. A grader whose rule has changed stamps its grade with `revision`
+  (`DATASET_GRADER_REVISIONS`, which says what each revision changed; absent ⇒ revision 1): `asked-back` is at 2.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -292,7 +295,7 @@ npx @objectstack/scenarios help                                      # the comma
 |:---|:---|
 | `scratch` | `create-objectstack` → the agent builds from the card prompt and the runner's data contract (`prompts.ts`) → `objectstack validate` / `build` / `verify` (proofs chosen from the tags) → score → `objectstack dev --fresh` → seed, one user + permission-set grant + API key per persona → every question as every persona it names and every operation as its persona, over the app's MCP → the iterate change → rebuild, re-score, re-run |
 | `template` | a blank host project (`host<code>`) → boot → install the card's verified build **unmanaged** (`/api/v1/marketplace/install-local`, `installMode: 'unmanaged'`) → the agent applies the iterate change to the installed copy → score → seed → Run. A refused install is a finding in the record |
-| `ask` | the same install of the same verified build as `template`, into a blank host of its own → seed → Run, and nothing else: no authoring turn, no score, no iterate. Off by default (`--modes ask`, or `--modes scratch,ask`) |
+| `ask` | the same install of the same verified build as `template`, into a blank host of its own → seed → Run, and nothing else: no authoring turn, no score, no iterate. Ask mode edits nothing, so a build the unmanaged door refuses `UNMANAGED_INSTALL_UNCOPYABLE` (it carries an item no environment row can hold, such as a `capability`) is installed unchanged through the same door with `installMode: 'managed'`; the record's `template.installMode` says which mode the run used, and `template.unmanagedRefusal` keeps the refusal it fell back from. No other refusal falls back, and template mode never does. Off by default (`--modes ask`, or `--modes scratch,ask`) |
 
 - **Ask mode** (`orchestrate.ts`, `scorecard.ts`): `--modes ask` runs only the Run half — every question (with
   `--ask-repeats`) and every operation — on a verified build: `--template F` when given, else this run's scratch build
@@ -400,8 +403,11 @@ npx @objectstack/scenarios help                                      # the comma
 - **Dataset questions** (`orchestrate.ts`, `scorecard.ts`): a card's `run.datasetQuestions` are asked after its
   questions and before its operations, as the admin, each a fresh session honouring `--ask-repeats`, and graded by
   `scenario-dataset-grade.ts`. The record keeps each on the half (`datasetQuestions`: the grade, the turn), and the
-  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back 1/2 ·
-  fallback-labelled 1/1)`) only on a card that declares them. A run on a build whose app serves no datasets answers
+  scorecard adds `Run · datasets` / `Iterate · Run · datasets` (`4/5 (metric-selected 2/2 · asked-back rev 2 1/2 ·
+  fallback-labelled 1/1)`) only on a card that declares them. A grader graded past its first rule revision is named
+  with it (`rev 2`; the tally's `byGrader` entry carries `revision`), so a round graded before a rule change, which
+  shows none, is not read like for like with one after; a replay (`--driver recorded:F`) grades with the rules as
+  they are now. A run on a build whose app serves no datasets answers
   them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
   replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
   records that ask as not measured, never as failed.
@@ -480,10 +486,25 @@ npx @objectstack/scenarios help                                      # the comma
   measured: author turn failed: …**. Never a degraded score, and nothing runs on it: no score, seed, Run or iterate. The
   scorecard's author rows show every authoring turn's `resultSubtype`, the turns it took of its cap
   (`error_max_turns · 300/300 turns`) and its elapsed time.
-- **Seed** (`seed.ts`): rows go in as the admin, a lookup's target before its referrer. Where the card's declared
+- **Seed** (`seed.ts`, `loadSeedRows` in `orchestrate.ts`): rows go in as the admin through the platform's own seed
+  path, never the data API: the runner installs one data-only package whose `data[]` holds the card's rows (keyed on
+  the card's own `id`, so a lookup value names the row seeded under it), through the managed install door. The
+  platform's seed loader writes them as established facts: a build's `state_machine` rule (its `initialStates` entry
+  check) does not judge them, so a claim the card states as already `paid` loads as the card states it. Every other
+  validation rule and every hook still judges each row, and a refused row is recorded with its object, id and the
+  loader's message (`seed.refused`; the seed door names no error code). **Seed rows fire no record-triggered flow**,
+  where the data API's insert used to fire a build's "on create" automation on each one. No card relies on that: every
+  truth is computed from the seed's own values (`truth.ts` refuses one the seed does not determine), and the four cards
+  that ask for record-triggered flows (`asset_lifecycle`, `requisition_to_receipt`, `service_desk`, `travel_expense`)
+  seed the values such a flow produces (a ticket's group, SLA policy and breach flag, a line's over-standard flag, the
+  statuses) explicitly. An operation's own write still goes through the agent's door and fires the build's automation.
+  A restore puts a removed seeded row back the same way. A lookup's target loads before its referrer. Where the card's declared
   lookups lead back to where they start — `department.manager → employee` with `employee.department → department`, or a
   self-lookup naming a later row — the seed loads in two passes: every row first with each lookup naming a row not in
-  yet left out, then one update per row sets those (`seed.secondPass` in the record). The side that waits is one the
+  yet left out, then one update per row sets those (`seed.secondPass` in the record). That second pass sets only these
+  deferred cycle lookups: `data[]` carries a persona's user id (`owner_id`, a `user` field) as sent, and patching it
+  again would put a user-door update, with its update triggers and hooks, back on every seed row.
+  The side that waits is one the
   build left optional; a build that makes every side of a cycle `required` cannot be seeded, which the data contract
   states and the scorecard reports as a Build finding naming the cycle (the seed is still sent, so the record holds
   the app's own refusals). A refused row takes out what it feeds (`seedDependence` in `orchestrate.ts`): with its
@@ -729,3 +750,61 @@ the directory you run from. For anything more, write a wrapper script.
 **WorkBuddy** (checked 2026-11-07): Tencent's WorkBuddy is a desktop app; no headless mode with structured output
 and an MCP client was found for it, so it is not wired here. A tool that has both rides `--driver external:` with a
 wrapper, with no change to the runner.
+
+## Running the published skills' eval cases — `skill-evals`
+
+Every published skill bundle carries eval cases (`skills/BUNDLE/evals/*.json`: a `prompt`, an `expected_output` and
+`assertions.must_contain` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
+once with the bundle installed and once without, and grades each answer by the case's own tokens. It runs from this
+checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
+the skill authors' and the runner never edits them.
+
+```bash
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN
+claude auth status                                              # oauth_token
+pnpm install && pnpm --filter '@objectstack/scenarios^...' build   # the runner reads its dependencies' dist/
+pnpm --filter @objectstack/scenarios skill-evals --dry-run      # the plan and the argv; no login read, no model call
+pnpm --filter @objectstack/scenarios skill-evals                # every case × 2 arms
+pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --repeats 3   # a touched skill
+pnpm --filter @objectstack/scenarios skill-evals --skills-from 18.5.0   # a published @objectstack/skills version's bundles and cases
+pnpm --filter @objectstack/scenarios skill-evals --regrade DIR  # re-draw a recorded round's verdicts from its records; no model call
+pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's own fixtures; no model call
+```
+
+- **Login**: the scenario runner's guard, imported from `src/runner/driver.ts`. A round refuses to start while
+  `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set, or when `claude auth status` reports no login or an API-key
+  login. Every turn is spawned without those two variables. Never an API-billed key.
+- **The arms**: each turn is one `claude -p` in a fresh temporary directory. The prompt goes on stdin. The two arms
+  differ only in the bundle. The with-skill arm copies it into `.claude/skills/BUNDLE/` without its `evals/`, so the
+  turn cannot read the assertions it is graded on. The no-skill arm's directory is empty. Both arms take the same
+  flags: `--setting-sources project` (the user's own skills, plugins and hooks stay out),
+  `--tools Read,Glob,Grep,Skill`, no MCP server (`--strict-mcp-config` over an empty config) and
+  `--no-session-persistence`. A read outside the directory needs a permission no turn is given, and `-p` denies it.
+  The skills built into Claude Code are present in both arms.
+- **Grading**: the answer is the result line's text, the reply a user reads. It passes when every `must_contain` token
+  is in it and no `must_not_contain` token is. Tokens match as literal, case-sensitive substrings, and no model judges
+  an answer. A turn whose init line shows the wrong arm is `invalid`: the with-skill arm does not list the bundle, or
+  the no-skill arm lists one or launches one. A bundle whose `SKILL.md` sets `user-invocable: false` (`objectui`) is
+  never in the init line's `skills` list, though the model can launch it. Its with-skill turns are graded, and each
+  record's `armEvidence` says whether the turn launched the bundle (`launched`) or nothing in the stream shows it
+  (`not-shown`). A turn with no answer is `error`: the process failed or timed out, or the result line is not
+  `success` (`error_max_turns` included). Both kinds are counted and named, and neither is in a denominator.
+  `--regrade DIR` applies the current rules to a recorded round's answers and arm facts. A changed record keeps the
+  verdict its turn was first given as `regradedFrom`. Each record carries `caseHash`, a hash of its case's prompt and
+  token lists as the turn ran them. A case changed or removed since the round is set apart: it is not regraded, its
+  records are left as they are, and the summary names it outside every pass rate. A record with no hash predates the
+  hash; it is regraded against the case as it is now, and the summary counts it as unhashed.
+- **Records**: by default the round goes to `docs/qa/platform-checklist/runs/skill-evals/ROUND/` (git-ignored), or to
+  `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, the answer, the skills listed
+  and launched, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
+  scope and the full per-case scores on both arms) and `summary.md`. The summary has one row per bundle (each arm's
+  pass rate, the with-skill failing cases, and the cases where the no-skill arm scored at least as high) and then
+  every case. `summary.github.md` is the same text with angle brackets spelled `(lt)` / `(gt)` for a GitHub body.
+- **Quota**: every turn reports the subscription's rate-limit window. The round stops scheduling turns once a window
+  reports `rejected` or a utilization at or above `--max-utilization` (default 0.9). The turns not run are recorded
+  as not run, and the command exits 3.
+- **Cost and time**: the CLI's cost figure is notional under a subscription login, and nothing is billed per token.
+  One whole round took 56 min in a Claude Code cloud container: 209 cases × 2 arms, `--concurrency 4`, Claude Code
+  2.1.326, the login's default model. The CLI reported 71 USD notional for it, 49 for the with-skill arm and 22 for
+  the no-skill arm. The median turn took 30 s with the skill and 24 s without. The round moved the login's seven-day
+  utilization from 0.45 to 0.56.

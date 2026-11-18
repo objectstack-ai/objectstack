@@ -25,6 +25,7 @@ displacement cost. The amendment lands as the rewrite did — by the maintainer'
 a base's upgrade plan may report, as advice, each `.custom` override that hides a vendor change; `basedOn` still never gates, and nothing is refused, merged or rebased on the finding ([D2](#d2), [D6](#d6), the [Supersede table](#supersede-table)'s §9 row, [Consequences](#consequences), merge question 2).
 It lands by the maintainer's hand-merge of the PR cut from #30881.
 · **Amended in place** (2026-11-06, ruling record [`6691022506`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691022506) on [#29594](https://github.com/objectstack-ai/objectstack/issues/29594), maintainer, verbatim: 「① 定制单位 = App；同意」, and the second ruling record [`6691217245`](https://github.com/objectstack-ai/objectstack/issues/29594#issuecomment-6691217245) there, verbatim: 「内核白名单，可以下一版本再处理，首批名单建议：Users、Organizations；其他同意。」): the customization unit is the App, so there is one pair per App, `<app id>.custom`, shared by every package its artifact delivers and never one per module; the kernel is one platform suite with one platform pair, `com.objectstack.kernel.custom`, whose range is the platform version; no kernel object is customizable in this version, and the kernel whitelist (Users, Organizations) belongs to the next one ([D3](#d3), [D11](#d11), Q4, [Consequences](#consequences), merge questions 8 to 12); the App of a package is read from the declarations the registry holds, a package that declares no App is its own unit, and a pair created under the old per-package unit is re-identified as, or moved into, its App's pair by the migration ceremony (merge questions 11 and 12). It lands by the maintainer's hand-merge of the PR cut from #31014.
+· **Amended in place** (2026-11-17, card [#34724](https://github.com/objectstack-ai/objectstack/issues/34724) of epic [#34571](https://github.com/objectstack-ai/objectstack/issues/34571), maintainer, verbatim: 「打包动作不是应该在 studio 对应的软件包中自定义吗」, and on platform actions getting no switch, 「同意，立卡」; ruling record [`6944409840`](https://github.com/objectstack-ai/objectstack/issues/34724#issuecomment-6944409840), verbatim: 「保持原状并写明恢复方法」): the action's ledger switch moves onto the action in Studio and Setup › Packaged Actions retires, so the line above that says D4 "keeps the ledger switch" now reads as the switch living in Studio; the platform's own actions carry no switch in the console, a row that already switches one off stays in force, and the activation door is the way to turn it on again ([D4](#d4), [D9](#d9)). It lands by the hand-merge or authorized approval of the PR cut from #34724.
 **Decided by**: the maintainer, 2026-10-30, in the desktop session that re-planned the epic, verbatim and
 untranslated as epic #28236 records them — the direction 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」; the suffix 「同意 后缀改成 .custom」; the eight questions 「等我拍板的 8 个问题，全部同意」; the extension
 fields 「扩展字段用 __c 后缀，只有 .custom 包能用。」; the item toolbar 「同意新增 2h「Studio 项工具栏」并放在 2a 之前」;
@@ -450,6 +451,27 @@ Fork D), not one of the §9 walls. This record moves the switch to where the ite
   open; it is decided.
 - **The action ledger switch is out of this epic** (#27842, #27504; 「四个小问题 同意」): `action` keeps ADR-0126 §8's
   disable leg where it is.
+- **Amended 2026-11-17 — the action switch moves onto the action in Studio; Setup › Packaged Actions retires**
+  ([#34724](https://github.com/objectstack-ai/objectstack/issues/34724), child of epic
+  [#34571](https://github.com/objectstack-ai/objectstack/issues/34571); maintainer, verbatim:
+  「打包动作不是应该在 studio 对应的软件包中自定义吗」, and on platform actions getting no switch, 「同意，立卡」).
+  The bullet above is superseded: in Studio, on a **read-only app package**, each vendor action carries the activation
+  ledger's switch — on the object's Actions view for an action embedded in the object, on the item's page in the "All
+  metadata" area for a standalone `action` item — with the flow switch's control, words ("on / off for this
+  deployment"), pre-judged gate and verbatim refusals (the first two bullets of this decision, unchanged). The doors
+  are the ones Setup's page used and are unchanged: the read is the `sys_metadata_activation` list (rows with
+  `metadata_type: 'action'`, absence meaning active), the write `POST /api/v1/actions/_activation/:object/:action`
+  (objectstack#12348), its gate the same `refuseUngrantedActivationWrite`. **The platform's own actions** (those a
+  kernel package ships, on `sys_user`, `sys_api_key`, `sys_sso_provider` …) **carry no switch anywhere** in the
+  console, and the server door is not changed. A row that already switches a platform action off stays in force:
+  no boot or upgrade step re-enables it (maintainer ruling
+  [6944409840](https://github.com/objectstack-ai/objectstack/issues/34724#issuecomment-6944409840), on the
+  measurement [6943920659](https://github.com/objectstack-ai/objectstack/issues/34724#issuecomment-6943920659)).
+  Turning one on again is the activation door's `{ enabled: true }`, and the `ACTION_DISABLED` sentence for a
+  platform action names that door rather than Studio. Setup's `nav_packaged_actions` entry and its
+  `automation:packaged-actions` page retire in the same change as the switch, so no window is left without one; a
+  bookmark of the page opens Studio. Action-clone stays unchartered (ADR-0126 §8 item 2): ⛔ no "new similar" for an
+  action, and a customer's own button stays a new action in `.custom` ([D9](#d9)).
 
 Maintainer, verbatim (2026-10-30): 「打包自动化开关，这个就很奇怪，正常的操作我应该是在studio中进入 hotcrm app，选中一个流程，点禁用或者复制更符合逻辑吧？」
 
@@ -573,8 +595,8 @@ naming the callers), the `FLOW_DISABLED` consult at `execute()`, and the walled 
 (ADR-0126 §5).
 
 **`action`, the other Regime C type, takes the same shape later** (ruled 2026-10-31 on decision card #28364, in Q3's
-pattern). Its precondition has landed: the action ledger switch is on `main` (#27842 and #27504, both closed 2026-10-30 —
-outside this epic, [D4](#d4)). A declared override of a base's `action` is admitted, once its door is cut, under conditions 1–3
+pattern). Its precondition has landed: the action ledger switch is on `main` (#27842 and #27504, both closed 2026-10-30), and since
+2026-11-17 it is drawn on the action in Studio ([D4](#d4) as amended, #34724). A declared override of a base's `action` is admitted, once its door is cut, under conditions 1–3
 above read for an action: served over the code package's name, rebound in one reload, one ledger row for the name;
 condition 4 does not apply — an action has no suspended run. The door itself is not cut here: there is no override door
 for `action` yet, no interim gate, and no card of this epic opens one. An undeclared same-name `action` in a dependent is

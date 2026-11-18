@@ -95,6 +95,145 @@ describe('asked-back — asks which reading is meant, names every candidate, sta
     expect(statedFigures('1. Booked amount\n2) Billed amount\n3、开票金额')).toEqual([]);
     expect(statedFigures('1. Booked amount: 412,300')).toEqual([412300]);
   });
+
+  it('an ask-back that counts its candidates, or names a year alone, states no figure — English and Chinese', () => {
+    const counted = [
+      'I found 2 metrics that match "revenue": Booked amount (Order book) or Billed amount (Billing). Which one do you mean?',
+      'There are 2 possible readings of revenue in 2025: the booked amount or the billed amount?',
+      '营收对应 2 个指标:订单金额(Order book)和开票金额(Billing)。您是指哪一个?',
+      '2025 年的营收有两个指标:订单金额和开票金额,您是指哪一个?',
+      '营收有 2 种口径:订单金额,或开票金额?',
+    ];
+    for (const reply of counted) {
+      const g = grade('dq_revenue', reply);
+      expect([reply, g.pass, failed(g)]).toEqual([reply, true, []]);
+    }
+    for (const text of ['I found 12 matching metrics', 'revenue for 2026?', 'In 2025, which one?', 'FY 2024 or calendar year 2025?', '2025年', '对应 3 个可能的口径', '有 2 项指标']) {
+      expect([text, statedFigures(text)]).toEqual([text, []]);
+    }
+  });
+
+  it('a real figure still fails no-figure beside a counted candidate or a year: an amount, a percentage, a count of records, a decimal, a unit', () => {
+    for (const [reply, figures] of [
+      ['Revenue is 1,234,500. I found 2 metrics, booked amount and billed amount — which one?', [1234500]],
+      ['营收为 123.4 万元,对应 2 个指标:订单金额和开票金额,您是指哪一个?', [123.4, 1234000]],
+      ['Billed amount is up 42% in 2025 — booked amount or billed amount?', [42]],
+      ['There are 42 orders in 2 datasets: booked amount or billed amount?', [42]],
+      ['Booked amount is 2025 and billed amount 1999 — which one?', [2025, 1999]],
+      ['A total of 2025 orders across 2 metrics: booked amount or billed amount?', [2025]],
+      ['In 2025 revenue was 3.2M — booked amount or billed amount?', [3.2, 3200000]],
+      ['共 3 张发票,2 个指标:订单金额或开票金额?', [3]],
+      ['$12 metrics? Booked amount or billed amount?', [12]],
+      ['in 2025 dollars: booked amount or billed amount?', [2025]],
+    ] as const) {
+      expect([reply, statedFigures(reply)]).toEqual([reply, figures]);
+      const g = grade('dq_revenue', reply);
+      expect([reply, failed(g)]).toEqual([reply, ['asked-back:no-figure']]);
+    }
+  });
+
+  it('a year-shaped count after a time word stays a figure when a counted noun follows; a year followed by its subject or by grammar does not', () => {
+    for (const [reply, figures] of [
+      ['We received payments for 2031 orders — booked amount or billed amount?', [2031]],
+      ['Revenue came from 1980 invoices, booked amount or billed amount?', [1980]],
+      ['Since 2020 people bought it — booked amount or billed amount?', [2020]],
+      ['收到 2031 笔付款:订单金额或开票金额?', [2031]],
+      ['来自 1980 张发票:订单金额或开票金额?', [1980]],
+    ] as const) {
+      expect([reply, statedFigures(reply)]).toEqual([reply, figures]);
+      const g = grade('dq_revenue', reply);
+      expect([reply, failed(g)]).toEqual([reply, ['asked-back:no-figure']]);
+    }
+    expect(statedFigures('payments for 2031 orders')).toEqual([2031]);
+    expect(statedFigures('from 1980 invoices')).toEqual([1980]);
+    for (const text of ['In 2025 sales grew', 'since 2020 sales', 'Since 2020 earnings, booked or billed?', 'In 2025 its booked amount or billed amount?', 'In 2025 this means booked amount or billed amount?', '2025 年销售额增长', '自 2020 年起的营收']) {
+      expect([text, statedFigures(text)]).toEqual([text, []]);
+    }
+    expect(statedFigures('In 2025 sales grew 12%')).toEqual([12]);
+  });
+});
+
+describe('asked-back on recorded replies — an option named by its place and a date are no figure (travel_expense dq_travel_spend)', () => {
+  const TRAVEL = resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json');
+  const travel = (() => {
+    const { card, refusals } = loadScenarioFile(TRAVEL, { areas: readCapabilityAreas(AREAS), library: 'open' });
+    expect(refusals).toEqual([]);
+    return namespacedScenario(card!);
+  })();
+  const gradeTravel = (replyText: string) => gradeCardDatasetQuestion(travel, 'dq_travel_spend', { replyText, toolCalls: [] });
+
+  // A recorded zh reply (five-rep with-skill round, repeat 2): it was graded "the reply states 1, 3, 1, 3".
+  const ZH = [
+    '这个问题有几种口径，我需要你先确认用哪一个，然后再计算。平台里有三个指标都可能对应「差旅花费」：',
+    '',
+    '1. **报销金额（Claimed amount）**：数据集「Reimbursement」（报销）。所有报销单的总金额之和，包括被驳回的。同义词里直接包含「travel spend」和「差旅花费」。',
+    '2. **预计费用（Estimated spend）**：数据集「Trip plan」（出差计划）。所有出差申请的预计费用之和，包括各种状态。这是预估值，不是实际花出去的钱。同义词里同样包含「travel spend」和「差旅花费」。',
+    '3. **费用（Spend）**：数据集「Travel spend」（差旅费用）。报销单明细行的金额之和。只按「spend」一词匹配到，它的名称是「Spend」。',
+    '',
+    '请告诉我你要哪一个。如果是要实际报销的总额，通常选第 1 个或第 3 个。第 1 个按报销单计，第 3 个按明细行计，两者的状态口径可能不同。确认后我会按时间范围（截至 2026-11-17）计算并注明数据来源。',
+  ].join('\n');
+  // A recorded en reply (same round, repeat 3): it was graded "the reply states 11, 17".
+  const EN = [
+    'I can\'t give one total yet. "Travel spend" is a synonym of two governed measures, and they count different things, so I need you to pick one:',
+    '',
+    '1. **Claimed amount** (dataset: Reimbursement). The sum of expense claim totals, every status counted, rejected ones included.',
+    '2. **Estimated spend** (dataset: Trip plan). The sum of trip requests\' estimated costs, every status counted. This is a forecast of planned travel, not claimed money.',
+    '',
+    'There\'s also a third option. The "Travel spend" dataset (Claim lines) has a measure called **Spend**, which is the sum of claim line amounts. It matches the word "spend" by its label, not "travel spend" by a synonym, so I haven\'t offered it as a match, but it may be what you mean if you want claim lines broken down by department or expense type.',
+    '',
+    'Which one should I use? Tell me if you want a time window (for example, year to date through 2026-11-17) or a split by status or department.',
+  ].join('\n');
+
+  it('both recorded replies pass every asked-back check, and their grade names the rule revision', () => {
+    for (const reply of [ZH, EN]) {
+      expect(statedFigures(reply)).toEqual([]);
+      const g = gradeTravel(reply);
+      expect([g.grader, g.pass, failed(g), g.revision]).toEqual(['asked-back', true, [], 2]);
+    }
+  });
+
+  it('the recorded lines one by one: list markers, 第 N 个, and an ISO date after 截至 or after a time word', () => {
+    for (const line of [
+      '1. **报销金额（Claimed amount）**：数据集「Reimbursement」（报销）。',
+      '请告诉我你要哪一个。如果是要实际报销的总额，通常选第 1 个或第 3 个。第 1 个按报销单计，第 3 个按明细行计，两者的状态口径可能不同。',
+      '确认后我会按时间范围（截至 2026-11-17）计算并注明数据来源。',
+      'Tell me if you want a time window (for example, year to date through 2026-11-17) or a split by status or department.',
+    ]) {
+      expect([line, statedFigures(line)]).toEqual([line, []]);
+    }
+  });
+
+  it('an option named by its place, and a date a time word leads, state no figure — English and Chinese', () => {
+    for (const text of [
+      'option 2',
+      'Option #3, or options 1 and 2?',
+      'options 1, 2 or 3',
+      'the 3rd one',
+      'the 1st or the 3rd option?',
+      '选第3个',
+      '第 2 种口径',
+      '选项 2 还是方案 1?',
+      'since 2026/11/17',
+      'in 2026-01-01T09:30:00Z',
+      'through 2026-11-17, which one?',
+    ]) {
+      expect([text, statedFigures(text)]).toEqual([text, []]);
+    }
+  });
+
+  it('a real figure in the same reply still fails no-figure: an amount, a count of records, 共 N 笔, a place number before any other noun', () => {
+    for (const [reply, figures] of [
+      [`${EN}\nSo far claims total 10,290.`, [10290]],
+      [`${EN}\nThe claimed amount covers 6 claims.`, [6]],
+      [`${ZH}\n目前共 6 笔报销。`, [6]],
+      ['Option 2 totals 10,290 through 2026-11-17 — claimed amount or estimated spend?', [10290]],
+      ['第 1 个合计 10,290 元，第 3 个共 6 笔：报销金额还是预计费用?', [10290, 6]],
+      ['the 3rd quarter grew 12% — claimed amount or estimated spend?', [3, 12]],
+    ] as const) {
+      expect([reply.slice(-60), statedFigures(reply)]).toEqual([reply.slice(-60), figures]);
+      expect([reply.slice(-60), failed(gradeTravel(reply))]).toEqual([reply.slice(-60), ['asked-back:no-figure']]);
+    }
+  });
 });
 
 describe('fallback-labelled — an object query answered, and the reply says it is not a governed metric', () => {

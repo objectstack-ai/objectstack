@@ -583,6 +583,7 @@ const ko = {
         "이 뷰는 그룹화되어 있지만 데이터 소스가 queryGroupHeaders를 구현하지 않아 그룹 개수를 셀 수 없습니다. 레코드를 표시하려면 그룹화를 제거하세요.",
       needsWholeRows:
         "그룹화에는 모든 레코드가 필요하지만 이 그리드에는 한 페이지만 전달되어 그룹 개수를 셀 수 없습니다. 모든 레코드를 전달하거나 queryGroupHeaders를 구현하는 데이터 소스에서 그리드가 불러오도록 하세요.",
+      draftOnly: "{{fields}}(으)로 그룹화되지 않았습니다: 게시할 때까지 초안에만 존재합니다.",
     },
     // objectui#4024 — column-footer aggregate prefixes, keyed by the spec's
     // `ColumnSummary` vocabulary. `pattern` owns the label/value join so this
@@ -934,6 +935,7 @@ const ko = {
     removeGroup: "제거",
     groupingUnstoredNotice: "{{fields}} 기준으로 이 목록을 그룹화할 수 없습니다. 값이 표시될 때 계산되며 저장되지 않습니다. 해당 그룹화 없이 목록을 표시합니다.",
     groupingUnstoredRemove: "그룹화에서 제거",
+    draftOnlyQueryDropped: "{{fields}} 기준 필터와 정렬이 적용되지 않았습니다. 초안에만 있으며 게시 후 적용됩니다.",
     inlineEditShort: "인라인 편집",
     inlineEditLabel: "레코드를 인라인으로 편집(셀을 클릭하여 편집)",
   },
@@ -1590,6 +1592,9 @@ const ko = {
     },
     total: "합계",
     noDataSourceFor: "데이터 소스 없음:",
+    drillTooMany: '이 값과 관련된 레코드가 너무 많아 여기에 나열할 수 없습니다. 대시보드 필터 범위를 좁힌 후 다시 시도하세요.',
+    drillUnavailable: '이 값에 해당하는 레코드는 여기에서 나열할 수 없습니다.',
+    drillFailed: '이 값에 해당하는 레코드를 불러오지 못했습니다. 잠시 후 다시 시도하세요.',
     config: {
       breadcrumb: {
         dashboard: "대시보드",
@@ -2174,7 +2179,7 @@ const ko = {
       changesApplied: "적용됨",
       changesDrafted: "초안으로 저장됨",
       changesFailed: "적용되지 않음",
-      discussing: "논의 중: {{target}}",
+      discussing: "보는 중: {{target}}",
       changeVerb: {
         createObject: "객체 생성",
         addField: "필드 추가",
@@ -2222,7 +2227,7 @@ const ko = {
       unavailableRetry: "다시 시도",
       unavailableHome: "홈으로 돌아가기",
       dock: {
-        title: "어시스턴트",
+        title: "AI 어시스턴트",
         description: "AI 어시스턴트 채팅",
         resize: "채팅 크기 조정",
         collapse: "채팅 접기",
@@ -2550,7 +2555,7 @@ const ko = {
       expandToPage: "전체 페이지로 열기",
       openAsPage: "전체 페이지로 열기",
       objectNotFound: "객체를 찾을 수 없음",
-      objectNotFoundDescription: "객체 \"{{objectName}}\"이(가) 현재 구성에 존재하지 않습니다.",
+      objectNotFoundDescription: "객체 \"{{objectName}}\"이(가) 존재하지 않거나 액세스 권한이 없습니다.",
       objectNotFoundHint: "앱 탐색 설정을 확인하거나 사이드바에서 다른 객체를 선택하세요.",
       objectPackageDisabled: "객체 \"{{objectName}}\"이(가) 속한 패키지가 비활성화되어 있어 제공되지 않습니다.",
       filterOrGroupNotEditable: "이 필터에는 다른 조건과 함께 OR 그룹이 있어 필터 편집기에서 표시할 수 없으므로 여기서는 읽기 전용입니다. 뷰에는 계속 적용됩니다.",
@@ -2949,6 +2954,10 @@ const ko = {
       missingToken: "확인 링크에 토큰이 없습니다.",
       emailMissing: "이메일 주소 누락",
       resendButton: "확인 이메일 다시 보내기",
+      // objectstack#34706 — the prompt's copy on an arrival that sent no mail.
+      sendDescription:
+        "이메일 주소가 아직 확인되지 않았습니다. {{email}}(으)로 확인 링크를 보낸 후 링크를 클릭하여 계정을 확인하세요.",
+      sendButton: "확인 이메일 보내기",
       resending: "전송 중…",
       resent: "이메일이 전송되었습니다! 받은 편지함을 확인하세요",
       resentSuccess: "확인 이메일이 전송되었습니다!",
@@ -3413,7 +3422,6 @@ const ko = {
   },
   empty: {
     objectNotFound: "오브젝트를 찾을 수 없습니다",
-    objectNotFoundDescription: "\"{{name}}\" 오브젝트 정의가 없습니다. 구성을 확인하거나 뒤로 이동하세요.",
     interfacePageSourceMissing: "이 인터페이스 페이지는 \"{{name}}\"을(를) 참조하지만 사용할 수 없습니다.",
     pageNotFound: "페이지를 찾을 수 없습니다",
     pageNotFoundDescription: "\"{{name}}\" 페이지를 찾을 수 없습니다. 삭제되거나 이름이 변경되었을 수 있습니다.",
@@ -4606,7 +4614,7 @@ const ko = {
       detailNone: '차이가 감지되지 않았습니다 — 초안이 게시된 버전과 일치합니다.',
       fieldOrderChanged: '필드 순서가 변경됨',
       // objectstack#27176 — who drafted part of this item: the copilot, or an agent through MCP.
-      draftedByCopilot: 'AI 코파일럿이 초안으로 작성한 변경 사항 포함',
+      draftedByCopilot: 'AI 어시스턴트가 초안으로 작성한 변경 사항 포함',
       draftedByMcpClient: 'MCP 클라이언트 “{{client}}”이(가) 초안으로 작성한 변경 사항 포함',
       draftedByMcp: 'MCP 클라이언트가 초안으로 작성한 변경 사항 포함',
       detailChangedKeys: '기타 변경:',
@@ -4714,7 +4722,8 @@ const ko = {
       securityBlockTitle: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_one: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
       securityBlockTitle_other: '게시가 거부됩니다 — {{count}}개 항목에 먼저 결정이 필요합니다',
-      securityBlockWhere: '객체의 설정 → 레코드 공유에서 수정한 후 다시 게시하세요.',
+      securityBlockWhere: '객체의 설정 → 누가 어떤 레코드를 볼 수 있는지에서 수정한 후 다시 게시하세요.',
+      flowChecksTitle: '게시하기 전에 확인하세요 — 게시 검사에서 다음 사항을 알립니다',
       securityRule: {
         owdUnset: '레코드 공유 기준(sharingModel)이 선언되지 않았습니다. 런타임은 private로 처리하지만 기준은 명시적으로 결정해야 합니다.',
         owdAlias: '레코드 공유 기준(sharingModel)이 정식 값이 아니므로 런타임은 이 개체를 private로 처리합니다.',

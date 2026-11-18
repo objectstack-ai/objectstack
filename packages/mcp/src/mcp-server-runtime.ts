@@ -1802,18 +1802,29 @@ const DEFAULT_HTTP_INSTRUCTIONS =
  * (ADR-0149 D3), in the few lines `initialize` carries. It rides the
  * instructions because a client reads a tool's description only after it has
  * chosen that tool (#34659 ruling D5 = A); the full procedure stays in the
- * tools' own descriptions and in the served skill (`DATASET_TOOL_LINES` in
- * `skill-md.ts`), which say the same thing: an exact name, label or synonym is
- * the only match, one measure match answers, several are a question for the
- * user, none falls back to the object tools with the answer labelled.
+ * tools' own descriptions and in the served skill's data loop
+ * (`ASK_SKILL_DATA_LOOP`, generated from `skills/objectstack-ask/SKILL.md` and
+ * rendered by `skill-md.ts`). All three hold an exact name, label or synonym as
+ * the only match, one measure match as the answer (two words with one measure
+ * match each are two metrics, both computed), and several matches on one word
+ * as a question for the user. [#34763] A word with no match may come back with
+ * `list_datasets` `candidates` (the ADR-0149 D3 amendment note): the rule makes
+ * that the same question, listing each candidate's label, dataset label and
+ * description, never a pick and never a match, even for a single candidate;
+ * only a word with no match and no candidate falls back to the object tools,
+ * with the answer labelled. The skill's own loose-form rows predate
+ * `candidates` and are amended in its lane.
  * Sent only where both dataset tools register ({@link datasetToolsServed}).
  */
 const DATASET_SELECTION_RULE =
   'For a question about a business number, look for a governed metric first: call list_datasets with the '
   + 'question\'s business words. A word matches only when it equals a measure\'s or dimension\'s name, label or '
-  + 'synonym, never a similar word. One measure match: answer with query_dataset. Several matches: ask the user '
-  + 'which one they mean; do not pick. No match: fall back to query_records / aggregate_records and say the answer '
-  + 'is not from a governed metric.';
+  + 'synonym, never a similar word. Each word that matches exactly one measure: answer with query_dataset; two '
+  + 'such words are two metrics, so compute both. One word matching several measures: ask the user which one '
+  + 'they mean; do not pick. A word with no match but with candidates in the answer: ask the same way, listing '
+  + 'each candidate\'s label, dataset label and description; do not pick one or treat it as a match. No match '
+  + 'and no candidates: fall back to query_records / aggregate_records and say the answer is not from a governed '
+  + 'metric.';
 
 /**
  * [#34686] The published skills package an open server points a client to

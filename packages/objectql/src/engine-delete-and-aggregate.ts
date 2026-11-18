@@ -465,7 +465,7 @@ export class DeleteAndAggregateFacet {
         // so testing it for `=== false` here would read a signal this layer's
         // contract does not promise — #5138's argument, unchanged.
         priorRecord = await readPreImage(id);
-        if (!priorRecord) throw recordNotFoundError(object, id);
+        if (!priorRecord) throw recordNotFoundError(object, id, opCtx.context);
         // Bound unconditionally now that the row is proven present.
         // `bindPreImage`'s never-fabricate rule (#4649/#4775) is unchanged and
         // still the reason the binding goes through it rather than around it.

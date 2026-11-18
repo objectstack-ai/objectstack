@@ -6,7 +6,7 @@ import type {
     MetadataProtocol,
     PackageProtocol,
 } from '@objectstack/spec/api';
-import { IDataEngine, recordNotFoundError } from '@objectstack/core';
+import { IDataEngine, recordNotFoundError, type UserMessageCaller } from '@objectstack/core';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { resolveQueryReadLimits } from '@objectstack/types';
 import { type TenancyPosture } from '@objectstack/spec/security';
@@ -266,6 +266,8 @@ import type { ImportUnmanagedPackageAnswer } from './protocol-package-install.js
 // [#25467 cut 8] The runtime authoring gate and the restored-body doors.
 import {
     assertRuntimeAuthoringRules,
+    draftPublishJudgement,
+    type DraftPublishJudgement,
     draftPublishVerdict,
     refuseRestoredBodyTheSaveDoorRefuses,
     restoredBodyDerivation,
@@ -1235,6 +1237,7 @@ export class ObjectStackProtocolImplementation implements
             diffMetaItem: (...a) => protocol.diffMetaItem(...a),
             disabledActionsOf: (...a) => protocol.disabledActionsOf(...a),
             discardDraftInItsScope: (...a) => protocol.discardDraftInItsScope(...a),
+            draftPublishJudgement: (...a) => protocol.draftPublishJudgement(...a),
             draftPublishVerdict: (...a) => protocol.draftPublishVerdict(...a),
             dropObjectStorage: (...a) => protocol.dropObjectStorage(...a),
             dropStorageRemainingRowsRefusal: (...a) => ObjectStackProtocolImplementation.dropStorageRemainingRowsRefusal(...a),
@@ -1262,6 +1265,8 @@ export class ObjectStackProtocolImplementation implements
             getMetaItem: (...a) => protocol.getMetaItem(...a),
             getMetaItems: (...a) => protocol.getMetaItems(...a),
             getOverlayRepo: (...a) => protocol.getOverlayRepo(...a),
+            getPackageTranslationBundle: (...a) => protocol.getPackageTranslationBundle(...a),
+            getPackagedFieldPatchBases: (...a) => protocol.getPackagedFieldPatchBases(...a),
             getPackagedObjectBase: (...a) => protocol.getPackagedObjectBase(...a),
             get getServicesRegistry() { return protocol.getServicesRegistry; },
             governServedObject: (...a) => protocol.governServedObject(...a),
@@ -1904,9 +1909,22 @@ export class ObjectStackProtocolImplementation implements
     private draftPublishVerdict(draft: {
         type: string; name: string; body: unknown; packageId: string | null;
     }): Promise<RuntimeAuthoringIssue[]> {
+        return draftPublishVerdict.call(this.draftVerdictHost(), draft);
+    }
+
+    /** [#34818] The same judgement with the gate's advisories beside its refusal (see `draftPublishJudgement`). */
+    private draftPublishJudgement(draft: {
+        type: string; name: string; body: unknown; packageId: string | null;
+        userTextLocales?: readonly (string | undefined)[];
+    }): Promise<DraftPublishJudgement> {
+        return draftPublishJudgement.call(this.draftVerdictHost(), draft);
+    }
+
+    /** The host both draft verdict bodies read: the promotion's own collaborators. */
+    private draftVerdictHost(): ThisParameterType<typeof draftPublishJudgement> {
         const readAuthoringChannel = () => this.authoringChannel;
         const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof draftPublishVerdict> = {
+        const host: ThisParameterType<typeof draftPublishJudgement> = {
             get authoringChannel() { return readAuthoringChannel(); },
             get engine() { return readEngine(); },
             collectBatchPendingDeclarations: (...a) => this.collectBatchPendingDeclarations(...a),
@@ -1922,7 +1940,7 @@ export class ObjectStackProtocolImplementation implements
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
         };
-        return draftPublishVerdict.call(host, draft);
+        return host;
     }
 
     /**
@@ -2969,66 +2987,65 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#30062] The PACKAGED (code-layer) declaration of a PAGE — the page a
-     * code package ships, before a `.custom` pair's declared override replaces
-     * it (ADR-0146 D2). The page twin of {@link getPackagedDashboardBase},
-     * answered the same way, and the fact `translatePage`
-     * (`@objectstack/spec/system`) compares against as its `packagedBase`: the
-     * i18n catalog (`pages.<name>`) is the packaged translation of exactly
-     * this body, so it may only replace a string the served page still carries
-     * unchanged from it (ruling record 6631250894: a translation in the pair,
-     * then the override's own label, then the base's translation).
+     * [#30062] The PACKAGED (code-layer) declarations of a PAGE, DATASET, APP,
+     * BOOK and IMPORT MAPPING — the item a code package ships, before a
+     * `.custom` pair's declared override replaces it (ADR-0146 D2). One
+     * contract for the five accessors below: the page is the twin of
+     * {@link getPackagedDashboardBase}, the other four are twins of the page
+     * (and of each other), all answered the same way, and each is the fact its
+     * translator (`@objectstack/spec/system`) compares against as its
+     * `packagedBase`: the i18n catalog entry is the packaged translation of
+     * exactly this body, so it may only replace a string the served item still
+     * carries unchanged from it (ruling record 6631250894: a translation in the
+     * pair, then the override's own label, then the base's translation).
      *
-     * Measured before this existed: a pair's override of the CRM's
-     * `crm_welcome` labelled `OVpage` was served, and a `zh-CN` reader got the
-     * base's `欢迎页`, because the translation of the served page had no base to
-     * compare with.
+     * - `getPackagedPageBase`: `translatePage`, `pages.<name>`. Measured before
+     *   this existed: a pair's override of the CRM's `crm_welcome` labelled
+     *   `OVpage` was served, and a `zh-CN` reader got the base's `欢迎页`,
+     *   because the translation of the served page had no base to compare
+     *   with. A page has no extension fold, so the artifact item IS the
+     *   packaged declaration.
+     * - `getPackagedDatasetBase`: `translateDataset`, each string of
+     *   `datasets.<name>` (label, description, dimension and measure labels),
+     *   for the page's reason: a pair's dataset override kept the base's
+     *   translated label and measure labels over its own.
+     * - `getPackagedAppBase`: `translateApp`, each string of `apps.<name>`
+     *   (label, description and navigation labels, a node judged against the
+     *   base's node of the same `id`).
+     * - `getPackagedBookBase`: `translateBook`, each string of `books.<name>`
+     *   (label, description and group labels, a group judged against the
+     *   base's group of the same `key`).
+     * - `getPackagedMappingBase` (#34939): `translateMapping`, the served
+     *   label only (`mappings.<name>.label`).
      *
      * Shadow-immune for the dashboard's reason: the override is served from its
-     * row, never as the artifact, so the body returned is the base's own. A
-     * page has no extension fold, so the artifact item IS the packaged
-     * declaration. Returns `undefined` for a page no code package ships, an
-     * unknown or empty name, and a registry double without the lookup — "no
-     * packaged baseline", read by the translator as the catalog applying
-     * unchanged.
+     * row, never as the artifact, so the body returned is the base's own. Each
+     * returns `undefined` for an item no code package ships, an unknown or
+     * empty name, and a registry double without the lookup — "no packaged
+     * baseline", read by the translator as the catalog applying unchanged.
      */
     getPackagedPageBase(name: string): unknown {
         return ProtocolDiscoveryAndBasesFacet.getPackagedPageBase(protocolHost(this), name);
     }
 
-    /**
-     * [#30062] The PACKAGED (code-layer) declaration of a DATASET, the fact
-     * `translateDataset` compares each string against (`datasets.<name>`: its
-     * label, description, dimension and measure labels). The dataset twin of
-     * {@link getPackagedPageBase}, answered the same way and for the same
-     * reason: a pair's dataset override kept the base's translated label and
-     * measure labels over its own. Returns `undefined` on the same
-     * uncertainties.
-     */
+    /** Contract: the shared docblock on {@link getPackagedPageBase}. */
     getPackagedDatasetBase(name: string): unknown {
         return ProtocolDiscoveryAndBasesFacet.getPackagedDatasetBase(protocolHost(this), name);
     }
 
-    /**
-     * [#30062] The PACKAGED (code-layer) declaration of an APP, the fact
-     * `translateApp` compares each string against (`apps.<name>`: its label,
-     * description and navigation labels, a node judged against the base's node
-     * of the same `id`). The app twin of {@link getPackagedPageBase}, answered
-     * the same way. Returns `undefined` on the same uncertainties.
-     */
+    /** Contract: the shared docblock on {@link getPackagedPageBase}. */
     getPackagedAppBase(name: string): unknown {
         return ProtocolDiscoveryAndBasesFacet.getPackagedAppBase(protocolHost(this), name);
     }
 
-    /**
-     * [#30062] The PACKAGED (code-layer) declaration of a BOOK, the fact
-     * `translateBook` compares each string against (`books.<name>`: its label,
-     * description and group labels, a group judged against the base's group of
-     * the same `key`). The book twin of {@link getPackagedPageBase}, answered
-     * the same way. Returns `undefined` on the same uncertainties.
-     */
+    /** Contract: the shared docblock on {@link getPackagedPageBase}. */
     getPackagedBookBase(name: string): unknown {
         return ProtocolDiscoveryAndBasesFacet.getPackagedBookBase(protocolHost(this), name);
+    }
+
+    /** Contract: the shared docblock on {@link getPackagedPageBase}. */
+    getPackagedMappingBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedMappingBase(protocolHost(this), name);
     }
 
     /**
@@ -3066,6 +3083,15 @@ export class ObjectStackProtocolImplementation implements
      */
     getPairTranslationBundle(basePackageId: string): Promise<TranslationBundle | undefined> {
         return ProtocolDiscoveryAndBasesFacet.getPairTranslationBundle(protocolHost(this), basePackageId);
+    }
+
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases} in `protocol-discovery-and-bases.ts` [#33952]. */
+    getPackagedFieldPatchBases(name: string): Array<{ packageId: string; base: unknown }> {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedFieldPatchBases(protocolHost(this), name);
+    }
+    /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle} in `protocol-discovery-and-bases.ts` [#33952]. */
+    getPackageTranslationBundle(packageId: string): Promise<TranslationBundle | undefined> {
+        return ProtocolDiscoveryAndBasesFacet.getPackageTranslationBundle(protocolHost(this), packageId);
     }
 
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.packagedArtifactBase} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
@@ -4103,6 +4129,8 @@ export class ObjectStackProtocolImplementation implements
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
+        /** [#34818] The draft read's user-sentence locales (`GetMetaItemRequestSchema.userTextLocales`). */
+        userTextLocales?: readonly string[],
     }) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItem(protocolHost(this), request);
@@ -4156,7 +4184,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readMetaItemFace(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
-        member?: string,
+        member?: string, userTextLocales?: readonly string[],
     }, face: 'served' | 'execution') {
         // [#25467 cut 31] The body moved to `protocol-meta-item-face.ts` (see `MetaItemFaceHost`).
         const readEngine = () => this.engine;
@@ -4195,7 +4223,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
-        member?: string,
+        member?: string, userTextLocales?: readonly string[],
     }, opts: { face?: 'served' | 'execution'; activeRows?: PrereadActiveRows } = {}) {
         // [#25467 E1] The body moved to `protocol-meta-item-reads.ts`; it reaches this class through `protocol-host.ts`.
         return readMetaItem(protocolHost(this), request, opts);
@@ -5341,12 +5369,12 @@ export class ObjectStackProtocolImplementation implements
      * context carries no explicit `transaction`, so the probe rides the same
      * connection as the writes it guards.
      */
-    private assertRecordExists(object: string, id: string): Promise<void> {
+    private assertRecordExists(object: string, id: string, caller?: UserMessageCaller | null): Promise<void> {
         // [#25467 cut 4] The body moved to `protocol-record-reads.ts` (see `RecordReadHost`).
         const host: ThisParameterType<typeof assertRecordExists> = {
             probeRecord: (...a) => this.probeRecord(...a),
         };
-        return assertRecordExists.call(host, object, id);
+        return assertRecordExists.call(host, object, id, caller);
     }
 
     /**

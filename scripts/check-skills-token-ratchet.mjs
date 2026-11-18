@@ -634,7 +634,24 @@ export const CEILINGS = new Map([
   // priced text is 27611 bytes -> ceil(27611 / 4) = 6903; the ceiling moves +42,
   // the measured remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27611 / 4)
-  ['skills/objectstack-automation/SKILL.md', 6903],
+  // 6903 -> 6992 (2026-11-17, card #34655, its Done-when "Document it in the
+  // automation skill", ruled into the same PR by the area): one paragraph under
+  // "A flow an installed package ships" teaches `defaultActive: false` — the
+  // flow ships unarmed (`_status` `enabled: false`) until an administrator turns
+  // the packaged-flow switch on, that choice outlives restart / upgrade /
+  // reinstall, `status: 'obsolete'` disarms past the switch, and a flow
+  // authored in the deployment is refused the key. Raise path the standing
+  // ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  // NOTHING PAID DOWN: the file was read whole for a restatement of the
+  // activation switch, its default or `status` as a switch and none exists —
+  // the paragraph points at the switch the preceding paragraph introduces
+  // rather than restating it. Arithmetic in priced bytes (stamp line
+  // excluded), against `main`'s 27611 (headroom 0): the diff adds 357 bytes
+  // and removes none, so the LANDED priced text is 27968 bytes ->
+  // ceil(27968 / 4) = 6992; the ceiling moves +89, the measured addition only.
+  // Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27968 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6992],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -1695,7 +1712,17 @@ export const CEILINGS = new Map([
   // a match either. 5848 -> 6105 bytes (+257), less the 20-byte stamp line:
   // 5828 -> 6085 priced bytes, ceil(6085 / 4) = 1522 (+65). Still the new
   // file's own measurement, pinned AT it, zero headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1522],
+  // 1522 -> 1491, a LOWERING, re-measured on the PR that makes step 2 read the
+  // answer's `candidates` (ADR-0149 D3 amendment note): a word with no match
+  // and a candidate listed is a question for the user, a lone candidate
+  // included, and no match with no candidate is the labelled fallback. Cut:
+  // the two loose-form rows and the paragraph that defined a loose form over
+  // the catalogue, since the server's `candidates` replaces the client's own
+  // check. Added: one step 1 bullet naming `candidates`, and the two rows that
+  // read it. 6105 -> 5981 bytes (-124), less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(5961 / 4)
+  // = 1491 (-31). Pinned AT the measurement, zero headroom; no other row moves.
+  ['skills/objectstack-ask/SKILL.md', 1491],
 ]);
 
 /**
