@@ -31,8 +31,8 @@ function toPx(length: string): number {
   return match![2] === 'rem' ? value * 16 : value;
 }
 
-/** The sidebar primitive's expanded and rail widths, read off a mounted provider. */
-function primitiveSidebarWidths(): { expanded: number; rail: number } {
+/** The sidebar primitive's expanded width, read off a mounted provider. */
+function primitiveSidebarWidths(): { expanded: number } {
   const { container } = render(
     <SidebarProvider>
       <div />
@@ -41,7 +41,6 @@ function primitiveSidebarWidths(): { expanded: number; rail: number } {
   const wrapper = container.firstElementChild as HTMLElement;
   return {
     expanded: toPx(wrapper.style.getPropertyValue('--sidebar-width')),
-    rail: toPx(wrapper.style.getPropertyValue('--sidebar-width-icon')),
   };
 }
 
@@ -73,12 +72,13 @@ describe('the console sidebar fold width (objectstack#27593, #29109)', () => {
     );
   });
 
-  it('folds a 1280 px and a 1366 px window, whose rail leaves the list its columns beside the drawer', () => {
-    const { expanded, rail } = primitiveSidebarWidths();
+  it('folds a 1280 px and a 1366 px window, whose hidden sidebar leaves the list its columns beside the drawer', () => {
+    const { expanded } = primitiveSidebarWidths();
     for (const width of [1280, 1366]) {
       expect(width).toBeLessThan(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH);
       expect(listBesideDrawer(width, expanded)).toBeLessThan(LIST_MIN_COLUMNS_WIDTH);
-      expect(listBesideDrawer(width, rail)).toBeGreaterThanOrEqual(LIST_MIN_COLUMNS_WIDTH);
+      // Folded, the sidebar is hidden and takes no width (objectstack#35062).
+      expect(listBesideDrawer(width, 0)).toBeGreaterThanOrEqual(LIST_MIN_COLUMNS_WIDTH);
     }
   });
 
