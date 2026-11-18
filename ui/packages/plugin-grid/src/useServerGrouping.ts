@@ -89,7 +89,8 @@ import {
   type ListViewGroupHeaderRow,
   type ListViewGroupQuerySource,
 } from '@objectstack/spec/ui';
-import { isExpandableFieldType } from '@object-ui/core';
+import { isExpandableFieldType, referencedRecordTitle } from '@object-ui/core';
+import { readLookupTargetDef } from './lookupGroupTargets';
 import { groupOrderByOf, serverSummaryOf, type GroupAggregationConfig, type UsableGroupingField } from './useGroupedData';
 
 /**
@@ -281,17 +282,22 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
             const ids = [...new Set(deepest.map((row) => row[field]).filter((v) => v !== null && v !== undefined && v !== ''))];
             if (ids.length === 0) return;
             try {
-              const result = await dataSource.find(reference, {
-                $filter: { id: { $in: ids } },
-                $top: ids.length,
-              });
+              // The target's definition rides beside the record read: with no
+              // `displayField` on the lookup, its declared `nameField` names
+              // the record, as the lookup's own cell names it.
+              const [result, targetDef] = await Promise.all([
+                dataSource.find(reference, {
+                  $filter: { id: { $in: ids } },
+                  $top: ids.length,
+                }),
+                readLookupTargetDef(dataSource, reference),
+              ]);
               const byId: Record<string, string> = {};
               for (const rec of (result?.data ?? []) as Array<Record<string, unknown>>) {
                 const id = rec?.id;
                 if (id === undefined || id === null) continue;
-                const label = (displayField ? rec[displayField] : undefined)
-                  ?? rec.name ?? rec.label ?? rec.title;
-                if (label !== undefined && label !== null && label !== '') byId[String(id)] = String(label);
+                const label = referencedRecordTitle(targetDef, rec, displayField ?? undefined);
+                if (label !== undefined) byId[String(id)] = label;
               }
               keyLabels[field] = byId;
             } catch (err) {

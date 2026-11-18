@@ -43,6 +43,8 @@ import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatch
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import type { ActionDispatchAnswer, ActionResumeRequest, PlaceRequestInEnvironment } from '../action-dispatch.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
+// [#34766] The open MCP draft door: its registry, behind `metadata:write` and the user's own `manage_metadata`.
+import { resolveOpenAuthoringInjection } from './mcp-authoring.js';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
@@ -243,6 +245,12 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     // service serves its dataset executor.
     const datasetTools = await resolveMcpDatasetToolsService(deps, context);
     const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools });
+    // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
+    // Design A): resolved per request, so the user's own `manage_metadata` is
+    // read for every call. `undefined` for a grant without `metadata:write`
+    // (an API key or a session carries none) and for an envelope with no user;
+    // a user without the capability gets a registry that lists nothing.
+    const authoring = await resolveOpenAuthoringInjection(deps, context, grantedScopes);
     let webRes: Response;
     try {
         webRes = await mcp.handleHttpRequest(webRequest, {
@@ -251,6 +259,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
             // undefined = not scope-limited (API key / session); an array
             // narrows the registered tool families inside the MCP runtime.
             ...(grantedScopes ? { toolOptions: { grantedScopes } } : {}),
+            ...(authoring ? { authoring } : {}),
             // [#31605] Who this request was admitted as: the resolved
             // ExecutionContext and the environment it was dispatched for. A
             // host-installed tool-call interceptor reads every call's

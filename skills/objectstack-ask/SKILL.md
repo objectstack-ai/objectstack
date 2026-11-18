@@ -57,12 +57,16 @@ wrote its business definition) outranks a number you work out yourself.
 | Each word for a thing measured matches exactly one measure | Compute: step 3. Two words with one measure each ("营收和赢单率") are two metrics, not a choice: compute both, with one `query_dataset` per dataset. |
 | One word matches several measures, in one dataset or in two | Ask the user which one they mean. List each candidate's label, its dataset's label and its description. Do not pick one. |
 | Only a dimension matches | That is a grouping ("by stage"), not a number. You still need a measure match; without one, ask which number is meant. |
-| A word matches nothing, and `candidates` lists members for it, one or several | Ask the user which one they mean, listing each candidate's label, its dataset's label and its description; with one candidate, ask whether it is the one meant. Do not pick one. |
-| No match and no candidates for the word for a thing measured | Step 4, and say in the answer that no governed metric was used. |
+| A word matches nothing, and `candidates` lists members for it | Ask the user which one they mean, listing each candidate's label, its dataset's label and its description; with one candidate, ask whether it is the one meant. Do not pick one. |
+| No match and no candidates for the word for a thing measured | Step 4. |
 | `membersWithheld: true` on a dataset | Say that it has members (measures or groupings) you may not read; the metric asked for may be among them. Do not say the metric does not exist. |
 
-When you ask, the reply is the question alone: no figure, and no tool call
-until the user answers. State no figure of your own in it (no count, total
+When the answer has `nextStep`, follow its `decision` and `note`. If `note`
+says to answer one measure and ask about a word, do both; use none of that
+word's candidates until the user answers.
+
+When you only ask, the reply is the question alone: no tool call until the user
+answers. State no figure of your own in it (no count, total
 or option number): name each option by its label in a bullet, and quote its
 description as written. Ask only about matches or candidates for words the user
 wrote; when their word matched nothing and has no candidates, go to step 4
@@ -75,8 +79,9 @@ be incomplete; `warning` says why, and you repeat it when you fall back.
   `selection.dimensions` take the names `list_datasets` gave;
   `selection.runtimeFilter` filters; `selection.dateGranularity` buckets a date
   dimension for a trend; `selection.order` and `selection.limit` rank.
-- Cite the source from the answer's `provenance` (the dataset's label and each
-  measure's label, as in 「指标：营收（数据集：销售分析）」), not from memory.
+- Cite the answer's `sourceLine` as given; without one, build the source from
+  `provenance` (the dataset's label and each measure's label, as in
+  「指标：营收（数据集：销售分析）」), not from memory.
 - Use the measure's `description` to say what the number includes and excludes.
 - `truncated: true`: more rows existed than came back. Say the result is
   partial. A `warning` on the answer narrows what you were allowed to read:
