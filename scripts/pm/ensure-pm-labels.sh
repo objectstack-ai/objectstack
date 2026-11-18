@@ -655,10 +655,12 @@ gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui l
 # area:security). Performance: slowness goes to the area of what is slow — a
 # slow query is data, a slow page load is ux.
 #
-# Triage applies it at FIRST TOUCH — step one of grading, in the same label
-# write as `domain:*`, together with the card's GitHub issue type (Bug /
-# Feature / Task: a native type, not a label, so this file creates nothing for
-# it); a filer may pre-apply both. The repository is judged before the area: a
+# A card the fleet files carries it from its filer, together with the card's
+# GitHub issue type (Bug / Feature / Task: a native type, not a label, so this
+# file creates nothing for it) and its grade, or the filing gate refuses the
+# card. On a maintainer's or an outsider's card triage applies both at FIRST
+# TOUCH — step one of grading, in the same label write as `domain:*` — and it
+# reviews what a fleet filer set. The repository is judged before the area: a
 # platform root cause is fixed here, wherever it showed up. A card that fits no
 # area is said so on the card and reported to the maintainer — ⛔ never a new
 # row here. The existing backlog is backfilled only under an epic the

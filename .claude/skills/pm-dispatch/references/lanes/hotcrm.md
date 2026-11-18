@@ -9,7 +9,7 @@
 - hotcrm 的规则住 hotcrm 仓,⛔ 本文不抄:`AGENTS.md`(Scope;Product, priorities and the development
   process;Platform Upgrades)与 `docs/PRIORITIES.md`(专题、首触、定级、阶段 × 文档)。
 - 跨仓机制照 `cross-repo-coordination.md` 规则 1 与多车道仓条,⛔ 本文不另写:平台缺口卡的立法
-  与 `Blocked-by:` 回链、`repo:hotcrm` 缝标签只给真协调卡、平台卡的 `domain:*` 与 type 归分诊。
+  与 `Blocked-by:` 回链、`repo:hotcrm` 缝标签只给真协调卡、平台卡的 `domain:*` 归分诊。
 
 ## 常设承诺
 

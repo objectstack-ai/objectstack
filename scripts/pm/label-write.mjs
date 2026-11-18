@@ -340,8 +340,8 @@
  * own stroke reads like a hand. The one way through is the rule's own: the
  * maintainer has ruled, and the comment folded into the write (`--comment-file`)
  * carries a `Ruling-ref:` line citing his words. To disagree without a ruling,
- * leave one line with the reason on the card and add `pm:awaiting-maintainer`;
- * the grade stays. ⛔ This is the seat's label door and claims nothing about the
+ * leave one line with the reason on the card as a comment, and nothing else:
+ * the grade and the card's state stay. ⛔ This is the seat's label door and claims nothing about the
  * others: a write that reaches the board another way is not judged here.
  */
 
@@ -633,8 +633,8 @@ export function refuseHandSetGrade({ grades = [], events = null, rulingRef = fal
   if (grades.length === 0 || rulingRef) return null;
   const rule = `${HAND_SET_RULE_PATH}: 「${HAND_SET_RULE}」`;
   const exits =
-    'A grade a person set stays. To disagree, leave one line with the reason on the card and add `pm:awaiting-maintainer` with its ' +
-    `\`Maintainer-action:\` line; where the maintainer has already ruled, fold the comment into this write (\`--comment-file\`) with a \`${RULING_REF_KEY}\` line citing his words.`;
+    'A grade a person set stays. To disagree, leave one line with the reason on the card as a comment, and nothing else: the grade ' +
+    `and the card's state stay as they are; where the maintainer has already ruled, fold the comment into this write (\`--comment-file\`) with a \`${RULING_REF_KEY}\` line citing his words.`;
   if (!Array.isArray(events)) {
     return (
       `the write changes the grade of ${ref} and the card's label events could not be read in full (${GRADE_EVENT_PAGE_CAP} pages at most), so ` +
@@ -3134,7 +3134,7 @@ export async function selfTest() {
     t('⭐ …and a user actor with no app is a person, whoever the login is', isFleetLabelEvent(HAND), false);
     const refused = hs([RELAY, { ...HAND, created_at: '2026-11-18T15:18:00Z' }]);
     t('⭐ a grade whose NEWEST labeled event is a person\'s is REFUSED, naming the label, the login and the time', typeof refused === 'string' && ['`priority:p1`', '`os-warren`', '2026-11-18T15:18:00Z', 'o/r#7'].every((s) => refused.includes(s)));
-    t('…quoting the rule and where it lives, and naming both exits', [HAND_SET_RULE, HAND_SET_RULE_PATH, 'pm:awaiting-maintainer', RULING_REF_KEY].map((s) => String(refused).includes(s)), [true, true, true, true]);
+    t('…quoting the rule and where it lives, naming the one exit, and parking the card in no state', [HAND_SET_RULE, HAND_SET_RULE_PATH, RULING_REF_KEY, 'pm:awaiting-maintainer'].map((s) => String(refused).includes(s)), [true, true, true, false]);
     t('a grade the fleet set — by the relay, by a workflow, by a session through an app — passes', [hs([RELAY]), hs([WORKFLOW]), hs([SESSION])], [null, null, null]);
     t('the newest event decides: a person\'s grade the fleet later re-set is the fleet\'s', hs([HAND, { ...RELAY, created_at: '2026-11-18T16:00:00Z' }]), null);
     t('⭐ an `unlabeled` event is not read: a session\'s own removal carries no app and must not read as a hand', hs([RELAY, labeled('priority:p1', 'os-bill', 'User', null, '2026-11-18T16:00:00Z', 'unlabeled')]), null);
