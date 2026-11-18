@@ -507,6 +507,19 @@ describe('the trigger floats the collapsed menu, and the keyboard walks it (obje
     expect(readWideWindowOpen()).toBe(false);
   });
 
+  it('collapsed by hand at 1600 px, "Keep sidebar open" chosen from the keyboard docks it, and focus stays in the menu', () => {
+    renderShell(1600);
+    fireEvent.click(trigger());
+    act(() => trigger().focus());
+    fireEvent.click(trigger());
+    expectFloat();
+    act(() => keepOpen()!.focus());
+    fireEvent.click(keepOpen()!);
+    expect(panel()).not.toHaveAttribute('data-console-rail');
+    expect(keepOpen(), 'the control goes with the float').toBeNull();
+    expect(panel(), 'focus stays in the docked menu').toContainElement(document.activeElement as HTMLElement);
+  });
+
   it('collapsed by hand, the trigger floats it even when React renders between the capture phase and the trigger’s own click handler', () => {
     renderShell(1600);
     fireEvent.click(trigger());

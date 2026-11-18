@@ -341,9 +341,10 @@ type FloatOpener = 'hover' | 'press' | 'command';
 
 /**
  * What folded it: a press outside it; Esc; a link chosen in it by keyboard (or
- * any other navigation), or by pointer; the pointer moving away.
+ * any other navigation), or by pointer; the pointer moving away; or "Keep
+ * sidebar open" docking it.
  */
-type FloatCloser = 'outside' | 'escape' | 'navigate' | 'pointer' | 'away';
+type FloatCloser = 'outside' | 'escape' | 'navigate' | 'pointer' | 'away' | 'dock';
 
 /** The window a float over a collapsed sidebar floated on: at or past the fold width, or below it. */
 type FloatWidth = 'wide' | 'narrow';
@@ -507,6 +508,7 @@ export function useConsoleSidebarRailPanel(
   // the reader's choice, kept as the wide-window choice on a wide window and
   // in the cookie; on the fold it also turns the fold off.
   const dock = useCallback(() => {
+    if (overlayOpenRef.current) closedBy.current = 'dock';
     holdWideWindowChoice(false);
     if (railModeRef.current) setKeepOpen(true);
     setFloatOn(null);
@@ -567,8 +569,15 @@ export function useConsoleSidebarRailPanel(
     returnFocus.current = null;
     clearTimeout(closeTimer.current);
     closeTimer.current = undefined;
-    // Docked from the float ("Keep sidebar open"): nothing to give back.
-    if (!becameHidden) return;
+    // Docked from the float ("Keep sidebar open"): nothing to give back, but on
+    // a wide window the control goes with the float, so the focus it held stays
+    // in the menu.
+    if (!becameHidden) {
+      const active = document.activeElement;
+      const lost = !(active instanceof HTMLElement) || active === document.body || !active.isConnected;
+      if (closer === 'dock' && lost) floatFocusTarget(root)?.focus({ preventScroll: true });
+      return;
+    }
     // Focus stranded in the hidden, inert sidebar. A press outside moves it where it lands.
     const active = document.activeElement;
     if (closer === 'outside' || !(active instanceof HTMLElement) || !root?.contains(active)) return;
