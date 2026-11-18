@@ -164,6 +164,17 @@ export interface AppHarness {
    * it that refusal stays the mode's finding, and every seed row is refused.
    */
   installManaged?(manifest: Record<string, unknown>): Promise<HttpAnswer>;
+  /**
+   * The sample-data reseed of a package the managed door installed
+   * (`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`):
+   * its `data[]` loaded again under the deliberate re-seed posture, which
+   * inserts every missing row whatever the organization's record of landed
+   * seed rows says. It is how a restore puts back a seeded row a turn removed,
+   * which an install withholds (`loadSeedRows` in `orchestrate.ts`). Optional,
+   * so a harness written before it keeps compiling; without it such a row is
+   * refused, named, and the operation is not measured.
+   */
+  reseedManaged?(manifestId: string): Promise<HttpAnswer>;
   /** The environment's metadata of every collection the template carries, as an artifact. */
   metadataAsArtifact(collections: readonly string[]): Promise<Record<string, unknown[]>>;
   /** One MCP tool call as the owner of `apiKey`, through the door the agent uses (`mcpUrl`). */
@@ -335,6 +346,10 @@ export class HttpApp implements AppHarness {
   installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
     const packageId = typeof manifest.id === 'string' ? manifest.id : 'scenario_template';
     return this.call('POST', '/api/v1/marketplace/install-local', { packageId, manifest, installMode: 'managed' }, { session: this.admin });
+  }
+
+  reseedManaged(manifestId: string): Promise<HttpAnswer> {
+    return this.call('POST', `/api/v1/marketplace/install-local/${encodeURIComponent(manifestId)}/reseed-sample-data`, {}, { session: this.admin });
   }
 
   async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {

@@ -1234,7 +1234,8 @@ interface SeedLoaderAnswer {
   mode?: string;
   reason?: string;
   inserted?: number;
-  errorList?: Array<{ sourceObject?: string; field?: string; recordIndex?: number; attemptedValue?: unknown; code?: string; message?: string }>;
+  skipped?: number;
+  errorList?: Array<{ sourceObject?: string; field?: string; targetField?: string; recordIndex?: number; attemptedValue?: unknown; code?: string; message?: string }>;
 }
 
 /** The seed loads made in this process, which name each load's package apart (one namespace per installed package). */
@@ -1248,14 +1249,21 @@ function seedLoadLetters(n: number): string {
 }
 
 /**
+ * Why the install door skipped a row of a load and the object does not hold it
+ * ({@link loadSeedRows}): an install reads a recorded row that is gone as a
+ * person's removal, which it must not undo. Short, so the restore's refusal
+ * line ({@link restoreSeededRows}) keeps the reason after it.
+ */
+const WITHHELD = 'withheld by the install door: its key is recorded as landed (`sys_seed_landed_key`), the row gone';
+
+/**
  * Write rows through the platform's own seed path: one data-only package
  * whose `data[]` carries them, each object a dataset keyed on `id`
- * (`externalId: 'id'`) under the default seed mode (`ignore`: a row whose `id`
- * the object does not hold yet is created, one it holds is left as it is),
- * installed through the managed install door (`installManaged`). The dataset
- * names no `mode`: `insert` and `replace` are retired (#34613), and the door
- * refuses a dataset declaring either, every row of it. The platform's seed
- * loader writes a package's `data[]` under its seed posture (`SEED_WRITE_EXECUTION_CONTEXT` in
+ * (`externalId: 'id'`) under the default seed mode (`ignore`), installed
+ * through the managed install door (`installManaged`). The dataset names no
+ * `mode`: `insert` and `replace` are retired (#34613), and the door refuses a
+ * dataset declaring either, every row of it. The platform's seed loader writes
+ * a package's `data[]` under its seed posture (`SEED_WRITE_EXECUTION_CONTEXT` in
  * `@objectstack/spec/kernel`): the object's `state_machine` rule is skipped,
  * every other validation rule and hook still runs, and record-triggered flows
  * do not fire. A row keeps the card's own `id`, and a lookup value naming a
@@ -1263,18 +1271,42 @@ function seedLoadLetters(n: number): string {
  * holds the claim seeded as `c001`. A user id in a row (`owner_id`, a `user`
  * field, a rewritten handle) is written as sent.
  *
+ * `ignore` at the install door is not "create every row the object does not
+ * hold". The door keeps the organization's record of landed seed rows
+ * (`sys_seed_landed_key`, keyed on the organization, the object and the row's
+ * key, with no package in it) and installs under its `honour` posture: a row
+ * the object holds is left as it is, and a row it does not hold whose key is
+ * recorded is withheld, as a person's removal, counted in `skipped` with no
+ * error. A fresh seed meets no record. A restore does: every row it sends is a
+ * seeded row a turn removed, recorded when the seed landed it. So with
+ * `reseedWithheld` (the restore, {@link restoreSeededRows}) a load the door
+ * skipped rows of goes on through that package's sample-data reseed
+ * (`reseedManaged`), the platform's deliberate re-seed, which inserts every
+ * missing row whatever the record says. Whenever the door skipped a row, each
+ * object of the load is read back, and every row sent that the door did not
+ * refuse and the object does not hold is refused by name with the reason
+ * ({@link WITHHELD}, and why the reseed did not bring it back), never counted
+ * as written. A read refused there leaves the rows of that object unconfirmed:
+ * each is refused with the read's answer.
+ *
  * Each package takes a namespace of its own, because one environment refuses
  * a second package claiming a namespace another already holds.
  *
  * The answer's `errorList` names each row the loader could not write
- * (`field: '(write)'`), which is refused, and each reference it could not
- * resolve on a row it did write, which is refused with the `fields` the row
- * does not hold. An entry carries the loader's message and no error code. A
- * door that refuses the package, a harness with no managed door, or a load
- * that did not run inline (`seeded.mode` other than `inline`) refuses every
- * row, with that reason in its message (the door's status and code included).
+ * (`field: '(write)'`), which is refused; each dataset it refused whole
+ * (`field: 'mode'`, `targetField: '(dataset)'`, a retired mode), every row of
+ * which is refused; and each reference it could not resolve on a row it did
+ * write, which is refused with the `fields` the row does not hold. An entry
+ * carries the loader's message and no error code. A door that refuses the
+ * package, a harness with no managed door, or a load that did not run inline
+ * (`seeded.mode` other than `inline`) refuses every row, with that reason in
+ * its message (the door's status and code included).
  */
-async function loadSeedRows(app: AppHarness, datasets: readonly SeedDataset[]): Promise<{ inserted: number; refused: RunHalf['seed']['refused'] }> {
+async function loadSeedRows(
+  app: AppHarness,
+  datasets: readonly SeedDataset[],
+  opts: { reseedWithheld?: boolean } = {},
+): Promise<{ inserted: number; refused: RunHalf['seed']['refused'] }> {
   const sent = datasets.flatMap((d) => d.records.map((r) => ({ object: d.object, id: String(r.id) })));
   if (sent.length === 0) return { inserted: 0, refused: [] };
   const all = (message: string) => ({ inserted: 0, refused: sent.map((r) => ({ ...r, message: message.slice(0, 300) })) });
@@ -1300,10 +1332,18 @@ async function loadSeedRows(app: AppHarness, datasets: readonly SeedDataset[]): 
   const unheld = new Map<string, RunHalf['seed']['refused'][number] & { fields: string[] }>();
   for (const e of seeded.errorList ?? []) {
     const object = String(e.sourceObject ?? '');
+    const said = { ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.message ? { message: e.message.slice(0, 300) } : {}) };
+    if (e.field === 'mode' && e.targetField === '(dataset)') {
+      // The dataset refused whole: no row of it was attempted.
+      for (const row of records.get(object) ?? []) {
+        const id = String(row.id);
+        if (!unwritten.has(`${object}/${id}`)) unwritten.set(`${object}/${id}`, { object, id, ...said });
+      }
+      continue;
+    }
     const row = typeof e.recordIndex === 'number' ? records.get(object)?.[e.recordIndex] : undefined;
     const id = String(row?.id ?? e.attemptedValue ?? '');
     const key = `${object}/${id}`;
-    const said = { ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.message ? { message: e.message.slice(0, 300) } : {}) };
     if (e.field === '(write)') {
       if (!unwritten.has(key)) unwritten.set(key, { object, id, ...said });
     } else {
@@ -1313,10 +1353,40 @@ async function loadSeedRows(app: AppHarness, datasets: readonly SeedDataset[]): 
     }
   }
   for (const key of unwritten.keys()) unheld.delete(key);
+  let written = typeof seeded.inserted === 'number' ? seeded.inserted : sent.length - unwritten.size;
+
+  // Rows the door skipped: brought back through the reseed when asked, then named if still not held.
+  const notBack = new Map<string, RunHalf['seed']['refused'][number]>();
+  if (typeof seeded.skipped === 'number' && seeded.skipped > 0) {
+    let why: string | undefined;
+    if (opts.reseedWithheld) {
+      if (!app.reseedManaged) why = 'no reseed door';
+      else {
+        const r = await app.reseedManaged(manifest.id);
+        const again = (r.body as { data?: { inserted?: unknown } } | null)?.data?.inserted;
+        if (r.ok && typeof again === 'number') written += again;
+        else why = `reseed refused: ${r.status}${r.code ? ` ${r.code}` : ''}${r.message ? ` ${r.message}` : ''}`;
+      }
+      why ??= 'the reseed left it out';
+    }
+    for (const [object, rows] of records) {
+      const asked = rows.map((row) => String(row.id)).filter((id) => !unwritten.has(`${object}/${id}`));
+      if (!asked.length) continue;
+      const read = await app.listRows(object);
+      const holds = new Set(read.ok ? read.rows.map((row) => String(row.id)) : []);
+      for (const id of asked) {
+        if (holds.has(id)) continue;
+        const message = read.ok
+          ? `${WITHHELD}${why ? `; ${why}` : ''}`
+          : `the door skipped ${seeded.skipped} row(s) of this load, and the read that would say whether this one is in was refused: ${read.status}${read.code ? ` ${read.code}` : ''}`;
+        notBack.set(`${object}/${id}`, { object, id, message: message.slice(0, 300) });
+      }
+    }
+    for (const key of notBack.keys()) unheld.delete(key);
+  }
   const order = (r: { object: string; id: string }) => position.get(`${r.object}/${r.id}`) ?? sent.length;
-  const refused = [...unwritten.values(), ...unheld.values()].sort((a, b) => order(a) - order(b));
-  const inserted = (typeof seeded.inserted === 'number' ? seeded.inserted : sent.length - unwritten.size) - unheld.size;
-  return { inserted, refused };
+  const refused = [...unwritten.values(), ...notBack.values(), ...unheld.values()].sort((a, b) => order(a) - order(b));
+  return { inserted: written - unheld.size, refused };
 }
 
 /**
@@ -1411,7 +1481,10 @@ async function seedDrift(card: Card, app: AppHarness, seeded: SeededRows, built?
  *   1. a row a turn added is deleted;
  *   2. a seeded row a turn removed is inserted again through the seed path
  *      ({@link loadSeedRows}, the posture the seed loaded it under, so a row
- *      already `paid` is not refused as a new record) — the very body the
+ *      already `paid` is not refused as a new record; the install withholds a
+ *      row the seed recorded as landed, so the load goes on through that
+ *      package's reseed, and a row still not back is refused by name, never
+ *      counted as reinserted) — the very body the
  *      seed sent ({@link seedRowBody}), or, for a row the app made itself
  *      while seeding, the row as it was read, less the columns the platform
  *      stamps ({@link RESTORE_UNWRITTEN}); the round's rows go in as one
@@ -1479,7 +1552,8 @@ export async function restoreSeededRows(
         else refused(`delete ${d.object} ${id}`, r);
       }
     }
-    // 2. The seeded rows a turn removed, through the seed path ({@link loadSeedRows}), in its load order, one load a round.
+    // 2. The seeded rows a turn removed, through the seed path ({@link loadSeedRows}), in its load order, one load a round;
+    //    the install withholds the ones the seed recorded as landed, which the package's reseed puts back.
     const back: Array<{ object: string; records: Array<Record<string, unknown>> }> = [];
     for (const d of [...drifts].sort((a, b) => order.indexOf(a.object) - order.indexOf(b.object))) {
       const records: Array<Record<string, unknown>> = [];
@@ -1496,7 +1570,7 @@ export async function restoreSeededRows(
       }
       if (records.length) back.push({ object: d.object, records });
     }
-    const load = await loadSeedRows(app, back);
+    const load = await loadSeedRows(app, back, { reseedWithheld: true });
     const notBack = new Set(load.refused.filter((r) => !r.fields).map((r) => `${r.object}/${r.id}`));
     for (const r of load.refused) refusals.add(`insert ${r.object} ${r.id}: ${r.code ? `${r.code} ` : ''}${r.fields ? `[${r.fields.join(', ')}] ` : ''}${(r.message ?? '').slice(0, 120)}`.trim());
     for (const d of back) for (const row of d.records) if (!notBack.has(`${d.object}/${String(row.id)}`)) reinserted.add(`${d.object}/${String(row.id)}`);

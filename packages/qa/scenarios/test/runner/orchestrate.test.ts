@@ -27,7 +27,7 @@ import { RETIRED_SEED_MODE_VALUES } from '@objectstack/spec/data';
 import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
-import { seedDoorAnswer } from './seed-door.js';
+import { reseedDoorAnswer, seedDoorAnswer, type SeedDoorRecord } from './seed-door.js';
 import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
 import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
@@ -194,15 +194,32 @@ class FakeApp implements AppHarness {
   seedDrops(_object: string, _row: Record<string, unknown>): Record<string, string> {
     return {};
   }
-  /** The managed door: a data-only package's `data[]` is the seed ({@link seedDoorAnswer}); any other manifest is a build. */
+  /** The organization's record of landed seed rows (`sys_seed_landed_key`), `object/id`, kept across every package the door loads ({@link seedDoorAnswer}). */
+  landed = new Set<string>();
+  /** The data-only packages the managed door installed, by id: what the reseed door loads again. */
+  seedPackageById = new Map<string, Record<string, unknown>>();
+  private seedRecord(): SeedDoorRecord {
+    return { landed: this.landed, holds: (object, id) => (this.rows[object] ?? []).some((r) => String(r.id) === id) };
+  }
+  /** The managed door: a data-only package's `data[]` is the seed ({@link seedDoorAnswer}), under the install's `honour` posture; any other manifest is a build. */
   async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
     if (!Array.isArray(manifest.data)) {
       this.installed = manifest;
       return this.installAnswer;
     }
+    this.seedPackageById.set(String(manifest.id), manifest);
     this.seeding = true;
     try {
-      return await seedDoorAnswer((object, row) => this.insertRow(object, row), manifest, (object, row) => this.seedDrops(object, row));
+      return await seedDoorAnswer((object, row) => this.insertRow(object, row), manifest, (object, row) => this.seedDrops(object, row), this.seedRecord());
+    } finally {
+      this.seeding = false;
+    }
+  }
+  /** The sample-data reseed door of an installed data-only package ({@link reseedDoorAnswer}): every missing row, whatever the record says. */
+  async reseedManaged(manifestId: string): Promise<HttpAnswer> {
+    this.seeding = true;
+    try {
+      return await reseedDoorAnswer((object, row) => this.insertRow(object, row), this.seedPackageById.get(manifestId), manifestId, this.seedRecord(), (object, row) => this.seedDrops(object, row));
     } finally {
       this.seeding = false;
     }
@@ -997,12 +1014,70 @@ describe('seedApp — a card row already past its entry state loads through the 
         id: 'com.scenario.seed.x',
         data: [{ object: 'demotravel_department', mode, externalId: 'id', records: [{ id: 'dep_a' }, { id: 'dep_b' }] }],
       });
-      const seeded = (answer.body as { data: { seeded: { inserted: number; errorList: Array<{ field: string; message: string }> } } }).data.seeded;
+      const seeded = (answer.body as { data: { seeded: { inserted: number; errorList: Array<{ field: string; targetField: string; recordIndex: number; message: string }> } } }).data.seeded;
       expect(written).toEqual([]);
       expect(seeded.inserted).toBe(0);
-      expect(seeded.errorList.map((e) => e.field)).toEqual(['(write)', '(write)']);
+      // One entry for the dataset, as `loadStored` answers it: the mode is the dataset's, no row was attempted.
+      expect(seeded.errorList.map(({ field, targetField, recordIndex }) => ({ field, targetField, recordIndex }))).toEqual([{ field: 'mode', targetField: '(dataset)', recordIndex: 0 }]);
       expect(seeded.errorList[0]!.message).toContain(`seed.mode: '${mode}'\` was removed`);
     }
+  });
+
+  it('[#34613] control: the test door keeps the landed-row record as the real door does — an install withholds a recorded row that is gone, the package\'s reseed brings it back, an unrecorded row lands', async () => {
+    const app = new FakeApp();
+    const pkg = (id: string, rows: Array<Record<string, unknown>>) => ({ id, data: [{ object: 'x', externalId: 'id', records: rows }] });
+    const seededOf = (a: HttpAnswer) => (a.body as { data: { seeded: { inserted: number; skipped: number; errors: number } } }).data.seeded;
+    expect(seededOf(await app.installManaged(pkg('com.scenario.seed.a', [{ id: 'r1' }, { id: 'r2' }])))).toMatchObject({ inserted: 2, skipped: 0, errors: 0 });
+    app.rows.x = app.rows.x!.filter((r) => r.id !== 'r2');
+    // A second package carrying the recorded, removed row: withheld, `skipped`, no error.
+    expect(seededOf(await app.installManaged(pkg('com.scenario.seed.b', [{ id: 'r2' }])))).toMatchObject({ inserted: 0, skipped: 1, errors: 0 });
+    expect(app.rows.x!.map((r) => r.id)).toEqual(['r1']);
+    // That package's reseed inserts it, whatever the record says.
+    const reseed = await app.reseedManaged('com.scenario.seed.b');
+    expect(reseed).toMatchObject({ ok: true, body: { data: { inserted: 1, skipped: 0, errors: 0 } } });
+    expect(app.rows.x!.map((r) => r.id)).toEqual(['r1', 'r2']);
+    // A row the object holds is left as it is; a row no load recorded lands.
+    expect(seededOf(await app.installManaged(pkg('com.scenario.seed.c', [{ id: 'r1' }, { id: 'r3' }])))).toMatchObject({ inserted: 1, skipped: 1, errors: 0 });
+    expect(app.rows.x!.map((r) => r.id)).toEqual(['r1', 'r2', 'r3']);
+    expect(await app.reseedManaged('com.scenario.seed.none')).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it('[#34613] a restore puts back a seeded row the install withholds: the restore package\'s reseed brings it in, and is the only reseed asked', async () => {
+    class ReseedTap extends TravelRulesApp {
+      readonly reseeds: string[] = [];
+      override async reseedManaged(manifestId: string): Promise<HttpAnswer> {
+        this.reseeds.push(manifestId);
+        return super.reseedManaged(manifestId);
+      }
+    }
+    const scenario = travel();
+    const app = new ReseedTap();
+    expect((await seedApp(scenario, app, [])).refused).toEqual([]);
+    expect(app.reseeds).toEqual([]); // a fresh seed meets no record
+    expect(app.landed.has('demotravel_expense_claim/c001')).toBe(true);
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
+    expect(await restoreSeededRows(scenario, app, [], seeded)).toEqual({ restored: { reinserted: ['demotravel_expense_claim/c001'] } });
+    expect(app.reseeds).toHaveLength(1);
+    expect(app.reseeds[0]).toMatch(/^com\.scenario\.seed\.scenarioseed[a-z]+$/);
+    expect(app.rows.demotravel_expense_claim!.filter((r) => r.id === 'c001')).toEqual([expect.objectContaining({ status: 'paid' })]);
+  });
+
+  it('[#34613] a withheld row a restore cannot put back is refused by name with the reason, never booked as reinserted', async () => {
+    const scenario = travel();
+    const app = Object.assign(new TravelRulesApp(), { reseedManaged: undefined });
+    await seedApp(scenario, app, []);
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');
+    const out = await restoreSeededRows(scenario, app, [], seeded);
+    expect(out.restored).toBeUndefined();
+    expect(out.failed).toContain('the rows could not be restored to the seeded state: demotravel_expense_claim: 1 missing (c001)');
+    // The refusal names the row, the record that withheld it, and why the reseed did not run.
+    const refusal = /\(refused: (.*)\)$/.exec(out.failed!)?.[1] ?? '';
+    expect(refusal).toMatch(/^insert demotravel_expense_claim c001: /);
+    expect(refusal).toContain('sys_seed_landed_key');
+    expect(refusal).toContain('no reseed door');
+    expect(app.rows.demotravel_expense_claim!.some((r) => r.id === 'c001')).toBe(false);
   });
 
   it('a reference the loader drops from a row it wrote refuses that row with the field and keeps its second-pass patch; a row also refused on write counts once; a restore counts the written row as reinserted', async () => {
