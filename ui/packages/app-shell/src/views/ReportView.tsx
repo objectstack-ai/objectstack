@@ -16,7 +16,7 @@ import { preferLocal } from '../utils/preferLocal.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { persistRuntimeMetadata } from './runtime-metadata-persistence.js';
-import { authoredBuffer, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
+import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
 import { t as tStudio, tFormat, useMetadataLocale } from './metadata-admin/i18n.js';
 import { servedPackageId } from '@object-ui/core';
 import { toast } from 'sonner';
@@ -237,6 +237,12 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // The served report stays the display copy; with nothing authored to read,
   // the editor does not open — ⛔ never fall back to the served copy, which is
   // the translated document this exists to keep out of the save.
+  //
+  // objectstack#35054 — the served draft read, at the same package, is handed
+  // to `authoredBuffer` as the Studio editors hand theirs: it says whether a
+  // draft is pending, so a pending draft whose stored copy the layers do not
+  // serve is `unserved` and opens no editor, instead of an editor seeded with
+  // the published report that a Save would stage over the pending draft.
   const metadataLocale = useMetadataLocale();
   // A landed save keeps the edited schema as the preview until the metadata
   // refresh it triggers replaces it (`handleCloseConfigPanel`). A close with no landed save puts
@@ -251,13 +257,14 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     let body: Record<string, unknown> | null = null;
     let failure: string | null = null;
     try {
-      const layers = await metadataClient.layered<Record<string, unknown>>(
-        'report',
-        reportName,
-        packageId ? { packageId } : {},
-      );
-      const authored = authoredBuffer('report', layers as AuthoredLayers, null);
-      if (authored.kind === 'buffer' && Object.keys(authored.body).length > 0) body = authored.body;
+      const at = packageId ? { packageId } : {};
+      const [layers, servedDraft] = await Promise.all([
+        metadataClient.layered<Record<string, unknown>>('report', reportName, at),
+        metadataClient.getDraft('report', reportName, at),
+      ]);
+      const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
+      if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
+      else if (Object.keys(authored.body).length > 0) body = authored.body;
       else failure = tStudio('engine.form.notFound', metadataLocale);
     } catch (err) {
       failure = formatMetadataError(err);
