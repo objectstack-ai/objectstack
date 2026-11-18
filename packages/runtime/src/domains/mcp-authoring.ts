@@ -46,10 +46,34 @@
  * ## What the reads serve
  *
  * The metadata protocol's public reads (`getMetaItems`, `getMetaItem`,
- * `listDrafts`), unmasked. That is the `/meta` doors' own answer for this
- * caller: a holder of `manage_metadata` is exempt from object-schema masking
- * (ADR-0106 D4, `isObjectSchemaMaskExempt`), and the same predicate admits the
- * pending-drafts read (`mayReadPendingDrafts`).
+ * `listDrafts`), judged by the `/meta` doors' own per-caller read gates, with
+ * the HUMAN as the caller. The door is not whole-for-author:
+ *
+ *  - The object-schema mask does not apply: a holder of `manage_metadata` is
+ *    exempt from it on every `/meta` door (ADR-0106 D4,
+ *    `isObjectSchemaMaskExempt`), and the same predicate admits the
+ *    pending-drafts read (`mayReadPendingDrafts`).
+ *  - The read gates do apply, as `@objectstack/rest` exports them
+ *    (`createMetaItemReadGate`, `createMetaListReadGate`). They refuse on the
+ *    caller's own `systemPermissions` and docs audience with no
+ *    `manage_metadata` exemption: a dashboard, a list view or an app whose
+ *    `requiredPermissions` the human does not hold, and a book or doc outside
+ *    their ADR-0046 audience, are refused here as every `/meta` door refuses
+ *    them to that human ("either way, author or not", ruling 5856774816).
+ *    The caller the gates read is built from the grants the admission
+ *    resolved (`resolveUserAuthzGrants`), never from the agent's envelope,
+ *    whose system permissions and permission sets are the token's ceiling.
+ *  - The item read runs `STORED_VERSION_DOOR_POLICY`, the policy of the
+ *    `/meta` doors that serve a stored version for authoring (the plain read's
+ *    `?state=draft` branch among them): only the per-caller gates, and the
+ *    author exemption for a container's entries, since this caller may save
+ *    the item. A whole refusal stays a refusal.
+ *  - A gate that cannot evaluate (a books or doc read that throws, a security
+ *    service that cannot resolve holdings) refuses: the read answers that
+ *    fault, never the item (ADR-0049).
+ *  - `list_drafts` runs no item gate, as `/meta/_drafts` runs none for this
+ *    same caller: a draft row carries the item's identity and its own `label`,
+ *    no body for a gate to judge.
  *
  * The walled refusal (`walledCatalogWriteVerdict`, ADR-0131 D3/D12) gates
  * metadata WRITES and no `/meta` read; it joins this door with the save tool.
@@ -72,7 +96,14 @@
 
 import { resolveUserAuthzGrants } from '@objectstack/core';
 import { metaWriteCapabilityVerdict } from '@objectstack/metadata-core';
-import { refuseUnknownMetaListType } from '@objectstack/rest';
+import {
+    createMetaItemReadGate,
+    createMetaListReadGate,
+    refuseUnknownMetaListType,
+    STORED_VERSION_DOOR_POLICY,
+    type MetaItemReadGateSources,
+    type MetaReadGateCaller,
+} from '@objectstack/rest';
 import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
 import type { ErrorCode, ListDraftsResponse, MetadataProtocol } from '@objectstack/spec/api';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
@@ -173,6 +204,13 @@ export type OpenAuthoringProtocol = Partial<Pick<MetadataProtocol, 'getMetaTypes
 };
 
 /**
+ * The `/meta` read gates' ports for one protocol, with the admitted human as
+ * the caller. Built by {@link resolveOpenAuthoringInjection}; a registry
+ * handed none refuses every read (fail closed).
+ */
+export type OpenAuthoringReadGateSources = (protocol: OpenAuthoringProtocol) => MetaItemReadGateSources;
+
+/**
  * The per-call context the MCP runtime stamps on every authoring call
  * (`McpAuthoringToolContext` in `@objectstack/mcp`), named structurally as
  * this package names every MCP shape: it takes no dependency on that package.
@@ -232,12 +270,13 @@ export async function resolveOpenAuthoringInjection(
     const organizationId = typeof ec?.tenantId === 'string' && ec.tenantId.length > 0 ? (ec.tenantId as string) : undefined;
     const clientId = typeof ec?.performedBy?.clientId === 'string' ? (ec.performedBy.clientId as string) : undefined;
 
-    const admitted = await humanHoldsAuthoringCapability(deps, context, userId, organizationId);
+    const reader = await resolveHumanReader(deps, context, userId, organizationId);
     return {
         registry: createOpenAuthoringRegistry({
-            admitted,
+            admitted: reader !== undefined,
             userId,
             getProtocol: async () => (await deps.resolveService(context, 'protocol', context.environmentId)) as OpenAuthoringProtocol | undefined,
+            ...(reader ? { readGate: openReadGateSources(deps, context, reader) } : {}),
             logger: deps.logger,
         }),
         principal: {
@@ -251,17 +290,24 @@ export async function resolveOpenAuthoringInjection(
 }
 
 /**
- * Does the human the token was issued to hold `manage_metadata` in the
- * organization the token's consent bound? `false` when the grant resolution
- * cannot be read (no data engine, or a read that throws): a capability nobody
- * could read is not held.
+ * The human the token was issued to, as the `/meta` read gates read a caller,
+ * when they hold `manage_metadata` in the organization the token's consent
+ * bound; `undefined` when they do not, or when the grant resolution cannot be
+ * read (no data engine, or a read that throws): a capability nobody could read
+ * is not held.
+ *
+ * The caller is the human's own grants, never the agent envelope's: its
+ * `systemPermissions` and permission sets are what the gates' audience and
+ * `requiredPermissions` arms read. `mayWriteItem` is this door's save answer,
+ * the one `metaWriteCapabilityVerdict` just gave, as the `/meta` save door
+ * gives it.
  */
-async function humanHoldsAuthoringCapability(
+async function resolveHumanReader(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     userId: string,
     organizationId: string | undefined,
-): Promise<boolean> {
+): Promise<MetaReadGateCaller | undefined> {
     try {
         const ql = (await deps.getObjectQL(context, context.environmentId))
             ?? (await deps.resolveService(context, 'objectql', context.environmentId));
@@ -269,7 +315,18 @@ async function humanHoldsAuthoringCapability(
         const grants = await resolveUserAuthzGrants(ql, userId, organizationId ? { tenantId: organizationId } : {});
         // The human's own grant, never the request envelope's: `isSystem` is not
         // passed, and an agent envelope's system permissions are not read.
-        return metaWriteCapabilityVerdict({ systemPermissions: grants.systemPermissions, operation: 'save' }).allowed;
+        if (!metaWriteCapabilityVerdict({ systemPermissions: grants.systemPermissions, operation: 'save' }).allowed) return undefined;
+        return {
+            userId,
+            ...(organizationId ? { tenantId: organizationId } : {}),
+            positions: grants.positions,
+            permissions: grants.permissions,
+            ...(grants.permissionSetAddresses ? { permissionSetAddresses: grants.permissionSetAddresses } : {}),
+            systemPermissions: grants.systemPermissions,
+            principalKind: grants.principalKind ?? 'human',
+            isSystem: false,
+            mayWriteItem: true,
+        };
     } catch (error) {
         // A functional degradation (the authoring tools are not listed, and
         // nothing claims to have persisted), so `warn`.
@@ -277,8 +334,49 @@ async function humanHoldsAuthoringCapability(
             '[MCP] The authoring tools are not served on this request: the user\'s metadata permission could not be read.',
             { error: error instanceof Error ? error.message : String(error) },
         );
-        return false;
+        return undefined;
     }
+}
+
+/** Where the app gate's nav-servability prune log records what it has already said, for this door. */
+const NAV_PRUNE_LOGGED = new Set<string>();
+
+/**
+ * The read gates' ports for this request, the I/O the runtime `/meta` domain
+ * hands the same gates, with `caller` in place of the request's envelope. Only
+ * I/O: every verdict is the gate's.
+ */
+function openReadGateSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    caller: MetaReadGateCaller,
+): OpenAuthoringReadGateSources {
+    return (protocol) => ({
+        resolveCaller: async () => caller,
+        resolveSecurityService: () => deps.resolveService(context, 'security'),
+        // `undefined` when the protocol has no list read: an unreadable input,
+        // which the gates refuse on, never an empty one.
+        listMetaItems: (type) => (typeof protocol.getMetaItems === 'function' ? protocol.getMetaItems({ type }) : undefined),
+        serviceProbe: () => async (name: string) => {
+            try {
+                return (await deps.resolveService(context, name)) != null;
+            } catch {
+                return false;
+            }
+        },
+        navPruneLogged: NAV_PRUNE_LOGGED,
+        resolveMessageTranslator: async () => {
+            let i18n: { t?: unknown } | null | undefined;
+            try {
+                i18n = await deps.resolveService(context, 'i18n');
+            } catch {
+                return undefined;
+            }
+            if (!i18n || typeof i18n.t !== 'function') return undefined;
+            const t = i18n.t as (key: string, locale: string, params?: Record<string, unknown>) => string;
+            return (key, locale, params) => t.call(i18n, key, locale, params);
+        },
+    });
 }
 
 /**
@@ -289,9 +387,11 @@ export function createOpenAuthoringRegistry(opts: {
     admitted: boolean;
     userId: string;
     getProtocol: () => Promise<OpenAuthoringProtocol | undefined>;
+    /** The `/meta` read gates' ports; without them every read is refused. */
+    readGate?: OpenAuthoringReadGateSources;
     logger?: { warn?: (...args: unknown[]) => void };
 }): OpenAuthoringRegistry {
-    const { admitted, userId, getProtocol } = opts;
+    const { admitted, userId, getProtocol, readGate } = opts;
     return {
         getAll: () => (admitted ? [...READ_TOOLS] : []),
         async execute(toolCall, context) {
@@ -322,6 +422,11 @@ export function createOpenAuthoringRegistry(opts: {
             }
 
             const protocol = await getProtocol();
+            // Fail closed: a registry with no read gate cannot judge what this
+            // caller may read, so it reads nothing.
+            if (typeof readGate !== 'function') {
+                return refuse(PERMISSION_DENIED, 'The authoring tools cannot judge what your account may read on this request.', 403);
+            }
             try {
                 switch (toolCall.toolName) {
                     case 'list_metadata_items': {
@@ -332,11 +437,19 @@ export function createOpenAuthoringRegistry(opts: {
                         // nothing under is refused, as the `/meta` list refuses it, rather
                         // than answered an empty list.
                         await refuseUnknownMetaListType(protocol, type);
+                        // `state: "draft"` reads the draft-overlaid list and keeps its
+                        // drafts, rather than `listDrafts({ type })`: the list gate
+                        // below judges each item's BODY (its `requiredPermissions`,
+                        // a doc's audience), and a draft row carries none.
                         const listed = await protocol.getMetaItems({
                             type,
                             ...(state === 'active' ? {} : { previewDrafts: true }),
                         });
-                        const items = (Array.isArray(listed?.items) ? listed.items : [])
+                        // What the `/meta` list withholds from this human is not listed.
+                        const kept = await createMetaListReadGate(readGate(protocol), type)(
+                            Array.isArray(listed?.items) ? listed.items : [],
+                        );
+                        const items = kept
                             .map(summaryOf)
                             .filter((item) => state !== 'draft' || item.draft);
                         return answer({ type: listed?.type ?? type, count: items.length, items });
@@ -351,10 +464,19 @@ export function createOpenAuthoringRegistry(opts: {
                             name,
                             ...(state === 'draft' ? { state: 'draft' as const } : state === 'active' ? {} : { previewDrafts: true }),
                         });
-                        const item = read?.item;
-                        if (item === undefined || item === null) {
-                            return refuse(RESOURCE_NOT_FOUND, `No '${type}' item named '${name}' in this environment.`, 404);
+                        const notFound = () => refuse(RESOURCE_NOT_FOUND, `No '${type}' item named '${name}' in this environment.`, 404);
+                        const stored = read?.item;
+                        if (stored === undefined || stored === null) return notFound();
+                        // The `/meta` item gate, as the doors that serve a stored version
+                        // for authoring run it. `absent` is the not-found answer itself
+                        // (an unpublished app stays unobservable, ADR-0045 §3).
+                        const verdict = await createMetaItemReadGate(readGate(protocol), type, name, [stored], STORED_VERSION_DOOR_POLICY)(stored);
+                        if (verdict.kind === 'refuse') {
+                            const { refusal } = verdict;
+                            if (refusal.reason === 'absent') return notFound();
+                            return refuse(refusal.code, refusal.message, refusal.status);
                         }
+                        const item = verdict.document;
                         const draft = state === 'draft' || (item as { _draft?: unknown })._draft === true;
                         return answer({
                             type: read.type ?? type,
