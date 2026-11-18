@@ -122,6 +122,10 @@ const CRASH_SAMPLES: Readonly<Record<string, string>> = {
   ...SAMPLES,
   'formatErr(err)': 'TypeError: boom',
   errStr: 'TypeError: boom',
+  // An action body that does not compile in its wrapper: the action's name and
+  // the compiler's sentence (`actionBodyCompileFailure`).
+  actionName: 'mz_lock_decide',
+  compilerError: 'SyntaxError: invalid redefinition of parameter name',
 };
 
 /**
