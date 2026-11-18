@@ -2955,9 +2955,17 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    them, and `os validate` prints them. This stage is the rule registry, not all
    of `os validate`: the `defineStack` provenance refusal (a config whose
    default export `defineStack` did not build, `STACK_PROVENANCE_MISSING`), the
-   package-docs lint, the capability-provider check, the picklist-reference and
-   view-container-name checks and `--strict` stay `os validate`'s, so run it
-   too.
+   package-docs lint, the picklist-reference and view-container-name checks and
+   `--strict` stay `os validate`'s, so run it too.
+
+   The stage then runs `os validate`'s capability-provider check over every
+   declared `requires` token and reports each finding as an **advisory**, in
+   the sentence `os validate` prints: a cloud-only token, an `enterprise` token
+   whose package is not installed, and an `enterprise` token whose package
+   resolves but which no plugin in `plugins[]` provides (for
+   `hierarchy-security`, the hierarchy scopes then behave as owner-only). These
+   never change `os verify`'s exit status, including the cloud-only tokens
+   `os validate` refuses.
 2. **Runtime.** Boot the app in-process and exercise it through the real HTTP
    stack. The boot reads the project's `.env*` files first, the ones `os dev`
    reads, from the directory holding the config (a variable already exported
@@ -3111,7 +3119,9 @@ document carries depends on where the run ended:
   `path`, `message`, `hint`, plus `package` for a finding raised inside one
   package of the artifact), or the schema issues when the stack does not parse.
 - **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
-  `seed` (the boot's seed: its `status`, per-source counts, `totals` and the
+  `capabilities` (the capability-provider advisories: `token`, `message`, and
+  `validate`, which is `error` when `os validate` refuses the stack over it and
+  `warning` when it reports it; `[]` when there are none), `seed` (the boot's seed: its `status`, per-source counts, `totals` and the
   `hardFailures` it adds), `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`),
   `deleteBehaviors` (with `--delete-behaviors`), `uniqueScopes` (with
   `--unique-scopes`; its `boot` names the legs the run could prove),
