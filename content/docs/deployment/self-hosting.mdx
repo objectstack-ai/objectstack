@@ -767,7 +767,12 @@ posture, and while the account's address is unverified it joins no
 organization: it joins by accepting the invitation once the address is
 verified, and the acceptance writes the membership the invitation names. Verifying the address binds nothing by itself.
 An address on the list is admitted by its domain, invitation or not, and the
-membership policy binds it at creation as before.
+membership policy binds it at creation as before. Both admissions have one
+exception: under this posture a sign-in through a social provider creates an
+account only when the provider reports the address verified, and is otherwise
+refused `403 SELF_REGISTRATION_CLOSED`, whatever the list or an invitation
+says ([Authentication](/docs/permissions/authentication#2-handle-callback)).
+Once the provider verifies the address, the next sign-in is admitted.
 
 **Accepting, declining and listing an invitation need a verified email
 address, on every deployment.** The invitation's `id`, which its link carries,
@@ -846,6 +851,12 @@ on `open`, keep verification on and connect a mail transport.
   off**: set `OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false`, or
   `emailAndPassword.requireEmailVerification: false` in the stack config. A
   sign-up is then signed in at once and no verification mail is sent.
+
+Under `email_domain`, and under `open` while verification is in force, a new
+account through a social provider is created only when the provider reports
+the address verified; otherwise the sign-in is refused
+`403 SELF_REGISTRATION_CLOSED` and nothing is written
+([Authentication](/docs/permissions/authentication#2-handle-callback)).
 
 The `open` opt-out is for a deployment with no mail transport that trusts
 whoever can reach it, such as a pre-production environment. It is loud and it
