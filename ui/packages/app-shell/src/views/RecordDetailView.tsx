@@ -4766,6 +4766,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // header by the `editLockedByState` badge, as the lock band explains
         // the approval lock.
         disabled: approvalLocked || editDisabledByPredicate || editLockedByState,
+        // objectstack#35016 — on a phone the bottom bar's first slot is its
+        // primary place, and an action that cannot be pressed never holds
+        // it: under the approval lock this Edit moves into the bar's `⋯`
+        // (still drawn, still off), and the first usable action takes the
+        // slot. The approval band above states the lock. The desktop row
+        // keeps it greyed in place, and a record with no approval lock is
+        // untouched.
+        ...(phonePage && approvalLocked ? { component: 'action:menu' } : {}),
         onClick: () => onEdit({ id: pureRecordId }, objectName),
       } as any);
     }
