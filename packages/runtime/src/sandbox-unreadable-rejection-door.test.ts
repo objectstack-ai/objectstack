@@ -34,6 +34,9 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { HttpDispatcher } from './http-dispatcher.js';
 import { actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
+// Paid during collection, never inside a case's clocked window: the door's
+// reach loads this package lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 const PREFIX = '/api/v1';
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
