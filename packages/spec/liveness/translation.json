@@ -388,6 +388,20 @@
         }
       }
     },
+    "mappings": {
+      "status": "live",
+      "verifiedAt": "2026-11-17",
+      "evidence": "packages/spec/src/system/i18n-resolver.ts#translateMapping (`mappings.<name>.label`, registered in METADATA_DOCUMENT_TRANSLATORS); packages/rest/src/meta-item-read-gate.ts#translateMetaList (the /meta list read that applies it per request locale)",
+      "note": "Seeded LIVE with its reader in the same change (the datasets precedent): a served `mapping` document is localized at the REST boundary, list and item, and `GET /meta/mapping` is what the console's import wizard offers by label in its saved-mapping selector. The face stops at the one string a mapping authors for a reader; its `fieldMapping` is column and field names.",
+      "children": {
+        "label": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidence": "packages/spec/src/system/i18n-resolver.ts#lookupMappingLabel (`mappings.<name>.label`, read by translateMapping)",
+          "note": "Overlays the served mapping's own `label`."
+        }
+      }
+    },
     "metadataForms": {
       "status": "live",
       "verifiedAt": "2026-08-28",
