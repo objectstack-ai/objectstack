@@ -341,16 +341,23 @@ that does not compute is answered by the reason, in two arms:
   mark, since a formula reading the user is computed per writer on every write
   that has one.
 
-**Known limit: the form does not recompute a formula.** The form judges the
-predicate on the formula value it last read, over its live values
-(`ruleRecord` in `form.tsx`); a create form has none, and an edit of the
-formula's inputs does not move it. The server judges the record being
-written. So on a create the form keeps a formula-driven field hidden while the
-server may require it (main refused that create too), and an edit that moves
-the computed value into the condition is refused naming a field the form still
-hides; main accepted that edit. The server's answer is the one ruling item 2
-asks for; the form-side recompute is a follow-up card, and until it lands the
-lint warns on every `required` field whose `visibleWhen` reads a formula.
+**The form recomputes a formula too (a limit this amendment first recorded,
+now closed).** The form used to judge the predicate on the formula value it
+last read, none on a create, so it could hide a field the server required. It
+now computes the object's `formula` fields over the record being edited before
+it judges the field rules: the object form renderer over its `ruleRecord`
+(`form.tsx`) and the console's form-view page over its live values
+(`FormPage.tsx`), both through `planObjectFormulas` (`@object-ui/core`,
+`formulaRecord.ts`) with the canonical `@objectstack/formula` engine in the
+read order, binding the signed-in user's id and positions as
+`applyFormulaPlan` binds them. A formula the form cannot compute (it reads
+through a reference, calls `label()` or `current_user.can()`, reads `os`,
+reads the user when nobody is signed in, is served without its expression, or
+reads such a formula) drops the `visibleWhen` that reads it: the field is shown
+and keeps its `required` flag, and the server, which judges the write, decides.
+For a formula that reads `os` or calls `can()` the form can be stricter than
+the server, which may compute it and hide the field. The server's answer is
+the one ruling item 2 asks for.
 
 **Author-time fence (narrowed from the ruling's item 4).** The ruling asked for a
 warning on `required` + `visibleWhen` reading roots the server cannot bind. That
@@ -362,7 +369,7 @@ older stored metadata, which the fault arm covers. What is added are three
 **warnings**, never refusals, since the field keeps the requirement it had:
 a `required` field's `visibleWhen` that reads through a reference field (never
 hydrated at the field level, so it always faults); one that reads a `formula`
-field (the known limit above, and, when a formula in its read closure reads
+field (written for the form-side limit above, since closed, and, when a formula in its read closure reads
 through a reference or calls `label()` or `can`, the counts-as-shown
 consequence; `required-visible-when-formula-issue.ts`, with the same verdict as
 a Studio advisory in the field inspector); and `required` + `visibleWhen`

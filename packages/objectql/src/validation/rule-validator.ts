@@ -438,10 +438,11 @@ export interface EvaluateRulesOptions {
    * record, as a read computes them: a `formula` is never on the write path
    * (computed on read, never stored), so a required field's `visibleWhen` that
    * reads one is judged on the value this returns, the value a read of the
-   * written record would serve. That is not always the value the form shows:
-   * the form judges the formula value it last read and does not recompute it
-   * while the user edits (a create form has none), so a write that changes a
-   * formula's inputs can be judged on a value the form never showed.
+   * written record would serve. The form computes the same formulas over the
+   * record being edited (`planObjectFormulas`, `@object-ui/core`), so the two
+   * agree, except for a formula the form cannot compute (among others, one
+   * reading `os` or calling `can`), where the form shows the field, keeps it
+   * required, and the write is judged here.
    * `unservable` names, with the reason, each formula whose read value the
    * write path cannot know (a hop, `label()`, `can` with no map, a read of the
    * acting user on a write with none, or a formula reading one);
@@ -3636,8 +3637,8 @@ function formulaReadsOf(pred: string | Expression, fields: Record<string, Condit
  * (`opts.formulaValues`, the read path's plan), because it is never on the
  * write path; one that faults for a reason a read shares is judged on the
  * `null` a read serves. That is the value a read of the written record serves,
- * not always the one the form shows: the form does not recompute a formula
- * while the user edits (ADR-0113's known limit). So a role-gated field is judged per writer; the lint refuses
+ * which the form also computes over the record being edited
+ * (`planObjectFormulas`, `@object-ui/core`). A role-gated field is judged per writer; the lint refuses
  * `current_user` in a field `visibleWhen` at authoring, so only older stored
  * metadata reaches that binding. `features`, `app` and `page` are never
  * bound server-side; `objectstack validate` and the object save door already
