@@ -59,6 +59,71 @@ export const STUDIO_PKG_READONLY_WORD = 'hidden @min-[300px]:inline';
 
 /** Rail: 240 px, the sidebar surface, a right border. */
 export const STUDIO_RAIL_WIDTH = 'w-60';
+
+/**
+ * objectstack#35061 — the rail's narrow form. While the right slot squeezes
+ * the pillars and the content column beside a 240 px rail would be under
+ * 900 px, every rail draws 52 px wide: one character per row, its full name on
+ * hover, and a 「»」 bar that floats the whole rail over the content until a
+ * row is picked, Escape, or a click outside. The slot closing, or widening the
+ * window, brings the 240 px rail back.
+ *
+ * Decided as `dataTabsFold.ts` decides its fold (decision B of epic
+ * objectui#12446): a CSS container query, here on the element that holds the
+ * pillars (`STUDIO_PILLARS_HOST`), never a JS width read. The query reads that
+ * element, not the content column, because the content column widens when the
+ * rail narrows: 1140 px of pillars is the 900 px content column plus the
+ * 240 px rail. The surface marks the host `data-studio-slot="open"` only while
+ * the slot squeezes it (not under `md`, where the slot overlays the page), so
+ * a narrow window with the slot closed keeps the 240 px rail. The rail's own
+ * `data-rail-peek` turns the narrow form off while it floats. It is the same
+ * in every pillar and every mode (objectui#12519): nothing here reads an edit
+ * mode. Literal class strings: Tailwind finds a class by scanning source.
+ */
+/** The content-column width (px) under which the rail narrows while the slot squeezes the pillars. */
+export const STUDIO_RAIL_NARROW_CONTENT_WIDTH = 900;
+/** On the element that holds the pillars: the group and the container the narrow form reads. */
+export const STUDIO_PILLARS_HOST = 'group/studio-pillars @container/studio-pillars';
+/** On the rail: 52 px while the narrow form applies (floating or not). */
+export const STUDIO_RAIL_NARROW_WIDTH = 'group-data-[studio-slot=open]/studio-pillars:@max-[1140px]/studio-pillars:w-[52px]';
+/** The rail's contents while they float over the content column. */
+export const STUDIO_RAIL_FLOATING = 'absolute inset-y-0 left-0 z-30 w-60 border-r bg-sidebar shadow-lg';
+/** The 「»」 bar: drawn only while the narrow form applies. */
+export const STUDIO_RAIL_FLOAT_BAR =
+  'hidden h-10 shrink-0 items-center justify-center border-b group-data-[studio-slot=open]/studio-pillars:@max-[1140px]/studio-pillars:flex';
+/** What the narrow form leaves out: the heading row, the search, the filters, the footer. */
+export const STUDIO_RAIL_NARROW_HIDDEN =
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:hidden';
+/** The list: tighter, and only rows and groups (`data-studio-rail-item`) stay in it. */
+export const STUDIO_RAIL_LIST_NARROW =
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:px-1.5 ' +
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:[&>:not([data-studio-rail-item])]:hidden';
+/** A row: one centred character, no padding or indent. */
+export const STUDIO_RAIL_ROW_NARROW =
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:h-8 ' +
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:justify-center ' +
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:gap-0 ' +
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:p-0';
+/**
+ * A row's one character, its `data-abbr`: generated content, so it adds no text
+ * to the row and no name for a screen reader (the empty alternative after the
+ * slash); drawn only in the narrow form.
+ */
+export const STUDIO_RAIL_ROW_ABBR =
+  "before:hidden before:h-full before:w-full before:items-center before:justify-center before:text-[13px] before:font-semibold before:content-[attr(data-abbr)_/_''] " +
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:before:flex';
+/** A row's label: still its accessible name in the narrow form. */
+export const STUDIO_RAIL_ROW_LABEL_NARROW =
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:sr-only';
+/** A row's icon and trailing slot: laid out as before, left out in the narrow form. */
+export const STUDIO_RAIL_ROW_PART =
+  'contents group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:hidden';
+/** A group: a rule above its rows instead of its header. */
+export const STUDIO_RAIL_GROUP_NARROW =
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:mt-1 ' +
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:border-t ' +
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:pt-1 ' +
+  'group-data-[studio-slot=open]/studio-pillars:group-data-[rail-peek=off]/studio-rail:@max-[1140px]/studio-pillars:[&>:not([data-studio-rail-item])]:hidden';
 export const STUDIO_RAIL_HEADER = 'flex h-11 shrink-0 items-center gap-2 pl-4 pr-3';
 export const STUDIO_RAIL_HEADING = 'text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground';
 export const STUDIO_RAIL_COUNT = 'inline-flex h-[18px] min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-[11px] font-medium text-muted-foreground';

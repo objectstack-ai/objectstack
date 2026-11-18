@@ -2509,6 +2509,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.definitionTitle': '{label} · Definition',
   // The shared rail (objectstack#26733): the action under a search that matched nothing.
   'engine.studio.rail.clearSearch': 'Clear search',
+  // objectstack#35061: the narrow rail's top button, which floats the whole list over the content and back.
+  'engine.studio.rail.expand': 'Show the full list',
+  'engine.studio.rail.collapse': 'Back to the narrow list',
   // Data pillar
   'engine.studio.data.newFieldLabel': 'New field',
   'engine.studio.data.nameFieldLabel': 'Name',

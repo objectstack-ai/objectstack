@@ -2255,6 +2255,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.if.definitionTitle': '{label} · 定义',
   // The shared rail (objectstack#26733): the action under a search that matched nothing.
   'engine.studio.rail.clearSearch': '清除搜索',
+  // objectstack#35061: the narrow rail's top button, which floats the whole list over the content and back.
+  'engine.studio.rail.expand': '展开完整列表',
+  'engine.studio.rail.collapse': '收回窄栏',
   // Data pillar
   'engine.studio.data.newFieldLabel': '新字段',
   'engine.studio.data.nameFieldLabel': '名称',

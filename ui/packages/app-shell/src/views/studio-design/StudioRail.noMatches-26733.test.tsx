@@ -68,6 +68,16 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { AccessPillar, AutomationsPillar, DataPillar } from './StudioDesignSurface';
+import { StudioRail, StudioRailRow, railAbbreviation } from './StudioRail';
+import {
+  STUDIO_PILLARS_HOST,
+  STUDIO_RAIL_FLOATING,
+  STUDIO_RAIL_NARROW_CONTENT_WIDTH,
+  STUDIO_RAIL_NARROW_WIDTH,
+  STUDIO_RAIL_ROW_ABBR,
+  STUDIO_RAIL_WIDTH,
+} from './studio-tokens';
+import * as studioTokens from './studio-tokens';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';
 
@@ -244,5 +254,126 @@ describe('the no-matches state in zh (objectstack#26733)', () => {
     expect(state).toHaveTextContent(tFormat('engine.list.emptyQuery', 'zh-CN', { query: 'zzzz' }));
     expect(within(state).getByRole('button')).toHaveTextContent('清除搜索');
     expect(t('engine.studio.rail.clearSearch', 'zh-CN')).toBe('清除搜索');
+  });
+});
+
+// objectstack#35061 item 1 — the narrow form every rail shares while the right
+// slot squeezes the pillars. jsdom evaluates no container query: these pins
+// hold the DOM both forms share and the class strings that switch between them.
+describe('the rails\' narrow form (objectstack#35061)', () => {
+  it('abbreviates a name to its first character, upper-cased, a grapheme kept whole', () => {
+    expect(railAbbreviation('客户', 'zh-CN')).toBe('客');
+    expect(railAbbreviation('  account', 'en')).toBe('A');
+    expect(railAbbreviation('éclair', 'en')).toBe('É');
+    expect(railAbbreviation('👩‍💻 team', 'en')).toBe('👩‍💻');
+    // The display locale's case rules: Turkish dotted capital I.
+    expect(railAbbreviation('istanbul', 'tr')).toBe('İ');
+    expect(railAbbreviation('   ', 'en')).toBe('');
+    expect(railAbbreviation(undefined, 'en')).toBe('');
+  });
+
+  it('every narrow-form class reads the pillars host at 900 px of content beside the 240 px rail', () => {
+    expect(STUDIO_RAIL_WIDTH).toBe('w-60');
+    expect(STUDIO_RAIL_NARROW_CONTENT_WIDTH).toBe(900);
+    expect(STUDIO_PILLARS_HOST).toBe('group/studio-pillars @container/studio-pillars');
+    const narrow = Object.entries(studioTokens).filter(
+      ([name, value]) => name.startsWith('STUDIO_RAIL_') && typeof value === 'string' && value.includes('studio-pillars'),
+    );
+    expect(narrow.length).toBeGreaterThanOrEqual(9);
+    for (const [, value] of narrow) {
+      for (const cls of (value as string).split(/\s+/).filter((c) => c.includes('studio-pillars'))) {
+        expect(cls).toContain('group-data-[studio-slot=open]/studio-pillars:');
+        expect(cls).toContain(`@max-[${STUDIO_RAIL_NARROW_CONTENT_WIDTH + 240}px]/studio-pillars:`);
+      }
+    }
+  });
+
+  describe.each(CASES)('the $name rail', (c) => {
+    it('keeps its 240 px width class, and narrows by the host alone; each row carries its character and its whole name', async () => {
+      renderRail(c);
+      const { rail } = await loadedRail(c);
+      expect(rail).toHaveClass(STUDIO_RAIL_WIDTH, ...STUDIO_RAIL_NARROW_WIDTH.split(' '));
+      expect(rail).toHaveAttribute('data-rail-peek', 'off');
+      for (const label of c.labels) {
+        // The label stays the row's text and its accessible name; the character is generated content.
+        const row = within(rail).getByRole('button', { name: label });
+        expect(row).toHaveAttribute('data-studio-rail-item');
+        expect(row).toHaveAttribute('data-abbr', railAbbreviation(label, 'en'));
+        expect(row).toHaveClass(...STUDIO_RAIL_ROW_ABBR.split(' '));
+        expect(row.textContent?.startsWith(label)).toBe(true);
+        expect(row.getAttribute('title')).toContain(label);
+      }
+    });
+
+    it('「»」 floats the full rail over the content; Escape puts it back and returns focus; so does a picked row', async () => {
+      renderRail(c);
+      const { rail } = await loadedRail(c);
+      const toggle = within(rail).getByTestId('studio-rail-float');
+      expect(toggle).toHaveAccessibleName(t('engine.studio.rail.expand', 'en'));
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+      fireEvent.click(toggle);
+      expect(rail).toHaveAttribute('data-rail-peek', 'on');
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(toggle).toHaveAccessibleName(t('engine.studio.rail.collapse', 'en'));
+      expect(toggle.parentElement?.parentElement).toHaveClass(...STUDIO_RAIL_FLOATING.split(' '));
+
+      const row = within(rail).getByRole('button', { name: c.labels[1] });
+      row.focus();
+      fireEvent.keyDown(row, { key: 'Escape' });
+      expect(rail).toHaveAttribute('data-rail-peek', 'off');
+      expect(toggle).toHaveFocus();
+
+      fireEvent.click(toggle);
+      fireEvent.click(within(rail).getByRole('button', { name: c.labels[1] }));
+      expect(rail).toHaveAttribute('data-rail-peek', 'off');
+    });
+  });
+
+  it('a click outside puts the floating rail back; a click inside that picks nothing keeps it', () => {
+    render(
+      <div>
+        <button type="button">outside</button>
+        <StudioRail heading="Objects" testId="rail" search={{ value: '', onChange: () => {}, placeholder: 'Search' }}>
+          <StudioRailRow>Account</StudioRailRow>
+        </StudioRail>
+      </div>,
+    );
+    const rail = screen.getByTestId('rail');
+    fireEvent.click(within(rail).getByTestId('studio-rail-float'));
+    fireEvent.pointerDown(within(rail).getByPlaceholderText('Search'));
+    expect(rail).toHaveAttribute('data-rail-peek', 'on');
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'outside' }));
+    expect(rail).toHaveAttribute('data-rail-peek', 'off');
+  });
+
+  it('a row with no string name keeps its icon in the narrow form; under the mobile breakpoint there is no 「»」', () => {
+    render(
+      <StudioRail heading="Sets" testId="rail" isMobile open>
+        <StudioRailRow icon={<svg data-testid="glyph" />}>
+          <span>Sales rep</span>
+        </StudioRailRow>
+        <StudioRailRow name="Support agent">
+          <span>Support agent</span>
+        </StudioRailRow>
+      </StudioRail>,
+    );
+    const rail = screen.getByTestId('rail');
+    expect(within(rail).queryByTestId('studio-rail-float')).toBeNull();
+    expect(rail).not.toHaveClass(...STUDIO_RAIL_NARROW_WIDTH.split(' '));
+    const [first, second] = within(rail).getAllByRole('button');
+    expect(first).not.toHaveAttribute('data-abbr');
+    expect(first).not.toHaveClass(...STUDIO_RAIL_ROW_ABBR.split(' '));
+    expect(within(first).getByTestId('glyph').parentElement?.className).toBe('contents');
+    expect(second).toHaveAttribute('data-abbr', 'S');
+    expect(second).toHaveAttribute('title', 'Support agent');
+    expect(second).toHaveTextContent(/^Support agent$/);
+  });
+
+  it('reads 「»」 in zh', async () => {
+    renderRail(CASES[0], 'zh');
+    const rail = await screen.findByTestId(CASES[0].railTestId, undefined, { timeout: 8000 });
+    expect(within(rail).getByTestId('studio-rail-float')).toHaveAccessibleName('展开完整列表');
+    expect(t('engine.studio.rail.collapse', 'zh-CN')).toBe('收回窄栏');
   });
 });

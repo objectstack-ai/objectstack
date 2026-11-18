@@ -66,6 +66,7 @@ import {
   STUDIO_HEADER_PILLAR,
   STUDIO_HEADER_PILLAR_NAV,
   STUDIO_KIND_CHIP,
+  STUDIO_PILLARS_HOST,
 } from './studio-tokens.js';
 import { StudioInspector } from './StudioInspector.js';
 import { agentDraftMarkOf, DraftChip, DraftSourceLine, isAgentDraftSurface } from './StudioDraftMark.js';
@@ -1842,7 +1843,15 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
             </p>
           )}
 
-          <div className="min-h-0 flex-1">
+          {/* objectstack#35061 — the pillars' host is what the rails' narrow
+              form measures, and it says whether the right slot squeezes it
+              (`STUDIO_PILLARS_HOST` in `studio-tokens.ts`): the slot shown
+              beside it, not overlaying the page under `md`. */}
+          <div
+            className={cn('min-h-0 flex-1', STUDIO_PILLARS_HOST)}
+            data-testid="studio-pillars-host"
+            data-studio-slot={slotHost && slotOpen && slotHasContent && !isMobile ? 'open' : 'closed'}
+          >
             {/* objectui#12725 — the pillars' item headers read the ledger the
                 badge counts (`studioItemDraftStatus.ts`). */}
             <StudioPendingDraftsContext.Provider value={pillarPendingDrafts}>
@@ -10969,6 +10978,7 @@ export function AccessPillar({
                 if (isMobile) setRailOpen(false);
               }}
               icon={<Shield className="h-4 w-4 shrink-0 text-muted-foreground" />}
+              name={p.label.trim() ? p.label : p.name}
               trailing={
                 <>
                   <RailCustomizationMark row={{ type: 'permission', ...p }} marks={railMarks} locale={locale} />
