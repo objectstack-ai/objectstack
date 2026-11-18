@@ -108,6 +108,23 @@ export const ACCOUNT_APP: App = {
           requiresObject: 'sys_inbox_message',
         },
         {
+          // [rulings 6968686390 and 6969143776] The person's own notification
+          // settings: per topic × channel on/off, digest and quiet hours. A
+          // console page registered as `account:notification_settings`; it
+          // reads `GET /api/v1/messaging/me/preferences` (their EFFECTIVE
+          // preferences, computed by the resolver `emit` uses) and writes
+          // their own `sys_notification_preference` rows through the data
+          // door, where `member_default`'s own-row policy decides which rows.
+          // Gated like Approvals: the capability is the messaging SERVICE,
+          // which mounts the route the page reads.
+          id: 'nav_account_notification_settings',
+          type: 'component',
+          label: 'Notification Settings',
+          componentRef: 'account:notification_settings',
+          icon: 'bell-ring',
+          requiresService: 'messaging',
+        },
+        {
           // #7234 — the DESTINATION is the Approvals Inbox component, not the
           // raw `sys_approval_request` grid. The engine-owned table has no
           // decision actions for an end user: every one is gated on a leaf

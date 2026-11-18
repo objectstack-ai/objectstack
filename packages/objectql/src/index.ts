@@ -387,6 +387,9 @@ export {
   seedHookUserGrants,
   seedHookUnreadMembership,
 } from './hook-run-as.js';
+// The platform's own system api over a hook's api: the context elevated, with
+// no app-automation provenance. Read by plugin-audit's ledger writer.
+export { platformSystemApi } from './platform-system-api.js';
 // Whether a write runs inside a transaction a write beside it joins, or one it
 // cannot reach: read by the runtime's script-body doors.
 export { openTransactionKind } from './open-transaction.js';

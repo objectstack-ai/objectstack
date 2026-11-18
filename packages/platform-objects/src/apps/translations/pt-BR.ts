@@ -20,6 +20,7 @@ export const ptBR: TranslationData = {
         nav_account_profile: { label: 'Perfil' },
         nav_account_mobile_app: { label: 'Aplicativo móvel' },
         nav_account_notifications: { label: 'Notificações' },
+        nav_account_notification_settings: { label: 'Configurações de notificação' },
         nav_account_approvals: { label: 'Minhas aprovações pendentes' },
         nav_account_memberships: { label: 'Minhas organizações' },
         nav_account_linked: { label: 'Contas vinculadas' },

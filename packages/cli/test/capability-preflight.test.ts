@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ENTERPRISE_ABSENCE_CONSEQUENCE,
+  judgeDeclaredCapabilities,
   preflightDeclaredCapabilities,
+  preflightProviderWiring,
   preflightRequiredCapabilities,
   renderCapabilityMessage,
   missingProviderMessage,
@@ -84,7 +87,7 @@ describe('renderCapabilityMessage (#3366)', () => {
 
   it('enterprise provider hint names plugins[] wiring AND carries the edition boundary', () => {
     const m = msgFor('hierarchy-security', () => false);
-    expect(m).toContain('pnpm add @objectstack/security-enterprise');
+    expect(m).toContain('Install @objectstack/security-enterprise');
     expect(m).toContain('plugins[]');
     // #10921 — this `pnpm add` names a package this repo does not build and that
     // is not publicly resolvable; it is followable only by a licensee. What keeps
@@ -223,5 +226,178 @@ describe('makeProviderResolver — real on-disk resolution', () => {
   it('reports a genuinely-absent package as not installed', () => {
     expect(isInstalled('@objectstack/service-ai')).toBe(false);
     expect(isInstalled('@objectstack/this-package-does-not-exist')).toBe(false);
+  });
+});
+
+// ── Enterprise / cloud capability findings (validate, verify, serve) ───────
+//
+// Which tokens get a finding is the registry's edition tag, so the battery is
+// DERIVED from `PLATFORM_CAPABILITY_PROVIDERS` and floored: a registry that
+// lost its non-open rows would otherwise run zero cases and stay green.
+
+const NON_OPEN_TOKENS = Object.entries(PLATFORM_CAPABILITY_PROVIDERS)
+  .filter(([, p]) => p.edition !== 'open')
+  .map(([token, p]) => ({ token, edition: p.edition, pkg: p.package }));
+
+/** The provider package's module, as a loader hands it back: one exported plugin class. */
+class FixtureProviderPlugin {
+  name = 'fixture.enterprise-provider';
+  async init() {}
+}
+class UnrelatedPlugin {
+  name = 'fixture.unrelated';
+  async init() {}
+}
+const providerModule = { FixtureProviderPlugin, someHelper: () => 1 };
+
+describe('enterprise and cloud registry tokens — one case per token', () => {
+  it('the battery is the registry, and it is not empty', () => {
+    // Today: one `enterprise` row and six `cloud` rows. A floor, not a total.
+    expect(NON_OPEN_TOKENS.filter((t) => t.edition === 'enterprise').length).toBeGreaterThanOrEqual(1);
+    expect(NON_OPEN_TOKENS.filter((t) => t.edition === 'cloud').length).toBeGreaterThanOrEqual(6);
+  });
+
+  for (const { token, edition, pkg } of NON_OPEN_TOKENS) {
+    it(`${token} (${edition}): no provider here ⇒ exactly one finding naming it`, async () => {
+      const r = await judgeDeclaredCapabilities({
+        requires: [token],
+        packages: [],
+        plugins: [],
+        projectDir: '/tmp/nowhere',
+        isInstalled: () => false,
+        loadModule: async () => providerModule,
+      });
+      const all = [...r.errors, ...r.warnings];
+      expect(all.map((a) => a.token)).toEqual([token]);
+      // `os validate`'s verdict per edition, unchanged: a cloud token has no
+      // version here at all (refused); an enterprise token is installable.
+      if (edition === 'cloud') expect(r.errors.map((a) => a.token)).toEqual([token]);
+      else expect(r.warnings.map((a) => a.token)).toEqual([token]);
+      if (pkg) expect(all[0].message).toContain(pkg);
+    });
+
+    it(`${token} (${edition}): the provider present ⇒ no finding, unless no package can exist`, async () => {
+      const r = await judgeDeclaredCapabilities({
+        requires: [token],
+        packages: [],
+        plugins: [new FixtureProviderPlugin()],
+        projectDir: '/tmp/nowhere',
+        isInstalled: () => true,
+        loadModule: async () => providerModule,
+      });
+      const all = [...r.errors, ...r.warnings];
+      // A cloud tier with no package has no provider to be present: it is
+      // still reported, the case `os validate` refuses.
+      expect(all.map((a) => a.token)).toEqual(pkg === null ? [token] : []);
+    });
+  }
+});
+
+describe('preflightProviderWiring — an enterprise package that resolves is not yet a provider', () => {
+  const ENTERPRISE = NON_OPEN_TOKENS.filter((t) => t.edition === 'enterprise');
+  const wiring = (plugins: unknown, loadModule = async (_pkg: string): Promise<unknown> => providerModule) =>
+    preflightProviderWiring({
+      requires: ENTERPRISE.map((t) => t.token),
+      packages: [],
+      plugins,
+      projectDir: '/tmp/nowhere',
+      isInstalled: () => true,
+      loadModule,
+    });
+
+  it('installed, `plugins[]` empty ⇒ one `unwired` finding per enterprise token', async () => {
+    const found = await wiring([]);
+    expect(found.map((c) => [c.token, c.wiring?.state])).toEqual(ENTERPRISE.map((t) => [t.token, 'unwired']));
+  });
+
+  it('installed, `plugins[]` holds only an unrelated plugin ⇒ still unwired', async () => {
+    const found = await wiring([new UnrelatedPlugin()]);
+    expect(found.map((c) => c.wiring?.state)).toEqual(ENTERPRISE.map(() => 'unwired'));
+  });
+
+  it('an instance of a class the package exports ⇒ wired, no finding', async () => {
+    expect(await wiring([new UnrelatedPlugin(), new FixtureProviderPlugin()])).toEqual([]);
+  });
+
+  it('a string `plugins[]` entry naming the package ⇒ wired, and the package is never loaded', async () => {
+    let loads = 0;
+    const entries = ENTERPRISE.map((t) => t.pkg as string);
+    const found = await wiring(entries, async () => {
+      loads++;
+      return providerModule;
+    });
+    expect(found).toEqual([]);
+    expect(loads).toBe(0);
+  });
+
+  it('a package that resolves but cannot be loaded ⇒ `unloadable`, never read as wired', async () => {
+    const found = await wiring([new FixtureProviderPlugin()], async () => {
+      throw new Error('boom at import');
+    });
+    expect(found.map((c) => c.wiring)).toEqual(ENTERPRISE.map(() => ({ state: 'unloadable', error: 'boom at import' })));
+    expect(renderCapabilityMessage(found[0])).toContain('boom at import');
+  });
+
+  it('a package that does not resolve is the resolution preflight\'s finding, not this one', async () => {
+    const found = await preflightProviderWiring({
+      requires: ENTERPRISE.map((t) => t.token),
+      packages: [],
+      plugins: [],
+      projectDir: '/tmp/nowhere',
+      isInstalled: () => false,
+      loadModule: async () => providerModule,
+    });
+    expect(found).toEqual([]);
+  });
+
+  it('a per-package `requires` attributes the finding to that package', async () => {
+    const token = ENTERPRISE[0].token;
+    const found = await preflightProviderWiring({
+      requires: undefined,
+      packages: [{ id: 'com.example.one', body: { requires: [token] } }],
+      plugins: [],
+      projectDir: '/tmp/nowhere',
+      isInstalled: () => true,
+      loadModule: async () => providerModule,
+    });
+    expect(found.map((c) => [c.package, c.token])).toEqual([['com.example.one', token]]);
+    expect(renderCapabilityMessage(found[0])).toMatch(/^package 'com\.example\.one' — /);
+  });
+
+  it('open and cloud tokens never reach the wiring check', async () => {
+    const found = await preflightProviderWiring({
+      requires: ['automation', ...NON_OPEN_TOKENS.filter((t) => t.edition === 'cloud').map((t) => t.token)],
+      packages: [],
+      plugins: [],
+      projectDir: '/tmp/nowhere',
+      isInstalled: () => true,
+      loadModule: async () => providerModule,
+    });
+    expect(found).toEqual([]);
+  });
+});
+
+describe('the enterprise consequence sentence', () => {
+  it('every consequence row keys an enterprise-edition registry token', () => {
+    for (const token of Object.keys(ENTERPRISE_ABSENCE_CONSEQUENCE)) {
+      expect(PLATFORM_CAPABILITY_PROVIDERS[token]?.edition, token).toBe('enterprise');
+    }
+  });
+
+  it('hierarchy-security names the owner-only fallback, absent and unwired alike', async () => {
+    const absent = renderCapabilityMessage(classifyRequiredCapability('hierarchy-security', () => false));
+    const [unwired] = await preflightProviderWiring({
+      requires: ['hierarchy-security'],
+      packages: [],
+      plugins: [],
+      projectDir: '/tmp/nowhere',
+      isInstalled: () => true,
+      loadModule: async () => providerModule,
+    });
+    for (const m of [absent, renderCapabilityMessage(unwired)]) {
+      expect(m).toContain('owner-only');
+      expect(m).toContain('enterprise edition');
+      expect(m).toContain('plugins[]');
+    }
   });
 });

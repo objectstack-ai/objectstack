@@ -46,10 +46,11 @@ describe('zh admin-override copy names an authorized override, not a violation (
   it('the override lever and the history chip read 管理员代为〈action〉 and 管理员代办', () => {
     expect(zh.overrideActionLabel).toBe('管理员代为{{action}}');
     expect(zh.viaOverrideChip).toBe('管理员代办');
-    // `{{action}}` is the lever's declared, localized label.
+    // `{{action}}` is the lever's declared, localized label; the reject lever
+    // reads 驳回 (objectstack#35021).
     const label = zh.overrideActionLabel as string;
-    expect(['通过', '拒绝', '转签', '撤回'].map((verb) => label.replace('{{action}}', verb)))
-      .toEqual(['管理员代为通过', '管理员代为拒绝', '管理员代为转签', '管理员代为撤回']);
+    expect(['通过', '驳回', '转签', '撤回'].map((verb) => label.replace('{{action}}', verb)))
+      .toEqual(['管理员代为通过', '管理员代为驳回', '管理员代为转签', '管理员代为撤回']);
   });
 
   it.each(OVERRIDE_KEYS)('zh %s keeps the placeholders of its en source', (key) => {
