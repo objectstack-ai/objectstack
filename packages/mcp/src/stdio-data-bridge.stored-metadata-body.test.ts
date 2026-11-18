@@ -469,6 +469,7 @@ const BRIDGE_MEMBERS: Record<string, string> = {
   aiReadExposed: 'no row body — a boolean read off one object definition (isAiReadExposed)',
   optionFieldsOf: 'no row body — field names from the same object definition describeObject reads',
   servedObjectDefinitionOf: 'no row body — the same object definition describeObject reads, judged by the gate and rendered to nobody',
+  fieldVisibilityOf: 'no row body — field names from the object definition describeObject reads, and the security service\'s readable answer',
   query: 'seam — serveStoredMetadataRows; filter / sort on the body column refused',
   get: 'seam — serveStoredMetadataRow',
   aggregate: 'refuses — group / filter / aggregate member on the body column',

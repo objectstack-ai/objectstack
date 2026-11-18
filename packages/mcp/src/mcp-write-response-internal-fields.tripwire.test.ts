@@ -161,6 +161,9 @@ const RECIPES: Record<string, Recipe> = {
   // [#32872] The object definition `describeObject` reads, handed to the
   // publish gate's passes and rendered to nobody: no engine read, no record.
   servedObjectDefinitionOf: { invoke: (b) => b.servedObjectDefinitionOf('vault'), writesRecords: false },
+  // [#35137] Field NAMES off the served object definition and the security
+  // service's readable answer: no engine read, no record.
+  fieldVisibilityOf: { invoke: (b) => b.fieldVisibilityOf('vault'), writesRecords: false },
   query: { invoke: (b) => b.query('vault', {}), writesRecords: false },
   get: { invoke: (b) => b.get('vault', 'row-1'), writesRecords: false },
   aggregate: { invoke: (b) => b.aggregate('vault', {}), writesRecords: false },
