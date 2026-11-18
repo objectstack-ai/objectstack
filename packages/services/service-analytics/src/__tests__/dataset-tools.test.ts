@@ -726,7 +726,7 @@ for (const cell of TG_CELLS) {
           measures: ['revenue'], dimensions: ['stage'], order: { revenue: 'desc' }, limit: 2,
         });
         expect(out).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_STAGES });
-        expect(out.rows.map((r) => r.stage)).toEqual(['lost', 'won']);
+        expect(out.rows.map((r) => r.stage), 'proposal 90, lost 70').toEqual(['proposal', 'lost']);
         expect(statements, 'one statement grouped, cut and counted').toHaveLength(1);
         expect(statements[0]).toContain(TG_WINDOW);
         expect(aggregate, 'no engine aggregate').toBe(0);
