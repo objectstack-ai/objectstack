@@ -37,7 +37,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { flushSync } from 'react-dom';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -147,6 +146,16 @@ function Trigger() {
   );
 }
 
+/** The provider's own toggle, as the trigger's handler or ⌘B's listener calls it, with no capture phase of its own. */
+function ProviderToggle() {
+  const { toggleSidebar } = useSidebar();
+  return (
+    <button type="button" data-testid="provider-toggle" hidden onClick={toggleSidebar}>
+      Provider toggle
+    </button>
+  );
+}
+
 function RouteProbe() {
   return <div data-testid="route">{useLocation().pathname}</div>;
 }
@@ -178,6 +187,7 @@ function renderShell(width: number) {
         <header data-testid="app-bar">
           <Trigger />
         </header>
+        <ProviderToggle />
         <Fold />
         <UnifiedSidebar activeAppName="crm" railOverlay />
         <div data-testid="page">
@@ -497,21 +507,23 @@ describe('the trigger floats the collapsed menu, and the keyboard walks it (obje
     expect(readWideWindowOpen()).toBe(false);
   });
 
-  it('collapsed by hand, the trigger floats it even when React renders between the capture phase and the trigger’s own click handler', async () => {
+  it('collapsed by hand, the trigger floats it even when React renders between the capture phase and the trigger’s own click handler', () => {
     renderShell(1600);
     fireEvent.click(trigger());
     expectHidden();
     // A browser runs a microtask checkpoint after each listener, so React may
-    // render the capture phase's update before the trigger's own handler runs.
-    // Dispatched outside act, as a browser does, with a render forced between.
-    const renderBetween = () => flushSync(() => {});
-    document.body.addEventListener('click', renderBetween, true);
+    // render the capture phase's note before the trigger's own handler runs.
+    // Here the click stops after the capture phase and renders (act), and the
+    // provider's toggle comes after, on its own.
+    const stopAfterCapture = (event: Event) => event.stopPropagation();
+    document.body.addEventListener('click', stopAfterCapture, true);
     try {
-      trigger().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      fireEvent.click(trigger());
     } finally {
-      document.body.removeEventListener('click', renderBetween, true);
+      document.body.removeEventListener('click', stopAfterCapture, true);
     }
-    await act(async () => {});
+    expectHidden();
+    fireEvent.click(screen.getByTestId('provider-toggle'));
     expectFloat();
     expect(readWideWindowOpen()).toBe(false);
   });
