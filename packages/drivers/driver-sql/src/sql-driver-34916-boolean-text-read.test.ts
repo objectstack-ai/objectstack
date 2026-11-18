@@ -212,6 +212,8 @@ describe('[#34973] driver-sql — boot converges legacy text booleans to 1 / 0 (
 
   it('is idempotent: a second boot converts 0 rows and logs nothing', async () => {
     await driver.initObjects([CONV_OBJECT]);
+    // The first boot converted (flag and live), so the second has a converged column to leave alone.
+    expect(converged(info)).toHaveLength(2);
     const after = await storedTypes(driver, CONV, 'flag');
     info.length = 0;
     // Count every UPDATE the second boot sends against the table.
