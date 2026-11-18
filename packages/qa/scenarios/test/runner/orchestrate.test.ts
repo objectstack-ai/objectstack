@@ -3528,6 +3528,29 @@ describe('runCard — dataset questions', () => {
     expect(at('dq_contacts')).toBeLessThan(firstOperation);
   });
 
+  it('the scorecard names a grader’s rule revision past the first, so a round graded before a rule change reads apart from one after', () => {
+    const asked = (pass: boolean, revision?: number) => ({ question: 'dq_x', repeat: 1, turn: { replyText: '', toolCalls: [] }, grade: { grader: 'asked-back', pass, checks: [], notes: [], ...(revision !== undefined ? { revision } : {}) } });
+    const picked = { question: 'dq_y', repeat: 1, turn: { replyText: '', toolCalls: [] }, grade: { grader: 'metric-selected', pass: true, checks: [], notes: [] } };
+    const half = (datasetQuestions: unknown[]) => ({ personas: [], seed: { inserted: 0, refused: [] }, questions: [], operations: [], datasetQuestions }) as unknown as NonNullable<CardRun['modes'][number]['run']>;
+    const now = half([asked(true, 2), asked(false, 2), picked]);
+    const before = half([asked(true), asked(false), picked]);
+    expect(datasetTally(now)!.byGrader).toEqual({ 'asked-back': { passed: 1, total: 2, revision: 2 }, 'metric-selected': { passed: 1, total: 1 } });
+    expect(datasetTally(before)!.byGrader).toEqual({ 'asked-back': { passed: 1, total: 2 }, 'metric-selected': { passed: 1, total: 1 } });
+    const notBuilt = { commands: [], score: null };
+    const run = {
+      card: 'c',
+      title: 'c',
+      capabilities: [],
+      counts: { questions: 0, questionTurns: 0, operations: 0, personas: 0 },
+      modes: [
+        { mode: 'ask', run: now, iterate: { build: notBuilt, run: before }, findings: [] },
+      ],
+    } as unknown as CardRun;
+    const table = renderScorecard(cardScorecard(run));
+    expect(table).toContain('| Run · datasets | 2/3 (metric-selected 1/1 · asked-back rev 2 1/2) |');
+    expect(table).toContain('| Iterate · Run · datasets | 2/3 (metric-selected 1/1 · asked-back 1/2) |');
+  });
+
   it('a card without dataset questions keeps its record’s shape: no `datasetQuestions` on the half, no datasets tally, no `run-datasets` result', async () => {
     const { scenario, ops, driver } = setup();
     const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
