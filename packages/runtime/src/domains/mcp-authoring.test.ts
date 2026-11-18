@@ -523,9 +523,15 @@ describe('the tools\' names', () => {
 
 const FLOW_DRAFT = { name: 'lead_intake', label: 'Lead intake', type: 'record_change', nodes: [], edges: [] };
 
-/** An admitted author's injection through the real domain, over `protocol` (the recording double by default). */
-async function authorThroughDomain(opts: Parameters<typeof serve>[1] = {}) {
-  const ec = await oauthEnvelope(['metadata:write'], ADMIN);
+/**
+ * An admitted author's injection through the real domain, over `protocol` (the
+ * recording double by default). The fixture's user holds `admin_full_access`,
+ * which a single-posture resolution anchors as the platform operator; `posture`
+ * replaces that rung, as a walled deployment's resolution would not grant it.
+ */
+async function authorThroughDomain(opts: Parameters<typeof serve>[1] & { posture?: string } = {}) {
+  const resolved = await oauthEnvelope(['metadata:write'], ADMIN);
+  const ec = opts.posture ? { ...resolved, posture: opts.posture } : resolved;
   const served = await serve(ec, opts);
   return { authoring: served.authoring!, served };
 }
@@ -540,11 +546,12 @@ describe('save_metadata_draft saves a draft and answers with its publish verdict
     expect(save[1]).toEqual({
       type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, packageId: 'com.acme.crm',
       mode: 'draft', surface: 'mcp', client: { id: 'c1' }, writeFace: 'meta-dispatch',
-      parentVersion: 'v7', actor: 'u1', userTextLocales: [],
+      // The languages the real envelope states (`userTextLocalesOf`).
+      parentVersion: 'v7', actor: 'u1', userTextLocales: ['en-US', 'en-US'],
     });
     // The verdict is the protocol's judgement of the STORED draft at the saved address.
     expect(served.protocolCalls.find((c: any) => c[0] === 'draftPublishJudgement')).toEqual(
-      ['draftPublishJudgement', { type: 'flow', name: 'lead_intake', packageId: 'com.acme.crm', userTextLocales: [] }],
+      ['draftPublishJudgement', { type: 'flow', name: 'lead_intake', packageId: 'com.acme.crm', userTextLocales: ['en-US', 'en-US'] }],
     );
     expect(saved.body).toEqual({
       saved: { type: 'flow', name: 'lead_intake', package: 'com.acme.crm', state: 'draft', version: 'v8' },
@@ -587,7 +594,7 @@ describe('save_metadata_draft saves a draft and answers with its publish verdict
   });
 
   it('under a walled tenancy posture the save is refused 403 before anything is written', async () => {
-    const { authoring, served } = await authorThroughDomain({ tenancy: { posture: 'isolated' } });
+    const { authoring, served } = await authorThroughDomain({ tenancy: { posture: 'isolated' }, posture: 'TENANT_ADMIN' });
     const refused = await call(authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
     expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
@@ -630,7 +637,7 @@ describe('delete_metadata_draft discards a pending draft only', () => {
   });
 
   it('under a walled tenancy posture the discard is refused 403 before anything is deleted', async () => {
-    const { authoring, served } = await authorThroughDomain({ tenancy: { posture: 'isolated' } });
+    const { authoring, served } = await authorThroughDomain({ tenancy: { posture: 'isolated' }, posture: 'TENANT_ADMIN' });
     const refused = await call(authoring, 'delete_metadata_draft', { type: 'flow', name: 'lead_intake' });
     expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(served.protocolCalls.filter((c: any) => c[0] === 'deleteMetaItem')).toEqual([]);
@@ -666,8 +673,10 @@ describe('list_drafts answers each draft with its publish verdict, told where th
 
 /**
  * The card's done-when on the `examples/app-crm` shape (its `com.example.crm`
- * package and its `crm_opportunity` object, declared here: this package's
- * tests read nothing outside it). The metadata protocol is the real one over a
+ * code package and its `crm_opportunity` object, declared here: this
+ * package's tests read nothing outside it). A booted code package is
+ * read-only, so the author saves into a Studio-created base beside it,
+ * `com.example.crm_studio`, the writable package the D4 refusal would name. The metadata protocol is the real one over a
  * real SQL store, the envelope is the real identity door's for an OAuth token
  * with `metadata:write` alone, and the door is the real `/mcp` domain: the
  * reply's finding is the publish gate's own, not a fixture's.
@@ -695,9 +704,13 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
       sharingModel: 'private',
       fields: { name: { type: 'text', label: 'Name' }, amount: { type: 'currency', label: 'Amount' } },
     } as any, 'com.example.crm');
+    engine.registry.installPackage({ id: 'com.example.crm', name: 'CRM', version: '1.0.0', type: 'app', scope: 'project' } as any, 'code' as never);
+    engine.registry.installPackage({ id: STUDIO_BASE, name: 'CRM Studio', version: '1.0.0', type: 'app' } as any, 'authored');
     cleanup.push(() => { void engine.destroy(); });
     return new ObjectStackProtocolImplementation(engine as any) as unknown as OpenAuthoringProtocol;
   }
+
+  const STUDIO_BASE = 'com.example.crm_studio';
 
   /** A record-triggered flow on the opportunity whose start node names no trigger. */
   const unroutable = {
@@ -716,25 +729,32 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     const { authoring } = await authorThroughDomain({ protocol });
     expect(authoring.registry.getAll().map((t) => t.name)).toEqual([...OPEN_AUTHORING_READ_TOOL_NAMES, ...OPEN_AUTHORING_WRITE_TOOL_NAMES]);
 
+    // Seat ruling D4: a save naming no package is refused, naming the packages the
+    // protocol's own writability verdict admits (the base among them).
+    const unnamed = await call(authoring, 'save_metadata_draft', { type: 'flow', name: 'crm_opportunity_followup', item: unroutable });
+    expect(unnamed.body.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(unnamed.body.error.message).toContain(STUDIO_BASE);
+    expect((await call(authoring, 'list_drafts', {})).body.drafts).toEqual([]);
+
     const saved = await call(authoring, 'save_metadata_draft', {
-      type: 'flow', name: 'crm_opportunity_followup', item: unroutable, package: 'com.example.crm',
+      type: 'flow', name: 'crm_opportunity_followup', item: unroutable, package: STUDIO_BASE,
     });
     expect(saved.isError, JSON.stringify(saved.body)).toBe(false);
-    expect(saved.body.saved).toMatchObject({ type: 'flow', name: 'crm_opportunity_followup', package: 'com.example.crm', state: 'draft' });
+    expect(saved.body.saved).toMatchObject({ type: 'flow', name: 'crm_opportunity_followup', package: STUDIO_BASE, state: 'draft' });
     const finding = saved.body.verdict.refusals.find((issue: any) => issue.rule === 'flow-trigger-unroutable');
     expect(finding, JSON.stringify(saved.body.verdict)).toBeDefined();
     expect(finding.path).toBe('flows[0].nodes[0].config.triggerType');
     expect(typeof finding.hint === 'string' && finding.hint.length > 0).toBe(true);
     expect(saved.body.verdict.publishable).toBe(false);
-    expect(saved.body.review.changes).toBe('/studio/com.example.crm/interfaces?changes=review');
+    expect(saved.body.review.changes).toBe(`/studio/${STUDIO_BASE}/interfaces?changes=review`);
 
     // The Studio Changes source: the package's pending drafts.
-    const listed = await call(authoring, 'list_drafts', { package: 'com.example.crm' });
-    expect(listed.body.drafts.map((d: any) => [d.type, d.name, d.packageId])).toEqual([['flow', 'crm_opportunity_followup', 'com.example.crm']]);
+    const listed = await call(authoring, 'list_drafts', { package: STUDIO_BASE });
+    expect(listed.body.drafts.map((d: any) => [d.type, d.name, d.packageId])).toEqual([['flow', 'crm_opportunity_followup', STUDIO_BASE]]);
     expect(listed.body.drafts[0].verdict).toEqual(saved.body.verdict);
 
     // Discarded, it leaves the list; there was no active item to touch.
-    expect((await call(authoring, 'delete_metadata_draft', { type: 'flow', name: 'crm_opportunity_followup', package: 'com.example.crm' })).isError).toBe(false);
-    expect((await call(authoring, 'list_drafts', { package: 'com.example.crm' })).body.drafts).toEqual([]);
+    expect((await call(authoring, 'delete_metadata_draft', { type: 'flow', name: 'crm_opportunity_followup', package: STUDIO_BASE })).isError).toBe(false);
+    expect((await call(authoring, 'list_drafts', { package: STUDIO_BASE })).body.drafts).toEqual([]);
   });
 });
