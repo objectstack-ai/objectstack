@@ -163,7 +163,7 @@ describe('[#35028] an action body\'s write inside ctx.api.transaction keeps its 
   it('a business write inside the body\'s transaction to the other datasource is refused, by name', async () => {
     const r = await stack.apiAs(token, 'POST', `/actions/${ITEM}/abx_tx_remote`, {});
     const body = (await r.json()) as any;
-    expect(r.status, JSON.stringify(body)).toBe(409);
+    expect(r.status, JSON.stringify(body)).toBe(400);
     expect(body.error?.code, JSON.stringify(body)).toBe('ERR_CROSS_DATASOURCE_TRANSACTION_WRITE');
     expect(body.error?.message).toContain(`insert of '${REMOTE}'`);
     expect(await ql.find(REMOTE, SYS)).toHaveLength(0);

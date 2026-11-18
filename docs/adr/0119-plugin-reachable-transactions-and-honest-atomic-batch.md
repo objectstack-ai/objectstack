@@ -310,6 +310,29 @@ on that path, is pinned as such in
 requires handle ownership to become discoverable on `IDataDriver` — a
 driver-contract change, tracked separately.
 
+**Note (2026-11-18, #35028) — the limit narrows to truly foreign handles.** The
+trio half of the paragraph above no longer holds. A handle the trio opened is no
+opaque object: `beginTransaction` takes it from the default driver, so its owner
+is known at that moment. The trio now records the same `TransactionScope`
+`transaction()` publishes, keyed by the handle and dropped when
+`commitTransaction` or `rollbackTransaction` closes it
+(`packages/objectql/src/engine-execute-transactions.ts#trioTransactionScopeOf`),
+and both halves of the gate read that record for an explicitly-threaded handle
+the store holds no scope for. So a trio handle gets exactly the 2026-08-06
+answers: a cross-datasource business write is refused with
+`CrossDatasourceTransactionWriteError`, and an append-only system ledger is
+carved out — written outside the transaction, on its own connection. Measured
+before it: an action body's write inside `ctx.api.transaction`, the sandbox's
+face of the trio, lost its `sys_audit_log` and `sys_activity` rows on every
+deployment with a `telemetry` datasource (`os dev`, and `os serve` with
+`OS_TELEMETRY_DB`), because plugin-audit's ledger insert was handed the
+primary's handle and ran on the primary connection, which has no such table. On
+a Postgres primary the refused statement also turned the business transaction's
+COMMIT into a rollback. What stays declared and unjudged is a handle the engine
+never opened — one an outside caller obtained elsewhere and passed in as
+`execCtx.transaction`. No `IDataDriver` change is needed for the trio, and the
+driver-contract change above is still the only way to close the rest.
+
 ### Consumer impact
 
 Single-datasource deployments — the overwhelming majority — see no change of any
