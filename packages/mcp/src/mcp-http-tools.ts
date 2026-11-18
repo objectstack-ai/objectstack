@@ -126,6 +126,7 @@ import {
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
 import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+import type { McpCappedListAnswer, McpLatestPer } from './types.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -226,6 +227,14 @@ export interface McpDataBridge {
       limit?: number;
       offset?: number;
       orderBy?: Array<{ field: string; order: 'asc' | 'desc' }>;
+      /**
+       * One row per group (`query_records`' `latestPer`): the bridge hands it
+       * to the engine's read as the engine's own read option, never as a query
+       * key, and answers `{ object, records, hasMore }` — at most `limit`
+       * groups, `hasMore` from a read of one row more, and no `total` (a row
+       * count is no group count). A bridge that cannot serve it refuses.
+       */
+      latestPer?: McpLatestPer;
     },
   ): Promise<unknown>;
   /**
@@ -546,6 +555,39 @@ export interface RegisterActionToolsOptions {
 }
 
 const DEFAULT_MAX_LIMIT = 50;
+
+/** The most partition fields, and the most order keys, one `latestPer` may name (the engine's own bound). */
+const LATEST_PER_MAX_KEYS = 3;
+
+/**
+ * [latest per group] `query_records`' answer under `latestPer`, from the
+ * bridge's `{ object, records, hasMore }`: the records (at most `limit`
+ * groups), `hasMore`, and the shared truncation flag ({@link
+ * McpCappedListAnswer}) when more groups exist than came back. No `total`: a
+ * row count is no group count. An answer that is not that shape — a bridge
+ * that served the read as an ordinary list — is no answer, and is refused.
+ */
+function latestPerAnswer(
+  objectName: string,
+  result: unknown,
+): { object: unknown; records: unknown[]; hasMore: boolean } & McpCappedListAnswer {
+  const answer = result as { object?: unknown; records?: unknown; hasMore?: unknown; total?: unknown } | null;
+  if (!answer || !Array.isArray(answer.records) || typeof answer.hasMore !== 'boolean' || answer.total !== undefined) {
+    const err = new Error(
+      `query_records on '${objectName}' with latestPer: this host's data bridge did not serve one record per group, `
+      + 'so its rows are not the answer and none is returned.',
+    ) as Error & { code?: string; status?: number };
+    err.code = StandardErrorCode.enum.INTERNAL_ERROR;
+    err.status = 500;
+    throw err;
+  }
+  return {
+    object: answer.object ?? objectName,
+    records: answer.records,
+    hasMore: answer.hasMore,
+    ...(answer.hasMore ? { truncated: true as const } : {}),
+  };
+}
 
 /** A `sys_`-prefixed object is a system table — off-limits to external agents. */
 function isSystemObject(name: string): boolean {
@@ -2922,7 +2964,11 @@ export function registerObjectTools(
           // Names repeat (ruling 6867150851), so the text says to tell
           // namesakes apart by email.
           'To fill a person field, find the colleague\'s id: objectName "sys_user", where {"email":"..."} for exactly ' +
-          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email.',
+          'one person, or {"name":{"$contains":"..."}}; names repeat, so tell people who share a name apart by email. ' +
+          // [latest per group] "each X with its latest Y" in one call.
+          'For "each X with its latest Y", pass latestPer: one record per group, e.g. each account\'s latest deal: ' +
+          'latestPer {"by":["account"],"orderBy":[{"field":"close_date","order":"desc"}]}; ties go by record id. ' +
+          'where filters the records first; limit counts groups; truncated: true means more groups exist than came back.',
         inputSchema: strictToolInput(
           {
             surface: 'this query_records call',
@@ -2963,11 +3009,24 @@ export function registerObjectTools(
               .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
               .optional()
               .describe('Sort order'),
+            latestPer: z
+              .object({
+                by: z.array(z.string().min(1)).min(1).max(LATEST_PER_MAX_KEYS)
+                  .describe('The fields that form a group, e.g. ["account"] or ["owner_id"]'),
+                orderBy: z
+                  .array(z.object({ field: z.string().min(1), order: z.enum(['asc', 'desc']) }).strict())
+                  .min(1)
+                  .max(LATEST_PER_MAX_KEYS)
+                  .describe('The order whose first record is each group\'s answer, e.g. [{"field":"close_date","order":"desc"}]'),
+              })
+              .strict()
+              .optional()
+              .describe('One record per group: each group\'s first record in orderBy, ties broken by id. limit counts groups.'),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, where, fields, limit, offset, orderBy }) => {
+      async ({ objectName, where, fields, limit, offset, orderBy, latestPer }) => {
         const bad = await readGuard(objectName);
         if (bad) return errorResult(bad);
         try {
@@ -2977,7 +3036,16 @@ export function registerObjectTools(
             limit: Math.min(limit ?? maxLimit, maxLimit),
             offset,
             orderBy,
+            ...(latestPer !== undefined ? { latestPer } : {}),
           });
+          if (latestPer !== undefined) {
+            const served = latestPerAnswer(objectName, result);
+            const diagnosedPer = typeof bridge.diagnoseDelegation === 'function'
+              ? await bridge.diagnoseDelegation(objectName).catch(() => undefined)
+              : undefined;
+            if (!diagnosedPer?.narrowed || !diagnosedPer.statement) return textResult(served);
+            return textResult(withDelegationNotice(served, diagnosedPer.statement));
+          }
           // [ADR-0090 D10 — ruling 2026-09-08, consequence 2] A delegated read
           // the agent ceiling NARROWED is served with the narrowing stated. The
           // rows are still served — a partial answer is the most useful true

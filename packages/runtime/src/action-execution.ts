@@ -114,6 +114,8 @@ import {
     servedRecordTitle,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
+    LATEST_PER,
+    type LatestPerRequest,
     type PackageScopedRefusal,
     type PackageScopedRegistry,
 } from '@objectstack/objectql';
@@ -863,8 +865,35 @@ export async function callData(deps: ActionExecutionDeps,
             const { object, ...rest } = params;
             return rest;
         })();
+        // [latest per group] The engine's one-row-per-group request, when an
+        // in-process door (the MCP tools) set it on `params` under the
+        // engine's own symbol key — never a wire key. Handed to `findData` on
+        // its request under the same key, and read back: a read that comes back
+        // without the engine's outcome on it was not served as one row per
+        // group, and its rows are no answer.
+        const latestPer = (params as Record<symbol, unknown> | undefined)?.[LATEST_PER] as LatestPerRequest | undefined;
         if (protocol && typeof protocol.findData === 'function') {
-            return await protocol.findData({ object: params.object, query, context: executionContext });
+            if (latestPer === undefined) {
+                return await protocol.findData({ object: params.object, query, context: executionContext });
+            }
+            const answer = await protocol.findData({ object: params.object, query, context: executionContext, [LATEST_PER]: latestPer });
+            if (latestPer.outcome?.kind !== 'served') {
+                throw {
+                    statusCode: 500,
+                    message: `The one-row-per-group read of '${params.object}' came back without being served as one row `
+                        + 'per group, so its rows are not the answer and none is returned.',
+                };
+            }
+            return answer;
+        }
+        if (latestPer !== undefined) {
+            // The fallback below serves canonical QueryAST keys only; one row
+            // per group is the engine's window, reached through `findData`.
+            throw {
+                statusCode: 501,
+                message: `Data query fallback cannot serve one row per group of '${params.object}': the protocol service `
+                    + '(metadata-protocol plugin) is not registered, and only its findData carries that read to the engine.',
+            };
         }
         if (ql) {
             // [#4386] This fallback used to pass only `{ context }` — the
