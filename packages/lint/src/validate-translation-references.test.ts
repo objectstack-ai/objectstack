@@ -4969,6 +4969,42 @@ describe('validateTranslationReferences — reports', () => {
   });
 });
 
+describe('validateTranslationReferences — import mappings', () => {
+  const stack = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    mappings: [{ name: 'lead_feed', label: 'Lead feed', targetObject: 'lead', fieldMapping: [{ source: 'Company', target: 'company' }] }],
+    ...extra,
+    translations: [{ en: data }],
+  });
+
+  it('a declared name is clean', () => {
+    expect(validateTranslationReferences(stack({ mappings: { lead_feed: { label: 'Lead feed' } } }))).toEqual([]);
+  });
+
+  it('a name no package declares is translation-target-unknown, at the named-item groups\' error', () => {
+    const findings = validateTranslationReferences(stack({ mappings: { lead_fede: { label: 'x' } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.where])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0].en.mappings.lead_fede', 'locale "en" · import mapping "lead_fede"'],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "lead_feed"?');
+  });
+
+  it('judges the group against its own collection — a report name under `mappings` is an orphan', () => {
+    const findings = validateTranslationReferences(stack(
+      { mappings: { opps_by_stage: { label: 'x' } } },
+      { reports: [{ name: 'opps_by_stage', label: 'Opportunities by Stage', type: 'summary', dataset: 'pipeline', values: ['amount'] }] },
+    ));
+    expect(findings.map((f) => f.path)).toEqual(['translations[0].en.mappings.opps_by_stage']);
+  });
+
+  it('resolves a name a sibling package of the artifact declares', () => {
+    const findings = validateTranslationReferences(stack(
+      { mappings: { contact_feed: { label: 'Contact feed' } } },
+      { packages: [{ manifest: { mappings: [{ name: 'contact_feed', targetObject: 'contact', fieldMapping: [] }] } }] },
+    ));
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — hook refusals (#26170)', () => {
   const creditStack = {
     hooks: [

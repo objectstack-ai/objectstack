@@ -6462,6 +6462,7 @@ describe('resolveMetadataFormSchemaTitles — bundle labels overlaid as JSON Sch
 import { type TranslateDocumentOptions } from './i18n-resolver';
 import { ReportSchema } from '../ui/report.zod';
 import { BookSchema } from './book.zod';
+import { MappingSchema } from '../data/mapping.zod';
 
 describe("label precedence on an overridden item — the pair's translation, then the override's label, then the base's translation (ADR-0146 D2)", () => {
   /** One translatable string of a served document, and the bundle address that translates it. */
@@ -6636,10 +6637,23 @@ describe("label precedence on an overridden item — the pair's translation, the
           ['books', 'crm_manual', 'groups', 'start', 'label'], '快速上手'),
       ],
     },
+    // An import mapping is an ADR-0146 D2 listed overridable type too, and its
+    // one translatable string is its label.
+    mapping: {
+      base: () => MappingSchema.parse({
+        name: 'crm_lead_feed',
+        label: 'Lead feed',
+        targetObject: 'crm_lead',
+        fieldMapping: [{ source: 'Company', target: 'company' }],
+      }),
+      slots: [
+        slot('label', (d) => d.label, (d, t) => { d.label = t; }, ['mappings', 'crm_lead_feed', 'label'], '线索导入'),
+      ],
+    },
   };
 
-  it('covers every document translator the ruling names — all eight types', () => {
-    expect(Object.keys(CASES).sort()).toEqual(['app', 'book', 'dashboard', 'dataset', 'object', 'page', 'report', 'view']);
+  it('covers every document translator the ruling names — all nine types', () => {
+    expect(Object.keys(CASES).sort()).toEqual(['app', 'book', 'dashboard', 'dataset', 'mapping', 'object', 'page', 'report', 'view']);
     for (const type of Object.keys(CASES)) expect(TRANSLATABLE_METADATA_TYPES.has(type), type).toBe(true);
   });
 

@@ -35,8 +35,6 @@ metadata:
 
 ## Quick Reference — Detailed Rules
 
-Detailed rules, with incorrect/correct examples:
-
 - **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
 - **[Field Types](./rules/field-types.md)** — All field types and configs
 - **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
@@ -312,12 +310,9 @@ picker; `formula` takes CEL in `expression` (`F\`...\`` from `@objectstack/spec`
 | Approval, review, routing, audit trail | not objects: an approval is a flow node (**objectstack-automation**) and its trail is platform history; model only the people it references (approver, reviewer), as `user` fields beside the owner |
 | Record owner | the platform's `owner_id` (`ownership: 'user'`, the default), also when the request says assignee, 负责人 or 处理人 — never a hand-added owner field, a second owner that owner-scoped visibility and "My records" views never read. A handler the request names apart from the owner is a `user` field that grants no access, with a label no other visible field carries, injected ones included: `owner_id` (Owner, 负责人), `created_by` (创建人), `updated_by` (更新人), `created_at` (创建时间), `updated_at` (更新时间). `ownership: 'none'` only for a shared catalog or a pure junction table |
 
-> **`multiple: true` lookup ≠ junction object.** A multi-value lookup
-> (`{ type: 'lookup', reference: 'x', multiple: true }`) is stored and read as an
-> **array of ids** on the record — reference elements positionally
-> (`{record.tags.0}` in flow values). It is NOT a junction table. Reach for a
-> **junction object** (two lookups) only when the relationship itself carries
-> attributes (role, added_at, …).
+> **`multiple: true` lookup ≠ junction object.** A multi-value lookup is stored
+> and read as an **array of ids** on the record — reference elements positionally
+> (`{record.tags.0}` in flow values).
 
 ### Validation Patterns
 
@@ -354,8 +349,7 @@ indexes: [
 ```
 
 See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope
-(`'organization'` / `'global'` — on a declared index bare `unique: true` is
-refused), the retired `type` / `partial`, and partial / gin / gist indexes at the
+(on a declared index bare `unique: true` is refused), the retired `type` / `partial`, and partial / gin / gist indexes at the
 database layer.
 
 ---
@@ -380,6 +374,11 @@ text; between two extensions the higher `priority` wins. A patch naming a field
 or option value the target lacks is refused at install and by `os validate`, and
 a `picklist`-bound field's options are never patchable. Example:
 `defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } } })`.
+Translate patched text in the patching package's `translations`, under the
+owner's keys (`objects.crm_account.fields.industry.label`, `.help`,
+`.options.<value>`): the owner's translation of the replaced text never applies, a
+pair `.custom` translation comes first on `/meta`, and an untranslated locale
+serves the patch text.
 
 **An object an installed package ships** is extended from the
 base's paired `.custom` package (`hotcrm.custom`; **objectstack-platform**

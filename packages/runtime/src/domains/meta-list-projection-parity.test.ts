@@ -167,6 +167,8 @@ const STORE: Record<string, any[]> = {
     page: [{ name: 'home', label: 'Home', type: 'app' }],
     action: [{ name: 'close_case', label: 'Close case', objectName: 'case', type: 'script' }],
     dataset: [{ name: 'pipeline', label: 'Pipeline', object: 'opportunity' }],
+    // A named import mapping, offered by label in the import wizard.
+    mapping: [{ name: 'lead_feed', label: 'Lead feed', targetObject: 'lead', sourceFormat: 'csv', mode: 'insert', fieldMapping: [{ source: 'Company', target: 'company' }] }],
     picklist: [{ name: 'industry', label: 'Industry', options: [{ label: 'Technology', value: 'technology' }] }],
     flow: [{ name: 'on_lead', label: 'On lead', type: 'autolaunched' }],
     // [#25333] The `?include=grants` step describes each position.
@@ -230,6 +232,8 @@ const BUNDLE: Record<string, any> = {
         reports: { opps_by_stage: { label: '各阶段商机' } },
         // [#26690] A doc book's title and section titles.
         books: { help_center: { label: '帮助中心', groups: { start: { label: '开始' } } } },
+        // A named import mapping's label.
+        mappings: { lead_feed: { label: '线索导入' } },
     },
 };
 
@@ -567,7 +571,7 @@ const PARAM_AXIS = new Set(PARAM_PROBES.map((p) => p.param).filter((p): p is str
 const TYPE_CELLS: readonly string[] = [
     'app', 'apps', 'view', 'views', 'doc', 'docs', 'book', 'books', 'api', 'apis',
     'object', 'objects', 'dashboard', 'dashboards', 'page', 'action', 'dataset', 'picklist', 'flow',
-    'position', 'positions', 'permission', 'permissions', 'report', 'reports',
+    'position', 'positions', 'permission', 'permissions', 'report', 'reports', 'mapping', 'mappings',
     // [#20408] A segment that names no metadata type: `RestServer` refuses it
     // (`refuseUnknownMetaListType`) rather than listing an empty collection.
     'totally_invented_type',
@@ -763,6 +767,11 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         expect([zhHelp?.label, zhHelp?.groups?.map((g: any) => g.label)]).toEqual(['帮助中心', ['开始']]);
         const enHelp = (await read('/meta/book', {}, { 'accept-language': 'en-US' })).items?.find((b: any) => b.name === 'help_center');
         expect([enHelp?.label, enHelp?.groups?.map((g: any) => g.label)]).toEqual(['Help Centre', ['Start']]);
+        // So is a named import mapping — the list the import wizard's saved-mapping selector reads.
+        const zhMappings = await read('/meta/mappings', {}, { 'accept-language': 'zh-CN' });
+        expect(zhMappings.items?.find((m: any) => m.name === 'lead_feed')?.label).toBe('线索导入');
+        const enMappings = await read('/meta/mapping', {}, { 'accept-language': 'en-US' });
+        expect(enMappings.items?.find((m: any) => m.name === 'lead_feed')?.label).toBe('Lead feed');
     });
 });
 
@@ -936,6 +945,7 @@ const ITEM_CELLS: readonly string[] = [
     '/meta/dashboard/ops', '/meta/dashboards/ops',
     '/meta/page/home', '/meta/action/close_case', '/meta/dataset/pipeline', '/meta/picklist/industry', '/meta/flow/on_lead', '/meta/api/crm_served',
     '/meta/position/sales_rep', '/meta/permission/crm_sales_user', '/meta/report/opps_by_stage',
+    '/meta/mapping/lead_feed', '/meta/mappings/lead_feed',
 ];
 const ITEM_TYPE_AXIS = new Set(ITEM_CELLS.map((c) => singular(c.split('/')[2])));
 const ITEM_CALLERS = ['holder', 'non-holder', 'builder', 'author'] as const satisfies readonly CallerName[];
@@ -1087,6 +1097,7 @@ describe('[#20408] the item read: the reference moves — each probe changes Res
         expect((await read('/meta/permission/crm_sales_user', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('销售用户');
         expect((await read('/meta/report/opps_by_stage', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('各阶段商机');
         expect((await read('/meta/book/help_center', {}, { 'accept-language': 'zh-CN' })).item?.groups?.[0]?.label).toBe('开始');
+        expect((await read('/meta/mapping/lead_feed', {}, { 'accept-language': 'zh-CN' })).item?.label).toBe('线索导入');
         const zhDoc = await read('/meta/doc/crm_intro', { locale: 'zh-CN' });
         expect(zhDoc.item?.label).toBe('入门');
         expect(text(zhDoc)).not.toContain('"translations"');
