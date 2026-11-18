@@ -55,6 +55,7 @@ import {
   warnAppAutomationAppendOnlyInsert,
 } from './flow-system-identity-write-refusal.js';
 import { SysUserPermissionSet, SysUserPosition } from './objects/index.js';
+import { defaultPermissionSets } from './objects/default-permission-sets.js';
 import { SysPermissionSet, SysPosition, SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 
 const pk = { name: 'id', type: 'text' as const, primaryKey: true };
@@ -662,7 +663,12 @@ describe("the platform's own audit and activity rows for an elevated automation'
   const INVOKER = 'usr_ledger_invoker';
   const NOTE = 'qa_ledger_note';
   const SYSTEM = { isSystem: true, tenantId: ORG } as const;
-  const envelope = { userId: INVOKER, tenantId: ORG, positions: [], permissions: ['member_default'] };
+  /** The invoker may create notes, so a `runAs: 'user'` run's insert lands as theirs. */
+  const WRITER = PermissionSetSchema.parse({
+    name: 'qa_ledger_writer',
+    objects: { [NOTE]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+  });
+  const envelope = { userId: INVOKER, tenantId: ORG, positions: [], permissions: [WRITER.name] };
   let kernel: ObjectKernel;
   let ql: ObjectQL;
   let warn: ReturnType<typeof vi.fn>;
@@ -699,7 +705,7 @@ describe("the platform's own audit and activity rows for an elevated automation'
     await kernel.use(new ObjectQLPlugin());
     await kernel.use(objects);
     await kernel.use(new AuditPlugin());
-    await kernel.use(new SecurityPlugin({ fallbackPermissionSet: 'member_default' }));
+    await kernel.use(new SecurityPlugin({ defaultPermissionSets: [...defaultPermissionSets, WRITER], fallbackPermissionSet: 'member_default' }));
     await kernel.bootstrap();
     ql = kernel.getService<ObjectQL>('objectql');
     await ql.insert('sys_organization', { id: ORG, name: 'Ledger', slug: 'ledger' }, { context: SYSTEM } as never);
