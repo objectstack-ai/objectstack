@@ -153,7 +153,7 @@ Result of loading a single dataset
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object that was loaded |
-| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | ✅ | Import mode used |
+| **mode** | `Enum<'update' \| 'upsert' \| 'ignore'>` | ✅ | Import mode used |
 | **inserted** | `integer` | ✅ | Records inserted |
 | **updated** | `integer` | ✅ | Records updated |
 | **skipped** | `integer` | ✅ | Records skipped |
@@ -195,7 +195,7 @@ Seed data loader configuration
 | **dryRun** | `boolean` | optional (default: `false`) | Validate references without writing data |
 | **haltOnError** | `boolean` | optional (default: `false`) | Stop on first reference resolution error |
 | **multiPass** | `boolean` | optional (default: `true`) | Enable multi-pass loading for circular dependencies |
-| **defaultMode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"ignore"`) | Default conflict resolution strategy: the seed `mode` default (`ignore`, create-only) |
+| **defaultMode** | `Enum<'update' \| 'upsert' \| 'ignore'>` | optional (default: `"ignore"`) | Default conflict resolution strategy: the seed `mode` default (`ignore`, create-only) |
 | **batchSize** | `integer` | optional (default: `1000`) | Maximum records per batch insert/upsert |
 | **transaction** | `boolean` | optional (default: `false`) | Wrap entire load in a transaction (all-or-nothing) |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>` | optional | Only load datasets matching this environment |
@@ -221,8 +221,8 @@ Seed loader request with datasets and configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **seeds** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; columns?: Record<string, object>; … }[]` | ✅ | Seeds to load |
-| **config** | `{ dryRun?: boolean; haltOnError?: boolean; multiPass?: boolean; defaultMode?: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; … }` | optional (has default) | Loader configuration |
+| **seeds** | `{ object: string; externalId?: string \| string[]; mode?: Enum<'update' \| 'upsert' \| 'ignore'>; columns?: Record<string, object>; … }[]` | ✅ | Seeds to load |
+| **config** | `{ dryRun?: boolean; haltOnError?: boolean; multiPass?: boolean; defaultMode?: Enum<'update' \| 'upsert' \| 'ignore'>; … }` | optional (has default) | Loader configuration |
 
 ### Nested Shape: `SeedLoaderRequest.seeds[number]`
 
@@ -230,7 +230,7 @@ Seed loader request with datasets and configuration
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Target Object Name |
 | **externalId** | `string \| string[]` | optional (default: `"name"`) | Field (or composite list of fields) matched for the uniqueness check |
-| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"ignore"`) | What a load does with a record whose `externalId` matches an existing row. `ignore` (default) is create-only: a missing row is inserted and an existing row is left as it is, so a replay (every boot, a package install or upgrade, a publish) never writes a seeded value back over a later edit. `upsert` also writes every declared column back onto the matched row on each replay; declare it for reference data the package keeps current. `update` writes matched rows only, `insert` inserts every record with no match, so each replay inserts them again, and `replace` does the same and deletes nothing: it is for a table the caller cleared. On the loads that seed an organization (the boot seed, a seed-replayer replay, the dev hot reload, a package install or upgrade), an `ignore` or `upsert` row that landed once and was later deleted is not inserted again; a publish, or a load that names no organization and finds no sole one, keeps no such record, and seed-replayer called with `{ reseed: true }` or the sample-data reseed inserts every missing row. |
+| **mode** | `Enum<'update' \| 'upsert' \| 'ignore'>` | optional (default: `"ignore"`) | What a load does with a record whose `externalId` matches an existing row. `ignore` (default) is create-only: a missing row is inserted and an existing row is left as it is, so a replay (every boot, a package install or upgrade, a publish) never writes a seeded value back over a later edit. `upsert` also writes every declared column back onto the matched row on each replay; declare it for reference data the package keeps current. `update` writes matched rows only. Every mode matches on `externalId`, so a replay finds the row an earlier load wrote instead of inserting it again. On the loads that seed an organization (the boot seed, a seed-replayer replay, the dev hot reload, a package install or upgrade), an `ignore` or `upsert` row that landed once and was later deleted is not inserted again; a publish, or a load that names no organization and finds no sole one, keeps no such record, and seed-replayer called with `{ reseed: true }` or the sample-data reseed inserts every missing row. |
 | **columns** | `Record<string, { applyOn?: Enum<'create' \| 'always'> }>` | optional | Per-column write policy, keyed by field name: `{ status: { applyOn: 'create' } }` writes `status` only when the seed creates the row. Omitted, every column is written on create and update. |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>[]` | optional (default: `["prod","dev","test"]`) | Applicable environments |
 | **locale** | `string[]` | optional | Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app's i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app's i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn. A locale no dataset of the object names gets none of its locale-scoped rows, unless one is marked `fallback: true` |
@@ -253,7 +253,7 @@ Seed loader request with datasets and configuration
 | **dryRun** | `boolean` | optional (default: `false`) | Validate references without writing data |
 | **haltOnError** | `boolean` | optional (default: `false`) | Stop on first reference resolution error |
 | **multiPass** | `boolean` | optional (default: `true`) | Enable multi-pass loading for circular dependencies |
-| **defaultMode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | optional (default: `"ignore"`) | Default conflict resolution strategy: the seed `mode` default (`ignore`, create-only) |
+| **defaultMode** | `Enum<'update' \| 'upsert' \| 'ignore'>` | optional (default: `"ignore"`) | Default conflict resolution strategy: the seed `mode` default (`ignore`, create-only) |
 | **batchSize** | `integer` | optional (default: `1000`) | Maximum records per batch insert/upsert |
 | **transaction** | `boolean` | optional (default: `false`) | Wrap entire load in a transaction (all-or-nothing) |
 | **env** | `Enum<'prod' \| 'dev' \| 'test'>` | optional | Only load datasets matching this environment |
@@ -275,7 +275,7 @@ Complete seed loader result
 | **success** | `boolean` | ✅ | Overall success status |
 | **dryRun** | `boolean` | ✅ | Whether this was a dry-run |
 | **dependencyGraph** | `{ nodes: object[]; insertOrder: string[]; circularDependencies?: string[][] }` | ✅ | Object dependency graph |
-| **results** | `{ object: string; mode: Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>; inserted: integer; updated: integer; … }[]` | ✅ | Per-object load results |
+| **results** | `{ object: string; mode: Enum<'update' \| 'upsert' \| 'ignore'>; inserted: integer; updated: integer; … }[]` | ✅ | Per-object load results |
 | **errors** | `{ sourceObject: string; field: string; targetObject: string; targetField: string; … }[]` | ✅ | All reference resolution errors |
 | **summary** | `{ objectsProcessed: integer; totalRecords: integer; totalInserted: integer; totalUpdated: integer; … }` | ✅ | Summary statistics |
 
@@ -294,7 +294,7 @@ Result of loading a single dataset
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object that was loaded |
-| **mode** | `Enum<'insert' \| 'update' \| 'upsert' \| 'replace' \| 'ignore'>` | ✅ | Import mode used |
+| **mode** | `Enum<'update' \| 'upsert' \| 'ignore'>` | ✅ | Import mode used |
 | **inserted** | `integer` | ✅ | Records inserted |
 | **updated** | `integer` | ✅ | Records updated |
 | **skipped** | `integer` | ✅ | Records skipped |

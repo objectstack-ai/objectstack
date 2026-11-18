@@ -7691,10 +7691,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try { metadata = ctx.getService('metadata'); } catch { /* none */ }
         if (!ql || !metadata) throw new Error('objectql-or-metadata-missing');
 
-        const [{ SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad }, { SeedLoaderRequestSchema }] = await Promise.all([
-            import('@objectstack/runtime'),
-            import('@objectstack/spec/data'),
-        ]);
+        const { SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad } = await import('@objectstack/runtime');
         const seedLocale = await resolveSeedLocaleForLoad(ctx, {
             seeds: datasets,
             organizationId,
@@ -7703,7 +7700,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         });
         ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
         const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger, { landedKeys });
-        const request = (SeedLoaderRequestSchema as any).parse({
+        // [#34613] `loadStored`: a stored dataset declaring a retired `mode`
+        // is refused alone, as an error of the result; the rest load.
+        const result = await seedLoader.loadStored({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
             config: {
@@ -7718,7 +7717,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ...(seedLocale ? { locale: seedLocale.locale } : {}),
             },
         });
-        const result = await seedLoader.load(request);
         // [#30324 · ruling 6670861426] The rows this load CREATED get the
         // person this door names as `owner_id` and `created_by`, then follow
         // the ordinary permission rules like any record they own.
