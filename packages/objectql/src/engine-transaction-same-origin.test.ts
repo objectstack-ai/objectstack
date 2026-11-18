@@ -641,6 +641,7 @@ describe('a handle the ScopedContext trio opened is attributed to its owner (#35
 
     expect(rolledBack).toBe(handle);
     expect(telemetry.writes.map((w: RecordedWrite) => w.object)).toEqual(['sys_audit_log', 'sys_activity']);
+    expect(telemetry.writes.every((w: RecordedWrite) => w.transaction === undefined)).toBe(true);
   });
 
   it('notes the carve-out at debug, once per trio transaction per datasource', async () => {
