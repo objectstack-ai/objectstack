@@ -49,8 +49,6 @@ export const SeedData = [statusSeed, categorySeed];   // parents first
 | `mode` | `'ignore'` | Import strategy (see below) |
 | `columns` | — | Per-column write policy, keyed by field: `{ FIELD: { applyOn: 'create' } }` (below) |
 | `env` | `['prod','dev','test']` | Environments where the seed loads |
-| `locale` | — (all) | BCP-47 tags the seed loads for |
-| `fallback` | — | `true` on one `locale` set per object: also loads for locales no set names |
 | `records` | — | `Partial<Record<keyof object.fields, unknown>>[]` |
 
 Full Zod shape: `node_modules/@objectstack/spec/src/data/seed.zod.ts`.
@@ -158,9 +156,11 @@ produce byte-identical `dist/objectstack.json`.
 | Practice | Why |
 |:---------|:----|
 | Always use `defineSeed()`, never `SeedSchema.parse()` | Lose compile-time field checking otherwise |
+| Prefer natural keys (`code` / `email` / `slug`) | Portable across environments |
 | Leave `mode` unset; `upsert` only for reference data | Replays keep customer edits |
 | Scope demo data with `env: ['dev','test']` | Keep noise out of prod |
 | Order seeds parent → child in the exported array | References resolve at load time |
+| `replace` only on cache tables the caller clears | It never deletes: duplicates otherwise |
 
 **Fictional is fine; malformed is not.** A seed row is written through the same
 field validation as a user's insert, and a value the field type refuses never
