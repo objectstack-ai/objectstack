@@ -1900,7 +1900,10 @@ function scanHttpTimeouts(at: string, nodes: AnyRec[], findings: FlowLintFinding
     const cfg = (node.config ?? {}) as AnyRec;
     if (armed(cfg.timeoutMs) || armed(node.timeoutMs) || cfg.durable === true) continue;
     const nodeId = typeof node.id === 'string' ? node.id : 'http';
-    const what = cfg.timeoutMs === 0 ? 'sets `config.timeoutMs: 0`, which arms no timer' : 'sets no `config.timeoutMs`';
+    // A number here is not positive (`armed` said so): it arms no timer.
+    const what = typeof cfg.timeoutMs === 'number'
+      ? `sets \`config.timeoutMs: ${cfg.timeoutMs}\`, which arms no timer`
+      : 'sets no `config.timeoutMs`';
     findings.push({
       severity: 'warning',
       where: `${at} · node '${nodeId}' (http)`,

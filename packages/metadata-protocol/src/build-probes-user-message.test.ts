@@ -432,7 +432,7 @@ const CASES: readonly ProbeCase[] = [
             }),
             published: [{ type: 'object', name: 'crm_acct' }],
         }),
-        params: (tag) => ({ object: ACCOUNTS, field: said(OPEN_DEALS, tag, 'open_deal_count'), child: DEALS }),
+        params: (tag) => ({ object: ACCOUNTS, field: said(OPEN_DEALS, tag, 'open_deal_count'), child: DEALS, cause: 'fills' }),
         hidden: ['crm_acct', 'open_deal_count', 'crm_deal'],
     },
     {
@@ -440,6 +440,7 @@ const CASES: readonly ProbeCase[] = [
         code: 'seed_reference_unresolved', // adr0112-ok: D6c build-probe diagnostics code
         run: probe({
             engine: engineOver({ crm_deal: [{ id: 'd1', name: 'Big deal', acct_ref: 'Acme Corp' }], crm_acct: [{ id: 'a1' }] }),
+            seedLanded: [{ object: 'crm_deal', inserted: { ids: ['d1'] }, matched: { ids: [] } }],
             published: [{ type: 'seed', name: 'crm_deal_seed' }],
         }),
         params: (tag) => ({ object: DEALS, field: said(ACCT_REF, tag, 'acct_ref'), target: ACCOUNTS, count: '1' }),

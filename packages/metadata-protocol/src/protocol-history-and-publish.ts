@@ -2684,6 +2684,9 @@ export class ProtocolHistoryAndPublishFacet {
                     // them for this package, as its executor will ask.
                     ...(automation && typeof automation.resolveConnectorAction === 'function' ? { automation } : {}),
                     packageId: request.packageId ?? null,
+                    // [#35146] The loader's own ids of the rows each seed
+                    // landed on: the reference probe reads those rows only.
+                    ...(seedApplied?.landed ? { seedLanded: seedApplied.landed } : {}),
                 });
             } catch {
                 probes = undefined;

@@ -73,7 +73,7 @@ const ITEMS: Record<string, unknown> = {
         },
     },
     'seed deal_seed': { object: 'deal', records: [{ name: 'D1' }, { name: 'D2' }] },
-    'seed deal_seed_composite': { object: 'deal', externalId: ['acct_ref', 'name'], records: [{ name: 'D1' }] },
+    'seed deal_seed_upsert': { object: 'deal', mode: 'upsert', records: [{ name: 'D1' }, { name: 'D2' }] },
     'dashboard board': {
         name: 'board',
         widgets: [{ id: 'w1', dataset: 'deal_totals', values: ['total'] }],
@@ -93,6 +93,10 @@ const run = (opts: Partial<RunBuildProbesOptions> & Pick<RunBuildProbesOptions, 
     runBuildProbes({ engine: engineOver({}), getItem: async (t, n) => ITEMS[`${t} ${n}`], ...opts });
 
 const codes = (report: Awaited<ReturnType<typeof run>>) => report.issues.map((i) => [i.code, i.severity, i.ref?.member]);
+
+/** `seedApplied.landed` for one object: the ids the loader created and the ids a seed key matched. */
+const landedOn = (object: string, inserted: string[], matched: string[] = []) =>
+    [{ object, inserted: { ids: inserted }, matched: { ids: matched } }];
 
 describe('widget_empty_result: a card whose real query reads only zeros', () => {
     const analytics = (rows: Row[]) => ({ queryDataset: async () => ({ rows }) });
@@ -166,6 +170,7 @@ describe('seed_reference_unresolved: a landed reference naming no row', () => {
                 acct: [{ id: 'a1' }],
                 sys_user: [{ id: 'u1' }],
             }),
+            seedLanded: landedOn('deal', ['d1', 'd2']),
             published,
         });
         expect(codes(report)).toEqual([
@@ -184,26 +189,38 @@ describe('seed_reference_unresolved: a landed reference naming no row', () => {
                 acct: [{ id: 'a1' }],
                 sys_user: [{ id: 'u1' }],
             }),
+            seedLanded: landedOn('deal', ['d1', 'd2']),
             published,
         });
         expect(report.issues).toEqual([]);
     });
 
-    it('a row the seed did not write is not judged as the seed\'s', async () => {
+    it('a row the loader did not land is not judged as the seed\'s, though it shares a seed key', async () => {
         const report = await run({
             engine: engineOver({
-                deal: [{ id: 'd1', name: 'D1', acct_ref: 'a1' }, { id: 'd9', name: 'Typed by a person', acct_ref: 'a_gone' }],
+                deal: [{ id: 'd1', name: 'D1', acct_ref: 'a1' }, { id: 'd9', name: 'D2', acct_ref: 'a_typed_by_a_person' }],
                 acct: [{ id: 'a1' }],
             }),
+            seedLanded: landedOn('deal', ['d1']),
             published,
         });
         expect(report.issues).toEqual([]);
     });
 
-    it('a seed whose key is composite identifies no row by itself, and is not judged', async () => {
+    it('a row a seed key matched is the seed\'s only when the seed\'s mode wrote it', async () => {
+        const engine = engineOver({ deal: [{ id: 'd9', name: 'D1', acct_ref: 'a_gone' }], acct: [] });
+        const seedLanded = landedOn('deal', [], ['d9']);
+        // `ignore` (the default) left the matched row as its writer left it.
+        expect((await run({ engine, seedLanded, published })).issues).toEqual([]);
+        // `upsert` wrote it.
+        const upsert = await run({ engine, seedLanded, published: [{ type: 'seed', name: 'deal_seed_upsert' }] });
+        expect(codes(upsert)).toEqual([['seed_reference_unresolved', 'warning', 'acct_ref']]);
+    });
+
+    it('no `seedApplied.landed` for the object: not judged', async () => {
         const report = await run({
             engine: engineOver({ deal: [{ id: 'd1', name: 'D1', acct_ref: 'a_gone' }], acct: [] }),
-            published: [{ type: 'seed', name: 'deal_seed_composite' }],
+            published,
         });
         expect(report.issues).toEqual([]);
     });
@@ -216,6 +233,7 @@ describe('seed_reference_unresolved: a landed reference naming no row', () => {
                     throw new Error('no such table');
                 },
             },
+            seedLanded: landedOn('deal', ['d1']),
             published,
         });
         expect(report.issues).toEqual([]);
@@ -277,26 +295,43 @@ describe('the landed-data reads are scoped like the engine\'s reference audit, a
         };
         return { engine, reads };
     };
-    const seedRowsRead = (r: Read) => r.object === 'deal' && r.where?.name !== undefined;
+    const seedRowsRead = (r: Read) => r.object === 'deal' && r.where?.id !== undefined;
 
     it('seed_reference_unresolved: a target row of another organization does not resolve the reference', async () => {
         const { engine, reads } = recording({
             deal: [{ id: 'd1', name: 'D1', organization_id: 'o1', acct_ref: 'a9' }],
             acct: [{ id: 'a9', organization_id: 'o2' }],
         });
-        const report = await run({ engine, organizationId: 'o1', published: [{ type: 'seed', name: 'deal_seed' }] });
+        const report = await run({
+            engine, organizationId: 'o1', seedLanded: landedOn('deal', ['d1']), published: [{ type: 'seed', name: 'deal_seed' }],
+        });
         expect(codes(report)).toEqual([['seed_reference_unresolved', 'warning', 'acct_ref']]);
         expect(reads.filter((r) => r.object === 'acct')).toEqual([
             { object: 'acct', where: { id: { $in: ['a9'] } }, fields: ['id'], context: { isSystem: true, tenantId: 'o1' } },
         ]);
-        // The seed's own rows, by its key, projected to what is judged. (The
-        // first `deal` read is `seed_not_applied`'s row count.)
+        // The seed's own rows, by the loader's ids, projected to what is judged.
+        // (The first `deal` read is `seed_not_applied`'s row count.)
         expect(reads.find(seedRowsRead)).toEqual({
             object: 'deal',
-            where: { name: { $in: ['D1', 'D2'] } },
+            where: { id: { $in: ['d1'] } },
             fields: ['id', 'acct_ref', 'owner'],
             context: { isSystem: true, tenantId: 'o1' },
         });
+    });
+
+    it('seed_reference_unresolved: a row of another organization with the seed\'s key is not matched, counted or quoted', async () => {
+        const { engine, reads } = recording({
+            deal: [
+                { id: 'd1', name: 'D1', organization_id: 'o1', acct_ref: 'a1', owner: 'u1' },
+                { id: 'd7', name: 'D1', organization_id: 'o2', acct_ref: 'a_other_org_value', owner: 'u1' },
+            ],
+            acct: [{ id: 'a1', organization_id: 'o1' }],
+            sys_user: [{ id: 'u1' }],
+        });
+        const report = await run({ engine, seedLanded: landedOn('deal', ['d1']), published: [{ type: 'seed', name: 'deal_seed' }] });
+        expect(report.issues).toEqual([]);
+        expect(JSON.stringify(reads)).not.toContain('a_other_org_value');
+        expect(reads.filter((r) => r.object === 'acct').map((r) => r.where)).toEqual([{ id: { $in: ['a1'] } }]);
     });
 
     it('seed_reference_unresolved with no publishing organization: each value is judged in its row\'s own organization', async () => {
@@ -308,7 +343,7 @@ describe('the landed-data reads are scoped like the engine\'s reference audit, a
             acct: [{ id: 'a1', organization_id: 'o1' }],
             sys_user: [{ id: 'u1' }],
         });
-        const report = await run({ engine, published: [{ type: 'seed', name: 'deal_seed' }] });
+        const report = await run({ engine, seedLanded: landedOn('deal', ['d1', 'd2']), published: [{ type: 'seed', name: 'deal_seed' }] });
         // `a1` resolves for the o1 row and not for the o2 one; `sys_user` has no
         // tenant column, so `u1` resolves in both.
         expect(codes(report)).toEqual([['seed_reference_unresolved', 'warning', 'acct_ref']]);
@@ -317,7 +352,6 @@ describe('the landed-data reads are scoped like the engine\'s reference audit, a
             { isSystem: true, tenantId: 'o1' },
             { isSystem: true, tenantId: 'o2' },
         ]);
-        expect(reads.find(seedRowsRead)!.context).toEqual({ isSystem: true });
         expect(reads.find(seedRowsRead)!.fields).toEqual(['id', 'acct_ref', 'owner', 'organization_id']);
     });
 
@@ -333,9 +367,66 @@ describe('the landed-data reads are scoped like the engine\'s reference audit, a
             [{ id: { $in: ['a1'] } }, ['id', 'deal_count'], { isSystem: true, tenantId: 'o1' }],
             [{ id: { $in: ['a1'] } }, ['id', 'deal_total'], { isSystem: true, tenantId: 'o1' }],
         ]);
-        expect(reads.filter((r) => r.object === 'deal').map((r) => r.fields)).toEqual([
-            ['id', 'acct_ref'],
-            ['id', 'acct_ref', 'amount'],
+        expect(reads.filter((r) => r.object === 'deal').map((r) => [r.fields, r.context])).toEqual([
+            [['id', 'acct_ref'], { isSystem: true, tenantId: 'o1' }],
+            [['id', 'acct_ref', 'amount'], { isSystem: true, tenantId: 'o1' }],
         ]);
+    });
+
+    it('rollup_never_computed with no publishing organization: a child of another organization is not counted', async () => {
+        const { engine, reads } = recording({
+            deal: [
+                { id: 'd1', organization_id: 'o1', acct_ref: 'a1', amount: 5 },
+                { id: 'd2', organization_id: 'o2', acct_ref: 'b1', amount: 5 },
+                { id: 'd3', organization_id: 'o2', acct_ref: 'b2', amount: 5 },
+            ],
+            acct: [
+                { id: 'a1', organization_id: 'o1', deal_count: 1, deal_total: 5 },
+                { id: 'b1', organization_id: 'o2', deal_count: null, deal_total: null },
+                { id: 'b2', organization_id: 'o2', deal_count: null, deal_total: null },
+            ],
+        });
+        const report = await run({ engine, published: [{ type: 'object', name: 'acct' }] });
+        // o1 computed its roll-ups; o2 never did. The verdict and the count are o2's alone.
+        expect(codes(report)).toEqual([
+            ['rollup_never_computed', 'warning', 'deal_count'],
+            ['rollup_never_computed', 'warning', 'deal_total'],
+        ]);
+        expect(report.issues[0]!.message).toContain('all 2 parent row(s) of one organization');
+        const samples = reads.filter((r) => r.object === 'deal' && r.context?.tenantId !== undefined);
+        expect(samples.map((r) => r.context!.tenantId)).toEqual(['o1', 'o2', 'o1', 'o2']);
+        // The organizations come from a read projected to the tenant column alone.
+        expect(reads.filter((r) => r.object === 'deal' && r.context?.tenantId === undefined).map((r) => r.fields))
+            .toEqual([['organization_id'], ['organization_id']]);
+        for (const r of reads.filter((x) => x.object === 'acct')) expect(r.context!.tenantId).toBeDefined();
+    });
+});
+
+describe('rollup_never_computed names the repair that fills the function', () => {
+    const items: Record<string, unknown> = {
+        ...ITEMS,
+        'object acct': {
+            name: 'acct',
+            fields: {
+                deal_total: { type: 'summary', summaryOperations: { object: 'deal', function: 'sum', field: 'amount' } },
+                deal_max: { type: 'summary', summaryOperations: { object: 'deal', function: 'max', field: 'amount' } },
+            },
+        },
+    };
+    it('`sum` names the plain run; `max` names `--recompute-undefined-on-empty object.field`', async () => {
+        const report = await run({
+            engine: engineOver({ deal: [{ id: 'd1', acct_ref: 'a1', amount: 5 }], acct: [{ id: 'a1' }] }),
+            getItem: async (t, n) => items[`${t} ${n}`],
+            published: [{ type: 'object', name: 'acct' }],
+        });
+        expect(codes(report)).toEqual([
+            ['rollup_never_computed', 'warning', 'deal_total'],
+            ['rollup_never_computed', 'warning', 'deal_max'],
+        ]);
+        expect(report.issues[0]!.fix).toContain('`os migrate summary-nulls --apply` computes');
+        expect(report.issues[0]!.fix).not.toContain('--recompute-undefined-on-empty');
+        expect(report.issues[1]!.fix).toContain('`os migrate summary-nulls --apply --recompute-undefined-on-empty acct.deal_max`');
+        expect(report.issues[1]!.userMessage).toContain('--recompute-undefined-on-empty');
+        expect(report.issues[0]!.userMessage).not.toContain('--recompute-undefined-on-empty');
     });
 });

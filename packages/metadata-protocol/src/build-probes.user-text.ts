@@ -48,7 +48,7 @@
  * | `widget_query_failed` | `dashboard`, `widget`, `dataset`, `object`, `cause` (`access` · `field-access` · `unavailable` · `query`) | dashboard, widget and dataset by label; `object` by label for `query`, and by the API name the refusal names for `access` · `field-access` · `unavailable` (the caller was not admitted to it, so nothing of it is read); empty when there is none |
  * | `probes_unavailable` | `count` | no name: one finding covers every dashboard of the publish |
  * | `widget_empty_result` | `dashboard`, `widget`, `dataset` | all three by label |
- * | `rollup_never_computed` | `object`, `field`, `child` | the parent object, the roll-up field and the child object by label |
+ * | `rollup_never_computed` | `object`, `field`, `child`, `cause` (`fills` · `named`) | the parent object, the roll-up field and the child object by label |
  * | `seed_reference_unresolved` | `object`, `field`, `target`, `count` | the seeded object, its reference field and the target object by label |
  * | `flow_connector_action_unresolved` | `flow`, `step`, `connector`, `cause` (`refused` · `no-action` · `degraded`) | flow and step by label; the connector by its name (the step names it so) |
  *
@@ -885,49 +885,80 @@ const WIDGET_EMPTY_RESULT: UserTextEntry = {
     `예상과 다르다면 읽어 오는 레코드(날짜와 값)를 확인한 후 다시 게시하세요.`,
 };
 
-/** `rollup_never_computed`: a roll-up field reads blank on every record that has related records. */
+/** `rollup_never_computed`: a roll-up field reads blank on every record that has related records; `cause` `named` is a min, max or avg roll-up, which the plain run does not fill. */
 const ROLLUP_NEVER_COMPUTED: UserTextEntry = {
   en: (p) =>
     `The roll-up field "${p.field}" on "${p.object}" is blank on every record that has related "${p.child}" ` +
-    `records: its stored value was never calculated for them. Ask whoever runs this environment to recalculate ` +
-    `the roll-ups (\`os migrate summary-nulls --apply\`).`,
+    `records: its stored value was never calculated for them. ` +
+    (p.cause === 'named'
+      ? `Ask whoever runs this environment to recalculate it by name (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, naming this field): a minimum, ` +
+        `maximum or average roll-up is not filled by the plain recalculation.`
+      : `Ask whoever runs this environment to recalculate the roll-ups (\`os migrate summary-nulls --apply\`).`),
   'zh-Hans': (p) =>
     `“${p.object}”的汇总字段“${p.field}”在每条有相关“${p.child}”记录的记录上都是空的：它的存储值从未为这些记录计算过。` +
-    `请让负责此环境的人重新计算汇总字段（\`os migrate summary-nulls --apply\`）。`,
+    (p.cause === 'named'
+      ? `请让负责此环境的人按名称重新计算它（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`，并指明此字段）：最小值、最大值或平均值汇总不会被普通的重新计算填充。`
+      : `请让负责此环境的人重新计算汇总字段（\`os migrate summary-nulls --apply\`）。`),
   'zh-Hant': (p) =>
     `「${p.object}」的匯總欄位「${p.field}」在每筆有相關「${p.child}」記錄的記錄上都是空的：它的儲存值從未為這些記錄計算過。` +
-    `請讓負責此環境的人重新計算匯總欄位（\`os migrate summary-nulls --apply\`）。`,
+    (p.cause === 'named'
+      ? `請讓負責此環境的人按名稱重新計算它（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`，並指明此欄位）：最小值、最大值或平均值匯總不會被一般的重新計算填入。`
+      : `請讓負責此環境的人重新計算匯總欄位（\`os migrate summary-nulls --apply\`）。`),
   es: (p) =>
     `El campo de resumen "${p.field}" de "${p.object}" está vacío en todos los registros que tienen registros ` +
-    `relacionados de "${p.child}": su valor almacenado nunca se calculó para ellos. Pida a quien administra este ` +
-    `entorno que recalcule los resúmenes (\`os migrate summary-nulls --apply\`).`,
+    `relacionados de "${p.child}": su valor almacenado nunca se calculó para ellos. ` +
+    (p.cause === 'named'
+      ? `Pida a quien administra este entorno que lo recalcule por nombre (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, indicando este campo): ` +
+        `un resumen de mínimo, máximo o promedio no se rellena con el recálculo normal.`
+      : `Pida a quien administra este entorno que recalcule los resúmenes (\`os migrate summary-nulls --apply\`).`),
   ar: (p) =>
     `حقل التجميع "${p.field}" في "${p.object}" فارغ في كل سجل له سجلات "${p.child}" مرتبطة: لم تُحسب قيمته المخزنة لها قط. ` +
-    `اطلب من مسؤول هذه البيئة إعادة حساب حقول التجميع (\`os migrate summary-nulls --apply\`).`,
+    (p.cause === 'named'
+      ? `اطلب من مسؤول هذه البيئة إعادة حسابه بالاسم (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` مع تسمية هذا الحقل): ` +
+        `حقل تجميع الحد الأدنى أو الأقصى أو المتوسط لا تملؤه إعادة الحساب العادية.`
+      : `اطلب من مسؤول هذه البيئة إعادة حساب حقول التجميع (\`os migrate summary-nulls --apply\`).`),
   fr: (p) =>
     `Le champ de synthèse « ${p.field} » de « ${p.object} » est vide sur chaque enregistrement qui a des ` +
-    `enregistrements « ${p.child} » liés : sa valeur stockée n’a jamais été calculée pour eux. Demandez à la ` +
-    `personne qui gère cet environnement de recalculer les synthèses (\`os migrate summary-nulls --apply\`).`,
+    `enregistrements « ${p.child} » liés : sa valeur stockée n’a jamais été calculée pour eux. ` +
+    (p.cause === 'named'
+      ? `Demandez à la personne qui gère cet environnement de le recalculer nommément (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, en nommant ce ` +
+        `champ) : une synthèse minimum, maximum ou moyenne n’est pas remplie par le recalcul ordinaire.`
+      : `Demandez à la personne qui gère cet environnement de recalculer les synthèses (\`os migrate summary-nulls --apply\`).`),
   'pt-BR': (p) =>
     `O campo de resumo "${p.field}" de "${p.object}" está vazio em todos os registros que têm registros ` +
-    `relacionados de "${p.child}": seu valor armazenado nunca foi calculado para eles. Peça a quem administra este ` +
-    `ambiente que recalcule os resumos (\`os migrate summary-nulls --apply\`).`,
+    `relacionados de "${p.child}": seu valor armazenado nunca foi calculado para eles. ` +
+    (p.cause === 'named'
+      ? `Peça a quem administra este ambiente que o recalcule pelo nome (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`, indicando este campo): ` +
+        `um resumo de mínimo, máximo ou média não é preenchido pelo recálculo comum.`
+      : `Peça a quem administra este ambiente que recalcule os resumos (\`os migrate summary-nulls --apply\`).`),
   ru: (p) =>
     `Сводное поле «${p.field}» объекта «${p.object}» пустое во всех записях, у которых есть связанные записи ` +
-    `«${p.child}»: его сохранённое значение для них ни разу не рассчитывалось. Попросите администратора этой среды ` +
-    `пересчитать сводные поля (\`os migrate summary-nulls --apply\`).`,
+    `«${p.child}»: его сохранённое значение для них ни разу не рассчитывалось. ` +
+    (p.cause === 'named'
+      ? `Попросите администратора этой среды пересчитать его по имени (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` с указанием этого поля): ` +
+        `сводное поле минимума, максимума или среднего обычный пересчёт не заполняет.`
+      : `Попросите администратора этой среды пересчитать сводные поля (\`os migrate summary-nulls --apply\`).`),
   de: (p) =>
     `Das Rollup-Feld „${p.field}“ in „${p.object}“ ist bei jedem Datensatz mit verknüpften „${p.child}“-Datensätzen ` +
-    `leer: Sein gespeicherter Wert wurde für sie nie berechnet. Bitten Sie die Person, die diese Umgebung betreibt, ` +
-    `die Rollups neu zu berechnen (\`os migrate summary-nulls --apply\`).`,
+    `leer: Sein gespeicherter Wert wurde für sie nie berechnet. ` +
+    (p.cause === 'named'
+      ? `Bitten Sie die Person, die diese Umgebung betreibt, es namentlich neu zu berechnen (\`os migrate summary-nulls --apply --recompute-undefined-on-empty\` mit diesem ` +
+        `Feld): Ein Minimum-, Maximum- oder Durchschnitts-Rollup füllt die normale Neuberechnung nicht.`
+      : `Bitten Sie die Person, die diese Umgebung betreibt, die Rollups neu zu berechnen (\`os migrate summary-nulls --apply\`).`),
   ja: (p) =>
     `「${p.object}」の積み上げ集計項目「${p.field}」は、関連する「${p.child}」レコードを持つすべてのレコードで空です。` +
-    `保存値がこれらのレコードについて一度も計算されていません。この環境の管理者に集計の再計算` +
-    `（\`os migrate summary-nulls --apply\`）を依頼してください。`,
+    `保存値がこれらのレコードについて一度も計算されていません。` +
+    (p.cause === 'named'
+      ? `この環境の管理者に、この項目を指定した再計算（\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`）を依頼してください。` +
+        `最小・最大・平均の集計は通常の再計算では埋まりません。`
+      : `この環境の管理者に集計の再計算（\`os migrate summary-nulls --apply\`）を依頼してください。`),
   ko: (p) =>
     `"${p.object}"의 롤업 필드 "${p.field}"가 관련 "${p.child}" 레코드가 있는 모든 레코드에서 비어 있습니다. ` +
-    `저장된 값이 이 레코드들에 대해 한 번도 계산되지 않았습니다. 이 환경의 관리자에게 롤업 재계산` +
-    `(\`os migrate summary-nulls --apply\`)을 요청하세요.`,
+    `저장된 값이 이 레코드들에 대해 한 번도 계산되지 않았습니다. ` +
+    (p.cause === 'named'
+      ? `이 환경의 관리자에게 이 필드를 지정한 재계산(\`os migrate summary-nulls --apply --recompute-undefined-on-empty\`)을 요청하세요. ` +
+        `최소·최대·평균 롤업은 일반 재계산으로 채워지지 않습니다.`
+      : `이 환경의 관리자에게 롤업 재계산(\`os migrate summary-nulls --apply\`)을 요청하세요.`),
 };
 
 /** `seed_reference_unresolved`: sample records point at records that do not exist. */

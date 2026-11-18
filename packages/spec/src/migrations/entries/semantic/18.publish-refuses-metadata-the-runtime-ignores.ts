@@ -28,7 +28,8 @@ export const entry: SemanticMigration = {
     + 'out-edge, so the approving and the rejecting branch both run; an http call with no timeout waits as long as the '
     + 'connection stays open; a state machine without `initialStates` lets a record be created already in its last '
     + 'state; an action bound to no object never renders. Stored items are not rewritten or refused at boot. The next '
-    + 'publish or write of an item that carries one of the four errors is refused with the fix named, and the http timeout is reported as a warning.',
+    + 'publish or write of an item that carries one of the four errors is refused with the fix named, and the http timeout is reported as a warning, '
+    + 'which makes `os validate --strict` exit 1 as any warning does.',
   acceptanceCriteria:
     'os validate reports none of the four errors (`flow-node-type-no-executor` is judged only at publish, against the '
     + 'deployment\'s sealed vocabulary) and no `flow-http-timeout-missing` warning; a publish of every flow, object and '

@@ -4226,6 +4226,12 @@ describe('flow-http-timeout-missing — an http node without a timeout of its ow
     expect(findings[0].message).toContain('arms no timer');
   });
 
+  it('names a negative `config.timeoutMs` as the value it is, which arms no timer', () => {
+    const findings = missing(httpFlow({ timeoutMs: -5 }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('`config.timeoutMs: -5`, which arms no timer');
+  });
+
   it('is silent on a `durable: true` node: the run does not wait on the endpoint', () => {
     expect(missing(httpFlow({ durable: true, method: 'POST' }))).toEqual([]);
   });
