@@ -48,6 +48,8 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.bulk.all': '全选',
   'perm.bulk.none': '清空',
   'perm.bulk.allTip': '授予除导出外的所有列;导出只能单独勾选',
+  'perm.more.col': '更多权限',
+  'perm.more.count': '已开 {count} 项',
   // objectstack#26187 — 记录范围选择器（ADR-0057 D1 访问深度）。
   'perm.scope.unset': '未设置',
   'perm.scope.value.own': '本人',
