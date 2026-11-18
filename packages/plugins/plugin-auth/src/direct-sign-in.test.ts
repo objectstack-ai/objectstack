@@ -185,7 +185,7 @@ describe('chooseDirectSignInProvider: which identity provider a visit goes to', 
 const fakeHost = (overrides: Partial<DirectSignInHost> = {}) => {
   const dispatched: Array<{ url: string; body: any; headers: Headers }> = [];
   const host: DirectSignInHost = {
-    setting: () => ({ enabled: true, provider: PLATFORM_IDP, localSignIn: 'hidden' }),
+    setting: () => ({ enabled: true, provider: PLATFORM_IDP, localSignIn: 'hidden', afterSignOut: 'hold' }),
     chooseProvider: async () => ({ kind: 'oauth', providerId: PLATFORM_IDP }),
     origin: () => ORIGIN,
     consolePageUrl: (path) => `${ORIGIN}/_console${path}`,
@@ -468,8 +468,10 @@ describe('the mounted start door (setting on)', () => {
     expect(res.status).toBe(302);
     const location = new URL(res.headers.get('location')!);
     expect(`${location.origin}${location.pathname}`).toBe(`${IDP}/${PLATFORM_IDP}/authorize`);
-    expect(location.searchParams.get('prompt')).toBeNull();
-    expect(location.searchParams.get('redirect_uri')).toBe(`${ORIGIN}/api/v1/auth/oauth2/callback/${PLATFORM_IDP}`);
+    // Off this origin: neither the door again nor the sign-in page.
+    expect(location.origin).not.toBe(new URL(ORIGIN).origin);
+    expect(res.headers.get('location')).not.toContain('/sign-in/direct');
+    expect(res.headers.get('location')).not.toContain('/login');
   });
 
   it('CONTROL: the API, /mcp, API-key and bearer requests are never redirected', async () => {
