@@ -52,6 +52,7 @@ import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-fiel
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
+import { memberOption } from './protocol-bundle-members.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
@@ -778,9 +779,10 @@ export async function draftPublishJudgement(
     // [#34766] No body handed: the stored draft at the address, as stored.
     let body = draft.body;
     if (body === undefined) {
-        const stored = await this.getOverlayRepo().get(
-            { type: singular, name: draft.name },
-            { state: 'draft', packageId: draft.packageId, ...(draft.member !== undefined ? { member: draft.member } : {}) },
+        const repo = this.getOverlayRepo();
+        const stored = await repo.get(
+            { type: singular, name: draft.name, org: 'env' } as Parameters<typeof repo.get>[0],
+            { state: 'draft', packageId: draft.packageId, ...memberOption(draft.member) },
         );
         if (!stored) throw noPendingDraftError(draft.type, draft.name);
         body = stored.body;
