@@ -600,9 +600,13 @@ const branchSlice = (): string => {
 const caseLabelsIn = (slice: string): string[] =>
   [...new Set([...stripComments(slice).matchAll(/case '([a-z-]+)':/g)].map((m) => m[1]))].sort();
 
-/** The eight branches the card was measured on. */
+/**
+ * The eight branches the card was measured on, plus `timesheet`
+ * (objectstack#34382), which is authored: `NamedListView.type` takes the
+ * spec's list-view enum, which declares it.
+ */
 const MEASURED_BRANCHES = [
-  'calendar', 'chart', 'gallery', 'gantt', 'kanban', 'map', 'timeline', 'tree',
+  'calendar', 'chart', 'gallery', 'gantt', 'kanban', 'map', 'timeline', 'timesheet', 'tree',
 ];
 
 // ---------------------------------------------------------------------------
@@ -612,7 +616,7 @@ const MEASURED_BRANCHES = [
 describe('the host-only view-type record matches the branches (objectui#5321)', () => {
   const recorded: string[] = [...OBJECT_VIEW_HOST_COMPOSITION_VIEW_TYPES].sort();
 
-  it('the fenced switch carries exactly the eight branches the card measured', () => {
+  it('the fenced switch carries exactly the branches the card measured, plus timesheet', () => {
     expect(
       caseLabelsIn(branchSlice()),
       'A view-type branch was added to or removed from `generateViewSchema`. That is a contract\n'

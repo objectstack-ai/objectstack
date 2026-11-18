@@ -17,8 +17,8 @@
 
 | Status | Records |
 |---|---|
-| Accepted | 135 |
-| Proposed | 8 |
+| Accepted | 136 |
+| Proposed | 7 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -217,7 +217,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
 | [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on… | 2026-11-05 | — | — |
 | [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) | The AI answers business questions through the dataset semantic layer — synonyms and descriptions on measures… | Accepted — 2026-11-08, recording two rulings of the maintainer: the placem… | 2026-11-08 | — | — |
-| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Proposed — 2026-11-08. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-08 | ADR-0028 | — |
+| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Accepted — 2026-11-08, merged in #31586. `docs/adr/` is Tier H (Prime Dire… | 2026-11-08 | ADR-0028 | — |
 | [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) | An AI service account — a headless agent is a registered principal of its own, with its own keys and its own… | Proposed — 2026-11-08 — draft. `docs/adr/` is a Tier H governed surface: t… | 2026-11-08 | — | — |
 | [ADR-0152](./0152-scim-group-grants-only-an-ordinary-permission-set-through-a-per-connection-mapping.md) | A SCIM group grants only an ordinary permission set, through a per-connection mapping row a platform administ… | Accepted — implemented, 2026-11-08, recording the maintainer's ruling of 2… | 2026-11-08 | — | — |
 | [ADR-0153](./0153-one-way-sync-in-beside-federation.md) | One-way sync-in beside federation — a connector or a federated object, a warehouse table included, fills an o… | Proposed — 2026-11-10. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-10 | — | — |

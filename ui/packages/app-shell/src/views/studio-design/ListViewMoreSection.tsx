@@ -58,6 +58,7 @@ const EDITED_BY_THE_PANEL: ReadonlySet<string> = new Set([
   'gantt',
   'map',
   'tree',
+  'timesheet',
 ]);
 
 /** The fields the curated controls own, hidden from the form as the view inspector hides them. */

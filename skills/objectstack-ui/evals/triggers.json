@@ -1,0 +1,47 @@
+{
+  "skill_name": "objectstack-ui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Through the ObjectStack MCP server, give the `deal` object a kanban board grouped by stage.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I have no project files, only an ObjectStack environment I reach over MCP. Build a sales dashboard with a revenue-by-month chart and a KPI for the open pipeline.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Add a 'Mark as won' button on the opportunity record page of our ObjectStack app that sets the stage to won.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Design the app navigation for our ObjectStack support app: a Tickets menu, a 'My open tickets' entry, and the support dashboard.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "在 ObjectStack 里做一个客户列表视图：只显示活跃客户，按创建时间倒序，并且能切换成看板。",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "Build a guided ObjectStack screen flow that asks whether a credit check is needed and branches to a credit-check step only when it is.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "In a plain React app with no ObjectStack, write a responsive card grid component with Tailwind that collapses to one column on phones.",
+      "should_trigger": false,
+      "files": []
+    }
+  ]
+}

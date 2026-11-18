@@ -9,11 +9,27 @@
  *   { "skill_name": BUNDLE, "evals": [ { "id", "prompt", "expected_output",
  *     "files": [], "assertions": { "must_contain": [..], "must_not_contain": [..] } } ] }
  *
+ * A TRIGGER case asks the other question about a skill: was it loaded when
+ * it should be, and left alone when it should not. It is the same entry with
+ * `"should_trigger": true | false` in place of `assertions`, and it is graded
+ * on whether the with-skill turn loaded the bundle, never on its answer:
+ *
+ *   { "id", "prompt", "should_trigger": false, "files": [] }
+ *
+ * `files` names what a case needs on disk: each entry is a path under the
+ * bundle's `evals/files/` (`"evals/files/src/objects/task.object.ts"`), a file
+ * or a directory, placed in the turn's working directory at the path below
+ * `evals/files/` on both arms. `evals/` itself is never copied into a turn, so
+ * a case's files reach it only this way.
+ *
  * The reader is strict, never lenient: a file that does not parse, a case
  * whose prompt is not a string, an assertion list that is not a list of
- * strings, or a case with no assertion at all is a located refusal — never a
- * case graded as a pass because nothing was asked of it. The cases themselves
- * are not this runner's to edit.
+ * strings, a case with no assertion at all, a trigger case that also carries
+ * assertions, a `files` entry outside `evals/files/` or missing from it, and a
+ * bundle whose trigger cases are all of one kind (all positive cannot show a
+ * false load; all negative cannot show a missed one) are located refusals —
+ * never a case graded as a pass because nothing was asked of it. The cases
+ * themselves are not this runner's to edit.
  */
 
 import { createHash } from 'node:crypto';
@@ -34,6 +50,14 @@ export interface SkillEvalCase {
   expectedOutput?: string;
   mustContain: string[];
   mustNotContain: string[];
+  /**
+   * Set ⇒ a trigger case: graded on whether the with-skill turn loaded the
+   * bundle (`true`: it should; `false`: it should not), on that arm only. Its
+   * token lists are empty.
+   */
+  shouldTrigger?: boolean;
+  /** Paths under the bundle's `evals/files/` placed in the turn's project; absent ⇒ none. */
+  files?: string[];
 }
 
 /** A file or case the reader refused, with where. */
@@ -66,11 +90,40 @@ export const caseKey = (bundle: string, file: string, id: number | string): stri
 /**
  * The case as a turn meets it: a hash of the prompt the turn is asked and the
  * two token lists its answer is graded on (`expected_output` is neither sent
- * nor graded, so it is left out). Every run record carries it, so `--regrade`
- * can tell a case reworded since the round from the case that ran. Pure.
+ * nor graded, so it is left out), and, only when the case has them, its
+ * trigger kind and its `files` list (names, not contents) — so a behaviour
+ * case with no files hashes as it did before either existed. Every run record
+ * carries it, so `--regrade` can tell a case reworded since the round from the
+ * case that ran. Pure.
  */
-export const hashCase = (c: Pick<SkillEvalCase, 'prompt' | 'mustContain' | 'mustNotContain'>): string =>
-  `sha256:${createHash('sha256').update(JSON.stringify([c.prompt, c.mustContain, c.mustNotContain])).digest('hex')}`;
+export const hashCase = (c: Pick<SkillEvalCase, 'prompt' | 'mustContain' | 'mustNotContain' | 'shouldTrigger' | 'files'>): string => {
+  const extra = {
+    ...(c.shouldTrigger !== undefined ? { shouldTrigger: c.shouldTrigger } : {}),
+    ...(c.files?.length ? { files: c.files } : {}),
+  };
+  const parts: unknown[] = [c.prompt, c.mustContain, c.mustNotContain];
+  if (Object.keys(extra).length) parts.push(extra);
+  return `sha256:${createHash('sha256').update(JSON.stringify(parts)).digest('hex')}`;
+};
+
+/** The directory under a bundle that holds the files cases place in a turn's project. */
+export const CASE_FILES_DIR = 'evals/files';
+
+/** Why a `files` entry is refused; `undefined` ⇒ it names a path under `evals/files/` that lands outside any `.claude/`. Pure. */
+export function caseFileProblem(entry: string): string | undefined {
+  const parts = entry.split('/');
+  if (entry.includes('\\') || parts.length < 3 || `${parts[0]}/${parts[1]}` !== CASE_FILES_DIR || parts.slice(2).some((p) => p === '' || p === '.' || p === '..')) {
+    return `\`files\` entry \`${entry}\` is not a path under \`${CASE_FILES_DIR}/\` (forward slashes, no \`.\` or \`..\` segment)`;
+  }
+  // Both arms receive every case file, and `.claude/` is where Claude Code finds
+  // skills: a case file there would hand the no-skill arm a skill without
+  // `verdictOf` ever calling the turn invalid. Any depth, any letter case (a
+  // case-insensitive disk resolves `.Claude` to the same directory).
+  if (parts.slice(2).some((p) => p.toLowerCase() === '.claude')) {
+    return `\`files\` entry \`${entry}\` would land under a \`.claude/\` directory in the turn's project, which only the runner fills: a case file there reaches the no-skill arm too`;
+  }
+  return undefined;
+}
 
 /** Read one eval file's text into cases, or refusals. Pure over its inputs. */
 export function parseEvalFile(bundle: string, file: string, text: string): { cases: SkillEvalCase[]; refusals: SkillEvalRefusal[] } {
@@ -102,19 +155,45 @@ export function parseEvalFile(bundle: string, file: string, text: string): { cas
       refusals.push({ path: at, message: '`prompt` is not a non-empty string' });
       return;
     }
-    const a = e.assertions;
-    if (typeof a !== 'object' || a === null || Array.isArray(a)) {
-      refusals.push({ path: at, message: '`assertions` is not an object' });
+    const files = e.files ?? [];
+    if (!isStringList(files)) {
+      refusals.push({ path: at, message: '`files` must be a list of strings' });
       return;
     }
-    const { must_contain: mc = [], must_not_contain: mnc = [] } = a as Record<string, unknown>;
-    if (!isStringList(mc) || !isStringList(mnc)) {
-      refusals.push({ path: at, message: '`assertions.must_contain` / `must_not_contain` must each be a list of strings' });
+    const badFile = files.map(caseFileProblem).find((m) => m !== undefined);
+    if (badFile) {
+      refusals.push({ path: at, message: badFile });
       return;
     }
-    if (mc.length + mnc.length === 0) {
-      refusals.push({ path: at, message: 'asserts nothing: a case with no `must_contain` and no `must_not_contain` would pass every answer' });
-      return;
+    let mc: string[] = [];
+    let mnc: string[] = [];
+    const trigger = e.should_trigger;
+    if (trigger !== undefined) {
+      if (typeof trigger !== 'boolean') {
+        refusals.push({ path: at, message: '`should_trigger` is neither `true` nor `false`' });
+        return;
+      }
+      if (e.assertions !== undefined) {
+        refusals.push({ path: at, message: 'is a trigger case (`should_trigger`) and carries `assertions`: a trigger case is graded on whether the skill was loaded, never on its answer' });
+        return;
+      }
+    } else {
+      const a = e.assertions;
+      if (typeof a !== 'object' || a === null || Array.isArray(a)) {
+        refusals.push({ path: at, message: '`assertions` is not an object' });
+        return;
+      }
+      const { must_contain: rawMc = [], must_not_contain: rawMnc = [] } = a as Record<string, unknown>;
+      if (!isStringList(rawMc) || !isStringList(rawMnc)) {
+        refusals.push({ path: at, message: '`assertions.must_contain` / `must_not_contain` must each be a list of strings' });
+        return;
+      }
+      if (rawMc.length + rawMnc.length === 0) {
+        refusals.push({ path: at, message: 'asserts nothing: a case with no `must_contain` and no `must_not_contain` would pass every answer' });
+        return;
+      }
+      mc = rawMc;
+      mnc = rawMnc;
     }
     const key = caseKey(bundle, file, id);
     if (seen.has(key)) {
@@ -131,6 +210,8 @@ export function parseEvalFile(bundle: string, file: string, text: string): { cas
       ...(typeof e.expected_output === 'string' ? { expectedOutput: e.expected_output } : {}),
       mustContain: mc,
       mustNotContain: mnc,
+      ...(typeof trigger === 'boolean' ? { shouldTrigger: trigger } : {}),
+      ...(files.length ? { files } : {}),
     });
   });
   return { cases, refusals };
@@ -154,11 +235,22 @@ export function loadSkillEvalCatalog(root: string): SkillEvalCatalog {
       .filter((d) => d.isFile() && d.name.endsWith('.json'))
       .map((d) => d.name)
       .sort();
+    const mine: SkillEvalCase[] = [];
     for (const file of files) {
       const r = parseEvalFile(bundle, file, readFileSync(join(dir, file), 'utf8'));
-      cases.push(...r.cases);
+      for (const c of r.cases) {
+        const missingFile = (c.files ?? []).find((f) => !existsSync(join(root, bundle, f)));
+        if (missingFile) refusals.push({ path: `${bundle}/evals/${file}: ${c.key}`, message: `\`files\` names \`${missingFile}\`, which is not in the bundle` });
+        else mine.push(c);
+      }
       refusals.push(...r.refusals);
     }
+    const kinds = new Set(mine.filter((c) => c.shouldTrigger !== undefined).map((c) => c.shouldTrigger));
+    if (kinds.size === 1) {
+      const only = kinds.has(true) ? 'positive' : 'negative';
+      refusals.push({ path: `${bundle}/evals`, message: `every trigger case is ${only}: a trigger set needs at least one \`should_trigger: true\` and one \`false\`, or it cannot show a ${only === 'positive' ? 'false load' : 'missed load'}` });
+    }
+    cases.push(...mine);
   }
   const unlistedBundles = bundles.filter((b) => notUserInvocable(readFileSync(join(root, b, 'SKILL.md'), 'utf8')));
   return { root, bundles, unlistedBundles, cases, refusals };
