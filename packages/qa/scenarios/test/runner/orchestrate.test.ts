@@ -1065,7 +1065,8 @@ describe('seedApp — a card row already past its entry state loads through the 
 
   it('[#34613] a withheld row a restore cannot put back is refused by name with the reason, never booked as reinserted', async () => {
     const scenario = travel();
-    const app = Object.assign(new TravelRulesApp(), { reseedManaged: undefined });
+    const app = new TravelRulesApp();
+    Object.assign(app, { reseedManaged: undefined }); // a harness with no reseed door
     await seedApp(scenario, app, []);
     const seeded = await seededRows(app, restoreObjects(scenario.card));
     app.rows.demotravel_expense_claim = app.rows.demotravel_expense_claim!.filter((r) => r.id !== 'c001');

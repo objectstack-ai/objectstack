@@ -15,8 +15,8 @@ describe('SeedMode', () => {
   // [#34613] The two unkeyed modes are retired (ADR-0049 enforce-or-remove):
   // each refusal names the mode, the version and the keyed fix.
   it.each([
-    ['insert', /`seed\.mode: 'insert'` was removed in @objectstack\/spec 18\.6\.0.*every replay.*inserted each record again.*`mode: 'ignore'`.*`externalId`/s],
-    ['replace', /`seed\.mode: 'replace'` was removed in @objectstack\/spec 18\.6\.0.*no load ever clears one.*`mode: 'ignore'`.*`externalId`/s],
+    ['insert', /`seed\.mode: 'insert'` was removed in @objectstack\/spec 18\.7\.0.*every replay.*inserted each record again.*`mode: 'ignore'`.*`externalId`/s],
+    ['replace', /`seed\.mode: 'replace'` was removed in @objectstack\/spec 18\.7\.0.*no load ever clears one.*`mode: 'ignore'`.*`externalId`/s],
   ])('refuses the retired mode %s with its prescription', (mode, prescription) => {
     expect(() => SeedMode.parse(mode)).toThrow(prescription);
     const parsed = SeedSchema.safeParse({ object: 'task', mode, records: [{ name: 'a' }] });

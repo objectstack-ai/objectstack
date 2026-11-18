@@ -347,7 +347,7 @@ describe('[#28952] controls — an `externalId` the object has is not refused', 
     it.each([['insert'], ['replace']])('the retired mode `%s` is refused with its prescription', async (mode) => {
         const { protocol, rows } = makeSession({ objects: OBJECTS });
         const attempt = protocol.saveMetaItem({ type: 'seed', name: 'r_ins', item: seed('seedkey_other', 'sku', mode), mode: 'draft' });
-        await expect(attempt).rejects.toThrow(new RegExp(`seed\\.mode: '${mode}'\` was removed in @objectstack/spec 18\\.6\\.0`));
+        await expect(attempt).rejects.toThrow(new RegExp(`seed\\.mode: '${mode}'\` was removed in @objectstack/spec 18\\.7\\.0`));
         expect(stored(rows, 'seed', 'r_ins')).toEqual([]);
     });
 
