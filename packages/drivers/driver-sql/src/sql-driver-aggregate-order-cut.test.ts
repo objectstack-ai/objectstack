@@ -105,10 +105,10 @@ function declareCell(cell: DialectCell): void {
       expect(asc.map((r) => r.revenue)).toEqual([0, 1, 5]);
       const byKeyAsc = await driver.aggregate(TABLE, query(cut([{ column: 'customer', order: 'asc' }])), { tenantId: 'org_a' });
       expect(customers(byKeyAsc).slice(0, 3)).toEqual(['c00', 'c01', 'c02']);
-      expect(customers(byKeyAsc).at(-1)).toBeNull();
+      expect(customers(byKeyAsc)[customers(byKeyAsc).length - 1]).toBeNull();
       const byKeyDesc = await driver.aggregate(TABLE, query(cut([{ column: 'customer', order: 'desc' }], 62)), { tenantId: 'org_a' });
       expect(customers(byKeyDesc).slice(0, 2)).toEqual(['cnull', 'c59']);
-      expect(customers(byKeyDesc).at(-1)).toBeNull();
+      expect(customers(byKeyDesc)[customers(byKeyDesc).length - 1]).toBeNull();
     });
 
     it('the cut runs inside the tenant wall and the where', async () => {
