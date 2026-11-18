@@ -55,6 +55,16 @@ let apps: Array<Record<string, unknown>> = [];
 vi.mock('../../providers/MetadataProvider', () => ({
   useMetadata: () => ({ apps, refresh }),
 }));
+// objectstack#35054 — Publish sends the stored app (the layers read): the
+// listed app minus its read decorations, which no layer carries.
+vi.mock('../../providers/AdapterProvider', () => ({
+  useAdapter: () => ({
+    getAuthoredItem: async (_type: string, name: string) => {
+      const app = apps.find((a) => a.name === name);
+      return app ? Object.fromEntries(Object.entries(app).filter(([k]) => !k.startsWith('_'))) : null;
+    },
+  }),
+}));
 
 // The commit timeline is a dialog with its own fetches; this file measures the
 // bar's read point and its publish body, not ADR-0067 history.

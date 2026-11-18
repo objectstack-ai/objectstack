@@ -146,6 +146,8 @@
  *   hooks.<hook>.texts.<key>.message                           (#34374)
  *   objects.<object>._actions.<action>.refusals.<CODE>.message  (#34273; and
  *   globalActions.<action>.refusals.<CODE>.message, with `.reasons.<REASON>.message` under each)
+ *   objects.<object>._actions.<action>.texts.<key>.message     (#34374 PR2; and
+ *   globalActions.<action>.texts.<key>.message)
  *   positions.<position>.label / .description
  *   permissions.<permission_set>.label / .description
  *   books.<book>.label / .description
@@ -835,6 +837,29 @@ function pushActionRefusals(
         { objectName },
       );
     }
+  }
+}
+
+/**
+ * [#34374 PR2] Emit `<action root>.texts.<key>.message` for every text an
+ * action declares (`ActionSchema.texts`), seeded with the declared message, as
+ * {@link walkHookTexts} seeds a hook's. The action body runner reads exactly
+ * that key (`actionTextMessageKey`) in the organization's language when the
+ * body asks for the text (`ctx.text`), so each declared text is one demand,
+ * under the action's own root: `objects.<object>._actions.<action>` or
+ * `globalActions.<action>`.
+ */
+function pushActionTexts(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const texts = action?.texts;
+  if (!texts || typeof texts !== 'object' || Array.isArray(texts)) return;
+  for (const [key, entry] of Object.entries<any>(texts)) {
+    pushOptional(out, [...actionRoot, 'texts', key, 'message'], inlineText(entry?.message), kind, { objectName });
   }
 }
 
@@ -1594,6 +1619,7 @@ export function collectExpectedEntries(
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionPreflight(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionRefusals(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionTexts(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
     }
 
@@ -1695,6 +1721,7 @@ export function collectExpectedEntries(
     pushActionResultDialog(out, root, action, kind, objectName);
     pushActionPreflight(out, root, action, kind, objectName);
     pushActionRefusals(out, root, action, kind, objectName);
+    pushActionTexts(out, root, action, kind, objectName);
   }
 
   // ── Apps + navigation ────────────────────────────────────────────

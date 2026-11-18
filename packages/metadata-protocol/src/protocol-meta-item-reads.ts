@@ -39,6 +39,7 @@ import {
     decorateMetadataItem,
     withPublishAdvisories,
     withPublishVerdict,
+    viewLintObjectLookup,
     withViewLintWarnings,
 } from './metadata-diagnostics.js';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
@@ -837,10 +838,13 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // ({@link withListViewFieldWarnings}), against the same objects.
     // Applied at every served exit of this read, the draft ones included; a
     // warning, so `valid` is left as the schema answered it. The execution
-    // face serves no `_diagnostics`.
+    // face serves no `_diagnostics`. [#34901] Each object is folded with
+    // every disabled package's `extend` contribution, as the save door folds
+    // it ({@link viewLintObjectLookup}): a name such a package adds is a
+    // stored field, not an unknown one.
     const serveViewLint = <T>(served: T): Promise<T> => (execution
         ? Promise.resolve(served)
-        : withViewLintWarnings(request.type, served, (name) => host.engine?.registry?.getObject?.(name)));
+        : withViewLintWarnings(request.type, served, viewLintObjectLookup(host.engine?.registry)));
     // [#26707] A served DRAFT is decorated as above and then told what its
     // publish would refuse: the runtime gate's verdict on the stored draft
     // body ({@link draftPublishVerdict}), folded into `_diagnostics`

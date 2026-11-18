@@ -62,6 +62,12 @@ const srv = vi.hoisted(() => ({
   pairPublished: [] as Array<Record<string, unknown>>,
   /** The pair's pending action drafts, by name. */
   pairDrafts: {} as Record<string, Record<string, unknown>>,
+  /**
+   * objectstack#35054 — what the pair's layered read serves for an action, by
+   * name, where it differs from the served reads above (which are then the
+   * translated copies). `draft: undefined` serves no `draft` key at all.
+   */
+  stored: {} as Record<string, { published: Record<string, unknown> | null; draft?: Record<string, unknown> | null }>,
 }));
 
 const servedObject = () => ({
@@ -93,7 +99,20 @@ const mockClient = {
       ? Object.keys(srv.pairDrafts).map((name) => ({ type: 'action', name }))
       : [],
   ),
-  layered: vi.fn(async () => ({ effective: servedObject(), code: servedObject() })),
+  layered: vi.fn(async (type: string, name: string, opts?: { packageId?: string }) => {
+    if (type === 'action' && opts?.packageId === PAIR) {
+      // The pair's action as stored: by default the served rows (no translation in play).
+      const own = srv.stored[name];
+      if (own) {
+        const layers: Record<string, unknown> = { code: null, overlay: own.published, effective: own.published };
+        if ('draft' in own) layers.draft = own.draft;
+        return layers;
+      }
+      const published = srv.pairPublished.find((a) => a.name === name) ?? null;
+      return { code: null, overlay: published, effective: published, draft: srv.pairDrafts[name] ?? null };
+    }
+    return { effective: servedObject(), code: servedObject() };
+  }),
   getDraft: vi.fn(async (type: string, name: string, opts?: { packageId?: string }) =>
     type === 'action' && opts?.packageId === PAIR && srv.pairDrafts[name]
       ? // Served decorated, as the draft read serves it.
@@ -153,6 +172,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The pillar reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -196,6 +218,7 @@ function customizationOf(over: Partial<StudioBaseCustomization> = {}): StudioBas
 beforeEach(() => {
   srv.pairPublished = [];
   srv.pairDrafts = {};
+  srv.stored = {};
   ensure.mockImplementation(async () => PAIR);
 });
 
@@ -326,5 +349,61 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     expect(names.some((n) => typeof n === 'string' && /^crm_lead_action_\d+$/.test(n))).toBe(true);
     expect(actionSaves()).toHaveLength(0);
     expect(ensure).not.toHaveBeenCalled();
+  }, 30_000);
+});
+
+/**
+ * objectstack#35054 (route D) — a pair action's buffer is the action as its
+ * author stored it, not the pair's served (translated) list or draft.
+ *
+ * `action` is a translatable type: in a zh-CN session the pair's list and its
+ * served drafts carry the translated label and confirmation text, and the
+ * autosave sends the buffer whole. Here the served reads carry the translated
+ * copies and the pair's layered read the stored source.
+ *
+ * Direction, written before the run: with the buffer seeded from the served
+ * reads (the unmodified tree) the first case goes RED on `confirmText` while
+ * the edited `label` (the control) stays GREEN, and the second goes RED by
+ * saving.
+ */
+describe('a pair action edits the action as stored (objectstack#35054)', () => {
+  const SOURCE = { ...KEPT, confirmText: 'Qualify this lead?' };
+  const SERVED = { ...SOURCE, label: '资格认定', confirmText: '认定此线索？' };
+
+  it('a zh-CN edit autosaves the stored confirmation text; the edited label changes', async () => {
+    srv.pairPublished = [SERVED];
+    srv.pairDrafts = { [KEPT.name]: SERVED };
+    srv.stored = { [KEPT.name]: { published: SOURCE, draft: SOURCE } };
+    await mountOnActions({ readOnly: true, customization: customizationOf() });
+    fireEvent.click(await within(list()).findByText('Qualify', undefined, { timeout: 8000 }));
+
+    const label = screen.getByRole('textbox', { name: L('engine.inspector.action.label') });
+    expect(label).toHaveValue('Qualify');
+    fireEvent.change(label, { target: { value: 'Mark qualified' } });
+    await outlastDebounce();
+    await waitFor(() => expect(actionSaves()).toHaveLength(1));
+    const [, name, body, opts] = actionSaves()[0]!;
+    expect(name).toBe(KEPT.name);
+    expect(opts).toMatchObject({ mode: 'draft', packageId: PAIR });
+    expect(body.confirmText).toBe('Qualify this lead?');
+    // Control: the edit itself is what the save carries.
+    expect(body.label).toBe('Mark qualified');
+    expect(mockClient.layered).toHaveBeenCalledWith('action', KEPT.name, { packageId: PAIR });
+  }, 30_000);
+
+  it('a pending draft whose stored copy is not served takes no edit, and nothing is saved', async () => {
+    srv.pairPublished = [SERVED];
+    srv.pairDrafts = { [KEPT.name]: SERVED };
+    // The layered read serves the published action and no `draft` key.
+    srv.stored = { [KEPT.name]: { published: SOURCE } };
+    await mountOnActions({ readOnly: true, customization: customizationOf() });
+    fireEvent.click(await within(list()).findByText('资格认定', undefined, { timeout: 8000 }));
+
+    fireEvent.change(screen.getByRole('textbox', { name: L('engine.inspector.action.label') }), {
+      target: { value: 'Mark qualified' },
+    });
+    await outlastDebounce();
+    expect(actionSaves()).toHaveLength(0);
+    expect(await screen.findByText(L('engine.studio.refusal.draftUnreadable'))).toBeInTheDocument();
   }, 30_000);
 });

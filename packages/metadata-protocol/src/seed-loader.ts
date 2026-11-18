@@ -370,7 +370,30 @@ function isLocaleScopedDataset(dataset: Seed): boolean {
 
 /** Render a dataset's declared locale scope for a log line. */
 function localeScopeLabel(dataset: Seed): string {
-  return `${dataset.object} (locale: ${(dataset.locale as string[]).join(', ')})`;
+  return `${dataset.object} (locale: ${(dataset.locale as string[]).join(', ')}${isFallbackDataset(dataset) ? '; fallback' : ''})`;
+}
+
+/**
+ * [Seed.fallback] True when the dataset is marked its object's fallback set.
+ * The schema refuses the marker on a dataset with no `locale`, so a marked
+ * dataset is always locale-scoped.
+ */
+function isFallbackDataset(dataset: Seed): boolean {
+  return (dataset as { fallback?: unknown }).fallback === true;
+}
+
+/**
+ * [Seed.fallback] The objects for which a locale-scoped dataset of `datasets`
+ * lists `locale`. A dataset with no `locale` is locale-neutral and is not a
+ * match: it loads beside whichever set is chosen, and does not keep the
+ * object's fallback set from filling in.
+ */
+function objectsWithLocaleMatch(datasets: readonly Seed[], locale: string): Set<string> {
+  const matched = new Set<string>();
+  for (const dataset of datasets) {
+    if (isLocaleScopedDataset(dataset) && datasetAllowsLocale(dataset, locale)) matched.add(dataset.object);
+  }
+  return matched;
 }
 
 /**
@@ -1312,15 +1335,28 @@ export class SeedLoaderService implements ISeedLoaderService {
       ? { context: { ...SEED_WRITE_EXECUTION_CONTEXT, tenantId: writeOrganization } }
       : SeedLoaderService.SEED_OPTIONS;
 
-    // 1. Filter datasets by the scope axes (environment AND locale)
-    const datasets = this.filterDatasets(request.seeds, config);
+    // 1. Filter datasets by the scope axes (environment AND locale). An object
+    // whose env-scoped datasets mark two DISTINCT fallback sets has no single
+    // set to fall back to (`Seed.fallback`): only its fallback CHOICE is
+    // refused. Every marked set still goes through the locale filter and loads
+    // for the locales it lists, exactly as an unmarked set would; none fills in
+    // for a locale no set lists. Identical copies of one declaration count
+    // once — the shared per-organization replay list holds a package's
+    // datasets once per merge.
+    const envScoped = this.filterByEnv(request.seeds, config.env);
+    const fallbackRefusals = findDuplicateFallbackSets(envScoped);
+    const refusedFallbackObjects = new Set(fallbackRefusals.map(refusal => refusal.object));
+    const datasets = this.filterByLocale(envScoped, config.locale, refusedFallbackObjects);
+    allErrors.push(...this.reportDuplicateFallbackSets(fallbackRefusals));
 
     // [#31021] The record of landed seed rows, once the organization this load
     // seeds is known. A load with nothing to seed reads and writes none.
     this.landedKeyLedger = datasets.length > 0 ? await this.openLandedKeyLedger(config) : undefined;
 
     if (datasets.length === 0) {
-      return this.buildEmptyResult(config, Date.now() - startTime);
+      return allErrors.length > 0
+        ? this.buildResult(config, { nodes: [], insertOrder: [], circularDependencies: [] }, [], allErrors, Date.now() - startTime)
+        : this.buildEmptyResult(config, Date.now() - startTime);
     }
 
     // 2. Build dependency graph. `Seed.dependsOn` adds its declared edges to
@@ -1332,7 +1368,10 @@ export class SeedLoaderService implements ISeedLoaderService {
     const graph = await this.buildDependencyGraph(objectNames, declared.edges);
     const dependsOnRefusals = [...declared.refusals, ...this.findDeclaredEdgeCycles(graph.nodes, declared.edges)];
     if (dependsOnRefusals.length > 0) {
-      return this.refuseDeclaredDependencies(config, graph, dependsOnRefusals, Date.now() - startTime);
+      const refused = this.refuseDeclaredDependencies(config, graph, dependsOnRefusals, Date.now() - startTime);
+      // [Seed.fallback] An object's refused fallback choice stays reported on a load refused for its declarations.
+      refused.errors.unshift(...allErrors);
+      return refused;
     }
 
     this.logger.info('[SeedLoader] Dependency graph built', {
@@ -4473,6 +4512,31 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
+   * [Seed.fallback] The errors for the objects whose fallback choice this
+   * load refused, one per object (`field: 'fallback'`), each named once at
+   * `warn`. Every dataset still loads where its own scope admits it, so the
+   * errors join the load's own and its result reads `success: false`. The
+   * `warn` is a functional degradation (an organization on a locale no set
+   * lists visibly gets none of that object's rows), said here because a
+   * replay's consumer may report a failed load's errors at `info` only.
+   */
+  private reportDuplicateFallbackSets(refusals: DuplicateFallbackRefusal[]): ReferenceResolutionError[] {
+    for (const refusal of refusals) {
+      this.logger.warn(`[SeedLoader] ${refusal.message}`, { object: refusal.object, fallbackSets: refusal.scopes });
+    }
+    return refusals.map(refusal => ({
+      sourceObject: refusal.object,
+      field: 'fallback',
+      targetObject: refusal.object,
+      targetField: '(dataset)',
+      attemptedValue: refusal.scopes.join(' | '),
+      // The marker is the dataset's, not a row's; no row was attempted.
+      recordIndex: 0,
+      message: refusal.message,
+    }));
+  }
+
+  /**
    * [Seed.dependsOn] The answer of a load refused for its declarations:
    * nothing written, `success: false`, one error per refused declaration
    * (`field: 'dependsOn'`). Returned rather than thrown, so every caller
@@ -4664,34 +4728,48 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
-   * Drop datasets that do not apply to this load, on every scope axis.
-   *
-   * The axes COMPOSE by conjunction: a dataset is kept when it passes `env`
-   * **and** `locale`. They stay separate functions — and separate log lines —
-   * because the two answer different operator questions ("why are my demo rows
-   * missing in production" vs "why did the Chinese dataset load"), and a single
-   * merged message would have to name a reason it did not measure.
-   */
-  private filterDatasets(datasets: Seed[], config: SeedLoaderConfigParsed): Seed[] {
-    return this.filterByLocale(this.filterByEnv(datasets, config.env), config.locale);
-  }
-
-  /**
-   * Drop datasets that do not apply to the resolved locale.
+   * Drop datasets that do not apply to the resolved locale. Runs on the
+   * datasets {@link filterByEnv} kept: the axes COMPOSE by conjunction, a
+   * dataset is kept when it passes `env` **and** `locale`. They stay separate
+   * functions — and separate log lines — because the two answer different
+   * operator questions ("why are my demo rows missing in production" vs "why
+   * did the Chinese dataset load"), and a single merged message would have to
+   * name a reason it did not measure.
    *
    * The mirror of {@link filterByEnv}, down to the reporting posture: skipping
    * is the declared, intended outcome of `locale: ['zh-CN']`, so it logs at
    * `info` — but it always NAMES what it dropped.
+   *
+   * [Seed.fallback] A dataset marked `fallback: true` that the locale would
+   * drop is kept instead when no locale-scoped dataset of its object lists
+   * the locale ({@link objectsWithLocaleMatch}), and that is named too —
+   * unless its object is in `refusedFallbackObjects` (two distinct marked
+   * sets, {@link findDuplicateFallbackSets}): there the marker is ignored and
+   * the dataset is filtered like an unmarked one. A load with no locale
+   * returns every dataset above, the fallback set included.
    */
-  private filterByLocale(datasets: Seed[], locale?: string): Seed[] {
+  private filterByLocale(datasets: Seed[], locale?: string, refusedFallbackObjects: ReadonlySet<string> = new Set()): Seed[] {
     if (!locale) return datasets;
 
+    const matched = objectsWithLocaleMatch(datasets, locale);
     const kept: Seed[] = [];
     const skipped: Seed[] = [];
+    const fellBack: Seed[] = [];
     for (const dataset of datasets) {
-      (datasetAllowsLocale(dataset, locale) ? kept : skipped).push(dataset);
+      if (datasetAllowsLocale(dataset, locale)) kept.push(dataset);
+      else if (isFallbackDataset(dataset) && !matched.has(dataset.object) && !refusedFallbackObjects.has(dataset.object)) {
+        kept.push(dataset);
+        fellBack.push(dataset);
+      } else skipped.push(dataset);
     }
 
+    if (fellBack.length > 0) {
+      this.logger.info(
+        `[SeedLoader] Locale '${locale}': no dataset is scoped to it for ${fellBack.length} object(s), so their ` +
+          `fallback set(s) loaded: ${fellBack.map(localeScopeLabel).join('; ')}`,
+        { locale, fallback: fellBack.map(d => d.object) },
+      );
+    }
     if (skipped.length > 0) {
       this.logger.info(
         `[SeedLoader] Locale '${locale}': skipped ${skipped.length} dataset(s) scoped to other ` +
@@ -5291,6 +5369,78 @@ export class SeedLoaderService implements ISeedLoaderService {
 // ==========================================================================
 // Internal Types
 // ==========================================================================
+
+/** [Seed.fallback] One object whose fallback choice a load refuses: it marks more than one distinct set. */
+interface DuplicateFallbackRefusal {
+  readonly object: string;
+  /** The locale scopes of the distinct marked datasets, one entry each, for the error's `attemptedValue`. */
+  readonly scopes: string[];
+  readonly message: string;
+}
+
+/**
+ * [Seed.fallback] A dataset's declaration, for telling a second COPY of one
+ * declaration from a second declaration: every key but the runtime protection
+ * envelope (`_`-prefixed, stamped by the loader that read the artifact),
+ * serialised with sorted keys so key order does not make two copies differ.
+ */
+function seedDeclarationFingerprint(dataset: Seed): string {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])]),
+      );
+    }
+    return value;
+  };
+  const declared = Object.fromEntries(Object.entries(dataset as Record<string, unknown>).filter(([key]) => !key.startsWith('_')));
+  return JSON.stringify(canonical(declared));
+}
+
+/**
+ * [Seed.fallback] Every object for which `datasets` (the datasets `env` kept
+ * for this load) mark more than one DISTINCT declaration `fallback: true`.
+ * Identical copies count once: the shared per-organization replay list holds
+ * a package's datasets once per merge (boot rehydrate, install or upgrade,
+ * reseed), and a second copy of the one fallback set is not a second choice.
+ * Object names are global, so two packages marking the same object are two
+ * declarations and that object's fallback choice is refused. So are two
+ * versions of one package whose marked set changed: an upgrade appends the new
+ * version's datasets beside the old version's until the process restarts.
+ *
+ * Judged whatever the load's locale: the declaration is ambiguous on every
+ * load, not only on one that needs the fallback, and a refusal that waited for
+ * an unmatched locale would surface on the first organization in a new market.
+ */
+function findDuplicateFallbackSets(datasets: readonly Seed[]): DuplicateFallbackRefusal[] {
+  const byObject = new Map<string, Map<string, Seed>>();
+  for (const dataset of datasets) {
+    if (!isFallbackDataset(dataset)) continue;
+    const distinct = byObject.get(dataset.object) ?? new Map<string, Seed>();
+    const fingerprint = seedDeclarationFingerprint(dataset);
+    if (!distinct.has(fingerprint)) distinct.set(fingerprint, dataset);
+    byObject.set(dataset.object, distinct);
+  }
+  const refusals: DuplicateFallbackRefusal[] = [];
+  for (const [object, distinct] of byObject) {
+    if (distinct.size < 2) continue;
+    const scopes = [...distinct.values()].map(d => `locale: ${((d.locale as string[] | undefined) ?? []).join(', ')}`);
+    refusals.push({
+      object,
+      scopes,
+      message:
+        `Seed datasets of '${object}' mark ${distinct.size} different sets \`fallback: true\` (${scopes.join('; ')}). ` +
+        'An object has at most one fallback set: it is the one set that loads when no other set lists the ' +
+        `resolved locale. No fallback was used for '${object}': each marked set still loads for the locales it ` +
+        'lists, and a locale none of them lists gets none of them; every other object seeds as usual. Two causes ' +
+        `leave more than one marked set: the packages being seeded mark more than one set of '${object}' (keep the ` +
+        'marker on one), or an upgrade within this process changed a package\'s marked set (the earlier ' +
+        'version\'s datasets stay on the replay list until the process restarts).',
+    });
+  }
+  return refusals;
+}
 
 /** [Seed.dependsOn] One declaration a load refuses: `object` named `target`. */
 interface DeclaredDependencyRefusal {

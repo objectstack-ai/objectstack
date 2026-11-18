@@ -58,8 +58,11 @@ export interface DatasetGrade {
  *   - `asked-back` 2: an option named by its place (`option 2`, `the 3rd one`,
  *     「第 1 个」) and a date whose year follows a time word (`through
  *     2026-11-17`) are no figure.
+ *   - `asked-back` 3: a request phrase (请确认, `please confirm`) after a
+ *     clause mark (`，` `,` `；` `;` `：` `:`) asks, as it did after a
+ *     sentence's end.
  */
-export const DATASET_GRADER_REVISIONS: Readonly<Partial<Record<DatasetGrader, number>>> = { 'asked-back': 2 };
+export const DATASET_GRADER_REVISIONS: Readonly<Partial<Record<DatasetGrader, number>>> = { 'asked-back': 3 };
 
 /**
  * The app tools that answer a question from object records: the MCP door's
@@ -101,11 +104,26 @@ function provenanceOf(c: Call): { dataset: string; measures: string[] } | undefi
   return { dataset: p.dataset.name, measures };
 }
 
+/** A request for the person's choice (`please confirm`, 请确认, 您是指): it asks wherever a sentence or a clause opens with it. */
+const REQUEST_PHRASE = String.raw`(?:please (?:confirm|clarify|specify|tell me|let me know)|could you (?:clarify|confirm|specify)|请(?:确认|说明|告诉我|明确)|您是指|你是指)`;
+
 /**
- * The reply asks the person something: a question mark (either width), or
- * one of the asking phrases below at a line's or sentence's start.
+ * The reply asks the person something: a question mark (either width), or an
+ * asking phrase that opens what it is part of.
+ *
+ *   - A request phrase ({@link REQUEST_PHRASE}) opens the text, a line, a
+ *     sentence (after `.` `。` `!` `！`) or a clause (after `,` `，` `;` `；`
+ *     `:` `：`, either width): 「我不替你选，请确认你要哪一个：」 asks with no
+ *     question mark.
+ *   - `which one` / `which of` opens the text, a line or a sentence only:
+ *     after a comma it is as often a relative clause (`…, which of course
+ *     differ`) as a question, and a question spelled that way ends in a
+ *     question mark.
+ *
+ * A phrase inside a clause asks nothing: quoted (「点“请确认”提交」) or
+ * reported (`I asked finance to please confirm the totals`).
  */
-const ASKS = /[?？]|(?:^|[.。!！\n]\s*)(?:please (?:confirm|clarify|specify|tell me|let me know)|could you (?:clarify|confirm|specify)|which (?:one|of)|请(?:确认|说明|告诉我|明确)|您是指|你是指)/i;
+const ASKS = new RegExp(String.raw`[?？]|(?:^|[.。!！\n,，;；:：]\s*)${REQUEST_PHRASE}|(?:^|[.。!！\n]\s*)which (?:one|of)`, 'i');
 
 /** Numbered-list markers (`1.`, `2)`, `3、`) at a line's start: an option list's numbering, never a figure. */
 const LIST_MARKER = /^[ \t]*(?:[-*][ \t]+)?\(?\d{1,2}(?:[.)][ \t]+|、[ \t]*)/gm;

@@ -1,5 +1,269 @@
 # @object-ui/plugin-detail
 
+## 18.6.0
+
+### Patch Changes
+
+- adccc24: fix(plugin-detail): a long text formula on the record page wraps instead of being cut to one line
+  
+  Clause-②: no — a value that was cut now shows in full; no surface added
+  Metadata-protocol: none
+  
+  The record page's field grid drew `formula` values with the formula cell, whose text face is the grid's one-line cell (`truncate`, an ellipsis, the whole value only in a hover `title`). A long text formula, such as an explanation sentence, read as its first few words, and touch and screen-reader users never reached the rest.
+  
+  A formula row now reads through `FormulaField`, the formula's own read display and the face the record form draws. Its text face wraps. Number, money, date and boolean results read the same words as before, because the widget reads the value by the rule the cell reads it by. List grid rows and the highlights strip keep the one-line cell. A host that registered its own `formula` cell keeps it on the record page.
+- 04e7b90: fix(components): a `page:tabs` tab holding a related list bound by `parentDataSource` shows its count badge before it is opened, on an app page too
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The tab strip counts a `record:related_list` by probing it against the record the page is about. An app page has no such record, so a tab whose related list reads its parent through `parentDataSource` (a team page listing members and invitations of the current organization, say) drew no badge: the number showed only inside the opened tab. On a record page the same list was probed against the page's record, which is not its parent.
+  
+  Such a list now says how many records it holds to its tab, the same number its own header shows, and the strip keeps that tab mounted while inactive so the badge is there before the tab is opened. A create or delete on the listed object re-reads the list and moves the badge. Lists whose parent is the page's record are counted by the strip's own probe exactly as before, and an authored `count` on a tab still wins.
+- 046c224: fix(plugin-detail): a `record:activity` whose `types` leaves out `comment` no longer offers a comment composer whose posts it then hides
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `types` is the list of feed item kinds the block shows, and `comment` is one of them. A block authored with a list that leaves it out, such as `types: ['task']`, filters every comment out of its feed, including a comment posted on that same block. It still drew the "Leave a comment" composer and the "Comments only" filter, so a member's comment was saved and then never appeared.
+  
+  Such a block now draws no composer and no "Comments only" option. In development it logs one warning per block that names the block, its `types` and the two fixes:
+  
+  - to take comments on the block, add `'comment'` to `types`;
+  - to keep the block activity-only, set `showCommentInput: false`.
+  
+  A block with no `types`, or with a `types` that includes `'comment'`, is unchanged.
+- 646b13e: fix(plugin-detail): a `record:chatter` or `record:discussion` whose `feed.types` leaves out `comment` no longer offers a comment composer whose posts it then hides
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `feed.types` is the list of feed item kinds the panel shows, and `comment` is one of them. A panel authored with a list that leaves it out, such as `feed: { types: ['task'] }`, filters every comment out of its feed, including a comment posted on that same panel. It still drew the "Leave a comment" composer and the "Comments only" filter, so a member's comment was saved and then never appeared. `record:activity` already withheld both for the same `types`; the two chatter blocks now follow the same rule.
+  
+  Such a panel now draws no composer and no "Comments only" option. In development it logs one warning per block that names the block, its `feed.types` and the two fixes:
+  
+  - to take comments on the panel, add `'comment'` to `feed.types`;
+  - to keep the panel activity-only, set `feed.showCommentInput: false`.
+  
+  A panel with no `feed.types`, or with a `feed.types` that includes `'comment'`, is unchanged. `RecordChatterPanel` takes the answer as a new optional `commentsShown` prop and forwards it to its timeline; absent, it means `true`, so a host that composes the panel itself is unchanged.
+- 0d0a088: feat(plugin-detail): the default record page shows Activity last — after the related panels, attachments and approvals
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record page nobody wrote by hand, the Activity stream used to come first in the right column, right after the details on a narrow screen, and second in the tab row. Members open the related records far more often than the stream, so the stream now comes last everywhere the default page draws it:
+  
+  - wide and two-column layouts: the right column reads related panels, then attachments, then approvals, then Activity;
+  - one-column layout (a phone, the split pane): details, related panels, attachments, approvals, then Activity at the very bottom;
+  - the tab row: Overview, the related panels, then Activity. While the panels' first counts are still loading, the Activity tab waits off the row with them, so no tab moves when they arrive;
+  - the synthesized `page:tabs` strip (`buildDefaultTabs`, `buildDefaultPageSchema`, and what Studio seeds a new record page with): Details, Related, Approvals, then the Activity stream.
+  
+  A hand-written record page keeps the order its author wrote. Nothing an author writes changes: every tab keeps its `value` (`details`, `related`, `approvals`, `timeline`), so `?tab=` links still open the same tab. Code that splices a custom tab into `buildDefaultTabs(...).items` by position should find its place by `value`, since the Activity stream's index moved from second to last.
+- 77b42a1: fix(ui): on a phone the record page keeps Edit in its bottom bar, names the current stage in full, and lays its key fields out in two columns
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three phone-width changes to the record page. Desktop layouts are unchanged.
+  
+  - **Bottom action bar.** On an editable record the bar is now Edit, the primary action, then the `⋯` menu with every other action. Before, the page's own actions took both slots first, so an object with two record actions pushed Edit into the `⋯`. The primary is the action declaring `variant: 'primary'`, else the first action. A record the reader cannot edit keeps the primary and one more. A destructive host action (Delete) still always goes in the `⋯`. `page:header`'s `mobileMaxVisible` still sets how many buttons the bar holds; a budget of one is Edit's.
+  - **Stage bar (`record:path`).** Below the `sm` breakpoint the path draws one progress segment per stage and no stage names, then one line with the step and the current stage's full name ("Step 5 of 6 · Negotiation", the existing form `stepOf` copy). The step counts the forward stages; a record on a lost stage shows that stage, marked lost, with no step. Tapping the line lists every stage by its full name, and on a path that allows stage changes each reachable stage there moves the record, behind the same permission and state-machine checks as on desktop. Nothing is authored for this: the viewport picks the mode.
+  - **Key-field strip on a hand-written page.** Below `sm` the strip is a two-column grid, as the default page's is, so six key fields read as three rows instead of six lines. A value too long for its cell ends in an ellipsis.
+- d83a275: fix(ui): in a narrow record drawer a relative time stays on one line
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The record page's meta line ("Updated by NAME · 2d ago") and the activity timeline's entry, folded-run and reply headers now keep the relative time, with its leading dot where it has one, as one piece that never breaks. Their rows wrap between pieces instead, so in a narrow drawer the whole time moves to the next line rather than breaking word by word ("2 / days / ago", "3" over "天前"). Wide layouts are unchanged: when the row fits, nothing wraps.
+- aa5a7d0: fix(plugin-detail): a discussion block in the record page's activity card keeps the card's inner padding
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The activity card at the foot of the record page's right column draws its body edge to edge, because the compact activity face it normally holds pads its own rows. A page whose `discussion` slot places `record:chatter` (or `record:discussion`) puts the full discussion timeline in that card instead, and that timeline padded only its top: the row icons sat on the card's left border, the composer's send button touched the right border, and long rows ran into it before wrapping.
+  
+  Inside that card the discussion timeline now takes the same inset as the related-list cards above it (12 px at the sides and a 12 px band at the top and foot), with one divider under the card head. The compact activity face in the same card, and the discussion timeline in the Activity tab and on the page body, look exactly as before.
+- 9c70c16: fix(ui): the record stage bar uses its compact form in a narrow record drawer, not only on a phone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `record:path` chose between its desktop row and its compact form by the viewport alone, so a narrow record drawer opened at a desktop viewport drew the desktop row: seven stages in a 380 px drawer got about 33 px each and read as 'P…', 'Pro…', 'Ne…'. The bar now draws the desktop row only when the viewport is at least `sm` and the bar itself is at least 24rem (384 px) wide. Otherwise it draws the compact form: the progress segments, then "Step N of M" and the current stage's full name, which opens the list of every stage.
+  
+  - Below `sm` nothing changes: the compact form, as before.
+  - A full-width record page keeps the desktop row, pixel for pixel.
+  - Nothing is authored for this: no new key, prop or translation string.
+- 81ea504: fix(plugin-detail): the approval badge says "In approval · editable" only when the record is editable for the viewer
+  
+  Clause-②: no — a label that claimed an edit the record refuses now says only that an approval is running; no surface added
+  Metadata-protocol: none
+  
+  On an approval node that declares `lockRecord: false`, the record page's approval badge read 「审批中 · 可编辑」 / "In approval · editable" from the node alone. When another gate closed the record for this user (record permission, the edit action's `disabledWhen` / `visibleWhen`, a `readonlyWhen` lock on every field), the badge still said editable and every edit was refused. The badge now also reads the host's `canEdit`: when it is false the badge reads 「审批中」 / "In approval" (new `detail.approvalPending` and `detail.approvalPendingNotEditableTooltip` keys in every locale). A lock an app enforces only in an imperative hook stays invisible to the client; declare it with `userActions.edit.disabledWhen` or `readonlyWhen` so the record page can show it.
+- ab44198: fix(plugin-detail): a related list's row Delete confirm names the row by its declared `nameField` when no column shows it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A related list with authored columns sends a `$select` projection, and the row Delete confirm names the row from the row that projection fetched. The projection did not ask for the child object's declared `nameField` unless a column showed it, so the confirm read `Are you sure you want to delete "Record #<id>"?` for a row that has a name. The projection now asks for the declared `nameField` (or its deprecated `displayNameField` alias) through the same gates as its other members: the field must be declared by the child object or be a platform column, the viewer must be allowed to read it, and the block must not redact it. It is fetched only, never drawn as a column. A list without authored columns sends no projection, as before. A name field the viewer cannot read is still not requested, and its confirm keeps the `Record #<id>` wording.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [0e2ead3]
+- Updated dependencies [b1efa37]
+- Updated dependencies [ffa6db1]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [b019048]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [a78781a]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [1078c73]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [39fa82b]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [b4eea88]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [8436f67]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [5a75579]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [6a7403b]
+- Updated dependencies [04e7b90]
+- Updated dependencies [3b1307e]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [dc54c60]
+- Updated dependencies [a8e794f]
+- Updated dependencies [d57d6ee]
+- Updated dependencies [bdd5176]
+- Updated dependencies [22bf910]
+- Updated dependencies [2b267b7]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [518baca]
+- Updated dependencies [066177b]
+- Updated dependencies [6c7d730]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [b86331d]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e2d3514]
+- Updated dependencies [e95210d]
+- Updated dependencies [26cab15]
+- Updated dependencies [e9f65a3]
+- Updated dependencies [13c62a6]
+- Updated dependencies [77b42a1]
+- Updated dependencies [4db3750]
+- Updated dependencies [2e29287]
+- Updated dependencies [8bc0808]
+- Updated dependencies [e61af97]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [a931063]
+- Updated dependencies [14619f5]
+- Updated dependencies [e47c1cb]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [81ea504]
+- Updated dependencies [c81f498]
+- Updated dependencies [4bdbdac]
+- Updated dependencies [3bbda33]
+- Updated dependencies [d656d62]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [90f2b1c]
+- Updated dependencies [b633afe]
+- Updated dependencies [0584eb5]
+- Updated dependencies [94c9491]
+- Updated dependencies [fff0ad0]
+- Updated dependencies [65ec3c5]
+- Updated dependencies [4aeeca5]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [421f180]
+- Updated dependencies [2fcc9cf]
+- Updated dependencies [7b7272f]
+- Updated dependencies [cb7d514]
+- Updated dependencies [743308b]
+- Updated dependencies [97cd541]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [343c49c]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [92a5cac]
+- Updated dependencies [db1a05c]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [3c535ee]
+- Updated dependencies [59defa0]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @object-ui/i18n@18.6.0
+  - @objectstack/spec@18.6.0
+  - @object-ui/core@18.6.0
+  - @object-ui/types@18.6.0
+  - @object-ui/components@18.6.0
+  - @object-ui/fields@18.6.0
+  - @object-ui/permissions@18.6.0
+  - @object-ui/react@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

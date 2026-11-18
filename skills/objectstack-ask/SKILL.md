@@ -5,17 +5,19 @@ description: >
   MCP tools (list_datasets, query_dataset, list_objects, describe_object,
   query_records, aggregate_records): find the governed metric the question
   names, compute it and cite its source, or fall back to an object query and
-  say so. Use when the user asks for a number, a ranking, a breakdown, a trend
-  or a list from the app's data, in any language ("how many", "total", "top
-  10", "by stage", "this quarter"; "多少", "总额", "排名", "占比", "趋势",
-  "按阶段统计", "列出"). Do not use for building or changing metadata (the
+  say so. Use for EVERY question answered from the app's records, before the
+  first data tool call, even when it names no metric: a number, a total, what
+  has been claimed, spent, sold or paid so far, a ranking, a breakdown, a trend
+  or a list, in any language ("how many", "how much", "total", "so far", "top
+  10", "by stage", "this quarter"; "多少", "一共", "总额", "排名", "占比",
+  "趋势", "按阶段统计", "列出"). Do not use for building or changing metadata (the
   domain skills cover that), or for writing a query in application code (see
   objectstack-query).
 license: Apache-2.0
 compatibility: Requires an environment served by @objectstack/mcp 18.x
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: process
   tags: ask, question, metric, dataset, mcp, list_datasets, query_dataset, 问数, 指标
 ---
@@ -33,7 +35,11 @@ wrote its business definition) outranks a number you work out yourself.
   "商机数") and what it is grouped or filtered by ("by stage", "按行业").
 - Call `list_datasets({ terms })` with those words, as the user wrote them and
   in the user's language. Do not translate or reword a term: a match on a word
-  you supplied is your reading, not the user's.
+  you supplied is your reading, not the user's. A term is the noun phrase for
+  the thing, kept whole ("travel budget", not "travel" and "budget": a
+  fragment's matches are not the user's) and without the verbs, time words
+  and question words around it ("trip days", not "trip days requested";
+  "报销金额", not "报销金额合计是多少").
 - Each dataset in the answer carries `matches`: one entry per hit, with the
   `term`, the `member` it names (`measures.<name>` or `dimensions.<name>`) and
   `matchedOn`. A word matches only when it equals a member's name, label or
@@ -51,12 +57,16 @@ wrote its business definition) outranks a number you work out yourself.
 | Each word for a thing measured matches exactly one measure | Compute: step 3. Two words with one measure each ("营收和赢单率") are two metrics, not a choice: compute both, with one `query_dataset` per dataset. |
 | One word matches several measures, in one dataset or in two | Ask the user which one they mean. List each candidate's label, its dataset's label and its description. Do not pick one. |
 | Only a dimension matches | That is a grouping ("by stage"), not a number. You still need a measure match; without one, ask which number is meant. |
-| A word matches nothing, and `candidates` lists members for it, one or several | Ask the user which one they mean, listing each candidate's label, its dataset's label and its description; with one candidate, ask whether it is the one meant. Do not pick one, and never treat a candidate as a match. Compute nothing yet. |
+| A word matches nothing, and `candidates` lists members for it, one or several | Ask the user which one they mean, listing each candidate's label, its dataset's label and its description; with one candidate, ask whether it is the one meant. Do not pick one. |
 | No match and no candidates for the word for a thing measured | Step 4, and say in the answer that no governed metric was used. |
 | `membersWithheld: true` on a dataset | Say that it has members (measures or groupings) you may not read; the metric asked for may be among them. Do not say the metric does not exist. |
 
 When you ask, the reply is the question alone: no figure, and no tool call
-until the user answers. `partial: true` on the answer means the catalogue may
+until the user answers. State no figure of your own in it (no count, total
+or option number): name each option by its label in a bullet, and quote its
+description as written. Ask only about matches or candidates for words the user
+wrote; when their word matched nothing and has no candidates, go to step 4
+instead of asking about some other word's matches. `partial: true` on the answer means the catalogue may
 be incomplete; `warning` says why, and you repeat it when you fall back.
 
 ## 3. Compute a governed metric
@@ -74,6 +84,10 @@ be incomplete; `warning` says why, and you repeat it when you fall back.
 
 ## 4. Fallback: object queries
 
+- The question names a kind of record (trip requests, invoices) and no listed
+  object or dataset is that kind: say you cannot see those records here (they
+  may be hidden from you) and stop. Never answer from a different object that
+  merely links to it.
 - `list_objects`, then `describe_object({ objectName })` on the object you will
   read. Read its fields before you filter: a field with `options` is filtered
   by the option's `value`, never its label.

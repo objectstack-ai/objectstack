@@ -392,6 +392,7 @@ const viewTypes: Record<NonNullable<ListViewSchema['viewType']>, string> = {
   map: 'Records at their geographic coordinates',
   chart: 'Aggregated bar / line / pie / area chart',
   tree: 'Hierarchical parent-child rows',
+  timesheet: 'Editable row × weekday entry grid',
 };
 
 export { view, richColumns, viewTypes };

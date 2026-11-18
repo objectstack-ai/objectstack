@@ -1343,9 +1343,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // belongs to the whole-stack rule (ruling `5791822697` on #19527, letter
     // B; ADR-0109 Decision §3). `ai-skill-tool-unresolved` is a verdict of
     // `os validate` / `os lint` / `os build`, and this door NEVER emits it.
-    // `validateAiToolReferences` resolves a skill's tools against a universe of
-    // three limbs — `stack.tools`, the platform registry and the materialised
-    // `action_<name>` family — and a per-write snapshot carries neither
+    // `validateAiToolReferences` resolves a skill's tools against `stack.tools`,
+    // the platform registry, the MCP door's file tools (for a skill offered
+    // over MCP) and the materialised `action_<name>` family — and a per-write
+    // snapshot carries neither
     // `stack.tools` nor `stack.actions`, while a tool a runtime plugin
     // registers outside the registry is invisible to every static universe.
     // So at this door the member has no truthful `unresolved` verdict to give:

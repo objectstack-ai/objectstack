@@ -31,12 +31,25 @@
  *  - **Remove** deletes the pair's draft, then its published row, at the pair:
  *    the Automations pillar's Delete flow. The base's actions are never
  *    written.
+ *
+ * objectstack#35054 (route D) — a row's BUFFER is the action as its author
+ * stored it. The pair's list and its served drafts are translated for the
+ * console's locale (`action` is a translatable type: its `label`, its
+ * confirmation and success text), and the autosave sends the buffer whole, so
+ * a buffer seeded from them stored the translations as the action's source
+ * text. The served reads decide which rows are listed and the draft pins; each
+ * row's body comes from the layered read at the same pair, through the one
+ * reading the Studio editors share (`authoredBuffer`): the stored pending
+ * draft, else the published action. A row whose stored copy is not served
+ * (`unserved`) stays listed and is not edited: ⛔ never buffered from the
+ * served copy.
  */
 
 import * as React from 'react';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
+import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
+import { t as tStudio, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { readDraftForSave, useDraftSaveGuard, type DraftPin } from '../metadata-admin/DraftConflictDialog.js';
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import type { RailCustomizations } from './StudioRailCustomizations.js';
@@ -66,6 +79,12 @@ export interface PairActionRow {
   body: Record<string, unknown>;
   published: boolean;
   draft: boolean;
+  /**
+   * objectstack#35054 — the layered read served no stored copy of this row
+   * (a pending draft it did not serve, or nothing at all): `body` is the
+   * served copy, for display only, and the row takes no edit.
+   */
+  unserved?: true;
 }
 
 export interface PairObjectActions {
@@ -120,6 +139,8 @@ export function usePairObjectActions(
   blockingOf: (name: string) => number,
 ): PairObjectActions {
   const client = useMetadataClient();
+  const locale = useMetadataLocale();
+  const localeRef = React.useRef(locale);
   const active = door !== null;
   const listedPair = door?.pairId ?? null;
   const publishNonce = door?.publishNonce ?? 0;
@@ -146,6 +167,7 @@ export function usePairObjectActions(
   React.useLayoutEffect(() => {
     doorRef.current = door;
     dirtyRef.current = dirty;
+    localeRef.current = locale;
   });
 
   // The ensure door's answer for this base: asked by the first write, once,
@@ -181,6 +203,8 @@ export function usePairObjectActions(
         if (cancelled) return;
         const byName = new Map<string, PairActionRow>();
         const pins = new Map<string, DraftPin | null>();
+        // The served draft body of each listed draft row: it only says a draft is pending.
+        const servedDrafts = new Map<string, Record<string, unknown>>();
         for (const raw of pub || []) {
           const body = ownBody(raw);
           const name = typeof body.name === 'string' ? body.name : '';
@@ -201,7 +225,24 @@ export function usePairObjectActions(
           const body = served ? ownBody(served) : null;
           if (!body || body.objectName !== objectName) return;
           byName.set(name, { name, body, published: byName.has(name), draft: true });
+          servedDrafts.set(name, served!);
           pins.set(name, read.pin);
+        });
+        // objectstack#35054 — each listed row's buffer is its stored body,
+        // read at the pair the served reads were (module header).
+        const listed = [...byName.keys()];
+        const layers = await Promise.all(
+          listed.map((name) => client.layered<Record<string, unknown>>('action', name, { packageId: readAt })),
+        );
+        if (cancelled) return;
+        listed.forEach((name, i) => {
+          const row = byName.get(name)!;
+          const authored = authoredBuffer('action', layers[i] as AuthoredLayers, servedDrafts.get(name) ?? null);
+          const body = authored.kind === 'buffer' ? ownBody(authored.body) : null;
+          byName.set(
+            name,
+            body && Object.keys(body).length > 0 ? { ...row, body } : { ...row, unserved: true },
+          );
         });
         const open = dirtyRef.current;
         setRows((prev) => {
@@ -244,6 +285,11 @@ export function usePairObjectActions(
   const patch = React.useCallback(
     (name: string, change: Record<string, unknown>) => {
       if (doorRef.current?.walled) return;
+      // A row with no stored copy served takes no edit (objectstack#35054).
+      if (listRef.current.find((r) => r.name === name)?.unserved) {
+        setError(tStudio('engine.studio.refusal.draftUnreadable', localeRef.current));
+        return;
+      }
       setRows((prev) =>
         prev === null
           ? prev
