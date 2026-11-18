@@ -13,6 +13,12 @@
  * data door, as them, and then reads the door again, so what the page shows is
  * always what is in force. See `myPreferences.ts`.
  *
+ * Digest and quiet hours offer only values that take effect when saved
+ * (`digestChoices`, `quietHoursSaveable`): the resolver reads a stored
+ * `'none'` or an empty window as "no opinion" and falls through to the
+ * organization's default, so neither is ever offered as a way to turn
+ * something off.
+ *
  * Channels are columns as the door lists them, so a channel the deployment
  * adds later (Slack, …) appears without a change here; a channel the
  * deployment cannot send on yet says so in its header.
@@ -43,6 +49,8 @@ import { SchemaRendererContext, useAdapter } from '@object-ui/react';
 import { PageHeader } from '../../layout/PageHeader.js';
 import {
   cellWrite,
+  digestChoices,
+  quietHoursSaveable,
   generalWrite,
   loadMyPreferences,
   PREFERENCE_WILDCARD,
@@ -57,8 +65,6 @@ import {
 } from './myPreferences.js';
 
 type Load = { readonly state: 'loading' } | { readonly state: 'failed' } | { readonly state: 'read'; readonly prefs: MyPreferences };
-
-const DIGESTS: readonly DigestCadence[] = ['none', 'daily', 'weekly'];
 
 const DIGEST_KEY: Record<DigestCadence, string> = {
   none: 'notificationSettings.digestNone',
@@ -188,15 +194,26 @@ export function NotificationSettingsPage() {
                 className="block h-9 w-full max-w-xs rounded-md border bg-background px-2 text-sm"
                 value={prefs.general.digest.value}
                 disabled={!canWrite}
-                onChange={(e) => void apply(generalWrite(userId!, prefs.general, { digest: e.target.value as DigestCadence }))}
+                onChange={(e) => {
+                  const digest = e.target.value as DigestCadence;
+                  // `none` is offered only while it is already the value, so it never reaches a write.
+                  if (digest !== 'none') void apply(generalWrite(userId!, prefs.general, { digest }));
+                }}
               >
-                {DIGESTS.map((d) => (
+                {digestChoices(prefs.general).map((d) => (
                   <option key={d} value={d}>
                     {t(DIGEST_KEY[d])}
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-muted-foreground">{t(SOURCE_KEY[prefs.general.digest.source])}</p>
+              <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-source">
+                {t(SOURCE_KEY[prefs.general.digest.source])}
+              </p>
+              {prefs.general.digest.value !== 'none' && (
+                <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-no-off">
+                  {t('notificationSettings.digestNoOff')}
+                </p>
+              )}
             </div>
             <div className="space-y-1" data-testid="notification-settings-quiet-hours">
               <Label>{t('notificationSettings.quietHours')}</Label>
@@ -212,13 +229,22 @@ export function NotificationSettingsPage() {
                 <Button
                   size="sm"
                   data-testid="notification-settings-quiet-hours-save"
-                  disabled={!canWrite || quietDraft === undefined}
-                  onClick={() => void apply(generalWrite(userId!, prefs.general, { quiet_hours: quietDraft ?? null }))}
+                  disabled={!canWrite || !quietHoursSaveable(quietDraft)}
+                  onClick={() => {
+                    if (quietHoursSaveable(quietDraft)) void apply(generalWrite(userId!, prefs.general, { quiet_hours: quietDraft }));
+                  }}
                 >
                   {t('notificationSettings.save')}
                 </Button>
-                <span className="text-xs text-muted-foreground">{t(SOURCE_KEY[prefs.general.quietHours.source])}</span>
+                <span className="text-xs text-muted-foreground" data-testid="notification-settings-quiet-hours-source">
+                  {t(SOURCE_KEY[prefs.general.quietHours.source])}
+                </span>
               </div>
+              {quietDraft === null && prefs.general.quietHours.value !== null && (
+                <p className="text-xs text-muted-foreground" data-testid="notification-settings-quiet-hours-no-clear">
+                  {t('notificationSettings.quietHoursNoClear')}
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>

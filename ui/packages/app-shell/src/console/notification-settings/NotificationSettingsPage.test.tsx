@@ -36,7 +36,11 @@ import { getAppComponent } from '../../services/componentRegistry';
 import '@objectstack/lint';
 import '../../services/builtinComponents';
 
-function answer(taskEnabled: boolean, taskRow?: string) {
+type General = { digest: { value: string; source: string }; quietHours: { value: unknown; source: string } };
+
+const BUILTIN_GENERAL: General = { digest: { value: 'none', source: 'builtin' }, quietHours: { value: null, source: 'builtin' } };
+
+function answer(taskEnabled: boolean, taskRow?: string, general: General = BUILTIN_GENERAL) {
   return {
     data: {
       topics: [
@@ -55,8 +59,7 @@ function answer(taskEnabled: boolean, taskRow?: string) {
       channels: [{ channel: 'email', configured: true }, { channel: 'slack', configured: false }],
       general: {
         enabled: { value: true, source: 'builtin' },
-        digest: { value: 'none', source: 'builtin' },
-        quietHours: { value: null, source: 'builtin' },
+        ...general,
       },
     },
   };
@@ -148,6 +151,63 @@ describe('NotificationSettingsPage', () => {
         channel: '*',
         enabled: true,
         digest: 'weekly',
+      }),
+    );
+  });
+
+  it('an organization digest in force: "No digest" is not offered, and the digest shows where it comes from', async () => {
+    const orgDaily: General = { ...BUILTIN_GENERAL, digest: { value: 'daily', source: 'default' } };
+    const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgDaily)));
+    const adapter = { create: vi.fn(async () => ({})), update: vi.fn() };
+    render(<NotificationSettingsPage />, { wrapper: host(apiFetch, adapter) });
+
+    const select = (await screen.findByTestId('notification-settings-digest')) as HTMLSelectElement;
+    expect(select.value).toBe('daily');
+    expect([...select.options].map((o) => o.value)).toEqual(['daily', 'weekly']);
+    expect(screen.getByTestId('notification-settings-digest-source')).toHaveTextContent('«notificationSettings.sourceDefault»');
+    expect(screen.getByTestId('notification-settings-digest-no-off')).toHaveTextContent('«notificationSettings.digestNoOff»');
+  });
+
+  it('with no digest in force, "No digest" is the current value and the hint is not shown', async () => {
+    const apiFetch = vi.fn().mockResolvedValue(json(answer(false)));
+    render(<NotificationSettingsPage />, { wrapper: host(apiFetch, { create: vi.fn(), update: vi.fn() }) });
+
+    const select = (await screen.findByTestId('notification-settings-digest')) as HTMLSelectElement;
+    expect(select.value).toBe('none');
+    expect(screen.getByTestId('notification-settings-digest-source')).toHaveTextContent('«notificationSettings.sourceBuiltin»');
+    expect(screen.queryByTestId('notification-settings-digest-no-off')).toBeNull();
+  });
+
+  it('organization quiet hours in force: clearing the window cannot be saved, a complete window can', async () => {
+    const orgQuiet: General = { ...BUILTIN_GENERAL, quietHours: { value: { start: '22:00', end: '07:00' }, source: 'default' } };
+    const apiFetch = vi.fn().mockResolvedValue(json(answer(false, undefined, orgQuiet)));
+    const adapter = { create: vi.fn(async () => ({})), update: vi.fn() };
+    render(<NotificationSettingsPage />, { wrapper: host(apiFetch, adapter) });
+
+    const start = await screen.findByTestId('quiet-hours-start');
+    const end = screen.getByTestId('quiet-hours-end');
+    const save = screen.getByTestId('notification-settings-quiet-hours-save');
+    expect(screen.getByTestId('notification-settings-quiet-hours-source')).toHaveTextContent('«notificationSettings.sourceDefault»');
+
+    fireEvent.change(start, { target: { value: '' } });
+    fireEvent.change(end, { target: { value: '' } });
+    expect(await screen.findByTestId('notification-settings-quiet-hours-no-clear')).toHaveTextContent('«notificationSettings.quietHoursNoClear»');
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(adapter.create).not.toHaveBeenCalled();
+
+    fireEvent.change(start, { target: { value: '23:00' } });
+    fireEvent.change(end, { target: { value: '06:00' } });
+    await waitFor(() => expect(save).not.toBeDisabled());
+    expect(screen.queryByTestId('notification-settings-quiet-hours-no-clear')).toBeNull();
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(adapter.create).toHaveBeenCalledWith('sys_notification_preference', {
+        user_id: 'alice',
+        topic: '*',
+        channel: '*',
+        enabled: true,
+        quiet_hours: { start: '23:00', end: '06:00' },
       }),
     );
   });

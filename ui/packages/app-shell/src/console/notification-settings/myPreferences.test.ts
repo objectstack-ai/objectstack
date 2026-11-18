@@ -10,6 +10,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   cellWrite,
+  digestChoices,
+  quietHoursSaveable,
   generalWrite,
   loadMyPreferences,
   MY_PREFERENCES_URL,
@@ -104,10 +106,10 @@ describe('the writes', () => {
   });
 
   it('a general change with an own (*, *) row updates only what was asked', () => {
-    expect(generalWrite('alice', { ...prefs.general, ownRowId: 'row-g' }, { quiet_hours: null })).toEqual({
+    expect(generalWrite('alice', { ...prefs.general, ownRowId: 'row-g' }, { quiet_hours: { start: '23:00', end: '06:00' } })).toEqual({
       kind: 'update',
       id: 'row-g',
-      data: { quiet_hours: null },
+      data: { quiet_hours: { start: '23:00', end: '06:00' } },
     });
   });
 
@@ -117,5 +119,31 @@ describe('the writes', () => {
     await sendPreferenceWrite(writer, { kind: 'create', data: { user_id: 'alice' } });
     expect(writer.update).toHaveBeenCalledWith(PREFERENCE_OBJECT, 'row-1', { enabled: true });
     expect(writer.create).toHaveBeenCalledWith(PREFERENCE_OBJECT, { user_id: 'alice' });
+  });
+});
+
+// The resolver reads a stored digest only as 'daily' / 'weekly', and quiet hours
+// only as a window with a start and an end; anything else falls through to the
+// next row (preference-resolver.ts parseDigest / parseQuietHours). So only the
+// values that override are offered.
+describe('only values that take effect are offered', () => {
+  const prefs = parseMyPreferences(ANSWER);
+
+  it('a digest in force (here the organization default) offers the two cadences, never "none"', () => {
+    expect(prefs.general.digest).toEqual({ value: 'daily', source: 'default' });
+    expect(digestChoices(prefs.general)).toEqual(['daily', 'weekly']);
+    expect(digestChoices({ ...prefs.general, digest: { value: 'weekly', source: 'own' } })).toEqual(['daily', 'weekly']);
+  });
+
+  it('with no digest in force, "none" is the current value and stays listed', () => {
+    expect(digestChoices({ ...prefs.general, digest: { value: 'none', source: 'builtin' } })).toEqual(['none', 'daily', 'weekly']);
+  });
+
+  it('a quiet-hours window is saveable only when complete; an empty one never is', () => {
+    expect(quietHoursSaveable({ start: '22:00', end: '07:00' })).toBe(true);
+    expect(quietHoursSaveable({ tz: 'UTC', start: '22:00', end: '07:00' })).toBe(true);
+    expect(quietHoursSaveable(null)).toBe(false);
+    expect(quietHoursSaveable(undefined)).toBe(false);
+    expect(quietHoursSaveable({ start: '', end: '07:00' })).toBe(false);
   });
 });

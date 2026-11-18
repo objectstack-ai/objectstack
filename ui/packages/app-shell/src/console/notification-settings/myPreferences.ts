@@ -178,9 +178,39 @@ export function cellWrite(userId: string, topic: PreferenceTopic, cell: Preferen
 }
 
 /**
+ * What a stored value on the person's own row does, measured against the
+ * resolver (`preference-resolver.ts`, `parseDigest` / `parseQuietHours`):
+ *
+ *  - `digest` takes effect only as `'daily'` or `'weekly'`. A stored `'none'`
+ *    (the field's default), an empty value or any other value is read as "no
+ *    opinion", and the lookup falls through to the next row — the
+ *    organization's default when there is one.
+ *  - `quiet_hours` takes effect only as a window with both a `start` and an
+ *    `end`. An empty value falls through the same way.
+ *
+ * So saving `'none'` or an empty window never turns off a digest or quiet
+ * hours that is in force: it only lets the next row decide, and the door
+ * cannot say what that row holds. The page therefore offers only the values
+ * that override — the two cadences and a complete window — and the writes
+ * below accept nothing else.
+ */
+export type OverridingDigest = Exclude<DigestCadence, 'none'>;
+
+/** The digest choices that take effect when saved: the two cadences, plus `none` only while nothing is in force (it is then the current value, and saving it changes nothing). */
+export function digestChoices(general: GeneralPreferences): DigestCadence[] {
+  return general.digest.value === 'none' ? ['none', 'daily', 'weekly'] : ['daily', 'weekly'];
+}
+
+/** True when `draft` is a quiet-hours window that takes effect when saved: a complete window, never an empty one. */
+export function quietHoursSaveable(draft: QuietHoursWindow | null | undefined): draft is QuietHoursWindow {
+  return !!draft && typeof draft.start === 'string' && draft.start !== '' && typeof draft.end === 'string' && draft.end !== '';
+}
+
+/**
  * The write that changes the person's digest or quiet hours: their own
  * `(*, *)` row. Created when they have none, with `enabled` set to what is in
- * force at that level now, so the new row changes only what was asked.
+ * force at that level now, so the new row changes only what was asked. Only
+ * values that override are accepted (see {@link OverridingDigest}).
  *
  * ⚠️ A person's `(*, *)` row comes before the organization's rows in the
  * lookup, so once it exists it decides every cell neither a more specific row
@@ -188,7 +218,11 @@ export function cellWrite(userId: string, topic: PreferenceTopic, cell: Preferen
  * control, and re-reads the door after each write, so what it draws is
  * what is in force.
  */
-export function generalWrite(userId: string, general: GeneralPreferences, patch: { digest?: DigestCadence; quiet_hours?: QuietHoursWindow | null }): PreferenceWrite {
+export function generalWrite(
+  userId: string,
+  general: GeneralPreferences,
+  patch: { digest?: OverridingDigest; quiet_hours?: QuietHoursWindow },
+): PreferenceWrite {
   if (general.ownRowId) return { kind: 'update', id: general.ownRowId, data: { ...patch } };
   return {
     kind: 'create',
