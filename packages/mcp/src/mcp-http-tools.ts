@@ -43,12 +43,15 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { EngineAggregateOptions } from '@objectstack/spec/data';
+import type { DisplayNameObjectMeta, EngineAggregateOptions } from '@objectstack/spec/data';
 // [#28550, #28609] The engine's aggregation entry. Each `aggregate_records`
 // entry IS this node, so this door and the REST query door (which parses
 // `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
 // with one refusal.
 import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec/data';
+// [#35138] ADR-0079's one reading of an object's name field
+// (`nameField ?? displayNameField ?? derived`), which names a lookup group.
+import { resolveDisplayField } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
@@ -759,15 +762,31 @@ async function servedFieldsOf(
   bridge: McpDataBridge,
   objectName: string,
 ): Promise<Record<string, unknown> | undefined> {
+  return fieldMapOf(await servedDefinitionOf(bridge, objectName));
+}
+
+/**
+ * The object `objectName` as this caller is served it, or `undefined` when the
+ * bridge cannot say (no member, no object, or a throw).
+ */
+async function servedDefinitionOf(
+  bridge: McpDataBridge,
+  objectName: string,
+): Promise<Record<string, unknown> | undefined> {
   if (typeof bridge.servedObjectDefinitionOf !== 'function') return undefined;
   try {
-    const fields = (await bridge.servedObjectDefinitionOf(objectName))?.fields;
-    return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
-      ? (fields as Record<string, unknown>)
-      : undefined;
+    return (await bridge.servedObjectDefinitionOf(objectName)) ?? undefined;
   } catch {
     return undefined;
   }
+}
+
+/** A served definition's name-keyed field map, or `undefined` when it carries none. */
+function fieldMapOf(def: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const fields = def?.fields;
+  return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
+    ? (fields as Record<string, unknown>)
+    : undefined;
 }
 
 /** The served field `name`, or `undefined` when the caller's view has no such field. */
@@ -844,6 +863,127 @@ function inDeclaredOptionOrder(
     }
     return 0;
   });
+}
+
+/**
+ * [#35138] The field types whose group value is the id of a record of another
+ * object, the field's `reference`.
+ */
+const LOOKUP_GROUP_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
+
+/** [#35138] The member beside a lookup group key that names its record: `<key>__label`. */
+const LOOKUP_LABEL_SUFFIX = '__label';
+
+/**
+ * [#35138] `aggregate_records`' groups with each lookup key's record named
+ * beside it, in `<key>__label`, where `<key>` is the group column (the key's
+ * alias when it has one).
+ *
+ * A group key is a lookup key when the caller's served schema shows it as a
+ * `lookup` or `master_detail` field with a `reference`. The name is the
+ * referenced record's value of the referenced object's name field (ADR-0079,
+ * {@link resolveDisplayField}), read AS THE CALLER: one `bridge.query` per
+ * referenced object, for the ids of the groups served, through the same
+ * bridge and context as the aggregate. Nothing is read with other rights, so
+ * the caller's object, field and record permissions apply as to any read the
+ * caller makes.
+ *
+ * A label is set only for a key whose record that read returns with a
+ * non-blank name. Every other key carries no label, and nothing else in the
+ * answer changes, so the answer says nothing about why a key has none.
+ * No label at all is added, and the rows come back as they are, when the
+ * referenced object is not one this tool reads (`admitsRead`), when the
+ * caller is not served it or its name field, or when the read fails.
+ * ⛔ This read never fails the aggregate it annotates.
+ */
+async function withLookupGroupLabels(
+  bridge: McpDataBridge,
+  rows: unknown[],
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+  admitsRead: (objectName: string) => Promise<boolean>,
+): Promise<unknown[]> {
+  const keysByTarget = new Map<string, string[]>();
+  for (const entry of groupBy ?? []) {
+    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
+    if (item.dateGranularity !== undefined) continue;
+    const def = servedFieldOf(fields, item.field);
+    if (!def || typeof def.type !== 'string' || !LOOKUP_GROUP_TYPES.has(def.type)) continue;
+    if (typeof def.reference !== 'string' || def.reference === '') continue;
+    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
+    keysByTarget.set(def.reference, [...(keysByTarget.get(def.reference) ?? []), column]);
+  }
+  if (keysByTarget.size === 0) return rows;
+
+  const namesByColumn = new Map<string, Map<string, string>>();
+  for (const [target, columns] of keysByTarget) {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (row === null || typeof row !== 'object') continue;
+      for (const column of columns) {
+        const id = (row as Record<string, unknown>)[column];
+        if (typeof id === 'string' && id !== '') ids.add(id);
+      }
+    }
+    if (ids.size === 0) continue;
+    const names = await recordNamesAsCaller(bridge, target, [...ids], admitsRead);
+    if (!names || names.size === 0) continue;
+    for (const column of columns) namesByColumn.set(column, names);
+  }
+  if (namesByColumn.size === 0) return rows;
+
+  return rows.map((row) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) return row;
+    const source = row as Record<string, unknown>;
+    const labelled: Record<string, unknown> = {};
+    for (const [member, value] of Object.entries(source)) {
+      labelled[member] = value;
+      const names = namesByColumn.get(member);
+      const name = names && typeof value === 'string' ? names.get(value) : undefined;
+      const labelMember = `${member}${LOOKUP_LABEL_SUFFIX}`;
+      // A column the aggregate itself answers under that name is never overwritten.
+      if (name !== undefined && !Object.prototype.hasOwnProperty.call(source, labelMember)) labelled[labelMember] = name;
+    }
+    return labelled;
+  });
+}
+
+/**
+ * [#35138] The name of each of `ids` in `target` that the caller's own read
+ * returns with a non-blank name, by id. `undefined` when no name can be read
+ * at all: the object is not one this tool reads, the caller is not served it
+ * or its name field, or the read fails.
+ */
+async function recordNamesAsCaller(
+  bridge: McpDataBridge,
+  target: string,
+  ids: string[],
+  admitsRead: (objectName: string) => Promise<boolean>,
+): Promise<Map<string, string> | undefined> {
+  try {
+    if (!(await admitsRead(target))) return undefined;
+    const def = await servedDefinitionOf(bridge, target);
+    const targetFields = fieldMapOf(def);
+    if (!def || !targetFields) return undefined;
+    const nameField = resolveDisplayField(def as DisplayNameObjectMeta);
+    if (!nameField || !servedFieldOf(targetFields, nameField)) return undefined;
+    const answer = await bridge.query(target, { where: { id: { $in: ids } }, fields: ['id', nameField], limit: ids.length });
+    const records = (answer as { records?: unknown } | null | undefined)?.records;
+    if (!Array.isArray(records)) return undefined;
+    const asked = new Set(ids);
+    const names = new Map<string, string>();
+    for (const record of records) {
+      if (record === null || typeof record !== 'object') continue;
+      const id = idOfRow(record as Record<string, unknown>);
+      const name = (record as Record<string, unknown>)[nameField];
+      if (id === undefined || !asked.has(id)) continue;
+      if (typeof name === 'string' && name.trim() !== '') names.set(id, name);
+      else if (typeof name === 'number' && Number.isFinite(name)) names.set(id, String(name));
+    }
+    return names;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -3280,6 +3420,10 @@ export function registerObjectTools(
             'Groups of a select field come back in the order the field declares its options. ' +
             'An amount column over a field with one fixed currency is named in currencies, alias to ISO 4217 code; ' +
             'an amount whose records each carry their own currency is answered only grouped by its currency code field. ' +
+            // [#35138] The name of a lookup group's record, read as the caller.
+            'A group keyed by a lookup or master-detail field carries <key>__label beside the record id: the name of that record, ' +
+            'read with the caller\'s own permissions. Name such a group by its __label, never by the id; ' +
+            'where a group has no __label, its record cannot be named, so say that rather than quoting the id. ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
             'Runs under the caller\'s permissions, row-level security and field-level security.',
           inputSchema: strictToolInput(
@@ -3366,8 +3510,14 @@ export function registerObjectTools(
             // Group count is unbounded (a high-cardinality groupBy can return
             // thousands of rows) — cap the tool output like query_records does.
             const truncated = groups.length > maxLimit;
+            const served = truncated ? groups.slice(0, maxLimit) : groups;
+            // [#35138] Each lookup key's record named beside it, read as the
+            // caller, for the groups served only.
+            const labelled = fields
+              ? await withLookupGroupLabels(bridge, served, groupBy, fields, async (name) => (await readGuard(name)) === undefined)
+              : served;
             return textResult({
-              rows: truncated ? groups.slice(0, maxLimit) : groups,
+              rows: labelled,
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
               ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
