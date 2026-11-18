@@ -34,7 +34,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { appAutomationElevationOf } from '@objectstack/core';
+import { appAutomationElevationOf, markAppAutomationElevation } from '@objectstack/core';
+import { platformSystemApi } from './platform-system-api.js';
 import { ObjectQL, ScopedContext } from './engine.js';
 import { bindHooksToEngine } from './hook-binder.js';
 import { wrapDeclarativeHook } from './hook-wrappers.js';
@@ -448,7 +449,11 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       expect('APP_AUTHORED_HOOK_API' in entry).toBe(false);
       // [#33651] The detached run of an async hook (`unit-detach.ts`) is the third, unexported too.
       expect('DETACHED_HOOK_RUN' in entry).toBe(false);
-      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(3);
+      // The platform's own system api (`platform-system-api.ts`) is the fourth: its key is not
+      // exported, only the reader `platformSystemApi` is.
+      expect('PLATFORM_SYSTEM_API' in entry).toBe(false);
+      expect(typeof (entry as Record<string, unknown>).platformSystemApi).toBe('function');
+      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(4);
     });
 
     it('a resolver failure keeps the UNSEEDED pin — narrower, never elevated — and says so once at warn', async () => {
@@ -700,5 +705,43 @@ describe('#25653 an app-authored hook\'s elevation carries the app-automation ma
     await hook.handler(ctx);
     expect(seen[0]).not.toBe(ctx.api);
     expect(appAutomationElevationOf((seen[0] as any).executionContext)).toBe('hook');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#35052] The platform's own system api over a hook's api: elevated as
+// sudo() elevates, without the automation's provenance (the mark, the run).
+// ---------------------------------------------------------------------------
+
+describe("the platform's own system api carries no app-automation provenance", () => {
+  /** The context of an insert made through `pick(ctx.api)` on a hook handed `execCtx`. */
+  async function insertThrough(execCtx: ExecutionContext, pick: (api: any) => any) {
+    const engine = recordingEngine();
+    await pick(makeCtx(execCtx, engine).api).object('sys_activity').insert({ id: 'a1' });
+    return engine.seen.find((e: { method: string }) => e.method === 'insert')!.context;
+  }
+  const transaction = { trx: 1 };
+  const ACTION = markAppAutomationElevation({ ...OPERATOR, isSystem: true, transaction }, 'action') as ExecutionContext;
+  const RUN = { ...OPERATOR, flowRunId: 'run_1', transaction } as ExecutionContext;
+
+  it('is elevated, and keeps every key of the write but the mark and the run', async () => {
+    for (const execCtx of [ACTION, RUN]) {
+      const context = await insertThrough(execCtx, (a) => platformSystemApi(a));
+      expect(context.isSystem).toBe(true);
+      expect(appAutomationElevationOf(context)).toBeUndefined();
+      expect(context.flowRunId).toBeUndefined();
+      expect(context).toMatchObject({ userId: OPERATOR.userId, tenantId: OPERATOR.tenantId, permissions: OPERATOR.permissions });
+      expect(context.transaction).toBe(transaction);
+    }
+  });
+
+  it("CONTROL: the same api's sudo() keeps both", async () => {
+    expect(appAutomationElevationOf(await insertThrough(ACTION, (a) => a.sudo()))).toBe('action');
+    expect((await insertThrough(RUN, (a) => a.sudo())).flowRunId).toBe('run_1');
+  });
+
+  it('answers nothing for an api this engine did not build', () => {
+    expect(platformSystemApi({ sudo: () => ({}) })).toBeUndefined();
+    expect(platformSystemApi(undefined)).toBeUndefined();
   });
 });
