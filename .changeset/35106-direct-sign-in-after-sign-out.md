@@ -1,13 +1,13 @@
 ---
 '@objectstack/plugin-auth': patch
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@object-ui/auth': patch
 ---
 
 feat(auth): `directSignIn.afterSignOut` lets an explicit sign-out return through the identity provider's sign-in page
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 A deployment with direct sign-in on can now choose where an explicit sign-out returns once the identity provider has ended its own session. The default keeps today's behaviour, so nothing changes until a deployment sets the new value.
 
