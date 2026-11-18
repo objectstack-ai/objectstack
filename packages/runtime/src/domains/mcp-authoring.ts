@@ -104,9 +104,16 @@
  *    save.
  *  - `delete_metadata_draft` discards a pending draft through `deleteMetaItem`
  *    with `state: 'draft'`, never an active item.
- *  - Both ask the walled refusal (`walledCatalogWriteVerdict`, ADR-0131
- *    D3/D12) before anything is written, as every `/meta` write door does, on
- *    the posture this transport reads (`readEffectiveTenancyPosture`).
+ *  - Both ask the `/meta` type-level write admission (`metaTypeWriteRefusal`,
+ *    the save as `PUT`, the discard as `DELETE`) with the human as the caller,
+ *    then the walled refusal (`walledCatalogWriteVerdict`, ADR-0131 D3/D12),
+ *    before anything is written, as every `/meta` write door does, on the
+ *    posture this transport reads (`readEffectiveTenancyPosture`). The
+ *    authoring admission (D1) alone does not cover a type whose own write
+ *    door requires more.
+ *  - A verdict is a read of the stored draft's body, so the save's verdict
+ *    and each listed draft's verdict are told only where the type-level read
+ *    admission admits the human; elsewhere the reply says it was withheld.
  *  - `list_drafts` stays ungated as a list (as `/meta/_drafts`), and each
  *    entry now carries its publish verdict. The verdict is read off the
  *    draft's body, so it is told only where the `/meta` item gate admits the
@@ -135,6 +142,7 @@ import {
     createMetaItemReadGate,
     createMetaListReadGate,
     metaTypeReadRefusal,
+    metaTypeWriteRefusal,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
     type MetaItemReadGateSources,
@@ -688,6 +696,9 @@ export function createOpenAuthoringRegistry(opts: {
                         if (input.ifMatch !== undefined && !ifMatch) {
                             return refuse(VALIDATION_ERROR, '`ifMatch` is the `version` a read or a save answered.', 400);
                         }
+                        // The `/meta` type-level write admission, before anything is written.
+                        const typeWriteRefused = await typeAdmission('PUT', type);
+                        if (typeWriteRefused) return refuse(typeWriteRefused.code, typeWriteRefused.message, typeWriteRefused.status);
                         const walled = await writer.writeVerdict(type);
                         if (!walled.allowed) return refuse(walled.code, walled.message, walled.status);
                         // Built field by field: `item` is data, never a channel, so no
@@ -714,6 +725,12 @@ export function createOpenAuthoringRegistry(opts: {
                             ...((saved as { version?: unknown } | undefined)?.version !== undefined ? { version: (saved as { version?: unknown }).version } : {}),
                         };
                         const review = reviewRoutes(pkg, type, name);
+                        // The verdict is a read of the stored draft: told only where the
+                        // `/meta` type-level read admission admits this human.
+                        const typeReadRefused = await typeAdmission('read', type);
+                        if (typeReadRefused) {
+                            return answer({ saved: identity, verdict: null, verdictWithheld: typeReadRefused, review });
+                        }
                         let judgement: OpenAuthoringDraftJudgement;
                         try {
                             judgement = await protocol.draftPublishJudgement({ type, name, packageId: pkg, userTextLocales: writer.userTextLocales });
@@ -732,6 +749,8 @@ export function createOpenAuthoringRegistry(opts: {
                         if (!type || !name) return refuse(VALIDATION_ERROR, 'Name the draft as `type` and `name`.', 400);
                         const pkg = input.package === undefined ? undefined : requiredString(input.package);
                         if (input.package !== undefined && !pkg) return refuse(VALIDATION_ERROR, '`package` is a package id.', 400);
+                        const typeWriteRefused = await typeAdmission('DELETE', type);
+                        if (typeWriteRefused) return refuse(typeWriteRefused.code, typeWriteRefused.message, typeWriteRefused.status);
                         const walled = await writer.writeVerdict(type);
                         if (!walled.allowed) return refuse(walled.code, walled.message, walled.status);
                         // `state: 'draft'`: the pending draft only, never an active item.
@@ -753,8 +772,23 @@ export function createOpenAuthoringRegistry(opts: {
              * refuses it, whether or not the named item exists.
              */
             async function typeReadRefusal(type: string): Promise<OpenAuthoringToolResult | undefined> {
-                const refusal = metaTypeReadRefusal('GET', type, await readGate!(protocol ?? {}).resolveCaller());
+                const refusal = await typeAdmission('read', type);
                 return refusal ? refuse(refusal.code, refusal.message, refusal.status) : undefined;
+            }
+
+            /**
+             * The `/meta` type-level admissions, read or write, with the human as
+             * the caller: `metaTypeReadRefusal` for a read of a typed item (a draft's
+             * body, the verdict read off it), `metaTypeWriteRefusal` for a draft save
+             * (`PUT`) or discard (`DELETE`), as the `/meta` entry asks them of the
+             * same verbs. `undefined` admits.
+             */
+            async function typeAdmission(
+                kind: 'read' | 'PUT' | 'DELETE',
+                type: string,
+            ): Promise<{ code: ErrorCode; message: string; status: number } | undefined> {
+                const caller = await readGate!(protocol ?? {}).resolveCaller();
+                return kind === 'read' ? metaTypeReadRefusal('GET', type, caller) : metaTypeWriteRefusal(kind, type, caller);
             }
 
             function unavailable(): OpenAuthoringToolResult {
@@ -770,6 +804,9 @@ export function createOpenAuthoringRegistry(opts: {
                 // the door's one helper; a row with no type keeps the row's own.
                 const draft = { ...listed, type: canonicalTypeOf(listed.type) ?? listed.type };
                 try {
+                    // A type this human may not read: neither its body nor a verdict read off it.
+                    const typeRefused = await typeAdmission('read', draft.type);
+                    if (typeRefused) return { verdict: null, verdictWithheld: typeRefused };
                     // A package-unbound draft is read without a package: the strict
                     // draft read's own address resolution then names it.
                     const read = await p.getMetaItem!({

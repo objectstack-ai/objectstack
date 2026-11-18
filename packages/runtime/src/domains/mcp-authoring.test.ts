@@ -655,6 +655,37 @@ describe('save_metadata_draft saves a draft and answers with its publish verdict
     expect(saved.body.review.item).toBe('/studio/com.acme.crm/metadata/flow/lead_intake?review=1');
   });
 
+  it('a type the caller may not write is refused on the save and the discard before anything is written', async () => {
+    const { authoring, served } = await authorThroughDomain();
+    for (const type of ['datasource', 'datasources']) {
+      const saved = await call(authoring, 'save_metadata_draft', { type, name: 'warehouse', item: { name: 'warehouse' }, package: 'com.acme.crm' });
+      expect(saved.body.error, type).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      const discarded = await call(authoring, 'delete_metadata_draft', { type, name: 'warehouse', package: 'com.acme.crm' });
+      expect(discarded.body.error, type).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    }
+    expect(served.protocolCalls.filter((c: any) => ['saveMetaItem', 'deleteMetaItem', 'draftPublishJudgement'].includes(c[0]))).toEqual([]);
+
+    // The control: a human who holds the type's capability writes it.
+    const holder = [...ADMIN, 'manage_platform_settings'];
+    const ec = await oauthEnvelope(['metadata:write'], holder);
+    const allowed = await serve(ec, { systemPermissions: holder });
+    expect((await call(allowed.authoring!, 'save_metadata_draft', { type: 'datasource', name: 'warehouse', item: { name: 'warehouse' }, package: 'com.acme.crm' })).isError).toBe(false);
+    expect((await call(allowed.authoring!, 'delete_metadata_draft', { type: 'datasource', name: 'warehouse', package: 'com.acme.crm' })).isError).toBe(false);
+    expect(allowed.protocolCalls.filter((c: any) => ['saveMetaItem', 'deleteMetaItem'].includes(c[0])).map((c: any) => [c[0], c[1].type])).toEqual(
+      [['saveMetaItem', 'datasource'], ['deleteMetaItem', 'datasource']],
+    );
+  });
+
+  it('a save of a type the caller may not read lands, and its verdict is withheld rather than read', async () => {
+    const { authoring, served } = await authorThroughDomain();
+    const saved = await call(authoring, 'save_metadata_draft', { type: 'external_catalog', name: 'warehouse_catalog', item: { name: 'warehouse_catalog' }, package: 'com.acme.crm' });
+    expect(saved.isError).toBe(false);
+    expect(saved.body.saved).toMatchObject({ type: 'external_catalog', name: 'warehouse_catalog' });
+    expect(saved.body.verdict).toBeNull();
+    expect(saved.body.verdictWithheld).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(served.protocolCalls.filter((c: any) => c[0] === 'draftPublishJudgement')).toEqual([]);
+  });
+
   it('a save naming no package is refused 400 naming the writable packages, and nothing is written (seat ruling D4)', async () => {
     const store = {
       package: [
@@ -728,18 +759,22 @@ describe('list_drafts answers each draft with its publish verdict, told where th
     const store = {
       dashboard: [{ name: 'finance_board', label: 'Finance', requiredPermissions: ['finance.access'], widgets: [] }],
     };
-    const { protocol } = fakeProtocol(store);
+    const { protocol, calls } = fakeProtocol(store);
     protocol.listDrafts = async () => ({
       drafts: [
         { type: 'flow', name: 'lead_intake', label: 'Lead intake', packageId: 'com.acme.crm', updatedAt: null, updatedBy: null },
         { type: 'dashboard', name: 'finance_board', label: 'Finance', packageId: 'com.acme.crm', updatedAt: null, updatedBy: null },
+        { type: 'datasource', name: 'warehouse', label: 'Warehouse', packageId: 'com.acme.crm', updatedAt: null, updatedBy: null },
       ],
     } as any);
     const { authoring } = await authorThroughDomain({ protocol });
     const listed = await call(authoring, 'list_drafts', {});
 
-    expect(listed.body.count).toBe(2);
-    const [flow, dashboard] = listed.body.drafts;
+    expect(listed.body.count).toBe(3);
+    const [flow, dashboard, typeRefused] = listed.body.drafts;
+    // A type the caller may not read: its body is not read and no verdict is told.
+    expect(typeRefused).toMatchObject({ type: 'datasource', name: 'warehouse', verdict: null, verdictWithheld: { code: 'PERMISSION_DENIED', status: 403 } });
+    expect(calls.some((c: any) => c[1]?.type === 'datasource')).toBe(false);
     // The list stays ungated, as /meta/_drafts: both drafts are listed.
     expect(flow).toMatchObject({ type: 'flow', name: 'lead_intake', verdict: { publishable: false, refusals: [UNROUTABLE_ISSUE] } });
     expect(dashboard).toMatchObject({ type: 'dashboard', name: 'finance_board', verdict: null, verdictWithheld: { code: 'PERMISSION_DENIED', status: 403 } });
