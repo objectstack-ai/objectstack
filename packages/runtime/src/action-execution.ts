@@ -114,6 +114,8 @@ import {
     servedRecordTitle,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
+    AGGREGATE_ORDER_CUT,
+    type AggregateOrderCutRequest,
     type PackageScopedRefusal,
     type PackageScopedRegistry,
 } from '@objectstack/objectql';
@@ -961,6 +963,13 @@ export async function callData(deps: ActionExecutionDeps,
                 groupBy: params.groupBy,
                 aggregations: params.aggregations,
             });
+            // [aggregate order and cut] The engine's order-cut-count request,
+            // when an in-process door (the MCP tools) set it on `params` under
+            // the engine's own symbol key — never a wire key. Handed to the
+            // engine as its read option and read back: a read that comes back
+            // without the engine's outcome on it was not ordered and cut in
+            // the driver's statement, and its rows are no answer.
+            const orderCut = (params as Record<symbol, unknown> | undefined)?.[AGGREGATE_ORDER_CUT] as AggregateOrderCutRequest | undefined;
             const rows = await engine.aggregate(
                 params.object,
                 {
@@ -970,8 +979,17 @@ export async function callData(deps: ActionExecutionDeps,
                     ...(params.timezone ? { timezone: params.timezone } : {}),
                     ...(executionContext ? { context: executionContext } : {}),
                 },
+                ...(orderCut !== undefined ? [{ [AGGREGATE_ORDER_CUT]: orderCut }] as const : [] as const),
             );
-            return { object: params.object, rows: rows ?? [] };
+            if (orderCut === undefined) return { object: params.object, rows: rows ?? [] };
+            if (orderCut.outcome?.kind !== 'served') {
+                throw {
+                    statusCode: 500,
+                    message: `The ordered and cut aggregate of '${params.object}' came back without being served by the `
+                        + 'driver\'s own statement, so its rows are not the answer and none is returned.',
+                };
+            }
+            return { object: params.object, rows: rows ?? [], groupCount: orderCut.outcome.groupCount };
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }

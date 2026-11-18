@@ -280,6 +280,32 @@ export interface McpDataBridge {
     },
   ): Promise<unknown[]>;
   /**
+   * `aggregate_records` with an `orderBy` or a `limit`: the groups ORDERED by
+   * an aggregated column (an aggregation alias or a group key's projected
+   * name), CUT to at most `limit`, and `groupCount`, how many groups existed
+   * before the cut — all three computed by the driver's own statement
+   * (`@objectstack/objectql` `aggregate-order-cut.ts`, which the bridge
+   * reaches through `engine.aggregate`'s read option). The bridge runs it
+   * through every gate {@link aggregate} runs. A driver that cannot order and
+   * cut groups in its own statement refuses (`INVALID_QUERY` / 400), and the
+   * bridge throws that refusal; it never orders or cuts the groups itself.
+   *
+   * OPTIONAL, separately from {@link aggregate}: a bridge without it registers
+   * `aggregate_records` as before, and the tool refuses an `orderBy` / `limit`
+   * rather than cut an unordered list (`NOT_IMPLEMENTED` / 501).
+   */
+  aggregateGroups?(
+    object: string,
+    opts: {
+      where?: Record<string, unknown>;
+      groupBy?: NonNullable<EngineAggregateOptions['groupBy']>;
+      aggregations: NonNullable<EngineAggregateOptions['aggregations']>;
+      timezone?: string;
+      orderBy: Array<{ field: string; order: 'asc' | 'desc' }>;
+      limit?: number;
+    },
+  ): Promise<{ rows: unknown[]; groupCount: number }>;
+  /**
    * [ADR-0149 D2] `list_datasets`: the governed datasets this caller may
    * query, each with its dimensions and measures, their business vocabulary,
    * and which of `input.terms` matched which member. Runs AS the principal
@@ -3006,6 +3032,12 @@ export function registerObjectTools(
             'Aggregate records with GROUP BY: count/sum/avg/min/max/count_distinct over an object, ' +
             'optionally grouped by fields (dates can be bucketed by day/week/month/quarter/year). ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
+            // [aggregate order and cut] A ranking question ("the top five
+            // customers by revenue") is answered by the database: ordered,
+            // cut, and the number of groups before the cut stated.
+            'For a ranking (top or bottom N), set orderBy to an aggregation alias or a group key and limit to N: ' +
+            'the database orders and cuts the groups, and groupCount says how many groups existed before the cut. ' +
+            `At most ${maxLimit} groups come back; truncated: true says more existed. ` +
             'Runs under the caller\'s permissions, row-level security and field-level security.',
           inputSchema: strictToolInput(
             {
@@ -3021,6 +3053,13 @@ export function registerObjectTools(
                 aggs: 'aggregations',
                 tz: 'timezone',
                 timeZone: 'timezone',
+                sort: 'orderBy',
+                sortBy: 'orderBy',
+                order: 'orderBy',
+                order_by: 'orderBy',
+                top: 'limit',
+                take: 'limit',
+                pageSize: 'limit',
               },
             },
             {
@@ -3064,14 +3103,63 @@ export function registerObjectTools(
               .string()
               .optional()
               .describe('IANA timezone for date bucketing (defaults to UTC)'),
+            orderBy: z
+              .array(z.object({ field: z.string(), order: z.enum(['asc', 'desc']) }))
+              .max(8)
+              .optional()
+              .describe(
+                'Order of the groups, by an aggregation alias or a group key (its alias when it has one), '
+                  + 'e.g. [{"field":"total","order":"desc"}]; computed by the database',
+              ),
+            limit: z
+              .number()
+              .int()
+              .positive()
+              .max(maxLimit)
+              .optional()
+              .describe(`Most groups to return (≤ ${maxLimit}); the cut is taken by the database, after orderBy`),
             },
           ),
           annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
         },
-        async ({ objectName, aggregations, groupBy, where, timezone }) => {
+        async ({ objectName, aggregations, groupBy, where, timezone, orderBy, limit }) => {
           const bad = await readGuard(objectName);
           if (bad) return errorResult(bad);
           try {
+            if (orderBy !== undefined || limit !== undefined) {
+              // [aggregate order and cut] Ordered, cut and counted by the
+              // driver's own statement, through the bridge's member for it;
+              // one group past the cap is asked for, so `truncated` is a fact
+              // (the capped-list key every read tool shares), and `groupCount`
+              // is the statement's own count of the groups before the cut.
+              // ⛔ Never sorted or sliced from an uncut list here.
+              if (typeof bridge.aggregateGroups !== 'function') {
+                return codedErrorResult({
+                  code: StandardErrorCode.enum.NOT_IMPLEMENTED,
+                  status: 501,
+                  message:
+                    `aggregate_records on '${objectName}': this server cannot order or cut groups in the database, `
+                    + 'and never orders or cuts them in the application instead. Ask without orderBy and limit.',
+                });
+              }
+              const cap = Math.min(limit ?? maxLimit, maxLimit);
+              const answer = await bridge.aggregateGroups(objectName, {
+                where,
+                groupBy,
+                aggregations,
+                timezone,
+                orderBy: orderBy ?? [],
+                limit: cap + 1,
+              });
+              const groups = Array.isArray(answer?.rows) ? answer.rows : [];
+              const cut = groups.length > cap;
+              return textResult({
+                rows: cut ? groups.slice(0, cap) : groups,
+                groupCount: answer.groupCount,
+                totalGroups: answer.groupCount,
+                ...(cut ? { truncated: true } : {}),
+              });
+            }
             const rows = (await aggregateFn(objectName, {
               where,
               groupBy,
@@ -3083,6 +3171,9 @@ export function registerObjectTools(
             const truncated = rows.length > maxLimit;
             return textResult({
               rows: truncated ? rows.slice(0, maxLimit) : rows,
+              // How many groups existed before the cap: the card's
+              // `groupCount`, beside the earlier `totalGroups` it equals.
+              groupCount: rows.length,
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
             });
