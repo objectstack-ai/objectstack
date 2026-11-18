@@ -136,7 +136,7 @@ record again: a 3-row fixture became 6, then 9
 reference the first load had to leave empty stayed empty on the first row while
 only a later copy named the person. `replace` expected the caller to clear the
 table first, and no load ever clears one. Both were removed in
-`@objectstack/spec` 18.6.0 ([#34613](https://github.com/objectstack-ai/objectstack/issues/34613)):
+`@objectstack/spec` 18.7.0 ([#34613](https://github.com/objectstack-ai/objectstack/issues/34613)):
 
 - **Authoring refuses them.** `defineSeed`, `defineStack`, `os validate`, `os build`
   and the metadata save and publish doors reject `mode: 'insert'` or
@@ -164,7 +164,7 @@ To convert a dataset, declare which field identifies a row, then drop the mode
 3. **The records carry their own ids**: set `externalId: 'id'`.
 
 ```typescript
-// Before — refused since @objectstack/spec 18.6.0
+// Before — refused since @objectstack/spec 18.7.0
 defineSeed(ExchangeRate, {
   mode: 'replace',
   records: [{ key: 'USD_EUR', rate: 0.92 }],

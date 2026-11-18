@@ -45,11 +45,11 @@ const SEED_MODE_RETIRED_FIX =
  * carries that judgement.
  */
 const SEED_MODE_INSERT_RETIRED =
-  "`seed.mode: 'insert'` was removed in @objectstack/spec 18.6.0 (ADR-0049 enforce-or-remove) — a seed is "
+  "`seed.mode: 'insert'` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — a seed is "
   + 'replayed on every boot, package install and publish, and `insert` matched no existing row, so every replay '
   + 'inserted each record again. ' + SEED_MODE_RETIRED_FIX;
 const SEED_MODE_REPLACE_RETIRED =
-  "`seed.mode: 'replace'` was removed in @objectstack/spec 18.6.0 (ADR-0049 enforce-or-remove) — it inserted "
+  "`seed.mode: 'replace'` was removed in @objectstack/spec 18.7.0 (ADR-0049 enforce-or-remove) — it inserted "
   + 'every record and left clearing the table to the caller, and no load ever clears one, so every replay '
   + 'inserted each record again. ' + SEED_MODE_RETIRED_FIX;
 
