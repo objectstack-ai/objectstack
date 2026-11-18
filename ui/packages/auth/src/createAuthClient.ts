@@ -653,6 +653,33 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
+  /** How long sign-out waits for `/auth/config` when this tab holds none: one attempt, never the retry ladder. */
+  const SIGN_OUT_CONFIG_TIMEOUT_MS = 3_000;
+
+  /**
+   * Where the identity provider sends the browser back after an explicit
+   * sign-out: the start door `{basePath}/sign-in/direct` when the deployment
+   * serves `afterSignOut: 'identity-provider'` and `directSignIn: true` (the
+   * door is mounted and can start), otherwise `loginPath`, the sign-in page
+   * (the `hold` ruling). The door starts a fresh sign-in with no cookie, and
+   * the provider has just ended its session, so the person meets the
+   * provider's own sign-in page; the door never sends the browser back to
+   * itself. Read from the config this tab holds; with none, one bounded
+   * attempt. A config that cannot be read keeps `loginPath`.
+   */
+  async function signOutReturn(loginPath: string): Promise<string> {
+    let config: AuthPublicConfig | null;
+    try {
+      config = configPromise ? await configPromise : await fetchConfigAttempt(SIGN_OUT_CONFIG_TIMEOUT_MS);
+    } catch {
+      config = null;
+    }
+    const features = config?.features;
+    return features?.directSignIn === true && features.afterSignOut === 'identity-provider'
+      ? `${basePath}/sign-in/direct`
+      : loginPath;
+  }
+
   const client: AuthClient = {
     async signIn(credentials: SignInCredentials) {
       const { data, error } = await betterAuth.signIn.email({
@@ -770,17 +797,21 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
 
     async signOut() {
       // `callbackURL` is where the identity provider sends the browser after
-      // ending its own session: this SPA's sign-in page. better-auth uses it
-      // only when it answers with a provider-logout URL (see
-      // `providerLogoutURL`); without a provider the answer is
-      // `{ success: true }` and the caller's in-app route to the sign-in page
-      // stays as it was.
+      // ending its own session: this SPA's sign-in page, or, under the
+      // deployment's `afterSignOut: 'identity-provider'`, the direct sign-in
+      // start door (`signOutReturn`). better-auth uses it only when it answers
+      // with a provider-logout URL (see `providerLogoutURL`); without a
+      // provider the answer is `{ success: true }` and the caller's in-app
+      // route to the sign-in page stays as it was.
       //
       // The sign-in page comes next, so it must read the doors the server
       // has now; forgotten before the request, so a failed sign-out (which
-      // still leaves this tab without its token) forgets it too.
+      // still leaves this tab without its token) forgets it too. The return
+      // is read first, from the config this tab already holds.
+      const loginPath = resolveSpaRoute('/login');
+      const callbackURL = await signOutReturn(loginPath);
       forgetConfig();
-      const { data, error } = await betterAuth.signOut({ callbackURL: resolveSpaRoute('/login') });
+      const { data, error } = await betterAuth.signOut({ callbackURL });
       TokenStorage.clear();
       if (error) {
         throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
@@ -800,9 +831,11 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       // page load, so `AuthProvider`'s in-memory "ended by sign-out" is gone by
       // then; the tab's note carries it across (`./signOutRoundTrip`), and the
       // page holds instead of starting a direct sign-in (objectstack#33183).
+      // Returning through the door instead, the browser never lands on the
+      // sign-in page on the way back, so there is no hold to carry.
       const url = providerLogoutURL(data);
       if (url && typeof window !== 'undefined') {
-        markSignOutRoundTrip(resolveSpaRoute('/login'));
+        if (callbackURL === loginPath) markSignOutRoundTrip(loginPath);
         window.location.assign(url);
       }
     },

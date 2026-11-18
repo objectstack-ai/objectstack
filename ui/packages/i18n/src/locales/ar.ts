@@ -1770,7 +1770,6 @@ const ar = {
     widgetForbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بهذه الأداة.",
     allWidgetsForbiddenMessage: "ليست لديك صلاحية لعرض البيانات الخاصة بلوحة التحكم هذه.",
     details: "التفاصيل",
-    exportCsv: "تصدير CSV",
     openInList: "فتح في القائمة",
     filters: {
       label: "عوامل تصفية لوحة المعلومات",

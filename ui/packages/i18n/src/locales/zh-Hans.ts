@@ -1635,7 +1635,6 @@ const zh = {
     widgetForbiddenMessage: '你没有查看该组件数据的权限。',
     allWidgetsForbiddenMessage: '你没有查看该仪表盘数据的权限。',
     details: '明细',
-    exportCsv: '导出 CSV',
     openInList: '在列表中打开',
     config: {
       breadcrumb: {

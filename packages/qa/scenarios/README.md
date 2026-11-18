@@ -237,6 +237,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # t
 pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
+pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-skills "$PWD/skills"  # build through the MCP draft door, no project (below)
 ```
 
 Per card and mode the runner writes `docs/qa/platform-checklist/runs/<date>-scenario-<card>.json`
@@ -263,7 +264,7 @@ files only: no model, no network, and no score of its own — every figure is th
   `this run’s from-scratch build` takes that run's scratch author.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
   driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
-  reads `none`), and the card file they graded (`card`, below; a record without it reads `card: not recorded`).
+  reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), and the card file they graded (`card`, below; a record without it reads `card: not recorded`).
   When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
 - **The card stamp**: every record names the card file it graded at its top level, `card: { id, sha256 }` (the sha256
@@ -279,6 +280,93 @@ files only: no model, no network, and no score of its own — every figure is th
   differ only in it share a row.
 - `--card ID[,ID]` and `--mode M[,M]` narrow the tables. Other JSON in a directory (recordings) is skipped and listed
   on stderr; a file named directly that is not a run record fails the command.
+
+### Door mode — `--modes door`
+
+Door mode builds the card the way a person's own MCP client builds an app on a running environment: through the
+app's **MCP draft door** (`save_metadata_draft` and its reads), with **no project and no files**. Then a
+person-equivalent step publishes what it staged, and the result is graded exactly as a scratch build is: the Build
+half on what the environment serves after the publish, then the Run half on that app. It builds once (no iterate).
+
+Per card (`doorMode` in `src/runner/orchestrate.ts`):
+
+1. A host project of its own namespace (`host<code>`) boots with the OAuth authorization server on
+   (`OS_OIDC_PROVIDER_ENABLED=true`), and the runner signs in as the dev admin.
+2. **The person's steps, through the same doors Studio uses**: create a writable package `com.scenario.<namespace>`
+   in the card's namespace (`POST /api/v1/packages`), and connect an MCP client: an OAuth 2.1 + PKCE token scoped
+   `openid metadata:write`, the scope that serves the authoring tools.
+3. **The client's turn**: a fresh, empty directory outside the host project, removed after the turn. The token goes
+   in a 0600 MCP config file outside that directory (never on argv, never in the record). The turn may call
+   `mcp__app` (and `Skill` when it is given skills); `Bash`, `Edit`, `Write` and `NotebookEdit` are denied. The prompt
+   names the package and the namespace and is the same text in every arm.
+4. **The publish**: the runner lists the package's drafts and publishes them
+   (`POST /api/v1/packages/<id>/publish-drafts`), recording the outcome and each refused draft. A publish that does
+   not answer `published` (a refusal answers on a 200) is a finding; the build is graded on what is served anyway.
+
+A refused package, a refused token or a harness without these doors is a finding or a skip naming the step, never a
+score. The scorecard prints the steps on one line (`- door: package … created · client connected (…) · N drafts
+pending · publish: published, N published`).
+
+**Arms.** One round measures what a piece of instruction text is worth by running the same cards with and without
+it. The arm is part of the driver's record (`env.driver.door`), and `summary` never sums two arms into one table.
+
+- `--door-skills DIR`: the Claude Code skills the client is given, under its directory's `.claude/skills/` (the same
+  reader and closed front-matter key set as `--ask-skills`). `--door-skill-omit NAME[,NAME]` leaves named skills of
+  `DIR` out: with and without one skill is the same directory with and without that omission. The record names each
+  skill given, with its version and sha256, and each omitted.
+- `--door-rules FILE` (or `OS_SCENARIOS_DOOR_RULES=FILE`): rule texts **the maintainer supplies at run time**, given to
+  the client as its directory's `CLAUDE.md`. The file lives outside this repository; one inside the checkout is
+  refused. `--door-rules-omit A[,B]` leaves out rule ids or named sets. The record names the file (its name, not its
+  path), its sha256, and the ids active and omitted, never a text.
+
+The rules file is one JSON object (`src/runner/door.ts` holds the whole contract):
+
+```json
+{
+  "rules": [
+    { "id": "rule-a", "text": "The full text of the first rule." },
+    { "id": "rule-b", "text": "The full text of the second rule." }
+  ],
+  "sets": { "set-x": ["rule-a"] }
+}
+```
+
+`rules` is a non-empty list of `{ id, text }` with unique ids; `sets` (optional) names lists of those ids. Refused
+before any card runs, naming what is wrong: a missing file, no JSON, an unknown key, an empty text, a duplicate id, a
+set naming no rule of the file or named like a rule, a selector naming nothing in the file, a selector that omits
+every rule (that arm is the run without `--door-rules`), and a file inside this checkout.
+
+A rules-arm run's record and recording (`--record`) hold the client's transcripts, and a transcript can quote rule
+text the client was given: read them before filing either anywhere public.
+
+Door mode runs on the live `claude` driver, or a replay of one (`--driver recorded:FILE` re-sends the recorded draft
+saves through the replay's own door and token, and refuses the run as not faithful when the app answers one
+otherwise). Codex and an external driver are refused.
+
+**One round, five reps per arm** (the maintainer's run; each arm writes its own records directory):
+
+```bash
+RULES=/abs/path/outside/the/repo/rules.json   # the maintainer's file
+for arm in bare skills rules both; do
+  case $arm in
+    bare)   flags=() ;;
+    skills) flags=(--door-skills "$PWD/skills") ;;
+    rules)  flags=(--door-rules "$RULES") ;;
+    both)   flags=(--door-skills "$PWD/skills" --door-rules "$RULES") ;;
+  esac
+  for rep in 1 2 3 4 5; do
+    pnpm --filter @objectstack/scenarios run-scenarios --modes door "${flags[@]}" \
+      --record "$PWD/runs/door-$arm/rep$rep.rec.json" --out "$PWD/runs/door-$arm/rep$rep"
+  done
+done
+for arm in bare skills rules both; do
+  pnpm --filter @objectstack/scenarios run-scenarios summary --mode door "$PWD/runs/door-$arm"
+done
+```
+
+Add `--door-skill-omit NAME` to an arm to measure one skill, or `--door-rules-omit SET` to measure one named set of
+rules; add `--model` / `--effort` as any round does. Summarize each arm apart: `summary` refuses a table whose runs
+differ in arm, naming both, and prints the arm on each table's dimensions line.
 
 ### Running from npm
 

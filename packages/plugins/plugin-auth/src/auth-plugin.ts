@@ -408,9 +408,13 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * id); unset, the one provider configured. `localSignIn` is `hidden`
    * (default: the sign-in page stays at `/login?local=1`) or `off` (the page
    * does not offer it); the server's password sign-in is unchanged either way.
-   * Absent ⇒ off. Self-host sets `OS_AUTH_DIRECT_SIGN_IN_ENABLED`,
-   * `OS_AUTH_DIRECT_SIGN_IN_PROVIDER` and `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH`, which win
-   * over this option field by field.
+   * `afterSignOut` is `hold` (default: an explicit sign-out the identity
+   * provider ends returns to the sign-in page, which holds) or
+   * `identity-provider` (it returns through the start door to the identity
+   * provider's own sign-in page). Absent ⇒ off. Self-host sets
+   * `OS_AUTH_DIRECT_SIGN_IN_ENABLED`, `OS_AUTH_DIRECT_SIGN_IN_PROVIDER`,
+   * `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH` and `OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT`,
+   * which win over this option field by field.
    */
   directSignIn?: DirectSignInOptions;
 
