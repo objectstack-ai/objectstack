@@ -201,8 +201,9 @@ describe('[aggregate order and cut] stdio — aggregate_records over the engine'
       // …and the engine refuses that rank, the driver never asked.
       const rank = Array.from({ length: AT + 1 }, (_, i) => `w${i}`);
       const err: any = await past.engine
-        .aggregate(OBJECT, { groupBy: ['wide'], aggregations: [{ function: 'count', alias: 'n' }] } as any,
-          { [AGGREGATE_ORDER_CUT]: { orderBy: [{ field: 'wide', order: 'asc', rank }], limit: 5 } } as any)
+        .aggregate(OBJECT, { groupBy: ['wide'], aggregations: [{ function: 'count', alias: 'n' }] },
+          // The engine-internal read option rides on its symbol key, outside the declared options.
+          { [AGGREGATE_ORDER_CUT]: { orderBy: [{ field: 'wide', order: 'asc', rank }], limit: 5 } } as unknown as Parameters<ObjectQL['aggregate']>[2])
         .then(() => undefined, (e: unknown) => e);
       expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_QUERY', status: 400 });
       expect(past.asts).toHaveLength(1);
