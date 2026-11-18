@@ -657,13 +657,14 @@ export function BuilderLanding(): React.ReactElement {
           <h2 className={headingClass}>{t('engine.home.recent', locale)}</h2>
           <div data-testid="studio-landing-recent" className="mb-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             {recentPackages.map((item) => (
-              <Link key={item.id} to={item.href} className={entryCardClass}>
+              // objectstack#35018 — the app's id is only the entry's hover
+              // title, as on the cards above; its face shows the name.
+              <Link key={item.id} to={item.href} title={item.name} className={entryCardClass}>
                 <span className={entryIconClass}>
                   <Clock className="h-4 w-4" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px] font-medium">{recentLabel(item)}</span>
-                  <span className="block truncate font-mono text-[10px] text-muted-foreground">{item.name}</span>
                 </span>
               </Link>
             ))}

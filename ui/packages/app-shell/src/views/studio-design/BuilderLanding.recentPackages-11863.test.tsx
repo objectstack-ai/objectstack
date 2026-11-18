@@ -336,6 +336,22 @@ describe('Studio landing → an own-app card shows the app, not its package (obj
   });
 });
 
+describe('Studio landing → a "Recently viewed" entry shows the app, not its package (objectstack#35018)', () => {
+  it('shows the name and not the id; the id is the entry’s hover title', async () => {
+    packages.list = [
+      { id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' },
+      { id: 'com.acme.hr', name: 'Acme HR', writable: true, namespace: 'acmehr' },
+    ];
+    renderLanding([visit('com.acme.crm')]);
+
+    await screen.findByText('Recently viewed');
+    const [link] = recentLinks();
+    expect(within(link).getByText('Acme CRM')).toBeInTheDocument();
+    expect(link.textContent).not.toContain('com.acme.crm');
+    expect(within(recentSection()).getByTitle('com.acme.crm')).toBe(link);
+  });
+});
+
 describe('Studio landing → "Recently viewed" is left out when it only repeats the cards (objectstack#35018)', () => {
   it('one recent visit to the only app: no row', async () => {
     packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
