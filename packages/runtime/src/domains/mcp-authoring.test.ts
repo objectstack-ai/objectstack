@@ -345,14 +345,14 @@ describe('the read tools answer from the metadata protocol\'s public reads', () 
     expect(refused.body.error).toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
   });
 
-  it('list_metadata_items refuses an inherited member\'s name as an undeclared type, folded or not', async () => {
+  it('an inherited member\'s name, which the fold answers no string for, reaches the protocol as the string sent', async () => {
     const { authoring, calls } = admitted();
-    for (const type of ['constructor', 'toString']) {
-      const refused = await call(authoring, 'list_metadata_items', { type });
-      expect(refused.isError, type).toBe(true);
-      expect(refused.body.error, type).toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
-    }
-    expect(calls).toEqual([]);
+    await call(authoring, 'list_metadata_items', { type: 'constructor', state: 'active' });
+    await call(authoring, 'get_metadata_item', { type: 'toString', name: 'lead_intake', state: 'active' });
+    expect(calls).toEqual([
+      ['getMetaItems', { type: 'constructor' }],
+      ['getMetaItem', { type: 'toString', name: 'lead_intake' }],
+    ]);
   });
 
   it('get_metadata_item reads a draft in place of the published version by default, and the draft only on state draft', async () => {

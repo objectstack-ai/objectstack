@@ -546,9 +546,9 @@ function canonicalTypeOf(value: unknown): string | undefined {
     if (type === undefined) return undefined;
     const folded: unknown = canonicalMetaUrlType(type);
     // The fold reads a plain object, so an inherited member's name
-    // (`constructor`, `toString`) answers no string. Such a spelling names no
-    // type: it goes on unfolded, and the unknown-type refusal judges it as it
-    // judges any other undeclared spelling.
+    // (`constructor`, `toString`) answers a function, not a type. The door's
+    // type stays the string the agent sent then: the spelling the protocol and
+    // the unknown-type refusal are handed for it on every `/meta` door.
     return typeof folded === 'string' ? folded : type;
 }
 
