@@ -158,6 +158,10 @@ describe('[#34973] driver-sql — boot converges legacy text booleans to 1 / 0 (
   });
 
   it('after the step, $in, $ne and $nin answer a former text row as its integer twin', async () => {
+    // Before: each operator compares the raw text, so it answers the text rows wrongly.
+    expect(await idsWhere(driver, { flag: { $in: [false] } })).toEqual(['int_zero']);
+    expect(await idsWhere(driver, { flag: { $ne: false } })).toContain('text_false');
+    expect(await idsWhere(driver, { flag: { $nin: [true] } })).toContain('text_true');
     await driver.initObjects([CONV_OBJECT]);
     expect(await idsWhere(driver, { flag: { $in: [true, false] } })).toEqual(['int_one', 'int_zero', 'text_false', 'text_true']);
     expect(await idsWhere(driver, { flag: { $in: [false] } })).toEqual(['int_zero', 'text_false']);
@@ -210,7 +214,19 @@ describe('[#34973] driver-sql — boot converges legacy text booleans to 1 / 0 (
     await driver.initObjects([CONV_OBJECT]);
     const after = await storedTypes(driver, CONV, 'flag');
     info.length = 0;
-    await driver.initObjects([CONV_OBJECT]);
+    // Count every UPDATE the second boot sends against the table.
+    const knex = (driver as any).knex;
+    const updates: string[] = [];
+    const onQuery = (q: { sql: string }) => {
+      if (/^update/i.test(q.sql) && q.sql.includes(CONV)) updates.push(q.sql);
+    };
+    knex.on('query', onQuery);
+    try {
+      await driver.initObjects([CONV_OBJECT]);
+    } finally {
+      knex.removeListener('query', onQuery);
+    }
+    expect(updates.filter((sql) => sql.includes("'true'"))).toEqual([]);
     expect(converged(info)).toEqual([]);
     expect(await storedTypes(driver, CONV, 'flag')).toEqual(after);
   });

@@ -2047,8 +2047,9 @@ export async function backfillCanonicalTimes(this: Pick<SchemaSyncHost, 'canonic
 /**
  * [#34973] The legacy text cells of a SQLite boolean column, as one `WHERE`
  * predicate spelling `??` twice (the column, then the column again). The
- * backfill's `UPDATE`, its id sample and the deferred-DDL preview all read
- * this one predicate, so the plan cannot count rows the step will not convert.
+ * backfill's count, its id sample, its `UPDATE` and the deferred-DDL preview
+ * all read this one predicate, so the plan cannot count rows the step will not
+ * convert.
  *
  * Only the two spellings `'true'` / `'false'` can be there: SQLite's NUMERIC
  * affinity, which a `boolean` column takes, folds the text `'1'` / `'0'` into
@@ -2088,7 +2089,10 @@ const BOOLEAN_BACKFILL_SAMPLE_IDS = 5;
  *
  * ONE `UPDATE` per column, atomic on SQLite, whose `WHERE` is
  * {@link SQLITE_LEGACY_BOOLEAN_TEXT}: it selects only the two text spellings,
- * so a converged column is a no-op and a second boot converts 0 rows. No other
+ * so a converged column is a no-op and a second boot converts 0 rows. One
+ * counting scan over the column's text cells comes first, and the id sample and
+ * the `UPDATE` run only when it found legacy text, so a converged column costs
+ * a boot that single read. No other
  * value is ever written: integers and NULL are already canonical, and other
  * text (`'yes'`, `'TRUE'`) has no boolean the driver can read without
  * guessing. Those rows are counted and warned about, the way the julian-day
@@ -2110,27 +2114,34 @@ export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'bool
 
   for (const field of fields) {
     try {
+      // One scan classifies every text cell: legacy (converted below) or
+      // other text (withheld and warned about).
       const counted: any = await this.knex.raw(
-        `select count(*) as n from ?? where typeof(??) = 'text' and ?? not in ('true', 'false')`,
-        [table, field, field],
+        `select count(*) as text_rows, coalesce(sum(case when ${SQLITE_LEGACY_BOOLEAN_TEXT} then 1 else 0 end), 0) as legacy ` +
+          `from ?? where typeof(??) = 'text'`,
+        [field, field, table, field],
       );
-      const withheld = Number((Array.isArray(counted) ? counted[0] : counted)?.n ?? 0);
-      const sample: Array<{ id: unknown }> = await this.knex.raw(
-        `select id from ?? where ${SQLITE_LEGACY_BOOLEAN_TEXT} order by id limit ?`,
-        [table, field, field, BOOLEAN_BACKFILL_SAMPLE_IDS],
-      );
-      const res = await this.knex.raw(
-        `update ?? set ?? = case ?? when 'true' then 1 when 'false' then 0 end where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
-        [table, field, field, field, field],
-      );
-      const converted = (res as any)?.changes ?? 0;
-      if (converted) {
-        this.logger.info?.(
-          `[sql-driver] canonicalised boolean storage for ${table}.${field}: rows that held the ` +
-            `text 'true' / 'false' now hold 1 / 0, so boolean filters, sorts and groups answer them ` +
-            `as the boolean they read as`,
-          { table, field, rowsConverted: converted, sampleIds: sample.map((r) => String(r.id)) },
+      const tally = Array.isArray(counted) ? counted[0] : counted;
+      const legacy = Number(tally?.legacy ?? 0);
+      const withheld = Number(tally?.text_rows ?? 0) - legacy;
+      if (legacy > 0) {
+        const sample: Array<{ id: unknown }> = await this.knex.raw(
+          `select id from ?? where ${SQLITE_LEGACY_BOOLEAN_TEXT} order by id limit ?`,
+          [table, field, field, BOOLEAN_BACKFILL_SAMPLE_IDS],
         );
+        const res = await this.knex.raw(
+          `update ?? set ?? = case ?? when 'true' then 1 when 'false' then 0 end where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
+          [table, field, field, field, field],
+        );
+        const converted = (res as any)?.changes ?? 0;
+        if (converted) {
+          this.logger.info?.(
+            `[sql-driver] canonicalised boolean storage for ${table}.${field}: rows that held the ` +
+              `text 'true' / 'false' now hold 1 / 0, so boolean filters, sorts and groups answer them ` +
+              `as the boolean they read as`,
+            { table, field, rowsConverted: converted, sampleIds: sample.map((r) => String(r.id)) },
+          );
+        }
       }
       if (withheld > 0) {
         this.logger.warn(
