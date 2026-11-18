@@ -396,22 +396,20 @@ are inserted, updated, or deleted. `relationshipField` is optional when the chil
 has only one `lookup`/`master_detail` field pointing back to the parent; set it
 when multiple relationships target the same parent object.
 
-On update a summary field is read-only whether or not it declares `readonly: true`.
-A value that a `PATCH`, an import with `writeMode: 'update'` or a bulk update
-sends for it is dropped, the rest of the write is stored, and the response's
-`droppedFields` names the field with reason `readonly`. Under
-`strictReadonlyWrites` the whole update is refused. Server code that runs with
-`isSystem: true` can still write the column, as it can any read-only column.
-On create, a value you send is kept as the field's starting value (seed data or
-a historical import may carry a pre-computed total); the next child write
-replaces it with the computed one.
-An import with `writeMode: 'upsert'` therefore drops the value on the rows it
-updates and keeps it on the rows it creates. A historical import
-(`treatAsHistorical: true`, which writes with `preserveAudit`) keeps a summary
-value on update as well, as it keeps any other read-only value it sends. Undoing
-an ordinary import restores the rows through an ordinary update, so a summary
-value that an import committed before this rule overwrote is not put back by
-the undo; it stays until the next child write recomputes it.
+A summary field is read-only on create and on update whether or not it declares
+`readonly: true`. A value that a `POST`, an import (any `writeMode`), an MCP
+create, a `PATCH` or a bulk update sends for it is dropped, the rest of the write
+is stored, and the response's `droppedFields` names the field with reason
+`readonly`. A record created that way starts as if no value had been sent: `0`
+for `count` and `sum`, empty for `min`, `max` and `avg`, and the next child write
+replaces it with the computed value. Under `strictReadonlyWrites` the whole write
+is refused. Server code that runs with `isSystem: true` can still write the
+column, as it can any read-only column: seed data, package installs and a
+historical import (`treatAsHistorical: true`, which only the system principal may
+send) keep a pre-computed total, on create and on update. Undoing an ordinary
+import restores the rows through an ordinary update, so a summary value that an
+import committed before this rule overwrote is not put back by the undo; it stays
+until the next child write recomputes it.
 
 Because the roll-up is engine-derived state rather than a user write, the
 recompute runs under a system context: a user who may create a child does not
