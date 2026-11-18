@@ -146,9 +146,10 @@ export interface VerifyCapabilityAdvisory {
  *          production starts it (a record-change flow by a real write of the
  *          record --flow-record names), reported node by node with the first
  *          failure and what it wrote; every write outside the ephemeral
- *          stack is refused before its datasource is called, and an
- *          outbound node (http, connector_action, notify, script) is not
- *          executed: the run stops there
+ *          stack is refused before its datasource is called, and the four
+ *          outbound node types (http, connector_action, notify, script)
+ *          are not executed: the run stops there (a plugin's own outbound
+ *          node type is not stood in)
  *
  * Exits non-zero on either stage's failures so it drops straight into CI.
  */
@@ -200,7 +201,7 @@ export default class Verify extends Command {
     }),
     flow: Flags.string({
       description:
-        "Also run this flow once on a fresh boot and report each node's status, the first failure with its code and the node named, and what the run wrote. It starts the way production starts it: a record-change flow by a real write of the record --flow-record names, a flow its own trigger starts with no caller (an API-triggered flow with --flow-input as its record and params, a time-relative flow with --flow-record seeded and handed in as its record, a schedule or runAs: 'system' flow with --flow-input as its params), any other flow through the trigger route as the dev admin. A schedule the deployment's scheduled-work switch keeps unarmed is reported as not armed and still run. Every write outside the in-memory database this run boots is refused before its datasource is called. Outbound nodes (http, connector_action, notify, script) are not executed: the run stops at the first one and names it, so nothing calls out of this machine",
+        "Also run this flow once on a fresh boot and report each node's status, the first failure with its code and the node named, and what the run wrote. It starts the way production starts it: a record-change flow by a real write of the record --flow-record names, a flow its own trigger starts with no caller (an API-triggered flow with --flow-input as its record and params, a time-relative flow with --flow-record seeded and handed in as its record (no acting organization), a schedule or runAs: 'system' flow with --flow-input as its params), any other flow through the trigger route as the dev admin. A schedule the deployment's scheduled-work switch keeps unarmed is reported as not armed and still run. Every write outside the in-memory database this run boots is refused before its datasource is called. Four outbound node types (http, connector_action, notify, script) are not executed: a run that reaches one stops there and names it. A plugin's own node type that calls out under another name is not stood in, and runs for real",
     }),
     'flow-record': Flags.string({
       description:
