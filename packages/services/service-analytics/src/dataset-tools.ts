@@ -35,6 +35,7 @@ import {
 } from './dataset-declared-members.js';
 import { findDatasetTermCandidates, matchDatasetTerms, type CandidateDataset } from './dataset-term-matcher.js';
 import { DATASET_NEXT_STEP_PRECEDENCE, composeDatasetNextStep, composeDatasetSourceLine } from './dataset-next-step.js';
+import type { GroupCountRequest } from './dataset-group-count.js';
 
 /**
  * The dataset AI tools — `list_datasets` and `query_dataset` — defined once,
@@ -572,7 +573,12 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       ? raw.selection.limit
       : maxRows;
     const selection: DatasetSelection = { ...raw.selection, limit: cap + 1 };
-    const answer: AnalyticsResult = await service.queryDataset(dataset, selection, context);
+    // [query_dataset totalGroups] The groups before the cut, counted by the
+    // statement that grouped them, where one did (`dataset-group-count.ts`);
+    // an answer no statement counted leaves the slot empty and the member out.
+    const groupCount: GroupCountRequest = {};
+    const answer: AnalyticsResult = await service.queryDataset(dataset, selection, context, { groupCount });
+    const totalGroups = groupCount.outcome?.groupCount;
 
     const rows = Array.isArray(answer.rows) ? answer.rows : [];
     const truncated = rows.length > cap;
@@ -600,6 +606,7 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       sourceLine: composeDatasetSourceLine(provenance, sentenceLocales(context)),
       rowCount: served.length,
       truncated,
+      ...(totalGroups !== undefined ? { totalGroups } : {}),
       ...(narrowing?.narrowed && narrowing.statement
         ? { delegationNarrowed: true as const, warning: narrowing.statement }
         : {}),

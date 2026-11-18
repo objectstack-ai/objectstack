@@ -119,6 +119,7 @@ import {
   type DateGranularityValue,
 } from './dataset-executor.js';
 import { measureDrillScopes, type MeasureSource } from './drill-scope.js';
+import type { GroupCountRequest } from './dataset-group-count.js';
 import {
   resolveDimensionLabels,
   createOrderLabelResolver,
@@ -3064,12 +3065,19 @@ export class AnalyticsService implements IAnalyticsService {
    * degraded "backing object unavailable" return and the main return — so an
    * exit added later inherits it instead of needing its own copy. `query()`
    * never passes through here, so a cube answer carries none.
+   *
+   * [query_dataset totalGroups] `options.groupCount` asks for the number of
+   * groups the selection formed before its window cut them, written to the
+   * request's slot by the statement that grouped them
+   * (`dataset-group-count.ts`). The draft-preview read and the degraded
+   * "backing object unavailable" answer count nothing, and neither does any
+   * selection the executor does not run as one pushed-down query.
    */
   async queryDataset(
     dataset: Dataset,
     selection: DatasetSelection,
     context?: ExecutionContext,
-    options?: { previewDrafts?: boolean },
+    options?: { previewDrafts?: boolean; groupCount?: GroupCountRequest },
   ): Promise<AnalyticsResult> {
     // The deployment's read limits judge the selection's own window — the
     // one a report or dashboard asked for — before anything runs (see
@@ -3097,7 +3105,7 @@ export class AnalyticsService implements IAnalyticsService {
     dataset: Dataset,
     selection: DatasetSelection,
     context?: ExecutionContext,
-    options?: { previewDrafts?: boolean },
+    options?: { previewDrafts?: boolean; groupCount?: GroupCountRequest },
   ): Promise<AnalyticsResult> {
     // [#21177] The dataset's own dimension/measure `field` text — inline or saved,
     // whichever branch supplied it — is judged here: a `field` that is not a
@@ -3384,7 +3392,10 @@ export class AnalyticsService implements IAnalyticsService {
       // branch above matches `row[key]`, which already reads the field.
       const bound = bindDatasetFiltersToObjectFields(resolved.compiled, resolved.selection, this.getObjectFieldNames?.(dataset.object));
       const scoped = this.scopedService(this.requestScope(bound.compiled));
-      result = await new DatasetExecutor(scoped, orderLabels).execute(bound.compiled, bound.selection, context);
+      const executor = new DatasetExecutor(scoped, orderLabels);
+      result = options?.groupCount
+        ? await executor.execute(bound.compiled, bound.selection, context, { groupCount: options.groupCount })
+        : await executor.execute(bound.compiled, bound.selection, context);
     } catch (err) {
       // The producer answered the classification question — the route's
       // envelope reader serves it (4xx as itself; a declared 5xx relayed with

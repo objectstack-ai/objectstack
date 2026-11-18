@@ -404,7 +404,8 @@ export const DatasetProvenanceSchema = lazySchema(() => z.object({
 
 /**
  * `query_dataset` output: the dataset answer the REST door serves, without the
- * executed SQL, plus `provenance`, `rowCount` and `truncated`.
+ * executed SQL, plus `provenance`, `rowCount`, `truncated` and, where the
+ * database counted them, `totalGroups`.
  *
  * The answer's members are taken BY REFERENCE from
  * `AnalyticsResultResponseSchema`'s `data`, so a column property the REST door
@@ -429,6 +430,17 @@ export const QueryDatasetOutputSchema = lazySchema(() => AnalyticsResultResponse
     rowCount: z.number().int().nonnegative().describe('How many rows `rows` holds'),
     truncated: z.boolean().describe(
       '`true` when more rows existed past the row cap the tool applied and were not returned',
+    ),
+    totalGroups: z.number().int().nonnegative().optional().describe(
+      'How many groups the selection formed before `offset` and `limit` cut them: the rows the same selection '
+      + 'answers with no window. The same name and meaning as `aggregate_records`\' `totalGroups`. Counted in the '
+      + 'database, by a window count in the one SQL statement that grouped and cut the answer, never by reading the '
+      + 'groups. Equals `rowCount` when the answer was not cut. Absent when no such statement counted them: the answer '
+      + 'was assembled from several queries (a measure with its own filter, a derived measure, `compareTo`) or '
+      + 'ordered by a display label; the query ran through the engine\'s aggregate instead (a date bucket, a '
+      + 'field-to-field filter, an external object, a driver with no raw SQL); the SQL dialect is not one the tool '
+      + 'knows; a selected member is itself named `__os_group_count`; the page came back empty after an `offset`; or '
+      + 'the dataset\'s object is missing and the answer is the empty one served for it',
     ),
     delegationNarrowed: z.literal(true).optional().describe(
       'Present, and `true`, when the caller acts as an agent whose authority narrows what it may read on the '

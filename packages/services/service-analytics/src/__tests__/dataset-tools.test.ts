@@ -17,20 +17,24 @@
  *   never a substring, never a withheld member.
  * - `query_dataset`: one NOT_FOUND for missing and hidden; `provenance`
  *   composed from what ran, which the model's input cannot set; the row cap
- *   and `truncated`; the delegation statement; no `sql`.
+ *   and `truncated`; `totalGroups`, counted by the statement that grouped the
+ *   answer and absent where none did; the delegation statement; no `sql`.
  * - [#34919] `nextStep` and `sourceLine` (ADR-0149 M1 note): the decision for
  *   each term, the precedence among mixed cases, the partial-answer rule, the
  *   sentence's language, and that neither sentence names a member the caller
  *   was not admitted to — on a mirror of `examples/app-crm`'s dataset.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { ListDatasetsOutputSchema, QueryDatasetOutputSchema, getDatasetToolJsonSchemas } from '@objectstack/spec/ai';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { AnalyticsServicePlugin } from '../plugin.js';
 import { AnalyticsService } from '../analytics-service.js';
 import { createDatasetTools, getDatasetToolDefinitions } from '../dataset-tools.js';
 import { DATASET_NEXT_STEP_PRECEDENCE, composeDatasetSourceLine, datasetToolSentenceLocale } from '../dataset-next-step.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const ME = { userId: 'u_me', tenantId: 'org_a', locale: 'zh-CN' } as ExecutionContext;
 const ADMIN = { userId: 'u_admin', tenantId: 'org_a' } as ExecutionContext;
@@ -113,11 +117,14 @@ const nativeSql = () => ({ nativeSql: true, objectqlAggregate: false, inMemory: 
 
 function fakeEngine(rows: Record<string, unknown>[]) {
   const reads: string[] = [];
+  const statements: string[] = [];
   return {
     reads,
+    statements,
     engine: {
       execute: async (sql: unknown, options?: { object?: string }) => {
         reads.push(`execute:${options?.object ?? String(sql)}`);
+        statements.push(String((sql as { sql?: string })?.sql ?? sql));
         return { rows: rows.map((r) => ({ ...r })) };
       },
       hasObjectMiddleware: () => false,
@@ -146,7 +153,7 @@ const security = {
 };
 
 async function bootWired(rows: Record<string, unknown>[] = [{ stage: 'won', revenue: 100 }]) {
-  const { engine, reads } = fakeEngine(rows);
+  const { engine, reads, statements } = fakeEngine(rows);
   const registered: Record<string, unknown> = {};
   const warn = vi.fn();
   const ctx = {
@@ -160,7 +167,7 @@ async function bootWired(rows: Record<string, unknown>[] = [{ stage: 'won', reve
     logger: { info() {}, warn, error() {}, debug() {} },
   };
   await new AnalyticsServicePlugin({ queryCapabilities: nativeSql }).init(ctx as never);
-  return { service: registered.analytics as AnalyticsService, reads, warn };
+  return { service: registered.analytics as AnalyticsService, reads, statements, warn };
 }
 
 const loadSaved = vi.fn(async () => SAVED.map((d) => ({ ...d, _diagnostics: { source: 'test' } })));
@@ -372,7 +379,8 @@ describe('query_dataset', () => {
     expect((dataset as { name: string }).name).toBe('pipeline');
     expect(selection).toEqual({ ...input.selection, limit: 51 });
     expect(context).toBe(ME);
-    expect(options).toBeUndefined();
+    // [query_dataset totalGroups] The one option the tool hands down: the group-count request.
+    expect(Object.keys(options ?? {})).toEqual(['groupCount']);
 
     expect(out.provenance).toEqual({
       kind: 'dataset',
@@ -575,6 +583,224 @@ describe('query_dataset', () => {
       code: 'NOT_FOUND',
       status: 404,
     });
+  });
+});
+
+// [query_dataset totalGroups] Beside `truncated`: how many groups the selection
+// formed before `offset` and `limit` cut them, the same name and meaning as
+// `aggregate_records`' `totalGroups` — counted by the database, by a window in
+// the ONE statement that grouped and cut the answer (`dataset-group-count.ts`),
+// never by reading the groups. Over a real engine, so the count is the
+// database's: the SQLite cell always runs, the PostgreSQL cell where
+// `OS_TEST_POSTGRES_URL` is set (a named skip otherwise; node-postgres answers
+// the count as text). Every read of the object is counted, so "one statement,
+// no second read" is measured, not assumed. Where no statement counted the
+// groups the member is ABSENT — never a number made up from the rows.
+const TG_OBJECT = 'os_tg_deal';
+const TG_ROWS = [
+  { id: 'd1', stage: 'lead', region: 'emea', amount: 10, closed_on: '2026-01-05' },
+  { id: 'd2', stage: 'lead', region: 'apac', amount: 20, closed_on: '2026-01-20' },
+  { id: 'd3', stage: 'qualified', region: 'emea', amount: 30, closed_on: '2026-02-03' },
+  { id: 'd4', stage: 'proposal', region: 'emea', amount: 40, closed_on: '2026-02-14' },
+  { id: 'd5', stage: 'proposal', region: 'amer', amount: 50, closed_on: '2026-03-01' },
+  { id: 'd6', stage: 'won', region: 'apac', amount: 60, closed_on: '2026-03-09' },
+  { id: 'd7', stage: 'lost', region: 'amer', amount: 70, closed_on: '2026-03-30' },
+] as const;
+const TG_STAGES = new Set(TG_ROWS.map((r) => r.stage)).size; // 5
+const TG_PAIRS = new Set(TG_ROWS.map((r) => `${r.stage}|${r.region}`)).size; // 7
+const TG_DATASET = {
+  name: 'tg_pipeline',
+  label: 'Deal pipeline',
+  object: TG_OBJECT,
+  dimensions: [
+    { name: 'stage', label: 'Stage', field: 'stage', type: 'string' },
+    { name: 'region', label: 'Region', field: 'region', type: 'string' },
+    { name: 'closed', label: 'Closed', field: 'closed_on', type: 'date' },
+  ],
+  measures: [
+    { name: 'revenue', label: 'Revenue', aggregate: 'sum', field: 'amount' },
+    { name: 'deals', label: 'Deals', aggregate: 'count' },
+    { name: 'emea_revenue', label: 'EMEA revenue', aggregate: 'sum', field: 'amount', filter: { region: 'emea' } },
+    { name: 'avg_deal', label: 'Average deal', derived: { op: 'ratio', of: ['revenue', 'deals'] } },
+  ],
+};
+const TG_CELLS = [
+  { id: 'sqlite', config: () => ({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) },
+  {
+    id: 'postgres',
+    config: () => (process.env.OS_TEST_POSTGRES_URL ? { client: 'pg', connection: process.env.OS_TEST_POSTGRES_URL } : null),
+  },
+] as const;
+const TG_CALLER = { userId: 'u_tg' } as ExecutionContext;
+const tgSecurity = {
+  getReadFilter: async () => undefined,
+  canReadObject: () => true,
+  getReadableFields: async () => ['id', 'stage', 'region', 'amount', 'closed_on'],
+  getQueryableFields: async () => ['id', 'stage', 'region', 'amount', 'closed_on'],
+};
+const tgQuiet = { debug() {}, info() {}, warn() {}, error() {}, child() { return tgQuiet; } };
+const TG_WINDOW = 'COUNT(*) OVER ()';
+
+for (const cell of TG_CELLS) {
+  const config = cell.config();
+  describe.skipIf(!config)(
+    `[query_dataset totalGroups] the groups before the cut, counted by the statement that grouped them (${cell.id})${config ? '' : ' (skipped: set OS_TEST_POSTGRES_URL to run this cell)'}`,
+    () => {
+      let driver: SqlDriver;
+      let engine: ObjectQL;
+      const reads = { statements: [] as string[], aggregate: 0 };
+      const services: Partial<Record<'native' | 'objectql', AnalyticsService>> = {};
+      const loadTg = async () => [{ ...TG_DATASET }];
+
+      const run = async (
+        face: 'native' | 'objectql',
+        selection: Record<string, unknown>,
+        opts: { maxQueryLimit?: number } = {},
+      ) => {
+        const before = { statements: reads.statements.length, aggregate: reads.aggregate };
+        const out = await services[face]!.datasetTools({ loadDatasets: loadTg, ...opts }).queryDataset(
+          { datasetName: TG_DATASET.name, selection },
+          TG_CALLER,
+        );
+        return {
+          out,
+          statements: reads.statements.slice(before.statements),
+          aggregate: reads.aggregate - before.aggregate,
+        };
+      };
+
+      beforeAll(async () => {
+        driver = new SqlDriver(config as never);
+        if (cell.id === 'postgres') await (driver as any).execute(`drop table if exists ${TG_OBJECT}`).catch(() => {});
+        engine = new ObjectQL({ logger: tgQuiet } as never);
+        engine.registerDriver(driver as never, true);
+        await engine.init();
+        engine.registry.registerObject({
+          name: TG_OBJECT,
+          label: 'Deal',
+          fields: {
+            stage: { name: 'stage', type: 'text' },
+            region: { name: 'region', type: 'text' },
+            amount: { name: 'amount', type: 'number' },
+            closed_on: { name: 'closed_on', type: 'date' },
+          },
+        } as never, '@objectstack/service-analytics');
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine as never);
+        for (const row of TG_ROWS) await engine.insert(TG_OBJECT, { ...row } as never);
+
+        const realExecute = (engine as any).execute.bind(engine);
+        (engine as any).execute = (sql: unknown, opts?: { object?: string }) => {
+          if (opts?.object === TG_OBJECT) reads.statements.push(String((sql as { sql?: string })?.sql ?? sql));
+          return realExecute(sql, opts);
+        };
+        const realAggregate = engine.aggregate.bind(engine);
+        (engine as any).aggregate = (object: string, ...rest: unknown[]) => {
+          if (object === TG_OBJECT) reads.aggregate += 1;
+          return (realAggregate as any)(object, ...rest);
+        };
+
+        for (const [face, caps] of [
+          ['native', undefined],
+          ['objectql', () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false })],
+        ] as const) {
+          const registered: Record<string, unknown> = {};
+          await new AnalyticsServicePlugin({ ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
+            getService: (name: string) => (name === 'data' ? engine : name === 'security' ? tgSecurity : registered[name]),
+            registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+            replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+            hook: () => {},
+            logger: tgQuiet,
+          } as never);
+          services[face] = registered.analytics as AnalyticsService;
+        }
+      });
+
+      afterAll(async () => {
+        if (cell.id === 'postgres') await (driver as any)?.execute(`drop table if exists ${TG_OBJECT}`).catch(() => {});
+        try { await engine?.destroy(); } catch { /* noop */ }
+      });
+
+      it('a limit below the group count: truncated, and totalGroups counts every group, in one statement', async () => {
+        const { out, statements, aggregate } = await run('native', {
+          measures: ['revenue'], dimensions: ['stage'], order: { revenue: 'desc' }, limit: 2,
+        });
+        expect(out).toMatchObject({ rowCount: 2, truncated: true, totalGroups: TG_STAGES });
+        expect(out.rows.map((r) => r.stage)).toEqual(['lost', 'won']);
+        expect(statements, 'one statement grouped, cut and counted').toHaveLength(1);
+        expect(statements[0]).toContain(TG_WINDOW);
+        expect(aggregate, 'no engine aggregate').toBe(0);
+        for (const row of out.rows) expect(row).not.toHaveProperty('__os_group_count');
+        expect(QueryDatasetOutputSchema.safeParse(out).success).toBe(true);
+      });
+
+      it('an answer not cut: totalGroups equals rowCount', async () => {
+        const { out, statements } = await run('native', { measures: ['revenue'], dimensions: ['stage'], limit: 10 });
+        expect(out).toMatchObject({ rowCount: TG_STAGES, truncated: false, totalGroups: TG_STAGES });
+        expect(statements).toHaveLength(1);
+      });
+
+      it('the tool\'s own row cap is a cut too, and two dimensions count their pairs', async () => {
+        const capped = await run('native', { measures: ['revenue'], dimensions: ['stage'] }, { maxQueryLimit: 3 });
+        expect(capped.out).toMatchObject({ rowCount: 3, truncated: true, totalGroups: TG_STAGES });
+        const pairs = await run('native', { measures: ['deals'], dimensions: ['stage', 'region'], limit: 1 });
+        expect(pairs.out).toMatchObject({ rowCount: 1, truncated: true, totalGroups: TG_PAIRS });
+      });
+
+      it('an offset: the count is before the offset; an empty page past the groups says nothing', async () => {
+        const page = await run('native', { measures: ['revenue'], dimensions: ['stage'], limit: 2, offset: 4 });
+        expect(page.out).toMatchObject({ rowCount: 1, truncated: false, totalGroups: TG_STAGES });
+        const past = await run('native', { measures: ['revenue'], dimensions: ['stage'], limit: 2, offset: 10 });
+        expect(past.out).toMatchObject({ rowCount: 0, truncated: false });
+        expect(past.out).not.toHaveProperty('totalGroups');
+      });
+
+      it('no dimension: one group', async () => {
+        const { out } = await run('native', { measures: ['revenue', 'deals'] });
+        expect(out).toMatchObject({ rowCount: 1, truncated: false, totalGroups: 1 });
+        expect(out.rows[0]).toEqual({ revenue: 280, deals: 7 });
+      });
+
+      it('absent where the grid is assembled from several queries, and nothing extra is read to count it', async () => {
+        for (const measures of [['revenue', 'emea_revenue'], ['avg_deal']]) {
+          const { out, statements } = await run('native', { measures, dimensions: ['stage'], limit: 2 });
+          expect(out, measures.join(',')).toMatchObject({ rowCount: 2, truncated: true });
+          expect(out, measures.join(',')).not.toHaveProperty('totalGroups');
+          for (const sql of statements) expect(sql).not.toContain(TG_WINDOW);
+        }
+      });
+
+      it('absent where the engine\'s aggregate serves the query: a date bucket, and the ObjectQL face', async () => {
+        const bucketed = await run('native', {
+          measures: ['revenue'], dimensions: ['closed'], timeDimensions: [{ dimension: 'closed', granularity: 'month' }], limit: 1,
+        });
+        expect(bucketed.out).toMatchObject({ rowCount: 1, truncated: true });
+        expect(bucketed.out).not.toHaveProperty('totalGroups');
+        expect(bucketed.aggregate, 'the ObjectQL face answered').toBe(1);
+        const face = await run('objectql', { measures: ['revenue'], dimensions: ['stage'], limit: 2 });
+        expect(face.out).toMatchObject({ rowCount: 2, truncated: true });
+        expect(face.out).not.toHaveProperty('totalGroups');
+        expect(face.aggregate).toBe(1);
+        expect(face.statements).toHaveLength(0);
+      });
+    },
+  );
+}
+
+describe('[query_dataset totalGroups] a SQL dialect the strategy does not know is not guessed at', () => {
+  it('runs no window and leaves totalGroups out', async () => {
+    // The engine double names no driver, so the strategy's dialect is `unknown`.
+    const rows = [{ stage: 'a', revenue: 1 }, { stage: 'b', revenue: 2 }, { stage: 'c', revenue: 3 }];
+    const { service, statements } = await bootWired(rows);
+    const out = await service.datasetTools({ loadDatasets: loadSaved }).queryDataset(
+      { datasetName: 'pipeline', selection: { measures: ['revenue'], dimensions: ['stage'], limit: 1 } },
+      ADMIN,
+    );
+    expect(out).toMatchObject({ rowCount: 1, truncated: true });
+    expect(out).not.toHaveProperty('totalGroups');
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('LIMIT 2');
+    expect(statements[0]).not.toContain(TG_WINDOW);
   });
 });
 

@@ -54,6 +54,12 @@ import { hasJsonMembershipSql, isJsonStoredShape } from '../contains-membership-
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { dateRangeWindowBounds } from '../dataset-executor.js';
+import {
+  ANALYTICS_GROUP_COUNT_COLUMN,
+  GROUP_COUNT_DIALECTS,
+  groupCountRequestOf,
+  takeGroupCount,
+} from '../dataset-group-count.js';
 // [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
 // the rule `driver-sql`'s own `aggregate()` applies, defined once in core.
 import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
@@ -670,6 +676,22 @@ function judgedComparands(source: unknown, typeOf: MemberDeclaredType | null): u
   if (!condition) return source;
   const judged = narrowComparands(condition, typeOf, 'where');
   return judged === condition ? source : { where: judged };
+}
+
+/** The window the group count is answered by: `COUNT(*) OVER ()` over the grouped statement. */
+const GROUP_COUNT_WINDOW_SQL = `COUNT(*) OVER () AS "${ANALYTICS_GROUP_COUNT_COLUMN}"`;
+
+/**
+ * [query_dataset totalGroups] The statement's projection, with the group-count
+ * window appended when `query` carries a count request
+ * (`dataset-group-count.ts`), `dialect` parses the window, and no selected
+ * member already answers under its column. Otherwise the projection as
+ * compiled, and the request stays unanswered.
+ */
+function countedGroupsSql(query: AnalyticsQuery, dialect: AnalyticsSqlDialect, selectClauses: string[]): string[] {
+  if (!groupCountRequestOf(query) || !GROUP_COUNT_DIALECTS.has(dialect)) return selectClauses;
+  if (selectClauses.some((clause) => clause.endsWith(` AS "${ANALYTICS_GROUP_COUNT_COLUMN}"`))) return selectClauses;
+  return [...selectClauses, GROUP_COUNT_WINDOW_SQL];
 }
 
 /**
@@ -1346,6 +1368,14 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       }
     }
 
+    // [query_dataset totalGroups] The count the statement answered on every
+    // row is taken off the rows before anyone reads them, and written to the
+    // caller's request (`dataset-group-count.ts`).
+    const groupCount = groupCountRequestOf(query);
+    if (groupCount && sql.includes(GROUP_COUNT_WINDOW_SQL)) {
+      takeGroupCount(rows, groupCount, { limit: query.limit, offset: query.offset });
+    }
+
     // Build field metadata
     const fields = this.buildFieldMeta(query, cube);
 
@@ -1649,7 +1679,13 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // order states its NULL placement in it. [#31626] SQL Server's lone limit
     // is a `TOP (n)` after `SELECT` (`windowTopSql`).
     const dialect = sqlDialectFor(ctx, this.extractObjectName(cube));
-    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${selectClauses.join(', ')} FROM "${tableName}"`;
+    // [query_dataset totalGroups] A caller that asked for the group count
+    // (`dataset-group-count.ts`) gets it from THIS statement: a window over
+    // its groups runs after the `GROUP BY` and ahead of the `ORDER BY` and the
+    // window, so every row answers how many groups formed before the cut. Only
+    // on a dialect it parses on, and never under a member's own name.
+    const projected = countedGroupsSql(query, dialect, selectClauses);
+    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${projected.join(', ')} FROM "${tableName}"`;
     if (joins.size > 0) {
       sql += ' ' + Array.from(joins.values(), (join) => join.sql).join(' ');
     }
