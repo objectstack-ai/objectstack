@@ -440,10 +440,10 @@ describe('Seed.fallback fills in for a locale no set of the object names', () =>
   describe('at most one fallback set per object in a load', () => {
     const PRICE_BOOK_ZH_FALLBACK = { ...PRICE_BOOK_ZH, fallback: true };
 
-    it('refuses only that object\'s marked sets when two distinct sets of it are marked; the rest still seed', async () => {
+    it('refuses only that object\'s fallback choice when two distinct sets of it are marked; the rest still seed', async () => {
       const PRICE_BOOK_SHARED_ROWS = { ...PRICE_BOOK_SHARED };
       const { store, result, logger } = await seedUnder('ja-JP', [ACCOUNT_DATASET, PRICE_BOOK_SHARED_ROWS, PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
-      // Neither marked price-book set loads; the object's unmarked set and every other object do.
+      // Neither marked price-book set fills in for ja-JP; the object's unmarked set and every other object load.
       expect(names(store)).toEqual(['Internal']);
       expect(store.account).toEqual([expect.objectContaining({ name: 'Acme Corporation' })]);
       expect(result.success).toBe(false);
@@ -458,13 +458,56 @@ describe('Seed.fallback fills in for a locale no set of the object names', () =>
       expect(warned[0]).toContain("'price_book'");
     });
 
-    it('refuses the object\'s marked sets whatever the locale — the declaration is ambiguous on every load', async () => {
-      for (const locale of ['zh-CN', 'en', undefined]) {
-        const { store, result } = await seedUnder(locale, [ACCOUNT_DATASET, PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
-        expect(result.success, `locale=${locale}`).toBe(false);
-        expect(store.price_book, `locale=${locale}`).toBeUndefined();
-        expect(store.account, `locale=${locale}`).toHaveLength(1);
+    it('reports the object whatever the locale, and each marked set still loads for the locales it lists, as unmarked', async () => {
+      // The declaration is ambiguous on every load, so every load reports it;
+      // the refusal never costs a load rows the same sets give it unmarked.
+      const cases: Array<[string | undefined, string[]]> = [
+        ['zh-CN', ['标准价格表']],
+        ['en', ['Standard']],
+        ['ja-JP', []],
+        [undefined, ['Standard', '标准价格表']],
+      ];
+      for (const [locale, expected] of cases) {
+        const marked = await seedUnder(locale, [ACCOUNT_DATASET, PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
+        const unmarked = await seedUnder(locale, [ACCOUNT_DATASET, PRICE_BOOK_ZH, PRICE_BOOK_EN]);
+        expect(marked.result.success, `locale=${locale}`).toBe(false);
+        expect(marked.result.errors.map((e) => e.field), `locale=${locale}`).toEqual(['fallback']);
+        expect(names(marked.store), `locale=${locale}`).toEqual(expected);
+        expect(names(unmarked.store), `control, locale=${locale}`).toEqual(expected);
+        expect(marked.store.account, `locale=${locale}`).toHaveLength(1);
       }
+    });
+
+    it('names no fallback it did not use, and does not tell a correctly authored package to drop its marker', async () => {
+      const { logger, result } = await seedUnder('ja-JP', [PRICE_BOOK_ZH_FALLBACK, PRICE_BOOK_EN_FALLBACK]);
+      const infos = logger.info.mock.calls.map((c: any[]) => String(c[0]));
+      expect(infos.some((m: string) => m.includes('fallback set(s) loaded'))).toBe(false);
+      const message = result.errors[0]!.message;
+      expect(message).toContain('an upgrade within this process changed a package');
+      expect(message).not.toContain('drop it from the others');
+    });
+
+    it('an upgrade that changed the marked set (versions 1 and 2 on one list): en keeps its rows, ja-JP gets no fallback, warn names the object', async () => {
+      // The shared replay list after an upgrade in a running process: version 1's
+      // datasets, then version 2's, whose marked en set gained a row.
+      const v1 = [PRICE_BOOK_ZH, PRICE_BOOK_EN_FALLBACK];
+      const EN_V2 = { ...PRICE_BOOK_EN_FALLBACK, records: [{ name: 'Standard' }, { name: 'Partner' }] };
+      const v2 = [structuredClone(PRICE_BOOK_ZH), EN_V2];
+      const unmarkedV2 = { ...PRICE_BOOK_EN, records: EN_V2.records };
+
+      const en = await seedUnder('en', [ACCOUNT_DATASET, ...v1, ...v2]);
+      const enControl = await seedUnder('en', [ACCOUNT_DATASET, PRICE_BOOK_ZH, PRICE_BOOK_EN, structuredClone(PRICE_BOOK_ZH), unmarkedV2]);
+      expect(names(en.store)).toEqual(['Partner', 'Standard']);
+      expect(names(en.store)).toEqual(names(enControl.store));
+      expect(en.store.account).toHaveLength(1);
+
+      const ja = await seedUnder('ja-JP', [ACCOUNT_DATASET, ...v1, ...v2]);
+      expect(ja.store.price_book).toBeUndefined();
+      expect(ja.store.account).toHaveLength(1);
+      expect(ja.result.errors.map((e) => e.sourceObject)).toEqual(['price_book']);
+      const warned = ja.logger.warn.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes('fallback: true'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain("'price_book'");
     });
 
     it('identical copies of one fallback set count once: a list merged twice seeds normally', async () => {
@@ -477,12 +520,16 @@ describe('Seed.fallback fills in for a locale no set of the object names', () =>
       expect(names(store)).toEqual(['Standard']);
     });
 
-    it('two packages marking the same object with different sets refuse only that object', async () => {
+    it('two packages marking the same object with different sets refuse only that object\'s fallback choice', async () => {
       const otherPackage = { object: 'price_book', externalId: 'name', mode: 'upsert', locale: ['de-DE'], fallback: true, records: [{ name: 'Standardpreisliste' }], _packageId: 'com.example.other' };
-      const { store, result } = await seedUnder('ja-JP', [ACCOUNT_DATASET, PRICE_BOOK_ZH, { ...PRICE_BOOK_EN_FALLBACK, _packageId: 'com.example.first' }, otherPackage]);
+      const seeds = [ACCOUNT_DATASET, PRICE_BOOK_ZH, { ...PRICE_BOOK_EN_FALLBACK, _packageId: 'com.example.first' }, otherPackage];
+      const { store, result } = await seedUnder('ja-JP', seeds);
       expect(store.price_book).toBeUndefined();
       expect(store.account).toHaveLength(1);
       expect(result.errors.map((e) => e.sourceObject)).toEqual(['price_book']);
+      // Each package's marked set still loads for its own locale.
+      const de = await seedUnder('de-DE', seeds);
+      expect(names(de.store)).toEqual(['Standardpreisliste']);
     });
 
     it('one fallback set on each of two objects is fine', async () => {

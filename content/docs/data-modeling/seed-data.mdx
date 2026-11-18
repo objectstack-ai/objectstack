@@ -381,11 +381,16 @@ The rules:
 - **`env` is applied first.** A set `env` scoped out of the load neither matches
   nor falls back.
 - **At most one fallback set per object in a load.** Two different sets of one
-  object both marked `fallback: true` leave no single choice: none of that
-  object's marked sets loads, and the load's error (also logged at warn) names
-  the object. The object's other sets and every other object still seed.
-  Identical copies of one set — the same package's datasets merged twice —
-  count once.
+  object both marked `fallback: true` leave no single choice, so only the
+  fallback choice is refused: no marked set fills in for a locale no set lists,
+  and the load's error (also logged at warn) names the object. Every marked set
+  still loads for the locales it lists, exactly as an unmarked set would, and
+  every other object still seeds. Identical copies of one set — the same
+  package's datasets merged twice — count once. Two versions of one package
+  whose marked set changed are two sets: an upgrade keeps the earlier
+  version's datasets on the per-organization replay list until the process
+  restarts, so until then an organization on an unlisted locale gets no
+  fallback for that object.
 
 The loader logs, at info, each fallback set it loaded and the locale it filled
 in for. Datasets without the marker load exactly as before.

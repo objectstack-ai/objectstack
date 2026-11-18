@@ -660,9 +660,10 @@ describe('Seed.fallback on the boot and install paths', () => {
         /**
          * Object names are global: two packages that each mark a different
          * fallback set for one object leave no single choice. Only that
-         * object's marked sets are skipped; every other object still seeds.
+         * object's fallback choice is refused: each marked set still loads for
+         * the locales it lists, and every other object still seeds.
          */
-        it('two packages marking different fallback sets of one object refuse only that object', async () => {
+        it('two packages marking different fallback sets of one object refuse only that object\'s fallback choice', async () => {
             settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
             const replay = await replayerOf([ACCOUNT_DATASET, ...MARKED]);
             const DE = { object: 'price_book', externalId: 'name', mode: 'upsert', locale: ['de-DE'], fallback: true, records: [{ name: 'Standardpreisliste' }] };
@@ -674,10 +675,59 @@ describe('Seed.fallback on the boot and install paths', () => {
             expect((store.account ?? []).map((r) => r.name)).toEqual(['Acme Corporation']);
             expect(logger.warn.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes("'price_book' mark 2 different sets"))).toHaveLength(1);
 
-            // The other package's other object seeds where its locale matches.
+            // The other package's other object seeds where its locale matches, and
+            // the first package's marked en set loads for en, as it would unmarked.
             await replay('org_en');
             expect((store.plan_en ?? []).map((r) => r.name)).toEqual(['Professional']);
-            expect(store.price_book).toBeUndefined();
+            expect(priceBooks()).toEqual(['Standard']);
+        });
+
+        /**
+         * An upgrade in a running process appends version 2's datasets beside
+         * version 1's on the shared list. When the marked set changed between
+         * the versions, the list holds two distinct marked declarations of one
+         * object from one correctly authored package. Only the fallback choice
+         * is refused: an `en` organization gets what the same versions give it
+         * unmarked, and a `ja-JP` organization gets what it got before the key
+         * existed.
+         */
+        it('a replay after an upgrade that changed the marked set: en gets its rows, ja-JP no fallback, warn names the object', async () => {
+            settingFor.org_en = { value: 'en', source: 'tenant' };
+            settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
+            const EN_V2_RECORDS = [{ name: 'Standard' }, { name: 'Partner' }];
+            const replayAfterUpgrade = async (v1: unknown[], v2: unknown[]) => {
+                // A fresh process: its own shared list, replayer and engine.
+                const settings = services.get('settings');
+                services = new Map([['settings', settings]]);
+                hooks = new Map();
+                ({ engine, store } = createEngine());
+                logger.warn.mockClear();
+                const replay = await replayerOf(v1);
+                await app('en', v2).start(ctx());
+                expect((services.get('seed-datasets') as unknown[]).length).toBe(v1.length + v2.length);
+                await replay('org_en');
+                const en = priceBooks();
+                ({ engine, store } = createEngine());
+                await replay('org_ja');
+                return { en, ja: priceBooks(), account: (store.account ?? []).map((r) => r.name) };
+            };
+
+            const marked = await replayAfterUpgrade(
+                [ACCOUNT_DATASET, ...MARKED],
+                [ACCOUNT_DATASET, ZH, { ...EN, fallback: true, records: EN_V2_RECORDS }],
+            );
+            const warned = logger.warn.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes("'price_book' mark 2 different sets"));
+            expect(warned.length).toBeGreaterThan(0);
+            const control = await replayAfterUpgrade(
+                [ACCOUNT_DATASET, ...UNMARKED],
+                [ACCOUNT_DATASET, ZH, { ...EN, records: EN_V2_RECORDS }],
+            );
+
+            expect(marked.en).toEqual(['Partner', 'Standard']);
+            expect(marked.en).toEqual(control.en);
+            expect(marked.ja).toEqual([]);
+            expect(marked.ja).toEqual(control.ja);
+            expect(marked.account).toEqual(['Acme Corporation']);
         });
     });
 
@@ -728,13 +778,20 @@ describe('Seed.fallback on the boot and install paths', () => {
             expect(priceBooks()).toEqual(['Standard']);
         });
 
-        it('two different marked sets of one object refuse that object\'s marked sets; the rest seeds', async () => {
+        it('two different marked sets of one object refuse that object\'s fallback choice; the rest seeds', async () => {
             settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
-            const result = await runInlineSeed([ACCOUNT_DATASET, { ...ZH, fallback: true }, { ...EN, fallback: true }], { organizationId: 'org_ja' });
+            const DOUBLY_MARKED = [ACCOUNT_DATASET, { ...ZH, fallback: true }, { ...EN, fallback: true }];
+            const result = await runInlineSeed(DOUBLY_MARKED, { organizationId: 'org_ja' });
             expect(result.success).toBe(false);
             expect(result.errors.map((e) => e.field)).toEqual(['fallback']);
             expect(store.price_book).toBeUndefined();
             expect((store.account ?? []).map((r) => r.name)).toEqual(['Acme Corporation']);
+
+            // A locale a marked set lists still gets that set.
+            ({ engine, store } = createEngine());
+            settingFor.org_zh = { value: 'zh-CN', source: 'tenant' };
+            await runInlineSeed(DOUBLY_MARKED, { organizationId: 'org_zh' });
+            expect(priceBooks()).toEqual(['标准价格表']);
         });
 
         it('the same marked set twice in one request (a list merged twice) is one fallback set', async () => {

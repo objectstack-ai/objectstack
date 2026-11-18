@@ -350,10 +350,14 @@ export const SeedSchema = lazySchema(() => strictObject({
    * - **Judged after `env`.** A dataset `env` scoped out of the load neither
    *   matches nor falls back.
    * - **At most one per object in a load.** Two different datasets of one
-   *   object both marked `fallback: true` leave the loader no single choice:
-   *   none of that object's marked datasets loads, the load reports the object,
-   *   and its other datasets and every other object still seed. Identical
-   *   copies of one dataset (a package's list merged twice) count once.
+   *   object both marked `fallback: true` leave the loader no single choice,
+   *   so only the fallback choice is refused: no marked set is used as the
+   *   fallback for a locale no set lists, and the load reports the object at
+   *   `warn`. Every marked set still loads for the locales it lists, exactly as
+   *   an unmarked set would, and every other object still seeds. Identical
+   *   copies of one dataset (a package's list merged twice) count once; two
+   *   versions of one package whose marked set changed are two datasets (an
+   *   upgrade keeps the earlier version's on the replay list until restart).
    * - **A load with no locale** (package apply, draft publish, or a load no rung
    *   resolved a locale for) loads every dataset, the fallback set included,
    *   and warns, as for any locale-scoped dataset.
@@ -365,10 +369,11 @@ export const SeedSchema = lazySchema(() => strictObject({
     .describe(
       'Marks this locale-scoped dataset as its object\'s fallback: it also loads for a resolved locale that no ' +
       'other locale-scoped dataset of the same object lists. Requires `locale`: a dataset with no locale already ' +
-      'loads everywhere, and the pair is refused. At most one dataset per object in a load may be marked; two ' +
-      'different marked datasets of one object are both skipped and reported, while the rest of the load seeds ' +
-      '(identical copies count once). A load with no locale loads it like every other dataset. Omitted, the ' +
-      'dataset loads only for the locales it lists.',
+      'loads everywhere, and the pair is refused. At most one dataset per object in a load may be marked; with ' +
+      'two different marked datasets of one object, none is used as the fallback and the load reports the object, ' +
+      'while each still loads for the locales it lists, as an unmarked dataset would (identical copies count once). ' +
+      'A load with no locale loads it like every other dataset. Omitted, the dataset loads only for the locales it ' +
+      'lists.',
     ),
 
   /**
