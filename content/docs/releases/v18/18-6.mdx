@@ -251,8 +251,9 @@ meet in order.
   doors answer `409 RESOURCE_CONFLICT`. People sign in through the hosting
   organisation's identity provider (`99a6ec0`, #33268).
 - **On a cloud-managed environment every organization door that writes a
-  membership refuses**, add-member excepted: remove, change role, make
-  owner, leave, accept invitation, create and delete organization answer
+  membership refuses**, add-member excepted: remove, change a member's
+  tier, make owner, leave, accept invitation, create and delete
+  organization answer
   `409 RESOURCE_CONFLICT`, and their actions are hidden. Make the change in
   the hosting organisation (`e2a4c66`, #34281).
 - **A cloud-managed environment does not offer its file storage or AI
