@@ -2150,6 +2150,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                     sections={schema.sections ?? []}
                     data={{ ...data, ...editedValues }}
                     isEditing={isInlineEditing}
+                    objectName={schema.objectName}
                     renderSection={renderSectionAt}
                   />
                 ) : foldEmptySections(schema.sections!.map(renderSectionAt));

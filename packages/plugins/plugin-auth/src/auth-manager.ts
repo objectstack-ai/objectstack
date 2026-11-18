@@ -2439,6 +2439,7 @@ export class AuthManager {
       enforceSessionControls: (...a) => this.enforceSessionControls(...a),
       getAppName: (...a) => this.getAppName(...a),
       getAudience: (...a) => this.getAudience(...a),
+      getAuthContext: (...a) => this.getAuthContext(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
