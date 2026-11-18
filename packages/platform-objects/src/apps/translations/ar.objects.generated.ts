@@ -240,6 +240,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "تم",
           fields: {
             email: "البريد الإلكتروني",
+            pendingAgain: "معلّق بالفعل",
             notApplied: "معلّق بالفعل، لذا لم يُطبَّق (عيّنه في السجل)",
             managerError: "المدير",
             "host.reason": "لم تُرسَل الدعوة"

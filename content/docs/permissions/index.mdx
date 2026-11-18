@@ -18,7 +18,9 @@ widens); **row-level security** is the expert escape hatch that narrows.
 without a declared rule stay visible by default — see the
 [FLS posture note](/docs/permissions/authorization#combination-semantics-the-fixed-order)).
 Object access scopes go from `own` through `own_and_reports`, `unit`,
-`unit_and_below`, to `org`. There is no Profile concept and the word "role"
+`unit_and_below`, to `org`; the three hierarchy scopes in between are enforced by
+the enterprise edition only and behave as `own` on the open edition (see
+[Access depth](/docs/permissions/permission-sets#access-depth--readscope--writescope-adr-0057-d1)). There is no Profile concept and the word "role"
 is reserved (D3) — if you knew the v1 model, start at
 [Profiles (removed)](/docs/permissions/profiles) and
 [Positions](/docs/permissions/positions).

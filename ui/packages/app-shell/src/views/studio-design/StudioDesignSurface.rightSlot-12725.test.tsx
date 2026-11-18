@@ -88,7 +88,7 @@ vi.mock('./StudioAiCopilot', () => ({
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
-import { STUDIO_HEADER_PILLAR_NAME, STUDIO_HEADER_WIDE_WORD } from './studio-tokens';
+import { STUDIO_HEADER_PILLAR_NAME, STUDIO_HEADER_WIDE_WORD, STUDIO_PILLARS_HOST } from './studio-tokens';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -424,5 +424,33 @@ describe('Studio right slot — controls (objectui#12725)', () => {
     expect(screen.getByTestId('if-inspector')).toBeVisible();
     expect(screen.getByTestId('if-properties-toggle')).toBeInTheDocument();
     expect(screen.getByTestId('if-canvas-main')).toHaveClass('px-6');
+  });
+});
+
+// objectstack#35061 item 1 — the pillars' host is what every rail's narrow form
+// measures, and it says whether the slot squeezes it.
+describe('Studio right slot — the rails read whether it squeezes the pillars (objectstack#35061)', () => {
+  it('marks the pillars host open while the slot shows beside it, closed once it is hidden', async () => {
+    await openDashboard();
+    const host = screen.getByTestId('studio-pillars-host');
+    expect(host).toHaveClass(...STUDIO_PILLARS_HOST.split(' '));
+    expect(host).toContainElement(screen.getByTestId('studio-rail-interfaces'));
+    expect(host).not.toContainElement(slot());
+    await waitFor(() => expect(host).toHaveAttribute('data-studio-slot', 'open'));
+
+    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
+    expect(slot()).not.toBeVisible();
+    expect(host).toHaveAttribute('data-studio-slot', 'closed');
+    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
+    expect(host).toHaveAttribute('data-studio-slot', 'open');
+  });
+
+  it('a pillar with no slot to show (Access, no copilot) keeps its host closed', async () => {
+    copilot.available = false;
+    renderAt('access');
+    await screen.findByTestId('studio-shell-header');
+    await act(async () => {});
+    expect(slot()).not.toBeVisible();
+    expect(screen.getByTestId('studio-pillars-host')).toHaveAttribute('data-studio-slot', 'closed');
   });
 });

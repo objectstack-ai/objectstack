@@ -61,6 +61,10 @@ const OBJECTS: Record<string, { enable?: unknown; fields: Record<string, Record<
   crm_opportunity_line_item: {
     fields: { id: { type: 'text' }, product: { type: 'text' }, quantity: { type: 'number' }, amount: { type: 'currency' } },
   },
+  // [#35005] one 销售额 measure beside an industry and a quarter grouping.
+  sales_order: {
+    fields: { id: { type: 'text' }, industry: { type: 'text' }, quarter: { type: 'text' }, amount: { type: 'number' }, churn: { type: 'number' } },
+  },
 };
 
 const PIPELINE = {
@@ -177,6 +181,15 @@ describe('the two AIToolDefinitions', () => {
     expect(defs[0].description).toMatch(/ask the user/i);
     expect(defs[0].description).toContain('非指标口径');
     expect(defs[1].description).toContain('provenance');
+  });
+
+  it('[#35005] scopes the ask-back to a word with a measure among its candidates', () => {
+    const [list] = getDatasetToolDefinitions();
+    expect(list.description).toContain('A word with a measure among its candidates: ask the same way');
+    expect(list.description).toContain(
+      'A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never '
+      + 'stops a matched measure.',
+    );
   });
 
   it('[#34919] says follow nextStep and cite sourceLine, and names the precedence the executor applies', () => {
@@ -1100,6 +1113,140 @@ describe('[#34919] list_datasets nextStep — the precedence among mixed cases',
 
   it('a word sent twice is one word, and the member it equals is counted once', async () => {
     expect(await decide(['商机数', '商机数'])).toEqual({ decision: 'one_measure', terms: ['商机数'] });
+  });
+});
+
+/**
+ * [#35005] An ask-back is owed only for the word being measured. A word whose
+ * candidates are all dimensions (「按行业」 near 行业, "this quarter" near
+ * `quarter`) is offered as a possible grouping: no question about it, and no
+ * stop for a matched measure. A word with a measure among its candidates keeps
+ * the question. The decision and the answer's `candidates` are unchanged: only
+ * the sentence is scoped.
+ */
+describe('[#35005] list_datasets nextStep — a grouping or time word with a candidate does not stop a matched measure', () => {
+  const SALES_METRICS = {
+    name: 'sales_metrics',
+    label: 'Sales Metrics',
+    object: 'sales_order',
+    dimensions: [
+      { name: 'industry', label: { en: 'Industry', 'zh-CN': '行业' }, field: 'industry', type: 'string' },
+      { name: 'quarter', label: { en: 'Quarter', 'zh-CN': '季度' }, field: 'quarter', type: 'string' },
+    ],
+    measures: [
+      { name: 'sales_amount', label: { en: 'Revenue', 'zh-CN': '销售额' }, aggregate: 'sum', field: 'amount' },
+      { name: 'churn_rate', label: { en: 'Churn Rate', 'zh-CN': '流失率' }, aggregate: 'avg', field: 'churn' },
+    ],
+  };
+  /** The sentence that offers a grouping and asks nothing about it, by the locale the context names. */
+  const GROUPING_OFFER: Record<string, string> = {
+    en: 'A possible grouping is not a question: do not ask the user about it',
+    'zh-CN': '可能的分组维度不需要追问：不要就它问用户',
+    'zh-TW': '可能的分組維度不需要追問：不要就它問使用者',
+    'ja-JP': 'グループ分けの候補は確認の対象ではありません',
+  };
+  /** The reported candidates_only question: compute nothing until the user answers. */
+  const ASK_BEFORE_COMPUTING: Record<string, string> = {
+    en: 'compute nothing until they answer',
+    'zh-CN': '用户回答前不要计算',
+    'zh-TW': '使用者回答前不要計算',
+    'ja-JP': '回答があるまで計算しないでください',
+  };
+  const loc = (ctx: ExecutionContext) => String(ctx.locale ?? 'en');
+
+  async function ask(terms: string[], ctx: ExecutionContext = ADMIN) {
+    const { service } = await bootWired();
+    const out = await service.datasetTools({ loadDatasets: async () => [SALES_METRICS] }).listDatasets({ terms }, ctx);
+    expectNextStepInvariants(out, terms);
+    return out;
+  }
+
+  it('「按行业」 + 销售额 ⇒ one_measure, computed with no question back, 行业 offered as a possible grouping', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['按行业', '销售额'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+      // The answer's candidates are what they were: the word is still offered its dimension.
+      expect(out.candidates).toEqual([{ term: '按行业', dataset: 'sales_metrics', member: 'dimensions.industry' }]);
+      const note = out.nextStep!.note;
+      expect(note, loc(ctx)).toContain('"sales_amount"');
+      expect(note, loc(ctx)).toContain('按行业');
+      expect(note, `${loc(ctx)} ⇒ no ask-first`).not.toContain(ASK_FIRST[loc(ctx)]);
+      expect(note, `${loc(ctx)} ⇒ no ask-before-computing`).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+      expect(note, `${loc(ctx)} ⇒ grouping offered`).toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+    const en = (await ask(['按行业', '销售额'])).nextStep!.note;
+    expect(en).toContain('"按行业" matches no member exactly; it may name a grouping: Industry (dataset: Sales Metrics).');
+    expect(en).not.toContain('possible readings');
+  });
+
+  it('"this quarter" + "revenue" ⇒ one_measure, computed with no question back, quarter offered as a possible grouping', async () => {
+    const out = await ask(['this quarter', 'revenue']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['revenue'] });
+    expect(out.candidates).toEqual([{ term: 'this quarter', dataset: 'sales_metrics', member: 'dimensions.quarter' }]);
+    const note = out.nextStep!.note;
+    expect(note).toContain('"this quarter" matches no member exactly; it may name a grouping: Quarter (dataset: Sales Metrics).');
+    expect(note).toContain(GROUPING_OFFER.en);
+    expect(note).not.toContain(ASK_FIRST.en);
+    // 本季度 contains 季度 the same way.
+    const zh = await ask(['本季度', '销售额'], { ...ADMIN, locale: 'zh-CN' } as ExecutionContext);
+    expect(zh.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(zh.nextStep!.note).toContain(GROUPING_OFFER['zh-CN']);
+    expect(zh.nextStep!.note).not.toContain(ASK_FIRST['zh-CN']);
+  });
+
+  it('a bare near-miss measure word still asks: candidates_only, compute nothing until the user answers', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['销售'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['销售'] });
+      expect(out.candidates).toEqual([{ term: '销售', dataset: 'sales_metrics', member: 'measures.sales_amount' }]);
+      expect(out.nextStep!.note, loc(ctx)).toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+      expect(out.nextStep!.note, loc(ctx)).not.toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+  });
+
+  it('a matched measure beside a word with a measure candidate still asks about that word (营收 + churn)', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['revenue', 'churn'], ctx);
+      expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['revenue'] });
+      expect(out.nextStep!.note, `${loc(ctx)} ⇒ ask first`).toContain(ASK_FIRST[loc(ctx)]);
+      expect(out.nextStep!.note, loc(ctx)).not.toContain(GROUPING_OFFER[loc(ctx)]);
+    }
+  });
+
+  it('a word with a measure AND a dimension among its candidates keeps the question', async () => {
+    const out = await ask(['industry revenue', '销售额']);
+    expect(out.candidates!.map((c) => c.member)).toEqual(['measures.sales_amount', 'dimensions.industry']);
+    expect(out.nextStep).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(out.nextStep!.note).toContain(ASK_FIRST.en);
+    expect(out.nextStep!.note).not.toContain(GROUPING_OFFER.en);
+    const alone = await ask(['industry revenue']);
+    expect(alone.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['industry revenue'] });
+    expect(alone.nextStep!.note).toContain(ASK_BEFORE_COMPUTING.en);
+  });
+
+  it('both kinds at once: the measure word is asked about and the grouping word is offered', async () => {
+    const withMeasure = (await ask(['churn', '按行业', '销售额'])).nextStep!;
+    expect(withMeasure).toMatchObject({ decision: 'one_measure', terms: ['销售额'] });
+    expect(withMeasure.note).toContain(ASK_FIRST.en);
+    expect(withMeasure.note).toContain(GROUPING_OFFER.en);
+    // The ask-first sentence is about churn's readings and comes before the grouping offer.
+    expect(withMeasure.note.indexOf(ASK_FIRST.en)).toBeLessThan(withMeasure.note.indexOf('"按行业"'));
+    const noMeasure = (await ask(['销售', '按行业'])).nextStep!;
+    expect(noMeasure).toMatchObject({ decision: 'candidates_only', terms: ['销售', '按行业'] });
+    expect(noMeasure.note).toContain(ASK_BEFORE_COMPUTING.en);
+    expect(noMeasure.note).toContain(GROUPING_OFFER.en);
+  });
+
+  it('a lone grouping word with a candidate keeps candidates_only and asks which number, never about the grouping', async () => {
+    for (const ctx of FOUR_LOCALES) {
+      const out = await ask(['this quarter'], ctx);
+      // The decision is the spec's: a term with entries in `candidates` is candidates_only.
+      expect(out.nextStep).toMatchObject({ decision: 'candidates_only', terms: ['this quarter'] });
+      const note = out.nextStep!.note;
+      expect(note, loc(ctx)).toContain(GROUPING_OFFER[loc(ctx)]);
+      expect(note, loc(ctx)).not.toContain(ASK_BEFORE_COMPUTING[loc(ctx)]);
+    }
+    expect((await ask(['this quarter'])).nextStep!.note).toContain('ask the user which number they mean');
   });
 });
 

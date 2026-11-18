@@ -150,7 +150,8 @@ describe('MCPServerRuntime.handleHttpRequest (Streamable HTTP)', () => {
     const queryCall = bridge.calls.find((c) => c[0] === 'query');
     expect(queryCall[1]).toBe('task');
     expect(queryCall[2].where).toEqual({ status: 'open' });
-    expect(queryCall[2].limit).toBe(5);
+    // [#35138] The capped page (5) plus the one probe row `truncated` is decided by.
+    expect(queryCall[2].limit).toBe(6);
   });
 
   it('rejects system objects on object-scoped tools (fail-closed)', async () => {

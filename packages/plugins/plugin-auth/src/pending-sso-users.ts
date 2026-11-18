@@ -621,6 +621,12 @@ export async function runAddSsoUser(
         email: person.email,
         source: PENDING_SSO_SOURCE,
         alreadyPending: outcome.alreadyPending,
+        // Present only on a re-add of a person still pending, so a reader
+        // (the `add_sso_user` result dialog, which skips a field whose path
+        // resolves to nothing) shows the fact exactly when it is true and
+        // draws no `false` row on a fresh add. `alreadyPending` stays on
+        // every answer for API readers.
+        ...(outcome.alreadyPending ? { pendingAgain: true } : {}),
         ...(outcome.alreadyPending ? {} : { positions: person.positions, permissionSets: person.permissionSets }),
         ...(outcome.alreadyPending && notAppliedOn(person, ADD_FIELD_NAMES).length > 0
           ? { notApplied: notAppliedOn(person, ADD_FIELD_NAMES) }
