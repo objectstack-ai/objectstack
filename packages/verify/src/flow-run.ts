@@ -197,7 +197,17 @@ type RuntimeState = ReturnType<AutomationEngine['getFlowRuntimeStates']>[number]
  * with the list the current run's refusals go to (the engine has no way to
  * take a middleware back, so a second run on the same stack swaps the list).
  */
-const confinedEngines = new WeakMap<object, { refused: Array<{ object: string; datasource: string }> }>();
+const confinedEngines = new WeakMap<object, { refused: ConfinedRefusal[] }>();
+
+/** One write the confinement refused. */
+interface ConfinedRefusal {
+  object: string;
+  datasource: string;
+  operation: ObservedWrite['operation'];
+}
+
+/** How a failing step's message is recognised as the confinement's refusal (the engine wraps the node's code). */
+const CONFINEMENT_SENTENCE = /a flow run writes to the ephemeral stack only/;
 
 /** The refusal the confinement throws: the ADR-0112 pair, and the object and datasource named. */
 function confinementRefusal(object: string, datasource: string, operation: string): Error {
@@ -223,7 +233,7 @@ function datasourceOf(ql: ObjectQL, object: string): string {
  * ephemeral datasource's name, or `undefined` when the engine names no default
  * driver (then nothing can be judged, and the run is not started).
  */
-function confineToEphemeral(ql: ObjectQL, refused: Array<{ object: string; datasource: string }>): string | undefined {
+function confineToEphemeral(ql: ObjectQL, refused: ConfinedRefusal[]): string | undefined {
   const defaultName = ql.getDefaultDriverName();
   const ephemeral = defaultName ? ql.getDriverByName(defaultName) : undefined;
   if (!defaultName || !ephemeral) return undefined;
@@ -238,7 +248,7 @@ function confineToEphemeral(ql: ObjectQL, refused: Array<{ object: string; datas
     if (!CONFINED_OPERATIONS.has(op.operation)) return next();
     if (ql.getDriverForObject(op.object) === ephemeral) return next();
     const datasource = datasourceOf(ql, op.object);
-    sink.refused.push({ object: op.object, datasource });
+    sink.refused.push({ object: op.object, datasource, operation: op.operation as ConfinedRefusal['operation'] });
     throw confinementRefusal(op.object, datasource, op.operation);
   });
   return defaultName;
@@ -420,7 +430,7 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
 
   // 5. The confinement, before anything writes.
   const ql = stack.kernel.getService<ObjectQL>('objectql');
-  const refused: Array<{ object: string; datasource: string }> = [];
+  const refused: ConfinedRefusal[] = [];
   const ephemeral = confineToEphemeral(ql, refused);
   if (!ephemeral) {
     report.firstFailure = {
@@ -503,21 +513,30 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
   const run = fresh[0];
   if (fresh.length > 1) report.notes.push(`${fresh.length} runs of the flow started; the first is reported`);
 
-  report.writes = observed
-    .filter((w) => w !== triggerWrite && !RUN_HISTORY_OBJECTS.has(w.object))
-    .map((w) => {
-      const datasource = datasourceOf(ql, w.object);
-      const confined = refused.some((r) => r.object === w.object);
-      return {
+  // The engine's observer sits on the same chain; a write the confinement
+  // refused never reaches the driver, and is reported from the confinement's
+  // own record of it, after the writes the observer saw.
+  report.writes = [
+    ...observed
+      .filter((w) => w !== triggerWrite && !RUN_HISTORY_OBJECTS.has(w.object))
+      .map((w): FlowRunWrite => ({
         object: w.object,
         operation: w.operation,
         ids: idsOf(w),
         outcome: w.outcome.status === 'refused' ? 'refused' : 'written',
         ...(w.outcome.status === 'refused' && w.outcome.code ? { code: w.outcome.code } : {}),
-        datasource,
-        ...(w.outcome.status === 'refused' && confined ? { confined: true } : {}),
-      } satisfies FlowRunWrite;
-    });
+        datasource: datasourceOf(ql, w.object),
+      })),
+    ...refused.map((r): FlowRunWrite => ({
+      object: r.object,
+      operation: r.operation,
+      ids: [],
+      outcome: 'refused',
+      code: 'PERMISSION_DENIED',
+      datasource: r.datasource,
+      confined: true,
+    })),
+  ];
   report.confinement.refused = refused.length;
 
   if (run) {
@@ -526,7 +545,7 @@ export async function runFlowProof(stack: VerifyStack, config: any, request: Flo
     report.verdict = VERDICT_OF_STATUS[run.status] ?? 'failed';
     const failing = report.steps.find((s) => s.status === 'failure');
     if (failing) {
-      const confinedWrite = refused.length > 0 && failing.error?.code === 'PERMISSION_DENIED' && /ephemeral stack only/.test(failing.error.message);
+      const confinedWrite = refused.length > 0 && CONFINEMENT_SENTENCE.test(failing.error?.message ?? '');
       const missing = report.missingExecutors.some((m) => m.nodeId === failing.nodeId);
       report.firstFailure = {
         kind: confinedWrite ? 'confined_write' : missing ? 'no_executor' : 'node_failed',
@@ -611,8 +630,9 @@ export function formatFlowRunReport(report: FlowRunReport): string {
         (s.error ? ` — ${s.error.code}: ${clip(s.error.message, 200)}` : ''),
     );
   }
-  for (const m of report.missingExecutors) {
-    lines.push(`  ✗ ${m.nodeId} <${m.nodeType}>${m.region ? ` [${m.region}]` : ''}  NO EXECUTOR: no installed plugin runs this node type`);
+  // A node the run reached is already on its step line above; one it did not reach is named here.
+  for (const m of report.missingExecutors.filter((x) => !report.steps.some((s) => s.nodeId === x.nodeId))) {
+    lines.push(`  ✗ ${m.nodeId} <${m.nodeType}>${m.region ? ` [${m.region}]` : ''}  NO EXECUTOR: not reached by this run, and no installed plugin runs this node type`);
   }
   for (const w of report.writes) {
     lines.push(
