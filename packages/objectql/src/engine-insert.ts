@@ -341,7 +341,7 @@ export class InsertFacet {
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
     // hook, default or validation runs, so a refusal costs nothing.
-    this.enforceTransactionOrigin(object, driver, 'insert');
+    this.enforceTransactionOrigin(object, driver, 'insert', options?.context?.transaction);
 
     // [#20308] A blank on a non-string-typed column is `null` from here on —
     // before the middleware, the caller snapshot, the defaults, the hooks and

@@ -154,7 +154,7 @@ const CONFIG = {
   dryRun: false,
   haltOnError: false,
   multiPass: true,
-  defaultMode: 'insert',
+  defaultMode: 'ignore',
   batchSize: 1000,
   transaction: false,
 } as any;
@@ -235,7 +235,7 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
     // in pass 1, so the loader defers by DELETING required `record_id`.
     const result = await loader().load({
       seeds: [
-        { object: 'rq_approval', mode: 'insert', env: ENV, records: [
+        { object: 'rq_approval', mode: 'ignore', env: ENV, records: [
           { process_name: 'flow:discount', object_name: 'rq_lead', record_id: 'Lisa Thompson', status: 'pending' },
         ] },
         LEAD_SEED,
@@ -270,7 +270,7 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
     const result = await loader().load({
       seeds: [
         LEAD_SEED,
-        { object: 'rq_approval', mode: 'insert', env: ENV, records: [
+        { object: 'rq_approval', mode: 'ignore', env: ENV, records: [
           { process_name: 'flow:discount', object_name: 'rq_lead', record_id: 'Lisa Thompson', status: 'pending' },
         ] },
       ] as any,
@@ -287,7 +287,7 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
   it('MEASURED: an OPTIONAL id half on a KEYLESS dataset heals out-of-order through the real engine (#11674 end-to-end)', async () => {
     const result = await loader().load({
       seeds: [
-        { object: 'rq_ledger', mode: 'insert', env: ENV, records: [
+        { object: 'rq_ledger', mode: 'ignore', env: ENV, records: [
           { action: 'read', object_name: 'rq_lead', record_id: 'Lisa Thompson' },
         ] },
         LEAD_SEED,
@@ -314,7 +314,7 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
     // signal moves when the author learns, it does not move the verdict.
     const result = await loader(logger).load({
       seeds: [
-        { object: 'rq_approval', mode: 'insert', env: ENV, records: [
+        { object: 'rq_approval', mode: 'ignore', env: ENV, records: [
           { process_name: 'flow:discount', object_name: 'rq_lead', record_id: 'Lisa Thompson', status: 'pending' },
         ] },
         LEAD_SEED,
@@ -343,7 +343,7 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
     const logger = silentLogger();
     const result = await loader(logger).load({
       seeds: [
-        { object: 'rq_ledger', mode: 'insert', env: ENV, records: [
+        { object: 'rq_ledger', mode: 'ignore', env: ENV, records: [
           { action: 'read', object_name: 'rq_lead', record_id: 'Lisa Thompson' },
         ] },
         LEAD_SEED,
@@ -416,7 +416,7 @@ describe('seed deferral vs required:true, on the real engine (#11674)', () => {
     const logger = silentLogger();
     const result = await loader(logger).load({
       seeds: [
-        { object: 'rq_approval_ro', mode: 'insert', env: ENV, records: [
+        { object: 'rq_approval_ro', mode: 'ignore', env: ENV, records: [
           { process_name: 'flow:discount', object_name: 'rq_lead', record_id: 'Lisa Thompson' },
         ] },
         LEAD_SEED,

@@ -10,7 +10,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
  *
  * A join / junction table has no single-field natural key — the PAIR of its
  * foreign keys is what's unique. Before composite externalId support, such a
- * dataset could only run `mode: 'insert'`, which re-inserts every row on each
+ * dataset could only run `mode: 'insert'` (since retired, #34613), which re-inserts every row on each
  * replay boot and duplicates the table (the showcase memberships went 3→6→9).
  *
  * A composite `externalId: ['team', 'project']` + `mode: 'ignore'` dedupes the

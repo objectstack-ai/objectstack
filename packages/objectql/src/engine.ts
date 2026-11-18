@@ -4089,6 +4089,11 @@ export class ObjectQL implements IObjectQLEngine {
     return SummariesAndExpansionFacet.summaryForeignKeyColumns.call(summariesAndExpansionHost.of(this), childObject);
   }
 
+  private summaryDescriptorsReadByRules(childObject: string): SummaryDescriptor[] {
+    // [#34465] The body is in `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
+    return SummariesAndExpansionFacet.summaryDescriptorsReadByRules.call(summariesAndExpansionHost.of(this), childObject);
+  }
+
   /** Roll-up descriptors for the summary fields `parentObject` OWNS (#5749) —
    *  i.e. the ones a NEW row of `parentObject` must have seeded.
    *
@@ -5471,6 +5476,7 @@ export class ObjectQL implements IObjectQLEngine {
     objectName: string,
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
+    explicitTransaction?: unknown,
   ): void {
     // [#25522 cut 7] The body moved to `engine-execute-transactions.ts`, its docblock with it (see `ExecuteTransactionsHost`).
     const readTxStore = () => this.txStore;
@@ -5479,9 +5485,10 @@ export class ObjectQL implements IObjectQLEngine {
       get txStore() { return readTxStore(); },
       datasourceNameOf: (...a) => this.datasourceNameOf(...a),
       isSystemLedgerObject: (...a) => this.isSystemLedgerObject(...a),
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
       get logger() { return readLogger(); },
     };
-    return enforceTransactionOrigin.call(host, objectName, driver, operation);
+    return enforceTransactionOrigin.call(host, objectName, driver, operation, explicitTransaction);
   }
 
   // ============================================
@@ -6235,6 +6242,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolveOptionPermissions: (...a) => engine.resolveOptionPermissions(...a),
       resolvePredicateRelated: (...a) => engine.resolvePredicateRelated(...a),
       settleMasterDetailLanding: (...a) => engine.settleMasterDetailLanding(...a),
+      summaryDescriptorsReadByRules: (...a) => engine.summaryDescriptorsReadByRules(...a),
       summaryForeignKeyColumns: (...a) => engine.summaryForeignKeyColumns(...a),
       triggerHooks: (...a) => engine.triggerHooks(...a),
       update: (...a) => engine.update(...a),

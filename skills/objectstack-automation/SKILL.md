@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -111,25 +111,34 @@ Built-in (plugins register more):
 ### `notify`
 
 An undeclared key is a named parse error. **RAW** keys are read as written:
-a `{token}` in one is refused.
+a `{token}` in one is refused. The node as JSON (TypeScript: the same
+literal, a `FlowNode`):
 
-<!-- os:check -->
-```ts
-import type { FlowNode } from '@objectstack/spec/automation';
-const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
-    recipients: { dialect: 'cel', source: 'record.owner_id' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
-    // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
-    // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
-    title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
-    message: 'Closed {{ record.closed_at | date:long }}', // body; only with inline `title`
-    topic: 'task',                     // RAW; default 'notify'
-    severity: 'warning',               // RAW; CLOSED enum info|warning|critical
-    channels: ['inbox'],               // RAW; default inbox
-    sourceObject: 'task',              // link: PAIR, else dropped; none of the 3 ⇒ the
-    sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete/before-create), if any
-    actionUrl: '/tasks/{{ record.id }}', // overrides the pair
-} };
+```json
+{ "id": "tell_owner", "type": "notify", "label": "Notify Owner", "config": {
+    "recipients": { "dialect": "cel", "source": "record.owner_id" },
+    "title": "Done: {{ record.title }}",
+    "message": "Closed {{ record.closed_at | date:long }}",
+    "topic": "task",
+    "severity": "warning",
+    "channels": ["inbox"],
+    "sourceObject": "task",
+    "sourceId": { "dialect": "cel", "source": "record.id" },
+    "actionUrl": "/tasks/{{ record.id }}"
+} }
 ```
+
+- `recipients` — REQUIRED: id, list, or envelope; a CSV is ONE id. 4th form
+  `{ "emailField": "applicant_email" }`: an `email` field of the trigger record,
+  for a non-user — then `channels: 'email'` alone. An envelope must yield USER
+  ids: an address no user holds fails the node.
+- `title` — inline; XOR `template` (RAW, localizable). `message` — body; only
+  with inline `title`.
+- RAW: `topic` (default `'notify'`), `severity` (CLOSED enum
+  `info` | `warning` | `critical`), `channels` (default inbox).
+- `sourceObject` + `sourceId` — the link: a PAIR, else dropped; none of the 3 ⇒
+  the trigger record (not on delete/before-create), if any. `actionUrl`
+  overrides the pair.
 
 A recipient string, written or evaluated, may be an audience selector:
 
@@ -288,21 +297,22 @@ Most are caught by `objectstack build`:
    database.** It receives `ctx.input` and **returns** a value; a later
    **declarative** node persists its `outputVariable`:
 
-   ```ts
-   { id: 'ai', type: 'script', config: {
-       function: 'helpdesk.aiTriageStub',
-       inputs: { ticketId: { dialect: 'cel', source: 'record.id' } },
-       outputVariable: 'ai',
-   } },
-   { id: 'apply', type: 'update_record', config: {
-       objectName: 'helpdesk_ticket',
-       filter: { id: { dialect: 'cel', source: 'record.id' } },
-       fields: { ai_category: { dialect: 'cel', source: 'ai.ai_category' } },
-   } },
+   ```json
+   [
+     { "id": "ai", "type": "script", "label": "AI Triage", "config": {
+         "function": "helpdesk.aiTriageStub",
+         "inputs": { "ticketId": { "dialect": "cel", "source": "record.id" } },
+         "outputVariable": "ai" } },
+     { "id": "apply", "type": "update_record", "label": "Apply Category", "config": {
+         "objectName": "helpdesk_ticket",
+         "filter": { "id": { "dialect": "cel", "source": "record.id" } },
+         "fields": { "ai_category": { "dialect": "cel", "source": "ai.ai_category" } } } }
+   ]
    ```
 
    A function that writes where the platform cannot see **declares** it, so the
-   run reports "cannot say" rather than `acted: 0`:
+   run reports "cannot say" rather than `acted: 0` (project code — a function
+   has no JSON form):
 
    ```ts
    defineStack({ functions: {

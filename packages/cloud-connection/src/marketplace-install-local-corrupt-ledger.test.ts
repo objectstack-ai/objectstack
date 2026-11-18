@@ -41,6 +41,8 @@ import { tmpdir } from 'node:os';
 // does so these tests exercise rehydrate's reporting, not seeding.
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
+        // [#34613] The stored-seed funnel the plugin calls; it ends in `load`.
+        async loadStored() { return this.load(); }
         async load() { return { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: 0 }, errors: [] }; }
     },
     recordSeedOutcome: vi.fn(),

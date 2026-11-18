@@ -35,7 +35,9 @@
  *
  * [#34273] An action's refusal catalogue (`ActionSchema.refusals`) is the same
  * entry, so {@link actionRefusalTemplateIssues} judges it by the same rules,
- * on the action collections the action copy pass reads.
+ * on the action collections the action copy pass reads; [#34374 PR2] and an
+ * action's declared texts (`ActionSchema.texts`) beside it, at
+ * `texts.<key>.message`, as a hook's are.
  */
 
 import { validateExpression } from '@objectstack/formula';
@@ -141,7 +143,8 @@ export interface ActionRefusalTemplateScope {
 
 /**
  * [#34273] The same findings for an action's refusal catalogue
- * (`ActionSchema.refusals`, the hook catalogue's twin), across the
+ * (`ActionSchema.refusals`, the hook catalogue's twin) and, #34374 PR2, its
+ * declared texts (`ActionSchema.texts`), across the
  * collections `scope` names. An action declared both top-level and on its
  * object is judged once, at the first place it is met — the de-duplication
  * the action copy pass applies.
@@ -155,7 +158,12 @@ export function actionRefusalTemplateIssues(stack: AnyRec, scope: ActionRefusalT
     const key = `${bound}:${name}`;
     if (seen.has(key)) return;
     seen.add(key);
-    judgeSentences(issues, `${owner} · action '${name}'`, refusalSentences(action.refusals), 'action');
+    judgeSentences(
+      issues,
+      `${owner} · action '${name}'`,
+      [...refusalSentences(action.refusals), ...textSentences(action.texts)],
+      'action',
+    );
   };
   if (scope.actions) {
     for (const action of recordsOf(stack.actions)) judge('stack', action);

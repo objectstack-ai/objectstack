@@ -992,7 +992,12 @@ export function namespaceObjectNameClashOf(
     return clashes.length > 0 ? clashes.map((c) => c.message).join(' ') : null;
 }
 
-/** The seed modes whose load matches incoming records to existing rows by the dataset's `externalId`. */
+/**
+ * The seed modes whose load matches incoming records to existing rows by the
+ * dataset's `externalId`: every live mode since the unkeyed `insert` and
+ * `replace` were retired (#34613). A retired mode is the schema's refusal, not
+ * this one's.
+ */
 const KEYED_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update', 'ignore']);
 
 /**
@@ -1055,7 +1060,8 @@ export async function seedExternalIdSaveRefusal(
     if (missing.length === 0) return undefined;
     const consequence = `so a load in \`${mode}\` mode could never match a row it wrote before: each publish and each `
         + `replay would ${mode === 'update' ? 'skip every record' : 'insert every record again'}. Name a field the object `
-        + "declares, or use `mode: 'insert'` for rows with no natural key.";
+        + "declares, a list of fields when no single field names a row, or `'id'` when the records carry "
+        + 'their own ids.';
     const issues: MetadataIssueEntry[] = missing.map(({ member, index }) => ({
         path: composite ? `externalId.${index}` : 'externalId',
         message: (declared

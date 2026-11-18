@@ -5336,6 +5336,16 @@ jobs:
         continue-on-error: true
         run: pnpm --filter @objectstack/spec check:skill-refs
 
+      # Rationale: `packages/spec/scripts/check-skill-served-sections.ts` header.
+      # The hosted MCP door reads 24 sections of the published skills by exact
+      # heading text; a rename, removal or duplicate fails that product at
+      # start. Also holds every JSON example in those sections to the spec.
+      # Reads packages/spec/src via tsx and needs no build, as its neighbours.
+      - name: Check the skill sections served to MCP clients keep their headings and valid JSON
+        id: check-the-skill-sections-served-to-mcp-clients
+        continue-on-error: true
+        run: pnpm --filter @objectstack/spec check:skill-served-sections
+
       # Rationale: `scripts/check-skill-frame-sync.mjs` header (#5130, #5451, #5799).
       - name: Check the decision frame is in sync across its four copies
         id: check-the-decision-frame-is-in-sync-across
