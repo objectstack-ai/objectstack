@@ -428,6 +428,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     reads: 'top-level',
     why: 'as in compile.ts.',
   },
+  'commands/verify.ts :: config.requires': {
+    reads: 'top-level',
+    why: 'as in compile.ts: handed to `judgeDeclaredCapabilities` beside `artifactPackages(config)`, which applies the same top-level-else-bodies rule for the capability advisories.',
+  },
   // ── os diff / os doctor / os generate / os migrate meta (#22288) ───────
   'commands/diff.ts :: beforeConfig': {
     reads: 'resolved',
