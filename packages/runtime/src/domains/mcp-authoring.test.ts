@@ -557,6 +557,18 @@ describe('save_metadata_draft saves a draft and answers with its publish verdict
     });
   });
 
+  it('a plural type spelling is folded once: the save, the verdict, the discard and the review route name the canonical singular', async () => {
+    const { authoring, served } = await authorThroughDomain();
+    const saved = await call(authoring, 'save_metadata_draft', { type: 'flows', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' });
+    await call(authoring, 'delete_metadata_draft', { type: 'flows', name: 'lead_intake', package: 'com.acme.crm' });
+    const typesSent = served.protocolCalls
+      .filter((c: any) => ['saveMetaItem', 'draftPublishJudgement', 'deleteMetaItem'].includes(c[0]))
+      .map((c: any) => [c[0], c[1].type]);
+    expect(typesSent).toEqual([['saveMetaItem', 'flow'], ['draftPublishJudgement', 'flow'], ['deleteMetaItem', 'flow']]);
+    expect(saved.body.saved.type).toBe('flow');
+    expect(saved.body.review.item).toBe('/studio/com.acme.crm/metadata/flow/lead_intake?review=1');
+  });
+
   it('a save naming no package is refused 400 naming the writable packages, and nothing is written (seat ruling D4)', async () => {
     const store = {
       package: [

@@ -127,6 +127,7 @@ import {
     type MetaReadGateCaller,
 } from '@objectstack/rest';
 import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import type { ErrorCode, ListDraftsResponse, MetadataProtocol, RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -652,7 +653,10 @@ export function createOpenAuthoringRegistry(opts: {
                             return unavailable();
                         }
                         if (!writer) return refuse(PERMISSION_DENIED, 'The authoring tools cannot write on this request.', 403);
-                        const type = requiredString(input.type);
+                        // Folded once to the canonical singular, as the protocol folds a
+                        // plural spelling, so the walled verdict, the save, the verdict and
+                        // the review route all name the type the protocol writes.
+                        const type = canonicalTypeOf(input.type);
                         const name = requiredString(input.name);
                         if (!type || !name) return refuse(VALIDATION_ERROR, 'Name the item as `type` and `name`.', 400);
                         const item = input.item;
@@ -705,7 +709,7 @@ export function createOpenAuthoringRegistry(opts: {
                     case 'delete_metadata_draft': {
                         if (typeof protocol?.deleteMetaItem !== 'function') return unavailable();
                         if (!writer) return refuse(PERMISSION_DENIED, 'The authoring tools cannot write on this request.', 403);
-                        const type = requiredString(input.type);
+                        const type = canonicalTypeOf(input.type);
                         const name = requiredString(input.name);
                         if (!type || !name) return refuse(VALIDATION_ERROR, 'Name the draft as `type` and `name`.', 400);
                         const pkg = input.package === undefined ? undefined : requiredString(input.package);
@@ -730,8 +734,10 @@ export function createOpenAuthoringRegistry(opts: {
             /** One draft's verdict, told where the item gate admits this human's strict draft read. */
             async function gatedDraftVerdict(
                 p: OpenAuthoringProtocol,
-                draft: { type: string; name: string; packageId?: string | null; member?: string },
+                listed: { type: string; name: string; packageId?: string | null; member?: string },
             ): Promise<{ verdict: ReturnType<typeof verdictOf> | null; verdictWithheld?: unknown; verdictError?: unknown }> {
+                // The gate and the judgement read the canonical singular.
+                const draft = { ...listed, type: canonicalMetaUrlType(listed.type) };
                 try {
                     // A package-unbound draft is read without a package: the strict
                     // draft read's own address resolution then names it.
@@ -858,6 +864,12 @@ async function packageRequiredMessage(protocol: OpenAuthoringProtocol): Promise<
     if (writable.length === 0) return `${head} No package in this environment is writable: create one in Studio first.`;
     const named = writable.slice(0, NAMED_PACKAGES_CAP).join(', ');
     return `${head} Writable packages here: ${named}${writable.length > NAMED_PACKAGES_CAP ? `, and ${writable.length - NAMED_PACKAGES_CAP} more` : ''}.`;
+}
+
+/** A `type` argument folded to its canonical singular (`dashboards` → `dashboard`), or `undefined` when absent. */
+function canonicalTypeOf(value: unknown): string | undefined {
+    const type = requiredString(value);
+    return type === undefined ? undefined : canonicalMetaUrlType(type);
 }
 
 function requiredString(value: unknown): string | undefined {
