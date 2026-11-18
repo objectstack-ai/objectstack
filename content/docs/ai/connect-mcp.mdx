@@ -301,9 +301,14 @@ such sentence.
 
 The instructions also name the published skills package and the version to
 install, which is the server's own version
-(`Published skills: @objectstack/skills <version>`, with
-`pnpm add -D @objectstack/skills@<version>`); see
-[Skills](/docs/ai/skills) for syncing it into your agent. A deployment that sets
+(`Published skills: @objectstack/skills <version>`), with the command that
+installs it into your agent's skills directory, with or without a project:
+`os skills install --version <version>`, or
+`npx -p @objectstack/cli@<version> os skills install --version <version>` where
+the CLI is not installed. If you only connected an MCP client and have no
+project, run it in the directory your agent works in; it writes
+`.claude/skills/` there (`--dir` names another). See
+[Skills](/docs/ai/skills#installing-skills) for updating and checking it. A deployment that sets
 the MCP plugin's `instructions` option serves that text as written instead, and
 the local stdio server's instructions carry neither part.
 

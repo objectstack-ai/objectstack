@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#34672] A roll-up `summary` field is read-only on UPDATE whether or not the
- * author declared `readonly: true`.
+ * [#34672] A roll-up `summary` field is read-only on UPDATE and on CREATE
+ * whether or not the author declared `readonly: true`.
  *
  * The engine computes a roll-up from its child rows and writes it through
  * `update()` under an `isSystem` context. Before this card the update's static
@@ -14,20 +14,26 @@
  * `readonly`, and refused under `strictReadonlyWrites`, exactly as for a
  * roll-up the author did declare read-only (the control below).
  *
- * Kept as before, each pinned here:
- *  - the roll-up recompute's own write (`isSystem`), and any other `isSystem`
- *    write of the column;
- *  - a caller's initial value on INSERT (seed data, a historical import), the
- *    boundary the `summary` note on `RUNTIME_OWNED_FIELD_TYPES` draws.
+ * The create side (second describe) reads the same lock through the insert
+ * view (`insertStaticReadonlySubject`): a person's or an import's starting
+ * value is taken, reported as `readonly`, and the column is re-seeded as for an
+ * empty child list (`staticReadonlyCreateStrip`), so it lands `0` for a `sum`,
+ * never the typed value and never `null`. The re-seed also fixes the declared
+ * `readonly: true` roll-up, which used to land `null` on such a create.
  *
- * The import door, end to end over HTTP and SQLite:
+ * Kept, each pinned here: the roll-up recompute's own write (`isSystem`), and
+ * any other `isSystem` write of the column, on update and on create (seed
+ * loads, package installs and historical imports write as the system
+ * principal).
+ *
+ * The REST and import doors, end to end over HTTP and SQLite:
  * `packages/rest/src/import-summary-update-lock-34672.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
-import { summaryFieldsLockedOnUpdate } from './engine-top-level.js';
+import { summaryFieldsLockedOnWrite } from './engine-top-level.js';
 import { READONLY_FIELD_REJECTED_CODE } from './readonly-strict-errors.js';
 
 function makeDriver() {
@@ -246,25 +252,205 @@ describe('[#34672] a roll-up summary without readonly: true is read-only on upda
     expect(acct('a1')).toMatchObject({ order_total: 42, order_total_ro: 42 });
   });
 
-  it('INSERT is not narrowed: a caller\'s initial value is kept (seed data, a historical import)', async () => {
+  // [#34672, insert half] This case pinned the opposite until the create side
+  // was narrowed: a person's create kept `order_total: 7`. It now pins the
+  // narrowed answer; the create side's own cases are in the describe below.
+  it('INSERT is narrowed too: a person\'s starting value is dropped, reported, and the column seeded 0', async () => {
     const events: DroppedFieldsEvent[] = [];
     await engine.insert(
       'acct', { id: 'a3', name: 'C', order_total: 7 },
       { context: PERSON, onFieldsDropped: (e: DroppedFieldsEvent) => events.push(e) } as any,
     );
-    expect(events).toEqual([]);
-    expect(acct('a3')).toMatchObject({ order_total: 7 });
+    expect(events).toEqual([ROLL_UP]);
+    expect(acct('a3')).toMatchObject({ name: 'C', order_total: 0 });
   });
 });
 
-describe('[#34672] summaryFieldsLockedOnUpdate', () => {
+describe('[#34672] a roll-up summary is read-only on create: dropped, reported, seeded as for an empty child list', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let creates: Array<Record<string, unknown>>;
+
+  /** A sibling account whose roll-ups have no empty-set value (`max`). */
+  const ACCOUNT_MAX = {
+    name: 'acct_max',
+    fields: {
+      name: { type: 'text' },
+      biggest: { type: 'summary', summaryOperations: { object: 'ord_max', field: 'amount', function: 'max' } },
+    },
+  };
+  const ORDER_MAX = {
+    name: 'ord_max',
+    fields: { amount: { type: 'number' }, acct: { type: 'master_detail', reference: 'acct_max' } },
+  };
+  const BOTH: DroppedFieldsEvent = { object: 'acct', fields: ['order_total', 'order_total_ro'], reason: 'readonly' };
+
+  beforeEach(async () => {
+    engine = new ObjectQL({ logger: silentLogger });
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    creates = [];
+    const create = d.driver.create.bind(d.driver);
+    d.driver.create = async (object: string, data: Record<string, unknown>) => {
+      if (object === 'acct' || object === 'acct_max') creates.push({ ...data });
+      return create(object, data);
+    };
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    for (const o of [ACCOUNT, ORDER, ACCOUNT_MAX, ORDER_MAX]) engine.registry.registerObject(o as any);
+  });
+
+  const acct = (id: string) => storeFor('acct').get(id);
+  const dropsOf = (events: DroppedFieldsEvent[]) => ({ context: PERSON, onFieldsDropped: (e: DroppedFieldsEvent) => events.push(e) }) as any;
+
+  it('baseline: a person\'s create that names neither roll-up stores the seed, reports nothing', async () => {
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert('acct', { id: 'a1', name: 'A' }, dropsOf(events));
+    expect(events).toEqual([]);
+    expect(acct('a1')).toMatchObject({ order_total: 0, order_total_ro: 0 });
+  });
+
+  it('a person\'s create (REST POST): both values are dropped and reported, both columns land 0, the rest is stored', async () => {
+    const events: DroppedFieldsEvent[] = [];
+    const created = await engine.insert('acct', { id: 'a1', name: 'A', order_total: 90, order_total_ro: 90 }, dropsOf(events));
+    expect(events).toEqual([BOTH]);
+    expect(acct('a1')).toEqual({ id: 'a1', name: 'A', order_total: 0, order_total_ro: 0 });
+    expect(created).toMatchObject({ order_total: 0, order_total_ro: 0 });
+  });
+
+  it('the declared readonly: true roll-up alone lands 0, not null (the re-seed after the strip)', async () => {
+    // Before the re-seed the strip re-ran only `applyFieldDefaults`, so the
+    // taken value left this column absent (null) while the write succeeded.
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert('acct', { id: 'a1', name: 'A', order_total_ro: 90 }, dropsOf(events));
+    expect(events).toEqual([{ object: 'acct', fields: ['order_total_ro'], reason: 'readonly' }]);
+    expect(creates).toEqual([{ id: 'a1', name: 'A', order_total: 0, order_total_ro: 0 }]);
+  });
+
+  it('a blank or null starting value is taken the same way and still lands 0', async () => {
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert('acct', { id: 'a1', name: 'A', order_total: null }, dropsOf(events));
+    expect(events).toEqual([ROLL_UP]);
+    expect(acct('a1')).toMatchObject({ order_total: 0, order_total_ro: 0 });
+  });
+
+  it('a batch create (array): every row\'s value is dropped and seeded, the union reported once', async () => {
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert('acct', [
+      { id: 'a1', name: 'A', order_total: 90 },
+      { id: 'a2', name: 'B' },
+      { id: 'a3', name: 'C', order_total: 2 },
+    ], dropsOf(events));
+    expect(events).toEqual([ROLL_UP]);
+    expect(['a1', 'a2', 'a3'].map((id) => acct(id)?.order_total)).toEqual([0, 0, 0]);
+  });
+
+  it('insertMany (the import commit): the row that sent a value carries droppedFields, the column lands 0', async () => {
+    const outcomes = await engine.insertMany('acct', [
+      { id: 'a1', name: 'A', order_total: 90 },
+      { id: 'a2', name: 'B' },
+    ], { context: PERSON } as any);
+    expect(outcomes.map((o) => o.ok)).toEqual([true, true]);
+    expect((outcomes[0] as any).droppedFields).toEqual([ROLL_UP]);
+    expect((outcomes[1] as any).droppedFields ?? []).toEqual([]);
+    expect([acct('a1')?.order_total, acct('a2')?.order_total]).toEqual([0, 0]);
+  });
+
+  it('under strictReadonlyWrites the create is refused and nothing is written', async () => {
+    const err = await rejection(engine.insert(
+      'acct', { id: 'a1', name: 'A', order_total: 90 },
+      { context: PERSON, strictReadonlyWrites: true } as any,
+    ));
+    expect(err.code).toBe(READONLY_FIELD_REJECTED_CODE);
+    expect(err.fields).toEqual(['order_total']);
+    expect(err.drops).toEqual([ROLL_UP]);
+    expect(err.operation).toBe('insert');
+    expect(creates).toEqual([]);
+  });
+
+  it('the insert-mode preview (validate) reports the same drop the write makes', async () => {
+    const events: DroppedFieldsEvent[] = [];
+    const preview = await engine.validate(
+      'acct', { id: 'a1', name: 'A', order_total: 90 },
+      { mode: 'insert', context: PERSON, onFieldsDropped: (e: DroppedFieldsEvent) => events.push(e) },
+    );
+    expect(events).toEqual([ROLL_UP]);
+    expect(preview.results[0]).toMatchObject({ valid: true, droppedFields: [ROLL_UP] });
+    expect(creates).toEqual([]);
+  });
+
+  it('a beforeInsert hook is shown the seed, not the caller\'s value', async () => {
+    const seen: unknown[] = [];
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      if (ctx.object === 'acct') seen.push(ctx.input.data.order_total);
+    });
+    await engine.insert('acct', { id: 'a1', name: 'A', order_total: 90 }, { context: PERSON } as any);
+    expect(seen).toEqual([0]);
+    expect(acct('a1')).toMatchObject({ order_total: 0 });
+  });
+
+  it('children already stored: the create lands the seed (0), not the typed value; the next child write recomputes', async () => {
+    // Rows naming the parent before it exists (caller-chosen ids, as an
+    // import keyed on an external id can produce), put straight in the store:
+    // a child write through the engine would recompute a parent that is not
+    // there yet. The true sum is 42.
+    storeFor('ord').set('o1', { id: 'o1', acct: 'a9', amount: 10 });
+    storeFor('ord').set('o2', { id: 'o2', acct: 'a9', amount: 32 });
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert('acct', { id: 'a9', name: 'Z', order_total: 90 }, dropsOf(events));
+    expect(events).toEqual([ROLL_UP]);
+    expect(acct('a9')).toMatchObject({ order_total: 0, order_total_ro: 0 });
+    await engine.insert('ord', { acct: 'a9', amount: 8 }, { context: PERSON } as any);
+    expect(acct('a9')).toMatchObject({ order_total: 50, order_total_ro: 50 });
+  });
+
+  it('an isSystem create keeps its value (seed loads, package installs, historical imports)', async () => {
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert(
+      'acct', { id: 'a1', name: 'A', order_total: 90, order_total_ro: 90 },
+      { context: { isSystem: true }, onFieldsDropped: (e: DroppedFieldsEvent) => events.push(e) } as any,
+    );
+    expect(events).toEqual([]);
+    expect(acct('a1')).toMatchObject({ order_total: 90, order_total_ro: 90 });
+  });
+
+  it('preserveAudit on a non-system create is no exemption: dropped and seeded', async () => {
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert(
+      'acct', { id: 'a1', name: 'A', order_total: 90 },
+      { context: { ...PERSON, preserveAudit: true }, onFieldsDropped: (e: DroppedFieldsEvent) => events.push(e) } as any,
+    );
+    expect(events).toEqual([ROLL_UP]);
+    expect(acct('a1')).toMatchObject({ order_total: 0 });
+  });
+
+  it('a roll-up with no empty-set value (max) is dropped and stays empty, as on any create', async () => {
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert('acct_max', { id: 'm1', name: 'M', biggest: 77 }, dropsOf(events));
+    expect(events).toEqual([{ object: 'acct_max', fields: ['biggest'], reason: 'readonly' }]);
+    expect(storeFor('acct_max').get('m1')?.biggest ?? null).toBeNull();
+  });
+
+  it('a sys_ object is outside the create lock, as it is outside the insert strip', async () => {
+    engine.registry.registerObject({
+      name: 'sys_tally',
+      fields: { total: { type: 'summary', summaryOperations: { object: 'ord', field: 'amount', function: 'sum' } } },
+    } as any);
+    const events: DroppedFieldsEvent[] = [];
+    await engine.insert('sys_tally', { id: 's1', total: 5 }, dropsOf(events));
+    expect(events).toEqual([]);
+    expect(storeFor('sys_tally').get('s1')).toMatchObject({ total: 5 });
+  });
+});
+
+describe('[#34672] summaryFieldsLockedOnWrite', () => {
   it('names each summary field not declared readonly, and nothing else', () => {
-    expect(summaryFieldsLockedOnUpdate(ACCOUNT)).toEqual(['order_total']);
-    expect(summaryFieldsLockedOnUpdate(ORDER)).toEqual([]);
+    expect(summaryFieldsLockedOnWrite(ACCOUNT)).toEqual(['order_total']);
+    expect(summaryFieldsLockedOnWrite(ORDER)).toEqual([]);
   });
 
   it('answers empty for a schema with no field map', () => {
-    expect(summaryFieldsLockedOnUpdate(undefined)).toEqual([]);
-    expect(summaryFieldsLockedOnUpdate({ fields: [] })).toEqual([]);
+    expect(summaryFieldsLockedOnWrite(undefined)).toEqual([]);
+    expect(summaryFieldsLockedOnWrite({ fields: [] })).toEqual([]);
   });
 });

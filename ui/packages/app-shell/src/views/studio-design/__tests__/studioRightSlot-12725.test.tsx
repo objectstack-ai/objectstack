@@ -113,13 +113,16 @@ describe('StudioRightSlot', () => {
     expect(onModeChange).toHaveBeenLastCalledWith('props');
   });
 
-  it('folds the copilot into a strip while the properties show; the strip leads back', () => {
+  it('hides the copilot while the properties show; the header switch leads back, with no strip at the foot', () => {
     const { onModeChange } = renderSlot({ mode: 'props' });
     expect(screen.getByTestId('studio-slot-props')).toBeVisible();
     expect(screen.getByTestId('studio-slot-copilot')).not.toBeVisible();
     // Still mounted: a turn in flight survives a look at the properties.
     expect(screen.getByTestId('copilot-body')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('studio-slot-copilot-strip'));
+    // objectstack#35018 — the 「AI 助手 / 回到对话 →」 strip repeated the switch; it is gone.
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
+    expect(screen.queryByText(t('engine.studio.slot.backToChat', 'en'))).toBeNull();
+    fireEvent.click(screen.getByTestId('studio-slot-tab-copilot'));
     expect(onModeChange).toHaveBeenLastCalledWith('copilot');
   });
 
@@ -153,13 +156,11 @@ describe('StudioRightSlot', () => {
     expect(onOverlayDismiss).toHaveBeenCalledTimes(1);
   });
 
-  // objectstack#25943 — the StudioRailProps strip, 「AI 助手 · N 项待确认 · 回到对话 →」
-  // (objectstack#34725 named the panel 「AI 助手」, as the console names it).
-  it('zh: the folded strip reads 「AI 助手 · 3 项待确认」 and the copilot tab carries the 3', () => {
+  // objectstack#25943 — 「N 项待确认」 on the copilot tab (objectstack#34725 named
+  // the panel 「AI 助手」; objectstack#35018 dropped the strip that repeated it).
+  it('zh: while the properties show, the copilot tab carries the 3 and no strip repeats it', () => {
     renderSlot({ mode: 'props', planPendingCount: 3, locale: 'zh-CN' });
-    const strip = screen.getByTestId('studio-slot-copilot-strip');
-    expect(strip).toHaveTextContent('AI 助手 · 3 项待确认');
-    expect(strip).toHaveTextContent(t('engine.studio.slot.backToChat', 'zh-CN'));
+    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
     const copilotTab = screen.getAllByRole('tab')[1];
     expect(within(copilotTab).getByTestId('studio-slot-plan-pending')).toHaveTextContent('3');
     expect(copilotTab).toHaveAccessibleDescription('3 项待确认');

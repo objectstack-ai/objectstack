@@ -703,3 +703,80 @@ describe('GridField / LineItemsField — editable line items', () => {
     });
   });
 });
+
+describe('GridField — a boolean column read as a boolean by the cell rules (objectstack#34972)', () => {
+  // The shape `@object-ui/plugin-form` derives for a `boolean` child field: a
+  // select column whose two options store the strings 'true' / 'false'.
+  const won = {
+    name: 'won',
+    label: 'Won',
+    type: 'select' as const,
+    options: [
+      { label: 'Yes', value: 'true' },
+      { label: 'No', value: 'false' },
+    ],
+  };
+  const requiredField = {
+    columns: [won, { name: 'delivery_date', label: 'Delivery', type: 'text' as const, requiredWhen: 'record.won == true' }],
+  } as any;
+
+  it("marks the dependent cell required when the select holds 'true', and not when it holds 'false'", () => {
+    render(
+      <GridField
+        value={[{ won: 'true', delivery_date: '' }, { won: 'false', delivery_date: '' }]}
+        onChange={() => {}}
+        field={requiredField}
+      />,
+    );
+    expect(screen.getByTestId('line-items-invalid-0-delivery_date')).toBeTruthy();
+    expect(screen.queryByTestId('line-items-invalid-1-delivery_date')).toBeNull();
+  });
+
+  it('reads a stored boolean the same way, and leaves the row the select wrote unchanged', () => {
+    const value = [{ won: true, delivery_date: '' }, { won: 'true', delivery_date: '' }];
+    const onChange = vi.fn();
+    render(<GridField value={value} onChange={onChange} field={requiredField} />);
+    expect(screen.getByTestId('line-items-invalid-0-delivery_date')).toBeTruthy();
+    expect(screen.getByTestId('line-items-invalid-1-delivery_date')).toBeTruthy();
+    expect(value[1].won).toBe('true');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("locks a readonlyWhen cell over the same reading: 'true' locks, 'false' does not", () => {
+    const lockField = {
+      columns: [won, { name: 'note', label: 'Note', type: 'text' as const, readonlyWhen: 'record.won == true' }],
+    } as any;
+    render(
+      <GridField value={[{ won: 'true', note: 'a' }, { won: 'false', note: 'b' }]} onChange={() => {}} field={lockField} />,
+    );
+    const notes = screen.getAllByLabelText('Note') as HTMLInputElement[];
+    expect(notes[0].disabled).toBe(true);
+    expect(notes[1].disabled).toBe(false);
+  });
+
+  it('CONTROL: a non-boolean select column keeps its string value in the predicate', () => {
+    const stageField = {
+      columns: [
+        {
+          name: 'stage',
+          label: 'Stage',
+          type: 'select' as const,
+          options: [
+            { label: 'Open', value: 'open' },
+            { label: 'Closed', value: 'closed' },
+          ],
+        },
+        { name: 'reason', label: 'Reason', type: 'text' as const, requiredWhen: "record.stage == 'closed'" },
+      ],
+    } as any;
+    render(
+      <GridField
+        value={[{ stage: 'closed', reason: '' }, { stage: 'open', reason: '' }]}
+        onChange={() => {}}
+        field={stageField}
+      />,
+    );
+    expect(screen.getByTestId('line-items-invalid-0-reason')).toBeTruthy();
+    expect(screen.queryByTestId('line-items-invalid-1-reason')).toBeNull();
+  });
+});
