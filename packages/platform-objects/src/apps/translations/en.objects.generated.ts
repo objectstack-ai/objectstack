@@ -240,6 +240,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Done",
           fields: {
             email: "Email",
+            pendingAgain: "Already pending",
             notApplied: "Already pending, so not applied (set these on the record)",
             managerError: "Manager",
             "host.reason": "Invitation not sent"

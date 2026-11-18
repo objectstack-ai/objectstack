@@ -240,6 +240,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "完了",
           fields: {
             email: "メールアドレス",
+            pendingAgain: "既に保留中",
             notApplied: "保留中のため適用されませんでした（レコードで設定してください）",
             managerError: "上司",
             "host.reason": "招待は送信されませんでした"
