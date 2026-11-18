@@ -20,7 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { ObjectQL } from '@objectstack/objectql';
+import { ObjectQL } from '@objectstack/objectql/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { createStdioDataBridge } from './stdio-data-bridge.js';

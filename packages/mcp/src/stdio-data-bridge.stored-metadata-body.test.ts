@@ -472,6 +472,7 @@ const BRIDGE_MEMBERS: Record<string, string> = {
   query: 'seam — serveStoredMetadataRows; filter / sort on the body column refused',
   get: 'seam — serveStoredMetadataRow',
   aggregate: 'refuses — group / filter / aggregate member on the body column',
+  aggregateGroups: 'refuses — the same gates as aggregate, which it runs through (an order key names an aggregated column, never the body)',
   create: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',
   update: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',
   remove: 'refused by the exposure gate — the stored-body tables admit no write verb (family pin)',

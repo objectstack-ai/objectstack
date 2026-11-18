@@ -18,6 +18,9 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+// The bridge's module graph reaches a dynamic `import('@objectstack/metadata')`;
+// paid here, at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { buildMcpBridge } from './domains/mcp.js';

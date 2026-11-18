@@ -157,8 +157,8 @@ type CodedError = Error & {
   object?: string; param?: string;
 };
 
-/** A refusal of the request, `INVALID_QUERY` (or the named code) / 400, nothing read. */
-function refusal(object: string, detail: string, code: string = StandardErrorCode.enum.INVALID_QUERY): CodedError {
+/** A refusal of the request, `INVALID_QUERY` or `INVALID_SORT` / 400, nothing read. */
+function refusal(code: 'INVALID_QUERY' | 'INVALID_SORT', object: string, detail: string): CodedError {
   const err = new Error(
     `aggregate('${object}') ordered or cut by group: ${detail} The query was NOT run and nothing was read.`,
   ) as CodedError;
@@ -184,18 +184,19 @@ export function assertAggregateOrderCutShape(
   columns: readonly string[],
 ): void {
   if (request === null || typeof request !== 'object') {
-    throw refusal(object, 'the request is not an object.');
+    throw refusal('INVALID_QUERY', object, 'the request is not an object.');
   }
   const orderBy: unknown = request.orderBy;
   if (!Array.isArray(orderBy)) {
-    throw refusal(object, '`orderBy` must be a list of { field, order } (an empty list orders by the group keys).');
+    throw refusal('INVALID_QUERY', object, '`orderBy` must be a list of { field, order } (an empty list orders by the group keys).');
   }
   const limit: unknown = request.limit;
   if (limit !== undefined && !(typeof limit === 'number' && Number.isInteger(limit) && limit >= 1)) {
-    throw refusal(object, `\`limit\` must be a whole number of groups, 1 or more; received ${JSON.stringify(limit)}.`);
+    throw refusal('INVALID_QUERY', object, `\`limit\` must be a whole number of groups, 1 or more; received ${JSON.stringify(limit)}.`);
   }
   if (columns.includes(AGGREGATE_GROUP_COUNT_COLUMN)) {
     throw refusal(
+      'INVALID_QUERY',
       object,
       `the aggregated row already projects a column named '${AGGREGATE_GROUP_COUNT_COLUMN}', the name the group count `
       + 'is answered under. Rename that alias.',
@@ -207,17 +208,17 @@ export function assertAggregateOrderCutShape(
     const field = (key as { field?: unknown } | null)?.field;
     const order = (key as { order?: unknown } | null)?.order;
     if (typeof field !== 'string' || field === '' || (order !== 'asc' && order !== 'desc')) {
-      throw refusal(object, `\`orderBy[${i}]\` must be { field, order: 'asc' | 'desc' }.`);
+      throw refusal('INVALID_QUERY', object, `\`orderBy[${i}]\` must be { field, order: 'asc' | 'desc' }.`);
     }
     if (!columns.includes(field)) {
       throw refusal(
+        'INVALID_SORT',
         object,
         `\`orderBy[${i}]\` names '${field}', which is not a column of the aggregated row. Groups are ordered by `
         + `the row's own columns — the aggregation aliases and the groupBy projections — which here are: ${known}.`,
-        StandardErrorCode.enum.INVALID_SORT,
       );
     }
-    if (seen.has(field)) throw refusal(object, `\`orderBy\` names '${field}' twice.`);
+    if (seen.has(field)) throw refusal('INVALID_QUERY', object, `\`orderBy\` names '${field}' twice.`);
     seen.add(field);
   }
 }
@@ -240,6 +241,7 @@ export function aggregateOrderCutRefusal(
 ): Error | undefined {
   if (!driverCompilesAggregateOrderCut(facts.driver)) {
     return refusal(
+      'INVALID_QUERY',
       object,
       `this read's driver '${driverNameOf(facts.driver)}' does not order and cut groups in its own statement, and `
       + 'the groups are never ordered or cut in the application instead. Ask without an order and a limit, or query '
@@ -248,16 +250,18 @@ export function aggregateOrderCutRefusal(
   }
   if (facts.hasHaving) {
     return refusal(
+      'INVALID_QUERY',
       object,
       '`having` is applied after the driver answers, so a cut in the statement would cut before it. Ask without '
       + '`having`, or without an order and a limit.',
     );
   }
   if (facts.hasRelationGroup) {
-    return refusal(object, 'grouping through a relation is not ordered or cut. Ask without an order and a limit.');
+    return refusal('INVALID_QUERY', object, 'grouping through a relation is not ordered or cut. Ask without an order and a limit.');
   }
   if (!facts.nativeAggregate) {
     return refusal(
+      'INVALID_QUERY',
       object,
       'this aggregate is computed in the application, not by the driver (a date bucket the driver does not '
       + 'compile, a reference timezone it does not bucket, or a measure filter it does not evaluate), and its groups '
