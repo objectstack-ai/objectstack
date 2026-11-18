@@ -3393,7 +3393,8 @@ function StudioObjectRow({
             type="button"
             onClick={() => setMoreOpen((v) => !v)}
             aria-expanded={moreOpen}
-            aria-label={`${o.name} ${t('perm.more.col')} · ${moreCount}`}
+            // Named like the strip's buttons, without the object: the row says which.
+            aria-label={`${t('perm.more.col')} · ${moreCount}`}
             data-testid={`perm-more-toggle-${o.name}`}
             data-on={moreOn}
             className="inline-flex h-6 items-center gap-1 whitespace-nowrap rounded px-1.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -3415,7 +3416,6 @@ function StudioObjectRow({
               <button
                 type="button"
                 disabled={!writable}
-                aria-label={`${o.name} ${t('perm.col.bulk')}`}
                 data-testid={`perm-bulk-menu-${o.name}`}
                 data-perm-fold="folded-only"
                 className={cn(
