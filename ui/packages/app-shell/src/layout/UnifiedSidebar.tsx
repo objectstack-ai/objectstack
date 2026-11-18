@@ -75,7 +75,7 @@ import {
 } from './ContextSelectors.js';
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
-import { useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
+import { SIDEBAR_EDGE_ZONE, useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
@@ -149,10 +149,13 @@ interface UnifiedSidebarProps {
   /** Callback when user switches apps */
   onAppChange?: (name: string) => void;
   /**
-   * Below the fold width, draw the sidebar as the icon rail that expands over
-   * the content (objectstack#27593). The console layout sets it, and folds
-   * the sidebar with `useResponsiveSidebar`; off, the sidebar is drawn as the
-   * provider says at every width.
+   * The console's sidebar (objectstack#27593, objectstack#35062): from 768 px
+   * up a collapsed sidebar is hidden, takes no width, and floats its full menu
+   * over the content from the window's left edge; below the fold width it
+   * collapses on its own, and the app bar's trigger floats the menu. The
+   * console layout sets it, and folds the sidebar with
+   * `useResponsiveSidebar`; off, the sidebar is drawn as the provider says at
+   * every width, collapsed to the primitive's icon rail.
    */
   railOverlay?: boolean;
   /**
@@ -192,8 +195,9 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   // hook, so the two surfaces cannot name one entry two ways.
   const resolveNavTargetLabel = useNavTargetLabel({ byName: true });
   const resolveNavTargetIcon = useNavTargetIcon();
-  // Below the fold width the sidebar is the icon rail and expands over the
-  // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
+  // Collapsed, the console's sidebar is hidden and its menu floats over the
+  // content (objectstack#35062); below the fold width it collapses on its own
+  // (objectstack#27593), and `useResponsiveSidebar` folds and unfolds it.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
   const railPanel = useConsoleSidebarRailPanel(rail);
   const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
@@ -616,7 +620,8 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
   return (
     <div data-testid="console-sidebar-frame" className={railPanel.frameClassName}>
     <Sidebar
-      collapsible="icon"
+      ref={railPanel.sidebarRef}
+      collapsible={railPanel.collapsible}
       className={cn(CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
       {...railPanel.panelProps}
     >
@@ -878,8 +883,8 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
         </nav>
       </SidebarContent>
       {/* "Keep sidebar open" turns the fold off for this browser; offered
-          where the fold applies, while the rail is expanded or kept open. */}
-      {rail.narrow && (rail.overlayOpen || rail.keepOpen) && (
+          where the fold applies, while the menu floats or is kept open. */}
+      {rail.narrow && (railPanel.overlayOpen || rail.keepOpen) && (
         <SidebarFooter className="border-t border-sidebar-border">
           <SidebarMenu>
             <SidebarMenuItem>
@@ -900,6 +905,17 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false, phoneNavBar
       {/* No footer trigger: the app bar's left slot holds the shell's one
           sidebar trigger at every width (objectui#12429). */}
     </Sidebar>
+    {/* objectstack#35062 — the window's left edge while the sidebar is
+        hidden: resting the pointer on it, or a press, floats the menu. For
+        the pointer only; the keyboard has the app bar's trigger and ⌘B. */}
+    {railPanel.edgeZoneProps && (
+      <div
+        data-testid="console-sidebar-edge"
+        aria-hidden="true"
+        className={cn(SIDEBAR_EDGE_ZONE, CONSOLE_BELOW_TOP_BAR)}
+        {...railPanel.edgeZoneProps}
+      />
+    )}
     {/* objectstack#34594 — the phone's bottom menu bar. After the sidebar,
         so it takes the sidebar's place before the page in reading order. */}
     {phoneMenu && (
