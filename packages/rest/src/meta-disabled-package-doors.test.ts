@@ -30,6 +30,8 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { createRegistryEmailTemplateLoader } from '@objectstack/plugin-email';
+// [#34901] Paid at collection, not inside a case's clock: the withheld-field pins boot the real plugin.
+import { SecurityPlugin } from '@objectstack/plugin-security';
 import { RestServer } from './rest-server.js';
 
 const META = '/api/v1/meta';
@@ -1106,5 +1108,146 @@ describe('[#32814] RestServer: a pair row of a name only a disabled package hold
         host.registry.disablePackage(MODULE);
         const read = await host.plainWith('email_template', 'welcome', { member: 'fr-FR' });
         expect([read.status, read.body?.error?.code], JSON.stringify(read.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    }, 60_000);
+});
+
+/**
+ * [ADR-0106 D1/D3/D5, #34901] The served object read names a disabled
+ * package's withheld fields in its `_withheldFields` read decoration; this
+ * door's projection keeps an entry only for a caller the security service's
+ * `getMetadataReadableWithheldFields` admits, judged against the field's
+ * STORAGE definition. Real protocol, real registry and the real
+ * `SecurityPlugin`'s registered service: package `PROJECTS` extends `m1_deal`
+ * with `m1_project`, guarded by the capability `view_projects`, and is
+ * disabled. FROM (the head before this fix): every caller was served the entry,
+ * both denied ones included. TO: only the admitted caller is.
+ */
+describe('[ADR-0106 D1/D3, #34901] RestServer: a disabled package\'s withheld field, per caller', () => {
+    const DEALS = 'com.qa.m1.deals';
+    const PROJECTS = 'com.qa.m1.projects';
+    const OBJECT = 'm1_deal';
+    const set = (name: string, extra: Record<string, unknown> = {}) =>
+        ({ name, label: name, objects: { [OBJECT]: { allowRead: true } }, ...extra });
+    const SETS = [
+        set('member_default'),
+        set('deny_project', { systemPermissions: ['view_projects'], fields: { [`${OBJECT}.m1_project`]: { readable: false, editable: false } } }),
+        set('open'),
+        set('projects_viewer', { systemPermissions: ['view_projects'] }),
+        set('projects_viewer_too', { systemPermissions: ['view_projects'] }),
+    ];
+    /** Denied by a permission set's `readable: false`; denied by the stored field's `requiredPermissions`; admitted (twice, for the 304 cohort). */
+    const CALLERS: Record<string, Record<string, unknown>> = {
+        'denied by a permission set': { userId: 'u_deny', positions: [], permissions: ['deny_project'] },
+        'denied by requiredPermissions': { userId: 'u_open', positions: [], permissions: ['open'] },
+        admitted: { userId: 'u_viewer', positions: [], permissions: ['projects_viewer'] },
+        'admitted, another set': { userId: 'u_viewer2', positions: [], permissions: ['projects_viewer_too'] },
+    };
+    const WITHHELD = { m1_project: { packageId: PROJECTS } };
+
+    async function realSecurityService(registry: SchemaRegistry) {
+        // Where the plugin's catalog reads the sets once it binds to this registry at start.
+        for (const s of SETS) registry.registerItem('permission', s as any, 'name' as any);
+        const ql = { registerMiddleware: () => {}, getSchema: (n: string) => registry.getObject(n) ?? null, findOne: async () => null, registry };
+        const metadata = { get: async (_t: string, n: string) => registry.getObject(n) ?? null, list: async () => SETS };
+        const services: Record<string, unknown> = { manifest: { register: vi.fn() }, objectql: ql, metadata };
+        const registerService = vi.fn();
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            registerService,
+            getService: (n: string) => { if (!(n in services)) throw new Error(`no ${n}`); return services[n]; },
+        };
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'member_default' } as any);
+        await plugin.init(ctx as any);
+        await plugin.start(ctx as any);
+        return registerService.mock.calls.find((c: unknown[]) => c[0] === 'security')?.[1] as Record<string, unknown>;
+    }
+
+    async function withheldHost(caller: Record<string, unknown>, options: { cached?: boolean; dropMember?: boolean } = {}) {
+        const host = setup(undefined, caller);
+        host.registry.installPackage({ id: DEALS, name: DEALS, version: '1.0.0', type: 'app', namespace: 'm1' } as any, 'code');
+        host.registry.installPackage({ id: PROJECTS, name: PROJECTS, version: '1.0.0', type: 'module', namespace: 'm1', dependencies: { [DEALS]: '^1.0.0' } } as any, 'code');
+        host.registry.registerObject({
+            name: OBJECT, label: 'Deal',
+            fields: { name: { name: 'name', type: 'text', label: 'Name' }, amount: { name: 'amount', type: 'number', label: 'Amount' } },
+        } as any, DEALS, 'm1', 'own');
+        host.registry.registerObject({
+            name: OBJECT,
+            fields: { m1_project: { name: 'm1_project', type: 'text', label: 'Project', requiredPermissions: ['view_projects'] } },
+        } as any, PROJECTS, 'm1', 'extend');
+        host.registry.disablePackage(PROJECTS);
+        const security = await realSecurityService(host.registry);
+        const served = options.dropMember ? { ...security, getMetadataReadableWithheldFields: undefined } : security;
+        (host.rest as any).securityServiceProvider = async () => served;
+        if (options.cached === false) (host.protocol as any).getMetaItemCached = undefined;
+        const read = async (pattern: string, path: string, params: Record<string, string>) => {
+            const route = host.rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === `${META}${pattern}`);
+            if (!route) throw new Error(`GET ${pattern} is not registered`);
+            const res = makeRes();
+            await route.handler({ method: 'GET', path: `${META}${path}`, params, query: {}, body: {}, headers: {} }, res);
+            return { status: res.statusCode, body: res.body, headers: res.headers as Record<string, string> };
+        };
+        return {
+            item: () => read('/:type/:name', `/object/${OBJECT}`, { type: 'object', name: OBJECT }),
+            list: () => read('/:type', '/object', { type: 'object' }),
+        };
+    }
+    const itemOf = (body: any) => body?.item ?? body?.data?.item ?? body;
+    const listed = (body: any) => {
+        const items: any[] = Array.isArray(body) ? body : body?.items ?? body?.data?.items ?? body?.data ?? [];
+        return items.find((i) => i?.name === OBJECT);
+    };
+
+    for (const cached of [true, false]) {
+        it(`the item read (${cached ? 'cached' : 'uncached'}): only the admitted caller is told the field is withheld`, async () => {
+            const seen: Record<string, unknown> = {};
+            for (const [label, caller] of Object.entries(CALLERS)) {
+                const answer = await (await withheldHost(caller, { cached })).item();
+                expect(answer.status, label).toBe(200);
+                expect(Object.keys(itemOf(answer.body)?.fields ?? {}), label).toContain('amount');
+                seen[label] = itemOf(answer.body)?._withheldFields ?? null;
+            }
+            expect(seen).toEqual({
+                'denied by a permission set': null,
+                'denied by requiredPermissions': null,
+                admitted: WITHHELD,
+                'admitted, another set': WITHHELD,
+            });
+        }, 60_000);
+    }
+
+    it('the object list read: only the admitted caller is told the field is withheld', async () => {
+        const seen: Record<string, unknown> = {};
+        for (const [label, caller] of Object.entries(CALLERS)) {
+            const answer = await (await withheldHost(caller)).list();
+            expect(answer.status, label).toBe(200);
+            seen[label] = listed(answer.body)?._withheldFields ?? null;
+        }
+        expect(seen).toEqual({
+            'denied by a permission set': null,
+            'denied by requiredPermissions': null,
+            admitted: WITHHELD,
+            'admitted, another set': WITHHELD,
+        });
+    }, 60_000);
+
+    it('[D3] the cached read\'s ETag differs between callers who see different withheld sets, and is equal for the same set', async () => {
+        const etag: Record<string, string | undefined> = {};
+        for (const [label, caller] of Object.entries(CALLERS)) {
+            etag[label] = (await (await withheldHost(caller)).item()).headers.ETag;
+        }
+        expect(etag.admitted).toBeTruthy();
+        expect(etag['denied by a permission set']).not.toBe(etag.admitted);
+        expect(etag['denied by a permission set']).toBe(etag['denied by requiredPermissions']);
+        expect(etag.admitted).toBe(etag['admitted, another set']);
+    }, 60_000);
+
+    it('fails closed: a security service without the member drops the entry for every caller, the admitted one included', async () => {
+        for (const [label, caller] of Object.entries(CALLERS)) {
+            const host = await withheldHost(caller, { dropMember: true });
+            const item = await host.item();
+            expect(item.status, label).toBe(200);
+            expect(itemOf(item.body)?._withheldFields, label).toBeUndefined();
+            expect(listed((await host.list()).body)?._withheldFields, label).toBeUndefined();
+        }
     }, 60_000);
 });
