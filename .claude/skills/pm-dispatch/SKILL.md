@@ -122,7 +122,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `finding` | 立卡三类内待首次定级,定级即离标;三类外关 not planned;不占队列不进收件箱 |
 | `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;三具名读者 = 候选查询排除、首触即关、普查半态行 |
 | `target:<major>` | ⛔ 不再作发版阻塞标记:阻塞卡只升 `priority:p0`,窗与回落见 `references/filing-gate.md` 定级判据 |
-| `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
+| `pm:epic`(父单或 sub-issue) | 子专题,只由维护者开;已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
 | `pm:seat` | 座位登记贴:协议载体,不是待分诊的工作 |
 | `priority:p0` | 插队:同轮立即派发,越过 `batch`、深度等待(`LOCK_DEPTH_HOLD`)与一切并发上限;无槽即暂停低级在飞 dev 腾位(机制 `references/execution-duties.md`);⛔ 不豁免重叠检查(`references/area-lease.md`)与认领协议 |
 | `area:*` | 产品大专题:每张公开卡恰一个,安全卡不打;分诊首触打,与 `domain:*` 同笔;存量回填只在维护者授权的专题下。四读者:维护者按专题看板;定级读北极星「Product areas」里该专题的核心功能清单;父单分组;取卡次序 = 维护者点名的专题 |
@@ -138,7 +138,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - declared≠enforced 观察类 ⇒ 转 enforce-or-remove 通道;真 won't-fix 候选 ⇒ 逐卡进决策箱。
 - 派发与折叠检查时读半状态巡查锚的 H17 触发文件索引,与本次派发文件面求交。
 - 相交 ⇒ 按该 hold 评论的 rider/restart 条款处置:点名该单,顺手活列为申报过的增项。
-- 关闭即在同一笔摘掉 `pm:*` 状态标;`domain:*`、`area:*` 与类型标签留下,归属不是状态。
+- 关闭即在同一笔摘掉 `pm:*` 状态标;`domain:*`、`area:*` 与 issue type 留下,归属不是状态。
 - `state_reason` 与关闭理由一致:撤单/不做 ⇒ `not_planned`,重复 ⇒ `duplicate` + `duplicate_of`。
 - `Blocked-by:` 行是机器可 grep 的反向索引,一遍读喂三个职责,⛔ 只做第一件。
 - 三职责:上游关单放回解锁卡;按解锁扇出排序;在合并后的 ref 上重验回队卡文件面。
