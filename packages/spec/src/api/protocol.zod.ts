@@ -1386,6 +1386,68 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One metadata item that still shows (or, after a type change, still filters
+ * by) a field a refused `object` save would remove or retype — an entry of
+ * {@link DestructiveChangeIssueSchema}'s `stillShownBy`.
+ */
+export const FieldStillShownBySchema = lazySchema(() => z.object({
+  type: z.string().describe(
+    'The metadata type of the item: `view` (a list view or a form), `dataset`, `dashboard`, `page`, '
+    + '`flow`, `report`, or `object` (another object, or the saved object\'s own body).',
+  ),
+  name: z.string().describe('The item\'s name, as the served list names it.'),
+  where: z.array(z.string()).describe(
+    'Each position inside the item that names the field, as a path relative to the item '
+    + '(`listViews.all.columns[1]`, `formViews.edit.sections[0].fields[2]`, `widgets[3]`).',
+  ),
+  via: z.string().optional().describe(
+    'A dashboard widget shows the field through this dataset: it names a dimension or measure of '
+    + 'the dataset, and that dimension or measure names the field.',
+  ),
+  operator: z.string().optional().describe(
+    'On a `field_type_change` entry only: the filter operator, as the view rule spells it, that '
+    + 'no longer fits the new type (`filterOperatorFieldTypeFit` answers `unfit`).',
+  ),
+}));
+
+/**
+ * One finding of the `409 DESTRUCTIVE_CHANGE` refusal of an `object` save (the
+ * save door's destructive-change diff): an entry of the refusal's `issues[]`,
+ * which every door relays verbatim beside the message — the REST `PUT` doors
+ * as a top-level `issues`, the runtime dispatcher as `details.issues`, the MCP
+ * draft door as `issues` on its refusal.
+ */
+export const DestructiveChangeIssueSchema = lazySchema(() => z.object({
+  code: z.string().describe(
+    'What the save loses: `field_removed`, `field_type_change`, `field_required_no_default`, '
+    + '`currency_mode_to_record` or `currency_field_repointed`.',
+  ),
+  field: z.string().optional().describe('The field the finding is about.'),
+  message: z.string().describe(
+    'The finding in prose. When `stillShownBy` names items, the prose ends by naming them too.',
+  ),
+  stillShownBy: z.array(FieldStillShownBySchema).optional().describe(
+    'The metadata items that still show the field, computed from the environment\'s served '
+    + 'metadata (one served listing per type: what the code packages register, with this '
+    + 'environment\'s stored active rows folded over them; drafts are not read, and no record is read). '
+    + 'On `field_removed` and `field_type_change` findings only; absent on every other code, and '
+    + 'absent when a listing could not be read (absent is "not computed", `[]` is "computed, none"). '
+    + 'On `field_removed`: the `object`, `view`, `dataset`, `dashboard`, `page`, `flow` and `report` '
+    + 'items in which the platform\'s reference-integrity suite, form-layout check and widget-binding '
+    + 'check (`@objectstack/lint`, the judges `os validate` runs) find a reference that resolves with '
+    + 'the field and dangles without it, the saved body taken as the save would write it; plus each '
+    + 'dashboard widget bound to a dataset dimension or measure that dangles (`via`). A position '
+    + 'those judges do not read is not seen, nor is an item of any other type (an app, an action, a '
+    + 'permission set), nor code outside the metadata. On `field_type_change`: each list-view filter '
+    + 'rule (a view\'s own `filter`, its `list` view\'s and each `listViews` entry\'s, rules inside '
+    + 'an any-of group included) bound to the saved object that names the field by its bare name '
+    + 'and whose operator does not fit the new type, judged by `filterOperatorFieldTypeFit`. Filters '
+    + 'elsewhere (datasets, dashboards, reports, flows), dotted paths, and comparands are not judged '
+    + 'there. The save does not edit any listed item.',
+  ),
+}));
+
+/**
  * Metadata Conflict — the 409 body of the `/meta/:type/:name` write doors
  *
  * Describes the body `PUT /api/v1/meta/:type/:name` (and its sibling write
@@ -4763,6 +4825,8 @@ export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredRespon
 export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
+export type FieldStillShownBy = z.infer<typeof FieldStillShownBySchema>;
+export type DestructiveChangeIssue = z.infer<typeof DestructiveChangeIssueSchema>;
 /** The 409 `METADATA_CONFLICT` body of the `/meta/:type/:name` write doors (#22114). */
 export type MetadataConflictError = z.input<typeof MetadataConflictErrorSchema>;
 /** Post-parse shape of {@link MetadataConflictError} — defaults applied, transforms run (ADR-0122). */
