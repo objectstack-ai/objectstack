@@ -336,6 +336,9 @@ before any card runs, naming what is wrong: a missing file, no JSON, an unknown 
 set naming no rule of the file or named like a rule, a selector naming nothing in the file, a selector that omits
 every rule (that arm is the run without `--door-rules`), and a file inside this checkout.
 
+A rules-arm run's record and recording (`--record`) hold the client's transcripts, and a transcript can quote rule
+text the client was given: read them before filing either anywhere public.
+
 Door mode runs on the live `claude` driver, or a replay of one (`--driver recorded:FILE` re-sends the recorded draft
 saves through the replay's own door and token, and refuses the run as not faithful when the app answers one
 otherwise). Codex and an external driver are refused.
