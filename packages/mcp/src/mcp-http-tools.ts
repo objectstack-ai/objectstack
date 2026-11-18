@@ -212,7 +212,9 @@ export interface McpDataBridge {
    * that judge what a field declares (`required`, `defaultValue`, a
    * `reference`'s target, an external binding) read the definition, which
    * `describeObject`'s projection does not carry. Never rendered to the
-   * caller: only the gate's findings are.
+   * caller: only the gate's findings are. [#35138] `aggregate_records` reads
+   * two facts off it the same way, a group key's declared option order and
+   * an amount's fixed currency, and renders those alone.
    *
    * OPTIONAL, like {@link optionFieldsOf}: a bridge that omits it gets the
    * shared validator's verdict alone, exactly as before.
@@ -699,6 +701,147 @@ function textResult(value: unknown) {
 
 function errorResult(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true as const };
+}
+
+/**
+ * [#35138] The fields of `objectName` as this caller is served them
+ * ({@link McpDataBridge.servedObjectDefinitionOf}): the map
+ * `aggregate_records` reads a group key's declared options and an amount's
+ * fixed currency from. A field the caller's view removed is not in it, so
+ * nothing read from it names a field the caller cannot see.
+ *
+ * `undefined` when the bridge cannot say — no member, no object, or a throw —
+ * and the tool then renders exactly what it rendered before. ⛔ This read
+ * never fails the aggregate it annotates.
+ */
+async function servedFieldsOf(
+  bridge: McpDataBridge,
+  objectName: string,
+): Promise<Record<string, unknown> | undefined> {
+  if (typeof bridge.servedObjectDefinitionOf !== 'function') return undefined;
+  try {
+    const fields = (await bridge.servedObjectDefinitionOf(objectName))?.fields;
+    return fields !== null && typeof fields === 'object' && !Array.isArray(fields)
+      ? (fields as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The served field `name`, or `undefined` when the caller's view has no such field. */
+function servedFieldOf(fields: Record<string, unknown>, name: unknown): Record<string, unknown> | undefined {
+  if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
+  const def = fields[name];
+  return def !== null && typeof def === 'object' ? (def as Record<string, unknown>) : undefined;
+}
+
+/**
+ * [#35138] The field types whose group value is ONE declared option, so the
+ * groups have the order the author declared the options in. A `multiselect`
+ * groups by a combination of options, which has no declared order.
+ */
+const OPTION_ORDERED_GROUP_TYPES: ReadonlySet<string> = new Set(['select', 'radio']);
+
+/**
+ * Each declared option value of `def` with its position, or `undefined` when
+ * the served field is not a single-option field declaring options.
+ */
+function declaredOptionRank(def: Record<string, unknown> | undefined): Map<unknown, number> | undefined {
+  if (!def || typeof def.type !== 'string' || !OPTION_ORDERED_GROUP_TYPES.has(def.type)) return undefined;
+  if (!Array.isArray(def.options)) return undefined;
+  const rank = new Map<unknown, number>();
+  for (const option of def.options) {
+    if (option === null || typeof option !== 'object' || !('value' in option)) continue;
+    const value = (option as { value: unknown }).value;
+    if (!rank.has(value)) rank.set(value, rank.size);
+  }
+  return rank.size > 0 ? rank : undefined;
+}
+
+/**
+ * [#35138] `aggregate_records`' groups in the option order the caller's
+ * served schema declares, for a call that states no order of its own.
+ *
+ * The group keys are read in `groupBy` order while each one is a
+ * single-option field ({@link OPTION_ORDERED_GROUP_TYPES}) the served schema
+ * declares options for; the first key that is not one ends the reading, so
+ * the groups under it keep the order the driver answered. A value no option
+ * declares (a null, a value stored before an option was removed) sorts after
+ * every declared one. The sort is stable: groups the declared order does not
+ * tell apart keep the driver's order. With no such leading key, `rows` comes
+ * back as it is.
+ *
+ * Run over every group, BEFORE the tool's cap, so the groups the cap keeps
+ * are the first in the declared order. Reordering a list the driver already
+ * answered whole runs no second query.
+ */
+function inDeclaredOptionOrder(
+  rows: unknown[],
+  groupBy: NonNullable<EngineAggregateOptions['groupBy']> | undefined,
+  fields: Record<string, unknown>,
+): unknown[] {
+  const keys: Array<{ column: string; rank: Map<unknown, number> }> = [];
+  for (const entry of groupBy ?? []) {
+    const item = typeof entry === 'string' ? { field: entry } : (entry as { field?: unknown; alias?: unknown; dateGranularity?: unknown });
+    // A bucketed key is a period, not a declared option.
+    if (item.dateGranularity !== undefined) break;
+    const rank = declaredOptionRank(servedFieldOf(fields, item.field));
+    if (!rank) break;
+    const column = typeof item.alias === 'string' ? item.alias : (item.field as string);
+    keys.push({ column, rank });
+  }
+  if (keys.length === 0) return rows;
+  const position = (row: unknown, key: { column: string; rank: Map<unknown, number> }): number => {
+    const value = row !== null && typeof row === 'object' ? (row as Record<string, unknown>)[key.column] : undefined;
+    return key.rank.get(value) ?? key.rank.size;
+  };
+  return [...rows].sort((a, b) => {
+    for (const key of keys) {
+      const by = position(a, key) - position(b, key);
+      if (by !== 0) return by;
+    }
+    return 0;
+  });
+}
+
+/**
+ * [#35138] The aggregate functions whose value is an amount in the field's
+ * currency: the ones that read the amount (ADR-0144 Open item 10, the set
+ * `@objectstack/objectql`'s `record-currency-aggregate-door.ts` judges).
+ * `count` reads no amount and `count_distinct` counts values, so neither
+ * answers a currency.
+ */
+const AMOUNT_AGGREGATE_FUNCTIONS: ReadonlySet<string> = new Set(['sum', 'avg', 'min', 'max']);
+
+/**
+ * [#35138] The currency of each amount column whose field has ONE currency,
+ * by the column's alias: a served field whose `currencyConfig` is
+ * `currencyMode: 'fixed'` answers its `defaultCurrency`. Empty when no
+ * column has one.
+ *
+ * The other two modes answer nothing here. A `record`-mode amount is
+ * answered by the engine only grouped by its own currency code field
+ * (`record-currency-aggregate-door.ts`, ADR-0144 D6), so each group's code is
+ * already in its row. A `dynamic`-mode amount has no currency of its own: it
+ * displays in the tenant default currency, which the served schema does not
+ * carry.
+ */
+function fixedAmountCurrencies(
+  aggregations: NonNullable<EngineAggregateOptions['aggregations']>,
+  fields: Record<string, unknown>,
+): Record<string, string> {
+  const currencies: Record<string, string> = {};
+  for (const aggregation of aggregations) {
+    if (!AMOUNT_AGGREGATE_FUNCTIONS.has(aggregation.function)) continue;
+    const config = servedFieldOf(fields, aggregation.field)?.currencyConfig;
+    if (config === null || typeof config !== 'object') continue;
+    const { currencyMode, defaultCurrency } = config as { currencyMode?: unknown; defaultCurrency?: unknown };
+    if (currencyMode === 'fixed' && typeof defaultCurrency === 'string' && defaultCurrency !== '') {
+      currencies[aggregation.alias] = defaultCurrency;
+    }
+  }
+  return currencies;
 }
 
 /**
@@ -3005,6 +3148,10 @@ export function registerObjectTools(
           description:
             'Aggregate records with GROUP BY: count/sum/avg/min/max/count_distinct over an object, ' +
             'optionally grouped by fields (dates can be bucketed by day/week/month/quarter/year). ' +
+            // [#35138] The two facts the answer carries from the served schema.
+            'Groups of a select field come back in the order the field declares its options. ' +
+            'An amount column over a field with one fixed currency is named in currencies, alias to ISO 4217 code; ' +
+            'an amount whose records each carry their own currency is answered only grouped by its currency code field. ' +
             'Use this instead of paging query_records when a question needs totals or breakdowns. ' +
             'Runs under the caller\'s permissions, row-level security and field-level security.',
           inputSchema: strictToolInput(
@@ -3078,13 +3225,24 @@ export function registerObjectTools(
               aggregations,
               timezone,
             })) ?? [];
+            // [#35138] Read off the object as the caller is served it: the
+            // declared option order of a select group key, and the one
+            // currency of a fixed-currency amount. Only when the call has a
+            // group key or an amount column to read it for.
+            const fields = (groupBy?.length ?? 0) > 0
+              || aggregations.some((a) => AMOUNT_AGGREGATE_FUNCTIONS.has(a.function) && typeof a.field === 'string')
+              ? await servedFieldsOf(bridge, objectName)
+              : undefined;
+            const groups = fields ? inDeclaredOptionOrder(rows, groupBy, fields) : rows;
+            const currencies = fields ? fixedAmountCurrencies(aggregations, fields) : {};
             // Group count is unbounded (a high-cardinality groupBy can return
             // thousands of rows) — cap the tool output like query_records does.
-            const truncated = rows.length > maxLimit;
+            const truncated = groups.length > maxLimit;
             return textResult({
-              rows: truncated ? rows.slice(0, maxLimit) : rows,
+              rows: truncated ? groups.slice(0, maxLimit) : groups,
               totalGroups: rows.length,
               ...(truncated ? { truncated: true } : {}),
+              ...(Object.keys(currencies).length > 0 ? { currencies } : {}),
             });
           } catch (err) {
             return dataDoorErrorResult(err, 'aggregate_records', objectName);
