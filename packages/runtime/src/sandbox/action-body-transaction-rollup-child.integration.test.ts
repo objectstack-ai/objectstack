@@ -24,6 +24,8 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+// Paid at collection, not inside a clocked case (`pnpm check:test-source-alias`).
+import '@objectstack/metadata';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,6 +76,8 @@ const ONE_LINE_SOURCE = `
     await ctx.api.object('rux_line').insert({ claim: claim.id, amount: 430 });
   });
   return { claim: claim.id };`;
+
+const SYS = { context: { isSystem: true } } as const;
 
 /** Far below the sandbox's 30 s wall clock: a stall cannot pass for a slow run. */
 const WALL_CLOCK_BOUND_MS = 10_000;
@@ -175,13 +179,13 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
       expect(response.status, JSON.stringify(response.body)).toBe(200);
       expect(elapsed).toBeLessThan(WALL_CLOCK_BOUND_MS);
       const claimId = String(response.body?.data?.claim ?? response.body?.claim);
-      const lines = (await e.find('rux_line', { where: { claim: claimId }, context: { isSystem: true } } as any)) as any[];
+      const lines = (await e.find('rux_line', { where: { claim: claimId }, ...SYS })) as any[];
       expect(lines.map((l) => Number(l.amount)).sort((a, b) => a - b)).toEqual([345, 860]);
-      const claim = (await e.findOne('rux_claim', { where: { id: claimId }, context: { isSystem: true } } as any)) as any;
+      const claim = (await e.findOne('rux_claim', { where: { id: claimId }, ...SYS })) as any;
       expect(Number(claim?.total_amount)).toBe(1205);
       // One claim and two lines, each with both ledger rows.
       expect(ledger).toEqual(['ok', 'ok', 'ok']);
-      const audit = (await e.find('sys_audit_log', { context: { isSystem: true } } as any)) as any[];
+      const audit = (await e.find('sys_audit_log', SYS)) as any[];
       expect(audit.map((a) => a.record_id).sort()).toEqual([claimId, ...lines.map((l) => String(l.id))].sort());
     }, 30_000);
   }
@@ -199,9 +203,9 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
       expect(begins.count).toBe(1);
       expect(response.status, JSON.stringify(response.body)).toBe(200);
       const claimId = String(response.body?.data?.claim ?? response.body?.claim);
-      const lines = (await e.find('rux_line', { where: { claim: claimId }, context: { isSystem: true } } as any)) as any[];
+      const lines = (await e.find('rux_line', { where: { claim: claimId }, ...SYS })) as any[];
       expect(lines.map((l) => Number(l.amount)).sort((a, b) => a - b)).toEqual([345, 860]);
-      expect(Number(((await e.findOne('rux_claim', { where: { id: claimId }, context: { isSystem: true } } as any)) as any)?.total_amount)).toBe(1205);
+      expect(Number(((await e.findOne('rux_claim', { where: { id: claimId }, ...SYS })) as any)?.total_amount)).toBe(1205);
       expect(ledger).toEqual(['ok', 'ok', 'ok']);
     }, 30_000);
 
@@ -210,7 +214,7 @@ describe('an action body transaction inserting a roll-up child completes on SQLi
       const { response } = await throughActionsDoor(e, ONE_LINE_SOURCE);
       expect(response.status, JSON.stringify(response.body)).toBe(200);
       const claimId = String(response.body?.data?.claim ?? response.body?.claim);
-      const lines = (await e.find('rux_line', { where: { claim: claimId }, context: { isSystem: true } } as any)) as any[];
+      const lines = (await e.find('rux_line', { where: { claim: claimId }, ...SYS })) as any[];
       expect(lines.map((l) => Number(l.amount))).toEqual([430]);
       expect(ledger).toEqual(['ok', 'ok']);
     }, 30_000);
