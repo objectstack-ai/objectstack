@@ -23,6 +23,7 @@ import { describe, it, expect } from 'vitest';
 // The `/mcp` domain reaches the dispatcher, which loads this package lazily;
 // paid here, during collection, never inside a clocked case.
 import '@objectstack/metadata';
+import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 import { handleMcpRequest } from './mcp.js';
 import {
@@ -82,7 +83,11 @@ const NOT_AN_AUTHOR = ['manage_users'];
 
 /**
  * `store` serves the gated types' items by type (a list read, and a by-name
- * read of one of them); every other type answers the flow fixtures.
+ * read of one of them); every other type answers the flow fixtures. Both reads
+ * FOLD the requested type first, as the real protocol's reads do
+ * (`canonicalizeMetaRequestType`, over `canonicalMetaUrlType`), so a plural
+ * reads the gated type here as it does there; `calls` records the request as
+ * the door handed it, unfolded.
  */
 function fakeProtocol(store: Record<string, any[]> = {}, opts: { listThrows?: string } = {}) {
   const calls: unknown[] = [];
@@ -92,8 +97,9 @@ function fakeProtocol(store: Record<string, any[]> = {}, opts: { listThrows?: st
     async getMetaTypes() {
       return { types: ['object', 'flow', 'view', 'dashboard', 'book', 'doc'] } as any;
     },
-    async getMetaItems(request: any) {
-      calls.push(['getMetaItems', request]);
+    async getMetaItems(handed: any) {
+      calls.push(['getMetaItems', handed]);
+      const request = { ...handed, type: canonicalMetaUrlType(handed.type) };
       if (opts.listThrows === request.type) throw new Error(`the ${request.type} list read failed`);
       if (store[request.type]) return { type: request.type, items: store[request.type] };
       return {
@@ -104,8 +110,9 @@ function fakeProtocol(store: Record<string, any[]> = {}, opts: { listThrows?: st
         ],
       };
     },
-    async getMetaItem(request: any) {
-      calls.push(['getMetaItem', request]);
+    async getMetaItem(handed: any) {
+      calls.push(['getMetaItem', handed]);
+      const request = { ...handed, type: canonicalMetaUrlType(handed.type) };
       if (store[request.type]) {
         const item = store[request.type].find((it) => it.name === request.name);
         return { type: request.type, name: request.name, item };
@@ -338,6 +345,16 @@ describe('the read tools answer from the metadata protocol\'s public reads', () 
     expect(refused.body.error).toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
   });
 
+  it('list_metadata_items refuses an inherited member\'s name as an undeclared type, folded or not', async () => {
+    const { authoring, calls } = admitted();
+    for (const type of ['constructor', 'toString']) {
+      const refused = await call(authoring, 'list_metadata_items', { type });
+      expect(refused.isError, type).toBe(true);
+      expect(refused.body.error, type).toMatchObject({ code: 'INVALID_REQUEST', status: 400 });
+    }
+    expect(calls).toEqual([]);
+  });
+
   it('get_metadata_item reads a draft in place of the published version by default, and the draft only on state draft', async () => {
     const { authoring, calls } = admitted();
     const read = await call(authoring, 'get_metadata_item', { type: 'flow', name: 'lead_intake' });
@@ -443,6 +460,40 @@ describe('the read tools withhold what every /meta door withholds from this huma
 
     const listed = await call(authoring, 'list_metadata_items', { type: 'doc' });
     expect(listed.body.items.map((i: any) => i.name)).toEqual(['crm_intro']);
+  });
+
+  it('a plural spelling is folded at the door: `dashboards` and `docs` are refused on the item read and left out of the list', async () => {
+    const authoring = await author();
+    for (const [type, name, secret] of [
+      ['dashboards', 'finance_board', 'finance.access'],
+      ['docs', 'crm_admin_runbook', 'Rotate the signing keys.'],
+    ] as const) {
+      const refused = await call(authoring, 'get_metadata_item', { type, name });
+      expect(refused.isError, type).toBe(true);
+      expect(refused.body.error, type).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(JSON.stringify(refused.body), type).not.toContain(secret);
+    }
+    // Served under the plural too, so the refusals above are the gates' verdicts, not a miss.
+    const allowed = await call(authoring, 'get_metadata_item', { type: 'dashboards', name: 'people_board' });
+    expect(allowed.body).toMatchObject({ type: 'dashboard', item: { name: 'people_board' } });
+
+    const dashboards = await call(authoring, 'list_metadata_items', { type: 'dashboards' });
+    expect(dashboards.body).toMatchObject({ type: 'dashboard', items: [{ name: 'people_board' }] });
+    expect(dashboards.body.count).toBe(1);
+    const docs = await call(authoring, 'list_metadata_items', { type: 'docs' });
+    expect(docs.body.items.map((i: any) => i.name)).toEqual(['crm_intro']);
+  });
+
+  it('the door hands the protocol the folded type, the one the gates judged', async () => {
+    const ec = await oauthEnvelope(['metadata:write'], ADMIN);
+    const served = await serve(ec, { store: STORE });
+    await call(served.authoring!, 'list_metadata_items', { type: 'docs', state: 'active' });
+    await call(served.authoring!, 'get_metadata_item', { type: 'dashboards', name: 'people_board', state: 'active' });
+    expect(served.protocolCalls).toEqual(expect.arrayContaining([
+      ['getMetaItems', { type: 'doc' }],
+      ['getMetaItem', { type: 'dashboard', name: 'people_board' }],
+    ]));
+    expect(served.protocolCalls.some((c: any) => c[1]?.type === 'docs' || c[1]?.type === 'dashboards')).toBe(false);
   });
 
   it('a gate that cannot evaluate refuses: a books read that throws serves no doc', async () => {

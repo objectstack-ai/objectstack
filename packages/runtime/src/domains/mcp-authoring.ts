@@ -60,6 +60,13 @@
  *    `requiredPermissions` the human does not hold, and a book or doc outside
  *    their ADR-0046 audience, are refused here as every `/meta` door refuses
  *    them to that human ("either way, author or not", ruling 5856774816).
+ *    Whatever spelling of `type` the agent sends: the door folds it once, at
+ *    its boundary, with the fold the protocol's reads apply
+ *    (`canonicalMetaUrlType`), and hands the one folded type to the protocol
+ *    read, to the unknown-type refusal and to both gates. The gates judge the
+ *    SINGULAR type only and leave the fold to their caller, as every `/meta`
+ *    caller of them folds first; an unfolded `dashboards` or `docs` would be
+ *    read as the dashboard or doc by the protocol and judged by no gate.
  *    The caller the gates read is built from the grants the admission
  *    resolved (`resolveUserAuthzGrants`), never from the agent's envelope,
  *    whose system permissions and permission sets are the token's ceiling.
@@ -105,6 +112,7 @@ import {
     type MetaReadGateCaller,
 } from '@objectstack/rest';
 import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import type { ErrorCode, ListDraftsResponse, MetadataProtocol } from '@objectstack/spec/api';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -431,7 +439,7 @@ export function createOpenAuthoringRegistry(opts: {
                 switch (toolCall.toolName) {
                     case 'list_metadata_items': {
                         if (typeof protocol?.getMetaItems !== 'function') return unavailable();
-                        const type = requiredString(input.type);
+                        const type = canonicalTypeOf(input.type);
                         if (!type) return refuse(VALIDATION_ERROR, 'Name the metadata type as `type`.', 400);
                         // A type the platform does not declare and this deployment holds
                         // nothing under is refused, as the `/meta` list refuses it, rather
@@ -456,7 +464,7 @@ export function createOpenAuthoringRegistry(opts: {
                     }
                     case 'get_metadata_item': {
                         if (typeof protocol?.getMetaItem !== 'function') return unavailable();
-                        const type = requiredString(input.type);
+                        const type = canonicalTypeOf(input.type);
                         const name = requiredString(input.name);
                         if (!type || !name) return refuse(VALIDATION_ERROR, 'Name the item as `type` and `name`.', 400);
                         const read = await protocol.getMetaItem({
@@ -525,6 +533,23 @@ export function createOpenAuthoringRegistry(opts: {
             }
         },
     };
+}
+
+/**
+ * A `type` argument folded to its canonical singular (`dashboards` → `dashboard`),
+ * or `undefined` when absent: the door's one fold, applied once at its
+ * boundary, so the protocol read, the unknown-type refusal and both read gates
+ * see the same type. It is the fold the protocol's reads apply themselves.
+ */
+function canonicalTypeOf(value: unknown): string | undefined {
+    const type = requiredString(value);
+    if (type === undefined) return undefined;
+    const folded: unknown = canonicalMetaUrlType(type);
+    // The fold reads a plain object, so an inherited member's name
+    // (`constructor`, `toString`) answers no string. Such a spelling names no
+    // type: it goes on unfolded, and the unknown-type refusal judges it as it
+    // judges any other undeclared spelling.
+    return typeof folded === 'string' ? folded : type;
 }
 
 function requiredString(value: unknown): string | undefined {
