@@ -1755,20 +1755,22 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6959 / 4)
   // = 1740 (+249), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  // 1740 -> 1753, the card that makes the dataset tools answer `nextStep` and
+  // 1740 -> 1750, the card that makes the dataset tools answer `nextStep` and
   // `sourceLine` (ruling #34894 = A): one line under the step 2 table says to
-  // follow `nextStep` (its `decision` and `note`) and cite `sourceLine` as
-  // given. Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling
+  // follow `nextStep` (its `decision` and `note`), and step 3's citation bullet
+  // says to cite `sourceLine` as given and to build the source from
+  // `provenance` only without one (one citation instruction, in the step that
+  // cites). Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling
   // record 6513306068, letter B). PAID DOWN FIRST — two restatements cut, each
   // keeping its other home: the fallback row's ", and say in the answer that no
   // governed metric was used" (step 4: "Open the answer with one line saying it
   // is not from a governed metric") and "no figure, and " in the paragraph under
   // the table (its next sentence: "State no figure of your own in it"). Text
-  // +122 bytes, cuts -71: 6979 -> 7030 bytes, less the 20-byte stamp line:
-  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7010 / 4)
-  // = 1753 (+13), the measured remainder only. Pinned AT the measurement, zero
+  // +111 bytes, cuts -71: 6979 -> 7019 bytes, less the 20-byte stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(6999 / 4)
+  // = 1750 (+10), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1753],
+  ['skills/objectstack-ask/SKILL.md', 1750],
 ]);
 
 /**
