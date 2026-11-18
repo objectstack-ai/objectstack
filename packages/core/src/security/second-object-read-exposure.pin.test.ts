@@ -266,10 +266,12 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason:
       "the post-publish build probes (`runBuildProbes`) name the object a reference column or a roll-up's foreign key " +
-      "points at, under the system identity and scoped to the publishing organization like their sample reads, only " +
-      "to report whether a landed reference resolves (`seed_reference_unresolved`) or a parent's roll-up was ever " +
-      'computed (`rollup_never_computed`); the finding carries counts and the referencing column\'s own values, never ' +
-      'a field of the target, and is returned to the publisher on the publish receipt, not served to a caller',
+      "points at, under the system identity kept inside an organization the way `inspectDanglingReferences` keeps its " +
+      "probe (#19837: the publishing organization, else the referencing row's own), only to report whether a landed " +
+      "reference resolves (`seed_reference_unresolved`, the target read projected to `id`) or a parent's roll-up was " +
+      "ever computed (`rollup_never_computed`, projected to `id` and the roll-up field); the finding carries counts " +
+      "and the referencing column's own values, never a field of the target, and is returned to the publisher on the " +
+      'publish receipt, not served to a caller',
   },
   'packages/metadata-protocol/src/seed-loader.ts': {
     kind: 'not-a-served-read',

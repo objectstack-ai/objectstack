@@ -889,81 +889,88 @@ const WIDGET_EMPTY_RESULT: UserTextEntry = {
 const ROLLUP_NEVER_COMPUTED: UserTextEntry = {
   en: (p) =>
     `The roll-up field "${p.field}" on "${p.object}" is blank on every record that has related "${p.child}" ` +
-    `records, so it has not been calculated yet. Edit one of those "${p.child}" records to recalculate it.`,
+    `records: its stored value was never calculated for them. Ask whoever runs this environment to recalculate ` +
+    `the roll-ups (\`os migrate summary-nulls --apply\`).`,
   'zh-Hans': (p) =>
-    `“${p.object}”的汇总字段“${p.field}”在每条有相关“${p.child}”记录的记录上都是空的，说明它还没有计算过。` +
-    `请编辑其中一条“${p.child}”记录以重新计算。`,
+    `“${p.object}”的汇总字段“${p.field}”在每条有相关“${p.child}”记录的记录上都是空的：它的存储值从未为这些记录计算过。` +
+    `请让负责此环境的人重新计算汇总字段（\`os migrate summary-nulls --apply\`）。`,
   'zh-Hant': (p) =>
-    `「${p.object}」的匯總欄位「${p.field}」在每筆有相關「${p.child}」記錄的記錄上都是空的，表示它還沒有計算過。` +
-    `請編輯其中一筆「${p.child}」記錄以重新計算。`,
+    `「${p.object}」的匯總欄位「${p.field}」在每筆有相關「${p.child}」記錄的記錄上都是空的：它的儲存值從未為這些記錄計算過。` +
+    `請讓負責此環境的人重新計算匯總欄位（\`os migrate summary-nulls --apply\`）。`,
   es: (p) =>
     `El campo de resumen "${p.field}" de "${p.object}" está vacío en todos los registros que tienen registros ` +
-    `relacionados de "${p.child}", así que aún no se ha calculado. Edite uno de esos registros de "${p.child}" para recalcularlo.`,
+    `relacionados de "${p.child}": su valor almacenado nunca se calculó para ellos. Pida a quien administra este ` +
+    `entorno que recalcule los resúmenes (\`os migrate summary-nulls --apply\`).`,
   ar: (p) =>
-    `حقل التجميع "${p.field}" في "${p.object}" فارغ في كل سجل له سجلات "${p.child}" مرتبطة، أي أنه لم يُحسب بعد. ` +
-    `عدّل أحد سجلات "${p.child}" هذه لإعادة حسابه.`,
+    `حقل التجميع "${p.field}" في "${p.object}" فارغ في كل سجل له سجلات "${p.child}" مرتبطة: لم تُحسب قيمته المخزنة لها قط. ` +
+    `اطلب من مسؤول هذه البيئة إعادة حساب حقول التجميع (\`os migrate summary-nulls --apply\`).`,
   fr: (p) =>
     `Le champ de synthèse « ${p.field} » de « ${p.object} » est vide sur chaque enregistrement qui a des ` +
-    `enregistrements « ${p.child} » liés : il n’a donc pas encore été calculé. Modifiez l’un de ces ` +
-    `enregistrements « ${p.child} » pour le recalculer.`,
+    `enregistrements « ${p.child} » liés : sa valeur stockée n’a jamais été calculée pour eux. Demandez à la ` +
+    `personne qui gère cet environnement de recalculer les synthèses (\`os migrate summary-nulls --apply\`).`,
   'pt-BR': (p) =>
     `O campo de resumo "${p.field}" de "${p.object}" está vazio em todos os registros que têm registros ` +
-    `relacionados de "${p.child}", então ainda não foi calculado. Edite um desses registros de "${p.child}" para recalculá-lo.`,
+    `relacionados de "${p.child}": seu valor armazenado nunca foi calculado para eles. Peça a quem administra este ` +
+    `ambiente que recalcule os resumos (\`os migrate summary-nulls --apply\`).`,
   ru: (p) =>
     `Сводное поле «${p.field}» объекта «${p.object}» пустое во всех записях, у которых есть связанные записи ` +
-    `«${p.child}», то есть оно ещё не рассчитано. Измените одну из этих записей «${p.child}», чтобы пересчитать его.`,
+    `«${p.child}»: его сохранённое значение для них ни разу не рассчитывалось. Попросите администратора этой среды ` +
+    `пересчитать сводные поля (\`os migrate summary-nulls --apply\`).`,
   de: (p) =>
     `Das Rollup-Feld „${p.field}“ in „${p.object}“ ist bei jedem Datensatz mit verknüpften „${p.child}“-Datensätzen ` +
-    `leer, wurde also noch nicht berechnet. Bearbeiten Sie einen dieser „${p.child}“-Datensätze, um es neu zu berechnen.`,
+    `leer: Sein gespeicherter Wert wurde für sie nie berechnet. Bitten Sie die Person, die diese Umgebung betreibt, ` +
+    `die Rollups neu zu berechnen (\`os migrate summary-nulls --apply\`).`,
   ja: (p) =>
-    `「${p.object}」の積み上げ集計項目「${p.field}」は、関連する「${p.child}」レコードを持つすべてのレコードで空のため、` +
-    `まだ計算されていません。それらの「${p.child}」レコードのいずれかを編集して再計算してください。`,
+    `「${p.object}」の積み上げ集計項目「${p.field}」は、関連する「${p.child}」レコードを持つすべてのレコードで空です。` +
+    `保存値がこれらのレコードについて一度も計算されていません。この環境の管理者に集計の再計算` +
+    `（\`os migrate summary-nulls --apply\`）を依頼してください。`,
   ko: (p) =>
-    `"${p.object}"의 롤업 필드 "${p.field}"가 관련 "${p.child}" 레코드가 있는 모든 레코드에서 비어 있어 아직 계산되지 않았습니다. ` +
-    `해당 "${p.child}" 레코드 중 하나를 편집하여 다시 계산하세요.`,
+    `"${p.object}"의 롤업 필드 "${p.field}"가 관련 "${p.child}" 레코드가 있는 모든 레코드에서 비어 있습니다. ` +
+    `저장된 값이 이 레코드들에 대해 한 번도 계산되지 않았습니다. 이 환경의 관리자에게 롤업 재계산` +
+    `(\`os migrate summary-nulls --apply\`)을 요청하세요.`,
 };
 
-/** `seed_reference_unresolved`: sample records point at records that do not exist, so they cannot be saved. */
+/** `seed_reference_unresolved`: sample records point at records that do not exist. */
 const SEED_REFERENCE_UNRESOLVED: UserTextEntry = {
   en: (p) =>
     `Some sample "${p.object}" records (${p.count} value(s) in "${p.field}") point to "${p.target}" records that ` +
-    `do not exist, so those records cannot be saved after an edit. Fix or clear "${p.field}" in the sample data, ` +
+    `do not exist, so on those records "${p.field}" leads nowhere. Fix or clear "${p.field}" in the sample data, ` +
     `then publish again.`,
   'zh-Hans': (p) =>
-    `部分“${p.object}”示例记录（“${p.field}”中有 ${p.count} 个值）指向不存在的“${p.target}”记录，因此这些记录编辑后无法保存。` +
+    `部分“${p.object}”示例记录（“${p.field}”中有 ${p.count} 个值）指向不存在的“${p.target}”记录，因此这些记录上的“${p.field}”指向空处。` +
     `请在示例数据中修正或清空“${p.field}”，然后重新发布。`,
   'zh-Hant': (p) =>
-    `部分「${p.object}」示例記錄（「${p.field}」中有 ${p.count} 個值）指向不存在的「${p.target}」記錄，因此這些記錄編輯後無法儲存。` +
+    `部分「${p.object}」示例記錄（「${p.field}」中有 ${p.count} 個值）指向不存在的「${p.target}」記錄，因此這些記錄上的「${p.field}」指向空處。` +
     `請在示例資料中修正或清空「${p.field}」，然後重新發布。`,
   es: (p) =>
     `Algunos registros de ejemplo de "${p.object}" (${p.count} valor(es) en "${p.field}") apuntan a registros de ` +
-    `"${p.target}" que no existen, por lo que no se pueden guardar tras editarlos. Corrija o vacíe "${p.field}" en ` +
-    `los datos de ejemplo y vuelva a publicar.`,
+    `"${p.target}" que no existen, así que en esos registros "${p.field}" no lleva a ninguna parte. Corrija o vacíe ` +
+    `"${p.field}" en los datos de ejemplo y vuelva a publicar.`,
   ar: (p) =>
     `بعض سجلات "${p.object}" التجريبية (${p.count} قيمة في "${p.field}") تشير إلى سجلات "${p.target}" غير موجودة، ` +
-    `لذلك لا يمكن حفظ هذه السجلات بعد تعديلها. صحّح "${p.field}" في البيانات التجريبية أو أفرغه، ثم أعد النشر.`,
+    `لذلك لا يؤدي "${p.field}" في هذه السجلات إلى أي مكان. صحّح "${p.field}" في البيانات التجريبية أو أفرغه، ثم أعد النشر.`,
   fr: (p) =>
     `Certains enregistrements d’exemple « ${p.object} » (${p.count} valeur(s) dans « ${p.field} ») pointent vers ` +
-    `des enregistrements « ${p.target} » inexistants : ils ne peuvent donc pas être enregistrés après une ` +
-    `modification. Corrigez ou videz « ${p.field} » dans les données d’exemple, puis publiez à nouveau.`,
+    `des enregistrements « ${p.target} » inexistants : sur ces enregistrements, « ${p.field} » ne mène nulle part. ` +
+    `Corrigez ou videz « ${p.field} » dans les données d’exemple, puis publiez à nouveau.`,
   'pt-BR': (p) =>
     `Alguns registros de exemplo de "${p.object}" (${p.count} valor(es) em "${p.field}") apontam para registros de ` +
-    `"${p.target}" que não existem, então não podem ser salvos após uma edição. Corrija ou limpe "${p.field}" nos ` +
-    `dados de exemplo e publique novamente.`,
+    `"${p.target}" que não existem, então nesses registros "${p.field}" não leva a lugar nenhum. Corrija ou limpe ` +
+    `"${p.field}" nos dados de exemplo e publique novamente.`,
   ru: (p) =>
     `Некоторые примеры записей «${p.object}» (значений в поле «${p.field}»: ${p.count}) ссылаются на ` +
-    `несуществующие записи «${p.target}», поэтому после изменения их нельзя сохранить. Исправьте или очистите ` +
-    `«${p.field}» в примерах данных и опубликуйте снова.`,
+    `несуществующие записи «${p.target}», поэтому в этих записях «${p.field}» никуда не ведёт. Исправьте или ` +
+    `очистите «${p.field}» в примерах данных и опубликуйте снова.`,
   de: (p) =>
     `Einige Beispieldatensätze von „${p.object}“ (${p.count} Wert(e) in „${p.field}“) verweisen auf „${p.target}“-` +
-    `Datensätze, die nicht existieren, und lassen sich daher nach einer Änderung nicht speichern. Korrigieren oder ` +
+    `Datensätze, die nicht existieren, sodass „${p.field}“ bei diesen Datensätzen ins Leere führt. Korrigieren oder ` +
     `leeren Sie „${p.field}“ in den Beispieldaten und veröffentlichen Sie dann erneut.`,
   ja: (p) =>
     `「${p.object}」のサンプルレコードの一部（「${p.field}」の値 ${p.count} 件）が存在しない「${p.target}」レコードを参照しているため、` +
-    `編集後に保存できません。サンプルデータの「${p.field}」を修正するか空にしてから、もう一度公開してください。`,
+    `それらのレコードの「${p.field}」はどこにもつながりません。サンプルデータの「${p.field}」を修正するか空にしてから、もう一度公開してください。`,
   ko: (p) =>
     `일부 "${p.object}" 샘플 레코드("${p.field}"의 값 ${p.count}개)가 존재하지 않는 "${p.target}" 레코드를 가리키므로 ` +
-    `편집 후 저장할 수 없습니다. 샘플 데이터에서 "${p.field}"를 수정하거나 비운 후 다시 게시하세요.`,
+    `해당 레코드의 "${p.field}"는 아무 곳으로도 연결되지 않습니다. 샘플 데이터에서 "${p.field}"를 수정하거나 비운 후 다시 게시하세요.`,
 };
 
 /**

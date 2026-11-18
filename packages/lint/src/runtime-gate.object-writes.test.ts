@@ -162,8 +162,8 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // at the metadata save gate and by `os validate`. Its refusal and the
       // re-save of a stored row that carries it are in the cases below.
       'validateTitleFormatRetired',
-      // A required checkbox and a state machine with no entry guard, judged on
-      // the object's own body (`validate-inert-object-declarations.ts`).
+      // A state machine with no entry guard, judged on the object's own body
+      // (`validate-inert-object-declarations.ts`).
       'validateInertObjectDeclarations',
       'lintAutonumberFormats',
       // A ruled join: the card's acceptance names this door. R13 judges a

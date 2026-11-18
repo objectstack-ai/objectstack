@@ -1856,8 +1856,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   },
   // A standalone action that declares a location but no `objectName` binds to
   // no object, so the button it declares never renders (every location is an
-  // object's surface) and the object's action route answers "not found".
-  // Gating: nothing about the declaration can work. On the runtime door for an
+  // object's surface). The handler still runs: an object-less action answers
+  // every object's action route (`resolveActionByPackage` falls through to the
+  // global scope). Gating: the placement the declaration names can never work. On the runtime door for an
   // `action` write, whose snapshot carries the written action itself.
   {
     name: 'validateActionObjectBinding',
@@ -1902,10 +1903,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
   },
-  // A required checkbox (the form refuses an unchecked box, so only "on" can be
-  // saved) and a state machine with no `initialStates` (a record can be born
-  // in any state). Gating: each declaration works against its author on every
-  // record. Reads the object's own body alone, so it judges an `object` write
+  // An active state machine with no (or an empty) `initialStates`: a record
+  // can be born in any state. Gating: the declaration works against its author
+  // on every create. Reads the object's own body alone, so it judges an `object` write
   // at the runtime door exactly as on the CLI.
   {
     name: 'validateInertObjectDeclarations',

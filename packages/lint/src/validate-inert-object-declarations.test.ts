@@ -3,7 +3,6 @@
 import { describe, expect, it } from 'vitest';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
 import {
-  FIELD_BOOLEAN_REQUIRED,
   STATE_MACHINE_NO_INITIAL_STATES,
   validateInertObjectDeclarations,
 } from './validate-inert-object-declarations.js';
@@ -29,33 +28,21 @@ const machine = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-describe('field-boolean-required', () => {
-  it('refuses a required boolean and a required toggle, at the `required` key', () => {
-    const findings = validateInertObjectDeclarations({
-      objects: [task({ is_done: { type: 'boolean', label: 'Done', required: true }, on: { type: 'toggle', label: 'On', required: true, defaultValue: false } })],
-    });
-    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
-      [FIELD_BOOLEAN_REQUIRED, 'error', 'objects[0].fields.is_done.required'],
-      [FIELD_BOOLEAN_REQUIRED, 'error', 'objects[0].fields.on.required'],
-    ]);
-    // The fix names the default only where the field has none.
-    expect(findings[0].hint).toContain('defaultValue: false');
-    expect(findings[1].hint).not.toContain('defaultValue');
-  });
-
-  it('is silent on an optional boolean and on a required non-boolean', () => {
-    expect(validateInertObjectDeclarations({
-      objects: [task({ is_done: { type: 'boolean', label: 'Done', defaultValue: false }, code: { type: 'text', label: 'Code', required: true } })],
-    })).toEqual([]);
-  });
-});
-
 describe('state-machine-no-initial-states', () => {
   it('refuses a state machine with no `initialStates`, naming a first state in the fix', () => {
     const findings = validateInertObjectDeclarations({ objects: [task({ status: STATUS }, [machine()])] });
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ rule: STATE_MACHINE_NO_INITIAL_STATES, severity: 'error', path: 'objects[0].validations[0]' });
     expect(findings[0].hint).toContain("initialStates: ['draft']");
+  });
+
+  it('refuses an empty `initialStates` list: the engine reads it as no entry contract', () => {
+    const findings = validateInertObjectDeclarations({ objects: [task({ status: STATUS }, [machine({ initialStates: [] })])] });
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[STATE_MACHINE_NO_INITIAL_STATES, 'objects[0].validations[0]']]);
+  });
+
+  it('is silent on a machine with `active: false`: the engine skips it', () => {
+    expect(validateInertObjectDeclarations({ objects: [task({ status: STATUS }, [machine({ active: false })])] })).toEqual([]);
   });
 
   it('is silent when the machine declares its entry states, and on other validation types', () => {
@@ -65,12 +52,16 @@ describe('state-machine-no-initial-states', () => {
   });
 });
 
-describe('the runtime publish gate refuses an object write carrying either declaration', () => {
-  it('raises each as an error on an `object` write', () => {
-    const item = task({ is_done: { type: 'boolean', label: 'Done', required: true }, status: STATUS }, [machine()]);
+describe('the runtime publish gate refuses an object write carrying the declaration', () => {
+  it('raises it as an error on an `object` write', () => {
+    const item = task({ status: STATUS }, [machine()]);
     const verdict = runRuntimeAuthoringRules({ type: 'object', item });
-    const rules = verdict.errors.map((f) => f.rule);
-    expect(rules).toContain(FIELD_BOOLEAN_REQUIRED);
-    expect(rules).toContain(STATE_MACHINE_NO_INITIAL_STATES);
+    expect(verdict.errors.map((f) => f.rule)).toContain(STATE_MACHINE_NO_INITIAL_STATES);
+  });
+
+  it('a required boolean is not refused: the form treats false as present', () => {
+    const item = task({ is_done: { type: 'boolean', label: 'Done', required: true, defaultValue: true } });
+    const verdict = runRuntimeAuthoringRules({ type: 'object', item });
+    expect(verdict.errors.map((f) => f.rule)).not.toContain('field-boolean-required');
   });
 });

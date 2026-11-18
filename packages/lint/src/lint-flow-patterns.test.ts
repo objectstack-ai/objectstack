@@ -4190,14 +4190,14 @@ describe('flow-approval-decision-unrouted — an approval decision continues onl
 });
 
 describe('flow-http-timeout-missing — an http node without a timeout of its own', () => {
-  const httpFlow = (config: Record<string, unknown>) => ({
+  const httpFlow = (config: Record<string, unknown>, node: Record<string, unknown> = {}) => ({
     flows: [{
       name: 'push_order',
       label: 'Push order',
       type: 'autolaunched',
       nodes: [
         { id: 'start', type: 'start', label: 'Start' },
-        { id: 'call', type: 'http', label: 'Call ERP', config: { url: 'https://erp.example.com/orders', ...config } },
+        { id: 'call', type: 'http', label: 'Call ERP', config: { url: 'https://erp.example.com/orders', ...config }, ...node },
       ],
       edges: [{ id: 'e0', source: 'start', target: 'call' }],
     }],
@@ -4214,5 +4214,19 @@ describe('flow-http-timeout-missing — an http node without a timeout of its ow
 
   it('is silent once the node sets one', () => {
     expect(missing(httpFlow({ timeoutMs: 10000 }))).toEqual([]);
+  });
+
+  it('is silent on a node-level `timeoutMs`: the engine races the node against it', () => {
+    expect(missing(httpFlow({}, { timeoutMs: 10000 }))).toEqual([]);
+  });
+
+  it('reads `config.timeoutMs: 0` (and a node-level 0) as no timer: neither arms one', () => {
+    const findings = missing(httpFlow({ timeoutMs: 0 }, { timeoutMs: 0 }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('arms no timer');
+  });
+
+  it('is silent on a `durable: true` node: the run does not wait on the endpoint', () => {
+    expect(missing(httpFlow({ durable: true, method: 'POST' }))).toEqual([]);
   });
 });

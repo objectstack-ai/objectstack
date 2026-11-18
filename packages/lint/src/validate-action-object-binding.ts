@@ -9,8 +9,10 @@
  * those surfaces only through its `objectName`, which `defineStack` folds into
  * that object's `actions` and the runtime keys its dispatch by. Without one the
  * action registers under the global scope: no object's list or record page
- * carries it, so the button it declares never renders and a call on an
- * object's action route answers "not found". The spec's own note on the
+ * carries it, so the button it declares never renders. (The handler still
+ * runs: an object-less action answers every object's action route, since
+ * `resolveActionByPackage` falls through to the global scope — only the
+ * placement is lost.) The spec's own note on the
  * location vocabulary names the honest shape for an object-less action:
  * `locations: []`, headless.
  *
@@ -51,7 +53,7 @@ export function validateActionObjectBinding(stack: Record<string, unknown>): Act
       path: `actions[${list.indexOf(action)}].objectName`,
       message:
         `Action "${name}" declares ${locations.map((l) => `\`${l}\``).join(', ')} but no \`objectName\`, so it binds ` +
-        'to no object: the button never renders, and a call on an object\'s action route answers "not found".',
+        'to no object: no list or record page carries it, so the button it declares never renders.',
       hint:
         `Set \`objectName\` to the object the action acts on, or write \`locations: []\` if it is headless ` +
         '(REST / MCP / AI only).',

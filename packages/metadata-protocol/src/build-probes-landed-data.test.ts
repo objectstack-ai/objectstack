@@ -26,13 +26,30 @@ const matches = (row: Row, where: Record<string, unknown> | undefined): boolean 
         return $in.includes(row[key]);
     });
 
-/** Fixed tables; honours `where` and then `limit` (`check:objectql-double-limit`). */
+/**
+ * Fixed tables; honours `where`, the context's organization, then `limit`
+ * (`check:objectql-double-limit`), and the `fields` projection. A table whose
+ * rows carry `organization_id` is tenant-scoped, as the engine reads it: a
+ * read with a `tenantId` sees that organization's rows only, and `getSchema`
+ * names the column. A table whose rows carry none (`sys_user`) is not scoped.
+ */
 const engineOver = (tables: Record<string, Row[]>): ProbeEngine => ({
     find: async (object, query) => {
-        const q = query as { where?: Record<string, unknown>; limit?: unknown } | undefined;
-        const rows = (tables[object] ?? []).filter((r) => matches(r, q?.where));
-        return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
+        const q = query as
+            | { where?: Record<string, unknown>; limit?: unknown; fields?: unknown; context?: { tenantId?: unknown } }
+            | undefined;
+        const tenant = q?.context?.tenantId;
+        const rows = (tables[object] ?? [])
+            .filter((r) => matches(r, q?.where))
+            .filter((r) => tenant === undefined || !('organization_id' in r) || r.organization_id === tenant);
+        const limited = typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
+        const fields = Array.isArray(q?.fields) ? (q.fields as string[]) : undefined;
+        return fields ? limited.map((r) => Object.fromEntries(fields.filter((f) => f in r).map((f) => [f, r[f]]))) : limited;
     },
+    getSchema: (object) =>
+        (tables[object] ?? []).some((r) => 'organization_id' in r)
+            ? { name: object, fields: { organization_id: { type: 'lookup', reference: 'sys_organization' } } }
+            : { name: object, fields: {} },
 });
 
 const ITEMS: Record<string, unknown> = {
@@ -55,7 +72,8 @@ const ITEMS: Record<string, unknown> = {
             owner: { type: 'user' },
         },
     },
-    'seed deal_seed': { object: 'deal', records: [] },
+    'seed deal_seed': { object: 'deal', records: [{ name: 'D1' }, { name: 'D2' }] },
+    'seed deal_seed_composite': { object: 'deal', externalId: ['acct_ref', 'name'], records: [{ name: 'D1' }] },
     'dashboard board': {
         name: 'board',
         widgets: [{ id: 'w1', dataset: 'deal_totals', values: ['total'] }],
@@ -144,7 +162,7 @@ describe('seed_reference_unresolved: a landed reference naming no row', () => {
     it('a value no target row has: a warning on the seed, naming the column', async () => {
         const report = await run({
             engine: engineOver({
-                deal: [{ id: 'd1', acct_ref: 'a1', owner: 'Jane Smith' }, { id: 'd2', acct_ref: 'a_gone' }],
+                deal: [{ id: 'd1', name: 'D1', acct_ref: 'a1', owner: 'Jane Smith' }, { id: 'd2', name: 'D2', acct_ref: 'a_gone' }],
                 acct: [{ id: 'a1' }],
                 sys_user: [{ id: 'u1' }],
             }),
@@ -161,8 +179,31 @@ describe('seed_reference_unresolved: a landed reference naming no row', () => {
 
     it('every value resolves, or the column is blank: silent', async () => {
         const report = await run({
-            engine: engineOver({ deal: [{ id: 'd1', acct_ref: 'a1', owner: 'u1' }, { id: 'd2', acct_ref: null }], acct: [{ id: 'a1' }], sys_user: [{ id: 'u1' }] }),
+            engine: engineOver({
+                deal: [{ id: 'd1', name: 'D1', acct_ref: 'a1', owner: 'u1' }, { id: 'd2', name: 'D2', acct_ref: null }],
+                acct: [{ id: 'a1' }],
+                sys_user: [{ id: 'u1' }],
+            }),
             published,
+        });
+        expect(report.issues).toEqual([]);
+    });
+
+    it('a row the seed did not write is not judged as the seed\'s', async () => {
+        const report = await run({
+            engine: engineOver({
+                deal: [{ id: 'd1', name: 'D1', acct_ref: 'a1' }, { id: 'd9', name: 'Typed by a person', acct_ref: 'a_gone' }],
+                acct: [{ id: 'a1' }],
+            }),
+            published,
+        });
+        expect(report.issues).toEqual([]);
+    });
+
+    it('a seed whose key is composite identifies no row by itself, and is not judged', async () => {
+        const report = await run({
+            engine: engineOver({ deal: [{ id: 'd1', name: 'D1', acct_ref: 'a_gone' }], acct: [] }),
+            published: [{ type: 'seed', name: 'deal_seed_composite' }],
         });
         expect(report.issues).toEqual([]);
     });
@@ -171,7 +212,7 @@ describe('seed_reference_unresolved: a landed reference naming no row', () => {
         const report = await run({
             engine: {
                 find: async (object) => {
-                    if (object === 'deal') return [{ id: 'd1', acct_ref: 'a_gone' }];
+                    if (object === 'deal') return [{ id: 'd1', name: 'D1', acct_ref: 'a_gone' }];
                     throw new Error('no such table');
                 },
             },
@@ -220,40 +261,81 @@ describe('flow_connector_action_unresolved: a connector step the runtime cannot 
     });
 });
 
-describe('the target and parent reads are scoped like the sample reads', () => {
-    /** Records every read's `where`, over the same fixed tables. */
+describe('the landed-data reads are scoped like the engine\'s reference audit, and projected', () => {
+    type Read = { object: string; where?: Record<string, unknown>; fields?: unknown; context?: Record<string, unknown> };
+    /** Records every read, over the same fixed tables. */
     const recording = (tables: Record<string, Row[]>) => {
-        const wheres: Array<[string, Record<string, unknown> | undefined]> = [];
+        const reads: Read[] = [];
         const inner = engineOver(tables);
         const engine: ProbeEngine = {
             find: async (object, query) => {
-                wheres.push([object, (query as { where?: Record<string, unknown> } | undefined)?.where]);
+                const q = query as Omit<Read, 'object'>;
+                reads.push({ object, where: q.where, fields: q.fields, context: q.context });
                 return inner.find(object, query);
             },
+            getSchema: inner.getSchema,
         };
-        return { engine, wheres };
+        return { engine, reads };
     };
+    const seedRowsRead = (r: Read) => r.object === 'deal' && r.where?.name !== undefined;
 
     it('seed_reference_unresolved: a target row of another organization does not resolve the reference', async () => {
-        const { engine, wheres } = recording({
-            deal: [{ id: 'd1', organization_id: 'o1', acct_ref: 'a9' }],
+        const { engine, reads } = recording({
+            deal: [{ id: 'd1', name: 'D1', organization_id: 'o1', acct_ref: 'a9' }],
             acct: [{ id: 'a9', organization_id: 'o2' }],
         });
         const report = await run({ engine, organizationId: 'o1', published: [{ type: 'seed', name: 'deal_seed' }] });
         expect(codes(report)).toEqual([['seed_reference_unresolved', 'warning', 'acct_ref']]);
-        expect(wheres.filter(([o]) => o === 'acct')).toEqual([['acct', { id: { $in: ['a9'] }, organization_id: 'o1' }]]);
+        expect(reads.filter((r) => r.object === 'acct')).toEqual([
+            { object: 'acct', where: { id: { $in: ['a9'] } }, fields: ['id'], context: { isSystem: true, tenantId: 'o1' } },
+        ]);
+        // The seed's own rows, by its key, projected to what is judged. (The
+        // first `deal` read is `seed_not_applied`'s row count.)
+        expect(reads.find(seedRowsRead)).toEqual({
+            object: 'deal',
+            where: { name: { $in: ['D1', 'D2'] } },
+            fields: ['id', 'acct_ref', 'owner'],
+            context: { isSystem: true, tenantId: 'o1' },
+        });
+    });
+
+    it('seed_reference_unresolved with no publishing organization: each value is judged in its row\'s own organization', async () => {
+        const { engine, reads } = recording({
+            deal: [
+                { id: 'd1', name: 'D1', organization_id: 'o1', acct_ref: 'a1', owner: 'u1' },
+                { id: 'd2', name: 'D2', organization_id: 'o2', acct_ref: 'a1', owner: 'u1' },
+            ],
+            acct: [{ id: 'a1', organization_id: 'o1' }],
+            sys_user: [{ id: 'u1' }],
+        });
+        const report = await run({ engine, published: [{ type: 'seed', name: 'deal_seed' }] });
+        // `a1` resolves for the o1 row and not for the o2 one; `sys_user` has no
+        // tenant column, so `u1` resolves in both.
+        expect(codes(report)).toEqual([['seed_reference_unresolved', 'warning', 'acct_ref']]);
+        expect(report.issues[0]!.message).toContain('1 value(s)');
+        expect(reads.filter((r) => r.object === 'acct').map((r) => r.context)).toEqual([
+            { isSystem: true, tenantId: 'o1' },
+            { isSystem: true, tenantId: 'o2' },
+        ]);
+        expect(reads.find(seedRowsRead)!.context).toEqual({ isSystem: true });
+        expect(reads.find(seedRowsRead)!.fields).toEqual(['id', 'acct_ref', 'owner', 'organization_id']);
     });
 
     it('rollup_never_computed: a parent row of another organization is not judged', async () => {
-        const { engine, wheres } = recording({
+        const { engine, reads } = recording({
             deal: [{ id: 'd1', organization_id: 'o1', acct_ref: 'a1', amount: 5 }],
             acct: [{ id: 'a1', organization_id: 'o2', deal_count: null, deal_total: null }],
         });
         const report = await run({ engine, organizationId: 'o1', published: [{ type: 'object', name: 'acct' }] });
         expect(report.issues).toEqual([]);
-        for (const [, where] of wheres.filter(([o]) => o === 'acct')) {
-            expect(where).toEqual({ id: { $in: ['a1'] }, organization_id: 'o1' });
-        }
-        expect(wheres.filter(([o]) => o === 'acct')).toHaveLength(2);
+        const parents = reads.filter((r) => r.object === 'acct');
+        expect(parents.map((r) => [r.where, r.fields, r.context])).toEqual([
+            [{ id: { $in: ['a1'] } }, ['id', 'deal_count'], { isSystem: true, tenantId: 'o1' }],
+            [{ id: { $in: ['a1'] } }, ['id', 'deal_total'], { isSystem: true, tenantId: 'o1' }],
+        ]);
+        expect(reads.filter((r) => r.object === 'deal').map((r) => r.fields)).toEqual([
+            ['id', 'acct_ref'],
+            ['id', 'acct_ref', 'amount'],
+        ]);
     });
 });

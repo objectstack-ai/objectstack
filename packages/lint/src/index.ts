@@ -681,7 +681,6 @@ export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validat
 export type { FlowNodeExecutorFinding } from './validate-flow-node-executors.js';
 export {
   validateInertObjectDeclarations,
-  FIELD_BOOLEAN_REQUIRED,
   STATE_MACHINE_NO_INITIAL_STATES,
 } from './validate-inert-object-declarations.js';
 export type { InertObjectDeclarationFinding } from './validate-inert-object-declarations.js';

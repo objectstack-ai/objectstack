@@ -116,7 +116,7 @@ const ITEMS: Record<string, unknown> = {
         label: DEALS,
         fields: { acct_ref: { type: 'lookup', reference: 'crm_acct', label: ACCT_REF } },
     },
-    'seed crm_deal_seed': { object: 'crm_deal', records: [] },
+    'seed crm_deal_seed': { object: 'crm_deal', records: [{ name: 'Big deal' }] },
     'flow crm_erp_sync': {
         name: 'crm_erp_sync',
         label: ERP_SYNC,
@@ -439,7 +439,7 @@ const CASES: readonly ProbeCase[] = [
         title: 'sample records whose reference names no record',
         code: 'seed_reference_unresolved', // adr0112-ok: D6c build-probe diagnostics code
         run: probe({
-            engine: engineOver({ crm_deal: [{ id: 'd1', acct_ref: 'Acme Corp' }], crm_acct: [{ id: 'a1' }] }),
+            engine: engineOver({ crm_deal: [{ id: 'd1', name: 'Big deal', acct_ref: 'Acme Corp' }], crm_acct: [{ id: 'a1' }] }),
             published: [{ type: 'seed', name: 'crm_deal_seed' }],
         }),
         params: (tag) => ({ object: DEALS, field: said(ACCT_REF, tag, 'acct_ref'), target: ACCOUNTS, count: '1' }),

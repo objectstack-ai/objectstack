@@ -6290,24 +6290,13 @@ const FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION: RuleExplanation = {
   rule: 'flow-http-timeout-missing',
   covers: 'why an http node needs a timeout',
   paragraphs: [
-    'The `http` node arms a timer only when `config.timeoutMs` is set. Without it the call waits for as long as ' +
-      'the transport does: an endpoint that never answers holds the run, and a flow triggered by a record save ' +
-      'holds that save with it.',
+    'The `http` node arms a timer only when `config.timeoutMs` is a positive number (`0` arms none), and the ' +
+      'engine races a node against its node-level `timeoutMs` only when that is positive. With neither, the call ' +
+      'waits for as long as the transport does: an endpoint that never answers holds the run, and a flow ' +
+      'triggered by a record save holds that save with it. A `durable: true` node is not reported: it hands the ' +
+      'request to the HTTP outbox and does not wait on the endpoint.',
     'A warning, not an error: the run is held, not lost, and a slow endpoint may be expected. Set `timeoutMs` to ' +
       'the longest answer the flow should wait for, in milliseconds.',
-  ],
-};
-
-const FIELD_BOOLEAN_REQUIRED_EXPLANATION: RuleExplanation = {
-  rule: 'field-boolean-required',
-  covers: 'why a checkbox is never required',
-  paragraphs: [
-    '`required` says a record must carry a value. A `boolean` or `toggle` field always carries one of its two ' +
-      'values, and `false` is a value, so the flag guards nothing. The record form reads it the other way: as ' +
-      '"must be checked". It then refuses to save the box unchecked, and the app can only create records with ' +
-      'the box on — the state the control shows by default is the one value it will not save.',
-    'Remove `required`, and give the field `defaultValue: false` so a new record starts unchecked. If the box ' +
-      'really must be ticked (an accepted agreement), say so with a validation rule.',
   ],
 };
 
@@ -6317,9 +6306,11 @@ const STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'A `state_machine` validation\'s `transitions` judge UPDATES: from this state, a record may move to those. ' +
       'Nothing in them judges an insert, and a select field accepts any of its options on create, so without ' +
-      '`initialStates` a record can be created already `approved` or `done` and skip the whole process.',
+      '`initialStates` a record can be created already `approved` or `done` and skip the whole process. An ' +
+      'empty `initialStates` list is the same as none: the engine reads it as no entry contract.',
     '`initialStates` lists the states a record may be created in, and the server refuses an insert in any ' +
-      'other. Seed rows are exempt from the machine on purpose, so curated sample data can start mid-process.',
+      'other. Seed rows are exempt from the machine on purpose, so curated sample data can start mid-process. ' +
+      'A machine with `active: false` is not run, so it is not reported.',
   ],
 };
 
@@ -6329,8 +6320,9 @@ const ACTION_NO_OBJECT_BINDING_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'Every action location is a surface of an object: its list toolbar, a list row, a record\'s header, menu, ' +
       'related list or section. A standalone action reaches them only through `objectName`, which folds it into ' +
-      'that object\'s actions and keys its dispatch. Without it the action registers under the global scope, the ' +
-      'button it declares renders nowhere, and the object\'s action route answers "not found".',
+      'that object\'s actions and keys its dispatch. Without it the action registers under the global scope and ' +
+      'the button it declares renders nowhere. The handler itself still runs when called: an object-less action ' +
+      'answers every object\'s action route, so only the placement is lost.',
     'An action written inside an object\'s own `actions` is bound by that object and is never reported. An ' +
       'action with no UI surface at all declares `locations: []`; one that omits `locations` is ' +
       '`action-no-placement`\'s question.',
@@ -6575,7 +6567,6 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION.rule]: FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION,
   [FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION.rule]: FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION,
   [FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION.rule]: FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION,
-  [FIELD_BOOLEAN_REQUIRED_EXPLANATION.rule]: FIELD_BOOLEAN_REQUIRED_EXPLANATION,
   [STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION.rule]: STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION,
   [ACTION_NO_OBJECT_BINDING_EXPLANATION.rule]: ACTION_NO_OBJECT_BINDING_EXPLANATION,
 });

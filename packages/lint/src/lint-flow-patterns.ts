@@ -385,8 +385,9 @@ export const FLOW_TRY_CATCH_WITHOUT_CATCH = 'flow-try-catch-without-catch';
  */
 export const FLOW_APPROVAL_DECISION_UNROUTED = 'flow-approval-decision-unrouted';
 /**
- * An `http` node with no `config.timeoutMs`. `warning`: the executor arms its
- * timer only when the key is set. See {@link scanHttpTimeouts}.
+ * An `http` node with no timer: no positive `config.timeoutMs` and no positive
+ * node-level `timeoutMs`. `warning`: the run is held, not lost. See
+ * {@link scanHttpTimeouts}.
  */
 export const FLOW_HTTP_TIMEOUT_MISSING = 'flow-http-timeout-missing';
 
@@ -1877,26 +1878,37 @@ function scanApprovalDecisionEdges(
 }
 
 /**
- * An `http` node with no `config.timeoutMs` has no timer of its own: the
- * executor arms one only when the key is set (`service-automation`
- * `builtin/http-nodes.ts`), so an endpoint that never answers holds the run —
- * and a record-triggered run holds the save that started it — for as long as
- * the transport waits. A warning, not an error: the run is held, not lost.
+ * An `http` node with no timer at all: the executor arms one only when
+ * `config.timeoutMs` is a positive number (`timeoutMs ? setTimeout : undefined`
+ * in `service-automation` `builtin/http-nodes.ts`, so `0` arms none), and the
+ * engine races a node against its node-level `timeoutMs` only when that is
+ * positive (`dag-traversal.ts`). With neither, an endpoint that never answers
+ * holds the run — and a record-triggered run holds the save that started it —
+ * for as long as the transport waits. A warning, not an error: the run is
+ * held, not lost.
+ *
+ * A `durable: true` node is not reported: it enqueues onto the HTTP outbox and
+ * returns, and on the save path its no-outbox fallback is sent in the
+ * background, so the run does not wait on the endpoint. Its one waiting arm —
+ * no outbox wired, off the save path — is a deployment fact this lint cannot
+ * see.
  */
 function scanHttpTimeouts(at: string, nodes: AnyRec[], findings: FlowLintFinding[], sites?: FlowNodeSites): void {
+  const armed = (v: unknown) => typeof v === 'number' && v > 0;
   for (const node of nodes) {
     if (node.type !== 'http') continue;
     const cfg = (node.config ?? {}) as AnyRec;
-    if (cfg.timeoutMs !== undefined) continue;
+    if (armed(cfg.timeoutMs) || armed(node.timeoutMs) || cfg.durable === true) continue;
     const nodeId = typeof node.id === 'string' ? node.id : 'http';
+    const what = cfg.timeoutMs === 0 ? 'sets `config.timeoutMs: 0`, which arms no timer' : 'sets no `config.timeoutMs`';
     findings.push({
       severity: 'warning',
       where: `${at} · node '${nodeId}' (http)`,
       ...(sites?.nodes.get(node) ? { path: `${sites.nodes.get(node)!.path}.config` } : {}),
       message:
-        `http node '${nodeId}' sets no \`config.timeoutMs\`, so the call has no timeout of its own: an endpoint ` +
+        `http node '${nodeId}' ${what} and no node-level \`timeoutMs\`, so the call has no timeout: an endpoint ` +
         'that never answers holds the run, and a record-triggered run holds the save that started it.',
-      hint: 'Set `config.timeoutMs` to a number of milliseconds, e.g. `timeoutMs: 10000`.',
+      hint: 'Set `config.timeoutMs` to a positive number of milliseconds, e.g. `timeoutMs: 10000`.',
       rule: FLOW_HTTP_TIMEOUT_MISSING,
     });
   }

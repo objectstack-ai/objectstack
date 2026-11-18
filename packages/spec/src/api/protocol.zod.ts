@@ -1848,10 +1848,13 @@ export const RuntimeBuildIssueSchema = lazySchema(() => z.object({
     '`error`: the published artifact is broken at runtime, or the check that '
     + 'judges it could not run (`object_field_ref_rule_failed`). `warning`: a '
     + 'dashboard widget was not probed, so nothing is known about it '
-    + '(`widget_not_probed`, `probes_unavailable`), or what landed reads in a '
-    + 'way the person will notice although it may be the truth (`widget_empty_result`, '
-    + '`rollup_never_computed`, `seed_reference_unresolved`, '
-    + '`flow_connector_action_unresolved`). Neither fails the publish.',
+    + '(`widget_not_probed`, `probes_unavailable`); what landed reads in a way '
+    + 'the person will notice although it may be the truth (`widget_empty_result`, '
+    + '`rollup_never_computed`); or what landed is wrong in a way that depends on '
+    + 'data or on what the environment serves rather than on the artifact alone: '
+    + 'a stored reference that names no row (`seed_reference_unresolved`), a '
+    + 'flow step that fails on every run that reaches it until the connector it '
+    + 'names is served (`flow_connector_action_unresolved`). Neither fails the publish.',
   ),
   artifact: z.object({
     type: z.string().describe('Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`, `flow`).'),
@@ -1870,10 +1873,11 @@ export const RuntimeBuildIssueSchema = lazySchema(() => z.object({
       + 'action of a connector.',
     ),
   }).optional().describe(
-    'What the probe exercised, when that is not the artifact itself: the '
-    + 'object a seed loads into or a view reads, the dataset a widget is bound '
-    + 'to, the connector a flow step dispatches. Absent when the finding is '
-    + 'about the artifact as a whole.',
+    'What the probe exercised: the object a seed loads into or a view reads, '
+    + 'the dataset a widget is bound to, the connector a flow step dispatches, '
+    + 'or the published object itself when `member` names the field the '
+    + 'finding is about (a roll-up). Absent when the finding is about the '
+    + 'artifact as a whole.',
   ),
   code: z.string().describe(
     'Stable machine id of the finding class, lowercase snake: a diagnostics '
