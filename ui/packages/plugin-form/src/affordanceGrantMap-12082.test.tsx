@@ -758,6 +758,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // Connect an Agent's key list (objectstack-ai/objectstack#30894): Revoke marks one of the caller's own keys revoked.
   'packages/app-shell/src/console/connect/AuthorizedAccessList.tsx :: AuthorizedAccessList > revoke :: update':
     outOfFamily("the caller's OWN sys_api_key row (Revoke on Connect an Agent's key list, whose read is filtered on user_id = the caller and offers Revoke only on an active key); the write sets revoked: true and the server's CRUD step asks the grant; no record the caller browses is written"),
+  // The account app's Notification Settings page (objectstack-ai/objectstack#34728): the caller's own preference rows.
+  'packages/app-shell/src/console/notification-settings/myPreferences.ts :: sendPreferenceWrite :: create':
+    outOfFamily("the caller's OWN sys_notification_preference row (a switch, the digest or quiet hours on Notification Settings), created with user_id = the caller; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
+  'packages/app-shell/src/console/notification-settings/myPreferences.ts :: sendPreferenceWrite :: update':
+    outOfFamily("the caller's OWN sys_notification_preference row, by the id the caller-scoped door GET /api/v1/messaging/me/preferences names as theirs; member_default's row scope and write check (user_id == current_user.id) refuse any other row on the server; no record the caller browses is written"),
   // ── core ──
   'packages/core/src/actions/TransactionManager.ts :: TransactionManager > executeBatch :: batch':
     door('the action engine\'s transaction executor runs the operations its caller hands it'),

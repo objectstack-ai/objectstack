@@ -20,6 +20,7 @@ export const fr: TranslationData = {
         nav_account_profile: { label: 'Profil' },
         nav_account_mobile_app: { label: 'Application mobile' },
         nav_account_notifications: { label: 'Notifications' },
+        nav_account_notification_settings: { label: 'Paramètres de notification' },
         nav_account_approvals: { label: 'Mes approbations en attente' },
         nav_account_memberships: { label: 'Mes organisations' },
         nav_account_linked: { label: 'Comptes liés' },

@@ -20,6 +20,7 @@ export const jaJP: TranslationData = {
         nav_account_profile: { label: 'プロフィール' },
         nav_account_mobile_app: { label: 'モバイルアプリ' },
         nav_account_notifications: { label: '通知' },
+        nav_account_notification_settings: { label: '通知設定' },
         nav_account_approvals: { label: '承認待ち' },
         nav_account_memberships: { label: '所属組織' },
         nav_account_linked: { label: '連携アカウント' },
