@@ -54,7 +54,8 @@ import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // The repo's ONE not-found envelope, which the HTTP bridge's `get` throws:
 // `get_record` refuses a null read with it, so both doors answer one 404.
-import { recordNotFoundError } from '@objectstack/core';
+import { pickSentenceLocale, recordNotFoundError } from '@objectstack/core';
+import { SystemFieldName } from '@objectstack/spec/system';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
@@ -251,6 +252,19 @@ export interface McpDataBridge {
    * only where one was established.
    */
   diagnoseDelegation?(object: string): Promise<{ narrowed: boolean; statement?: string } | undefined>;
+  /**
+   * [#35138] The caller's locale ladder for a sentence the tools compose into
+   * a result (`ifNotRecorded`): the codes in order, the shared picker
+   * (`pickSentenceLocale`, `@objectstack/core`) choosing the first language
+   * the sentence is written in, `en` below all. The HTTP bridge answers
+   * `userTextLocalesOf` over the request's `ExecutionContext`, the ladder the
+   * dataset tools' `nextStep` reads on that door; the stdio bridge answers the
+   * principal's ladder, then the i18n service's default.
+   *
+   * OPTIONAL: a bridge that omits it, or whose answer throws, is written to in
+   * `en`.
+   */
+  userTextLocales?(): Promise<readonly string[]>;
   get(object: string, id: string): Promise<unknown>;
   create(object: string, data: Record<string, unknown>): Promise<unknown>;
   update(object: string, id: string, data: Record<string, unknown>): Promise<unknown>;
@@ -1061,9 +1075,14 @@ function refusalAsTheDoorServesIt(envelope: ThrownRefusalEnvelope, door: DataDoo
  * code-less sentences, which the door's message heuristics would misread, so
  * it keeps {@link errorResultWithCode}.
  */
-function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RECORDS_TOOL, objectName: string) {
+function dataDoorErrorResult(
+  err: unknown,
+  tool: DataDoorTool | typeof DELETE_RECORDS_TOOL,
+  objectName: string,
+  beside?: NotRecordedMembers,
+) {
   const envelope = dataDoorRefusalEnvelope(err, objectName);
-  if (envelope) return codedErrorResult({ ...envelope });
+  if (envelope) return codedErrorResult({ ...envelope }, beside);
   const door = dataDoorAnswerOf(err, objectName);
   if (isServerFault(door.status)) {
     logServerFault({
@@ -1073,7 +1092,170 @@ function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RE
       request: { method: 'tools/call', path: `${tool} ${objectName}` },
     });
   }
-  return codedErrorResult(door);
+  return codedErrorResult(door, isServerFault(door.status) ? undefined : beside);
+}
+
+/**
+ * [#35138] What a record read's refusal says about data the caller's app does
+ * not record: `notRecorded` names it, as the caller sent it, and
+ * `ifNotRecorded` tells the model, in the caller's language, to say so rather
+ * than answer around a bare not-found. Rendered beside the coded refusal
+ * (`{ error, notRecorded, ifNotRecorded }`), whose `error` is unchanged.
+ *
+ * - `{ object }`: the caller's schema shows no object by the name they sent;
+ * - `{ object, fields }`: it shows the object, and not these names the call
+ *   sent (in the order first sent).
+ */
+export interface NotRecordedMembers {
+  notRecorded: { object: string; fields?: string[] };
+  ifNotRecorded: string;
+}
+
+/** The languages {@link NOT_RECORDED_SENTENCE} is written in; `en` is the floor. */
+const NOT_RECORDED_LOCALES = ['en', 'zh-Hans', 'zh-Hant', 'ja'] as const;
+
+/**
+ * [#35138, ADR-0149 M1] The `ifNotRecorded` sentence, one per language, in
+ * the executor: the spec fixes no wording. ⛔ One sentence for every case the
+ * member is served on, naming nothing: what is not recorded is the
+ * `notRecorded` member's, built from the caller's own words.
+ */
+const NOT_RECORDED_SENTENCE: Readonly<Record<(typeof NOT_RECORDED_LOCALES)[number], string>> = {
+  en:
+    'What notRecorded names is not recorded here, so nothing was read: tell the user this data is not recorded, '
+    + 'never report 0 or an empty result for it, and do not answer with another object or field in its place.',
+  'zh-Hans': 'notRecorded 所列的内容在这里没有记录，因此没有读取任何数据：请告诉用户这项数据没有记录，不要为它报告 0 或空结果，也不要用其他对象或字段代替回答。',
+  'zh-Hant': 'notRecorded 所列的內容在這裡沒有記錄，因此沒有讀取任何資料：請告訴使用者這項資料沒有記錄，不要為它回報 0 或空結果，也不要用其他物件或欄位代替回答。',
+  ja: 'notRecorded に挙げたものはここに記録されていないため、何も読み取っていません：このデータは記録されていないとユーザーに伝え、0 や空の結果を報告せず、別のオブジェクトやフィールドで代わりに答えないでください。',
+};
+
+/**
+ * The columns every object answers whatever its schema lists: the primary key
+ * and the two audit timestamps the engine's read and write doors admit on any
+ * object (`PLATFORM_PROVISIONED_COLUMNS`, `@objectstack/objectql`). A schema
+ * need not list them, so their absence there never makes them not recorded.
+ */
+const ALWAYS_ADDRESSABLE_COLUMNS: ReadonlySet<string> = new Set([
+  SystemFieldName.ID,
+  SystemFieldName.CREATED_AT,
+  SystemFieldName.UPDATED_AT,
+]);
+
+/** The logical operators whose operands are themselves conditions on the object's fields. */
+const WHERE_LOGICAL_OPERATORS: ReadonlySet<string> = new Set(['$and', '$or', '$nor', '$not']);
+
+/**
+ * The field names a `where` the caller sent addresses on its own object, in
+ * order: each condition key's first path segment (a dotted key names a
+ * relation's field through its head), through the logical operators. Other
+ * `$` keys are operators, never names.
+ */
+function whereFieldNames(where: unknown, into: string[]): string[] {
+  if (Array.isArray(where)) {
+    for (const branch of where) whereFieldNames(branch, into);
+    return into;
+  }
+  if (!where || typeof where !== 'object') return into;
+  for (const [key, value] of Object.entries(where as Record<string, unknown>)) {
+    if (key.startsWith('$')) {
+      if (WHERE_LOGICAL_OPERATORS.has(key)) whereFieldNames(value, into);
+      continue;
+    }
+    into.push(key.split('.')[0]);
+  }
+  return into;
+}
+
+/** The field names a `query_records` call sent: `where`, `fields`, `orderBy`. */
+function queryRecordsSentFields(args: {
+  where?: Record<string, unknown>;
+  fields?: string[];
+  orderBy?: Array<{ field: string }>;
+}): string[] {
+  return [
+    ...whereFieldNames(args.where, []),
+    ...(args.fields ?? []),
+    ...(args.orderBy ?? []).map((o) => o.field),
+  ];
+}
+
+/** The field names an `aggregate_records` call sent: `where`, `groupBy`, each aggregation's `field` and `filter`. */
+function aggregateRecordsSentFields(args: {
+  where?: Record<string, unknown>;
+  groupBy?: Array<string | { field: string }>;
+  aggregations: Array<{ field?: string; filter?: unknown }>;
+}): string[] {
+  const names = whereFieldNames(args.where, []);
+  for (const g of args.groupBy ?? []) names.push(typeof g === 'string' ? g : g.field);
+  for (const a of args.aggregations) {
+    if (typeof a.field === 'string' && a.field !== '') names.push(a.field);
+    whereFieldNames(a.filter, names);
+  }
+  return names;
+}
+
+/**
+ * [#35138] {@link NotRecordedMembers} for a refused record read, or
+ * `undefined`. Decided from two things only: the names the caller sent, and
+ * the object as the caller's own schema shows it (`describeObject`, the
+ * `describe_object` answer). ⛔ So an object or a field the caller's schema
+ * does not show is answered exactly as one that does not exist, whatever the
+ * refusal beside it says, and nothing the schema shows is ever named or
+ * counted. A schema read that throws, or one with no field list, establishes
+ * nothing: no member.
+ */
+async function notRecordedMembersOf(
+  bridge: McpDataBridge,
+  objectName: string,
+  sentFields: readonly string[],
+): Promise<NotRecordedMembers | undefined> {
+  let served: unknown;
+  try {
+    served = await bridge.describeObject(objectName);
+  } catch {
+    return undefined;
+  }
+  let notRecorded: NotRecordedMembers['notRecorded'];
+  if (served == null) {
+    notRecorded = { object: objectName };
+  } else {
+    const fields = (served as { fields?: unknown }).fields;
+    if (!Array.isArray(fields)) return undefined;
+    const shown = new Set<string>(ALWAYS_ADDRESSABLE_COLUMNS);
+    for (const f of fields) {
+      const name = (f as { name?: unknown } | null)?.name;
+      if (typeof name === 'string') shown.add(name);
+    }
+    const absent = [...new Set(sentFields)].filter((name) => !shown.has(name));
+    if (absent.length === 0) return undefined;
+    notRecorded = { object: objectName, fields: absent };
+  }
+  let locales: readonly string[] = [];
+  try {
+    locales = (await bridge.userTextLocales?.()) ?? [];
+  } catch {
+    locales = [];
+  }
+  return { notRecorded, ifNotRecorded: NOT_RECORDED_SENTENCE[pickSentenceLocale(locales, NOT_RECORDED_LOCALES)] };
+}
+
+/**
+ * [#35138] A record read tool's answer to a throw ({@link dataDoorErrorResult},
+ * unchanged), with {@link NotRecordedMembers} beside the refusal where the
+ * caller's schema does not show what the call named. A server fault is not a
+ * refusal and carries none.
+ */
+async function recordReadErrorResult(
+  bridge: McpDataBridge,
+  err: unknown,
+  tool: 'query_records' | 'aggregate_records' | 'get_record',
+  objectName: string,
+  sentFields: readonly string[],
+) {
+  const refusal = dataDoorRefusalEnvelope(err, objectName) !== undefined
+    || !isServerFault(dataDoorAnswerOf(err, objectName).status);
+  const beside = refusal ? await notRecordedMembersOf(bridge, objectName, sentFields) : undefined;
+  return dataDoorErrorResult(err, tool, objectName, beside);
 }
 
 /**
@@ -1153,16 +1335,19 @@ function landedWriteResultOrError(
  * (`tool-call-interceptor.ts`), so a host's deny reaches the client in the
  * envelope the tools' own refusals use; not on the package entry.
  */
-export function codedErrorResult(error: {
-  code?: string;
-  message: string;
-  status?: number;
-  declaredCode?: string;
-  userMessage?: string;
-  details?: unknown;
-}) {
+export function codedErrorResult(
+  error: {
+    code?: string;
+    message: string;
+    status?: number;
+    declaredCode?: string;
+    userMessage?: string;
+    details?: unknown;
+  },
+  beside?: NotRecordedMembers,
+) {
   return {
-    content: [{ type: 'text' as const, text: jsonText({ error }) }],
+    content: [{ type: 'text' as const, text: jsonText(beside ? { error, ...beside } : { error }) }],
     isError: true as const,
   };
 }
@@ -2992,7 +3177,8 @@ export function registerObjectTools(
           if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
           return textResult(withDelegationNotice(result, diagnosed.statement));
         } catch (err) {
-          return dataDoorErrorResult(err, 'query_records', objectName);
+          // [#35138] …with what the call named that the caller's schema does not show.
+          return recordReadErrorResult(bridge, err, 'query_records', objectName, queryRecordsSentFields({ where, fields, orderBy }));
         }
       },
     );
@@ -3087,7 +3273,10 @@ export function registerObjectTools(
               ...(truncated ? { truncated: true } : {}),
             });
           } catch (err) {
-            return dataDoorErrorResult(err, 'aggregate_records', objectName);
+            // [#35138] …with what the call named that the caller's schema does not show.
+            return recordReadErrorResult(
+              bridge, err, 'aggregate_records', objectName, aggregateRecordsSentFields({ where, groupBy, aggregations }),
+            );
           }
         },
       );
@@ -3121,7 +3310,8 @@ export function registerObjectTools(
           if (record == null) throw recordNotFoundError(objectName, recordId);
           return textResult(record);
         } catch (err) {
-          return dataDoorErrorResult(err, 'get_record', objectName);
+          // [#35138] …and an object the caller's schema does not show is said to be not recorded.
+          return recordReadErrorResult(bridge, err, 'get_record', objectName, []);
         }
       },
     );

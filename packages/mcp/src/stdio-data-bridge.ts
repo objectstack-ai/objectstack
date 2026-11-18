@@ -138,7 +138,7 @@ import { isAiReadExposed } from '@objectstack/spec/data';
 // a direct `@objectstack/core` dependency (`plugin.ts` imports from it too),
 // and `@objectstack/core` is the lowest package that carries the factory, so
 // there is no reason to add a second import path to the same function.
-import { recordNotFoundError } from '@objectstack/core';
+import { recordNotFoundError, userTextLocalesOf } from '@objectstack/core';
 // Managing API keys is a signed-in-session act: the one rule every data door
 // asks beside its exposure gate (`RestServer.enforceApiAccess`, the runtime
 // dispatcher's `refuseUnexposedDataAction`), asked here by the write arms.
@@ -1391,6 +1391,23 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         serveStoredMetadataRow(object, await findById(engine, object, id, context)),
         keyedDigest?.(),
       );
+    },
+
+    // [#35138] The locale ladder for a sentence the record tools compose
+    // (`ifNotRecorded`): the principal's, the ladder the dataset tools'
+    // `nextStep` reads on this door (`userTextLocalesOf`), then the i18n
+    // service's default, the locale this transport's `/meta` translation
+    // speaks ({@link defaultLocaleSources}). An i18n service this host cannot
+    // resolve, or whose default read throws, adds no rung.
+    async userTextLocales(): Promise<readonly string[]> {
+      const ladder = userTextLocalesOf(await resolvePrincipal());
+      let fallback: string | undefined;
+      try {
+        fallback = metaRequestLocale(undefined, deps.i18n?.());
+      } catch {
+        fallback = undefined;
+      }
+      return fallback !== undefined ? [...ladder, fallback] : ladder;
     },
 
     async create(object, data) {
