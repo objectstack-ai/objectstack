@@ -280,7 +280,7 @@ Namespace `plugin-list`.
 | Input | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `data` | `object` |  | Where this list's records come from, the spec's `ViewData`: `{ provider: 'object', object }` lists that object's records, and `{ provider: 'value', items }` hands the list its rows. Not required: the node's `dataSource` binding can name the object instead, and `dataSource.object` outranks this key. With neither, the list shows a hint naming `data.object` instead of an empty list. |
-| `type` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | The list kind, the spec's list view `type`. Absent, a bound saved view's kind applies, else a grid. On a metadata page it is written `properties.type`; the node's own `type` stays `list-view`. |
+| `type` | `enum`: `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]`, `[object Object]` |  | The list kind, the spec's list view `type`. Absent, a bound saved view's kind applies, else a grid. On a metadata page it is written `properties.type`; the node's own `type` stays `list-view`. |
 | `columns` | `array` |  | The fields the list shows, in order: field names (`["name", "stage"]`) or the spec's `ListColumn` objects. They are also the query's `$select`. Optional on a page node: a node bound to a saved view through `dataSource.view` draws that view's columns. |
 | `filter` | `array` |  | The base query filter, the spec's `ViewFilterRule` array `[{ field, operator, value }]`, lowered to `$filter`. |
 | `sort` | `array` |  | The initial sort order, `[{ field, order }]`, lowered to `$orderby` in the order written. |
@@ -319,6 +319,7 @@ Namespace `plugin-list`.
 | `map` | `object` |  | The map, `{ locationField }` or `{ latitudeField, longitudeField }`, with `titleField`, `zoom` and `center`. |
 | `tree` | `object` |  | The tree, `{ parentField, labelField, fields, defaultExpandedDepth }`. |
 | `chart` | `object` |  | The chart a `type: "chart"` list draws, bound to an ADR-0021 dataset: `{ dataset, values, dimensions, chartType }`. There is no default binding. |
+| `timesheet` | `object` |  | The editable row × weekday grid a `type: "timesheet"` list draws: `{ rowFields, dateField, valueField }`. All three are required; each typed cell creates, updates or deletes one record. |
 | `dataSource` | `object` (`object` data binding) |  | Per-element data binding: \{ object, view, filter, sort, limit \}. Overrides the page-level object context for this block; `view` names a saved view of `object`, and `filter` is ANDed with the view’s own rather than replacing it. |
 
 ## `object-map` [#object-map]

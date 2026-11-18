@@ -120,15 +120,40 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanDefaultsTables } from '@object-ui/test-support/defaults-table-scan';
 import { en } from '@object-ui/i18n';
+import { loadDeveloperCatalogue } from '@object-ui/i18n/namespaces/developer';
+import { loadMarketplaceCatalogue } from '@object-ui/i18n/namespaces/marketplace';
+import { loadTimesheetCatalogue } from '@object-ui/i18n/namespaces/timesheet';
 import { DETAIL_DEFAULT_TRANSLATIONS } from '@object-ui/plugin-detail';
 import { LIST_DEFAULT_TRANSLATIONS } from '@object-ui/plugin-list';
 import { DESIGNER_DEFAULT_TRANSLATIONS } from '@object-ui/plugin-designer';
 
-/** Resolve a dotted i18n key against a pack. Returns `undefined` at any miss. */
-const packValueAt = (key: string): unknown =>
-  key
-    .split('.')
-    .reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], en);
+/**
+ * The pack-shaped lazy namespaces' `en` catalogues (`@object-ui/i18n`'s
+ * `namespaces/packNamespace.ts`). Each holds groups of the en pack moved out
+ * of the eager catalogue: a surface that reads one renders only once its
+ * namespace is loaded and merged into the page's i18next instance, and the
+ * provider path then serves those keys exactly as it serves pack keys. So the
+ * pack a row is resolved against is `en` together with these (#34382: the
+ * timesheet's defaults table is the first to name a lazy group's keys).
+ */
+const LAZY_EN_CATALOGUES: readonly unknown[] = [
+  await loadDeveloperCatalogue('en'),
+  await loadMarketplaceCatalogue('en'),
+  await loadTimesheetCatalogue('en'),
+];
+
+/** Resolve a dotted i18n key against one pack. Returns `undefined` at any miss. */
+const valueIn = (pack: unknown, key: string): unknown =>
+  key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], pack);
+
+/** Resolve a dotted i18n key against the en pack and its lazy namespaces. Returns `undefined` at any miss. */
+const packValueAt = (key: string): unknown => {
+  for (const pack of [en, ...LAZY_EN_CATALOGUES]) {
+    const value = valueIn(pack, key);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+};
 
 /** Codepoints, so a failure distinguishes `…` from `...` and NBSP from a space. */
 const codepoints = (s: string) => [...s].map((c) => c.codePointAt(0)).join(',');

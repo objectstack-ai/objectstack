@@ -128,8 +128,11 @@ describe('view form — `pagination` is offered to every view type', () => {
 
   // A `chart` view binds a dataset (#22491), so it carries that binding here;
   // every other type parses with no block of its own.
+  // `chart` and `timesheet` each refuse a list view with no binding block, so they carry one.
   const bindingFor = (type: string) =>
-    (type === 'chart' ? { chart: { dataset: 'lead_metrics', values: ['amount_sum'] } } : {});
+    (type === 'chart' ? { chart: { dataset: 'lead_metrics', values: ['amount_sum'] } }
+      : type === 'timesheet' ? { timesheet: { rowFields: ['name'], dateField: 'work_date', valueField: 'hours' } }
+      : {});
 
   it.each(VIEW_TYPES.map((t) => [t]))("is backed by the door: type '%s' parses a pagination block and keeps it", (type) => {
     const r = ListViewSchema.safeParse({ type, columns: ['name'], ...bindingFor(type), pagination: { pageSize: 50 } });

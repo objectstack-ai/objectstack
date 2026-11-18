@@ -24,6 +24,9 @@ view / page / dashboard / report metadata.
   docs, wizard forms, a view added beside the list (and the empty board over
   a field added with it), a write button whose body writes, the view kind
   the request names.
+- `triggers.json` — trigger cases: requests that should load this skill
+  (`should_trigger: true`) and near misses that should not (`false`), graded
+  on whether the skill was loaded, never on the answer.
 
 ## Format
 
@@ -33,6 +36,11 @@ Each eval file is a JSON fixture with a list of evals, each carrying:
 2. **expected_output** — what a correct answer does (and avoids)
 3. **assertions** — `must_contain` / `must_not_contain` string checks used to
    score the output
+4. **files** — paths under `evals/files/` a case needs on disk (empty when
+   the prompt states its context)
+
+A trigger case carries `should_trigger` in place of `expected_output` and
+`assertions`.
 
 ## Contributing
 

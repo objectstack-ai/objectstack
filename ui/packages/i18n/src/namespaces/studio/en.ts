@@ -1509,6 +1509,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.view.type.map': 'Map',
   'engine.inspector.view.type.chart': 'Chart',
   'engine.inspector.view.type.tree': 'Tree',
+  'engine.inspector.view.type.timesheet': 'Timesheet',
   // Report default ("home") inspector
   'engine.inspector.report.kind': 'Report',
   'engine.inspector.report.close': 'Close report',
@@ -4632,6 +4633,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.category.positions': 'Positions',
   'engine.translationPreview.category.permissions': 'Permission Sets',
   'engine.translationPreview.category.books': 'Doc Books',
+  'engine.translationPreview.category.mappings': 'Import Mappings',
   'engine.translationPreview.category.metadataForms': 'Metadata Forms',
   'engine.translationPreview.category.settingsCommon': 'Settings UI',
   'engine.translationPreview.coverage': 'Category coverage:',

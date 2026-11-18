@@ -13,7 +13,10 @@
  * What a turn's record can say:
  *
  * - `pass` / `fail` — the answer (the result line's text, the reply the asker
- *   reads) against the case's tokens;
+ *   reads) against the case's tokens; for a trigger case, whether the turn
+ *   loaded the bundle (a `Skill` launch of it, or a `Read` of a file under its
+ *   `.claude/skills/BUNDLE/`) against `should_trigger`. A trigger case runs on
+ *   the with-skill arm only: without the bundle nothing can be loaded;
  * - `invalid` — the turn did not run the arm it was meant to: the with-skill
  *   arm's init line does not list the bundle, or the no-skill arm's lists a
  *   bundle of the catalog. Out of the denominator, and counted;
@@ -35,7 +38,7 @@ import { assertSubscriptionLogin, CLAUDE_EFFORT_ENV, effortLevelsFromHelp, subsc
 import { runTurnProcess, type TurnProcessRun } from '../runner/drivers/process.js';
 import { parseStreamJson } from '../runner/transcript.js';
 import type { TurnProcess } from '../runner/transcript.js';
-import { ARMS, type Arm, armArgs, prepareArmWorkdir } from './arms.js';
+import { ARMS, type Arm, armArgs, placeCaseFiles, prepareArmWorkdir } from './arms.js';
 import { hashCase, type SkillEvalCase } from './cases.js';
 import { type Grader, gradeAnswer } from './grade.js';
 
@@ -49,6 +52,15 @@ export type RunVerdict = 'pass' | 'fail' | 'invalid' | 'error';
  * it) or `not-shown` (it did not, so nothing in the stream shows it).
  */
 export type ArmEvidence = 'init-line' | 'launched' | 'not-shown';
+
+/** How a turn reached a bundle's text: a `Skill` launch of it, or a `Read` of a file under it. */
+export type LoadEvidence = 'skill-tool' | 'read';
+
+/** A trigger case's reading: what it asked, and how the turn reached the bundle (empty ⇒ it did not). */
+export interface TriggerReading {
+  shouldTrigger: boolean;
+  loadedBy: LoadEvidence[];
+}
 
 export interface RateLimitReading {
   status?: string;
@@ -65,6 +77,12 @@ export interface TurnStreamFacts {
   initSkills?: string[];
   /** The `skill` input of every `Skill` tool call. */
   skillsInvoked: string[];
+  /**
+   * Every file a `Read` call named under a `.claude/skills/` directory, as the
+   * path below it (`objectstack-data/SKILL.md`): the turn reading a skill's
+   * text instead of launching it.
+   */
+  skillFilesRead: string[];
   /** The result line's `permission_denials` count. */
   permissionDenials?: number;
   /** The tool each of those denials refused, in order. */
@@ -73,9 +91,12 @@ export interface TurnStreamFacts {
   rateLimit?: RateLimitReading;
 }
 
+/** A path under a project's `.claude/skills/`, captured below it. */
+const SKILL_FILE_PATH = /(?:^|\/)\.claude\/skills\/(.+)$/;
+
 /** Read the facts {@link parseStreamJson} does not keep. Pure over its input. */
 export function readStreamFacts(stdout: string): TurnStreamFacts {
-  const facts: TurnStreamFacts = { skillsInvoked: [] };
+  const facts: TurnStreamFacts = { skillsInvoked: [], skillFilesRead: [] };
   for (const line of stdout.split('\n')) {
     const t = line.trim();
     if (!t.startsWith('{')) continue;
@@ -108,6 +129,10 @@ export function readStreamFacts(stdout: string): TurnStreamFacts {
         if (b?.type === 'tool_use' && b.name === 'Skill' && typeof b.input === 'object' && b.input !== null) {
           const skill = (b.input as Record<string, unknown>).skill;
           if (typeof skill === 'string') facts.skillsInvoked.push(skill);
+        } else if (b?.type === 'tool_use' && b.name === 'Read' && typeof b.input === 'object' && b.input !== null) {
+          const path = (b.input as Record<string, unknown>).file_path;
+          const below = typeof path === 'string' ? SKILL_FILE_PATH.exec(path.replace(/\\/g, '/')) : null;
+          if (below) facts.skillFilesRead.push(below[1]!);
         }
       }
     }
@@ -147,6 +172,10 @@ export interface SkillEvalRunRecord {
   bundlesLoaded: string[];
   /** Every skill the turn launched with the `Skill` tool. */
   skillsInvoked: string[];
+  /** Files the turn read under `.claude/skills/` (absent on a record written before the runner kept them). */
+  skillFilesRead?: string[];
+  /** A trigger case's reading: whether the turn loaded the bundle, and how. */
+  trigger?: TriggerReading;
   /** The tools the turn called, in order. */
   toolCalls: string[];
   permissionDenials?: number;
@@ -180,6 +209,8 @@ export interface VerdictFacts {
   initSeen: boolean;
   bundlesLoaded: readonly string[];
   skillsInvoked: readonly string[];
+  /** Absent on a record written before the runner kept it: read as none. */
+  skillFilesRead?: readonly string[];
   resultSubtype?: string;
   answer?: string;
 }
@@ -190,6 +221,18 @@ export interface Verdict {
   missing: string[];
   forbidden: string[];
   armEvidence?: ArmEvidence;
+  trigger?: TriggerReading;
+}
+
+/** The arms a case runs on: both, or the with-skill arm alone for a trigger case. Pure. */
+export const armsOf = (c: Pick<SkillEvalCase, 'shouldTrigger'>): readonly Arm[] => (c.shouldTrigger === undefined ? ARMS : ['with-skill']);
+
+/** How the turn reached `bundle`'s text, in a fixed order; empty ⇒ it did not. Pure. */
+export function loadEvidence(bundle: string, f: Pick<VerdictFacts, 'skillsInvoked' | 'skillFilesRead'>): LoadEvidence[] {
+  const by: LoadEvidence[] = [];
+  if (f.skillsInvoked.includes(bundle)) by.push('skill-tool');
+  if ((f.skillFilesRead ?? []).some((p) => p.startsWith(`${bundle}/`))) by.push('read');
+  return by;
 }
 
 /**
@@ -200,6 +243,13 @@ export interface Verdict {
  * its answer, with `armEvidence` saying whether the turn launched it; a listed
  * bundle absent from the line is `invalid`. The no-skill arm is `invalid` when
  * its init line lists a catalog bundle or it launches one.
+ *
+ * A trigger case is judged on {@link loadEvidence}, not on its answer: `pass`
+ * when the turn loaded the bundle exactly when `shouldTrigger` says it should.
+ * A turn that loaded it is judged however it ended (the load already
+ * happened); one that did not is judged only when it ended `success`, since a
+ * turn cut short may have been about to load it. On the no-skill arm it is
+ * `invalid`: nothing there can be loaded.
  */
 export function verdictOf(c: SkillEvalCase, arm: Arm, f: VerdictFacts, catalog: CatalogView, grade: Grader = gradeAnswer): Verdict {
   const none = { missing: [], forbidden: [] };
@@ -208,6 +258,7 @@ export function verdictOf(c: SkillEvalCase, arm: Arm, f: VerdictFacts, catalog: 
     return { verdict: 'error', reason: p.error ? `the process failed: ${p.error}` : p.timedOut ? `killed by the ${p.timeoutMs} ms case timeout` : `the CLI exited ${String(p.exit)}${p.signal ? ` (${p.signal})` : ''}`, ...none };
   }
   if (!f.initSeen) return { verdict: 'error', reason: NO_INIT_LINE, ...none };
+  if (c.shouldTrigger !== undefined && arm !== 'with-skill') return { verdict: 'invalid', reason: 'a trigger case runs on the with-skill arm only', ...none };
   let armEvidence: ArmEvidence | undefined;
   if (arm === 'with-skill') {
     if (f.bundlesLoaded.includes(c.bundle)) armEvidence = 'init-line';
@@ -219,6 +270,14 @@ export function verdictOf(c: SkillEvalCase, arm: Arm, f: VerdictFacts, catalog: 
     if (launched.length > 0) return { verdict: 'invalid', reason: `the no-skill turn launched ${launched.map((b) => `\`${b}\``).join(', ')}`, ...none };
   }
   const ev = armEvidence ? { armEvidence } : {};
+  if (c.shouldTrigger !== undefined) {
+    const trigger: TriggerReading = { shouldTrigger: c.shouldTrigger, loadedBy: loadEvidence(c.bundle, f) };
+    const loaded = trigger.loadedBy.length > 0;
+    if (!loaded && f.resultSubtype !== 'success') {
+      return { verdict: 'error', reason: `the turn ended \`${f.resultSubtype ?? 'absent'}\` without loading the bundle, so not loading it is not shown`, ...none, ...ev, trigger };
+    }
+    return { verdict: loaded === c.shouldTrigger ? 'pass' : 'fail', ...none, ...ev, trigger };
+  }
   if (f.resultSubtype !== 'success' || f.answer === undefined) {
     return { verdict: 'error', reason: `no answer to grade: the result line is \`${f.resultSubtype ?? 'absent'}\``, ...none, ...ev };
   }
@@ -233,6 +292,7 @@ const applyVerdict = <T extends object>(base: T, v: Verdict) => ({
   missing: v.missing,
   forbidden: v.forbidden,
   ...(v.armEvidence ? { armEvidence: v.armEvidence } : {}),
+  ...(v.trigger ? { trigger: v.trigger } : {}),
 });
 
 /** Judge one finished turn. Pure over its inputs. */
@@ -259,6 +319,7 @@ export function judgeTurn(
     caseHash: hashCase(c),
     bundlesLoaded,
     skillsInvoked: facts.skillsInvoked,
+    skillFilesRead: facts.skillFilesRead,
     toolCalls: turn.toolCalls.map((t) => t.rawName),
     ...(facts.permissionDenials !== undefined ? { permissionDenials: facts.permissionDenials } : {}),
     ...(facts.deniedTools?.length ? { deniedTools: facts.deniedTools } : {}),
@@ -272,7 +333,7 @@ export function judgeTurn(
     startedAt,
     ...(facts.answer !== undefined ? { answer: facts.answer } : {}),
   } as const;
-  const v = verdictOf(c, arm, { process: run.process, initSeen: facts.initSkills !== undefined, bundlesLoaded, skillsInvoked: facts.skillsInvoked, ...(turn.meta.resultSubtype ? { resultSubtype: turn.meta.resultSubtype } : {}), ...(facts.answer !== undefined ? { answer: facts.answer } : {}) }, catalog, grade);
+  const v = verdictOf(c, arm, { process: run.process, initSeen: facts.initSkills !== undefined, bundlesLoaded, skillsInvoked: facts.skillsInvoked, skillFilesRead: facts.skillFilesRead, ...(turn.meta.resultSubtype ? { resultSubtype: turn.meta.resultSubtype } : {}), ...(facts.answer !== undefined ? { answer: facts.answer } : {}) }, catalog, grade);
   return applyVerdict(base, v);
 }
 
@@ -299,8 +360,8 @@ export function caseDrift(rec: Pick<SkillEvalRunRecord, 'caseHash'>, c: SkillEva
  */
 export function regradeRecord(rec: SkillEvalRunRecord, c: SkillEvalCase, catalog: CatalogView, grade: Grader = gradeAnswer): SkillEvalRunRecord {
   if (caseDrift(rec, c) === 'changed') throw new Error(`--regrade: \`${rec.key}\` has changed since the turn ran (record ${rec.caseHash}, now ${hashCase(c)}); a changed case is set apart, never regraded`);
-  const { reason: _reason, armEvidence: _ev, regradedFrom: _was, ...rest } = rec;
-  const v = verdictOf(c, rec.arm, { process: rec.process, initSeen: rec.reason !== NO_INIT_LINE, bundlesLoaded: rec.bundlesLoaded, skillsInvoked: rec.skillsInvoked, ...(rec.resultSubtype ? { resultSubtype: rec.resultSubtype } : {}), ...(rec.answer !== undefined ? { answer: rec.answer } : {}) }, catalog, grade);
+  const { reason: _reason, armEvidence: _ev, regradedFrom: _was, trigger: _trigger, ...rest } = rec;
+  const v = verdictOf(c, rec.arm, { process: rec.process, initSeen: rec.reason !== NO_INIT_LINE, bundlesLoaded: rec.bundlesLoaded, skillsInvoked: rec.skillsInvoked, ...(rec.skillFilesRead ? { skillFilesRead: rec.skillFilesRead } : {}), ...(rec.resultSubtype ? { resultSubtype: rec.resultSubtype } : {}), ...(rec.answer !== undefined ? { answer: rec.answer } : {}) }, catalog, grade);
   const out = applyVerdict(rest, v);
   const asRun = rec.regradedFrom ?? rec.verdict;
   return v.verdict === asRun ? out : { ...out, regradedFrom: asRun };
@@ -416,10 +477,13 @@ export interface RoundJob {
   repeat: number;
 }
 
-/** The turns of a round, case-major with both arms adjacent, so a stopped round still holds paired arms. */
+/**
+ * The turns of a round, case-major with both arms adjacent, so a stopped round
+ * still holds paired arms; a trigger case takes the with-skill arm only.
+ */
 export function planRound(cases: readonly SkillEvalCase[], repeats: number): RoundJob[] {
   const jobs: RoundJob[] = [];
-  for (let r = 1; r <= repeats; r++) for (const c of cases) for (const arm of ARMS) jobs.push({ case: c, arm, repeat: r });
+  for (let r = 1; r <= repeats; r++) for (const c of cases) for (const arm of armsOf(c)) jobs.push({ case: c, arm, repeat: r });
   return jobs;
 }
 
@@ -483,6 +547,7 @@ export async function executeRound(jobs: readonly RoundJob[], opts: RoundOptions
       const dir = prepareArmWorkdir(job.arm, job.case.bundle, opts.skillsRoot);
       const startedAt = new Date().toISOString();
       try {
+        placeCaseFiles(job.case.files, job.case.bundle, opts.skillsRoot, dir.cwd);
         const run = await runTurn(opts.bin, armArgs(dir.mcpConfigPath, opts), { cwd: dir.cwd, input: job.case.prompt, timeoutMs: opts.caseTimeoutMs, env });
         const rec = judgeTurn(job.case, job.arm, job.repeat, run, opts.catalog, startedAt);
         records.push(rec);

@@ -207,10 +207,11 @@ const VIEW_LAYOUT_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
   rule: 'view/layout-without-binding',
   covers: 'what each view type renders without its block',
   paragraphs: [
-    'Six list-view types read their layout from a config block named after the type: `kanban`, ' +
-      '`calendar`, `gantt`, `timeline`, `map` and `tree`. A view of one of them with no block parses ' +
-      'and publishes clean, but the surface the author asked for is not the one that renders. What ' +
-      'renders instead differs by type, as read from the renderer below; the rule is a warning on all six.',
+    'Seven list-view types read their layout from a config block named after the type: `kanban`, ' +
+      '`calendar`, `gantt`, `timeline`, `map`, `tree` and `timesheet`. A view of one of them with no ' +
+      'block parses and publishes clean, but the surface the author asked for is not the one that ' +
+      'renders. What renders instead differs by type, as read from the renderer below; the rule is a ' +
+      'warning on all seven.',
     '`calendar`: no date axis, and the renderer does not invent one. objectui\'s `ListView.tsx` ' +
       'calendar branch forwards only the bindings the view declared, so `getCalendarConfig` ' +
       '(`ObjectCalendar.tsx`) resolves `null` and the view renders its "Calendar configuration ' +
@@ -241,6 +242,11 @@ const VIEW_LAYOUT_WITHOUT_BINDING_EXPLANATION: RuleExplanation = {
       'authoring reports success. For `tree` a block is not the whole story either: every `tree` key ' +
       'is optional, and a tree with no resolvable parent pointer renders flat — that is ' +
       '`view/tree-without-parent-field`.',
+    '`timesheet`: objectui\'s `ListView.tsx` timesheet branch hands the block to `ObjectTimesheet` ' +
+      '(`@object-ui/plugin-timesheet`) as declared, and its `resolveTimesheetConfig` resolves `null` ' +
+      'without all three keys, so the view renders its "Timesheet configuration required" screen ' +
+      'instead of a grid, on any object. Declare `timesheet.rowFields`, `timesheet.dateField` and ' +
+      '`timesheet.valueField`, the three keys `TimesheetConfigSchema` requires.',
     'A `gallery` view is not judged: no `gallery` key is required, and its fallback mis-titles ' +
       'cards rather than emptying the view.',
   ],
@@ -4080,7 +4086,7 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'column\'s `summary` and `prefix`), `hiddenFields`, `fieldOrder`, ' +
       '`grouping` (and a grouping level\'s `orderBy`), `rowColor` and `userFilters`, the keys of its `filter` and of each ' +
       '`userFilters.tabs[].filter`, and every binding inside a `kanban`, `calendar`, `gantt`, ' +
-      '`timeline`, `gallery`, `map` or `tree` block. Nothing resolves the name at render time: the ' +
+      '`timeline`, `gallery`, `map`, `tree` or `timesheet` block. Nothing resolves the name at render time: the ' +
       'view renders successfully with a blank, empty or wrong result, and nothing else reports the ' +
       'miss. The verdict\'s "Did you mean" names the nearest field the object declares.',
     'An error where the miss changes what the view returns or collapses what it lays out — for ' +
@@ -4090,7 +4096,8 @@ const LIST_VIEW_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'collapses every card into one lane; a required date field of a `gantt`, `calendar` or ' +
       '`timeline` leaves nothing to place; a map with no coordinate field plots no marker; a ' +
       '`tree.parentField` flattens the tree; a `gantt.lockField` unfreezes every row and a ' +
-      '`gantt.objectField` stops every bar opening its record. A warning where one decoration ' +
+      '`gantt.objectField` stops every bar opening its record, and every `timesheet` binding is written ' +
+      'into each record a typed cell creates. A warning where one decoration ' +
       'drops and the rest renders — an optional colour, title, tooltip or cover binding, or a stale ' +
       '`hiddenFields` or `fieldOrder` entry, which hides or orders nothing.',
     LIST_VIEW_HEAD_ONLY,
@@ -4353,7 +4360,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'set\'s `name` that a package of this stack declares. `reports.NAME` a report\'s `name` that ' +
       'a package of this stack declares. `books.BOOK` a doc book\'s `name` that a package of this ' +
       'stack declares, or a package id (its implicit book), and `.groups.KEY` a group `key` that ' +
-      'book declares, not its label.',
+      'book declares, not its label. `mappings.MAPPING` an import mapping\'s `name` that a ' +
+      'package of this stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
