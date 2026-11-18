@@ -1,0 +1,22 @@
+{
+  "card": "travel_expense",
+  "cardSha256": "9d0c7dad107579b8e77d0c7924ec8c44ebf0bb446d3f3f0a526c32828eca262a",
+  "build": "travel_expense.json",
+  "sha256": "5fe6f452d36fe56a0ecf0f8c782394076953baeb99ef2499763991e119a29989",
+  "runner": "ec227fc7",
+  "packages": "published 18.6.0",
+  "built": "2026-11-18",
+  "author": {
+    "driver": "claude-code-cli 2.1.327",
+    "login": "oauth_token",
+    "model": "opus",
+    "effort": "high",
+    "prompt": "detailed",
+    "lang": "en"
+  },
+  "verified": {
+    "build": "135/135",
+    "seed": "757/757",
+    "how": "the scratch run's dist/objectstack.json after its Build half (before the iterate turn), byte for byte as `objectstack build` wrote it; re-scored against the card, its score equals the run record's Build half"
+  }
+}
