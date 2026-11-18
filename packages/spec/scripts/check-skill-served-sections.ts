@@ -54,14 +54,33 @@ import { PermissionSetSchema } from '../src/security';
 import { ActionSchema } from '../src/ui';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
-const SKILLS_DIR = path.resolve(REPO_ROOT, 'skills');
 const LIST_FILE = path.resolve(__dirname, 'skill-served-sections.json');
+
+/**
+ * The files this gate READS, declared for `scripts/pm/dispatch-gates.mjs` as a
+ * LITERAL array (its hint extractor reads source text). Eleven files, not the
+ * skills root: the gate opens only the files the list names, and
+ * `assertWatchHintsNameTheList` holds this declaration equal to the list.
+ */
+const DECLARED_WATCH_HINTS = [
+  'skills/objectstack-automation/SKILL.md',
+  'skills/objectstack-automation/references/examples-flows.md',
+  'skills/objectstack-automation/references/state-machines-and-approvals.md',
+  'skills/objectstack-data/SKILL.md',
+  'skills/objectstack-data/references/seeds.md',
+  'skills/objectstack-data/rules/lifecycle.md',
+  'skills/objectstack-data/rules/naming.md',
+  'skills/objectstack-data/rules/relationships.md',
+  'skills/objectstack-data/rules/validation.md',
+  'skills/objectstack-ui/SKILL.md',
+  'skills/objectstack-ui/rules/list-views.md',
+];
 
 const FORMS = ['json', 'json+ts', 'neutral'] as const;
 type Form = (typeof FORMS)[number];
 
 interface ServedSection {
-  skill: string;
+  /** Repository-relative path of the skill file. */
   file: string;
   heading: string;
   item?: number;
@@ -155,7 +174,7 @@ function fencesOf(section: string[]): Array<{ lang: string; body: string }> {
 
 const TS_LANGS = new Set(['ts', 'typescript', 'tsx', 'js', 'javascript', 'jsx']);
 
-/** Every problem with `rows`, read through `read` (a path relative to `skills/`, or undefined when absent). */
+/** Every problem with `rows`, read through `read` (a repository-relative path, or undefined when absent). */
 function judge(
   rows: readonly ServedSection[],
   read: (rel: string) => string | undefined,
@@ -165,8 +184,8 @@ function judge(
   if (rows.length === 0) problems.push('the list names no section: a gate with nothing to read must not pass');
   const seen = new Set<string>();
   for (const row of rows) {
-    const rel = `${row.skill}/${row.file}`;
-    const label = `skills/${rel} § ${row.heading}`;
+    const rel = row.file;
+    const label = `${rel} § ${row.heading}`;
     const key = label;
     if (seen.has(key)) {
       problems.push(`${label}: listed more than once`);
@@ -242,8 +261,19 @@ function readList(): ServedSection[] {
   return parsed.sections;
 }
 
+/** A file the list names and the declaration does not (or the reverse) is a hint that went stale. */
+function assertWatchHintsNameTheList(rows: readonly ServedSection[]): void {
+  const expected = [...new Set(rows.map((row) => row.file))].sort();
+  if (expected.join('|') !== [...DECLARED_WATCH_HINTS].sort().join('|')) {
+    throw new Error(
+      `check-skill-served-sections: DECLARED_WATCH_HINTS no longer names the files the list reads ` +
+        `(${JSON.stringify(expected)}): update the declaration, as a LITERAL array.`,
+    );
+  }
+}
+
 function readSkillFile(rel: string): string | undefined {
-  const abs = path.resolve(SKILLS_DIR, rel);
+  const abs = path.resolve(REPO_ROOT, rel);
   return fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : undefined;
 }
 
@@ -268,7 +298,7 @@ function selfTest(): void {
   let failed = 0;
   const batterySeen = new Map<string, number>();
   const row = (over: Partial<ServedSection> = {}): ServedSection => ({
-    skill: 's', file: 'f.md', heading: 'Target', form: 'neutral', json: [], ...over,
+    file: 'f.md', heading: 'Target', form: 'neutral', json: [], ...over,
   });
   const expect = (battery: string, label: string, text: string | undefined, rows: ServedSection[], want: 'green' | RegExp) => {
     batterySeen.set(battery, (batterySeen.get(battery) ?? 0) + 1);
@@ -331,6 +361,7 @@ function selfTest(): void {
 
   b = 'real tree — the list is read and names real validators';
   const real = readList();
+  assertWatchHintsNameTheList(real);
   const count = (label: string, ok: boolean) => {
     batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
     if (ok) console.log(`  ✓ ${label}`);
@@ -377,6 +408,7 @@ function main(): void {
     return;
   }
   const rows = readList();
+  assertWatchHintsNameTheList(rows);
   const problems = judge(rows, readSkillFile);
   if (problems.length > 0) {
     console.error(`✗ check-skill-served-sections: ${problems.length} problem(s)\n`);
