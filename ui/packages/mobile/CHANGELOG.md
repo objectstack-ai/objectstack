@@ -1,5 +1,15 @@
 # @object-ui/mobile
 
+## 18.6.0
+
+### Patch Changes
+
+- Updated dependencies [b019048]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [4240719]
+- Updated dependencies [2e29287]
+  - @object-ui/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

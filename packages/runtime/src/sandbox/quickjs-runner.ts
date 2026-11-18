@@ -1045,7 +1045,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // ── [#34374] `ctx.text(key, params?)` — a declared text, in the
     // organization's language ────────────────────────────────────────────────
     //
-    // Installed when the host built the seam (hook bodies, `hook-text.ts`). The
+    // Installed when the host built the seam (hook bodies and, #34374 PR2,
+    // action bodies — `hook-text.ts`). The
     // same deferred-promise pump as `title`, never `newAsyncifiedFunction`, for
     // the same reason: a body awaits it beside `ctx.api` calls. No capability:
     // it reads no record, and the language it reads is the platform's.

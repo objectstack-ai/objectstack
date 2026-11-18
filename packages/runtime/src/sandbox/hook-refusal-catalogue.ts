@@ -170,12 +170,20 @@ export interface ActionRefusalDeclaration {
   refusals?: unknown;
 }
 
+/**
+ * The action's OWN object — `undefined` for an object-less action — read by
+ * the one owner-key ladder (`objectName`, then `object`, else object-less),
+ * never re-spelled here. Shared with an action's declared texts (#34374 PR2,
+ * `hook-text.ts`), so a refusal and a text of one action read one address.
+ */
+export function actionOwnObject(action: Pick<ActionRefusalDeclaration, 'name' | 'objectName' | 'object'>): string | undefined {
+  const ownerKey = standaloneActionOwnerKey(action);
+  return isObjectLessActionKey(ownerKey) ? undefined : ownerKey;
+}
+
 function actionOwner(action: ActionRefusalDeclaration): RefusalOwner {
   const name = String(action.name);
-  // The action's OWN object, read by the one owner-key ladder
-  // (`objectName`, then `object`, else object-less) — never re-spelled here.
-  const ownerKey = standaloneActionOwnerKey(action);
-  const object = isObjectLessActionKey(ownerKey) ? undefined : ownerKey;
+  const object = actionOwnObject(action);
   return {
     label: `action '${name}'`,
     messageKey: (code, reason) => actionRefusalMessageKey(object, name, code, reason),

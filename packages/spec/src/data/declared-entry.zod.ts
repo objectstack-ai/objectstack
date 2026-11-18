@@ -10,8 +10,9 @@
  *    (#34273), keyed by code: `{ message, status?, reasons?, params? }`, read
  *    in the CALLER's locale when the code is thrown;
  *  - a **text** entry — `HookSchema.texts` (#34374, ruling 6913660232
- *    parameter 7), keyed by snake_case key: `{ message, params? }`, read in
- *    the ORGANIZATION's language when the code asks for it (`ctx.text`).
+ *    parameter 7) and `ActionSchema.texts` (#34374 PR2), keyed by snake_case
+ *    key: `{ message, params? }`, read in the ORGANIZATION's language when the
+ *    code asks for it (`ctx.text`).
  *
  * Both are built from the same core so they cannot drift: `message` (a
  * trimmed, non-empty sentence), `params` (identifiers, each declared once),
@@ -30,7 +31,8 @@
  *
  * Not on any barrel: each entry schema is published by the declaration that
  * carries it — {@link HookSchema}'s module exports `HookRefusalSchema` and
- * `HookTextSchema`, `ui/action.zod.ts` exports `ActionRefusalSchema`.
+ * `HookTextSchema`, `ui/action.zod.ts` exports `ActionRefusalSchema` and
+ * `ActionTextSchema`.
  */
 
 import { z } from 'zod';
@@ -38,6 +40,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import {
   ACTION_REFUSAL_MESSAGE_HOLE_REFUSED,
+  ACTION_TEXT_MESSAGE_HOLE_REFUSED,
   HOOK_REFUSAL_MESSAGE_HOLE_REFUSED,
   HOOK_REFUSAL_MESSAGE_WITHOUT_HOLE,
   HOOK_REFUSAL_PARAM_PATTERN,
@@ -271,10 +274,10 @@ export function declaredRefusalEntrySchema(subject: DeclaredRefusalSubject) {
 // ── Text entries ─────────────────────────────────────────────────────────────
 
 /**
- * The declarations a text catalogue sits on. `hook` today (#34374 PR1); the
- * action half of #34374 adds its row to {@link TEXT_WORDS}.
+ * The declarations a text catalogue sits on: `hook` (#34374 PR1) and `action`
+ * (#34374 PR2), one row each in {@link TEXT_WORDS}.
  */
-export type DeclaredTextSubject = 'hook';
+export type DeclaredTextSubject = 'hook' | 'action';
 
 /** What a text entry's text says about its subject — each a whole sentence, so a row reads as it publishes. */
 interface TextWords {
@@ -310,6 +313,26 @@ const TEXT_WORDS: Record<DeclaredTextSubject, TextWords> = {
       + 'unknown formatter, an empty hole and a currency formatter with no code are refused where the text is compiled '
       + '(os validate, compile, the publish gate). Absent: the sentence is plain text and a {{ }} hole is refused',
     rule: { slot: 'A hook text `message`', holeRefused: HOOK_TEXT_MESSAGE_HOLE_REFUSED },
+  },
+  action: {
+    surface: 'this action text',
+    localeGuidance:
+      'An action text has no language of its own — the runtime picks the organization\'s language. Write the sentence '
+      + 'in the source locale in `message` and translate it through `objects.OBJ._actions.ACT.texts.KEY.message` '
+      + '(`globalActions.ACT.texts.KEY.message` for an object-less action).',
+    messageDescribe:
+      'The sentence the action\'s body writes into a record — in the source locale, translated whole through '
+      + 'objects.<object>._actions.<action>.texts.<key>.message (globalActions.<action>.texts.<key>.message for an '
+      + 'object-less action) in the organization\'s language when the body asks for it (ctx.text). With no params '
+      + 'every {{ }} hole is refused; with params a hole is a path over one of them with an optional known formatter',
+    paramPatternMessage: 'A text param is an identifier (e.g. subject) — the root a {{ }} hole names',
+    paramsDescribe:
+      'The names this text may fill: a {{ NAME }} or {{ NAME | formatter }} hole renders the value the action\'s body '
+      + 'passes in ctx.text(KEY, { NAME: value }). A hole over any other name is refused at parse; a hole holding '
+      + 'logic, an unknown formatter, an empty hole and a currency formatter with no code are refused where the text '
+      + 'is compiled (os validate, compile, the publish gate). Absent: the sentence is plain text and a {{ }} hole is '
+      + 'refused',
+    rule: { slot: 'An action text `message`', holeRefused: ACTION_TEXT_MESSAGE_HOLE_REFUSED },
   },
 };
 

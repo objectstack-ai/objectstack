@@ -1396,6 +1396,7 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     emptyHint,
     onInvalidInputChange,
     onAutofill,
+    openingValue,
     // Renderer-only, and deliberately NOT a new key in the widget contract
     // (objectui#3393). The call site started forwarding `label` for the
     // built-in fullscreen dialog; registered widgets must keep receiving
@@ -1443,6 +1444,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     (CREATE_AUTOFILL_WIDGET_TYPES.has(normalizedType) && onAutofill)
       ? { onAutofill }
       : {}),
+    // The opening value rides with the lookup's writer: only a lookup fills
+    // from the value a create form opened with (objectstack#35050).
+    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) && openingValue !== undefined ? { openingValue } : {}),
   };
 }
 
@@ -4279,17 +4283,27 @@ ComponentRegistry.register('form',
                   // error is re-validated, so a filled required field clears.
                   // A create-only writer (objectstack#32770) gets none on an
                   // edit form: see `CREATE_AUTOFILL_WIDGET_TYPES`.
+                  //
+                  // A fill made by the value a create form OPENED with
+                  // (`opening`, objectstack#35050) joins the opening values:
+                  // the dirty baseline takes it first, so a form nobody has
+                  // touched yet still closes without the discard prompt.
                   onAutofill:
                     !isCreateForm && CREATE_AUTOFILL_WIDGET_TYPES.has(normalizeFieldType(resolvedType))
                       ? undefined
-                      : (patch: Record<string, unknown>) => {
+                      : (patch: Record<string, unknown>, options?: { opening?: boolean }) => {
+                          if (options?.opening) baselineRef.current = { ...baselineRef.current, ...patch };
                           for (const [target, filled] of Object.entries(patch)) {
                             form.setValue(target, filled, {
-                              shouldDirty: true,
+                              shouldDirty: !options?.opening,
                               shouldValidate: !!form.getFieldState(target).error,
                             });
                           }
                         },
+                  // The value a create form opened with, for a lookup to fill
+                  // its declared targets from (objectstack#35050). An edit
+                  // form's value is the stored record's and fills nothing.
+                  openingValue: isCreateForm ? defaultValues?.[name] : undefined,
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static
                   // `required` + `requiredWhen` CEL) drove exactly one thing —

@@ -231,3 +231,81 @@ describe('action refusal templates over declared params (#34273)', () => {
     expect(gate('Paid {{ amount | currency:EUR }}.')).toEqual([]);
   });
 });
+
+describe('action text templates over declared params (#34374 PR2)', () => {
+  const action = (texts: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    name: 'send_email',
+    label: 'Send email',
+    type: 'script',
+    body: { language: 'js', source: "return ctx.text('email_subject', { subject: input.subject });" },
+    texts,
+    ...extra,
+  });
+  const text = (message: string, params: string[] | undefined = ['subject']) => ({
+    email_subject: params ? { message, params } : { message },
+  });
+  const stackWith = (message: string, params?: string[] | undefined) => ({
+    objects: [{ name: 'crm_contact', actions: [action(text(message, params))] }],
+  });
+  const actionIssues = (message: string, params?: string[]) =>
+    actionRefusalTemplateIssues(stackWith(message, params), { actions: true, objects: true });
+
+  it.each([
+    'Email: {{ subject }}',
+    'Email: {{ subject | upper }}',
+    'Paid {{ subject | currency:EUR }}',
+  ])('CONTROL: accepts %j', (message) => {
+    expect(actionIssues(message)).toEqual([]);
+  });
+
+  it.each([
+    ['an unknown formatter', 'Email: {{ subject | shout }}'],
+    ['logic', 'Email: {{ subject + 1 }}'],
+    ['an empty hole', 'Email: {{ }}'],
+  ])('refuses %s as an error at texts.<key>.message, naming the object and the action', (_label, message) => {
+    const issues = actionIssues(message);
+    expect(issues.length).toBeGreaterThan(0);
+    expect(issues.every((i) => i.severity === 'error')).toBe(true);
+    expect(issues[0]!.where).toBe("object 'crm_contact' · action 'send_email' texts.email_subject.message");
+  });
+
+  it('refuses a currency formatter with no code, naming the code spelling', () => {
+    const issues = actionIssues('Paid {{ subject | currency }}');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.message).toContain('{{ subject | currency:EUR }}');
+  });
+
+  it('a text with no params is not read here (the parse refuses every hole in it)', () => {
+    const issues = actionRefusalTemplateIssues(
+      { actions: [action({ email_subject: { message: 'Email {{ subject | shout }}' } })] },
+      { actions: true, objects: true },
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it('judges a text and a refusal on one action, each at its own path', () => {
+    const both = action(text('Email: {{ subject | shout }}'), {
+      refusals: { NOT_SENT: { message: 'Not sent {{ reason | shout }}.', params: ['reason'] } },
+    });
+    const issues = actionRefusalTemplateIssues({ actions: [both] }, { actions: true, objects: true });
+    expect(issues.map((i) => i.where).sort()).toEqual([
+      "stack · action 'send_email' refusals.NOT_SENT.message",
+      "stack · action 'send_email' texts.email_subject.message",
+    ]);
+  });
+
+  it('is part of the stack expression pass `objectstack validate` and `compile` run', () => {
+    const issues = validateStackExpressions(stackWith('Email: {{ subject | shout }}') as never);
+    expect(issues.some((i) => i.where.endsWith("action 'send_email' texts.email_subject.message") && i.severity === 'error'))
+      .toBe(true);
+  });
+
+  it('refuses an `action` write at the publish gate, and passes the CONTROL', () => {
+    const gate = (message: string) =>
+      runRuntimeAuthoringRules({ type: 'action', item: action(text(message)), context: { objects: [] } })
+        .errors.filter((e) => String(e.where ?? '').includes('texts.'));
+    const refused = gate('Paid {{ subject | currency }}');
+    expect(refused.some((e) => String(e.message).includes('{{ subject | currency:EUR }}')), JSON.stringify(refused)).toBe(true);
+    expect(gate('Paid {{ subject | currency:EUR }}')).toEqual([]);
+  });
+});

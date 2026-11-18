@@ -74,7 +74,10 @@ const h = vi.hoisted(() => {
         unserved.push({ name, body });
         return { success: true, state: 'active' };
       }
-      served.set(name, { ...body });
+      // The server stamps its read decorations (`_packageId`) on what it
+      // serves; a stored body carries none.
+      const decorations = Object.fromEntries(Object.entries(served.get(name) ?? {}).filter(([k]) => k.startsWith('_')));
+      served.set(name, { ...decorations, ...body });
       overlays.add(name);
       return { success: true, state: 'active' };
     },
@@ -157,6 +160,12 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   useMetadata: () => ({ apps: h.apps.value, refresh: h.refresh }),
   useAdapter: () => ({
     getClient: () => ({ meta: { saveItem: h.saveItem, deleteItem: h.deleteItem } }),
+    // objectstack#35054 — a save starts from the stored app (the layers read):
+    // the served row minus its read decorations, which no layer carries.
+    getAuthoredItem: async (_type: string, name: string) => {
+      const row = h.served.get(name);
+      return row ? Object.fromEntries(Object.entries(row).filter(([k]) => !k.startsWith('_'))) : null;
+    },
   }),
 }));
 
