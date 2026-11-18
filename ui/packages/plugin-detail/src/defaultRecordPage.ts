@@ -20,7 +20,9 @@ import * as React from 'react';
  * line naming the owner and the record id. A block drawn anywhere else — an
  * authored page, a dashboard, a standalone `DetailView` — keeps its own face,
  * because no metadata key says "v3": the face is the default page's, never an
- * author's choice (ADR-0085).
+ * author's choice (ADR-0085). The one exception is the empty-sections line:
+ * every `record:details` body draws it, authored page included
+ * (`EmptySectionsLineContext`, objectstack#35019).
  */
 export const DefaultRecordPageContext = React.createContext(false);
 
