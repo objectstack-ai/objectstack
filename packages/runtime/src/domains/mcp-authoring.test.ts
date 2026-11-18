@@ -808,4 +808,19 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect((await call(authoring, 'delete_metadata_draft', { type: 'flow', name: 'crm_opportunity_followup', package: STUDIO_BASE })).isError).toBe(false);
     expect((await call(authoring, 'list_drafts', { package: STUDIO_BASE })).body.drafts).toEqual([]);
   });
+
+  it('an inherited member\'s name as `type`, which the fold keeps as sent, is refused and writes nothing', async () => {
+    const protocol = await realProtocol();
+    const { authoring } = await authorThroughDomain({ protocol });
+    for (const type of ['constructor', 'toString']) {
+      // Refused, not written. The status is the protocol's answer for such a name,
+      // not pinned here: its own fold reads a plain object (Acceptance notes).
+      const saved = await call(authoring, 'save_metadata_draft', { type, name: 'crm_opportunity_followup', item: unroutable, package: STUDIO_BASE });
+      expect(saved.isError, `${type}: ${JSON.stringify(saved.body)}`).toBe(true);
+      expect(saved.body.saved, type).toBeUndefined();
+      const discarded = await call(authoring, 'delete_metadata_draft', { type, name: 'crm_opportunity_followup', package: STUDIO_BASE });
+      expect(discarded.isError, `${type}: ${JSON.stringify(discarded.body)}`).toBe(true);
+    }
+    expect((await call(authoring, 'list_drafts', {})).body.drafts).toEqual([]);
+  });
 });
