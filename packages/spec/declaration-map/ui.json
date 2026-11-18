@@ -284,6 +284,8 @@
     "StyleMapSchema": "ui/StyleMap",
     "TimelineConfig": "ui/TimelineConfig",
     "TimelineConfigSchema": "ui/TimelineConfig",
+    "TimesheetConfig": "ui/TimesheetConfig",
+    "TimesheetConfigSchema": "ui/TimesheetConfig",
     "TreeConfig": "ui/TreeConfig",
     "TreeConfigSchema": "ui/TreeConfig",
     "UrlNavItem": "ui/UrlNavItem",
