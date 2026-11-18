@@ -20,6 +20,23 @@ import { ClaudeCodeDriver, RecordedDriver, RecordingDriver, type AgentDriver, ty
 import { renderSummaryTable, summaryTables, type SummaryRecord } from '../../src/runner/summary.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
 
+/**
+ * A case-insensitive filesystem (macOS, Windows), stood in for on any host:
+ * while `on`, `existsSync` answers a path true when its directory holds the
+ * name in any case, as such a filesystem does. Off, `node:fs` answers as ever.
+ */
+const caseInsensitive = vi.hoisted(() => ({ on: false }));
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>();
+  const { basename, dirname } = await import('node:path');
+  const anyCase = (p: string) => {
+    if (fs.existsSync(p)) return true;
+    const d = dirname(p);
+    return fs.existsSync(d) && fs.statSync(d).isDirectory() && fs.readdirSync(d).some((n) => n.toLowerCase() === basename(p).toLowerCase());
+  };
+  return { ...fs, existsSync: (p: import('node:fs').PathLike) => (caseInsensitive.on ? anyCase(String(p)) : fs.existsSync(p)) };
+});
+
 const SKILL_MD = '---\nname: ask-data\ndescription: Answer business questions through the governed datasets.\nmetadata:\n  version: 1.2.0\n---\n\nCall list_datasets first.\n';
 
 const root = mkdtempSync(join(tmpdir(), 'scenario-ask-skills-'));
@@ -115,6 +132,47 @@ describe('readAskSkills — the directory read once, as the record states it', (
     placeAskSkills(bundle, cwd);
     const listed = readAskSkills(join(cwd, '.claude', 'skills')).info.skills;
     expect(listed).toEqual(bundle.info.skills);
+  });
+});
+
+describe('readAskSkills — a skill file is matched by its exact spelling, on every filesystem', () => {
+  afterEach(() => {
+    caseInsensitive.on = false;
+  });
+  const onBoth = (check: () => void) => {
+    for (const on of [true, false]) {
+      caseInsensitive.on = on;
+      check();
+    }
+  };
+
+  it('⛔ a skill directory whose file is spelled `skill.md` is refused, naming the file found and the spelling required', () => {
+    const dir = mkdtempSync(join(root, 'lower-'));
+    writeFileSync(join(dir, 'skill.md'), SKILL_MD);
+    onBoth(() =>
+      expect(() => readAskSkills(dir)).toThrow(
+        `--ask-skills names \`${dir}\`, which holds \`skill.md\`: a skill file is spelled \`SKILL.md\` exactly, ` +
+          'or a session reads it on one filesystem and misses it on another; rename it to `SKILL.md`',
+      ),
+    );
+  });
+
+  it('⛔ in a directory of skills, one spelled `Skill.md` is refused by its path, never skipped while the others load', () => {
+    const dir = skillsDir();
+    mkdirSync(join(dir, 'mixed'));
+    writeFileSync(join(dir, 'mixed', 'Skill.md'), '---\nname: mixed\n---\n');
+    onBoth(() => expect(() => readAskSkills(dir)).toThrow(`--ask-skills names \`${dir}\`, which holds \`mixed/Skill.md\`: a skill file is spelled \`SKILL.md\` exactly`));
+  });
+
+  it('a skill file spelled `SKILL.md` loads as before, on both filesystems', () => {
+    const dir = skillsDir();
+    onBoth(() => {
+      expect(readAskSkills(dir).info.skills.map((s) => [s.name, s.version])).toEqual([
+        ['ask-data', '1.2.0'],
+        ['fallback', '0.1'],
+      ]);
+      expect(readAskSkills(join(dir, 'ask-data')).info.skills.map((s) => s.name)).toEqual(['ask-data']);
+    });
   });
 });
 

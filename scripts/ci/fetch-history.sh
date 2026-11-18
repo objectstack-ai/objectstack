@@ -27,15 +27,44 @@
 #
 # So the fetch runs with `--progress` into a log, in its own session, and an
 # attempt that writes nothing for STALL_SECONDS (60) is killed with its whole
-# process group (the `git-remote-https` helper included) and retried. A fetch
-# that keeps moving is never cut, however slow: a healthy one prints a line at
-# least every second (enumerating, counting, compressing, then receiving with
-# its byte rate), so 60 s of silence is a hang, not a slow network. The step's
-# `timeout-minutes` stays the outer wall, unchanged.
+# process group (the `git-remote-https` helper included) and retried.
 #
-# Inputs: PR_BASE_REF (empty on push and merge_group). Test knobs, for the
-# self-test only: FETCH_HISTORY_STALL_SECONDS and FETCH_HISTORY_RETRY_SLEEP.
+# ⭐ ...AND BY ITS BYTE RATE, BECAUSE A HUNG FETCH CAN KEEP PRINTING (#34994).
+# Silence was the wrong signal. A healthy fetch prints at least every second,
+# but the converse does not hold. The next 13 step timeouts (2026-11-17, 8-20
+# minutes each) all died in attempt 1 with no `::warning::` and no attempt 2:
+# the watchdog loop ran for the whole budget (its `sleep` was among the
+# orphans) and never saw 60 s of silence. Each one's orphans were `git`, `git`
+# and `git-remote-https`, never `index-pack`, which fetch-pack starts only
+# once it reads the pack header. So the server never started the pack, and
+# meanwhile its enumerate/count/compress progress (`remote: ...`, carried on
+# the sideband) kept the log growing. lint.yml's checkouts and ci.yml's
+# depth-1 checkouts stalled the same way, and same-run siblings took 51-65 s.
+#
+# So every attempt also runs under curl's low-speed abort: a request that
+# moves under GIT_HTTP_LOW_SPEED_LIMIT (1000) bytes/s for GIT_HTTP_LOW_SPEED_TIME
+# (120) seconds exits 128 ("curl 28 Operation too slow"), the loop below
+# retries it, and server progress is far too few bytes to hold it open. Both
+# workflows set the same two values for every job, so actions/checkout's own
+# retry gets the same bound; this script exports them only when they are
+# unset, so a local run is bounded too. Measured on this fetch: the server
+# starts the pack after ~15 s and a healthy receive runs at MiB/s, so neither
+# number cuts a slow transfer that moves. The silence bound stays as the
+# backstop for a request that sends nothing at all.
+#
+# Each phase is printed as it starts, with the attempt's elapsed seconds, so a
+# step that still hits its wall names where it stood. The attempt's own log is
+# printed only when it ends, and the step timeout kills this script first.
+# The step's `timeout-minutes` stays the outer wall, unchanged.
+#
+# Inputs: PR_BASE_REF (empty on push and merge_group); GIT_HTTP_LOW_SPEED_LIMIT
+# and GIT_HTTP_LOW_SPEED_TIME (the workflows' values; defaults below). Test
+# knobs, for the self-test only: FETCH_HISTORY_STALL_SECONDS and
+# FETCH_HISTORY_RETRY_SLEEP.
 set -uo pipefail
+
+export GIT_HTTP_LOW_SPEED_LIMIT="${GIT_HTTP_LOW_SPEED_LIMIT:-1000}"
+export GIT_HTTP_LOW_SPEED_TIME="${GIT_HTTP_LOW_SPEED_TIME:-120}"
 
 STALL_SECONDS="${FETCH_HISTORY_STALL_SECONDS:-60}"
 RETRY_SLEEP="${FETCH_HISTORY_RETRY_SLEEP:-15}"
@@ -60,6 +89,22 @@ show_log() {
     END { if (held != "") print held }'
 }
 
+# The phase the attempt is in now: its last COMPLETE line (a trailing write
+# with no carriage return or newline yet is not read as a phase), cut to the
+# phase name ("remote: Counting objects", "Receiving objects", ...).
+current_phase() {
+  local partial=0
+  case "$(tail -c 1 "$log" | od -An -c | tr -d ' ')" in
+    '\n' | '\r' | '') ;;
+    *) partial=1 ;;
+  esac
+  tr '\r' '\n' < "$log" | awk -v partial="$partial" '
+    NF { line = $0; pre = ""
+         if (sub(/^remote: /, "", line)) pre = "remote: "
+         sub(/:.*/, "", line); prev = key; key = pre line }
+    END { print (partial ? prev : key) }'
+}
+
 # One fetch attempt. Returns git's exit status, or 124 when it was killed for
 # STALL_SECONDS of silence. `setsid` gives git a process group of its own (a
 # background job of a non-interactive shell is never a group leader, so setsid
@@ -67,13 +112,18 @@ show_log() {
 fetch_once() {
   : > "$log"
   setsid git "$@" < /dev/null > "$log" 2>&1 &
-  local pid=$! size last=-1 quiet=0 rc
+  local pid=$! size last=-1 quiet=0 rc phase='' now start=$SECONDS
   while kill -0 "$pid" 2> /dev/null; do
     sleep 1
     size=$(wc -c < "$log")
     if [ "$size" -ne "$last" ]; then
       last=$size
       quiet=0
+      now=$(current_phase)
+      if [ -n "$now" ] && [ "$now" != "$phase" ]; then
+        phase=$now
+        echo "fetch-history: +$((SECONDS - start))s ${phase}"
+      fi
     else
       quiet=$((quiet + 1))
     fi
@@ -93,6 +143,7 @@ fetch_once() {
   return "$rc"
 }
 
+echo "Each attempt ends when it moves under $GIT_HTTP_LOW_SPEED_LIMIT bytes/s for ${GIT_HTTP_LOW_SPEED_TIME}s (curl) or writes nothing for ${STALL_SECONDS}s, and is retried."
 attempt=1
 while :; do
   deepen=()

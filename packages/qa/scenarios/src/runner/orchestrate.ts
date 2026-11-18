@@ -101,7 +101,7 @@ import {
   verifyArgs,
   type PromptChoice,
 } from './prompts.js';
-import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rowDrift, seedLookups, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
+import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rowDrift, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
 import type { ParsedTurn } from './transcript.js';
 
 // ── What the orchestrator needs from the outside world ──────────────────────
@@ -1158,12 +1158,21 @@ function seedRowBody(
  * user lookup, which refuses the handle text. Every other value is sent
  * verbatim.
  *
- * The tally is kept in `seed` as each row is loaded, and `seed` is what is
- * returned: when an insert throws, the caller's tally already holds what was
- * inserted and refused before it (the record shows the partial seed next to the
- * half's error). A row whose second-pass update is refused moves from
- * `inserted` to `refused` (with the `fields` it could not set), so the tally
- * still counts each row sent once.
+ * The rows go in through the platform's own seed path ({@link loadSeedRows}):
+ * one data-only package whose `data[]` holds them, installed managed, so the
+ * platform's seed loader writes them as established facts. That posture skips
+ * the object's `state_machine` rule (its `initialStates` entry check), which a
+ * user write meets: a card's row that is already `paid` or `closed` is a fact,
+ * not a record entering its lifecycle. Every other validation rule and hook
+ * still judges each row, and record-triggered flows do not fire on it. The
+ * second pass is an ordinary update through the data API.
+ *
+ * The tally is kept in `seed` and `seed` is what is returned: when the load
+ * throws, the caller's tally already holds what was counted before it (the
+ * record shows the partial seed next to the half's error). A row the load
+ * wrote with a lookup it could not resolve, or whose second-pass update is
+ * refused, moves from `inserted` to `refused` (with the `fields` it does not
+ * hold as the card states them), so the tally still counts each row sent once.
  */
 export async function seedApp(
   scenario: LoadedScenario,
@@ -1182,20 +1191,24 @@ export async function seedApp(
     later.get(key)!.patch[d.field] = d.value;
   }
   if (later.size) seed.secondPass = Object.fromEntries([...new Set(plan.deferred.map((d) => lookupKey(d)))].map((k) => [k, 0]));
+  const datasets: SeedDataset[] = [];
   for (const object of plan.order) {
+    const records: Array<Record<string, unknown>> = [];
     for (const row of card.run.seed[object] ?? []) {
       const { body, rewritten, asAdmin } = seedRowBody(card, object, row, accounts, app.adminUserId());
       if (rewritten.length) seed.rewritten = [...new Set([...(seed.rewritten ?? []), ...rewritten])].sort();
       if (asAdmin.length) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), ...asAdmin])].sort();
       const waits = later.get(`${object}/${row.id}`);
       for (const field of Object.keys(waits?.patch ?? {})) delete body[field];
-      const r = await app.insertRow(object, body);
-      if (r.ok) seed.inserted++;
-      else {
-        seed.refused.push({ object, id: row.id, ...(r.code ? { code: r.code } : {}), ...(r.message ? { message: r.message.slice(0, 300) } : {}) });
-        later.delete(`${object}/${row.id}`); // nothing to update: the row is not there
-      }
+      records.push(body);
     }
+    if (records.length) datasets.push({ object, records });
+  }
+  const load = await loadSeedRows(app, datasets);
+  seed.inserted += load.inserted;
+  for (const r of load.refused) {
+    seed.refused.push(r);
+    if (!r.fields) later.delete(`${r.object}/${r.id}`); // nothing to update: the row is not there
   }
   // The second pass: every row each waiting lookup names is in by now.
   for (const { object, id, patch } of later.values()) {
@@ -1208,6 +1221,99 @@ export async function seedApp(
     }
   }
   return seed;
+}
+
+/** One object's rows for a seed load ({@link loadSeedRows}): each row's body as the seed sends it, `id` included. */
+interface SeedDataset {
+  object: string;
+  records: Array<Record<string, unknown>>;
+}
+
+/** The seed loader's answer as the install door reports it (`data.seeded`). */
+interface SeedLoaderAnswer {
+  mode?: string;
+  reason?: string;
+  inserted?: number;
+  errorList?: Array<{ sourceObject?: string; field?: string; recordIndex?: number; attemptedValue?: unknown; code?: string; message?: string }>;
+}
+
+/** The seed loads made in this process, which name each load's package apart (one namespace per installed package). */
+let seedLoads = 0;
+
+/** `n` (from 1) as lowercase letters, `a` … `z`, `aa` …: a namespace takes no digit. */
+function seedLoadLetters(n: number): string {
+  let out = '';
+  for (let k = n; k > 0; k = Math.floor((k - 1) / 26)) out = String.fromCharCode(97 + ((k - 1) % 26)) + out;
+  return out;
+}
+
+/**
+ * Write rows through the platform's own seed path: one data-only package
+ * whose `data[]` carries them, each object a dataset keyed on `id`
+ * (`externalId: 'id'`, `mode: 'insert'`), installed through the managed
+ * install door (`installManaged`). The platform's seed loader writes a
+ * package's `data[]` under its seed posture (`SEED_WRITE_EXECUTION_CONTEXT` in
+ * `@objectstack/spec/kernel`): the object's `state_machine` rule is skipped,
+ * every other validation rule and hook still runs, and record-triggered flows
+ * do not fire. A row keeps the card's own `id`, and a lookup value naming a
+ * row of the same load resolves to it, so a child loaded with `claim: 'c001'`
+ * holds the claim seeded as `c001`. A user id in a row (`owner_id`, a `user`
+ * field, a rewritten handle) is written as sent.
+ *
+ * Each package takes a namespace of its own, because one environment refuses
+ * a second package claiming a namespace another already holds.
+ *
+ * The answer's `errorList` names each row the loader could not write
+ * (`field: '(write)'`), which is refused, and each reference it could not
+ * resolve on a row it did write, which is refused with the `fields` the row
+ * does not hold. An entry carries the loader's message and no error code. A
+ * door that refuses the package, a harness with no managed door, or a load
+ * that did not run inline (`seeded.mode` other than `inline`) refuses every
+ * row, with that reason in its message (the door's status and code included).
+ */
+async function loadSeedRows(app: AppHarness, datasets: readonly SeedDataset[]): Promise<{ inserted: number; refused: RunHalf['seed']['refused'] }> {
+  const sent = datasets.flatMap((d) => d.records.map((r) => ({ object: d.object, id: String(r.id) })));
+  if (sent.length === 0) return { inserted: 0, refused: [] };
+  const all = (message: string) => ({ inserted: 0, refused: sent.map((r) => ({ ...r, message: message.slice(0, 300) })) });
+  if (!app.installManaged) return all('this app harness has no managed install door, which the seed loads through');
+  const namespace = `scenarioseed${seedLoadLetters(++seedLoads)}`;
+  const manifest = {
+    id: `com.scenario.seed.${namespace}`,
+    namespace,
+    version: '0.0.1',
+    type: 'app',
+    scope: 'project',
+    name: 'Scenario seed',
+    data: datasets.map((d) => ({ object: d.object, mode: 'insert', externalId: 'id', records: d.records })),
+  };
+  const answer = await app.installManaged(manifest);
+  if (!answer.ok) return all(`the seed package was refused: ${answer.status}${answer.code ? ` ${answer.code}` : ''}${answer.message ? ` ${answer.message}` : ''}`);
+  const seeded = (answer.body as { data?: { seeded?: SeedLoaderAnswer } } | null)?.data?.seeded;
+  if (seeded?.mode !== 'inline') return all(`the seed did not load inline: ${seeded ? `mode ${String(seeded.mode)}${seeded.reason ? ` (${seeded.reason})` : ''}` : 'the install answered no seed result'}`);
+
+  const records = new Map(datasets.map((d) => [d.object, d.records]));
+  const position = new Map(sent.map((r, i) => [`${r.object}/${r.id}`, i]));
+  const unwritten = new Map<string, RunHalf['seed']['refused'][number]>();
+  const unheld = new Map<string, RunHalf['seed']['refused'][number] & { fields: string[] }>();
+  for (const e of seeded.errorList ?? []) {
+    const object = String(e.sourceObject ?? '');
+    const row = typeof e.recordIndex === 'number' ? records.get(object)?.[e.recordIndex] : undefined;
+    const id = String(row?.id ?? e.attemptedValue ?? '');
+    const key = `${object}/${id}`;
+    const said = { ...(typeof e.code === 'string' ? { code: e.code } : {}), ...(e.message ? { message: e.message.slice(0, 300) } : {}) };
+    if (e.field === '(write)') {
+      if (!unwritten.has(key)) unwritten.set(key, { object, id, ...said });
+    } else {
+      const held = unheld.get(key) ?? { object, id, fields: [], ...said };
+      if (e.field && !held.fields.includes(e.field)) held.fields.push(e.field);
+      unheld.set(key, held);
+    }
+  }
+  for (const key of unwritten.keys()) unheld.delete(key);
+  const order = (r: { object: string; id: string }) => position.get(`${r.object}/${r.id}`) ?? sent.length;
+  const refused = [...unwritten.values(), ...unheld.values()].sort((a, b) => order(a) - order(b));
+  const inserted = (typeof seeded.inserted === 'number' ? seeded.inserted : sent.length - unwritten.size) - unheld.size;
+  return { inserted, refused };
 }
 
 /**
@@ -1300,11 +1406,14 @@ async function seedDrift(card: Card, app: AppHarness, seeded: SeededRows, built?
  * Otherwise, in rounds until nothing has moved:
  *
  *   1. a row a turn added is deleted;
- *   2. a seeded row a turn removed is inserted again through the seed path —
- *      the very body the seed sent ({@link seedRowBody}), or, for a row the
- *      app made itself while seeding, the row as it was read, less the
- *      columns the platform stamps ({@link RESTORE_UNWRITTEN}) — with each
- *      lookup to a row still missing left out until a later round sets it;
+ *   2. a seeded row a turn removed is inserted again through the seed path
+ *      ({@link loadSeedRows}, the posture the seed loaded it under, so a row
+ *      already `paid` is not refused as a new record) — the very body the
+ *      seed sent ({@link seedRowBody}), or, for a row the app made itself
+ *      while seeding, the row as it was read, less the columns the platform
+ *      stamps ({@link RESTORE_UNWRITTEN}); the round's rows go in as one
+ *      load, so a lookup between two of them resolves, and a lookup the load
+ *      cannot resolve is set back by a later round;
  *   3. a seeded row a turn changed has those columns set back to the values
  *      the seeded state read.
  *
@@ -1322,7 +1431,6 @@ export async function restoreSeededRows(
   const { card } = scenario;
   const derived = derivedFields(built);
   const unwritten = (object: string) => new Set([...RESTORE_UNWRITTEN, ...(derived.get(object) ?? [])]);
-  const lookups = seedLookups(card);
   const order = restoreOrder(card, seeded);
   const deleted = new Set<string>();
   const reinserted = new Set<string>();
@@ -1368,25 +1476,27 @@ export async function restoreSeededRows(
         else refused(`delete ${d.object} ${id}`, r);
       }
     }
-    // 2. The seeded rows a turn removed, through the seed path, in its load order.
-    const missing = new Set(drifts.flatMap((d) => d.missing.map((id) => `${d.object}/${id}`)));
+    // 2. The seeded rows a turn removed, through the seed path ({@link loadSeedRows}), in its load order, one load a round.
+    const back: Array<{ object: string; records: Array<Record<string, unknown>> }> = [];
     for (const d of [...drifts].sort((a, b) => order.indexOf(a.object) - order.indexOf(b.object))) {
+      const records: Array<Record<string, unknown>> = [];
       for (const id of d.missing) {
         const seedRow = card.run.seed[d.object]?.find((r) => r.id === id);
         const was = seeded.get(d.object)!.find((r) => String(r.id) === id)!;
         const skip = unwritten(d.object);
         skip.delete('id');
-        const body = seedRow
-          ? seedRowBody(card, d.object, seedRow, accounts, app.adminUserId()).body
-          : Object.fromEntries(Object.entries(was).filter(([k]) => !skip.has(k)));
-        for (const l of lookups) if (l.object === d.object && missing.has(`${l.to}/${String(body[l.field])}`)) delete body[l.field];
-        const r = await app.insertRow(d.object, body);
-        if (r.ok) {
-          reinserted.add(`${d.object}/${id}`);
-          missing.delete(`${d.object}/${id}`);
-        } else refused(`insert ${d.object} ${id}`, r);
+        records.push(
+          seedRow
+            ? seedRowBody(card, d.object, seedRow, accounts, app.adminUserId()).body
+            : Object.fromEntries(Object.entries(was).filter(([k]) => !skip.has(k))),
+        );
       }
+      if (records.length) back.push({ object: d.object, records });
     }
+    const load = await loadSeedRows(app, back);
+    const notBack = new Set(load.refused.filter((r) => !r.fields).map((r) => `${r.object}/${r.id}`));
+    for (const r of load.refused) refusals.add(`insert ${r.object} ${r.id}: ${r.code ? `${r.code} ` : ''}${r.fields ? `[${r.fields.join(', ')}] ` : ''}${(r.message ?? '').slice(0, 120)}`.trim());
+    for (const d of back) for (const row of d.records) if (!notBack.has(`${d.object}/${String(row.id)}`)) reinserted.add(`${d.object}/${String(row.id)}`);
     // 3. The seeded rows a turn changed, set back to the values the seeded state read.
     for (const d of drifts) {
       const skip = unwritten(d.object);

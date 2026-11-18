@@ -21,6 +21,7 @@ import {
     SysMetadataObject,
 } from '@objectstack/metadata-core';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import { AUDIT_FIELD_DEFS, OWNER_FIELD_DEF } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
@@ -192,6 +193,13 @@ describe('[#34721] HTTP MCP list_objects and describe_object serve the authored 
         expect('description' in field(described, 'subject')).toBe(false);
         expect('description' in field(described, 'blank_note')).toBe(false);
         expect('description' in (await bridge.describeObject(PLAIN))).toBe(false);
+    });
+
+    it('[#34877] describe_object: a column the platform injects carries the platform\'s description and reads system: true', async () => {
+        const described = await (await bridgeAs(PERSONAS.member)).describeObject(OBJ);
+        expect(field(described, 'created_at')).toMatchObject({ description: AUDIT_FIELD_DEFS.created_at.description, system: true });
+        expect(field(described, 'owner_id')).toMatchObject({ description: OWNER_FIELD_DEF.description, system: true });
+        expect(field(described, 'amount')).toMatchObject({ description: AMOUNT_TEXT, system: false });
     });
 
     it('list_objects: each object\'s authored description, and no key on an object that authors none', async () => {

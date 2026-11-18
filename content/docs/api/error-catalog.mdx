@@ -709,6 +709,7 @@ value directly (single wrap).
 | Type has no server dispatch (`url`/`modal`/`form`/`api`), or a param-contract violation | **400** | `{ success: false, error: { message, code } }` |
 | Data engine or automation service unavailable | **503** | `{ success: false, error: { message, code } }` |
 | Handler **crashed** (`TypeError`, driver error, sandbox timeout) | **500** | `{ success: false, error: { message, code } }` |
+| Sandboxed body **does not compile** in its `(async (input, ctx) => { … })` wrapper | **500** | `{ success: false, error: { message, code: 'INTERNAL_ERROR' } }` — `message` names the action and the compile error |
 
 A rejection and a crash are told apart by the thrown error: a plain
 `throw new Error(msg)`, a sandboxed body's deliberate throw, or a
