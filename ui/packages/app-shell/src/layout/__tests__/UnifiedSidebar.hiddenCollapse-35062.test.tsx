@@ -497,19 +497,21 @@ describe('the trigger floats the collapsed menu, and the keyboard walks it (obje
     expect(readWideWindowOpen()).toBe(false);
   });
 
-  it('collapsed by hand, the trigger floats it even when React renders between the capture phase and the trigger’s own click handler', () => {
+  it('collapsed by hand, the trigger floats it even when React renders between the capture phase and the trigger’s own click handler', async () => {
     renderShell(1600);
     fireEvent.click(trigger());
     expectHidden();
     // A browser runs a microtask checkpoint after each listener, so React may
     // render the capture phase's update before the trigger's own handler runs.
+    // Dispatched outside act, as a browser does, with a render forced between.
     const renderBetween = () => flushSync(() => {});
     document.body.addEventListener('click', renderBetween, true);
     try {
-      fireEvent.click(trigger());
+      trigger().dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     } finally {
       document.body.removeEventListener('click', renderBetween, true);
     }
+    await act(async () => {});
     expectFloat();
     expect(readWideWindowOpen()).toBe(false);
   });
