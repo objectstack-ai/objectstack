@@ -345,7 +345,7 @@ function standInOutbound(automation: FlowRunAutomation, stopped: OutboundStop[])
           errorClass: 'guard',
           error:
             `verify --flow does not execute outbound nodes: '${node.id}' (${type}) would call out of the process, ` +
-            'so the run stopped here and nothing after it is proven',
+            'so it was not run, and nothing that depends on it is proven',
         };
       },
     });
