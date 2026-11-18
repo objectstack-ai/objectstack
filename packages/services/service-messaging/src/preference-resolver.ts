@@ -66,6 +66,20 @@ export interface QuietHours {
 /** Digest cadence declared on a preference row (P3b-2). `none` ⇒ no batching. */
 export type DigestCadence = 'daily' | 'weekly';
 
+/**
+ * [rulings 6968686390 and 6969143776] The context
+ * {@link PreferenceResolver.effectiveFor} reads the preference rows under: the
+ * explicit system opt-in. Kept apart from {@link FAN_OUT_SYSTEM_CONTEXT} on
+ * purpose, because what this read derives DOES reach a caller: the
+ * caller-scoped door answers a person whether each topic and channel is on
+ * and whether that comes from the organization's default — the ruled
+ * answer, which a member's own grant cannot read (the default rows are
+ * outside their row scope). The read is bounded by the `organization_id`
+ * term, never by the context; the rows themselves, and every row of another
+ * person, stay inside the method.
+ */
+export const EFFECTIVE_PREFERENCES_SYSTEM_CONTEXT = { isSystem: true } as const;
+
 /** The topic / channel wildcard. ⛔ Not a user: see {@link GLOBAL_USER}. */
 const WILDCARD = '*';
 
@@ -154,20 +168,7 @@ export class PreferenceResolver {
             return all();
         }
 
-        // Index rows by `${user}|${topic}|${channel}` → { enabled, quietHours }.
-        const recipientSet = new Set(recipients);
-        const index = new Map<string, PrefRowLite>();
-        for (const r of rows) {
-            const user = isGlobalDefaultUser(r.user_id) ? GLOBAL_USER : String(r.user_id);
-            if (user !== GLOBAL_USER && !recipientSet.has(user)) continue; // ignore unrelated users
-            const topic = String(r.topic ?? WILDCARD);
-            const channel = String(r.channel ?? WILDCARD);
-            index.set(`${user}|${topic}|${channel}`, {
-                enabled: asBool(r.enabled),
-                quietHours: parseQuietHours(r.quiet_hours),
-                digest: parseDigest(r.digest),
-            });
-        }
+        const index = indexRows(rows, new Set(recipients));
 
         const nowMs = ctx.now ?? Date.now();
         const critical = ctx.severity === 'critical';
@@ -185,13 +186,13 @@ export class PreferenceResolver {
             let notBefore: number | undefined;
             let digest: { window: string } | undefined;
             if (!critical) {
-                const cadence = this.resolveDigest(index, recipient, ctx.topic);
+                const cadence = this.resolveDigest(index, recipient, ctx.topic)?.digest;
                 if (cadence) {
-                    const d = digestDeferral(cadence, nowMs, this.resolveQuietHours(index, recipient, ctx.topic)?.tz);
+                    const d = digestDeferral(cadence, nowMs, this.resolveQuietHours(index, recipient, ctx.topic)?.quietHours?.tz);
                     notBefore = d.notBefore;
                     digest = { window: d.window };
                 } else {
-                    const qh = this.resolveQuietHours(index, recipient, ctx.topic);
+                    const qh = this.resolveQuietHours(index, recipient, ctx.topic)?.quietHours;
                     notBefore = qh ? quietHoursDeferral(qh, nowMs) : undefined;
                 }
             }
@@ -239,11 +240,11 @@ export class PreferenceResolver {
      * row (`(user, *, *)` or `(user, topic, *)`) — quiet hours are a per-person,
      * channel-agnostic setting. Most-specific user/topic wins.
      */
-    private resolveQuietHours(index: Map<string, PrefRowLite>, user: string, topic: string): QuietHours | undefined {
+    private resolveQuietHours(index: Map<string, PrefRowLite>, user: string, topic: string): PrefRowLite | undefined {
         for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 const hit = index.get(`${u}|${t}|${WILDCARD}`);
-                if (hit?.quietHours) return hit.quietHours;
+                if (hit?.quietHours) return hit;
             }
         }
         return undefined;
@@ -254,21 +255,189 @@ export class PreferenceResolver {
      * channel-wildcard row (`(user, *, *)` or `(user, topic, *)`) — batching is a
      * per-person, channel-agnostic setting. Most-specific user/topic wins.
      */
-    private resolveDigest(index: Map<string, PrefRowLite>, user: string, topic: string): DigestCadence | undefined {
+    private resolveDigest(index: Map<string, PrefRowLite>, user: string, topic: string): PrefRowLite | undefined {
         for (const u of [user, GLOBAL_USER]) {
             for (const t of [topic, WILDCARD]) {
                 const hit = index.get(`${u}|${t}|${WILDCARD}`);
-                if (hit?.digest) return hit.digest;
+                if (hit?.digest) return hit;
             }
         }
         return undefined;
     }
+
+    /**
+     * [rulings 6968686390 and 6969143776] One person's EFFECTIVE preferences —
+     * what `filter` would decide for them — for every `topic` × `channel`
+     * named, with where each answer comes from. The caller-scoped door
+     * `GET /api/v1/messaging/me/preferences` answers this, so the Account
+     * page draws the same rules `emit` applies, from this one implementation.
+     *
+     * The topics and channels are the ones asked for, then any other the
+     * person's own rows name. Per cell: a mandatory topic is on (`mandatory`); otherwise the
+     * most-specific row wins exactly as in {@link filter} — the person's own
+     * (`own`), the organization's default (`default`), or none and the
+     * built-in default on (`builtin`). Digest and quiet hours are the
+     * person's general ones: the channel-wildcard lookup {@link filter} runs,
+     * for the `*` topic.
+     *
+     * ⚠️ The rows are read under the fan-out's system opt-in, as
+     * {@link filter} reads them: they include other people's rows, which are
+     * dropped here and never leave this method. What leaves is the computed
+     * answer for `userId`, plus the ids of `userId`'s OWN rows (`ownRowId`,
+     * the rows the person edits). No organization ⇒ no row is read: every
+     * stored row carries one (ADR-0131 D1), and a read without the term would
+     * cross organizations.
+     *
+     * Unlike {@link filter} this does not fail open: a read that fails
+     * rejects, and the door answers the fault — a page must never draw
+     * "everything on" because a read failed.
+     */
+    async effectiveFor(
+        userId: string,
+        organizationId: string | undefined,
+        topics: readonly string[],
+        channels: readonly string[],
+    ): Promise<EffectivePreferences> {
+        const data = this.opts.getData();
+        const rows = data && organizationId
+            ? ((await data.find(
+                this.objectName,
+                { where: { organization_id: organizationId }, limit: 10000 },
+                { context: EFFECTIVE_PREFERENCES_SYSTEM_CONTEXT },
+            )) ?? [])
+            : [];
+        const index = indexRows(rows, new Set([userId]));
+        // The person's own rows name topics and channels too: a topic only
+        // they ever muted, a channel id a plugin no longer registers. Each is
+        // listed after the ones asked for, so their own row is never hidden.
+        const ownKeys = [...index.values()].filter((row) => row.user === userId);
+        const listed = (asked: readonly string[], ownValues: string[]): string[] => {
+            const seen = new Set(asked);
+            return [...asked, ...[...new Set(ownValues)].filter((v) => !seen.has(v)).sort()];
+        };
+        const allTopics = listed(topics, ownKeys.map((row) => row.topic));
+        const allChannels = listed(channels, ownKeys.map((row) => row.channel).filter((c) => c !== WILDCARD));
+        const own = (topic: string, channel: string): { ownRowId?: string } => {
+            const id = index.get(`${userId}|${topic}|${channel}`)?.id;
+            return id ? { ownRowId: id } : {};
+        };
+        const sourceOf = (hit: PrefRowLite | undefined): EffectiveSource =>
+            !hit ? 'builtin' : hit.user === GLOBAL_USER ? 'default' : 'own';
+
+        const effectiveTopics = allTopics.map((topic): EffectiveTopic => {
+            const mandatory = this.isMandatory(topic);
+            return {
+                topic,
+                wildcard: topic === WILDCARD,
+                mandatory,
+                channels: allChannels.map((channel): EffectiveCell => {
+                    if (mandatory) return { channel, enabled: true, source: 'mandatory', ...own(topic, channel) };
+                    const hit = this.resolveRow(index, userId, topic, channel);
+                    return { channel, enabled: hit?.enabled ?? true, source: sourceOf(hit), ...own(topic, channel) };
+                }),
+            };
+        });
+
+        const general = this.resolveRow(index, userId, WILDCARD, WILDCARD);
+        const digest = this.resolveDigest(index, userId, WILDCARD);
+        const quietHours = this.resolveQuietHours(index, userId, WILDCARD);
+        return {
+            topics: effectiveTopics,
+            channels: allChannels,
+            general: {
+                ...own(WILDCARD, WILDCARD),
+                enabled: { value: general?.enabled ?? true, source: sourceOf(general) },
+                digest: { value: digest?.digest ?? 'none', source: sourceOf(digest) },
+                quietHours: { value: quietHours?.quietHours ?? null, source: sourceOf(quietHours) },
+            },
+        };
+    }
+}
+
+/** Where an effective answer comes from (see {@link PreferenceResolver.effectiveFor}). */
+export type EffectiveSource = 'own' | 'default' | 'builtin';
+
+/** One channel of one topic, as {@link PreferenceResolver.effectiveFor} answers it. */
+export interface EffectiveCell {
+    channel: string;
+    /** Whether a notification of this topic is delivered on this channel. */
+    enabled: boolean;
+    /** `mandatory` when the topic bypasses preferences; otherwise the row that decided. */
+    source: EffectiveSource | 'mandatory';
+    /** The person's own row for exactly this (topic, channel), when they have one. */
+    ownRowId?: string;
+}
+
+/** One topic's row of the effective matrix. */
+export interface EffectiveTopic {
+    topic: string;
+    /** `true` on the `*` (all topics) row alone. */
+    wildcard: boolean;
+    /** The topic bypasses preferences: every channel is on, and no row changes that. */
+    mandatory: boolean;
+    channels: EffectiveCell[];
+}
+
+/** An effective value and the row that decided it. */
+export interface EffectiveSetting<T> {
+    value: T;
+    source: EffectiveSource;
+}
+
+/** One person's effective preferences (see {@link PreferenceResolver.effectiveFor}). */
+export interface EffectivePreferences {
+    /** The topics asked for, then any other topic the person's own rows name. */
+    topics: EffectiveTopic[];
+    /** The channels asked for, then any other channel the person's own rows name; the column order of every topic. */
+    channels: string[];
+    /**
+     * The person's general settings, decided on the `(*, *)` lookup: whether
+     * notifications reach them at all where nothing more specific says, their
+     * digest cadence and their quiet hours. `ownRowId` is their own `(*, *)`
+     * row, the one a digest or quiet-hours change is written to.
+     */
+    general: {
+        ownRowId?: string;
+        enabled: EffectiveSetting<boolean>;
+        digest: EffectiveSetting<'none' | DigestCadence>;
+        quietHours: EffectiveSetting<QuietHours | null>;
+    };
 }
 
 interface PrefRowLite {
+    /** The row's id, as stored. */
+    id?: string;
+    /** The index key's parts: a user id or {@link GLOBAL_USER}, the topic and the channel. */
+    user: string;
+    topic: string;
+    channel: string;
     enabled: boolean;
     quietHours?: QuietHours;
     digest?: DigestCadence;
+}
+
+/**
+ * Index rows by `${user}|${topic}|${channel}`. Rows of a user outside `users`
+ * are dropped; the admin-global default's rows are always kept.
+ */
+function indexRows(rows: readonly Record<string, unknown>[], users: ReadonlySet<string>): Map<string, PrefRowLite> {
+    const index = new Map<string, PrefRowLite>();
+    for (const r of rows) {
+        const user = isGlobalDefaultUser(r.user_id) ? GLOBAL_USER : String(r.user_id);
+        if (user !== GLOBAL_USER && !users.has(user)) continue; // ignore unrelated users
+        const topic = String(r.topic ?? WILDCARD);
+        const channel = String(r.channel ?? WILDCARD);
+        index.set(`${user}|${topic}|${channel}`, {
+            ...(r.id != null ? { id: String(r.id) } : {}),
+            user,
+            topic,
+            channel,
+            enabled: asBool(r.enabled),
+            quietHours: parseQuietHours(r.quiet_hours),
+            digest: parseDigest(r.digest),
+        });
+    }
+    return index;
 }
 
 function asBool(v: unknown): boolean {

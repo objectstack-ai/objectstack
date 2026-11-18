@@ -221,6 +221,7 @@ describe('default permission sets', () => {
       // `shipped-sets-identity-default-row-scope.test.ts`,
       // `private-credential-row-scope.test.ts` and
       // `scim-projection-row-scope.test.ts`; this list only records presence.
+      'sys_notification_preference_self',
       'sys_notification_receipt_self',
       'sys_oauth_application_self',
       'sys_oauth_consent_self',
