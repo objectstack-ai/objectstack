@@ -57,6 +57,11 @@ vi.mock('./metadata-admin/inspectors/ViewVariantInspector', () => ({
   ),
 }));
 
+// The panel's source reaches dynamic imports of `@objectstack/lint` and
+// `@objectstack/formula` (through the inspector, mocked here): pay their load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@objectstack/formula';
 import { ViewConfigPanel } from './ViewConfigPanel';
 import { buildViewConfigSaveBody } from './objectViewTabs';
 
