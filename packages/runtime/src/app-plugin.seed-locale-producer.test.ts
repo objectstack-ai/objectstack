@@ -695,8 +695,8 @@ describe('Seed.fallback on the boot and install paths', () => {
             settingFor.org_en = { value: 'en', source: 'tenant' };
             settingFor.org_ja = { value: 'ja-JP', source: 'tenant' };
             const EN_V2_RECORDS = [{ name: 'Standard' }, { name: 'Partner' }];
-            const replayAfterUpgrade = async (v1: unknown[], v2: unknown[]) => {
-                // A fresh process: its own shared list, replayer and engine.
+            const replayAfterUpgrade = async (v1: unknown[], v2: unknown[], organizationId: string) => {
+                // A fresh process per organization: its own shared list, replayer and engine.
                 const settings = services.get('settings');
                 services = new Map([['settings', settings]]);
                 hooks = new Map();
@@ -705,29 +705,25 @@ describe('Seed.fallback on the boot and install paths', () => {
                 const replay = await replayerOf(v1);
                 await app('en', v2).start(ctx());
                 expect((services.get('seed-datasets') as unknown[]).length).toBe(v1.length + v2.length);
-                await replay('org_en');
-                const en = priceBooks();
-                ({ engine, store } = createEngine());
-                await replay('org_ja');
-                return { en, ja: priceBooks(), account: (store.account ?? []).map((r) => r.name) };
+                await replay(organizationId);
+                const warned = logger.warn.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes("'price_book' mark 2 different sets"));
+                return { priceBooks: priceBooks(), account: (store.account ?? []).map((r) => r.name), warned: warned.length };
             };
+            const V1_MARKED = [ACCOUNT_DATASET, ...MARKED];
+            const V2_MARKED = [ACCOUNT_DATASET, ZH, { ...EN, fallback: true, records: EN_V2_RECORDS }];
+            const V1_UNMARKED = [ACCOUNT_DATASET, ...UNMARKED];
+            const V2_UNMARKED = [ACCOUNT_DATASET, ZH, { ...EN, records: EN_V2_RECORDS }];
 
-            const marked = await replayAfterUpgrade(
-                [ACCOUNT_DATASET, ...MARKED],
-                [ACCOUNT_DATASET, ZH, { ...EN, fallback: true, records: EN_V2_RECORDS }],
-            );
-            const warned = logger.warn.mock.calls.map((c: any[]) => String(c[0])).filter((m: string) => m.includes("'price_book' mark 2 different sets"));
-            expect(warned.length).toBeGreaterThan(0);
-            const control = await replayAfterUpgrade(
-                [ACCOUNT_DATASET, ...UNMARKED],
-                [ACCOUNT_DATASET, ZH, { ...EN, records: EN_V2_RECORDS }],
-            );
-
-            expect(marked.en).toEqual(['Partner', 'Standard']);
-            expect(marked.en).toEqual(control.en);
-            expect(marked.ja).toEqual([]);
-            expect(marked.ja).toEqual(control.ja);
-            expect(marked.account).toEqual(['Acme Corporation']);
+            for (const [org, expected] of [['org_en', ['Partner', 'Standard']], ['org_ja', []]] as const) {
+                const marked = await replayAfterUpgrade(V1_MARKED, V2_MARKED, org);
+                const control = await replayAfterUpgrade(V1_UNMARKED, V2_UNMARKED, org);
+                expect(marked.priceBooks, org).toEqual(expected);
+                expect(marked.priceBooks, org).toEqual(control.priceBooks);
+                expect(marked.account, org).toEqual(['Acme Corporation']);
+                expect(control.account, org).toEqual(['Acme Corporation']);
+                expect(marked.warned, org).toBe(1);
+                expect(control.warned, org).toBe(0);
+            }
         });
     });
 
