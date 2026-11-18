@@ -1912,9 +1912,9 @@ export class ObjectStackProtocolImplementation implements
         return draftPublishVerdict.call(this.draftVerdictHost(), draft);
     }
 
-    /** [#34818] The same judgement with the gate's advisories beside its refusal (see `draftPublishJudgement`). */
-    private draftPublishJudgement(draft: {
-        type: string; name: string; body: unknown; packageId: string | null;
+    /** [#34818, #34766] PUBLIC: this judgement with the gate's advisories; no `body` ⇒ the stored draft (see `draftPublishJudgement`). */
+    draftPublishJudgement(draft: {
+        type: string; name: string; body?: unknown; packageId: string | null; member?: string;
         userTextLocales?: readonly (string | undefined)[];
     }): Promise<DraftPublishJudgement> {
         return draftPublishJudgement.call(this.draftVerdictHost(), draft);
