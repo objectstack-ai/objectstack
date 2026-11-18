@@ -3068,10 +3068,10 @@ export class AnalyticsService implements IAnalyticsService {
    *
    * [query_dataset totalGroups] `options.groupCount` asks for the number of
    * groups the selection formed before its window cut them, written to the
-   * request's slot by the statement that grouped them
-   * (`dataset-group-count.ts`). The draft-preview read and the degraded
-   * "backing object unavailable" answer count nothing, and neither does any
-   * selection the executor does not run as one pushed-down query.
+   * request's slot by the statement that grouped and cut them, or as the
+   * length of a whole grid the executor or the ObjectQL face windowed in
+   * memory (`dataset-group-count.ts`). The draft-preview read and the degraded
+   * "backing object unavailable" answer count nothing.
    */
   async queryDataset(
     dataset: Dataset,

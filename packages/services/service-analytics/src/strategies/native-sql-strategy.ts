@@ -57,7 +57,9 @@ import { dateRangeWindowBounds } from '../dataset-executor.js';
 import {
   ANALYTICS_GROUP_COUNT_COLUMN,
   GROUP_COUNT_DIALECTS,
+  answerWholeGrid,
   groupCountRequestOf,
+  hasWindow,
   takeGroupCount,
 } from '../dataset-group-count.js';
 // [#20889] What each aggregate function ANSWERS, and the `'number'` presenter —
@@ -684,12 +686,13 @@ const GROUP_COUNT_WINDOW_SQL = `COUNT(*) OVER () AS "${ANALYTICS_GROUP_COUNT_COL
 /**
  * [query_dataset totalGroups] The statement's projection, with the group-count
  * window appended when `query` carries a count request
- * (`dataset-group-count.ts`), `dialect` parses the window, and no selected
- * member already answers under its column. Otherwise the projection as
- * compiled, and the request stays unanswered.
+ * (`dataset-group-count.ts`) AND a window to count past, `dialect` parses the
+ * window, and no selected member already answers under its column. Otherwise
+ * the projection as compiled. A statement with no window needs none: every
+ * group it forms comes back, and the request is answered from the rows.
  */
 function countedGroupsSql(query: AnalyticsQuery, dialect: AnalyticsSqlDialect, selectClauses: string[]): string[] {
-  if (!groupCountRequestOf(query) || !GROUP_COUNT_DIALECTS.has(dialect)) return selectClauses;
+  if (!groupCountRequestOf(query) || !hasWindow(query) || !GROUP_COUNT_DIALECTS.has(dialect)) return selectClauses;
   if (selectClauses.some((clause) => clause.endsWith(` AS "${ANALYTICS_GROUP_COUNT_COLUMN}"`))) return selectClauses;
   return [...selectClauses, GROUP_COUNT_WINDOW_SQL];
 }
@@ -1370,10 +1373,15 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
 
     // [query_dataset totalGroups] The count the statement answered on every
     // row is taken off the rows before anyone reads them, and written to the
-    // caller's request (`dataset-group-count.ts`).
+    // caller's request (`dataset-group-count.ts`). A statement with no
+    // `LIMIT` or `OFFSET` handed back every group it formed: the rows ARE the
+    // count, and the request is answered from them — the executor's proof
+    // that a grid it windows in memory is whole.
     const groupCount = groupCountRequestOf(query);
     if (groupCount && sql.includes(GROUP_COUNT_WINDOW_SQL)) {
       takeGroupCount(rows, groupCount, { limit: query.limit, offset: query.offset });
+    } else if (groupCount && !hasWindow(query)) {
+      answerWholeGrid(rows, groupCount);
     }
 
     // Build field metadata

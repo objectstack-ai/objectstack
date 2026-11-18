@@ -574,8 +574,9 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       : maxRows;
     const selection: DatasetSelection = { ...raw.selection, limit: cap + 1 };
     // [query_dataset totalGroups] The groups before the cut, counted by the
-    // statement that grouped them, where one did (`dataset-group-count.ts`);
-    // an answer no statement counted leaves the slot empty and the member out.
+    // statement that grouped and cut them, or as the length of a whole grid
+    // windowed in memory (`dataset-group-count.ts`); an answer neither covers
+    // leaves the slot empty and the member out.
     const groupCount: GroupCountRequest = {};
     const answer: AnalyticsResult = await service.queryDataset(dataset, selection, context, { groupCount });
     const totalGroups = groupCount.outcome?.groupCount;
